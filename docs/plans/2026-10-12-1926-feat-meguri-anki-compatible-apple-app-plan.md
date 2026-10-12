@@ -6,6 +6,7 @@ topic: meguri-anki-compatible-apple-app
 artifact_contract: ce-unified-plan/v1
 product_contract_source: ce-brainstorm
 execution: code
+deepened: 2026-10-12
 ---
 
 # Meguri - Plan
