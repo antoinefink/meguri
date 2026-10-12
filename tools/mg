@@ -223,7 +223,7 @@ mg__invoke_docker() {
   local rel="${MG_RUN_DIR#"$MG_ROOT"/}"
   mg_compose run --rm -T --no-deps \
     -e MG_JOB="$MG_JOB" -e MG_RUN_ID="$MG_RUN_ID" -e MG_DEFAULT_REPRO="$MG_DEFAULT_REPRO" \
-    "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"}
+    "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"} </dev/null
 }
 
 # Inside a container: tools/mg __exec <job> <run-dir relative to root> -- args
@@ -282,6 +282,14 @@ mg__write_result() {
       status=error
       mg_failure job-exit "job exited with code $rc without reporting a status; see log.txt"
     fi
+  fi
+  if [ "$rc" -ne 0 ]; then
+    case "$status" in
+      pass | warn)
+        mg_failure job-exit "job reported $status but exited with code $rc; see log.txt"
+        status=error
+        ;;
+    esac
   fi
   message="$(cat "$MG_STATE/message")"
   [ -n "$message" ] || message="$job: $status"

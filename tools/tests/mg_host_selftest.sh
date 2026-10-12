@@ -119,7 +119,7 @@ t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
   BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$PROJECT" -f "$SB/docker/compose.yml" \
-    run --rm -T --no-deps dev python3 tools/tests/validate_result.py $RESULTS
+    run --rm -T --no-deps dev python3 tools/tests/validate_result.py $RESULTS </dev/null
 }
 
 TESTS="t_unknown_job t_dry_run_every_job t_doctor_on_this_mac t_core_test_runs_in_dev_container

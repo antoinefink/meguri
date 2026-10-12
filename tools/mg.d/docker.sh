@@ -44,9 +44,16 @@ mg_dev_image() {
     return 0
   fi
 
-  local devid fuzzid images
+  local devid fuzzid devrc fuzzrc images
   devid="$(docker image inspect "$project-dev" --format '{{.Id}}')"
+  devrc=$?
   fuzzid="$(docker image inspect "$project-fuzz" --format '{{.Id}}')"
+  fuzzrc=$?
+  if [ "$devrc" -ne 0 ] || [ "$fuzzrc" -ne 0 ] || [ -z "$devid" ] || [ -z "$fuzzid" ]; then
+    mg_failure image-inspect "inspecting the built images failed or returned an empty image ID; see log.txt"
+    mg_status error
+    return 0
+  fi
   images="$(jq -nc \
     --arg dtag "$project-dev" --arg did "$devid" --argjson dstats "$(mg__image_build_stats "$devlog")" \
     --arg ftag "$project-fuzz" --arg fid "$fuzzid" --argjson fstats "$(mg__image_build_stats "$fuzzlog")" \

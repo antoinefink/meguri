@@ -17,6 +17,9 @@ MG_DOCTOR_FAIL_DISK_GIB=10
 mg__doctor_check() {
   jq -nc --arg id "$1" --arg s "$2" --arg m "$3" '{id: $id, status: $s, message: $m}' >>"$MG_RUN_DIR/checks.jsonl"
   printf '  %-4s  %-16s %s\n' "$2" "$1" "$3"
+  if [ "$2" = fail ]; then
+    mg_failure "$1" "$3" "tools/mg doctor"
+  fi
 }
 
 # mg__doctor_env <key> <string value>

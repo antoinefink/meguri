@@ -23,10 +23,15 @@ mg_core_test() {
   fi
 
   local out="$MG_RUN_DIR/nextest.jsonl" rc
+  # Only a bare run may match no tests (empty workspace). With a filter, an
+  # empty match must fail, or a stale repro command would pass.
+  if [ "$#" -eq 0 ]; then
+    set -- --no-tests=pass
+  fi
   (
     cd core &&
       NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --workspace \
-        --retries 0 --no-fail-fast --no-tests=pass \
+        --retries 0 --no-fail-fast \
         --message-format libtest-json-plus --message-format-version 0.1 \
         ${1+"$@"} >"$out"
   )
@@ -55,7 +60,9 @@ mg_core_test() {
        repro: ("tools/mg core-test -- -E " + ("package(" + ($p[0] | split("::")[0]) + ") & test(=" + ($p[1] // $p[0]) + ")" | @sh))}' \
     "$out" >>"$MG_STATE/failures.jsonl"
 
-  if [ "$rc" -ne 0 ] && [ "$failed" -eq 0 ]; then
+  if [ "$rc" -eq 4 ] && [ $((passed + failed + skipped)) -eq 0 ]; then
+    mg_failure no-tests-matched "no test matched the nextest arguments; check the filter (a renamed test?)"
+  elif [ "$rc" -ne 0 ] && [ "$failed" -eq 0 ]; then
     mg_failure "nextest-exit-$rc" "cargo nextest exited with code $rc before reporting a test failure (build or setup error); see log.txt"
   fi
   if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then

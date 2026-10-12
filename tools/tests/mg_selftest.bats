@@ -45,6 +45,8 @@ mg_job fx-warn host fx_warn "fixture: warn"
 mg_job fx-fail host fx_fail "fixture: fail"
 mg_job fx-error host fx_error "fixture: error"
 mg_job fx-crash host fx_crash "fixture: non-zero exit, no status"
+mg_job fx-pass-exit host fx_pass_exit "fixture: pass then non-zero exit"
+mg_job fx-warn-exit host fx_warn_exit "fixture: warn then non-zero exit"
 mg_job fx-failure-only host fx_failure_only "fixture: failure, no status"
 mg_job fx-args host fx_args "fixture: echo args"
 fx_pass() {
@@ -61,6 +63,8 @@ fx_warn() { mg_status warn; }
 fx_fail() { mg_failure broken "it broke"; mg_status fail; }
 fx_error() { mg_status error; }
 fx_crash() { echo "crashing" >&2; return 3; }
+fx_pass_exit() { mg_status pass; return 7; }
+fx_warn_exit() { mg_status warn; return 7; }
 fx_failure_only() { mg_failure broken "it broke" "tools/mg fx-failure-only --again"; }
 fx_args() { mg_detail args "$(mg_json_array "$@")"; mg_status pass; }
 EOF
@@ -255,6 +259,28 @@ write_workspace() {
   validate "$result"
 }
 
+@test "a job reporting pass then exiting non-zero reports an error" {
+  add_fixture_jobs
+  mg fx-pass-exit
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field .exit_code)" -eq 2 ]
+  [ "$(field '.failures[0].id')" = job-exit ]
+  [[ "$(field '.failures[0].message')" == *"reported pass but exited with code 7"* ]]
+  validate "$result"
+}
+
+@test "a job reporting warn then exiting non-zero reports an error" {
+  add_fixture_jobs
+  mg fx-warn-exit
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field .exit_code)" -eq 2 ]
+  [ "$(field '.failures[0].id')" = job-exit ]
+  [[ "$(field '.failures[0].message')" == *"reported warn but exited with code 7"* ]]
+  validate "$result"
+}
+
 @test "dry runs do not move latest" {
   add_fixture_jobs
   mg fx-pass
@@ -340,7 +366,9 @@ write_workspace() {
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   jq -e '.user_steps[] | select(.id == "xcode-license" and .state == "missing")' "$result"
+  jq -e '.failures[] | select(.id == "xcode-license" and .message == "the Xcode license is not accepted" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
+  validate "$result"
 }
 
 @test "doctor fails and lists the step without an iOS 27 simulator runtime" {
@@ -350,7 +378,9 @@ write_workspace() {
   [ "$status" -eq 1 ]
   jq -e '.user_steps[] | select(.id == "ios-runtime" and .state == "missing")' "$result"
   jq -e '.details.ios_runtimes | length == 1' "$result"
+  jq -e '.failures[] | select(.id == "ios-runtime" and .message == "no available iOS 27 simulator runtime" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
+  validate "$result"
 }
 
 @test "doctor fails when Docker is unreachable" {
@@ -359,7 +389,9 @@ write_workspace() {
   mg doctor
   [ "$status" -eq 1 ]
   jq -e '.details.checks[] | select(.id == "docker" and .status == "fail")' "$result"
+  jq -e '.failures[] | select(.id == "docker" and .message == "Docker is not reachable; start Docker Desktop" and .repro == "tools/mg doctor")' "$result"
   assert_read_only_calls
+  validate "$result"
 }
 
 @test "doctor warns about missing Rust targets without making it a user step" {
@@ -431,6 +463,18 @@ mod tests {
   [ "$(field -c .summary)" = '{"total":1,"passed":0,"failed":1,"skipped":0}' ]
 }
 
+@test "core-test fails when a filter matches no tests" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn adds() { assert_eq!(1 + 1, 2); } }'
+  mg core-test -- -E 'package(fx) & test(=tests::renamed)'
+  [ "$status" -ne 0 ]
+  [ "$(field .status)" != pass ]
+  [ "$(field .summary.total)" -eq 0 ]
+  [ "$(field '.failures[0].id')" = no-tests-matched ]
+  validate "$result"
+}
+
 @test "core-test reports a build failure as a failed run" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   write_workspace
@@ -443,6 +487,39 @@ mod tests {
 }
 
 # --- images ----------------------------------------------------------------
+
+@test "dev-image reports an error when image inspection fails or returns an empty ID" {
+  local stubs="$BATS_TEST_TMPDIR/image-stubs" image mode
+  mkdir -p "$stubs"
+  cat >"$stubs/docker" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  info | compose*" build dev" | build*) exit 0 ;;
+  "image inspect "*)
+    if [[ "$3" == *"-$STUB_BAD_IMAGE" ]]; then
+      [ "$STUB_INSPECT_MODE" = empty ] && exit 0
+      echo sha256:fixture
+      echo "image inspection failed" >&2
+      exit 1
+    fi
+    echo sha256:fixture ;;
+  *) exit 97 ;;
+esac
+EOF
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  for image in dev fuzz; do
+    for mode in fail empty; do
+      export STUB_BAD_IMAGE="$image" STUB_INSPECT_MODE="$mode"
+      mg dev-image
+      [ "$status" -eq 2 ]
+      [ "$(field .status)" = error ]
+      [ "$(field .exit_code)" -eq 2 ]
+      [ "$(field '.failures[0].id')" = image-inspect ]
+      validate "$result"
+    done
+  done
+}
 
 @test "every Docker base image is pinned by digest and the dev image matches the Rust toolchain file" {
   local f line image stages

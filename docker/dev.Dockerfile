@@ -19,7 +19,8 @@ ARG CARGO_ABOUT_VERSION=0.9.2
 RUN --mount=type=cache,id=meguri-dev-cargo-registry,target=/usr/local/cargo/registry \
     cargo install --locked --version "${CARGO_NEXTEST_VERSION}" cargo-nextest \
  && cargo install --locked --version "${CARGO_DENY_VERSION}" cargo-deny \
- && cargo install --locked --version "${CARGO_ABOUT_VERSION}" cargo-about
+ && cargo install --locked --version "${CARGO_ABOUT_VERSION}" --features cli cargo-about \
+ && cargo nextest --version && cargo deny --version && cargo about --version
 
 # Install exactly what core/rust-toolchain.toml lists, so rustup never needs
 # the network when cargo runs in /work/core. The Apple targets come along:
