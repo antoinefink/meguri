@@ -3,3 +3,19 @@
 
 # Reference checkouts (separate git repos; Anki is AGPL and never part of Meguri)
 /refs/
+
+# tools/mg job results and reports
+/build/
+
+# Rust build output (host builds; Docker builds use a named volume)
+/core/target/
+
+# XCFramework and generated UniFFI Swift bindings (rebuilt from core/)
+/app/Packages/MeguriCore/Binaries/
+/app/Packages/MeguriCore/Sources/MeguriCoreBindings/
+
+# Xcode
+DerivedData/
+
+# Python virtual environments (macOS-native oracle lane)
+.venv*

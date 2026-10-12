@@ -1,0 +1,4 @@
+# The build context is the repo root. Send only what the image needs:
+# never local-data/, refs/, build/ or core/target/.
+*
+!core/rust-toolchain.toml
