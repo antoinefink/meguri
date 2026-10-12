@@ -3293,16 +3293,40 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - UI units that reproduce no Anki behavior work from the Product Contract alone.
   - Governs R1954–R1960, R2021.
 - KTD2. **Repository and workspace layout** as in Output Structure.
-  - The Rust crates are layered text → model → storage → (template, search) → sched → engine → (stats, sync, package) → servers → ffi. Only `meguri-ffi` is built for Apple targets. Only sync and servers use tokio.
+  - Crate layering is an allowed-edge table, stored as `core/tools/layering-check/edges.toml` and enforced by `layering-check` (U5). A crate may depend only on crates in lower rows; the components diagram in High-Level Technical Design draws it.
+
+  | Row | Crate | Rule |
+  |---|---|---|
+  | 1 | meguri-text | |
+  | 2 | meguri-model | owns the change value types `ChangeSet`, `OpSource` and `ChangeKind` (`src/changes.rs`), so sched, search and stats consume them without engine |
+  | 3 | meguri-storage | the only crate that issues SQL against `collection.anki2` |
+  | 4 | meguri-template | |
+  | 5 | meguri-search | |
+  | 6 | meguri-sched | pure: no executor, undo or event access; session orchestration, answer submission, leech tagging and sibling-bury writes live in meguri-engine (U43, U44) |
+  | 7 | meguri-engine | declares the ports `BackupService` (U127), `SuspendParticipant`, `ChangeObserver` and `GenerationListener` (U24) and `DiskSpaceProvider` (U32) |
+  | 8 | meguri-stats, meguri-package | siblings; no edge between them |
+  | 9 | meguri-sync | tokio |
+  | 10 | meguri-host | the only composition root (U38): `CoreHost::open` wires the package BackupService, the stats observers and widget builder, and the sync policy subscriptions |
+  | 11 | meguri-servers | tokio and axum; macOS and Linux only |
+  | 12 | meguri-ffi | the only crate built for Apple targets |
+  | — | meguri-testkit, meguri-cli | any crate except meguri-ffi |
+
+  - meguri-ffi (U37), meguri-servers and every testkit or cli path that executes engine ops open the collection through `CoreHost::open`, so headless runs get the same backup hook, observers and widget wiring as the app. tokio appears only in sync and servers, axum only in servers.
   - The crates whose output must equal the oracle's are pinned with `=` to the oracle lockfile: `unicase` 2.6.0, `regex`, `htmlescape` 0.3.1, `unicode-normalization`, `sha1`, `fsrs` 6.6.2 and `rand` at the version rslib uses at the tag. They are re-pinned only together with the oracle.
   - The toolchain is Rust 1.99 (`rust-toolchain.toml`). Docker uses the same image for build, test, lint, fuzz and benchmarks.
 
 **Core**
 - KTD3. **Storage engine.**
   - rusqlite with bundled SQLite. The `unicase` collation is registered on every connection, and the open fails closed without it.
-  - WAL mode: one writer connection owned by the engine's writer thread, plus 2–4 read-only connections. No exclusive locking. An advisory lock file blocks a second writer process.
+  - WAL mode: one writer connection owned by the engine's writer thread. No exclusive locking. An advisory lock file blocks a second writer process.
+  - Read-only connections are assigned by role, never pooled:
+    - one reserved for the interactive lane (review session, render, Card Info, editor open);
+    - one for the query lane (row pages, deck counts, heatmap);
+    - one per search worker (interruptible);
+    - one shared by maintenance, sync snapshots, stats cache builds and derived rebuilds.
+    Long-lived snapshots never use the interactive or query reader.
   - Nothing is ever added to `collection.anki2` (R2016). Derived data lives in a rebuildable `meguri-derived.db` (R1487–R1489).
-  - A full upload streams a `VACUUM INTO` snapshot. A full download goes to a temp file, passes `integrity_check`, then is renamed into place while every connection is closed.
+  - A full upload streams a `VACUUM INTO` snapshot. Every collection swap (full download and upload, `.colpkg` import, restore) goes through U124's verified-replace primitive.
 - KTD4. **Protobuf records.**
   - Hand-written prost structs follow the specs. A codec layer captures unknown field tags with their wire bytes and re-appends them on encode (R1463, R1486), proved by round-trip property tests with injected unknown tags.
   - Generating code from Anki's `.proto` files is forbidden.
@@ -3310,27 +3334,34 @@ The plan was written without a synchronous user checkpoint, at the user's instru
 - KTD5. **Op executor, change stream, undo and lifecycle live in the core (`meguri-engine`).**
   - Every write from UI, sync, local servers, optimizer, rollover or maintenance is an op on one serialized executor.
   - An op carries a `source` and returns its sequence number, a ChangeSet, undo metadata and the collection generation.
-  - The change stream is ordered and coalesced and includes `CollectionReplaced(generation)`.
+  - The change stream is ordered and includes `CollectionReplaced(generation)`. It is the single queue for every core→Swift event (KTD9).
   - The undo manager keeps before-images and an `uploaded` flag, and reports disabled reasons. The core enforces that no uploaded step is undoable.
   - Lifecycle states: NoCollection, Opening, Upgrading, Ready(generation), ExclusiveBusy, Failed.
-  - `prepareForSuspend` and `resume` implement the suspend protocol (R2006, R2007).
+  - The suspend protocol (C8, R2006, R2007) is three control-lane calls, `flush_for_background()`, `suspend(deadline)` and `resume()`, defined in U32. The Swift sequences around them are U151's.
+  - **Core decides, Swift schedules.** Core policies (U40 day clock, U113 sync and optimizer eligibility, U127 backup) are pure and return actions plus `next_deadline`. Swift arms exactly one timer per policy, in one owner:
+    - day clock: U51 `DayClockMonitor`;
+    - sync: U151 `SyncCoordinator`, which only executes U113 actions;
+    - optimizer: U51, started only by U113's optimizer action;
+    - backups: U154 `BackupTrigger`, armed at U127's deadline.
+    U154 alone registers background-task identifiers. Session state reaches U113 inside the core from U43's events; Swift never forwards it. Core-internal debounces (U100's 2 s) stay in the core as suspend participants.
 - KTD6. **Hold-back sync is snapshot-and-stage.**
   - A normal sync reads outgoing rows from a read snapshot taken at sync start. It substitutes before-images for rows touched by the held-back run: the active session's contiguous top-of-stack steps, down to and including the latest answer.
   - It computes sanity-check counts from that virtual state and stages incoming changes.
-  - At the end, one short write transaction commits the merge using the pending-and-newer-mtime rule. Uploaded rows are marked with the server USN only if they are unchanged since read. `col.mod` is bumped after `finish` when pending rows remain.
-  - Answers commit at once (durable within 1 s) and never wait for a sync. The one exception is the final vacuum of Check Database, which holds the writer for up to 5 s (R1847). Answers given meanwhile stay in the session's in-memory queue and commit as soon as the vacuum ends.
+  - At the end, one write transaction commits the merge using the pending-and-newer-mtime rule. Only keys untouched since the snapshot and outside the held-back run get the server USN (U107 step 6). `col.mod` is bumped after `finish` when pending rows remain.
+  - Answers commit at once (durable within 1 s) and never wait for a sync. The exceptions are the final vacuum of Check Database, which holds the writer for up to 5 s (R1847), and a SyncIncoming commit whose staged row count exceeds its declared write-phase budget (U107). Answers given meanwhile stay in the session's in-memory overlay and commit as soon as the writer is free.
   - Governs R88, R726, R1495, R1519, R1520 together with R99.
 - KTD7. **Undo and queues around sync.**
-  - Applying incoming changes clears undo and redo except the held-back run, which is also cleared if incoming rows touch it.
-  - Queues refresh in the background and keep the shown card and still-valid pre-renders, matched by `(cardId, stateToken)`.
+  - Applying incoming changes clears undo and redo except the held-back run. The held-back run is also cleared when any staged incoming row or grave targets a key in its touched set (card, note, deck, deck config, notetype or config key), whether or not the merge applied it.
+  - Queues refresh in the background and keep the shown card and still-valid pre-renders, matched by `(cardId, stateToken, renderKey)` (U43).
   - Local-server writes truncate the undo stack at the deepest entry they intersect (R1796).
 - KTD8. **FSRS through fsrs 6.6.2 directly.**
-  - Optimization uses 8 epochs explicitly. The rayon global pool runs at utility QoS, and the engine's CancelToken maps to `want_abort`.
+  - Optimization uses 8 epochs explicitly. The optimizer uses its own rayon pool built at utility QoS; nothing uses rayon's global pool. The engine's CancelToken maps to `want_abort`.
   - The real cost is SQLite, so performance work targets the revlog→item builder and batched card-data updates.
   - **Optimizer commit gate:**
     - training runs only when no session is active, and a session start cancels it;
-    - the write happens only after a fresh `meta` shows the server unchanged since the first sync;
-    - parameters, memory states and the last-optimized date commit in one transaction, followed by a sync (R699).
+    - training ends in `AwaitingGate` and writes nothing. The core never calls the network for the optimizer;
+    - U51 runs the gate as a U113 action: a fresh `meta` with auth (U114), then `optimizer_commit`, which writes only if the server is unchanged since the first sync and no session is active;
+    - parameters, memory states and the last-optimized date commit in one Optimizer op, which then requests a sync that SyncCoordinator runs under the normal policy (R699; U47).
   - Two Meguri devices optimizing the same day is an accepted small race; the next run converges.
 - KTD24. **Floating-point determinism follows the platform, as Anki does.**
   - fsrs evaluates f32 `powf`/`exp`/`ln`. Apple's libm and glibc differ by 1 ulp on about 0.6% of FSRS-range inputs, which can flip a rounded interval on rare boundary cards.
@@ -3342,12 +3373,25 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - Conflict call-out: R1890 says "exactly". The plan meets it against Anki on the same platform and documents the Linux-oracle boundary class under R1889.
 
 **Bridge and app**
-- KTD9. **UniFFI 0.32.2 with blocking exports only.**
+- KTD9. **UniFFI 0.32.2 with short blocking exports; long work runs as core jobs.**
   - Bindings come from an in-repo `uniffi-bindgen-swift` pinned `=0.32.2`, not cargo-swift.
   - The generated Swift compiles in its own Swift 5 language-mode target, `MeguriCoreBindings`, over the binary module `MeguriCoreFFI`. The Swift 6 `CoreBridge` wraps it.
-  - CoreBridge uses actors with custom serial executors on `DispatchSerialQueue` lanes: interactive, query and maintenance.
+  - Within one build configuration the exported surface is identical on every slice. Platform features gate implementations, never exports: on iOS slices the server exports (U135) are stubs that return `Unsupported`. Bindings are generated once per configuration from the macOS slice, and the build checks that every slice exports the same `uniffi_*` symbol set (U6).
+  - **Jobs.** Collection open, normal, one-way and media sync, optimizer training, import and export, backup, Check Database, Check Media and Empty Cards are jobs. A short `start_*` export returns `JobHandle{id, cancel, progress}` at once. The work runs on core-owned threads (tokio for sync and media, a bounded job pool otherwise), and completion arrives as a `JobFinished{id, outcome}` event. U24's C7 arbitration decides concurrency: normal and media sync may overlap; exclusive jobs refuse others with `Busy` (R171).
+  - **Lanes** carry only short calls. CoreBridge uses actors with custom serial executors on `DispatchSerialQueue` lanes:
+    - interactive: review, render, undo, edits;
+    - query: reads, pages, stats, and `qa_cells` with cancel;
+    - maintenance: job start and control, listings, config;
+    - control: lifecycle, `flush_for_background`/`suspend`/`resume`, widget flush and cancels. It never carries long work.
+  - **Threads.** Every Rust-created thread is created through U24's thread registry and sets its QoS at start through the pthread QoS API: the engine writer and the search workers (with the search's own rayon pool) at user-initiated; the derived writer, stats cache builds and the optimizer pool at utility.
   - CancelToken objects are exported explicitly, because Swift Task cancellation does not reach Rust.
-  - Progress and change events arrive through synchronous callback interfaces, throttled to about 10 Hz, and are bridged into `AsyncStream`. There are no async foreign traits.
+  - **Events.** One `CoreEvent` envelope `{seq, generation, causeSeq?, kind}`, defined in meguri-ffi (U6) and fed from the engine change stream (U24). Variants: Changes, CollectionReplaced, Lifecycle, RolledOver, Session, Stats, SyncStatus, MediaArrived, DerivedReadiness, WidgetSnapshotWritten and JobFinished; each owning unit adds its variant. Delivery rules:
+    - one core dispatcher thread delivers envelopes in `seq` order, never from the writer thread and never while holding a lock;
+    - Swift callback implementations only yield into an `.unbounded` `AsyncStream` continuation and never call the core synchronously;
+    - derived events carry the `causeSeq` of the ChangeSet that caused them;
+    - coalescing happens only in U151's `ChangeFanout`, never across CollectionReplaced, and never drops Session or CommitFailed variants;
+    - only Progress is throttled (about 10 Hz in Rust, `bufferingNewest(1)` in Swift), on its own callback interface.
+    HostEvents (U135) follow the same delivery rules on their own channel. There are no async foreign traits.
   - Results are paged (R1859), and every bridge call is signposted (R1861).
   - The XCFramework holds static libraries for `aarch64-apple-darwin`, `aarch64-apple-ios` and `aarch64-apple-ios-sim`, rebuilt only when inputs change.
 - KTD10. **App structure.**
@@ -3360,15 +3404,18 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - Swift 6 strict concurrency throughout. MeguriKit uses MainActor default isolation; MeguriCore is nonisolated.
 - KTD11. **Card rendering.**
   - The core renders question and answer HTML.
-  - The `CardRendering` target keeps two persistent `WKWebView`s that share one configuration and content controller, plus one persistent website data store with a fixed identifier (R502). Both are stacked full-frame and opaque, with the idle page underneath. A swap changes z-order inside one `CATransaction`.
+  - The `CardRendering` target keeps two persistent `WKWebView`s that share one configuration and content controller, plus one persistent website data store with a fixed identifier (R502). Both are stacked full-frame and opaque, with the idle page underneath. A swap changes z-order in the same Core Animation commit as the bottom bar and chrome changes, with no web-content call before it (U67, U176).
   - Meguri-authored runtime JS runs in the page world behind an allowlisted message handler (R2038).
   - Media is served through the `meguri-media:` scheme with Range/206 support. `[sound:]` plays natively through AVFoundation.
   - SwiftUI `WebView`/`WebPage` is rejected: it has no process-termination callback, no `pageZoom`, no autoplay policy and no file loading.
   - Spikes S1 (rendering under occlusion and a swap within the input frame) and S2 (custom-scheme media ranges) gate the review renderer.
+  - Conflict call-out (R1807, R1862): R1807 counts to the R1862 visible confirmation, but a post-swap double rAF lands at least two web-process frames after the native commit, which the native baseline swap never pays; measured literally, R1807 always fails. The plan reads it as follows. Frames-to-visible runs from the native input timestamp to the display frame that presents the swap commit (U243 frame probe). R1862 is met by a pre-swap double rAF in the occluded page (settled means painted) plus a post-swap double rAF that must report the same card id; the post-swap message proves identity and paint but does not end the interval. The baseline probe uses the same input path and end rule, and both timestamps are recorded (U12, U67, U176).
+  - Conflict call-out (R1853, R329): "released" means each page drops its card DOM, images and media and returns to the warm document at session end; the web content processes stay alive so R1813 holds (U176, U245).
 - KTD12. **Where data lives.**
   - The collection, media, media DB and derived store sit in the app's private Application Support. Backups go to `Documents/Backups` on iOS and iPadOS, where the Files app shows them (R1629), and to the private container on the Mac, with a Show Backups action.
   - The App Group holds only `widget-snapshot.json`.
-  - Device-only state never enters the collection (R1468): the host key (Keychain), server endpoint, sync progress, auto-sync pause flag, last optimize time and UI state.
+  - Device-only state never enters the collection (R1468): the host key (Keychain), server endpoint, sync progress, auto-sync pause flag, optimizer run diagnostics (U47 derived-store table) and UI state.
+  - `lastFsrsOptimize` is a synced collection config key, written only by the U47 commit op and read by U113's optimizer gate.
 - KTD13. **Local servers in Rust (`meguri-servers`, axum on tokio), started and stopped by the Mac app over FFI.**
   - Body limits as R1678 sets them (256 MB for AnkiConnect, 128 MB for Migaku).
   - JSON parsed from raw bytes, with a single fallback handler.
@@ -3388,7 +3435,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
     - `BGContinuedProcessingTask` for a user-started one-way sync or import, with progress;
     - `beginBackgroundTask` when leaving the app, covering the incremental sync, snapshot write and WAL checkpoint.
   - macOS: `NSBackgroundActivityScheduler` and `ProcessInfo` activities.
-  - Foreground return runs in this order: external-change check, rollover, queue head refresh, sync (with hold-back if a session is open), snapshot.
+  - The foreground-return and background sequences are U151's, built on U32's three C8 calls; U154 owns every task registration (KTD5).
 - KTD16. **The widget snapshot is built in the core (`meguri-stats`) to the single schema of R1433.**
   - It subscribes to the change stream with a 2 s debounce, plus rollover, background and session end.
   - It is written atomically and triggers a WidgetCenter reload only when its bytes change.
@@ -3398,6 +3445,7 @@ The plan was written without a synchronous user checkpoint, at the user's instru
   - During it, Study, Add, Edit, bulk actions, deck options and note-type edits show "Waiting for <op>".
   - Open Add or Edit sheets close first: edits are saved, and Add drafts go through the discard prompt.
   - Local servers reply "collection unavailable"; Migaku requests use the durable pending queue.
+  - The core enforces the phase: only ops submitted by the exclusive job commit, and the job's safety backup and snapshot come after a drain (U24).
   - Afterwards every Swift cache resets by generation and the app lands on Home.
 - KTD18. **Test-only hooks** sit behind the Swift `MEGURI_TEST_HOOKS` condition and the Rust `test-hooks` feature, and are absent from Release (R1967).
   - They cover fixture loading, clock injection and state jumping.
@@ -3428,30 +3476,31 @@ The plan was written without a synchronous user checkpoint, at the user's instru
 
 ### High-Level Technical Design
 
-**Components and layering**
+**Components and layering** (solid arrows mean "depends on"; each crate may also use any crate below it, per the KTD2 table; dashed arrows are file I/O)
 
 ```mermaid
 flowchart TB
   subgraph Apple["Apple app (SwiftUI)"]
-    Shell["App shell: scenes, navigation, CollectionStore, SyncCoordinator"]
     Features["Features: Home, Review, Browse, Editor, NoteTypes, ImageOcclusion, DeckOptions, Stats, Settings, Onboarding, Integrations"]
+    Shell["App shell: scenes, navigation, CollectionStore, SyncCoordinator"]
     CardR["CardRendering: 2 x WKWebView, meguri-media scheme, native audio"]
     DS["DesignSystem: tokens, components, gallery"]
-    Bridge["MeguriCore: CoreBridge lanes + MeguriCoreFFI (UniFFI)"]
+    Bridge["MeguriCore: CoreBridge lanes (interactive, query, maintenance, control) + MeguriCoreFFI (UniFFI)"]
     Widget["MeguriWidget (snapshot reader)"]
   end
   subgraph Core["Rust core (core/crates)"]
-    FFI["meguri-ffi"]
-    Engine["meguri-engine: ops, change stream, undo, lifecycle, notes/decks/notetypes, maintenance"]
-    Sched["meguri-sched (fsrs 6.6.2)"]
-    Tmpl["meguri-template"]
-    Search["meguri-search"]
-    Stats["meguri-stats (+ widget snapshot)"]
-    Sync["meguri-sync (reqwest, tokio)"]
-    Pkg["meguri-package"]
+    FFI["meguri-ffi: exports, CoreEvent dispatcher"]
     Servers["meguri-servers (axum, Mac only)"]
+    Host["meguri-host: CoreHost::open, port wiring"]
+    Sync["meguri-sync (reqwest, tokio)"]
+    Stats["meguri-stats (+ widget snapshot)"]
+    Pkg["meguri-package"]
+    Engine["meguri-engine: ops, change stream, undo, lifecycle, jobs, review session, ports"]
+    Sched["meguri-sched (pure; fsrs 6.6.2)"]
+    Search["meguri-search"]
+    Tmpl["meguri-template"]
     Storage["meguri-storage (rusqlite, WAL, derived store)"]
-    Model["meguri-model (prost + unknown fields)"]
+    Model["meguri-model (prost + unknown fields, change value types)"]
     Text["meguri-text"]
   end
   Files[("collection.anki2, media, derived db, backups (private container)")]
@@ -3462,23 +3511,23 @@ flowchart TB
   Shell --> Bridge
   CardR --> Bridge
   Bridge --> FFI
-  FFI --> Engine
   FFI --> Servers
-  Servers --> Engine
+  FFI --> Host
+  Servers --> Host
+  Host --> Sync
+  Sync --> Stats
+  Sync --> Pkg
+  Stats --> Engine
+  Pkg --> Engine
   Engine --> Sched
-  Engine --> Tmpl
-  Engine --> Search
-  Engine --> Stats
-  Engine --> Sync
-  Engine --> Pkg
-  Sched --> Storage
-  Search --> Storage
+  Sched --> Search
+  Search --> Tmpl
+  Tmpl --> Storage
   Storage --> Model
   Model --> Text
-  Tmpl --> Text
-  Storage --> Files
-  Stats --> Snap
-  Widget --> Snap
+  Storage -.-> Files
+  Stats -.-> Snap
+  Widget -.-> Snap
 ```
 
 **Answer, hold-back and periodic sync**
@@ -3488,20 +3537,25 @@ sequenceDiagram
   participant UI as Review UI
   participant CR as CardRendering
   participant Br as CoreBridge (interactive lane)
+  participant Ss as Core review session (U43)
   participant En as Engine executor
-  participant Sy as Sync job (maintenance lane)
+  participant Sy as Sync job (core thread)
   UI->>CR: input (button/zone/key)
-  CR->>CR: swap to pre-rendered page N+1 (same frame)
-  UI->>Br: answer(cardId, rating, stateToken)
-  Br->>En: op(source=UserUndoable)
-  En-->>Br: OpResult(seq, ChangeSet, undo entry)
-  Br-->>UI: queue head diff, next pre-render request
-  UI->>CR: render N+2 into idle page
+  CR->>CR: swap to settled page N+1 (same frame)
+  UI->>Br: answer(sessionId, cardId, rating, stateToken)
+  Br->>Ss: answer
+  Ss-->>Br: Accepted{headDiff, counts, flags}, no commit wait
+  Br-->>UI: head diff
+  UI->>Br: renderHead(N+2 renderKey)
+  Br-->>UI: RenderedCard
+  UI->>CR: prepare N+2 in idle page
+  Ss->>En: answer op (source=UserUndoable), asynchronous
+  En-->>Ss: OpResult(seq, ChangeSet, undo entry)
   Note over En: committed, durable within 1 s
   Sy->>En: read snapshot (held-back run substituted by before-images)
   Sy->>Sy: meta, start, graves, changes, chunks, sanity, finish
-  Sy->>En: stage incoming, then one short commit transaction
-  En-->>UI: ChangeSet(source=SyncIncoming), undo cleared except held-back run
+  Sy->>En: stage incoming, then one SyncIncoming commit op
+  En-->>UI: CoreEvent Changes(source=SyncIncoming), undo cleared except held-back run
 ```
 
 **Undo entry lifecycle**
@@ -3510,9 +3564,11 @@ sequenceDiagram
 stateDiagram-v2
   [*] --> Undoable: op committed (user, undoable)
   Undoable --> HeldBack: in active session's top run at sync start
-  Undoable --> Uploaded: included in a sync upload
-  HeldBack --> Undoable: sync finished, entry untouched by incoming
-  HeldBack --> Dropped: incoming touched its rows
+  Undoable --> UploadPending: in the snapshot of a running sync
+  UploadPending --> Uploaded: finish request sent
+  UploadPending --> Undoable: sync failed before finish was sent
+  HeldBack --> Undoable: sync finished, no staged incoming key in its touched set
+  HeldBack --> Dropped: a staged incoming row or grave targets its touched set
   Undoable --> Dropped: rollover, one-way sync, Check DB, API intersect
   Uploaded --> [*]: never undoable
   Undoable --> Undone: user undo
@@ -3524,9 +3580,9 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TB
-  A["Idle page (beneath): question of N+1 rendered, scripts run, fonts and images settled"] --> B{"Answer input"}
-  B --> C["Swap z-order in one CATransaction, frame of input"]
-  C --> D["Visible page: N+1 question; double-rAF confirms paint (R1862)"]
+  A["Idle page (beneath): question of N+1 rendered, scripts and update hooks run, #qa visible, painted (double rAF)"] --> B{"Answer input"}
+  B --> C["Swap z-order with bottom bar and chrome in one Core Animation commit, frame of input"]
+  C --> D["Visible page: N+1 question; shown-hooks run; post-swap double rAF confirms the same card (R1862, KTD11)"]
   D --> E["Reveal: answer side inserted in the same page; answer scripts within 50 ms"]
   C --> F["Former page becomes idle: render N+2 question"]
 ```
@@ -3617,23 +3673,28 @@ core/                                    Rust workspace
   AGENTS.md
   crates/
     meguri-text/                         strip_html, entities, NFC/NFKD, unicase, csum, sort field, media refs, folding
-    meguri-model/                        ids/usn/mtime, prost records + unknown-field codec, schema-11 JSON, clock seam, faultpoints
+    meguri-model/                        ids/usn/mtime, prost records + unknown-field codec, schema-11 JSON, clock seam, faultpoints,
+                                         change value types (ChangeSet, OpSource, ChangeKind)
     meguri-storage/                      rusqlite open, collation, WAL, connections, schema, rows, graves, config, derived store, media store
     meguri-template/                     template parser/renderer, filters, cloze, type-in, image occlusion, preview
     meguri-search/                       lexer/parser, canonical writer, SQL writer, matchers, browser rows, accelerators
-    meguri-sched/                        day clock, queues, steps, FSRS, fuzz, load balancer, answers, memory states, optimizer, options
-    meguri-engine/                       op executor, change stream, undo, lifecycle, notes/cards/decks/notetypes/tags ops,
-                                         card generation, change notetype, maintenance (Check DB/Media, Empty Cards, backups hook)
+    meguri-sched/                        pure: day clock, queues, steps, FSRS, fuzz, load balancer, answer rows, memory states,
+                                         optimizer training, session queue-state types; no executor, undo or events
+    meguri-engine/                       op executor, change stream, jobs, ports, undo, lifecycle, review session, answer op,
+                                         notes/cards/decks/notetypes/tags ops, card generation, change notetype,
+                                         maintenance (Check DB/Media, Empty Cards, backups hook)
     meguri-stats/                        aggregates, heatmap/streaks, graphs, card_info/, widget snapshot
-    meguri-sync/                         protocol v11 normal and one-way sync, media sync, SyncTransport
+    meguri-sync/                         protocol v11 normal and one-way sync, media sync, policy, SyncTransport
     meguri-package/                      .apkg/.colpkg import/export, backups (writer, retention, restore)
+    meguri-host/                         composition root (U38): CoreHost::open, port wiring per area (wiring/)
     meguri-servers/                      axum AnkiConnect (8765) + Migaku (44432); macOS and Linux only
-    meguri-ffi/                          UniFFI exports only; staticlib; the only crate built for Apple targets
+    meguri-ffi/                          UniFFI exports only (U37 collection surface + per-area exports), CoreEvent dispatcher;
+                                         staticlib; the only crate built for Apple targets
     meguri-testkit/                      scenario runner, fixtures, generator, profiles/, golden diffing, faults, soak (dev only)
   tools/
     meguri-cli/                          headless driver: scenarios, generators, benchmarks, oracle compare, private suite
     uniffi-bindgen-swift/                in-repo bindgen pinned =0.32.2
-    layering-check/                      KTD2 crate-edge and tokio placement gate
+    layering-check/                      KTD2 allowed-edge table (edges.toml) and tokio placement gate
   fuzz/fuzz_targets/                     cargo-fuzz targets
   bench/baselines/                       core benchmark baselines
 app/
@@ -3658,7 +3719,7 @@ app/
       Package.swift, AGENTS.md
       Binaries/                          gitignored: MeguriCoreFFI.xcframework (binaryTarget, C module)
       Sources/MeguriCoreBindings/        gitignored generated UniFFI Swift (Swift 5 mode)
-      Sources/CoreBridge/                Swift 6 lanes, CancelToken, change stream, signposts, per-area bridges
+      Sources/CoreBridge/                Swift 6 lanes, CancelToken, jobs, CoreEvent stream, signposts, per-area services
       Tests/CoreBridgeTests/
     MeguriKit/                           Swift package, MainActor default isolation
       Package.swift
@@ -3695,8 +3756,8 @@ Each unit belongs to the earliest milestone that needs it, so every milestone is
 | Milestone | Units | Closing gate (all suites on one commit) | User steps |
 |---|---|---|---|
 | **M0 Foundations** | U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241 | The oracle image builds, and T0 is green on the first goldens: the 10k fuzz table, id allocation, and a rollover×TZ subset (U3, U4). The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). A two-client full upload and download runs under a frozen clock (U13). | Xcode license, simulator runtime and Xcode agent access (R1969) |
-| **M1 Daily review driver** | U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U34, U35, U40, U41, U42, U43, U44, U45, U46, U47, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U81, U82, U83, U84, U85, U92, U95, U96, U97, U98, U99, U100, U101, U103, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U120, U122, U123, U124, U126, U127, U128, U130, U131, U135, U136, U137, U150, U151, U152, U153, U154, U155, U156, U157, U158, U159, U160, U161, U162, U163, U166, U175, U176, U177, U178, U179, U180, U181, U182, U183, U184, U185, U186, U187, U188, U190, U191, U192, U193, U195, U200, U210, U222, U225, U227, U228, U229, U232, U242, U243, U245, U246, U248, U249, U250, U251, U252, U254, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U245 review and memory subset. U248 coexistence soak. U250 fault classes: review, sync, full download, backup (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home and review (U254). A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged |
-| **M2 Creation and maintenance** | U33, U69, U71, U86, U87, U88, U90, U91, U121, U129, U132, U133, U194, U196, U197, U201, U202, U203, U205, U206, U207, U211, U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U244, U247, U253 | U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor. U253 VoiceOver for browser and editor. | Variant picks for browser and editor. Device run (browser and editor budgets) |
+| **M1 Daily review driver** | U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U34, U35, U37, U38, U40, U41, U42, U43, U44, U45, U46, U47, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80, U81, U82, U83, U84, U85, U92, U95, U96, U97, U98, U99, U100, U101, U103, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U120, U121, U122, U123, U124, U126, U127, U128, U129, U130, U131, U132, U133, U135, U136, U137, U150, U151, U152, U153, U154, U155, U156, U157, U158, U159, U160, U161, U162, U163, U166, U175, U176, U177, U178, U179, U180, U181, U182, U183, U184, U185, U186, U187, U188, U190, U191, U192, U193, U195, U200, U210, U222, U225, U227, U228, U229, U232, U242, U243, U245, U246, U248, U249, U250, U251, U252, U254, U256 | U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U245 review and memory subset. U248 coexistence soak. U250 fault classes: review, sync, full download, backup (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag. | U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home and review (U254). A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged |
+| **M2 Creation and maintenance** | U33, U69, U71, U86, U87, U88, U90, U91, U194, U196, U197, U201, U202, U203, U205, U206, U207, U211, U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U244, U247, U253 | U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews. U249 adds saved searches, browser sorts and apkg/colpkg round trips. U244 browser, search and editor groups (R1824–R1836). U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848). U250 classes: edit, bulk, import, export, Check DB. U251 disk-full and kill during import. U252–U254 for browser, editor, note types and IO editor. U253 VoiceOver for browser and editor. | Variant picks for browser and editor. Device run (browser and editor budgets) |
 | **M3 Stats, widgets, automatic optimization** | U104, U165, U226, U230, U231, U233, U234, U236, U237 | U246: stats (R1921), optimizer (R1904, R1905). U249 adds stats per deck. U244 stats group (R1837–R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U248 two-device optimizer scenario. U252–U254 for stats, deck options and widget. | Variant picks for stats and deck options. Device run |
 | **M4 Mac integration servers** | U138, U139, U140, U141, U142, U143, U144, U145, U146, U147, U164 | U246: server contract suites (R1944–R1946, R1948, R1949) from the Mac-servers area. U249 Migaku routing replay (AE87). U250 class for server writes during edit and review. U255 Mac entitlement and loopback checks. | The firewall check on a clean user account (spike in the servers area) |
 | **M5 Hardening and design sign-off** | U16, U17, U18, U36, U116, U167, U168, U255, U257 | U246 full: every in-scope and preservation-only harvested scenario passes (R1880), and no undocumented deviation remains (R1889). The full snapshot matrix (U252). Every screen is "verified" (U254). U255 release configs. U256 device run on every budget. U257 release readiness. | Signature-screen sign-off (all), the monthly device session, the 30-day daily-driver run (U257) |
@@ -3715,7 +3776,7 @@ Each unit belongs to the earliest milestone that needs it, so every milestone is
 |---|---|
 | f32 libm divergence makes "exact" next states fail on rare cards | KTD24 macOS-native oracle check at M1; vendored math port fallback |
 | UniFFI Swift 6 async-trait bug and no cancellation | Blocking exports, explicit cancel tokens, bindings target in Swift 5 mode (KTD9) |
-| An occluded WKWebView stops rendering, breaking the one-frame swap | Spike S1 before the review renderer; fallback is a pre-rendered snapshot image swap while the live page catches up, measured against R1807 |
+| An occluded WKWebView stops rendering, breaking the one-frame swap | Spike S1 on the Mac host before the review renderer, iPhone checkpoint in U256; fallback is a pre-rendered snapshot image swap while the live page catches up, built behind a flag before M1 closes (U176) and measured against R1807 |
 | Custom-scheme media ranges on iOS | Spike S2; fallback `loadFileURL` with a shared read-access root |
 | AnkiWeb rejects the honest client id | Self-hosted sync remains fully supported; never impersonate (R1509) |
 | `refs/anki` HEAD is ahead of the oracle | Spec writers read the 26.09.3 tag worktree only (KTD23) |
@@ -3745,6 +3806,7 @@ Deferred to implementation:
 - Spike outcomes S1–S4 and their effect on the review renderer and the Mac window lifecycle.
 - The editor's Return and Shift-Return markup, read from the oracle (U190).
 - Whether Migaku 1.31 accepts `{"success": true, "created": false}` as success (U137).
+- Whether R1852's 300 MB optimizer cap holds at 500k cards (about 4M revlog rows) without changing the FSRS item set. U47 measures it; a breach is a stop condition reported to Antoine, because trimming items would break FSRS parity (R1902).
 
 ### Sources and Research
 
@@ -3803,7 +3865,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U21 | meguri-model: typed records, protobuf blobs with unknown-field capture, legacy JSON, clock | `core/crates/meguri-model/src/`<br>`core/fuzz/fuzz_targets/proto_blobs.rs`<br>`core/crates/meguri-model/tests/proto_roundtrip.rs` | U5, U20 |
 | U22 | meguri-storage: open, collation, WAL, connections, schema check and upgrade | `core/crates/meguri-storage/`<br>`specs/storage/schema-18.md`<br>`specs/storage/open-and-connections.md` | U3, U4, U5, U20, U21 |
 | U23 | Record I/O, ids, USN and mtimes, graves, config table, op journal | `core/crates/meguri-storage/src/rows/`<br>`core/crates/meguri-storage/src/ids.rs`<br>`core/crates/meguri-storage/tests/ids.rs` | U21, U22 |
-| U24 | Engine core: op executor, change stream, lifecycle and generation, cancellation and progress | `core/crates/meguri-engine/`<br>`specs/engine/op-model.md`<br>`specs/engine/change-stream.md` | U12, U22, U23 |
+| U24 | Engine core: op executor, change stream, lifecycle and generation, jobs, ports, cancellation and progress | `core/crates/meguri-engine/`<br>`specs/engine/op-model.md`<br>`specs/engine/change-stream.md` | U12, U22, U23 |
 | U25 | Undo manager (C3) | `core/crates/meguri-engine/src/undo/`<br>`core/crates/meguri-engine/tests/undo_basic.rs`<br>`specs/engine/undo.md` | U23, U24 |
 | U26 | Derived store | `core/crates/meguri-storage/src/derived/`<br>`core/crates/meguri-engine/src/derived_host.rs`<br>`core/crates/meguri-storage/tests/derived_store.rs` | U22, U24 |
 | U27 | Notes and cards: note ops, card generation, deck placement and positions | `core/crates/meguri-engine/src/notes/`<br>`core/crates/meguri-engine/src/cards/`<br>`core/crates/meguri-engine/src/cardgen/` | U20, U23, U24, U25, U29, U30, U60, U61 |
@@ -3816,18 +3878,20 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U34 | Note type structure changes: fields, templates, sort field, deletion, Restore to Default | `core/crates/meguri-engine/src/notetypes/structure.rs`<br>`core/crates/meguri-engine/tests/notetype_structure.rs`<br>`specs/notetypes/structure-changes.md` | U27, U29, U60 |
 | U35 | Change Note Type and Empty Cards (generation side) | `core/crates/meguri-engine/src/notetypes/change_notetype.rs`<br>`core/crates/meguri-engine/tests/change_notetype.rs`<br>`specs/notetypes/change-notetype.md` | U27, U29, U34 |
 | U36 | Data preservation and churn-prevention conformance suite | `core/crates/meguri-testkit/src/dump/preservation.rs`<br>`core/crates/meguri-engine/tests/preservation_churn.rs`<br>`specs/conformance/normalized-dump.md` | U3, U4, U11, U27, U28, U29, U30, U31, U34, U43, U60, U107, U137, U160 |
+| U37 | Collection FFI surface and CoreBridge engine services | `core/crates/meguri-ffi/src/collection.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/CollectionService.swift`<br>`app/Packages/MeguriCore/Sources/CoreBridge/UndoService.swift` | U6, U24, U25, U27, U28, U29, U30, U31, U32, U34, U35, U38, U41, U127 |
+| U38 | meguri-host composition root | `core/crates/meguri-host/src/open.rs`<br>`core/crates/meguri-host/src/wiring/`<br>`core/crates/meguri-host/tests/ports.rs` | U24, U25, U26, U32 |
 | U40 | Day clock and rollover | `core/crates/meguri-sched/src/timing/`<br>`core/crates/meguri-engine/src/sched/`<br>`core/crates/meguri-ffi/src/day_clock.rs` | U4, U5, U22, U23, U24, U25 |
 | U41 | Queue building and counts | `core/crates/meguri-sched/src/queue/`<br>`core/crates/meguri-sched/src/counts/`<br>`core/crates/meguri-storage/src/sqlfns/sched.rs` | U22, U23, U26, U40, U42 |
 | U42 | Scheduling data model: card fields, cards.data, presets and scheduling config | `core/crates/meguri-sched/src/model/`<br>`core/crates/meguri-sched/tests/`<br>`specs/sched/card-data.md` | U21, U23, U28 |
-| U43 | Review session (contract C5) | `core/crates/meguri-sched/src/session/`<br>`core/crates/meguri-engine/src/session.rs`<br>`core/crates/meguri-ffi/src/review_session.rs` | U6, U24, U25, U40, U41, U44, U45, U46 |
+| U43 | Review session (contract C5) | `core/crates/meguri-sched/src/session/`<br>`core/crates/meguri-engine/src/session/`<br>`core/crates/meguri-ffi/src/review_session.rs` | U6, U24, U25, U40, U41, U44, U45, U46, U62, U64 |
 | U44 | Answer application | `core/crates/meguri-sched/src/answer/`<br>`core/crates/meguri-sched/src/load_balancer/`<br>`core/crates/meguri-storage/src/queries/` | U24, U25, U27, U30, U41, U42, U45, U46 |
 | U45 | Next-state engine: steps, FSRS transitions, fuzz and labels | `core/Cargo.toml`<br>`core/crates/meguri-sched/src/states/`<br>`core/crates/meguri-sched/tests/` | U5, U40, U42 |
 | U46 | Memory states and FSRS training items | `core/crates/meguri-sched/src/memory/`<br>`core/crates/meguri-storage/src/queries/revlog_fsrs.rs`<br>`core/crates/meguri-engine/src/ops/memory_state.rs` | U12, U23, U24, U25, U42, U45, U80 |
-| U47 | Automatic FSRS optimizer job | `core/crates/meguri-sched/src/optimizer/`<br>`core/crates/meguri-engine/src/jobs/optimizer.rs`<br>`core/crates/meguri-storage/src/derived/optimizer_log.rs` | U12, U24, U26, U42, U46, U49, U80, U107 |
-| U48 | Card scheduling operations | `core/crates/meguri-sched/src/ops/`<br>`core/crates/meguri-engine/src/ops/sched_ops.rs`<br>`core/crates/meguri-ffi/src/sched_ops.rs` | U24, U25, U28, U42, U44, U45, U46 |
+| U47 | Automatic FSRS optimizer job | `core/crates/meguri-sched/src/optimizer/`<br>`core/crates/meguri-engine/src/jobs/optimizer.rs`<br>`core/crates/meguri-storage/src/derived/optimizer_log.rs` | U12, U24, U26, U42, U43, U46, U49, U80 |
+| U48 | Card scheduling operations | `core/crates/meguri-sched/src/ops/`<br>`core/crates/meguri-engine/src/ops/sched_ops.rs`<br>`core/crates/meguri-ffi/src/sched_ops.rs` | U24, U25, U28, U42, U43, U44, U45, U46 |
 | U49 | Deck options and scheduling preferences | `core/crates/meguri-sched/src/options/`<br>`core/crates/meguri-engine/src/ops/`<br>`core/crates/meguri-ffi/src/deck_options.rs` | U24, U25, U27, U28, U29, U41, U42, U46 |
 | U50 | FSRS-only policy and collection compatibility | `core/crates/meguri-sched/src/compat/`<br>`core/crates/meguri-engine/src/ops/fsrs_policy.rs`<br>`core/crates/meguri-ffi/src/fsrs_policy.rs` | U22, U24, U42, U45, U46 |
-| U51 | App-side scheduling coordination: day clock timer, optimizer scheduling, FSRS sheet, diagnostics | `app/Packages/MeguriKit/Sources/AppModel/`<br>`app/Packages/MeguriKit/Sources/Features/Settings/SchedulerDiagnosticsView.swift`<br>`app/Packages/MeguriKit/Sources/Features/Home/FsrsEnabledSheet.swift` | U6, U7, U9, U10, U40, U47, U50, U151, U160 |
+| U51 | App-side scheduling coordination: day clock monitor, optimizer gate, FSRS sheet, diagnostics | `app/Packages/MeguriKit/Sources/AppModel/`<br>`app/Packages/MeguriKit/Sources/Features/Settings/SchedulerDiagnosticsView.swift`<br>`app/Packages/MeguriKit/Sources/Features/Home/FsrsEnabledSheet.swift` | U6, U7, U9, U10, U13, U40, U47, U50, U113, U114, U151, U154, U160 |
 | U60 | Template engine: syntax, special fields, filters | `core/crates/meguri-template/Cargo.toml`<br>`core/crates/meguri-template/src/`<br>`core/fuzz/fuzz_targets/template_parse.rs` | U2, U3, U4, U5, U20 |
 | U61 | Cloze rendering and cloze utilities | `core/crates/meguri-template/src/cloze/`<br>`core/fuzz/fuzz_targets/cloze.rs`<br>`core/crates/meguri-template/tests/cloze_unit.rs` | U20, U60 |
 | U62 | Card render pipeline, AV tags and display transform | `core/crates/meguri-template/src/`<br>`core/crates/meguri-engine/src/rendering/`<br>`core/crates/meguri-ffi/src/render.rs` | U6, U21, U23, U24, U28, U29, U60, U61 |
@@ -3852,12 +3916,12 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U90 | Search accelerators and search/browse performance budgets | `core/crates/meguri-search/src/accel/`<br>`core/crates/meguri-storage/src/derived/search_tables.rs`<br>`core/crates/meguri-search/tests/accel_equivalence.rs` | U11, U12, U26, U85, U86, U87 |
 | U91 | Search differential corpus and grammar fuzzer | `core/crates/meguri-testkit/src/search_gen.rs`<br>`core/tools/meguri-cli/src/cmd/search_fuzz.rs`<br>`core/crates/meguri-search/tests/differential.rs` | U3, U4, U11, U80, U82, U84 |
 | U92 | Card Info and Previous Card Info data | `oracle/driver/ops/stats.py`<br>`core/crates/meguri-stats/src/card_info/`<br>`core/crates/meguri-stats/tests/card_info.rs` | U3, U4, U23, U28, U29, U40, U43, U46, U85, U95, U97 |
-| U95 | Day buckets and incrementally maintained review aggregates | `oracle/driver/ops/heatmap_addon.py`<br>`core/crates/meguri-stats/Cargo.toml`<br>`core/crates/meguri-stats/src/` | U3, U4, U5, U11, U22, U23, U24, U25, U26, U40 |
+| U95 | Day buckets and incrementally maintained review aggregates | `oracle/driver/ops/heatmap_addon.py`<br>`core/crates/meguri-stats/Cargo.toml`<br>`core/crates/meguri-stats/src/` | U3, U4, U5, U11, U22, U23, U24, U25, U26, U38, U40 |
 | U96 | Heatmap grid data, streak stats and `heatmap` config writer | `core/crates/meguri-stats/src/heatmap/`<br>`core/crates/meguri-stats/tests/`<br>`specs/stats/heatmap-addon.md` | U23, U24, U28, U40, U95 |
 | U97 | Studied-today line and Stats "Today" section | `oracle/driver/ops/stats.py`<br>`core/crates/meguri-stats/src/text.rs`<br>`core/crates/meguri-stats/tests/studied_today_text.rs` | U40, U80, U95 |
-| U98 | Stats graph engine: columnar caches, scope resolution, binning and browse queries | `oracle/driver/ops/stats.py`<br>`core/crates/meguri-stats/src/graphs/`<br>`core/crates/meguri-stats/tests/` | U3, U4, U23, U24, U26, U40, U80, U95 |
+| U98 | Stats graph engine: columnar caches, scope resolution, graph aggregates and browse queries | `oracle/driver/ops/stats.py`<br>`core/crates/meguri-stats/src/graphs/`<br>`core/crates/meguri-stats/tests/` | U3, U4, U23, U24, U26, U40, U80, U95 |
 | U99 | Review-log graphs: Calendar, Reviews, Retention, Hourly Breakdown, Answer Buttons | `core/crates/meguri-stats/src/graphs/calendar.rs`<br>`core/crates/meguri-stats/tests/graphs_revlog.rs`<br>`specs/stats/graphs-revlog.md` | U97, U98 |
-| U100 | Widget snapshot builder (C10) | `core/crates/meguri-stats/src/widget/`<br>`core/crates/meguri-stats/tests/widget_snapshot.rs`<br>`specs/stats/widget-snapshot.md` | U24, U40, U95, U96, U97 |
+| U100 | Widget snapshot builder (C10) | `core/crates/meguri-stats/src/widget/`<br>`core/crates/meguri-stats/tests/widget_snapshot.rs`<br>`specs/stats/widget-snapshot.md` | U24, U38, U40, U95, U96, U97 |
 | U101 | Card-based graphs: Future Due, Card Counts, Intervals, Stability, Difficulty, Retrievability, Added | `core/crates/meguri-stats/src/graphs/future_due.rs`<br>`core/crates/meguri-stats/tests/graphs_cards.rs`<br>`specs/stats/graphs-cards.md` | U45, U46, U47, U98 |
 | U103 | Stats FFI surface and live-refresh events | `core/crates/meguri-ffi/src/stats.rs`<br>`core/crates/meguri-stats/src/events.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/StatsBridge.swift` | U6, U24, U92, U95, U96, U97, U98, U99, U100, U101 |
 | U104 | Stats conformance matrix and performance gates | `core/tools/meguri-cli/src/commands/stats_private.rs`<br>`core/crates/meguri-stats/benches/stats_bench.rs`<br>`core/crates/meguri-stats/tests/fuzz_aggregates.rs` | U4, U11, U12, U95, U103 |
@@ -3867,10 +3931,10 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U109 | One-way sync (full upload and download) | `core/crates/meguri-sync/src/oneway/`<br>`core/crates/meguri-sync/tests/one_way.rs`<br>`specs/sync/one-way.md` | U22, U24, U26, U29, U43, U105, U106, U107, U111, U124, U126, U127 |
 | U110 | Media sync state and change tracking | `core/crates/meguri-sync/src/media/`<br>`core/crates/meguri-sync/tests/media_tracker.rs`<br>`specs/sync/media-tracking.md` | U22, U31 |
 | U111 | Media sync | `core/crates/meguri-sync/src/media/syncer.rs`<br>`core/fuzz/fuzz_targets/media_zip.rs`<br>`core/crates/meguri-sync/tests/media_sync.rs` | U24, U31, U105, U106, U110 |
-| U113 | Sync policy and status model | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md` | U24, U43, U47, U106, U107, U109, U111 |
+| U113 | Sync policy and status model | `core/crates/meguri-sync/src/policy/`<br>`core/crates/meguri-sync/tests/policy.rs`<br>`specs/sync/policy.md` | U24, U38, U43, U47, U106, U107, U109, U111 |
 | U114 | Sync FFI surface and CoreBridge sync service | `core/crates/meguri-ffi/src/sync.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/Sync/`<br>`tools/scripts/sync-e2e-swift.sh` | U6, U12, U24, U105, U113 |
 | U116 | AnkiWeb build switch and identity checks | `app/Config/Release.xcconfig`<br>`app/Config/AppStore.xcconfig`<br>`app/Meguri/AnkiWeb.xcstrings` | U6, U7, U105, U114, U150, U160 |
-| U117 | Sync conformance suites (two-client and oracle) | `core/crates/meguri-testkit/src/sync/`<br>`core/tools/meguri-cli/src/commands/sync.rs`<br>`conformance/scenarios/sync/normal/` | U3, U4, U11, U13, U43, U107, U109, U111, U137 |
+| U117 | Sync conformance suites (two-client and oracle) | `core/crates/meguri-testkit/src/sync/`<br>`core/tools/meguri-cli/src/commands/sync.rs`<br>`conformance/scenarios/sync/normal/` | U3, U4, U11, U13, U38, U43, U107, U109, U111, U137 |
 | U118 | Sync robustness, property tests and budgets | `core/crates/meguri-testkit/src/sync/`<br>`core/crates/meguri-sync/tests/holdback_property.rs`<br>`core/crates/meguri-sync/benches/sync_day.rs` | U11, U12, U13, U107, U109, U111, U113, U117 |
 | U120 | Package reader and `.apkg` import | `core/crates/meguri-package/Cargo.toml`<br>`core/crates/meguri-package/src/`<br>`core/fuzz/fuzz_targets/package_reader.rs` | U3, U4, U5, U11, U12, U20, U21, U22, U23, U24, U25, U27, U28, U29, U30, U31, U40 |
 | U121 | Note type merging on `.apkg` import | `core/crates/meguri-package/src/apkg/import/merge.rs`<br>`core/crates/meguri-package/tests/apkg_merge.rs`<br>`specs/package/notetype-merge.md` | U27, U29, U35, U120, U127 |
@@ -3878,14 +3942,14 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U123 | Schema-11 writer and legacy package export | `core/crates/meguri-storage/src/schema/downgrade11.rs`<br>`core/crates/meguri-package/src/container/legacy.rs`<br>`core/crates/meguri-storage/tests/downgrade11.rs` | U21, U22, U23, U122 |
 | U124 | `.colpkg` import/export and verified collection replacement | `core/crates/meguri-package/src/colpkg/`<br>`core/crates/meguri-engine/src/lifecycle/replace.rs`<br>`core/crates/meguri-engine/src/maintenance/device_state.rs` | U22, U24, U26, U31, U120, U122, U123 |
 | U126 | Backup writer, listing and retention | `core/crates/meguri-package/src/backup/`<br>`core/crates/meguri-package/tests/`<br>`core/crates/meguri-package/benches/backup.rs` | U23, U24, U124 |
-| U127 | Backup triggers, safety backups and restore | `core/crates/meguri-engine/src/maintenance/`<br>`core/crates/meguri-package/src/backup/`<br>`core/crates/meguri-engine/tests/maintenance_scheduler.rs` | U24, U124, U126 |
+| U127 | Backup triggers, safety backups and restore | `core/crates/meguri-engine/src/maintenance/`<br>`core/crates/meguri-package/src/backup/`<br>`core/crates/meguri-engine/tests/maintenance_scheduler.rs` | U24, U38, U124, U126 |
 | U128 | Check Database: integrity, optimize and record repairs | `core/crates/meguri-engine/src/maintenance/check_db/`<br>`core/crates/meguri-storage/src/maintenance.rs`<br>`core/crates/meguri-engine/tests/check_db.rs` | U3, U4, U22, U23, U24, U25, U26, U27, U28, U40, U127 |
 | U129 | Check Database: note and note type repairs | `core/crates/meguri-engine/src/maintenance/check_db/`<br>`specs/maintenance/check-database-notes.md`<br>`conformance/scenarios/maintenance/check-db-notes/` | U27, U29, U30, U61, U128 |
 | U130 | Check Media and media trash | `core/crates/meguri-engine/src/maintenance/check_media/`<br>`core/crates/meguri-engine/tests/check_media.rs`<br>`core/crates/meguri-engine/benches/check_media.rs` | U20, U24, U27, U31, U60, U111, U127 |
 | U131 | Empty Cards | `core/crates/meguri-engine/src/maintenance/empty_cards.rs`<br>`core/crates/meguri-engine/tests/empty_cards_maintenance.rs`<br>`specs/maintenance/empty-cards.md` | U23, U25, U27, U35, U60, U61, U127 |
 | U132 | Integrity monitoring, corruption handling and optimize | `core/crates/meguri-engine/src/maintenance/`<br>`core/crates/meguri-engine/tests/integrity.rs`<br>`specs/maintenance/optimize-integrity.md` | U22, U24, U124, U126, U127, U128 |
 | U133 | FFI and CoreBridge surface for packages and maintenance | `core/crates/meguri-ffi/src/`<br>`app/Packages/MeguriCore/Sources/CoreBridge/`<br>`app/Packages/MeguriCore/Tests/CoreBridgeTests/` | U6, U24, U120, U121, U122, U123, U124, U126, U127, U128, U129, U130, U131, U132 |
-| U135 | Server host, security layer and integrations store | `core/crates/meguri-servers/`<br>`core/crates/meguri-ffi/src/servers.rs`<br>`specs/servers/host-security.md` | U1, U2, U5, U6, U22, U24 |
+| U135 | Server host, security layer and integrations store | `core/crates/meguri-servers/`<br>`core/crates/meguri-ffi/src/servers.rs`<br>`specs/servers/host-security.md` | U1, U2, U5, U6, U22, U24, U38 |
 | U136 | Server conformance harness and AnkiConnect transcript oracle | `oracle/ankiconnect/`<br>`docker/compose.yml`<br>`core/crates/meguri-testkit/src/servers/` | U2, U3, U4, U135 |
 | U137 | Migaku server endpoints, CORS and WebSocket | `core/crates/meguri-servers/src/migaku/`<br>`core/fuzz/fuzz_targets/migaku_ws_message.rs`<br>`core/crates/meguri-servers/tests/migaku_endpoints.rs` | U135, U136 |
 | U138 | Migaku routing profiles and language detection | `core/crates/meguri-servers/src/migaku/`<br>`core/crates/meguri-servers/src/config/migrations/`<br>`core/tools/meguri-cli/src/migaku_corpus.rs` | U20, U28, U29, U135, U137 |
@@ -3899,50 +3963,50 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U146 | AnkiConnect GUI actions, sync action and `/create` navigation | `core/crates/meguri-servers/src/ankiconnect/actions/gui.rs`<br>`app/Packages/MeguriKit/Sources/Features/Integrations/Gui/`<br>`core/crates/meguri-servers/tests/ankiconnect_gui.rs` | U141, U142, U143, U144, U150, U151, U175, U195, U210 |
 | U147 | Integrations end-to-end, data-safety and performance verification | `tools/scripts/clean-account-network-check.md`<br>`tools/mg`<br>`app/MeguriUITests/Integrations/` | U11, U12, U13, U25, U135, U146, U152, U175, U190, U210 |
 | U150 | App shell, scenes and adaptive navigation | `app/Meguri/App/MeguriApp.swift`<br>`app/Meguri/Mac/AppDelegate.swift`<br>`app/Meguri/Shell/` | U7, U9 |
-| U151 | CollectionStore, lifecycle and sync coordinator | `app/Packages/MeguriKit/Sources/AppModel/Collection/CollectionStore.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Lifecycle/AppLifecycleCoordinator.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Sync/SyncCoordinator.swift` | U6, U24, U25, U40, U47, U105, U107, U109, U111, U150 |
-| U152 | Home and deck list | `app/Packages/MeguriKit/Sources/Features/Home/`<br>`app/Packages/MeguriKit/Tests/HomeTests/HomeStoreTests.swift`<br>`app/MeguriSnapshotTests/HomeSnapshotTests.swift` | U9, U28, U41, U95, U151, U227 |
+| U151 | CollectionStore, lifecycle and sync coordinator | `app/Packages/MeguriKit/Sources/AppModel/Collection/CollectionStore.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Lifecycle/AppLifecycleCoordinator.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Sync/SyncCoordinator.swift` | U6, U24, U25, U37, U40, U105, U107, U109, U111, U113, U114, U150 |
+| U152 | Home and deck list | `app/Packages/MeguriKit/Sources/Features/Home/`<br>`app/Packages/MeguriKit/Tests/HomeTests/HomeStoreTests.swift`<br>`app/MeguriSnapshotTests/HomeSnapshotTests.swift` | U9, U28, U37, U41, U95, U151, U227 |
 | U153 | Status communication, errors and exclusive-phase gating | `app/Packages/MeguriKit/Sources/AppModel/Status/StatusCenter.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Diagnostics/DiagnosticsCollector.swift`<br>`app/Packages/MeguriKit/Sources/DesignSystem/Components/Status/ToastView.swift` | U9, U151 |
-| U154 | Background execution and scheduled work | `app/Packages/MeguriKit/Sources/AppModel/Background/BackgroundScheduler.swift`<br>`app/Meguri/App/MeguriApp.swift`<br>`app/Meguri/Info-iOS.plist` | U47, U111, U126, U128, U151 |
+| U154 | Background execution and scheduled work | `app/Packages/MeguriKit/Sources/AppModel/Background/BackgroundScheduler.swift`<br>`app/Meguri/App/MeguriApp.swift`<br>`app/Meguri/Info-iOS.plist` | U47, U111, U126, U128, U133, U151 |
 | U155 | Deck page and finished state | `app/Packages/MeguriKit/Sources/Features/Home/DeckPage/`<br>`app/Packages/MeguriKit/Tests/HomeTests/DeckPageStoreTests.swift`<br>`app/MeguriSnapshotTests/DeckPageSnapshotTests.swift` | U20, U28, U41, U67, U152, U157, U228, U232 |
-| U156 | Deck management and Go to Deck | `app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/DeckMenu.swift`<br>`app/Packages/MeguriKit/Sources/Features/Home/GoToDeck/GoToDeckView.swift`<br>`app/Packages/MeguriKit/Tests/HomeTests/DeckActionsModelTests.swift` | U28, U152, U153, U157, U162, U210, U225, U232 |
+| U156 | Deck management and Go to Deck | `app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/DeckMenu.swift`<br>`app/Packages/MeguriKit/Sources/Features/Home/GoToDeck/GoToDeckView.swift`<br>`app/Packages/MeguriKit/Tests/HomeTests/DeckActionsModelTests.swift` | U28, U37, U152, U153, U157, U162, U210, U225, U232 |
 | U157 | Review session shell and end-of-session summary | `app/Packages/MeguriKit/Sources/AppModel/Session/StudyLauncher.swift`<br>`app/Packages/MeguriKit/Sources/Features/Home/SessionSummary/SessionSummaryView.swift`<br>`app/Packages/MeguriKit/Tests/AppModelTests/SessionShellTests.swift` | U41, U43, U67, U95, U150, U151, U153, U175, U190, U210, U222 |
 | U158 | Keyboard shortcut engine, catalog and deck-list keys | `app/Packages/MeguriKit/Sources/AppModel/Keyboard/KeyStroke.swift`<br>`app/Meguri/Shell/Keyboard/`<br>`app/Meguri/Shell/KeyboardShortcutsHelpView.swift` | U150, U152 |
-| U159 | Menu bar commands, global shortcuts and undo/redo routing | `app/Meguri/Commands/MeguriCommands.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Commands/FocusedActions.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Undo/UndoStore.swift` | U25, U150, U151, U156, U157, U158, U160, U161, U162, U163 |
+| U159 | Menu bar commands, global shortcuts and undo/redo routing | `app/Meguri/Commands/MeguriCommands.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Commands/FocusedActions.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Undo/UndoStore.swift` | U25, U37, U150, U151, U156, U157, U158, U160, U161, U162, U163 |
 | U160 | Settings framework and preference pages | `app/Packages/MeguriKit/Sources/Features/Settings/SettingsRoot.swift`<br>`app/Packages/MeguriKit/Sources/Features/Settings/Pages/ReviewSettingsPage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SettingsStoreTests.swift` | U23, U95, U150, U151, U153, U158, U200 |
 | U161 | Sync status UI, account login and one-way choice | `app/Packages/MeguriKit/Sources/Features/Settings/Sync/SyncButton.swift`<br>`app/Meguri/Mac/QuitSyncSheet.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/SyncButtonStateTests.swift` | U20, U105, U107, U109, U111, U151, U153, U160 |
-| U162 | Import and export UI | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/FileIntake.swift`<br>`app/Meguri/Shell/FileDropTargets.swift`<br>`app/Meguri/Mac/AppDelegate.swift` | U120, U122, U124, U151, U153, U154, U157 |
-| U163 | Backups and maintenance UI | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsPage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/BackupsPageTests.swift`<br>`app/MeguriUITests/MaintenanceTests.swift` | U7, U126, U127, U128, U130, U131, U153, U154, U160 |
-| U164 | Mac integrations entry and server lifecycle | `app/Packages/MeguriKit/Sources/Features/Settings/Integrations/IntegrationsPage.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Integrations/LocalServersController.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/IntegrationsPageTests.swift` | U135, U137, U141, U150, U160 |
+| U162 | Import and export UI | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/FileIntake.swift`<br>`app/Meguri/Shell/FileDropTargets.swift`<br>`app/Meguri/Mac/AppDelegate.swift` | U120, U122, U124, U133, U151, U153, U154, U157 |
+| U163 | Backups and maintenance UI | `app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsPage.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/BackupsPageTests.swift`<br>`app/MeguriUITests/MaintenanceTests.swift` | U7, U126, U127, U128, U130, U131, U133, U153, U154, U160 |
+| U164 | Mac integrations settings entry and Tools menu item | `app/Packages/MeguriKit/Sources/Features/Settings/Integrations/IntegrationsSectionEntry.swift`<br>`app/Meguri/Commands/IntegrationsCommands.swift`<br>`app/Packages/MeguriKit/Tests/SettingsTests/IntegrationsEntryTests.swift` | U144, U150, U160 |
 | U165 | Heatmap and streak widget extension | `app/MeguriWidget/MeguriWidgetBundle.swift`<br>`app/MeguriWidget/Views/SmallWidgetView.swift`<br>`app/MeguriWidget/Info.plist` | U7, U100, U150, U151, U227 |
-| U166 | First launch and onboarding | `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Tips/OneTimeTips.swift`<br>`app/Packages/MeguriKit/Tests/OnboardingTests/OnboardingFlowTests.swift` | U22, U29, U109, U111, U151, U153, U154, U161, U162 |
+| U166 | First launch and onboarding | `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/Tips/OneTimeTips.swift`<br>`app/Packages/MeguriKit/Tests/OnboardingTests/OnboardingFlowTests.swift` | U22, U29, U109, U111, U133, U151, U153, U154, U161, U162 |
 | U167 | Appearance, accessibility and localization conformance for the shell | `app/Meguri/AppIcon.icon`<br>`tools/scripts/lint-strings`<br>`app/MeguriUITests/ShellAccessibilityAuditTests.swift` | U9, U10, U150, U152, U155, U157, U160 |
 | U168 | Foldable iPhone adaptations | `app/Meguri/Shell/FoldAwareLayout.swift`<br>`app/MeguriUITests/FoldableTests.swift`<br>`app/MeguriSnapshotTests/FoldableSnapshotTests.swift` | U150, U167, U175 |
 | U175 | Review screen and session controller | `app/Packages/MeguriKit/Sources/AppModel/Review/ReviewCoordinator.swift`<br>`app/Packages/MeguriKit/Sources/Features/Review/Session/`<br>`app/Packages/MeguriKit/Sources/Features/Review/Screen/ReviewScreen.swift` | U6, U7, U9, U24, U43, U44, U67, U150, U151 |
 | U176 | Pre-rendering pipeline over the two alternating pages | `app/Packages/MeguriKit/Sources/Features/Review/Rendering/`<br>`app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/review-host.js`<br>`app/Packages/MeguriKit/Sources/Features/Review/AGENTS.md` | U11, U12, U43, U66, U67, U151, U175 |
 | U177 | Top bar: progress bar, on-screen timer and card-coloured chrome | `app/Packages/MeguriKit/Sources/Features/Review/Screen/`<br>`app/Packages/MeguriKit/Sources/Features/Review/Progress/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/SessionProgressTests.swift` | U9, U41, U43, U175, U176 |
 | U178 | Reveal, answer buttons and accessible answering | `app/Packages/MeguriKit/Sources/Features/Review/Answer/`<br>`app/Packages/MeguriKit/Sources/DesignSystem/Tokens/RatingTokens.swift`<br>`app/Packages/MeguriKit/Tests/ReviewTests/RevealControllerTests.swift` | U9, U43, U45, U67, U160, U175, U176 |
-| U179 | Undo/back button and redo | `app/Packages/MeguriKit/Sources/Features/Review/Undo/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/ReviewUndoControllerTests.swift`<br>`app/MeguriUITests/Review/ReviewUndoUITests.swift` | U25, U43, U150, U151, U175, U176, U177 |
+| U179 | Undo/back button and redo | `app/Packages/MeguriKit/Sources/Features/Review/Undo/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/ReviewUndoControllerTests.swift`<br>`app/MeguriUITests/Review/ReviewUndoUITests.swift` | U25, U37, U43, U150, U151, U175, U176, U177 |
 | U180 | Tap zones, press tint and touch double-answer prevention | `app/Packages/MeguriKit/Sources/Features/Review/Input/`<br>`app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/review-host.js`<br>`app/Packages/MeguriKit/Tests/ReviewTests/TapDecisionTests.swift` | U9, U66, U67, U160, U175, U176, U178 |
-| U181 | Keyboard controls and review commands | `app/Packages/MeguriKit/Sources/Features/Review/Input/`<br>`app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/review-host.js`<br>`app/Packages/MeguriKit/Tests/ReviewTests/ReviewKeyMapTests.swift` | U67, U150, U160, U175, U178, U179, U182, U183, U184, U185 |
-| U182 | ⋯ menu, in-place card actions and review toasts | `app/Packages/MeguriKit/Sources/Features/Review/Menu/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/CardActionPerformerTests.swift`<br>`app/MeguriSnapshotTests/Review/ReviewMenuSnapshotTests.swift` | U27, U30, U43, U44, U48, U66, U67, U175, U176, U179 |
+| U181 | Keyboard controls and review commands | `app/Packages/MeguriKit/Sources/Features/Review/Input/`<br>`app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/review-host.js`<br>`app/Packages/MeguriKit/Tests/ReviewTests/ReviewKeyMapTests.swift` | U66, U67, U150, U160, U175, U178, U179, U182, U183, U184, U185 |
+| U182 | ⋯ menu, in-place card actions and review toasts | `app/Packages/MeguriKit/Sources/Features/Review/Menu/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/CardActionPerformerTests.swift`<br>`app/MeguriSnapshotTests/Review/ReviewMenuSnapshotTests.swift` | U27, U30, U37, U43, U44, U48, U66, U67, U175, U176, U179 |
 | U183 | Review dialogs and panels: Set Due Date, Forget, Card Info, Deck Options, Create Copy | `app/Packages/MeguriKit/Sources/Features/Review/Panels/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/SetDueDateDialogModelTests.swift`<br>`app/MeguriUITests/Review/ReviewPanelsUITests.swift` | U48, U92, U151, U175, U179, U182, U195, U222, U232 |
 | U184 | Edit-current panel | `app/Packages/MeguriKit/Sources/Features/Review/Panels/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/EditCurrentCoordinatorTests.swift`<br>`app/MeguriSnapshotTests/Review/EditCurrentPanelSnapshotTests.swift` | U27, U67, U175, U176, U178, U183, U190 |
 | U185 | Timebox and Auto Advance | `app/Packages/MeguriKit/Sources/Features/Review/Timebox/`<br>`app/Packages/MeguriKit/Sources/Features/Review/AutoAdvance/AutoAdvanceController.swift`<br>`app/Packages/MeguriKit/Tests/ReviewTests/TimeboxControllerTests.swift` | U67, U175, U176, U182 |
 | U186 | Congratulations, closing and summary hand-off | `app/Packages/MeguriKit/Sources/Features/Review/Congrats/`<br>`app/Packages/MeguriKit/Sources/Features/Review/Session/`<br>`app/Packages/MeguriKit/Sources/Features/Review/Preview/ReadOnlyCardPlayer.swift` | U41, U67, U151, U152, U157, U175, U176, U179 |
 | U187 | Session continuity: background, page termination, relaunch and external changes | `app/Packages/MeguriKit/Sources/Features/Review/Continuity/`<br>`app/Packages/MeguriKit/Tests/ReviewTests/SessionContinuityTests.swift`<br>`app/MeguriUITests/Review/ReviewContinuityUITests.swift` | U24, U40, U43, U67, U150, U151, U175, U176, U185, U186 |
 | U188 | Day rollover mid-session | `app/Packages/MeguriKit/Sources/Features/Review/Rollover/SessionRolloverHandler.swift`<br>`app/Packages/MeguriKit/Tests/ReviewTests/SessionRolloverHandlerTests.swift`<br>`app/MeguriUITests/Review/ReviewRolloverUITests.swift` | U25, U40, U43, U151, U175, U176, U177, U178, U179, U186 |
-| U190 | Note editor component: runtime page, host, field list and save pipeline | `app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/editor.html`<br>`app/Packages/MeguriKit/Sources/Features/Editor/NoteEditorView.swift`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Host/EditorWebView.swift` | U6, U7, U9, U10, U12, U20, U24, U27, U29, U31, U67, U150, U151 |
+| U190 | Note editor component: runtime page, host, field list and save pipeline | `app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/editor.html`<br>`app/Packages/MeguriKit/Sources/Features/Editor/NoteEditorView.swift`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Host/EditorWebView.swift` | U6, U7, U9, U10, U12, U20, U24, U27, U29, U31, U37, U67, U150, U151 |
 | U191 | Core editor services: add defaults, field check, tag completion | `core/crates/meguri-engine/src/editor/`<br>`core/crates/meguri-ffi/src/editor.rs`<br>`app/Packages/MeguriCore/Sources/CoreBridge/EditorServices.swift` | U2, U3, U4, U20, U22, U23, U24, U27, U29, U30 |
 | U192 | Editor formatting, cloze tools and command routing | `app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/js/formatting.js`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Toolbar/EditorToolbar.swift`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Commands/EditorCommands.swift` | U9, U23, U29, U60, U150, U190 |
 | U193 | Tag editor | `app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/js/tags.js`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Tags/TagEditorModel.swift`<br>`app/Packages/MeguriKit/Tests/EditorTests/TagEditorRuntimeTests.swift` | U30, U190, U191 |
-| U194 | Media insertion, images in the editor and context menu | `app/Packages/MeguriKit/Sources/Features/Editor/Media/MediaImporter.swift`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/js/images.js`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Host/EditorContextMenu.swift` | U31, U67, U190, U192 |
-| U195 | Add flow | `app/Packages/MeguriKit/Sources/Features/Editor/Add/AddScreen.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/AddEntryPoints.swift`<br>`app/Packages/MeguriKit/Tests/EditorTests/AddScreenModelTests.swift` | U27, U28, U29, U80, U150, U151, U152, U175, U190, U191, U192, U193, U210 |
+| U194 | Media insertion, images in the editor and context menu | `app/Packages/MeguriKit/Sources/Features/Editor/Media/MediaImporter.swift`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/js/images.js`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Host/EditorContextMenu.swift` | U31, U37, U67, U190, U192 |
+| U195 | Add flow | `app/Packages/MeguriKit/Sources/Features/Editor/Add/AddScreen.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/AddEntryPoints.swift`<br>`app/Packages/MeguriKit/Tests/EditorTests/AddScreenModelTests.swift` | U27, U28, U29, U37, U80, U150, U151, U152, U175, U190, U191, U192, U193, U210 |
 | U196 | Edit flows: review edit panel, Browse editor, external changes | `app/Packages/MeguriKit/Sources/Features/Editor/Edit/`<br>`app/Packages/MeguriKit/Tests/EditorTests/ExternalChangePolicyTests.swift`<br>`app/MeguriUITests/Editor/EditFlowUITests.swift` | U24, U25, U27, U151, U175, U190, U192, U193, U210 |
 | U197 | Paste and drag-and-drop pipeline | `app/Packages/MeguriKit/Sources/Features/Editor/Resources/EditorRuntime/js/paste-filter.js`<br>`app/Packages/MeguriKit/Sources/Features/Editor/Paste/PasteboardReader.swift`<br>`app/Packages/MeguriKit/Tests/EditorTests/PasteProcessorTests.swift` | U2, U3, U4, U190, U194 |
-| U200 | Note Types screen and card template editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/NoteTypesScreen.swift`<br>`app/Packages/MeguriKit/Sources/Features/NoteTypes/Templates/CardTemplateEditor.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/SchemaChangeGate.swift` | U9, U28, U29, U34, U60, U150, U151, U190 |
-| U201 | Field editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/Fields/FieldsEditor.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/FieldNameValidatorTests.swift`<br>`app/MeguriUITests/NoteTypes/FieldsEditorUITests.swift` | U9, U29, U34, U200 |
-| U202 | Template preview | `app/Packages/MeguriKit/Sources/Features/NoteTypes/Preview/TemplatePreviewView.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/TemplatePreviewModelTests.swift`<br>`app/MeguriUITests/NoteTypes/TemplatePreviewUITests.swift` | U60, U61, U64, U66, U67, U190, U200 |
-| U203 | Change Note Type | `app/Packages/MeguriKit/Sources/Features/NoteTypes/ChangeNotetype/ChangeNotetypeView.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/ChangeNotetypeModelTests.swift`<br>`app/MeguriUITests/NoteTypes/ChangeNotetypeUITests.swift` | U29, U35, U151, U200, U210 |
+| U200 | Note Types screen and card template editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/NoteTypesScreen.swift`<br>`app/Packages/MeguriKit/Sources/Features/NoteTypes/Templates/CardTemplateEditor.swift`<br>`app/Packages/MeguriKit/Sources/AppModel/SchemaChangeGate.swift` | U9, U28, U29, U34, U37, U60, U150, U151, U190 |
+| U201 | Field editor | `app/Packages/MeguriKit/Sources/Features/NoteTypes/Fields/FieldsEditor.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/FieldNameValidatorTests.swift`<br>`app/MeguriUITests/NoteTypes/FieldsEditorUITests.swift` | U9, U29, U34, U37, U200 |
+| U202 | Template preview | `app/Packages/MeguriKit/Sources/Features/NoteTypes/Preview/TemplatePreviewView.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/TemplatePreviewModelTests.swift`<br>`app/MeguriUITests/NoteTypes/TemplatePreviewUITests.swift` | U37, U60, U61, U64, U66, U67, U190, U200 |
+| U203 | Change Note Type | `app/Packages/MeguriKit/Sources/Features/NoteTypes/ChangeNotetype/ChangeNotetypeView.swift`<br>`app/Packages/MeguriKit/Tests/NoteTypesTests/ChangeNotetypeModelTests.swift`<br>`app/MeguriUITests/NoteTypes/ChangeNotetypeUITests.swift` | U29, U35, U37, U151, U200, U210 |
 | U205 | Image occlusion mask editor | `app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Model/OcclusionDocument.swift`<br>`app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Canvas/MaskEditorView.swift`<br>`app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Commands/MaskEditorCommands.swift` | U9, U12, U63, U64, U150 |
 | U206 | Image occlusion note flows: create, edit, change image | `app/Packages/MeguriKit/Sources/Features/ImageOcclusion/Flow/IONoteController.swift`<br>`app/Packages/MeguriKit/Tests/ImageOcclusionTests/IOSaveAdapterTests.swift`<br>`app/MeguriUITests/ImageOcclusion/IOAddEditUITests.swift` | U29, U63, U64, U194, U195, U196, U197, U205 |
 | U207 | Per-mask audio for custom image-occlusion types | `app/Packages/MeguriKit/Sources/Features/ImageOcclusion/MaskAudio/MaskAudioInspector.swift`<br>`app/Packages/MeguriKit/Tests/ImageOcclusionTests/MaskFieldLinksTests.swift`<br>`app/MeguriUITests/ImageOcclusion/MaskAudioUITests.swift` | U61, U67, U190, U194, U206 |
@@ -3953,7 +4017,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U214 | Search field: tokens, editing and inline errors | `app/Packages/MeguriKit/Sources/Features/Browse/SearchField/`<br>`app/Packages/MeguriKit/Tests/BrowseTests/SearchTokenModelTests.swift`<br>`app/MeguriSnapshotTests/Browse/SearchFieldSnapshotTests.swift` | U9, U80, U210 |
 | U215 | Search autocomplete and recent searches | `app/Packages/MeguriKit/Sources/Features/Browse/Autocomplete/`<br>`app/Packages/MeguriKit/Tests/BrowseTests/SuggestionEngineTests.swift`<br>`app/MeguriUITests/Browse/AutocompleteUITests.swift` | U80, U84, U214, U216 |
 | U216 | Filter sidebar: sections, filtering and combining searches | `app/Packages/MeguriKit/Sources/Features/Browse/Sidebar/`<br>`app/Packages/MeguriKit/Tests/BrowseTests/SidebarModelTests.swift`<br>`app/MeguriSnapshotTests/Browse/SidebarSnapshotTests.swift` | U24, U28, U30, U80, U84, U210, U214 |
-| U217 | Sidebar management actions | `app/Packages/MeguriKit/Sources/Features/Browse/Sidebar/`<br>`app/Packages/MeguriKit/Sources/AppModel/FlagLabels.swift`<br>`app/Packages/MeguriKit/Tests/BrowseTests/SidebarActionsTests.swift` | U25, U27, U28, U30, U195, U200, U216, U220 |
+| U217 | Sidebar management actions | `app/Packages/MeguriKit/Sources/Features/Browse/Sidebar/`<br>`app/Packages/MeguriKit/Sources/AppModel/FlagLabels.swift`<br>`app/Packages/MeguriKit/Tests/BrowseTests/SidebarActionsTests.swift` | U25, U27, U28, U30, U37, U195, U200, U216, U220 |
 | U218 | Browse commands, keyboard map and in-place bulk actions | `app/Packages/MeguriKit/Sources/Features/Browse/Commands/`<br>`app/Packages/MeguriKit/Sources/Features/Browse/Sheets/TagEntrySheet.swift`<br>`app/Packages/MeguriKit/Tests/BrowseTests/BrowseCommandCatalogTests.swift` | U25, U27, U30, U86, U150, U190, U210, U212, U213 |
 | U219 | Bulk action sheets: deck, note type, scheduling, export, add and copy | `app/Packages/MeguriKit/Sources/Features/Browse/Sheets/`<br>`app/Packages/MeguriKit/Tests/BrowseTests/SetDueDateSheetTests.swift`<br>`app/MeguriUITests/Browse/BrowseSheetsUITests.swift` | U28, U44, U86, U122, U195, U200, U218 |
 | U220 | Find and Replace and Edit Field… | `app/Packages/MeguriKit/Sources/Features/Browse/FindReplace/FindReplaceSheet.swift`<br>`app/Packages/MeguriKit/Sources/Features/Browse/BatchEdit/EditFieldSheet.swift`<br>`app/Packages/MeguriKit/Tests/BrowseTests/FindReplaceModelTests.swift` | U86, U190, U218 |
@@ -3982,7 +4046,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U247 | Nightly T2: differential fuzzing, query fuzzing, long simulations and Anki timing ratio | `core/crates/meguri-testkit/src/difffuzz/`<br>`core/tools/meguri-cli/src/fuzz_diff.rs`<br>`oracle/driver/` | U2, U3, U4, U11, U40, U41, U44, U45, U80, U107, U120, U122, U241, U242, U246 |
 | U248 | Multi-client sync coexistence soak | `core/crates/meguri-testkit/src/soak/`<br>`tools/mg`<br>`app/MeguriUITests/Sync/` | U3, U4, U13, U25, U43, U47, U107, U109, U111, U151, U175, U246 |
 | U249 | Private real-collection suite and anonymizer (T3) | `core/tools/meguri-cli/src/private_suite/`<br>`core/crates/meguri-testkit/src/anonymize/`<br>`tools/scripts/private-suite` | U3, U4, U11, U41, U44, U45, U46, U47, U60, U80, U84, U98, U107, U109, U111, U120, U122, U124, U137, U242, U246, U247 |
-| U250 | Core fault-injection and data-safety suite | `core/crates/meguri-model/src/faultpoint.rs`<br>`core/crates/meguri-testkit/src/fault/`<br>`core/tools/meguri-cli/src/fault.rs` | U3, U4, U22, U23, U24, U25, U26, U31, U47, U107, U109, U111, U120, U122, U124, U126, U128, U130, U246 |
+| U250 | Core fault-injection and data-safety suite | `core/crates/meguri-model/src/faultpoint.rs`<br>`core/crates/meguri-testkit/src/fault/`<br>`core/tools/meguri-cli/src/fault.rs` | U3, U4, U22, U23, U24, U25, U26, U31, U38, U47, U107, U109, U111, U120, U122, U124, U126, U128, U130, U246 |
 | U251 | App-level kill, disk-full and restore end-to-end suite | `tools/scripts/kill-app`<br>`tools/mg`<br>`app/MeguriUITests/Safety/` | U7, U8, U109, U126, U130, U151, U152, U160, U175, U190, U210, U250 |
 | U252 | Snapshot matrix and motion verification runs | `tools/scripts/snapshot-matrix`<br>`tools/scripts/baseline-guard`<br>`app/TestPlans/Snapshots.xctestplan` | U7, U9, U10, U67, U150, U152, U160, U165, U175, U190, U200, U205, U210, U225, U232, U240 |
 | U253 | Accessibility sweep and VoiceOver scripts | `app/TestPlans/Accessibility.xctestplan`<br>`tools/mg`<br>`app/MeguriUITests/Accessibility/` | U7, U9, U10, U150, U152, U160, U175, U190, U200, U205, U210, U225, U232 |
@@ -4125,15 +4189,15 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Files:**
 - `core/Cargo.toml` (workspace, `[workspace.dependencies]` with exact pins, profiles), `core/Cargo.lock`
-- `core/crates/meguri-{text,model,storage,template,search,sched,sync,package,stats,engine,servers,ffi,testkit}/Cargo.toml` and `src/lib.rs` (empty crate shells)
+- `core/crates/meguri-{text,model,storage,template,search,sched,sync,package,stats,engine,host,servers,ffi,testkit}/Cargo.toml` and `src/lib.rs` (empty crate shells)
 - `core/tools/meguri-cli/` (binary shell)
 - `core/crates/meguri-model/src/clock.rs`, `core/crates/meguri-model/src/rng.rs` (seam types)
 - `core/deny.toml`, `core/clippy.toml`, `core/rustfmt.toml`, `core/AGENTS.md`
-- `core/tools/layering-check/` (small binary reading `cargo metadata`), `core/pins.toml` (pin ↔ oracle lockfile provenance)
+- `core/tools/layering-check/` (small binary reading `cargo metadata`), `core/tools/layering-check/edges.toml` (the KTD2 table as data), `core/pins.toml` (pin ↔ oracle lockfile provenance)
 - `tools/mg.d/core.sh` (`core-test`, `core-lint`, `core-deny`)
 
 **Approach:**
-- Crates per the Output Structure; allowed dependency edges per KTD2 (text → model → storage → template/search → sched → engine → stats/sync/package → servers → ffi; testkit and meguri-cli may depend on everything; tokio only in sync and servers). `layering-check` fails on any other edge and on tokio/axum/reqwest outside allowed crates.
+- Crates per the Output Structure; allowed dependency edges per the KTD2 table in `edges.toml`. `layering-check` fails on any other edge, on tokio/axum/reqwest outside their allowed crates, and on a call to the engine's raw open entry point from any crate other than meguri-host.
 - `[workspace.dependencies]` pins with `=`: `unicase =2.6.0`, `fsrs =6.6.2`, `htmlescape =0.3.1`, and `regex`, `unicode-normalization`, `sha1`, `rand` at the exact versions in Anki's `Cargo.lock` at tag 26.09.3 (rand for interval fuzz is 0.9.4 at the tag, while fsrs 6.6.2 brings rand 0.10.1; both appear in the graph). `core/pins.toml` records each pin, the tag it came from and the rule "change only with an oracle re-pin" (R2027). The pins are third-party interface facts read from the lockfile by the infra/spec role; implementers only see `pins.toml`.
 - Seam (R1875): a clock abstraction giving the current instant in milliseconds and the local UTC offset at an instant, and a randomness abstraction for seeded generators. Production implementations read the system; tests and the scenario runner inject fixed instants and seeds. Every core crate that needs time or randomness takes it through this seam; reading the system clock elsewhere is a lint failure (clippy `disallowed_methods` for `SystemTime::now`, `Instant::now` outside the clock module and benches, and `thread_rng`).
 - Cargo feature `test-hooks` declared on engine and ffi (filled by U24/U6) and `ankiweb` on sync and ffi (KTD18, KTD21); neither is default.
@@ -4145,7 +4209,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Patterns to follow:** rust-stack.md §0–§6; bridge-build.md §4 profiles.
 
 **Test scenarios:**
-- Adding `tokio` to meguri-sched's dependencies → `core-lint` fails naming the forbidden edge.
+- Adding `tokio` to meguri-sched's dependencies → `core-lint` fails naming the forbidden edge. Adding meguri-engine to meguri-sched, or meguri-stats to meguri-package → fails naming the `edges.toml` row.
 - Adding a GPL-3.0 crate anywhere in the graph → `core-deny` fails naming the crate and license.
 - Changing `unicase` to 2.7.0 in the workspace → a pin test comparing `Cargo.lock` against `core/pins.toml` fails before other tests (feeds AE82's "fails first" ordering in U19).
 - A core function calling `SystemTime::now` outside the clock module → clippy failure.
@@ -4210,18 +4274,19 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Dependencies:** U5.
 
 **Files:**
-- `core/crates/meguri-ffi/` (`Cargo.toml` with `crate-type = ["staticlib", "lib"]`, `uniffi.toml`, `src/lib.rs`, `src/error.rs`, `src/cancel.rs`, `src/progress.rs`, `src/changes.rs`)
+- `core/crates/meguri-ffi/` (`Cargo.toml` with `crate-type = ["staticlib", "lib"]`, `uniffi.toml`, `src/lib.rs`, `src/error.rs`, `src/cancel.rs`, `src/progress.rs`, `src/jobs.rs`, `src/events.rs`)
 - `core/tools/uniffi-bindgen-swift/` (in-repo bindgen binary pinned `=0.32.2`)
 - `tools/scripts/build-core-xcframework.sh` (called by `tools/mg core-xcframework`)
-- `app/Packages/MeguriCore/Package.swift`, `app/Packages/MeguriCore/Sources/MeguriCoreBindings/` (generated, gitignored), `app/Packages/MeguriCore/Sources/CoreBridge/` (`CoreBridge.swift`, `Lanes.swift`, `CancelToken.swift`, `Progress.swift`, `ChangeStream.swift`, `BridgeError.swift`), `app/Packages/MeguriCore/Binaries/` (gitignored)
+- `app/Packages/MeguriCore/Package.swift`, `app/Packages/MeguriCore/Sources/MeguriCoreBindings/` (generated, gitignored), `app/Packages/MeguriCore/Sources/CoreBridge/` (`CoreBridge.swift`, `Lanes.swift`, `CancelToken.swift`, `Progress.swift`, `Jobs.swift`, `CoreEventStream.swift`, `BridgeError.swift`), `app/Packages/MeguriCore/Binaries/` (gitignored)
 - `app/Packages/MeguriCore/Tests/CoreBridgeTests/`
 - `app/Packages/MeguriCore/AGENTS.md`
 
 **Approach:**
-- UniFFI 0.32.2 proc-macros only; sync (blocking) exports only; every export returns a result type; `panic = "unwind"` kept. Initial surface: core version and build info, a `CancelToken` object (atomic flag + async token) with `cancel()`, a progress callback interface throttled in Rust to ≤ 10 Hz (R1858), a change-listener callback interface (events filled by U24), and the error enum mapped to a small Swift-facing set. No async foreign traits.
-- Build script (KTD9): hash tracked Rust inputs plus profile, feature set and slice list; exit in ~50 ms when unchanged; otherwise build each slice (`aarch64-apple-darwin`, `aarch64-apple-ios`, `aarch64-apple-ios-sim`, chosen by `--slices`, defaulting to mac + sim), run the in-repo bindgen for Swift sources, header and modulemap (module name `MeguriCoreFFI`, header in `Headers/MeguriCoreFFI/`), create the static-library XCFramework, and replace outputs only when bytes differ. Feature sets are part of the hash: `test-hooks` for Debug/Profile, `ankiweb` for Debug/Profile/Release, neither for AppStore (KTD18, KTD21). The Xcode scheme pre-action calls the script with slices derived from the platform being built.
+- UniFFI 0.32.2 proc-macros only; short blocking exports only; every export returns a result type; `panic = "unwind"` kept. Initial surface: core version and build info, a `CancelToken` object (atomic flag + async token) with `cancel()`, the `JobHandle` record and job-control exports (KTD9 jobs; jobs filled by U24 and the area units), a progress callback interface throttled in Rust to ≤ 10 Hz (R1858), the `CoreEvent` envelope with its event callback interface, and the error enum mapped to a small Swift-facing set. No async foreign traits.
+- Events (KTD9 owns the rules): `src/events.rs` defines the envelope and runs the single dispatcher thread that drains the engine change stream (U24) and calls the Swift callback in `seq` order. Variants are added by their owning units. `CoreEventStream.swift` implements the callback by yielding into an `.unbounded` continuation only.
+- Build script (KTD9): hash tracked Rust inputs plus profile, feature set and slice list; exit in ~50 ms when unchanged; otherwise build each slice (`aarch64-apple-darwin`, `aarch64-apple-ios`, `aarch64-apple-ios-sim`, chosen by `--slices`, defaulting to mac + sim), create the static-library XCFramework, and replace outputs only when bytes differ. Bindings (Swift sources, header and modulemap; module name `MeguriCoreFFI`, header in `Headers/MeguriCoreFFI/`) are generated once per build configuration from the macOS slice, and the script fails unless every slice exports the same `uniffi_*` symbol set. Feature sets are part of the hash: `test-hooks` for Debug/Profile, `ankiweb` for Debug/Profile/Release, neither for AppStore (KTD18, KTD21). The Xcode scheme pre-action calls the script with slices derived from the platform being built.
 - Package: `binaryTarget` `MeguriCoreFFI` (C module), Swift target `MeguriCoreBindings` (generated Swift, Swift 5 language mode), Swift target `CoreBridge` (Swift 6, nonisolated by default) exporting DTOs and hiding generated types. Linker settings declare Security, SystemConfiguration and libresolv. `swift test` on the package works on the host without Xcode or a simulator.
-- CoreBridge: three lane actors (interactive, query, maintenance) each with a custom serial executor on its own DispatchSerialQueue; blocking FFI calls run only there, never on the main actor or the cooperative pool. Every call is wrapped in an os_signpost interval named after the call (R1861, names registry from U12). Change events arrive through the callback interface and are re-published as an `AsyncStream`. Cancellation from Swift calls the explicit token; Swift task cancellation alone is never relied on.
+- CoreBridge: four lane actors (interactive, query, maintenance, control; KTD9) each with a custom serial executor on its own DispatchSerialQueue; blocking FFI calls run only there, never on the main actor or the cooperative pool. Every call is wrapped in an os_signpost interval named after the call (R1861, names registry from U12). `Jobs.swift` turns a `JobHandle` plus its `JobFinished` event into an awaitable Swift value. Cancellation from Swift calls the explicit token; Swift task cancellation alone is never relied on.
 - One Rust staticlib in the app; the widget never links it (KTD16).
 
 **Execution note:** Infra role; no Anki-derived behavior.
@@ -4232,6 +4297,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Running the build script twice with no Rust change → second run exits without invoking cargo and leaves all output mtimes unchanged.
 - Changing a private function body in meguri-ffi without changing the exported surface → `.a` replaced, generated Swift and header untouched (mtime unchanged).
 - Building with `--slices mac,sim` then building the app for an iOS device destination → the pre-action adds the device slice; the link succeeds.
+- An iOS device build links against bindings generated from the Mac slice with integrations enabled; a test-only export compiled on one slice only makes the symbol-set check fail before the XCFramework is created.
+- 10,000 events from 4 test producer threads → Swift receives them in strictly increasing `seq`, always on the dispatcher thread and never on a producer thread (thread-name assertion); a callback implementation that calls back into the core synchronously trips a debug assertion.
 - `swift test` in `app/Packages/MeguriCore` → CoreBridge test calls the version export and gets the workspace version.
 - A Rust export returning an error → Swift receives the typed `BridgeError` case, not a crash.
 - A Rust export that panics (test-only export behind `test-hooks`) → Swift receives the internal-error case; the process survives.
@@ -4453,7 +4520,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - Interval registry (R1861): answer→next card visible, reveal→answer visible, launch→deck list interactive, keystroke→search results visible, browser open→first page, stats open→first graph, editor open→editable, sync start→sync end, plus one interval per bridge call (emitted by CoreBridge, U6). One subsystem/category scheme; UI performance tests and Instruments use the same names; a test fails if a perf test references an unregistered name.
-- Visible confirmation (R1862): the interval ends only when the card web content reports it has painted after its next frame. This unit defines the contract (token per swap, message name, ending API); the card runtime (U66) and CardRendering (U67) implement the page side.
+- Visible confirmation (R1862, read per the KTD11 conflict call-out): `answer→next visible` ends at the display frame that presents the swap commit. Each swap records two timestamps: that presented frame, and the post-swap double-rAF message, which must name the same card id or the sample is a miss. This unit defines the contract (token per swap, message name, ending API); the card runtime (U66) and CardRendering (U67) implement the page side.
 - UI perf harness (R1863, R1866): XCTest base class running in the Profile configuration with `XCTOSSignpostMetric` for registered intervals, `XCTHitchMetric`, launch metric and memory metric; manual start/stop; warm-up iteration including a warmed web content process; no debugger, screenshots, coverage or sanitizers; parallel off. `perf-compare` exports metrics from the xcresult and fails when a budget in `budgets.json` (interval → percentile → value, per device class) is exceeded or a baseline regresses by more than 10%. Simulators run per change (smoke set chosen by U19); devices run per milestone once signing allows device builds.
 - Core benches (R1864): criterion wall-clock suites on the host (p50/p95/p99 and peak memory via a counting allocator) at 10k/100k/500k generated collections; gungraun instruction-count suites in Docker that fail on > 5% regression against `core/bench/baselines/icount.json`. Area units add their benches; this unit provides fixtures, the allocator, reporting and a sample bench.
 - Field diagnostics (R1867): a MetricKit subscriber stores hang, hitch, launch, memory and disk-write payloads in app-private storage; nothing is sent; Settings (U160) exposes them through Copy Debug Info.
@@ -4725,7 +4792,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** Every job from U1–U18 is assigned to a tier; `tools/mg gate` is the single merge condition; nightly and milestone runs produce one summary result each.
 
-**Core: text, model, storage, engine (U20–U36)**
+**Core: text, model, storage, engine (U20–U38)**
 
 ### U20. meguri-text: text primitives with Anki parity
 
@@ -4827,14 +4894,15 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `core/crates/meguri-storage/tests/open_refuse.rs`, `tests/upgrade.rs`, `tests/schema_objects.rs`, `tests/connections.rs`, `tests/collation_order.rs`
 
 **Approach:**
-- KTD3: bundled SQLite; WAL with normal locking; one writer connection (owned by U24's writer thread) plus 2–4 read-only connections (`query_only`, short busy timeout, prepared-statement cache raised to ~128). `page_size`, `cache_size`, `temp_store` per rust-stack §1.
-- Durability setting is decided here by measurement: writer `synchronous=FULL` with `checkpoint_fullfsync` on Apple unless the answer-commit benchmark (U12) shows it too slow, in which case `NORMAL` plus the ≤1 s flush in U32. The choice and numbers go in `specs/storage/open-and-connections.md`.
+- KTD3: bundled SQLite; WAL with normal locking; one writer connection (owned by U24's writer thread) plus the role-assigned read-only connections of KTD3 (`query_only`, short busy timeout, prepared-statement cache raised to ~128). `page_size`, `cache_size`, `temp_store` per rust-stack §1.
+- Durability setting is decided here by measurement: writer `synchronous=FULL` with `checkpoint_fullfsync` on Apple unless the answer-commit benchmark (U12) shows it too slow, in which case `NORMAL` plus the ≤1 s flush in U32. On Apple the writer also sets `fullfsync` when `synchronous=FULL` is chosen, because a plain fsync does not flush the drive cache. With `NORMAL`, U32's flush forces a full sync of the WAL independently of checkpoint progress, because a checkpoint blocked by a reader performs no sync. The choice and measured costs go in `specs/storage/open-and-connections.md`.
 - Connection-init hook: every connection registers `unicase` (fails closed if registration fails), then runs registered initializers so U80/U81 and U41 can add their SQL functions without storage depending on them. No function or collation other than `unicase` may appear in any schema object.
 - Open is two-phase: a read-only probe reads `ver` and the v1-scheduler marker without changing journal mode (setting WAL rewrites the header, which would modify a file that must be refused). Only then the read-write open. No table scans (R1823).
 - Refusals (R1479, R1482, R2013) are typed errors with the message class (too old, made by a newer or unclean client, v1 scheduler).
 - Upgrade (R1478): copy the original first (R1480, SQLite backup API to `<name>.pre-upgrade-v<N>`), then run every step in one transaction so a crash leaves the original intact; progress reported through the U24 lifecycle state `Upgrading`. Step semantics (config/deck-config/tags tables, protobuf conversion via U21 schema-11 JSON with unique names and notetype-id-0 replacement, initial-ease fix, tags rebuild, graves rebuild) come from the spec.
 - Fixtures for 14–17 need historical `anki` releases; the oracle-maintainer (U3) produces them once with pinned older wheels and commits them as data (cross-area ask).
 - Schema guard (R2016): the set of `sqlite_master` objects after open, upgrade and any scenario equals the spec's expected list. U4's runner asserts it after every scenario.
+- The open gate (two-phase probe, refusals, upgrade, expected-object check) is one function callable on any file, so U124 runs it on staging copies before a swap.
 - `core/crates/meguri-storage/AGENTS.md` records the traps: `unicase =2.6.0` pin, probe before WAL, never add schema objects, only this crate issues SQL against `collection.anki2`, never hold a statement across FFI calls (checkpoint starvation).
 
 **Execution note:** Oracle-maintainer produces the fixtures first; spec writer writes the DDL/upgrade spec; implementer test-first against fixture goldens.
@@ -4872,7 +4940,12 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `core/crates/meguri-storage/tests/ids.rs`, `tests/noop_writes.rs`, `tests/graves.rs`, `tests/config_bytes.rs`, `tests/journal.rs`
 
 **Approach:**
-- A write scope (handed out only by U24's executor) wraps one transaction. Every typed write compares with the stored row; an identical row is skipped with no journal entry (R1472). A real change stamps `usn = -1` and mtime = now in seconds, then journals (table, key, before-image or absent, after-image). `col.mod` (ms) is bumped once when the scope commits, only if the journal is non-empty (R1471, R1474).
+- A write scope (handed out only by U24's executor) wraps one transaction. Every typed write compares every column, `usn` and mtime included, with the stored row; an identical row is skipped with no journal entry (R1472), and a usn-only change is a real write. A real change is stamped per the scope's stamping mode, then journalled (table, key, before-image or absent, after-image):
+  - `Local`: `usn = -1`, mtime = now in seconds. The default for user, LocalApi, Optimizer and Rollover writes.
+  - `CallerSupplied`: usn and mtime given by the caller. Used for SyncIncoming rows and graves, USN marking after upload, undo restores and the R1541 upload transform.
+  - `KeepMtime`: `usn = -1` with the incoming mtime. Used for `.apkg` updates (R1602).
+  - `Raw`: rows written as given with no stamping, for staging copies built by U33, U122 and U123 and for U40's unbury-on-rollover queue write.
+  `col.mod` (ms) is bumped once when a `Local` or `KeepMtime` scope commits with a non-empty journal (R1471, R1474). SyncIncoming sets it through the R1531 finalisation instead.
 - Journal semantics: the first before-image per key wins within one op; it feeds U24's ChangeSet and in-core observers, U25's undo entries, and U107's hold-back overlay (KTD6).
 - Ids (R1469, R772): now-ms from the U21 clock, bumped to the next free value on collision, capped per the spec when the clock jumps backward (R1470). Allocation must equal the oracle's exactly because fuzz seeds derive from card ids (oracle-harness "Logical ids").
 - Graves are insert-or-ignore; deleting a note graves each of its cards (R1473).
@@ -4893,58 +4966,72 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Setting `curDeck` → config row `usn = -1` and `col.mod` bumped (R1474).
 - An op that updates one card twice → one journal entry whose before-image is the original row.
 - Property: random sequences mixing real and identical rewrites never change `usn`/mtime/`col.mod` for the identical ones.
+- Marking 1,000 rows with a server USN in a `CallerSupplied` scope → each keeps that USN, none returns to -1, and `col.mod` is not bumped by the marking.
+- An undo restore writes the prior usn and mtime exactly; a `KeepMtime` write keeps the incoming mtime with `usn = -1`.
 
 **Verification:** id and config scenarios match goldens; no-op property test passes 10k cases.
 
-### U24. Engine core: op executor, change stream, lifecycle and generation, cancellation and progress
+### U24. Engine core: op executor, change stream, lifecycle and generation, jobs, ports, cancellation and progress
 
-**Goal:** The single serialized write path (C1), the ordered change stream and in-core observers (C2), the collection lifecycle with generations and exclusive-op arbitration (C7), and the CancelToken/progress plumbing every long operation uses.
+**Goal:** The single serialized write path (C1), the ordered change stream and in-core observers (C2), the collection lifecycle with generations and exclusive-op arbitration (C7), the job registry and engine ports, and the CancelToken/progress plumbing every long operation uses.
 
 **Requirements:** R1490, R1494, R1495 (with KTD6), R2002 (atomic ops), R727 (precondition mechanism), R1658 (core side: one op layer for UI, sync, servers), R171 (core arbitration); supports R1797/R1706 (waits), R1858, R1860.
 
 **Dependencies:** U12, U22, U23.
 
 **Files:**
-- `specs/engine/op-model.md`, `specs/engine/change-stream.md`, `specs/engine/lifecycle.md` (Meguri design docs, written by the implementer from this plan)
-- `core/crates/meguri-engine/Cargo.toml`, `src/lib.rs`, `src/collection.rs`, `src/error.rs`
-- `core/crates/meguri-engine/src/executor/mod.rs`, `src/executor/op.rs`, `src/executor/source.rs`, `src/executor/writer.rs`, `src/executor/plan_commit.rs`, `src/executor/preconditions.rs`, `src/executor/priority.rs`, `src/executor/catalog.rs`
-- `core/crates/meguri-engine/src/changes/mod.rs`, `src/changes/changeset.rs`, `src/changes/observers.rs`, `src/changes/stream.rs`
-- `core/crates/meguri-engine/src/lifecycle/mod.rs`, `src/lifecycle/state.rs`, `src/lifecycle/generation.rs`, `src/lifecycle/wait.rs`, `src/lifecycle/replace.rs`
+- `specs/engine/op-model.md`, `specs/engine/change-stream.md`, `specs/engine/lifecycle.md`, `specs/engine/jobs.md` (Meguri design docs, written by the implementer from this plan)
+- `core/crates/meguri-model/src/changes.rs` (`ChangeSet`, `OpSource`, `ChangeKind` value types; KTD2)
+- `core/crates/meguri-engine/Cargo.toml`, `src/lib.rs`, `src/collection.rs`, `src/error.rs`, `src/ports.rs`, `src/threads.rs`, `src/readers.rs`
+- `core/crates/meguri-engine/src/executor/mod.rs`, `src/executor/op.rs`, `src/executor/source.rs`, `src/executor/writer.rs`, `src/executor/plan_commit.rs`, `src/executor/preconditions.rs`, `src/executor/priority.rs`, `src/executor/catalog.rs`, `src/executor/exclusive.rs`
+- `core/crates/meguri-engine/src/changes/mod.rs`, `src/changes/observers.rs`, `src/changes/stream.rs`
+- `core/crates/meguri-engine/src/lifecycle/mod.rs`, `src/lifecycle/state.rs`, `src/lifecycle/generation.rs`, `src/lifecycle/wait.rs`
+- `core/crates/meguri-engine/src/jobs/mod.rs`, `src/jobs/registry.rs`, `src/jobs/pool.rs`
 - `core/crates/meguri-engine/src/cancel.rs`, `src/progress.rs`
 - `core/crates/meguri-engine/AGENTS.md`
-- `core/crates/meguri-engine/tests/executor_ordering.rs`, `tests/changeset.rs`, `tests/observers.rs`, `tests/lifecycle.rs`, `tests/cancel.rs`, `tests/preconditions.rs`
+- `core/crates/meguri-engine/tests/executor_ordering.rs`, `tests/changeset.rs`, `tests/observers.rs`, `tests/lifecycle.rs`, `tests/exclusive.rs`, `tests/jobs.rs`, `tests/readers.rs`, `tests/cancel.rs`, `tests/preconditions.rs`
 
 **Approach:**
 - One writer thread owns the writer connection. Ops carry a `source` (UserUndoable, UserNonUndoable, SyncIncoming, LocalApi, Optimizer, Rollover, Maintenance) and a name. Interactive ops (answers, edits) are dequeued ahead of queued background ops but never preempt a running transaction.
 - Every op is one transaction (R1490), with savepoints for composite ops; any error, panic or cancel rolls back and leaves the collection unchanged (R1860, R2002). Composite ops (for example U137's create-then-delete move) produce one journal and therefore one undo entry.
-- Plan/commit pattern: heavy ops compute on a reader snapshot (off the writer, cancellable, progress reported) and then commit in one short write phase that re-checks preconditions. Non-exclusive ops target a write phase of ≤ ~200 ms so answers stay durable within 1 s (R2006). Ops whose write phase cannot meet that (large `.apkg` import) declare it, and the executor publishes the delay so C5 (U43) keeps answers in its in-memory overlay (see coverage conflict on R1490 vs R2006).
+- Plan/commit pattern: heavy ops compute on a reader snapshot (off the writer, cancellable, progress reported) and then commit in one short write phase. Non-exclusive ops target a write phase of ≤ ~200 ms so answers stay durable within 1 s (R2006). Ops whose write phase cannot meet that (large `.apkg` import, a large SyncIncoming merge) declare it, and the executor publishes the delay so C5 (U43) keeps answers in its in-memory overlay (see coverage conflict on R1490 vs R2006).
+- Write-phase rule: the write phase never writes a value computed on the snapshot to a row that may have changed. Each written row is either re-derived inside the write transaction from the live row (the transformation is re-applied) or carries a per-row precondition (mtime and usn, or a content hash). On a mismatch the op replans, with bounded retries, or returns `Stale`. U30, U34, U35, U128 and U130 cite this rule.
 - Preconditions: an op can carry expected row identities (for example a card-row hash used as the `stateToken`); a mismatch returns `Stale` and writes nothing (R727 mechanism; U43/U44 build the answer precondition; R728/R729 handling is theirs).
-- `OpResult { seq, changes, undo, generation }`. The ChangeSet is derived from the U23 journal: card ids with note ids (so Browse needs no card→note index) and a scheduling-relevant vs memory-state-only flag computed by column diff; note ids; notetype ids with `schemaChanged`; deck, deck-config, config-key, tag, revlog added/removed and media added/removed sets; and `source`.
-- In-core observers run on the writer thread after commit and before the ChangeSet is published, receiving row payloads (revlog rows added/removed with removed rows from before-images, compact card before/after, config keys). Consumers: U26, U41, U95, U100. The C2 stream to Swift stays id-based (via U6 callback → AsyncStream) in strict `seq` order.
+- `OpResult { seq, changes, undo, generation }`. The ChangeSet (value type in meguri-model, KTD2) is derived from the U23 journal: card ids with note ids (so Browse needs no card→note index) and a scheduling-relevant vs memory-state-only flag computed by column diff; note ids; notetype ids with `schemaChanged`; deck, deck-config, config-key, tag, revlog added/removed and media added/removed sets; and `source`.
+- In-core observers (the `ChangeObserver` port) run on the writer thread after commit and before the ChangeSet is published, receiving row payloads (revlog rows added/removed with removed rows from before-images, compact card before/after, config keys). Consumers: U26, U41, U95, U100. Observers never call Swift. The change stream is the single ordered queue for every core→Swift event (KTD9): crates above engine publish their variants into it, and U6's dispatcher delivers it.
 - R1495 under KTD6: a normal sync never holds the writer; answers and edits commit immediately during a sync and upload on the next one. The sync's staged incoming changes commit as one SyncIncoming op (U107).
 - Lifecycle (C7): `NoCollection → Opening → Upgrading → Ready(gen)`, `ExclusiveBusy{op, phase, cancellable}`, `Failed(reason)` (incl. `Corrupt`, set by U32). One exclusive op at a time; a second gets `Busy{running op}` (R171). Waiters block with a timeout chosen by the caller (5 s Migaku, 30 s AnkiConnect; U135/U137/U141). Handles and ops from an older generation are rejected with `StaleGeneration`.
-- `replace_collection(verified temp file)`: used by U109 (full download), U124 (`.colpkg` import) and U127 (restore). It closes every connection, swaps atomically through U32's helper, reopens, increments the generation, emits `CollectionReplaced(gen)`, clears undo (U25) and invalidates derived data (U26).
+- Exclusive phase (owner of the KTD17 core rule): entering `ExclusiveBusy` first drains queued writes and flushes U43's in-memory answer overlay. While `ExclusiveBusy`, the executor commits only ops submitted by the exclusive job. Every other source (UserUndoable, LocalApi, Optimizer, Rollover, Maintenance, SyncIncoming) is refused with `CollectionUnavailable`, or parked until `Ready` and then re-validated against the new generation, getting `StaleGeneration` if it was planned on the old one. The exclusive job takes its safety backup (U127) and any `VACUUM INTO` snapshot only after the drain.
+- Generation change: U124's verified-replace primitive performs every swap; this unit then bumps the generation, emits `CollectionReplaced(gen)`, clears undo (U25) and invalidates derived data (U26) through the `GenerationListener` port.
+- Jobs (KTD9): a registry hands out `JobHandle{id, cancel, progress}` from short `start_*` calls, runs the work on a bounded job pool (sync and media use tokio in meguri-sync), and publishes `JobFinished{id, outcome}` on the change stream. C7 arbitration: normal and media sync may overlap; exclusive jobs refuse others with `Busy`.
+- Ports and threads: this unit declares `ChangeObserver`, `GenerationListener` and `SuspendParticipant`; implementations above engine are wired only by U38. Every core-owned thread is created through the thread registry, which names it, sets its QoS (KTD9) and lets U32 check that it is idle after suspend.
+- Readers: the engine hands out read-only connections by role (KTD3); long-lived snapshots get the shared maintenance reader, never the interactive or query one.
 - CancelToken: a Rust object (atomic flag plus an async token for sync) exported by U6; Swift Task cancellation is never relied on. Progress: a sink carrying phase (planning, committing — so the UI stops offering Cancel once commit starts), counts and ETA, throttled to ~10 Hz (R1858).
 - `tracing` spans per op (name, source, rows touched, plan ms, write-phase ms) feed U12 benchmarks; FFI signposts belong to U6.
-- Exposed through U6 (cross-area): submit op and await `OpResult` (blocking export run on a CoreBridge lane), change-stream subscription, lifecycle state and waits, CancelToken, progress callback, op catalog metadata (names, undoability).
+- Exposed through U37 (cross-area): typed op exports returning `OpResult` summaries, lifecycle state and waits, job control, CancelToken, progress callback, op catalog metadata (names, undoability).
 
 **Execution note:** Meguri-designed contract (no Anki-derived behavior): no spec-writer pass; the implementer writes the `specs/engine/` design docs from this plan and C1/C2/C7 before code.
 
-**Patterns to follow:** KTD5, KTD6, KTD9 (blocking exports, explicit cancel), spec-flow C1/C2/C7; rust-stack §1 (no statement held across calls).
+**Patterns to follow:** KTD3, KTD5, KTD6, KTD9 (short exports, jobs, explicit cancel, event delivery), spec-flow C1/C2/C7; rust-stack §1 (no statement held across calls).
 
 **Test scenarios:**
-- 1,000 ops from 4 threads → `seq` strictly increasing; ChangeSets delivered once each, in `seq` order, to both an in-core observer and a stream subscriber.
+- 1,000 ops from 4 threads → `seq` strictly increasing; each ChangeSet reaches an in-core observer once and the change stream once, in `seq` order, and the U6 dispatcher delivers each envelope once.
 - An op that writes nothing → empty change set, `col.mod` unchanged, no stream event.
 - Card update touching only memory-state keys in `data` → flagged memory-state-only; a `due` change → scheduling-relevant; both carry the note id.
 - Covers AE27 (core half). Answer op with a card-row precondition; a SyncIncoming op changes that card first → answer returns `Stale`, zero rows written, `col.mod` unchanged.
+- Write-phase rule: a test op plans a field rewrite on a snapshot, and a LocalApi edit of one planned note commits before its write phase → that note is re-derived from the live row (the edit survives) or the op returns `Stale`; it is never overwritten with the snapshot value.
 - Cancel during the plan phase of a 10k-note op → no write; cancel requested after commit starts → op completes and reports it was past the cancel point.
 - Failpoint panic inside a write phase → rollback; the next op succeeds.
 - An answer submitted while a 3 s background op is planning → the answer commits first and is durable within 1 s.
 - Exclusive op running → a second exclusive op gets `Busy` naming the first; a waiter with a 5 s timeout gets `CollectionUnavailable` after 5 s.
-- `replace_collection` → old-generation handle rejected; `CollectionReplaced(gen+1)` delivered once; readers reopened on the new file.
+- During a one-way upload stubbed to stall after `VACUUM INTO`, a Rollover op, an Optimizer commit and a LocalApi add are refused or parked. After the swap, the live collection equals the uploaded bytes, and every parked op either re-runs on the new generation or reports `StaleGeneration`.
+- Generation change → old-generation handle rejected; `CollectionReplaced(gen+1)` delivered once; readers reopened on the new file.
+- Jobs: normal sync and media sync jobs run together; a Check Database start while a `.colpkg` import job holds the exclusive slot → `Busy`; every job ends with exactly one `JobFinished`.
+- While a sync-length snapshot holds the maintenance reader, a search worker runs a 300 ms scan and a stats-cache-sized build waits for the maintenance reader, an interactive card-row read stays ≤ 1 ms p95 and a 200-row page read on the query reader stays ≤ 16 ms p95 at 150k (KTD3; U43 repeats it through `answer()`).
+- Every thread created through the registry reports its QoS class (user-initiated for the writer, utility for the derived writer).
 - 1,000 internal progress updates per second → ≤ ~10 callbacks per second, with phase transitions always delivered.
 
-**Verification:** executor, observer and lifecycle suites green natively and in Docker; U12 benchmarks: empty-op overhead < 50 µs and answer-sized write phase p95 < 5 ms on the M3 Max, recorded as baselines.
+**Verification:** executor, observer, lifecycle, exclusive and job suites green natively and in Docker; U12 benchmarks: empty-op overhead < 50 µs and answer-sized write phase p95 < 5 ms on the M3 Max, recorded as baselines.
 
 ### U25. Undo manager (C3)
 
@@ -4964,10 +5051,10 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Entry = {id, name (Anki op names), kind, session id, touched set, before-images, after-image digests, uploaded flag}, created from the U23 journal of every UserUndoable op; 30 entries, memory only (R719).
 - Undo is itself an op: it requires every touched row to still equal the step's after-image (else the entry is disabled with `ChangedExternally`), restores before-images (inserted rows deleted, deleted rows reinserted and the graves the step added removed, changed rows restored including their prior `usn`/mtime), and its own journal becomes the redo entry (R720). Any new undoable op clears redo.
 - Non-database state (load-balancer cache, learning cutoff, session queue; R721's in-memory parts) is restored by restorers that U43/U44 register; R722 (show the card next) is U43's.
-- `peek()` returns the available step's name or a disabled reason: `None`, `ClearedByRollover`, `ClearedBySync`, `ClearedByOneWay`, `ChangedExternally`, `AlreadyUploaded`. It drives R173, R365, R366 and R370 in the UI (U150, U175).
-- Clearing (KTD7 replaces R725's literal rule): rollover (U40 calls), one-way sync, `CollectionReplaced`, Check Database and external change → clear all; a UserNonUndoable op → clear all; a sync that applies incoming changes → clear all except the held-back run, which is also cleared if incoming touches its rows; LocalApi ops are never recorded and truncate the stack at the deepest entry whose touched set intersects the API change (that entry and all older ones dropped, reason `ChangedExternally`).
+- `peek(scope)`, `undo(scope)` and `redo(scope)` take `Global` or `Session(id)`; a `Session` call acts only on the top step when it belongs to that session. `peek` returns the available step's name or a disabled reason: `None`, `ClearedByRollover`, `ClearedBySync`, `ClearedByOneWay`, `ChangedExternally`, `AlreadyUploaded`, `UploadPending` (the step is in the snapshot of a running sync). It drives R173, R365, R366 and R370 in the UI (U159, U179). U43 answers session-scoped calls first while its overlay holds uncommitted answers.
+- Clearing (KTD7 replaces R725's literal rule): rollover (U40 calls), one-way sync, `CollectionReplaced`, Check Database and external change → clear all; a UserNonUndoable op → clear all; a sync that applies incoming changes → clear all except the held-back run, which KTD7 also clears when a staged incoming row or grave targets its touched set; LocalApi ops are never recorded and truncate the stack at the deepest entry whose touched set intersects the API change (that entry and all older ones dropped, reason `ChangedExternally`).
 - Hold-back (KTD6, spec-flow Q11): `held_back_run(session)` = the contiguous top-of-stack entries of the active session down to and including the most recent answer; it exposes the touched set and before-images to U107. The session for hold-back ends when the summary or congrats screen is dismissed (KTD6).
-- After a successful sync, entries that existed at sync start and were not in the held-back run are marked uploaded and redo is cleared; entries created during the sync are left alone. Undoing an uploaded entry is refused in core regardless of caller.
+- Upload-pending flags (set by U107 for entries in its snapshot) become `uploaded` once the `finish` request has been sent, whatever the outcome, because the server may have committed. They are cleared only when the sync fails strictly before `finish` is sent. Redo is cleared with the marking; entries created during the sync are left alone. Undoing an uploaded entry is refused in core regardless of caller.
 - Op catalog check (R2020): every engine op declares undoable, or destructive-non-undoable (requires confirmation and the U127 pre-op backup hook), or non-destructive; a test enumerates the catalog.
 
 **Execution note:** Spec writer first for the observable undo results (compared with the oracle's `undo`); implementer builds the mechanism test-first, property tests first.
@@ -4980,7 +5067,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - 31 undoable ops → the oldest is dropped; `peek()` names "Answer Card", "Bury", "Suspend" as recorded.
 - Rollover → `peek()` = `ClearedByRollover`.
 - Stack [answer1, answer2, bury] in one session → held-back run = [bury, answer2]; after a (fake) sync, undo bury and undo answer2 succeed; undo answer1 → refused, `AlreadyUploaded`.
-- Incoming sync change to answer2's card → held-back run cleared; `peek()` = `ClearedBySync`.
+- Incoming sync change to answer2's card → held-back run cleared; `peek(Global)` = `ClearedBySync`. An incoming deck rename that loses the merge to the newer local deck row still clears the run.
+- Upload-pending entry: `peek` = `UploadPending` during the sync; a sync failing before `finish` → undoable again; a sync whose `finish` was sent and whose response was lost → `AlreadyUploaded`.
+- `peek(Session(s))` while the top step belongs to another session or to no session → `None`; `peek(Global)` names it.
 - API change touching entry 3 of 5 (1 = newest) → entries 1–2 kept, entries 3–5 dropped; ⌘Z reason `ChangedExternally`.
 - Property (proptest state machine): random answers, edits, undo, redo, fake syncs against a model server, API writes and rollovers → never undoes an uploaded entry; undo never changes a row outside the entry's touched set; the held-back run is never marked uploaded. (The same property against the live sync server runs in U107.)
 - Catalog test: every registered op has an undoability class; destructive non-undoable ops declare confirmation and backup.
@@ -5003,7 +5092,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `core/crates/meguri-storage/tests/derived_store.rs`, `core/crates/meguri-engine/tests/derived_lag.rs`
 
 **Approach:**
-- Separate SQLite file with its own writer connection and thread, so derived writes never block the collection writer; attached read-only to the collection reader connections for joins (atomicity is per file, so all derived updates are idempotent).
+- Separate SQLite file with its own writer connection and thread (utility QoS, U24 thread registry), so derived writes never block the collection writer; attached read-only to the collection reader connections for joins (atomicity is per file, so all derived updates are idempotent). The writer thread is a `SuspendParticipant` (U32).
 - Stamp: collection identity (`crt`, `scm`, generation id), last applied `seq`/`col.mod`, and a schema version per component.
 - Components register a name, version, full builder (from a reader snapshot, cancellable, with progress) and an incremental applier fed by the U24 in-core observer payloads. Owners: U41 (count caches), U80/U90 (folded text and FTS), U84 (browser caches), U95 (daily aggregates), U130 (media reference index).
 - Readiness per component (`Ready`, `Building{progress}`, `Stale`) is published on the change stream; consumers keep a correct fallback path while building (deck counts and the review queue never wait on the search index).
@@ -5042,14 +5131,17 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - Paths: the collection, media, media journal, derived store and sidecar all live in the directory Swift passes at open (app-private Application Support, KTD12, R1450). Backups go to the separate backups folder Swift also passes (`Documents/Backups` on iOS and iPadOS, the private container on the Mac, KTD12). Swift creates that directory with the "until first user authentication" protection class (R1455, owned by U151); files inherit it.
-- Durability per U22's measured setting; after the last commit before close, quit or suspend, a TRUNCATE checkpoint (R1454). Answers are durable within 1 s and before suspension (R2006 with U43).
+- Durability per U22's measured setting; after the last commit before close, quit or suspend, a TRUNCATE checkpoint (R1454). Answers are durable within 1 s and before suspension (R2006 with U43). With `synchronous=NORMAL`, the ≤1 s flush issues a full sync of the `-wal` itself, so durability holds while a reader (for example the U107 snapshot) blocks checkpoint progress.
 - Sidecar (`meguri-sidecar.json`, device-only): clean-shutdown flag, last seen `col.mod`/`scm`, upgrade-in-progress marker. Used for R1453 at open and for unclean-shutdown detection (R2011).
 - External change (R1453): compare `data_version` on the writer at resume and before each write transaction, and `col.mod`/`scm` against the sidecar at open. On change: clear undo (`ChangedExternally`), invalidate derived data, emit a whole-collection change set.
 - Lock (R2014): an advisory lock file held while open refuses a second Meguri process; a busy probe at open detects a program holding the file in exclusive mode and refuses with a clear message.
-- Atomic replace (R1492, R2004): temp file in the same directory, fsync, caller-supplied verifier (`integrity_check` for databases, size and SHA-1 for packages and media), rename, directory fsync. Leftover cleanup at launch removes temp patterns, partial exports and half-written backups (R1493). Consumers: U24 `replace_collection`, U31, U109, U122, U124, U126.
+- Atomic replace (R1492, R2004): temp file in the same directory, fsync, caller-supplied verifier (`integrity_check` for databases, size and SHA-1 for packages and media), rename, directory fsync. Leftover cleanup at launch removes temp patterns, partial exports and half-written backups (R1493). Consumers: U124's verified-replace primitive, U31, U109, U122, U126.
 - Free space (R2015): a check against a provider injected from Swift (iOS important-usage capacity), with a `statvfs` fallback in Docker. Callers: U107/U109, U111, U120–U126.
 - Integrity (R2011, R2012): `quick_check` on a reader in the background (never blocking `Ready`) after an unclean shutdown; full `integrity_check` callable on any file (U109 runs it on the downloaded temp file); idle checks scheduled from Swift (KTD15). Corruption → lifecycle `Failed(Corrupt)`: the executor refuses writes and U107/U109 refuse uploads; U151 offers restore or Check Database.
-- Suspend protocol (C8): `prepare_for_suspend(deadline)` stops accepting background ops, drains queued writes, cancels a running normal sync through its token (U107 discards staged incoming), runs registered suspend participants within the deadline (U100 widget snapshot), checkpoints, and resets reader statements so no lock or transaction is held (R2007, R14). `resume()` runs: external-change check → rollover check (U40) → participants (U43 queue refresh, U107 sync, U100 snapshot), in spec-flow Q16 order.
+- Suspend protocol (C8), three calls on the control lane (KTD5, KTD9):
+  - `flush_for_background()`: commits U43's overlay answers durably and keeps accepting ops.
+  - `suspend(deadline)`: final. Cancels running jobs through the U24 registry (a cancelled normal sync discards its stage), quiesces every registered `SuspendParticipant` within the deadline, TRUNCATE-checkpoints and releases readers, so no lock or transaction is held (R2007, R14). Participants: the derived writer (U26), session rebuilds (U43), optimizer training (U47), search workers (U85), the stats debounce and widget builder (U100) and the backup deadline (U127).
+  - `resume()`: core-local checks only, data_version or external change and then rollover (U40). It returns `ResumeReport{externalChange, rolledOver}`. Queue refresh, sync and the snapshot belong to U151's foreground sequence.
 - Failpoints (feature `test-hooks`, KTD18) at named points in commit, upgrade, replace, staging rename, backup and derived update; U240+ drives them for R2003.
 
 **Execution note:** Meguri-designed contract; no spec-writer pass. Crash and kill tests run in Docker (process-level), suspend timing on the host.
@@ -5062,12 +5154,48 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Covers AE86 (core half). Replace with a temp file killed at 50% → previous collection opens unchanged, passes integrity check, and the temp file is removed at the next launch.
 - A second process opens the same collection → refused with "open in another program"; the first is unaffected.
 - An external SQLite client changes a note while Meguri is open → at the next resume check: undo cleared with `ChangedExternally`, derived invalidated, whole-collection change set emitted.
-- `prepare_for_suspend` with 5 queued answers and a running sync → answers committed, sync cancelled with nothing applied, no open transaction, WAL checkpointed, returns before a 2 s deadline at 150k cards.
+- `flush_for_background()` with 5 overlay answers → all committed and durable; a following edit op is accepted.
+- `suspend(2 s)` with 5 queued answers and a running sync job → answers committed, sync cancelled with nothing applied, no open transaction, WAL checkpointed, returns before the deadline at 150k cards.
+- After `suspend`, every thread in the U24 thread registry reports idle and no connection holds a transaction (enumeration test; a new core thread that is not a participant fails it).
+- `resume()` after an external edit and a crossed rollover → `ResumeReport{externalChange: true, rolledOver: true}`, and no sync or queue work ran inside the call.
+- With a reader transaction held open (U107 snapshot), a counting VFS shim observes a full sync of the `-wal` within 1 s of each of 20 answer commits; the measured cost is recorded in `specs/storage/open-and-connections.md`.
 - Disk full (size-limited tmpfs) during an atomic replace → original intact, `InsufficientSpace`; the pre-check refuses when the provider reports too little space.
 - A corrupted page injected → background `quick_check` reports it → state `Failed(Corrupt)`; a write op is refused.
 - Unclean-shutdown flag set → `Ready` reached without waiting; quick check runs in the background.
 
 **Verification:** kill loops and crash-consistency runs clean in Docker; suspend completes within deadline on simulator and Mac; every named failpoint reachable from the U240+ fault suite.
+
+### U38. meguri-host composition root
+
+**Goal:** One place that opens a collection and wires every engine port, so the app (through meguri-ffi), the local servers and headless testkit and cli runs execute engine ops with the same backup hook, observers, widget wiring and sync subscriptions (KTD2).
+
+**Requirements:** supports R1658 (one op layer for UI, sync and servers), R2008 (safety backups on every path), R2020 (backup side of the op catalog); KTD2.
+
+**Dependencies:** U24, U25, U26, U32.
+
+**Files:**
+- `core/crates/meguri-host/Cargo.toml`, `core/crates/meguri-host/AGENTS.md`
+- `core/crates/meguri-host/src/lib.rs`, `src/open.rs` (`CoreHost::open`, `close`), `src/config.rs` (`HostConfig`), `src/wiring/mod.rs`, `src/wiring/pending.rs`
+- `core/crates/meguri-host/tests/ports.rs`, `tests/headless_parity.rs`
+- `specs/engine/host.md` (Meguri design doc)
+
+**Approach:**
+- `CoreHost::open(HostConfig)` takes the collection directory, the backups directory, the App Group snapshot path, the clock and the `DiskSpaceProvider`. It opens the engine through its raw open entry point, which only this crate may call (U5 layering-check rule), and registers every port implementation.
+- Wiring is per area under `src/wiring/`: U127 adds `backup.rs` (package BackupService), U95 and U100 add `stats.rs` (stats observers, widget builder), U113 adds `sync.rs` (session and lifecycle events fed into the sync policy). Until a provider unit lands, its port uses the engine's explicit `Unavailable` provider listed in `wiring/pending.rs`; that list must be empty when M1 closes.
+- Callers: meguri-ffi (U37), meguri-servers (U135) for headless contract runs, and every testkit or cli path that executes engine ops from this unit on (U117, U250). None of them registers ports itself.
+- `core/crates/meguri-host/AGENTS.md` records the traps: no business logic here, only construction and wiring; a new port needs a wiring entry and a `ports.rs` case.
+
+**Execution note:** Meguri-designed contract; no spec-writer pass. Land the crate with an empty wiring table right after U32 so U37 and the area units can add to it.
+
+**Patterns to follow:** KTD2 (allowed-edge table, ports declared in engine); KTD5; U24 port declarations.
+
+**Test scenarios:**
+- `ports.rs`: after `CoreHost::open`, every port in the engine's port catalog has exactly one provider; a port with none fails the test unless it is listed in `wiring/pending.rs`.
+- `headless_parity.rs`: the same deck-delete scenario run through `CoreHost::open` from testkit and from a meguri-ffi test harness → both take the safety backup before the commit and emit the same ChangeSet sequence.
+- A crate other than meguri-host that calls the engine's raw open → `core-lint` fails (U5 rule).
+- `close` after open → every registered thread idle, writer and readers closed, no `-wal` content left after the final checkpoint.
+
+**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`.
 
 ### U33. Schema-11 legacy writer
 
@@ -5158,7 +5286,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - Canonicalization (R891, R892): NFC, control characters and all spaces (including U+3000) removed, empty components become "blank", existing spelling adopted case-insensitively, parent spelling adopted for new children. Notes store tags deduplicated, sorted and joined with leading/trailing spaces (R770, R893); every tag used is registered.
-- Management ops (rename with children, delete with children, reparent rules, clear unused keeping parents of used tags) are plan/commit ops that touch only notes whose tag string changes, one undoable step each (R894–R896). The `collapsed` and `config` columns are preserved (R1467).
+- Management ops (rename with children, delete with children, reparent rules, clear unused keeping parents of used tags) are plan/commit ops that touch only notes whose tag string changes, one undoable step each (R894–R896). Each note's new tag string is re-derived from the live row in the write phase (U24 write-phase rule). The `collapsed` and `config` columns are preserved (R1467).
 - Bulk add/remove of tags on selected notes are primitives here, invoked by U86 (Browse) and U141 (AnkiConnect).
 - Flags: low 3 bits only, higher bits preserved; setting the current flag clears it (R897, R898). Flag names in the synced `flagLabels` key, "1"–"7", empty name or "restore default" removes the entry (R899); written through U23's typed config write.
 - Marked: add or remove the `marked` tag, matched case-insensitively (R901).
@@ -5289,7 +5417,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Approach:**
 - Layout (KTD12): flat `collection.media/`, sibling `media.trash/` and `media.staging/` on the same volume, and Meguri's own journal database next to them (name, SHA-1, mtime, dirty, tombstone; folder mtime and last media USN; tombstones indexed so 20k+ cost nothing, R1582). The journal is the media sync state that U111 reads and updates; deleting it means a full media resync.
 - Add (R979–R986): normalize (U20) → same name and same SHA-1 → reuse the on-disk name → new names with uppercase stored lowercase, existing mixed-case files untouched → name taken by other content → `<stem>-<40-hex sha1>.<ext>` within 120 bytes → return the stored name for the field. Lookup resolves case-insensitively to the canonical existing name on every platform (R984). `thumbs.db`/`.ds_store` ignored (R985). Every add or change marks the entry dirty (R986).
-- Staging (C9): inside an op, files are written to staging and listed in a staging manifest; they are renamed into the folder after the op's transaction commits, and deleted on rollback. A launch-time recovery completes renames for committed manifests and removes uncommitted ones. `/receive` (R1702) relies on this. Editor attachments outside a note transaction commit immediately (orphans are reported later by Check Media; spec-flow Flow 7).
+- Staging (C9): inside an op, files are written to staging and listed in a staging manifest; they are renamed into the folder after the op's transaction commits, and deleted on rollback. The manifest lives in the media journal database and records the op id and the collection rows that will reference the staged names (note ids with their post-op mtime). Launch recovery decides whether an op committed by looking those rows up in the collection, never by a flag written after the collection commit. Staged files of an uncommitted op go to `media.trash` (R2018), never deleted, so a wrong judgement is recoverable. `/receive` (R1702) relies on this. Editor attachments outside a note transaction commit immediately (orphans are reported later by Check Media; spec-flow Flow 7).
 - Static media (R1587): write only if absent or different by SHA-1; used by U137 for `_`-prefixed fonts.
 - Trash (R2018): delete = move into `media.trash` plus a tombstone; restore renames back (or re-adds with the hash rename if taken); emptying the trash is the only permanent delete and only on user action.
 - Change tracking comes from Meguri's own writes; a cheap folder-mtime check detects outside changes; full rescans run only on request (Check Media, media resync), off the writer, with progress (R1855).
@@ -5306,7 +5434,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Existing `MixedCase.png` keeps its name and resolves for a lookup of `mixedcase.png`.
 - `Thumbs.DB` added to the folder → never journaled.
 - An op adding a note plus two media files fails after staging → folder unchanged, staging empty, journal unchanged.
-- Failpoint kill after commit and before the staging rename → next launch completes the rename; field references resolve.
+- Kill after the collection commit and before any manifest update → the next launch moves the files into the folder and references resolve. Kill before the collection commit → the note is absent and the files are in `media.trash`, not in the media folder.
 - `ensure_static_media` called 100 times with identical bytes → zero journal changes (AE66 core half).
 - Trash then restore → file back and journal entry dirty; empty trash → file gone permanently.
 - A 30k-file folder with no changes → change check without listing the folder, well under 0.5 s.
@@ -5330,7 +5458,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `core/crates/meguri-engine/tests/notetype_structure.rs`
 
 **Approach:**
-- Each op plans on a snapshot (new notetype, per-note field remap, card ordinal remaps and deletions), passes U29's gate, commits in one transaction with a notetype-mtime precondition, regenerates cards through U27, and emits a change set with `schemaChanged`. Large types run with progress and cancel (R927).
+- Each op plans on a snapshot (new notetype, per-note field remap, card ordinal remaps and deletions), passes U29's gate, commits in one transaction with a notetype-mtime precondition, regenerates cards through U27, and emits a change set with `schemaChanged`. Per-note `flds` and `sfld` rewrites follow the U24 write-phase rule: the remap is re-applied to the live row inside the transaction. Large types run with progress and cancel (R927).
 - Reference rewriting uses U60's AST with source spans (cross-area contract): rename and removal update plain, filtered, conditional, negated and closing references in front, back and browser templates; a front left with no field reference gets the first remaining field (R923, R924). Text outside the edited tags stays byte-identical.
 - Sort-field change rewrites every note's `sfld` (R926); field add/remove/reorder rewrites `flds`.
 - Template removal deletes its cards with graves and reports the number of notes left without cards (R933 deviation). Deck override writes are non-schema (R934, R950).
@@ -5351,6 +5479,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Add a conditional to a front template → missing cards generated; no card deleted.
 - Restore to Default on a Basic-kind type with 3 fields and 2 templates → 2 fields, 1 template, third field content and card 2 gone, name and id kept; kind 0 → `NeedsStockKind`.
 - Every op's result equals the oracle's normalized dump for the same op.
+- A LocalApi field edit committed while a 50k-note field reorder is planning → the edit survives, remapped to its new position.
 
 **Verification:** structure scenarios match goldens; reordering fields on 50k notes completes with progress within the U12 baseline.
 
@@ -5370,7 +5499,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - Info op: for note ids sharing one notetype and a target, return the default field map (exact names, then unused old fields in order) and template map (hidden when either side is cloze), plus the discard preview (fields losing content, cards to remove) and the current `scm` (R945–R947).
-- Commit (R948): requires schema confirmation and the `scm` captured by the info op (refused if it changed); removes unmapped cards with graves, renumbers remapped ordinals, remaps fields, sets the notetype, regenerates cards with the last-deck rule; undoable; returns the note count.
+- Commit (R948): requires schema confirmation and the `scm` captured by the info op (refused if it changed); removes unmapped cards with graves, renumbers remapped ordinals, remaps fields, sets the notetype, regenerates cards with the last-deck rule; undoable; returns the note count. Field remaps follow the U24 write-phase rule.
 - Empty Cards (R952): a cancellable scan with progress over each notetype lists cards whose ordinal would no longer be generated (front predicate or missing cloze number) and flags notes that would lose all cards; the delete op honors "keep notes with no valid cards" (keeps the first card) and is one undoable step. U131 owns the maintenance report flow, the delete op's safety-backup call and its UI contract; U87 (Browse) and U203 (Notes UI) invoke the change-notetype op.
 
 **Execution note:** Spec writer first; implementer test-first.
@@ -5422,6 +5551,44 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - An optimizer write (U47 leg) → only the current FSRS list changes in the preset blob (R1486).
 
 **Verification:** preservation suite green in T0 (goldens) on every core change and in T1 (live legs); the R2017 normalized-dump comparison reports zero differences.
+
+### U37. Collection FFI surface and CoreBridge engine services
+
+**Goal:** Export everything Swift needs to open and run a collection that no area unit exports: open and close through `CoreHost`, lifecycle, undo, suspend and resume, the deck tree with counts, and the deck, note, notetype, tag, flag and media ops, wrapped in CoreBridge services on the right lanes.
+
+**Requirements:** R2015 (free-space provider); supports R1494, R1857, R1858, R1860 (bridge side), R14 and R2007 (suspend calls), R173 and R365 (undo status data); KTD9.
+
+**Dependencies:** U6, U24, U25, U27, U28, U29, U30, U31, U32, U34, U35, U38, U41, U127.
+
+**Files:**
+- `core/crates/meguri-ffi/src/{collection,lifecycle,undo,decks,deck_tree,notes,notetypes,tags,media,suspend}.rs`
+- `app/Packages/MeguriCore/Sources/CoreBridge/{CollectionService,UndoService,DeckService,NoteService,NotetypeService,MediaService,DiskSpaceProvider}.swift`
+- `app/Packages/MeguriCore/Tests/CoreBridgeTests/{CollectionServiceTests,UndoServiceTests,DeckServiceTests,NoteServiceTests}.swift`
+- `core/crates/meguri-ffi/tests/collection_ffi.rs`
+
+**Approach:**
+- Open: `start_open(collection dir, backups dir, App Group snapshot path, clock, DiskSpaceProvider)` is a job (KTD9) that calls `CoreHost::open` (U38), so every port is registered before the first op. `close` checkpoints and releases the host. Lifecycle state and waits go on the control lane.
+- Ops: one typed export per op, each returning an `OpResult` summary (seq, generation, undo name, the ids Swift needs). No generic op enum crosses the FFI. Deck ops (U28), note ops and field check (U27), notetype ops (U29, U34, U35), tags, flags and marked (U30), and media adds (U31) go on the interactive lane; their long variants (regeneration, structure changes on large types) are jobs.
+- Undo: `peek(scope)`, `undo(scope)` and `redo(scope)` with U25's scopes and reasons. Session-scoped calls route through U43 first when it is linked (U179); `UndoService` serves global undo (U159).
+- Suspend and resume: the three U32 calls on the control lane.
+- Deck tree with counts (U41) on the query lane, one record per refresh (R1859).
+- `DiskSpaceProvider` is a synchronous foreign trait implemented with `volumeAvailableCapacityForImportantUsage`. Its required-reason declaration (E174.1, R2034) belongs to the release area.
+- CoreBridge services are actors on the KTD9 lanes and return Sendable value records; a `FakeCollectionService` with scripted results lets UI units build previews without the core.
+
+**Execution note:** Infra role; no Anki-derived behavior. Land the open, lifecycle and deck-tree exports first, since Home (U152) and the shell (U151) need them earliest.
+
+**Patterns to follow:** U6 lane actors, jobs and CancelToken; U114 and U133 service shapes (protocol plus fake); bridge-build guidance (every export returns `Result`).
+
+**Test scenarios:**
+- `start_open` on a fixture → `JobFinished(ok)`, lifecycle `Ready(1)`; deleting a deck that contains cards through `DeckService` → a safety backup exists before the commit (BackupService registered at open).
+- Opening a schema-11 fixture → lifecycle passes through `Upgrading` with progress, then `Ready`.
+- Every op export returns its `OpResult` summary; an interface check finds no export taking a generic op enum.
+- `peek(Session(s))`, `undo(Session(s))` and `redo(Global)` reach U25 with the given scope; the disabled reasons decode into Swift cases.
+- `flush_for_background`, `suspend` and `resume` run on the control lane while a long job holds the maintenance lane, and each returns within its deadline.
+- Deck tree for 2,000 decks → one record per call, decoded under 5 ms on the M3 Max.
+- Every service call made from a MainActor context runs on its lane's queue, never on the main thread.
+
+**Verification:** `swift test` on MeguriCore passes these suites on the host; Rust FFI tests pass in Docker; U151 and U152 build against this surface with no other entry points for these features.
 
 **Scheduling and FSRS (U40–U51)**
 
@@ -5586,7 +5753,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Mixing uses the deterministic even-spreading rule for new/review and interday/review (R619). The learning queue is ordered with attempted cards first, then by due (R620).
 - SQL scalar functions live in `meguri-storage/src/sqlfns/sched.rs`: `fnvhash` and the FSRS extractors (variable, retrievability, relative retrievability, original position). U22 registers them on every connection. U80 reuses them for `prop:` searches. Retrievability uses fsrs 6.6.2's own retrievability function with the card's decay (R618).
 - The queue result is a value: ordered main queue entries, intraday-learning entries with the learning cutoff, the learn-ahead tail (R602), counts (R626) and the remaining-limits snapshot. U43 owns the mutable session state built from it.
-- `rebuild_rules` maps a C2 `ChangeSet` to "rebuild needed / patch / none" per R623. Flag-only card changes need nothing.
+- `rebuild_rules` maps a C2 `ChangeSet` (the meguri-model value type, KTD2) to "rebuild needed / patch / none" per R623. Flag-only card changes need nothing.
 - Deck tree counts (R624):
   - one grouped query per refresh, then bottom-up sums capped by the limits tree;
   - no sibling-burying subtraction (R625);
@@ -5721,6 +5888,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - applies the preset's ignore-before date;
   - uses whole days relative to `next_day_at`;
   - for histories without a learning start, uses the SM-2 fallback with historical retention (R689).
+- Training items are built one preset at a time and dropped before the next preset; the builder reports item count and bytes (R1852, U47).
 - On-the-fly computation (R650) is a single-card path called by U43/U44 when a card has no memory state. It does not write; the next answer stores the result.
 - Bulk recompute is an engine op over a card set (by preset, deck or all). It runs in batches with a CancelToken and progress (KTD5). It writes `s`, `d`, `dr` and `decay` and bumps mtime/usn only where the stored values change (R687). It is one undoable step when user-initiated (named by the caller: "Deck Options"); source `Optimizer` or `Maintenance` otherwise. It never touches due, interval, queue or revlog (R686, R697).
 - The R690 count ("N of M cards included") is a read query exposed for U49/U232.
@@ -5783,6 +5951,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - note-sibling due days;
   - Easy Days percentages per preset (R667, R669).
 - U43 builds the cache with each queue build (R668). The engine builds it on demand for Grade Now. It implements U45's fuzzed-day chooser for intervals ≤ 90 days when `loadBalancerEnabled` is on (R666). It is updated per applied answer and reverted on undo.
+- Split (KTD2): `meguri-sched/src/answer/` computes the rows to write as pure values (card fields, revlog row, deck counters, sibling queue changes, leech decision). `meguri-engine/src/ops/answer.rs` submits them as one op, adds the leech tag through U30 and registers the U25 restorer.
 - The answer op (engine, source `UserUndoable`, undo name "Answer Card") takes `{card id, chosen state from U45, answered_at ms, elapsed ms, from-queue kind}`. In one transaction it:
   1. writes the card fields per R675/R676, plus `pos` on first leaving New (R589) and the factor (R587), keeping `cd` (R591);
   2. inserts one revlog row per R681: id = answer ms bumped to the next free ms; elapsed time capped at Maximum answer seconds (R678);
@@ -5817,34 +5986,34 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U43. Review session (contract C5)
 
-**Goal:** Expose the review session API (start, head with state tokens, answer, events) that keeps the in-memory queue ahead of the database, protects against stale states, and recovers from failures and rollovers.
+**Goal:** Expose the review session API (start, head with state tokens and predictions, render payloads, answer, events) that keeps the in-memory queue ahead of the database, protects against stale states, and recovers from failures and rollovers. This unit is the single owner of the C5 record; U175 and U176 cite it.
 
-**Requirements:** R600, R620 (presentation and cutoff), R621, R622, R623 (rebuild execution), R627 (counts data), R680, R720 (session effect of redo), R721 (queue side), R722, R727–R729; core side of R362, R444, R456, R457, R459–R463, R726 (session tagging); AE13 (core part), AE27; supports R1807, R1811–R1813, R1817, R1894, R2006.
+**Requirements:** R600, R620 (presentation and cutoff), R621, R622, R623 (rebuild execution), R627 (counts data), R680, R720 (session effect of redo), R721 (queue side), R722, R727–R729; core side of R326, R362, R444, R456, R457, R459–R463, R726 (session tagging); AE13 (core part), AE27; supports R1807, R1811–R1813, R1817, R1894, R2006.
 
-**Dependencies:** U40, U41, U44, U45, U46, U24, U25, U6. The optimizer job registers its cancellation hook with this unit's session-start event, so the optimizer depends on this unit, not the reverse.
+**Dependencies:** U40, U41, U44, U45, U46, U24, U25, U6, U62, U64. The optimizer job registers its cancellation hook with this unit's session-start event, so the optimizer depends on this unit, not the reverse.
 
 **Files:**
-- `core/crates/meguri-sched/src/session/mod.rs`
-- `core/crates/meguri-sched/src/session/queue_state.rs`
-- `core/crates/meguri-sched/src/session/token.rs`
-- `core/crates/meguri-sched/src/session/overlay.rs`
-- `core/crates/meguri-sched/src/session/events.rs`
-- `core/crates/meguri-engine/src/session.rs`
+- `core/crates/meguri-sched/src/session/mod.rs`, `session/queue_state.rs`, `session/token.rs`, `session/overlay.rs`, `session/predict.rs` (pure types and functions; KTD2)
+- `core/crates/meguri-engine/src/session/mod.rs` (orchestration, op submission, events), `session/render.rs` (`renderHead`, payload cache), `session/undo.rs`
 - `core/crates/meguri-ffi/src/review_session.rs`
 - `app/Packages/MeguriCore/Sources/CoreBridge/ReviewSessionBridge.swift`
-- `core/crates/meguri-engine/tests/session.rs`
-- `core/crates/meguri-engine/tests/session_faults.rs`
+- `core/crates/meguri-engine/tests/session.rs`, `tests/session_faults.rs`, `tests/session_predict.rs`
 - `app/Packages/MeguriCore/Tests/CoreBridgeTests/ReviewSessionBridgeTests.swift`
 - `specs/sched/review-session.md`
 - `conformance/scenarios/sched/session/`
 
 **Approach:**
-- API shape (directional; names from C5):
-  - `startSession(deck)` returns a session handle with counts.
-  - `head(n)` returns up to n entries. Each entry has card id, note id, queue kind, `stateToken`, the four button states with labels (U45), and the home-preset display options U175 needs (audio R748, timers R749, auto advance R750, max answer seconds).
-  - `answer(cardId, rating, stateToken, answeredAt, elapsedMs)` returns synchronously one of `Accepted{newHead, counts, leech flags}`, `Stale` or `NotAtHead`.
-  - `endSession()` is called by U175's `ReviewCoordinator` (the Swift review session model): when the U157 summary is dismissed (U157 calls `ReviewCoordinator.dismissSummary()`), when congrats shown alone is dismissed, or at an exit that shows neither (KTD6, flow Q2). Nothing else calls it.
-  - Events go to a callback interface that becomes an AsyncStream in CoreBridge (KTD9): `QueueHeadChanged(diff)`, `CurrentCardChanged{eligible|removed|memoryOnly}`, `CommitFailed(cardId, error)`, `WaitingUntil(instant)` (R622), `Finished(info)` (U41 finished facts), `PresetUnsupported` (U50).
+- **C5 record** (names directional):
+  - `startSession(deckId, resumeCardId?)` → `{sessionId, generation, head(3), counts by kind, validUntil, timeLim}`. It is one op that writes `curDeck` (R326), and before building it fires the session-start hook through which U47 cancels a running optimizer job, so the rule holds whatever the UI does (KTD8).
+  - `peekFirstCard(deckId)` → the first head item with no queue state and no `curDeck` write, ≤ 20 ms at 150k. U176 prepares it before the session starts (R1813); `startSession` reuses that page when `(cardId, stateToken)` match.
+  - Head item: card id, note id, queue kind, `stateToken`, `renderKey` (digest of card id, ordinal, deck and original deck, flags, note mtime, notetype id and mtime), the four next states with label strings and interval seconds (U45), `predictedNext[rating]`, flag and marked state, and the R330 home-preset values (audio R748, timers R749, auto advance R750, maximum answer seconds, leech action). No HTML.
+  - `renderHead(sessionId, renderKeys)` on the interactive lane → one U62 `RenderedCard` per key, with media refs for preload. Payloads are cached by `renderKey`, so undo and head diffs reuse them.
+  - `answer(sessionId, cardId, rating, stateToken, answeredAtMs, msTaken)` → `Accepted{headDiff, counts, leech, suspended, rolledOver}` | `Stale{freshHead}` | `NotAtHead`. It returns ids, tokens, labels, predictions, counts and flags only, and never renders.
+  - `refreshCard(sessionId, cardId)` and `endSession(sessionId)`. `endSession` is called by U175's `ReviewCoordinator` (the Swift review session model): when the U157 summary is dismissed (U157 calls `ReviewCoordinator.dismissSummary()`), when congrats shown alone is dismissed, or at an exit that shows neither (KTD6, flow Q2). Nothing else calls it.
+  - Head diffs mark entries `restate` (`stateToken` changed) or `rerender` (`renderKey` changed). A prepared page stays valid only while `(cardId, stateToken, renderKey)` is unchanged (KTD7).
+  - Events are Session variants of the single core event channel (KTD9): `QueueHeadChanged(diff)`, `CurrentCardChanged{eligible|removed|memoryOnly}`, `CommitFailed(cardId, error)`, `WaitingUntil(instant)` (R622), `Finished(info)` (U41 finished facts), `PresetUnsupported` (U50), and `SessionStarted`/`SessionEnded`, which U113 consumes inside the core.
+- Layering (KTD2): `meguri-sched/src/session/` holds the pure queue state, token, overlay and prediction; `meguri-engine/src/session/` submits ops, renders and emits events.
+- `predictedNext[rating]` simulates the overlay for each of the four ratings (learning requeue per R621, learn-ahead per R602).
 - `stateToken` is a digest of:
   - the card row's scheduling columns, `data` and mtime;
   - the home preset's id and mtime, and the deck DR override;
@@ -5854,34 +6023,43 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Answer path:
   1. Verify the card is the head (learning-anywhere rule per R729); Grade Now bypasses the session.
   2. Recompute the token from the committed row plus the overlay. On mismatch, write nothing and return `Stale`; the session rebuilds silently and the UI shows the R728 notice only if the card is still due.
-  3. Compute states (U45, with the U46 on-the-fly memory state), update the overlay (in-memory queue, learning requeue per R621, cutoff, counts, load balancer cache), and return.
-  4. Submit the U44 op to the executor at once (durable ≤ 1 s, R2006).
+  3. Compute states (U45, with the U46 on-the-fly memory state), update the overlay (in-memory queue, learning requeue per R621, cutoff, counts, load balancer cache, predictions), and return.
+  4. Submit the U44 op to the executor at once (durable ≤ 1 s, R2006). When U24 publishes a delayed write phase (large import, a large U107 merge), the overlay keeps the answers and commits them right after with their `stateToken` preconditions (R727–R729).
   5. On commit failure: emit `CommitFailed`, drop the later uncommitted answers in order, and restore the queue to the failed card (R680).
-- Rebuilds follow U41 `rebuild_rules` on C2 events. They run in the background and return a head diff that keeps entries whose `(cardId, stateToken)` is unchanged (KTD7). A current card changed only in memory state emits `memoryOnly`.
+- Rebuilds follow U41 `rebuild_rules` on in-core ChangeSets. They run in the background and return a head diff under the KTD7 keep rule. A current card changed only in memory state emits `memoryOnly`.
 - Rollover: on `RolledOver`, recompute the current card's states and labels at once (R600, R460). Rebuild the queue after the current answer (R461). The session stays one session (R463).
-- Undo and redo: the session observes U25 results for its own answer steps. Undo puts the card at the head on its question side even after a rebuild (R722) and restores the cutoff and load balancer entry. Redo advances (R720). Non-answer undo steps patch the queue in place (R1812).
+- Undo and redo (session side of C3):
+  - Session-scoped `peek`, `undo` and `redo` (U25 scopes) are answered here first: `peek` reports overlay steps first.
+  - Undoing the session's top answer restores the overlay and the head at once from the in-memory answer metadata (R1811). If the answer is still uncommitted, its pending op is dropped without a write; otherwise the U25 undo op is submitted asynchronously, with the same `CommitFailed` recovery as answers.
+  - A `Global` undo issued while the overlay holds uncommitted answers waits for it to drain before targeting U25.
+  - Undo puts the card at the head on its question side even after a rebuild (R722) and restores the cutoff and load balancer entry. Redo advances (R720). Non-answer undo steps patch the queue in place (R1812); U48's ops take an optional session id and return a head diff.
 - Every undo entry made while the session is active carries the session id. U107 uses this for hold-back (KTD6); `endSession` closes the scope.
-- `startSession` cancels a running optimizer job through U47's engine handle before building, so this rule holds in the core whatever the UI does (KTD8).
-- Spec: `specs/sched/review-session.md` separates the Anki-derived queue progression (oracle-checked) from Meguri-only contract behavior (tokens, overlay, stale recovery). Each Meguri deviation (R728 silent recovery) gets an entry in the R1889 known-deviations list.
+- Suspend: the session is a `SuspendParticipant` (U32). `flush_for_background` commits its overlay answers; `suspend` stops background rebuilds. Entering `ExclusiveBusy` flushes the overlay too (U24).
+- Spec: `specs/sched/review-session.md` separates the Anki-derived queue progression (oracle-checked) from Meguri-only contract behavior (tokens, overlay, predictions, stale recovery). Each Meguri deviation (R728 silent recovery) gets an entry in the R1889 known-deviations list.
 
 **Execution note:** Spec writer first for queue progression and learning requeue. The C5 contract parts are specified from the Product Contract and this plan (no Anki source needed). Implementer test-first, with a fault-injection suite for commit failure.
 
-**Patterns to follow:** KTD5 (C1/C2/C3 contracts); KTD9 lanes (interactive lane, sync exports, callback events); KTD7 rebuild-diff rule.
+**Patterns to follow:** KTD2 (pure sched, orchestration in engine); KTD5 (C1/C2/C3 contracts); KTD9 lanes (interactive lane, short exports, Session event variants); KTD7 keep rule.
 
 **Test scenarios:**
 - Full drain of a 40-card deck with mixed new, learning and review cards, under the scripted rating policy (Good, Again every 5th), matches the oracle's order, kinds and counts after every answer (R1894).
 - A learning card answered Again with another learning card waiting is not shown twice in a row; with no alternative, it is shown again (R621).
+- Again on a learning card with no other card due within learn-ahead → `predictedNext[again]` is that card; with another learning card waiting → the other card (R621). Over 10k random sessions, every prediction equals the head returned after that answer.
 - Only learning cards beyond learn-ahead remain: `WaitingUntil` carries the due instant; at that instant `head` returns the card.
-- Covers AE27. The answer side is shown; a sync changes the card; answering Good returns `Stale`, writes nothing, then emits a head with fresh labels; the next answer with the new token is accepted.
+- Covers AE27. The answer side is shown; a sync changes the card; answering Good returns `Stale`, writes nothing, and carries a fresh head with new labels; the next answer with the new token is accepted.
 - Answering a card that is not at the head returns `NotAtHead` and writes nothing.
-- A change from another device that alters only `s`/`d` emits `CurrentCardChanged{memoryOnly}`, and the next-two head entries keep their pre-render identity when their tokens did not change.
+- A change from another device that alters only `s`/`d` emits `CurrentCardChanged{memoryOnly}`; the next-two head entries keep their `stateToken` and `renderKey`.
+- A field edit of queued card B → the head diff marks B `rerender` with its `stateToken` unchanged; a preset change affecting B → `restate`.
+- `renderHead` for the same `renderKey` twice → the second is served from the cache (counter); `answer()` performs no render (render counter unchanged).
 - With the load balancer on, answering card N updates N+1's Good label in the same `Accepted` result when the due counts moved.
 - Covers AE13 (core part). At 03:59:58 on the answer side, crossing 04:00 recomputes the labels for the new day; the answer uses new-day states; the queue is rebuilt after it; U25 reports `ClearedByRollover`.
 - Covers AE22 (session part). After undoing A's answer, `head(1)` returns A on its question side even though a background rebuild ran in between.
+- Undo of an answer still pending behind a 3 s import write phase → A is back at the head at once, no write happens, and after the import no revlog row exists for that answer. A `Global` undo while two answers are uncommitted waits until they commit, then undoes the newest.
 - Commit failure injected on answer 3 of 5 rapid answers: `CommitFailed(card3)`; answers 4 and 5 are not written; the head is card 3; nothing is lost silently.
 - Durability: kill the process 1 s after an accepted answer; reopening shows the revlog row (R2006).
 - `startSession` while an optimizer job is training: the job ends with `Cancelled` and wrote nothing.
-- Perf: `answer()` returns in ≤ 1 ms at p95 release excluding the commit (bridge-build budget); `startSession` plus `head(3)` fits the R1813 150 ms budget at 14.4k cards; undo to head ≤ 50 ms (R1811).
+- `peekFirstCard` at 150k → ≤ 20 ms and `col.mod` unchanged; `startSession` right after returns the same card id and `stateToken`.
+- Perf: `answer()` ≤ 1 ms at p95 release excluding the commit, also while a sync snapshot, a streaming `re:` search and a stats cache build run (KTD3); `renderHead` for one Migaku-like card ≤ 5 ms p95 on the M3 Max; `startSession` plus `head(3)` fits the R1813 150 ms budget at 14.4k cards; undo to head ≤ 50 ms (R1811), also during a 200 ms SyncIncoming commit.
 
 **Verification:** `conformance/scenarios/sched/session/` goldens match; the fault-injection and durability tests pass in Docker; the CoreBridge Swift tests pass with `swift test`.
 
@@ -5891,7 +6069,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R634, R635, R682, R683, R706, R707, R708–R718, R719 (op names); core API for R768; AE26, AE45 (core part).
 
-**Dependencies:** U42, U44, U45, U46, U24, U25, U28
+**Dependencies:** U42, U43, U44, U45, U46, U24, U25, U28
 
 **Files:**
 - `core/crates/meguri-sched/src/ops/mod.rs`
@@ -5915,7 +6093,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `conformance/scenarios/sched/ops/empty-filtered/`
 
 **Approach:**
-- Each op takes card ids (note-level variants expand to the note's cards). Each is one U24 op with source `UserUndoable` and an Anki op name (R719; spec writer records Anki's exact names, R370). The ChangeSet lets U43 patch the queue in place.
+- Each op takes card ids (note-level variants expand to the note's cards) and an optional session id. Each is one U24 op with source `UserUndoable` and an Anki op name (R719; spec writer records Anki's exact names, R370). With a session id, the result carries U43's head diff, so the review shows the next card without a rebuild (R1812).
 - Bury and unbury: manual bury to −3, skipping suspended cards (R634). Unbury for a deck has three modes and restores the queue from the type via the U42 helper (R635). No revlog rows (R683).
 - Suspend and unsuspend: R717. A buried card can be suspended.
 - Set due date:
@@ -6027,7 +6205,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R691–R697, R698 (core side: priority, abort), R699 (as amended by KTD8), R700, R701 (data and "Optimize now"); AE28; budgets R1850, R1852.
 
-**Dependencies:** U46, U42, U49, U80, U24, U26, U107, U12
+**Dependencies:** U46, U42, U43, U49, U80, U24, U26, U12
 
 **Files:**
 - `core/crates/meguri-sched/src/optimizer/mod.rs`
@@ -6044,39 +6222,39 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `conformance/scenarios/sched/optimizer/`
 
 **Approach:**
-- Job states: `Idle → Training(preset k of n) → AwaitingGate → Writing → Syncing → Done{adopted, skipped}`, plus `Cancelled` and `Abandoned(reason)`. The engine holds at most one job. U43's `startSession` cancels it.
-- Trigger: U51 starts it after a successful incremental sync when no session is active and today − `lastFsrsOptimize` ≥ 30 (R692). "Optimize now" (R701) skips the 30-day check.
+- Job states: `Idle → Training(preset k of n) → AwaitingGate{jobId, adoptedPresets} → Writing → Done{adopted, skipped}`, plus `Cancelled` and `Abandoned(reason)`. The engine holds at most one job (KTD9 job registry). U43's `startSession` cancels it.
+- Trigger: U51 starts it only when executing U113's optimizer action (no session, today − `lastFsrsOptimize` ≥ 30, R692). "Optimize now" (R701) skips the 30-day check.
 - Per preset:
   1. Build items with U46 from the preset's search, or its stored `weightSearch` (R694), executed by U80.
   2. Skip the preset below 64 items (R693).
   3. Call `compute_parameters` with 8 epochs set explicitly (the crate default is 5), short-term on, and the count of relearning steps under one day.
   4. Evaluate current params (defaults when empty) and new params on the same items. Adopt only when the log loss is lower, plus Anki's relearning-steps check (R695).
   5. When `fsrsHealthCheck` is on and items exceed 300, run the health check and record the result (R700).
-- Training runs on a background thread. The rayon global pool is configured once at utility QoS (KTD8). The CancelToken sets fsrs's abort flag, and `Interrupted` maps to `Cancelled` with nothing written (R698).
-- Commit gate (KTD8):
-  1. After training, ask U107 for a fresh `meta`.
-  2. If the server changed since sync 1, or a session started, abandon without writing.
-  3. Otherwise run one op with source `Optimizer`: write `fsrsParams6` only for adopted presets (R696), refresh memory states for their cards through U46 without rescheduling (R697), and set `lastFsrsOptimize` to today (R692).
-  4. Request sync 2 from U107. If sync 2 fails, the write stays and uploads with the next normal sync.
+- Training runs on the optimizer's own rayon pool at utility QoS (KTD8, `optimizer/pool.rs`). The CancelToken sets fsrs's abort flag, and `Interrupted` maps to `Cancelled` with nothing written (R698). The job is a `SuspendParticipant` (U32): suspend cancels training.
+- Commit gate (KTD8); the core never calls the network:
+  1. Training ends in `AwaitingGate{jobId, adoptedPresets}` and writes nothing.
+  2. U51's `OptimizerCoordinator`, executing U113's `optimizerGate` action, calls the U114 meta probe with auth, then `optimizer_commit(jobId, serverModAtSync1, metaResult)`.
+  3. `optimizer_commit` abandons without writing if the server changed since sync 1 or a session is active. Otherwise it runs one op with source `Optimizer`: `fsrsParams6` only for adopted presets (R696), memory states refreshed for their cards through U46 without rescheduling (R697), and `lastFsrsOptimize` set to today (R692).
+  4. The commit emits U113's `syncRequested(optimizerAdopted)` input, so SyncCoordinator runs sync 2 under the normal policy. If sync 2 fails, the write stays and uploads with the next normal sync.
 - Diagnostics (R701) are stored per preset in a U26 derived-store table: last run date, review count used, adopted or not, health result. This data is device-local and rebuildable as empty (KTD12). An FFI read serves U51's view.
 
-**Execution note:** Spec writer first: training data selection and the adoption rule. The implementer validates against oracle-computed params for fixed revlog fixtures with a declared tolerance. A T1 live check confirms that Anki accepts the written params.
+**Execution note:** Spec writer first: training data selection and the adoption rule. The implementer validates against oracle-computed params for fixed revlog fixtures with a declared tolerance. A T1 live check confirms that Anki accepts the written params. Stop condition: if the `realistic-500k` peak exceeds 300 MB without changing the item set, stop and report the R1852 conflict to Antoine (Open Questions); never trim items, because that breaks FSRS parity (R1902).
 
 **Patterns to follow:** KTD8; rust-stack §2 (fsrs API, abort, pool); KTD5 CancelToken/progress.
 
 **Test scenarios:**
-- Covers AE28. `lastFsrsOptimize` 31 days ago, preset A whose optimized params do not beat current, preset B whose do: A is not written; B gets new `fsrsParams6` and refreshed memory states; no card due or interval changes (digest); `lastFsrsOptimize` = today.
+- Covers AE28 (core part; the end-to-end gate is U51's). `lastFsrsOptimize` 31 days ago, preset A whose optimized params do not beat current, preset B whose do: training ends in `AwaitingGate` with nothing written; `optimizer_commit` with an unchanged server: A is not written; B gets new `fsrsParams6` and refreshed memory states; no card due or interval changes (digest); `lastFsrsOptimize` = today.
 - A preset with 63 items is skipped and keeps its params.
 - `fsrsParams5` and `fsrsWeights` stay byte-identical after B is adopted.
 - A stored `weightSearch` overrides the default preset search.
 - Cancel during training: the result is `Cancelled`, and the collection digest is unchanged.
 - A session starts during training: the job is cancelled by U43, and nothing is written.
-- The fresh `meta` shows a server change since sync 1: `Abandoned(serverChanged)`, nothing written.
-- Sync 2 fails (sync rig fault): the write stays and goes up on the next sync; the job ends `Done` with a pending-upload note.
+- `optimizer_commit` with a meta result showing a server change since sync 1: `Abandoned(serverChanged)`, nothing written. With a session started after training: `Abandoned(sessionActive)`, nothing written.
+- A successful commit emits `syncRequested(optimizerAdopted)` and the job ends `Done` without running any sync itself.
 - Health check enabled with 350 items: a result is recorded; with 250 items, none.
 - T1 live: the oracle opens the collection after adoption and constructs FSRS from every preset's params without error (R696).
 - Two Meguri clients both past 30 days (U13 sync rig): both converge after syncing; the accepted race is documented in the spec.
-- Bench: 1M revlog entries ≤ 30 s and ≤ 300 MB peak (R1850, R1852), measured through `meguri-cli bench optimizer`.
+- Bench: 1M revlog entries ≤ 30 s (R1850), and `realistic-500k` (about 4M revlog rows) peak footprint ≤ 300 MB (R1852), measured through `meguri-cli bench optimizer`; the item builder's reported bytes are recorded per preset.
 
 **Verification:** `conformance/scenarios/sched/optimizer/` goldens match within declared tolerances; T1 live acceptance passes; bench results are within budget.
 
@@ -6123,13 +6301,13 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** `conformance/scenarios/sched/compat/` goldens pass; the preservation digest test passes in T0.
 
-### U51. App-side scheduling coordination: day clock timer, optimizer scheduling, FSRS sheet, diagnostics
+### U51. App-side scheduling coordination: day clock monitor, optimizer gate, FSRS sheet, diagnostics
 
 **Goal:** Wire the core day clock, optimizer job and FSRS policy into the app lifecycle on every platform without polling, and give Settings the scheduler diagnostics view.
 
-**Requirements:** R597 (triggers), R698 (platform scheduling), R701 (view), R702 and R703 (sheet), R704 (study-state copy hand-off); supports R459, R464, R1854.
+**Requirements:** R597 (triggers), R698 (platform scheduling), R699 (gate execution, as amended by KTD8), R701 (view), R702 and R703 (sheet), R704 (study-state copy hand-off); AE28 (end to end); supports R459, R464, R1854.
 
-**Dependencies:** U40, U47, U50, U6, U151, U160, U7, U9, U10
+**Dependencies:** U40, U47, U50, U6, U13, U113, U114, U151, U154, U160, U7, U9, U10
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/AppModel/DayClockMonitor.swift`
@@ -6137,9 +6315,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/Packages/MeguriKit/Sources/AppModel/FsrsPolicyCoordinator.swift`
 - `app/Packages/MeguriKit/Sources/Features/Settings/SchedulerDiagnosticsView.swift`
 - `app/Packages/MeguriKit/Sources/Features/Home/FsrsEnabledSheet.swift`
-- `app/Meguri/Info-iOS.plist` (BGTask permitted identifier)
 - `app/Packages/MeguriKit/Tests/AppModelTests/DayClockMonitorTests.swift`
 - `app/Packages/MeguriKit/Tests/AppModelTests/OptimizerCoordinatorTests.swift`
+- `app/Packages/MeguriKit/Tests/AppModelTests/Integration/OptimizerGateServerTests.swift` (against the U13 server)
 - `app/MeguriSnapshotTests/SchedulerDiagnosticsSnapshotTests.swift`
 - `app/MeguriSnapshotTests/FsrsEnabledSheetSnapshotTests.swift`
 
@@ -6148,10 +6326,12 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - arms one timer for the core's `nextDayAt`;
   - observes the system time zone and significant time changes;
   - on each trigger calls `checkRollover()` on the interactive lane (KTD9) and re-arms from the result.
-  It never polls (R1854). U151's foreground sequence calls it in the order data_version → rollover → queue refresh → sync → snapshot (flow Q16).
-- `OptimizerCoordinator` subscribes to U151's sync results. After a successful incremental sync with no active session and the 30-day condition met, it starts the core job on the maintenance lane:
-  - macOS: `NSBackgroundActivityScheduler` at utility QoS while open.
-  - iOS/iPadOS: a `BGProcessingTask` (`.backgroundTask(.processingTask)`, KTD15) that runs sync 1 then the job, preferring charging and idle. Task expiration cancels the CancelToken.
+  It is the only owner of the day-clock timer (KTD5) and never polls (R1854). On foreground, U151's `resume()` performs the rollover check; the monitor re-arms from the returned `nextDayAt`.
+- `OptimizerCoordinator` executes U113's optimizer actions and nothing else starts the optimizer (KTD5):
+  - On the optimizer action, it starts the core job (a KTD9 job).
+  - On `AwaitingGate`, it runs the KTD8 gate as U113's `optimizerGate` action: the U114 meta probe with auth, then `optimizer_commit` (U47). The commit's `syncRequested` input makes SyncCoordinator run sync 2.
+  - macOS: the work runs under `NSBackgroundActivityScheduler` at utility QoS while open.
+  - iOS/iPadOS: it attaches its handler to U154's `BGProcessingTask` registration (KTD15), preferring charging and idle. Inside the task, sync 1 is a SyncCoordinator action, never a direct export call. Task expiration cancels the job's CancelToken.
   The core enforces the session rule (U43), so the coordinator needs no lock. "Optimize now" in diagnostics calls the same path.
 - `FsrsPolicyCoordinator` checks `fsrsPolicyStatus()` after open and after syncs. It shows `FsrsEnabledSheet` once per event, with first-time or re-enabled copy (R702/R703), then runs `enableFsrs` with progress. Study entry points wait until it completes.
 - `SchedulerDiagnosticsView` is hosted under Settings → Advanced by U160. It is read-only: per preset, last run, review count, adopted, health. It has the "Optimize now" action and no parameter values (R691, R701). It has previews for the empty, typical, overflow, error and loading states (R1970).
@@ -6164,8 +6344,10 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Test scenarios:**
 - With an injected core clock, `DayClockMonitor` arms a timer for `nextDayAt`; firing it calls `checkRollover` once and re-arms for the next day.
 - A time zone change notification triggers `checkRollover` (R464).
-- `OptimizerCoordinator` does not start after a failed sync, during an active session, or when fewer than 30 days have passed; it starts after a successful sync otherwise.
-- A BG task expiration handler cancels the job token; the core reports `Cancelled`.
+- `OptimizerCoordinator` starts the job only on U113's optimizer action; a sync result alone starts nothing.
+- Covers AE28 (end to end, U13 server): sync 1, training, gate with a fresh meta, commit, then sync 2 run by SyncCoordinator; the server holds B's new `fsrsParams6` and `lastFsrsOptimize`.
+- Another client syncs between sync 1 and the gate (U13) → `Abandoned(serverChanged)`, nothing written locally or uploaded.
+- A BG task expiration handler cancels the job token; the core reports `Cancelled`. The handler is attached through U154 (no second identifier registration).
 - The FSRS sheet appears once for `needsEnable`, shows the re-enabled copy for `needsReEnable`, and does not reappear after `enableFsrs` succeeds.
 - Snapshot tests: diagnostics empty, typical (3 presets, one bad fit), overflow (30 presets), error; sheet at the largest accessibility text size, light and dark.
 
@@ -6301,7 +6483,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Execution note:** Spec writer first (KTD1). The display-transform spec is written from R525–R527 and R564 directly, since no oracle covers it.
 
-**Patterns to follow:** C5 contract from spec-flow (U43 consumes render records keyed by `(cardId, stateToken)`); CoreBridge lane wrappers from U6; signpost names from U12 (R1861).
+**Patterns to follow:** C5 contract (U43's `renderHead` is its review consumer and caches `RenderedCard` by `renderKey`); CoreBridge lane wrappers from U6; signpost names from U12 (R1861).
 
 **Test scenarios:**
 - A Basic-like custom note type answer with `{{FrontSide}}<hr id=answer>{{Back}}` contains the question without `<style>` (R469–R470).
@@ -6425,7 +6607,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Approach:**
 - **S1:** two full-frame, opaque WKWebViews share one configuration, with the idle one beneath. Prove each of:
   - (a) scripts, `@font-face` fonts and images settle and `requestAnimationFrame` fires in the beneath page;
-  - (b) a z-order swap inside one CATransaction from a touch handler is visible in the input's frame at 120 Hz on iPhone 17 Pro and on the Mac (signposts input→commit plus the front page's double-rAF confirmation, R1862);
+  - (b) a z-order swap made from an input handler, in the same Core Animation commit as SwiftUI chrome changes, is visible in the input's frame at 120 Hz on the Mac host (signposts input→commit plus the front page's double-rAF confirmation, R1862, read per the KTD11 call-out); the iPhone 17 Pro confirmation is a U256 checkpoint;
   - (c) no white or blank frame;
   - (d) the `callAsyncJavaScript` round-trip cost;
   - (e) programmatic focus of an input in the newly front page raises the iOS software keyboard without a tap (R534); record the fallback if public API cannot;
@@ -6441,7 +6623,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - If S2(a), (b) or (d) fails, record the fallback (`loadFileURL` with a read-access root, KTD11 note) and its costs before U66/U67 start.
   - If S1(b) fails, escalate: R1807 and the two-page model depend on it.
 
-**Execution note:** Time-boxed, 2 days. Spike code is throwaway except the measurement tests, which are kept as regression tests. Device timing needs the user's iPhone 17 Pro and Mac; functional parts run on the simulator and macOS host. This unit gates U66, U67 and U175.
+**Execution note:** Time-boxed, 2 days. Spike code is throwaway except the measurement tests, which are kept as regression tests. S1(b) and the probe attribution are checked on the Mac host against an Instruments trace, and on the iOS simulator for function only; that unblocks U66, U67, U175, U176 and U243 gating. The iPhone 120 Hz confirmation becomes a U256 checkpoint. This unit gates U66, U67 and U175.
 
 **Patterns to follow:** U12 signpost names; KTD19 (XCTest for device performance, Swift Testing for logic).
 
@@ -6487,10 +6669,11 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - **Base CSS:** written by Meguri from the constants in R479–R487 (R1959). The font-family modernization in R479 (system-ui stack) is recorded as a known deviation (R1889, list owned by U4). `:root` tokens hold light and dark values with `color-scheme` (R485). No `.card`/`.cloze` defaults (R486).
 - **Side updates** run in the page world through Anki-named functions only (`_showQuestion`, `_showAnswer`, `_updateQA`, `_drawFlag`, `_drawMark`, `getTypedAnswer`, `_typeAnsPress`, `require`, the hook arrays, `anki`, `ankiPlatform`, `$`, `MathJax` stub). Updates are serialized (R466).
 - **Order:** each update follows R467, split into two phases:
-  - **prepare:** insert, re-create scripts as separate tasks, run `onUpdateHook`, set body classes on the question;
-  - **present:** make visible, then run `onShownHook`.
+  - **prepare** (idle page, occluded): insert, re-create scripts as separate tasks, run `onUpdateHook`, set body classes, make `#qa` visible, then wait for a double rAF that confirms the visible content has painted beneath. Only then is the slot settled.
+  - **present** (after the swap): run `onShownHook` only. Nothing the user sees depends on present.
   
-  Native code triggers `present` after the page-pair swap (U67), so a pre-rendered question runs its scripts while hidden (R445) and its shown-hooks at display time. The order is unchanged from the template's point of view.
+  Native code triggers `present` after the page-pair swap (U67), so a pre-rendered question runs its scripts while beneath (R445) and its shown-hooks at display time. The order is unchanged from the template's point of view.
+- **Listener scan:** before any card script runs, the page-world runtime records whether card code registers `keydown`/`keypress` or `click`/`touchend`/`pointerup` listeners or inline handler attributes, through the runtime's listener wrapper plus an attribute scan at insertion. The result is published per side with the hit map; U180 and U181 use it for their fast paths.
 - **Control channel:** Meguri internals use DOM events or closure-held state, so no other page globals exist (R516). The isolated-world `interaction.js` reads the DOM and posts to the native handler (R2038):
   - tap targets with their exemption classification (R405–R407, rules owned by U175);
   - selection state;
@@ -6515,7 +6698,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Patterns to follow:** KTD11 (page world for card-visible shims, isolated world for Meguri probes); the U65 decision log.
 
 **Test scenarios:**
-- R467 order: hook resets, insertion, script order with an awaited `src` script, update-hooks awaited, present, shown-hooks. Asserted by a fixture that logs each step (`SideUpdateTests.swift`).
+- R467 order: hook resets, insertion, script order with an awaited `src` script, update-hooks awaited, `#qa` visible and painted (double rAF) before settled, then shown-hooks at present. Asserted by a fixture that logs each step (`SideUpdateTests.swift`).
+- Listener scan: a side whose script adds a `keydown` listener, and a side with an `onclick` attribute, report it; a plain side reports none.
 - Covers AE15: a back side whose first script throws still runs scripts 2 and 3; `.word` spans and the pitch SVG exist; no raw `漢字[かな;h]` syntax is visible; the error was posted with message, line and side. On the next card in the same page, the `readyState` check takes the `complete` branch (R467, R468, R521, R522).
 - S10 semantics: a top-level `const x` throws on the second side; a `var` counter increments across sides and cards in the same page; `DOMContentLoaded` runs once per page; `document.currentScript.dataset` is readable; an `onerror` attribute fires for a missing `src` (R468, R518, R519).
 - `import('/_mod.js')` and `import('./_mod.js')` both resolve via the scheme handler (R520).
@@ -6567,8 +6751,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 2. **Page pair (`CardPagePair`, MainActor, owned by the session model, never by a view):**
    - Creates two pages at launch, stacked full-frame and opaque, with the idle page beneath (KTD11, S1). The representable only hosts them, so layout switches reparent without reloading.
    - API (directional):
-     - `prepare(cardPayload)` loads the question into the idle page through the prepare phase;
-     - `present()` swaps z-order in one CATransaction and then triggers present/shown-hooks;
+     - `prepare(cardPayload)` loads the question into the idle page through the prepare phase and reports settled only after the pre-swap double rAF;
+     - `present()` changes z-order with no web-content call before it; shown-hooks are sent after the commit. It does not open its own explicit transaction, so the swap lands in the same Core Animation commit as U176's SwiftUI changes;
      - `showAnswer(answerPayload)` runs on the current page after reading the typed text and calling U64's compare;
      - `setAppearance`, `setCardState(flag, mark)`;
      - `mediaArrived(names)` resets failed `src` in place on the visible side; pre-rendered cards are re-prepared by U175;
@@ -6594,7 +6778,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
    - pause and seek (R552).
 
    `AVQueuePlayback` prepares the next side's first clip during pre-render, to meet R554/R1814. Missing files are skipped (R558) and TTS entries are silent (R559). `AudioSessionCoordinator` sets `.playback` with ducking (R555), handles interruptions, route changes and backgrounding (R556) and publishes no Now Playing info (R557). Ogg family codecs and video tags are U69.
-7. **Signposts:** answer→next visible and reveal→answer visible use the U12 names (R1861), ending at the double-rAF confirmation (R1862).
+7. **Signposts:** answer→next visible and reveal→answer visible use the U12 names (R1861). Each records the display frame that presents the swap commit and the post-swap double-rAF confirmation, which must name the same card (KTD11 conflict call-out).
 
 **Execution note:** Starts only after the U65 decision-log entries. If S2 forced the file-URL fallback, the handler sub-part follows that design.
 
@@ -6602,7 +6786,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Test scenarios:**
 - Over 1,000 alternating prepare/present cycles, exactly two WKWebView instances exist and both sides of each card use one page. A global counter in a test template shows each page sees every other card (R465, R450 support).
-- `present()` commits the swap synchronously, and `visibleConfirmed` arrives after the front page's double rAF.
+- `present()` commits the swap synchronously with no web-content call before it; `visibleConfirmed` arrives after the front page's double rAF and names the same card id.
 - Platform classes are `iphone ios mobile safari` on an iPhone simulator, `ipad ios mobile safari` on iPad (and the UA contains "iPad"), `mac safari` on macOS (R475, R477).
 - Toggling appearance on a shown side changes classes without re-running a side script counter (R490).
 - Resolver: `my%20file.jpg`, an NFD-stored `日本.png`, `PHOTO.JPG` for `photo.jpg` and `/foo.jpg` all resolve; `../../etc/passwd` and `%2e%2e/` are refused; `/_addons/x.js` returns 404 (R493, R494, R496, R497).
@@ -7040,15 +7224,15 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - **Contract consumed by U210** (Browser UI) and U141 (AnkiConnect):
-  1. `start_search(session, text, mode, sort, cancel)` returns at once. A Rust search worker thread on its own reader connection runs it, so the query lane stays free for row pages. Results arrive through a synchronous callback interface: `FirstPage(handle, ids[0..page])`, then `Progress{matched, scanned}` for streamed searches, then `Complete{handle, count}` or `Failed{error with UTF-16 range}` or `Cancelled`. Every event carries the request seq.
+  1. `start_search(session, text, mode, sort, cancel)` returns at once. A Rust search worker thread (user-initiated QoS, its own rayon pool, KTD9) on its own reader connection (KTD3) runs it, so the query lane stays free for row pages. Workers are `SuspendParticipant`s (U32). Results arrive through a synchronous callback interface: `FirstPage(handle, ids[0..page])`, then `Progress{matched, scanned}` for streamed searches, then `Complete{handle, count}` or `Failed{error with UTF-16 range}` or `Cancelled`. Every event carries the request seq.
   2. A session (one per Browse instance) cancels its previous in-flight search when a new one starts: CancelToken plus SQLite interrupt on the worker's reader. Swift drops any event whose seq is older than the latest (R1084).
-  3. `rows(handle, index range, columns)` returns one page (default 200) of row records from U84, without Question/Answer. `qa_cells(handle, range, which)` is a separate call that U210 schedules on the maintenance lane (R1242).
+  3. `rows(handle, index range, columns)` returns one page (default 200) of row records from U84, without Question/Answer. `qa_cells(handle, range, which, cancel)` is a separate cancellable call on the query lane (KTD9, R1242).
   4. `reverse(handle)` reverses the held list in memory and keeps index-based selection mapped (R1142). `resort(handle, sort)` re-sorts the held id set without re-running the predicate (R1083).
   5. `map_selection(from_handle, ranges|ids, to_handle)` covers re-search preservation (R1154) and the Cards/Notes toggle mapping (R1116: cards → their notes; notes → all their cards; current note → its first card). `index_of(handle, id)` supports reviewer entry (R1113).
   6. `resolve_selection(handle, ranges, target)` → card ids or note ids. Notes mode expands to all cards of the selected notes (R1117). U86/U87 use it so 150k-id selections never cross the FFI.
   7. `invalidated_rows(handle, change_set)` → indexes to refetch: card changes are mapped to their note rows in notes mode. It also returns `removed` indexes for deleted notes/cards, which the handle prunes (R1156). Membership is never re-evaluated (R1155).
   8. `search_ids(text, mode, order=IdAscending, context)` is a blocking one-shot used by AnkiConnect (R1776–R1778). It resolves `deck:current` from the same config and returns the same error text.
-- **Streaming plan.** Cheap terms and the sort run in SQL. Slow leaves (U80 marks them) are then checked in final sort order, chunk by chunk, with rayon over each chunk. The first page is emitted as soon as the first page of matches in prefix order is confirmed. Order and membership equal the non-streamed result.
+- **Streaming plan.** Cheap terms and the sort run in SQL, reusing U90's cached sorted id list when the cheap predicate is unchanged. Slow leaves (U80 marks them) are then checked in final sort order, chunk by chunk, on the worker's own rayon pool. The first page is emitted as soon as the first page of matches in prefix order is confirmed. Order and membership equal the non-streamed result.
 - **Handles** hold ordered ids (8 bytes each), the request seq, the change-stream seq and the generation. The registry keeps a small LRU (current plus previous per session) to respect R1851. A handle from an older generation returns `StaleGeneration` (KTD17).
 - **Contexts** are built by the engine from config, the day clock (U40) and now. Swift never builds a `SearchContext`.
 
@@ -7065,6 +7249,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - A handle used after `CollectionReplaced` → `StaleGeneration`.
 - CoreBridge test: cancelling from Swift calls `token.cancel()`; the stale-seq filter drops a late page.
 - `reverse` then `rows(0..200)` → equals rows from a descending query (U84 property).
+- A `re:` search started while optimizer training runs meets the R1826 first-page budget (separate pools and QoS, KTD8, KTD9).
 
 **Verification:** Engine and CoreBridge tests pass. `conformance/scenarios/browser/modes/` passes. The U90 benchmarks show first page and row-page budgets met.
 
@@ -7215,7 +7400,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - The accelerator is used only when its watermark is at or above the query's change-stream seq. Otherwise execution falls back to the direct path.
   - Literal fragments shorter than three characters use a scan of the folded column instead of FTS.
 - **Invariant:** results with accelerators on and off are identical. This is enforced by a differential property test under random edits, and by a debug-build assertion mode that runs both paths.
-- **Other optimizations:** id-list caching for unchanged predicates on re-sort, a prepared-statement cache for fixed row-page statements, and rayon chunking of slow leaves (U85).
+- **Sorted-list cache.** The sorted id list of the query's cheap-term predicate is cached, keyed by (canonical cheap predicate, sort, mode, change seq). When typing changes only slow leaves, the list is reused and only the slow leaves are re-checked, in sort order. A derived sort-rank table (card id → rank) for the default columns (sort field, due, created) lives in the derived store and is updated from the change stream. FTS candidates from the attached derived DB are passed as an `rarray` table-valued parameter (no TEMP tables, U84) and intersected while walking the cached sorted list.
+- **Other optimizations:** a prepared-statement cache for fixed row-page statements, and chunking of slow leaves on the search worker's pool (U85).
 - **Benchmarks** run in Docker and natively on macOS against the synthetic 150k-card / 1.2M-revlog collection. The U12 gate fails CI on regression (R1246).
 
 **Execution note:** First land the U85 baseline benchmarks without accelerators. Add accelerators only for budgets that baseline misses, and only after the equivalence property test exists.
@@ -7225,13 +7411,17 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Stale watermark (derived store one change behind) → direct path is used; results are correct.
 - Derived DB deleted while the app runs → searches fall back, a background rebuild starts, results are unchanged.
 - An edit that changes `Über` to `Uber` → the next search `über` no longer returns the note, even before the derived update applies.
-- Benchmarks at 150k cards:
-  - deck, tag, state, flag, id and recent-event searches: first page < 30 ms (R1081)
-  - plain text: < 100 ms (R1081)
-  - `re:`, `nc:`, `sc:`, `w:`, field-glob and `prop:r`: first page < 300 ms (R1082)
+- Benchmarks at 150k cards, core first page on the M3 Max per the U241 decomposition (about 50% of each device budget):
+  - deck, tag, state, flag, id and recent-event searches: ≤ 15 ms (R1081)
+  - plain text: ≤ 50 ms (R1081)
+  - `re:`, `nc:`, `sc:`, `w:`, field-glob and `prop:r`: ≤ 150 ms (R1082)
+  - row page fetch plus decode: ≤ 15 ms
+  - typing `über` at 15 chars/s: every keystroke after the first reuses the cached sorted list (signpost), and the first page meets R1825 from dispatch
   - sort-column change: < 100 ms, including deck/notetype/template names and notes-mode aggregates (R1083)
   - mode toggle and reverse: < 100 ms (R1244)
   - tag-all and move-all on 150k: complete in the background while a concurrent row-page reader stays under 16 ms per page (R1245)
+
+**Patterns to follow:** U26 derived-store components; KTD3 role readers; U85 streaming plan.
 
 **Verification:** The equivalence property suite passes in T0. The benchmark suite meets every listed budget on the M3 Max in Docker and natively, and on the iPhone 17 Pro via the U12 device run. The regression gate is wired into `tools/mg bench`.
 
@@ -7321,25 +7511,26 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U95. Day buckets and incrementally maintained review aggregates
 
-**Goal:** Give `meguri-stats` its two day mappings (Anki day, heatmap civil day) and the always-resident review aggregates (Home per-day totals, heatmap row index, card → home-deck table, studied-today counters), kept current from engine commits without ever rescanning the review log while the user waits.
+**Goal:** Give `meguri-stats` its two day mappings (Anki day, heatmap civil day) and the always-resident review aggregates (Home per-day totals, per-(day, deck) heatmap counts, card → home-deck table, studied-today counters), kept current from engine commits without ever rescanning the review log while the user waits.
 
 **Requirements:** R1269–R1276, R1278–R1281, R1286–R1288, R1292 (per-day totals are never released), R1295, R290–R292, R304. Tests enforce AE5 (day attribution), AE52, AE53 (Home count), AE58 (heatmap side), AE6 (count part).
 
-**Dependencies:** U3, U4, U5, U11, U22, U23, U24, U25, U26, U40.
+**Dependencies:** U3, U4, U5, U11, U22, U23, U24, U25, U26, U38, U40.
 
 **Files:**
 - `specs/stats/day-buckets.md`, `specs/stats/counting-rules.md`, `specs/stats/heatmap-config.md` (read semantics and defaults of the synced `heatmap` key)
 - `conformance/scenarios/stats/day-buckets/*.yaml`, `conformance/scenarios/stats/heatmap-totals/*.yaml`, `conformance/goldens/stats/day-buckets/`, `conformance/goldens/stats/heatmap-totals/`
 - `oracle/driver/ops/heatmap_addon.py` (oracle-maintainer role only; the Review Heatmap add-on v1.0.1 pinned by hash inside the AGPL quarantine, driven headless against the oracle collection)
-- `core/crates/meguri-stats/Cargo.toml`, `core/crates/meguri-stats/src/lib.rs`, `src/day.rs`, `src/tz.rs`, `src/heatmap_config.rs`, `src/aggregates/mod.rs`, `src/aggregates/day_totals.rs`, `src/aggregates/row_index.rs`, `src/aggregates/card_table.rs`, `src/aggregates/studied_today.rs`, `src/aggregates/persist.rs`, `src/service.rs`
+- `core/crates/meguri-stats/Cargo.toml`, `core/crates/meguri-stats/src/lib.rs`, `src/day.rs`, `src/tz.rs`, `src/heatmap_config.rs`, `src/aggregates/mod.rs`, `src/aggregates/day_totals.rs`, `src/aggregates/day_deck_counts.rs`, `src/aggregates/card_table.rs`, `src/aggregates/studied_today.rs`, `src/aggregates/persist.rs`, `src/service.rs`
 - `core/crates/meguri-stats/tests/day_buckets.rs`, `core/crates/meguri-stats/tests/aggregates_incremental.rs`
 - `core/crates/meguri-testkit/src/observe/stats.rs` (scenario observations `heatmap_totals`, `studied_today_raw`)
+- `core/crates/meguri-host/src/wiring/stats.rs` (registers the stats observers with U38)
 
 **Approach:**
 1. Day mapping. The Anki day index and `next_day_at` come from U40's day clock and are never recomputed in this crate (R1272). The heatmap day (R1270) is the civil date of (instant − rollover hours) in the device zone, using that zone's offset at the instant. The core receives the IANA zone id plus current offset through U40's clock injection and resolves historical offsets with `jiff` and a bundled tz database (no system tz lookup, so Docker and device agree). Rows dated after now map to today (R1280). If the zone id is unknown, fall back to the current fixed offset and log it.
 2. Resident tier, built once per open and never released while the collection is open:
    - Home per-day totals under the current heatmap rules (`limresched`, `limcdel`, `limdecks` with children, R1336–R1341).
-   - A compact heatmap row index with one entry per revlog row: heatmap day, card slot, rated/unrated flag, type. Deck-scoped and `limdecks`-filtered heatmaps filter this index through the card table at query time (R1287).
+   - Counts per (heatmap day, home deck, rated/unrated, type), so the size is O(days × decks) rather than one entry per revlog row (R1851). Deck-scoped and `limdecks`-filtered heatmaps sum the matching decks at query time (R1287). A card move or delete re-attributes that card's rows through the `revlog.cid` index.
    - A card table: card id → slot, home deck (`odid` else `did`), current `did`, queue, due, exists. U96 uses it for forecasts and U98 for deck scopes.
    - Studied-today count and time for Anki day 0, counting types 0–3 across the whole collection including deleted cards (R1277, R1288, R1296).
 3. Maintenance. The stats service registers as an in-core derived-state observer on U24's op executor. It receives committed row payloads on the writer thread, before the ChangeSet goes out, so any read after an OpResult sees updated totals. This needs a cross-area contract with U24/U25 (see coverage note):
@@ -7348,7 +7539,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
    - card deletes flip `exists`; card moves update the card table;
    - `CollectionReplaced`, a `heatmap` or `rollover` config change, a time-zone change (U40 event, R1273) or an external change (R1453) triggers a background rebuild. The rebuild runs from a read snapshot at change-seq S and then replays the buffered ChangeSets after S;
    - `RolledOver` resets the studied-today counters with one indexed revlog range read.
-4. Persistence. Per-day totals and studied-today values are persisted in `meguri-derived.db` (U26). The validity key covers collection identity, revlog row count and max id, rollover, zone id and a hash of the `heatmap` config. Persisted totals are used for the first paint after open and replaced when the key mismatches. This crate never writes `collection.anki2` (R1295).
+4. Persistence. Per-day totals, the per-(day, deck) counts, the card table and the studied-today values are persisted in `meguri-derived.db` (U26). The validity key covers collection identity, revlog row count and max id, rollover, zone id and a hash of the `heatmap` config. At open they load without a scan (R1823). Only on a key mismatch does a rebuild scan, in the background at utility QoS, after the deck list is interactive (R1818). This crate never writes `collection.anki2` (R1295).
 5. In-crate query API: Home or deck-subtree day → count maps, first history day, studied-today values. U96, U97 and U100 consume it.
 
 **Execution note:** The spec writer comes first. The oracle-maintainer adds the add-on op so heatmap goldens come from the real add-on. The implementer then works test-first against the goldens.
@@ -7365,12 +7556,13 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Covers AE53 (Home part). 50 reviews today, 10 of them on a card deleted afterwards → Home per-day total for today 50, studied-today count 50.
 - Covers AE6 (count part). 45 ease-0 rows plus 10 rated rows today: `limresched` true → 10, false → 55. After deleting one reviewed card, Home stays 10 and the deck subtree query returns 9.
 - Studied-today excludes type 4 and 5 rows and includes type 3 rows (R1277).
-- Incremental equivalence (property test): random sequences of answer, undo, redo, sync-incoming revlog, card delete, card move and deck delete give the same totals, row index and counters as a fresh rebuild.
+- Incremental equivalence (property test): random sequences of answer, undo, redo, sync-incoming revlog, card delete, card move and deck delete give the same totals, per-(day, deck) counts and counters as a fresh rebuild.
+- Cold open at 150k cards / 1.2M rows with a valid persisted key → no revlog scan before the deck list is interactive (query-plan check).
 - `RolledOver` resets studied-today. A one-way download (`CollectionReplaced`) rebuilds everything, and stale persisted totals are never shown under the new generation.
 - A tampered persisted validity key (rollover changed outside the app) triggers a rebuild, not a stale paint.
 - Opening the collection, building aggregates and querying them leave `col.mod`, every usn and the config table byte-identical (R1295).
 
-**Verification:** Every scenario in `conformance/scenarios/stats/day-buckets/` and `conformance/scenarios/stats/heatmap-totals/` matches its golden across the TZ matrix. The incremental-equivalence property test passes 10k cases. Resident tier memory at 1.2M revlog rows is measured and recorded for U104.
+**Verification:** Every scenario in `conformance/scenarios/stats/day-buckets/` and `conformance/scenarios/stats/heatmap-totals/` matches its golden across the TZ matrix. The incremental-equivalence property test passes 10k cases. Resident tier memory at 1.2M and 4M revlog rows is measured and recorded for U104.
 
 ### U96. Heatmap grid data, streak stats and `heatmap` config writer
 
@@ -7460,14 +7652,13 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** `conformance/scenarios/stats/studied-today/` and `conformance/scenarios/stats/today/` match oracle goldens across the TZ matrix. The Home line read is O(1) with no SQL, checked by a test that asserts zero reader-connection queries.
 
-### U98. Stats graph engine: columnar caches, scope resolution, binning and browse queries
+### U98. Stats graph engine: columnar caches, scope resolution, graph aggregates and browse queries
 
 **Goal:** Build the shared machinery every Stats-screen graph uses:
-- lazily built columnar revlog and card caches;
+- columnar revlog and card caches, built in the background and memory-mapped;
 - scope and history resolution;
-- Anki-identical binning and quantile ranges;
-- click-to-browse query composition;
-- one request API that returns pre-binned variants, so per-graph controls never call the core.
+- finest-resolution aggregates per graph, which Swift re-buckets (U226), so per-graph controls never call the core;
+- click-to-browse query composition.
 
 **Requirements:** R1282–R1285, R1289, R1290 (engine part), R1291 (off-main data side), R1292 (columnar cache release), R1293, R1294, R1350–R1353 (data), R1355, R1362, R1364 (cumulative data), R1365 (bin bounds data), R1367 (range availability), R1417 (query composition), R1420.
 
@@ -7477,11 +7668,14 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `specs/stats/graphs-common.md` (scopes, history window, bin edges, range definitions, quantile method, day-label bounds), `specs/stats/browse-queries.md`
 - `conformance/scenarios/stats/graphs/scope/*.yaml`, `conformance/scenarios/stats/browse-queries/*.yaml`, goldens under `conformance/goldens/stats/graphs/`
 - `oracle/driver/ops/stats.py` (oracle-maintainer: raw graph data for a search and history window; the binned-output source per the coverage note's open question)
-- `core/crates/meguri-stats/src/graphs/mod.rs`, `src/graphs/cache.rs`, `src/graphs/scope.rs`, `src/graphs/request.rs`, `src/graphs/binning.rs`, `src/graphs/queries.rs`
-- `core/crates/meguri-stats/tests/graphs_cache_sync.rs`, `core/crates/meguri-stats/tests/binning.rs`, `core/crates/meguri-stats/tests/browse_queries.rs`
+- `core/crates/meguri-stats/src/graphs/mod.rs`, `src/graphs/cache.rs`, `src/graphs/column_files.rs`, `src/graphs/scope.rs`, `src/graphs/request.rs`, `src/graphs/aggregates.rs`, `src/graphs/queries.rs`
+- `core/crates/meguri-stats/tests/graphs_cache_sync.rs`, `core/crates/meguri-stats/tests/aggregates.rs`, `core/crates/meguri-stats/tests/browse_queries.rs`
 
 **Approach:**
-1. Columnar caches (R1289). Revlog columns: id, card slot, ease, ivl, lastIvl, factor, time, type. Card columns: id, nid, did, odid, type, queue, due, odue, ivl, FSRS stability, difficulty, decay, last-review time. Both are built lazily on first Stats use from a read connection and kept current through the same in-core observer as U95 (answer, undo, card change, delete, sync). Both can be released on a memory-warning call (R1292), which U103 exposes. The 40 MB target at 1.2M rows is asserted in U104.
+1. Columnar caches (R1289). Revlog columns: id, card slot, ease, ivl, lastIvl, factor, time, type. Card columns: id, nid, did, odid, type, queue, due, odue, ivl, FSRS stability, difficulty, decay, last-review time.
+   - Written as files in the derived store and memory-mapped read-only, so their clean pages stay out of the app's footprint. Columns use the narrowest lossless widths.
+   - Built in the background at utility QoS on the shared maintenance reader (KTD3) once Home has been idle for 2 s after launch, or loaded from the persisted column files. This still meets R1289's "lazy", and the build never runs on the launch path. History-window columns are built first; all-history columns only when all history is selected.
+   - Kept current through the same in-core observer as U95 (answer, undo, card change, delete, sync); released on a memory-warning call (R1292), which U103 exposes. U104 asserts the footprint.
 2. Scope resolution:
    - Collection = every revlog row including deleted cards' rows (R1281), and existing cards.
    - Deck = fast path over `did`/`odid` in the deck subtree with `deck:` semantics, no search run (R1283).
@@ -7489,8 +7683,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
    - Revlog rows are attributed by the card's current deck (R1282).
    - The history window starts at `next_day_at − 366 × 86,400 s` or covers all history (R1352). Card graphs ignore it.
    - No request ever touches `curDeck` (R1353).
-3. Request API: (scope, history, requested graph set, cancel token) → results for the requested graphs. The resolved scope (bitsets and filtered row ranges) is memoized per (scope, history, generation, change seq), so the UI can ask for above-the-fold graphs first and the rest next without repeating work. Each graph returns every range and toggle variant pre-binned (count/time, backlog on/off, separate inactive on/off, Young/Mature/All, every range), so control changes re-bin nothing in the core (R1355, R1290 ≤ 16 ms). Range options needing all history are returned only with all history (R1367).
-4. Binning (R1293, R1362): at most 70 bins with Anki's edges per range; quantile ranges taken from cumulative histograms (never one value per card); cumulative running totals for overlays (R1364); each bin carries its start/end day offsets or value bounds so Swift formats the "Today", "In a-b days" and similar labels (R1365).
+3. Request API: (scope, history, requested graph set, cancel token) → results for the requested graphs. The resolved scope (bitsets and filtered row ranges) is memoized per (scope, history, generation, change seq), so the UI asks for above-the-fold graphs first and the rest as they scroll into view without repeating work (R1838). Range options needing all history are returned only with all history (R1367).
+   - Conflict call-out (R1355, R1838, R1289): R1355 asks for one core call per scope or history change, while R1838 computes below-the-fold graphs only when scrolled into view. The plan makes two memoized calls per change (above the fold, then the rest), and reads R1355's intent as "controls never call the core", which still holds. R1289's "lazy" is read as "never on the launch path": the idle-time background build in step 1 satisfies it.
+4. Aggregates (decision): per graph, the core returns only finest-resolution aggregates: per-day arrays bounded by the history window, and per-value histograms at the finest bin width the spec allows (at most a few thousand buckets), with each bucket's day offsets or value bounds. No per-card or per-revlog value crosses the FFI. U226's `StatsBinning` owns Anki's bin edges, quantile ranges from cumulative histograms and every control variant (R1293, R1362, R1355, R1290).
 5. Browse queries (R1417, R1420): each clickable bin, cell or label carries its item query from the graph spec. `queries.rs` joins it with the scope search (scope in parentheses, AND, nothing for collection scope). Every generated string is parsed by U80 in tests.
 
 **Execution note:** Spec writer first. The oracle-maintainer extends the stats op. The implementer then works test-first. Binning goldens follow the decision recorded in the coverage note.
@@ -7504,7 +7699,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - The last-12-months window starts exactly at `next_day_at − 366 d`. A row 1 ms earlier is excluded and a row at the boundary is included.
 - Cache sync: answer, undo, delete card, move card, sync-incoming revlog, then request again. Results equal those of a cold cache build (property test over random op sequences).
 - Released cache: after a memory-warning release, the next request rebuilds and returns identical data. Per-day totals (U95) are unaffected.
-- Binning: an interval histogram with 1 card at ivl 36,500 days and the 95% range stays ≤ 70 bins with the spec's edges. Quantiles from cumulative counts equal brute-force quantiles over expanded values for 10k random distributions.
+- Aggregates: every graph's record holds only per-day arrays and finest-width histograms (schema check); summing a histogram equals the scope's card count; an interval histogram with 1 card at ivl 36,500 days stays within the bucket cap.
+- Background build: no column build starts before Home has been idle 2 s after launch; a persisted, still-valid column file loads without a revlog scan.
 - Covers AE59 (availability part). With history "last 12 months", no "all" variant is returned for Reviews, Hourly or Buttons and no All-time Retention row. With all history, all of them are present.
 - Browse query composition: scope `deck:"Japanese"` plus item `"is:new"` gives `(deck:"Japanese") AND "is:new"`. Collection scope gives the item query alone. Every query in every golden parses with U80 and round-trips through its canonical writer.
 - Viewing graphs leaves `col.mod`, usn and the config table unchanged (R1295).
@@ -7533,7 +7729,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - the maximum day count for the square-root colour scale;
   - `firstDayOfWeek` read from config (U98's config read).
   - A user change of `firstDayOfWeek` from the graph menu is written through the generic config op exposed in U103.
-- Reviews (R1385–R1389): five kinds in count and time variants for each range, including the "0–4" first-bin shift for year/all ranges, plus the full table (days studied "a of b" with no false 100%, totals, averages, average answer time with cards/minute).
+- Reviews (R1385–R1389): per-day counts and times for the five kinds (the range bins and the "0–4" first-bin shift are U226's), plus the full table (days studied "a of b" with no false 100%, totals, averages, average answer time with cards/minute).
 - Retention (R1405–R1408): the true-retention row set bounded at `next_day_at − k × 86,400 s`, Young/Mature/All variants and "N/A" cells, with no per-day de-duplication.
 - Hourly (R1410–R1412): 24 buckets using the current UTC offset for all history, excluding Filtered, Manual and Rescheduled rows, with counts, correct counts and percentages.
 - Answer Buttons (R1413–R1414): three groups × four buttons with each group's correct percentage and totals. Out-of-range buttons and Manual/Rescheduled rows are skipped.
@@ -7541,7 +7737,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Execution note:** Spec writer first, using the stats oracle op's raw graph data for numbers. Then the implementer works test-first.
 
-**Patterns to follow:** U98 request/variant shape, binning and query modules.
+**Patterns to follow:** U98 request shape, aggregates and query modules; U226 owns binning.
 
 **Test scenarios:**
 - Covers AE58 (Calendar side). Europe/Paris spring-forward 03:30 CEST review: the Calendar date matches the Anki oracle's date and differs from U95's heatmap date as asserted there.
@@ -7561,12 +7757,13 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R1274 (widget data at rollover), R1431 (data), R1433–R1436 (data), R1438 (empty-state data), R1840 (snapshot side), R312, R315–R318 (merged per KTD16). Tests enforce AE51 (widget part).
 
-**Dependencies:** U95, U96, U97, U24, U40.
+**Dependencies:** U95, U96, U97, U24, U38, U40.
 
 **Files:**
 - `specs/stats/widget-snapshot.md` (Meguri-authored contract between core and the widget extension: schema, versioning, field semantics, write and change rules; no Anki behavior)
 - `core/crates/meguri-stats/src/widget/mod.rs`, `src/widget/schema.rs`, `src/widget/builder.rs`, `src/widget/writer.rs`, `src/widget/scheduler.rs`
 - `core/crates/meguri-stats/tests/widget_snapshot.rs`
+- `core/crates/meguri-host/src/wiring/stats.rs` (modify: registers the widget builder with U38)
 - `conformance/scenarios/stats/widget/*.yaml`, `conformance/goldens/stats/widget/*.json` (Meguri goldens. U165 reuses them as decoder and snapshot-test fixtures for the widget extension.)
 
 **Approach:**
@@ -7581,13 +7778,13 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
    - No deck names, card content or due-count fields: forecast appears only as cell levels.
 2. Triggers (KTD16, flow 5):
    - The stats service thread subscribes in-core to ChangeSets touching revlog rows, card due/queue/type, the `heatmap` or `rollover` config, or the deck set, and to `CollectionReplaced`, `RolledOver` and time-zone change.
-   - It rebuilds after a ~2 s quiet period.
-   - An explicit `flush(reason, deadline)` bypasses the debounce. It is used for session end, background and C8 `prepareForSuspend`, called by U151.
+   - It rebuilds after a ~2 s quiet period. The debounce stays in the core (KTD5) and is a `SuspendParticipant` (U32): `suspend` runs a pending build within the deadline, then stops the timer.
+   - An explicit `flush(reason, deadline)` on the control lane bypasses the debounce. U151 calls it at session end and in its background sequence.
 3. Write rule:
    - Serialize deterministically, with stable key order and no wall-clock fields except `refreshedAt`.
    - Compare the content without `refreshedAt` to the last written content, which is read back from the file on first run.
    - Write via temp file in the same directory, fsync, then rename, when the content changed or when `refreshedAt` is older than 12 h. This keeps the 24 h staleness note (KTD16) honest without reload churn.
-   - Report `{changed, refreshedOnly}` on the change stream as a `WidgetSnapshotWritten` event (exposed in U103). The App Group file path (`widget-snapshot.json`, KTD12) is injected at open by Swift. The core never resolves App Group containers.
+   - Report `{changed, refreshedOnly}` on the change stream as a `WidgetSnapshotWritten` event (exposed in U103). The App Group file path (`widget-snapshot.json`, KTD12) arrives through `start_open` (U37). The core never resolves App Group containers.
 4. With no collection the core writes nothing. The extension (U165) shows the single empty-state string when the file is absent.
 
 **Execution note:** No spec-writer pass for the schema (Meguri-own format). Streak and level semantics come from U96's spec and goldens. Write the spec first, because U165 builds against it in parallel.
@@ -7644,7 +7841,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Execution note:** Spec writer first. The implementer then works test-first against oracle graph data. Retrievability goldens carry the scenario-declared 1e-6 tolerance (oracle-harness float rule).
 
-**Patterns to follow:** U98 request/variant, binning and query modules; FSRS calls only through the pinned `fsrs` crate (KTD8).
+**Patterns to follow:** U98 request shape, aggregates and query modules (U226 owns binning); FSRS calls only through the pinned `fsrs` crate (KTD8).
 
 **Test scenarios:**
 - Covers AE57. 30 overdue review cards, 5 buried due today, 3 buried due tomorrow. Backlog off: no negative days, today excludes the 5, tomorrow includes the 3, and daily load includes all 38 cards. Backlog on: the 30 cards appear on negative days.
@@ -7684,9 +7881,10 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - setHeatmapSettings(patch);
   - setStatsPreference(key ∈ {futureDueShowBacklog, cardCountsSeparateInactive, firstDayOfWeek}, value), a config op that preserves value types;
   - releaseStatsCaches() for memory warnings;
-  - configureWidgetSnapshot(path), flushWidgetSnapshot(reason, deadline).
-- `CoreBridge` routes heatmap, studied-today and Card Info to the query lane. Stats graphs go to the query lane with a `CancelToken`, so a scope change cancels the in-flight request. The widget flush goes to the maintenance lane.
-- New change-stream events:
+  - flushWidgetSnapshot(reason, deadline). The snapshot path arrives at open (U37).
+- `statsGraphs` returns U98's finest-resolution aggregates only; no per-card or per-revlog values cross the FFI.
+- `CoreBridge` routes heatmap, studied-today and Card Info to the query lane. Stats graphs go to the query lane with a `CancelToken`, so a scope change cancels the in-flight request. The widget flush goes to the control lane (KTD9).
+- New Stats variants of the core event channel (KTD9), each carrying the `causeSeq` of the ChangeSet that caused it:
   - `StatsChanged{homeTotals, deckIds?, studiedToday, graphsStale, reason}` after answer, undo, sync, rollover, zone change, config change or replace (R1274, R1300, R1356);
   - `CardStatsChanged{cardIds}` derived from C2 card/revlog ids through U92's `card_info_affected` for Card Info refresh (R1429);
   - `WidgetSnapshotWritten{changed, refreshedOnly}` for U151 to call WidgetCenter only when changed.
@@ -7702,6 +7900,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `releaseStatsCaches()` followed by statsGraphs() returns identical data (rebuild path).
 - A Card Info subscriber for card X receives `CardStatsChanged` when X is edited, answered or touched by sync incoming, and not for unrelated cards.
 - A widget flush with a 1 s deadline completes within the deadline on the 150k fixture and reports `changed`.
+- The largest `statsGraphs` record at 150k cards / 1.2M rows is ≤ 256 KB.
+- A `StatsChanged` event caused by an answer carries that answer's ChangeSet `seq` as `causeSeq` and arrives after it.
 
 **Verification:** `swift test` on MeguriCore passes `StatsBridgeTests`. Rust FFI tests pass. Every export appears in the signpost log during the U104 benchmark run.
 
@@ -7737,7 +7937,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
    - heatmap + streaks ≤ 5 ms;
    - all graphs for deck and collection scope ≤ 50 ms;
    - search scope = search time + ≤ 50 ms;
-   - columnar cache ≤ ~40 MB;
+   - stats footprint (`phys_footprint`, not RSS) ≤ 40 MB at 150k / 1.2M rows and ≤ 60 MB at 500k / 4M rows;
+   - cold open at 150k / 1.2M rows: no revlog scan before the deck list is interactive (query-plan check);
+   - cold Stats open before the caches are built: first graphs ≤ 200 ms, all graphs ≤ 500 ms (R1837);
    - widget build ≤ 10 ms;
    - studied-today O(1).
    - Run on the reference Mac. The iPhone numbers come from U240+ device perf runs consuming the same harness.
@@ -7877,28 +8079,28 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `conformance/scenarios/sync/normal/`, `conformance/scenarios/sync/conflicts/`, `conformance/scenarios/sync/holdback/`
 
 **Approach:**
-1. Preflight, on the maintenance lane: run the C6 rollover check and unbury if the day rolled over (R1520, R599), then `meta` (U106) with no write lock.
-2. Snapshot: a dedicated reader connection holds one read transaction for the job's duration (seconds; outgoing rows stream in 250-object chunks, so memory stays bounded). The held-back run comes from U25: the contiguous top-of-stack entries of the active session down to and including the latest answer (KTD6). Their before-images replace the live rows in the outgoing set and in the counts. Rows the run created count as absent, the run's revlog rows are absent, and deck rows (today counters) and config keys revert to their before-images. Every other undo entry whose rows are in the snapshot is flagged upload-pending in U25, which disables its undo with reason "Syncing" until the job ends.
+1. Preflight, as a KTD9 job started from the maintenance lane: run the C6 rollover check and unbury if the day rolled over (R1520, R599), then `meta` (U106) with no write lock.
+2. Snapshot: the shared maintenance reader (KTD3) holds one read transaction for the job's duration (seconds; outgoing rows stream in 250-object chunks, so memory stays bounded). The held-back run comes from U25: the contiguous top-of-stack entries of the active session down to and including the latest answer (KTD6). Their before-images replace the live rows in the outgoing set and in the counts. Rows the run created count as absent, the run's revlog rows are absent, and deck rows (today counters) and config keys revert to their before-images. Every other undo entry whose rows are in the snapshot is flagged upload-pending in U25, which disables its undo with reason `UploadPending` until the job ends.
 3. Protocol order per R1519: `start` (R1521), local graves in chunks of at most 250 (R1522), `applyChanges` from the snapshot (R1523; config table and `crt` only when local is newer), `chunk` loop into the stage, `applyChunk` loop from the snapshot (R1529), `sanityCheck2`, `finish`.
 4. Stage: incoming graves, unchunked changes and chunks go into a scratch SQLite file next to the collection. It is attached to the writer only during the commit, deleted at the end, and swept at launch (R1493, U22). Notes get `sfld`/`csum` computed while staging (R1528). A staged note whose notetype is neither local nor incoming → missing-notetype error before `finish`. An accepted incoming notetype whose field or template count differs from the local one → abort with notetype-schema-changed, and the caller offers a one-way sync (R1525).
 5. Sanity (R1530, read against the virtual state; see coverage): verify that every pending row of the virtual outgoing set was sent, then send counts of the virtual state plus the staged incoming changes. A `bad` reply → discard the stage, send `abort`, set `scm` through a Maintenance-source op (R1533), and keep the server's counts from the reply for the one-way choice (R2019, U109).
-6. Commit: one short write transaction through the op executor with source SyncIncoming:
+6. Commit: one write transaction through the op executor with source SyncIncoming, written in U23's `CallerSupplied` stamping mode. It declares its expected write phase to U24 from the staged row counts; above about 200 ms the executor publishes the delay and U43 keeps answers in its overlay, committing them right after the merge with their `stateToken` preconditions (R727–R729, KTD6). Steps:
    - remote graves applied (R1521);
+   - an incoming note, card, deck, deck config or notetype whose id has a local grave with `usn = -1` written after the snapshot is skipped, so the local deletion wins as it does in Anki, where graves go up at `start`; incoming cards whose note is absent after that rule are skipped too. Skipped ids are reported in the SyncIncoming ChangeSet diagnostics;
    - notetypes, decks and deck configs merged by the mtime rule with unique names (R1524);
    - config table replaced when the server is newer (R1526), except keys that became pending after the snapshot, which keep the newer local value (this reproduces Anki's result for a change made just after the sync);
    - tags registered;
    - cards and notes merged with the pending-and-newer rule against the live rows (R1527);
    - revlog inserted only when absent;
-   - uploaded rows marked with the server USN only where the live row still equals the snapshot image (id, mtime, `usn = -1`);
-   - sent graves marked;
-   - col finalised per R1531;
+   - uploaded rows and sent graves get the server USN only when (a) the key is not in the held-back run's touched set (U25) and (b) no op with a `seq` above the snapshot's `seq` touched the key. The job collects these keys from the U24 ChangeSets and U23 journal emitted since the snapshot. Full-row equality with the image actually sent is an acceptable alternative; an mtime comparison is not, because mtimes have one-second resolution;
+   - col finalised per R1531; if the live `scm` differs from the snapshot's `scm` (a schema change, Check Database or R1547 during the job), `scm` is set to `ls` + 1 ms in the same transaction, so the one-way requirement survives (R1475);
    - if any `usn = -1` rows remain (held back, or written during the sync), `mod` is bumped by 1 ms so the status shows pending changes (KTD6).
 7. Reconciliation (KTD7):
    - The ChangeSet (source SyncIncoming) is emitted.
-   - U25 marks the upload-pending entries uploaded, never undoable again. When incoming changes were applied, it clears all undo and redo entries except the held-back run, which is also cleared if incoming touched its rows.
-   - U43 refreshes queues in the background, keeping the current card and the pre-renders whose (cardId, stateToken) are unchanged.
+   - U25 marks the upload-pending entries uploaded, never undoable again. When incoming changes were applied, it clears all undo and redo entries except the held-back run, which KTD7 also clears when any staged incoming row or grave targets its touched set, whether or not the merge applied it.
+   - U43 refreshes queues in the background under the KTD7 keep rule.
    - U26 applies incremental derived updates.
-8. Cancel and errors: before `finish` is sent → discard the stage, send `abort` fire-and-forget (R1532), clear U25's upload-pending flags. After `finish` → cancel is ignored and the commit completes. A crash between `finish` and commit self-heals on the next sync, because the re-upload is idempotent (tested in U118). Background expiry (R1554) is a cancel.
+8. Cancel and errors: before `finish` is sent → discard the stage, send `abort` fire-and-forget (R1532), clear U25's upload-pending flags. Once the `finish` request has been sent, the server may have committed: U25 marks the upload-pending entries uploaded whatever the outcome. If the response is missing or is an error, the stage is discarded, no USN marking or R1531 finalisation happens, and the job reports `Interrupted`, so the next sync re-sends idempotently. A crash between `finish` and commit self-heals the same way (tested in U118). Background expiry (R1554) is a cancel.
 9. Progress (R1535): stage (connecting, syncing, finalising) and sent/received counts, throttled to 10 Hz.
 10. Answers made while the job runs commit at once through the op executor and are not in this upload (R1495, R1845, R2006). The UI never waits.
 
@@ -7920,7 +8122,14 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - The held-back run includes a bury made after the last answer → both are held back; the server's deck today counters reflect 29 answers; `sanityCheck2` passes.
 - Covers AE68 (first clause). The stub delays `chunk` by 3 s while 3 answers are made → each is durably committed within 1 s (fsync observed) and absent from this upload; after the sync the status is PendingChanges (mod bump); the next sync uploads them.
 - A note edited during the sync, after its snapshot image was uploaded → the server holds the old version, the local row stays `usn = -1`, and the next sync uploads the new one.
-- Undo of an upload-pending answer during the sync → refused with reason Syncing. After success → refused with AlreadyUploaded. After a failed sync → the undo works.
+- Undo of an upload-pending answer during the sync → refused with reason `UploadPending`. After success → refused with `AlreadyUploaded`. After a sync that failed before `finish` was sent → the undo works.
+- The stub commits `finish` and drops the connection before replying → a pending answer and a pending deck delete are refused with `AlreadyUploaded`; the next sync converges with no sanity failure.
+- An answer and a flag on the same card in the same second, with the flag committed after the snapshot → after the sync the card is still `usn = -1`, the next sync uploads the flag, and a fresh oracle client C sees it.
+- A held-back answer whose card had a pending before-image in the same second → the card stays `usn = -1` after the sync.
+- The stub delays `chunk` while note N, which the server holds in a newer version, is deleted locally → after the sync N and its cards stay deleted with pending graves; the next sync sends the graves; `sanityCheck2` passes on both syncs and an oracle client C converges.
+- One-answer session; desktop renames the answer's deck and syncs; the local deck row is newer, so the rename is not applied → the held-back entry is cleared with `ClearedBySync`, the next sync uploads the deck row, and all parties converge.
+- A field is added and confirmed while the stub delays `chunk` → after the sync `scm > ls`, the status is OneWayNeeded, and the next sync returns OneWay without sending the notetype through `applyChanges`.
+- 150k incoming card updates while answering every 2 s → no answer is lost, each is durable within 1 s after the merge commits, and the merge write phase is recorded against its declared budget on the reference iPhone (U242).
 - Incoming change to a held-back card with a newer remote mtime → the remote row wins, the held-back undo entry is dropped, the local revlog row stays pending and uploads next sync, and `sanityCheck2` passes.
 - A session start sets `curDeck` during a sync in which the server's config is newer → `curDeck` keeps the local value and uploads next sync.
 - Covers AE27 (core part). An incoming change to the card on screen → a CurrentCardChanged event, and an answer carrying the old stateToken is rejected by U43's R727 check.
@@ -7960,14 +8169,14 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - check free disk space (R2015);
   - cancel and await a running media sync;
   - enter ExclusiveBusy (KTD17, U24) once the caller has confirmed and closed editors (U151).
-- Forced local backup through U127 before either direction (R1539, R2008).
+- Forced local backup through U127 before either direction (R1539, R2008), taken after U24's exclusive-entry drain.
 - Upload:
   1. If the server is not empty, first download its collection to a temp file, integrity-check it, wrap it as a `.colpkg` through U124, and store it in the backups folder under a name that Restore lists and retention never deletes (R1540; contract with U126).
-  2. `VACUUM INTO` a temp file (compacted, consistent, KTD3), then apply the R1541 transformation to that temp file: graves deleted, pending and structural USNs set to 0, `usn` incremented, `scm` and `ls` set to now.
+  2. `VACUUM INTO` a temp file (compacted, consistent, KTD3, after the drain), then apply the R1541 transformation to that temp file in U23's `CallerSupplied` mode: graves deleted, pending and structural USNs set to 0, `usn` incremented, `scm` and `ls` set to now. The transformed file is finalised as in U124 (single file, no `-wal`) before it is streamed.
   3. For AnkiWeb (feature only), compress to a temp `.zst` first and refuse above 100 MB compressed or 300 MB uncompressed (R1563). An uncompressed-size precheck from page counts also runs before every AnkiWeb sync starts.
   4. Stream to `upload`. Success only when the body is `OK`; any other body is the error text (R1542).
-  5. On `OK`, the transformed temp file replaces the live collection by atomic rename. Local then equals what the server holds, and the live file is compacted (R1655). On any failure the live collection is untouched.
-- Download: stream to a temp file in the collection folder, never fully in memory. Progress reports bytes and total, then "Checking…" (R1545). Then open with the collation, integrity check, set `ls = mod`, close, and atomically rename while every connection is closed (R1543, KTD3). Failure or kill leaves the original in place (R1544); leftovers are swept at launch.
+  5. On `OK`, the transformed temp file replaces the live collection through U124's verified-replace primitive with `ReplaceReason::FullUpload`. Local then equals what the server holds, and the live file is compacted (R1655). On any failure the live collection is untouched.
+- Download: stream to a temp file in the collection folder, never fully in memory. Progress reports bytes and total, then "Checking…" (R1545). Then the file passes the U124 open gate, `ls = mod` is set, and U124's primitive swaps it with `ReplaceReason::FullDownload` (R1543, KTD3). Failure or kill leaves the original in place (R1544); leftovers are swept at launch.
 - After either direction:
   - CollectionReplaced(generation + 1), and the whole undo history cleared (R725);
   - derived store rebuilt (R1489, U26) or revalidated after an upload swap;
@@ -7989,6 +8198,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - AnkiWeb-feature build with the U105 resolver override and a 120 MB-compressed collection → upload-too-large before any transfer. The same collection against a custom server → no limit check.
 - Covers AE86 (sync part). A meguri-cli download of a 150k-card collection is killed at 50% of the bytes → the previous collection opens unchanged, passes integrity check, holds every review committed before the download, and the temp file is gone after the next launch sweep.
 - The stub serves a truncated SQLite file → integrity failure, original untouched, error kind shown.
+- The server holds a collection with `ver` 19, or a v1-scheduler collection → the download is refused as unsupported; the local collection, generation and backups are unchanged. A schema-11 server file is upgraded on the temp copy before the swap.
+- T1: the uploaded file, downloaded by an oracle client, has zero graves and no `usn = -1` rows.
 - One-way requested during an active session → session-active error; nothing changes.
 - After a sanity mismatch → the facts include the server counts, and the backup precedes the swap (R2019).
 - Injected low free disk space → disk-full error before any transfer.
@@ -8012,7 +8223,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `conformance/scenarios/sync/media/tracking/`
 
 **Approach:**
-- Per entry: content hash (null for a deletion tombstone), size, mtime, a dirty flag (pending upload or deletion) and a pending-download flag (known on the server, not yet local; feeds R1584). Meta: last media USN, folder mtime at last check, last result counts. Partial indexes on dirty and pending-download, so 20k+ tombstones cost nothing (R1582).
+- Per entry: content hash (null for a deletion tombstone), size, mtime, a dirty flag (pending upload or deletion), a change counter incremented by every U31 write and every tracker re-hash (U111 uses it to mark clean safely), and a pending-download flag (known on the server, not yet local; feeds R1584). Meta: last media USN, folder mtime at last check, last result counts. Partial indexes on dirty and pending-download, so 20k+ tombstones cost nothing (R1582).
 - Detection (R1573): U31's write journal marks Meguri's own writes (add, replace, move to trash) dirty at write time. A folder-level check compares the folder mtime with the stored one and lists and stats entries only when it changed. Only files whose size or mtime changed are re-hashed. Skips follow R1574. NFD names found on disk are renamed to NFC with U31's normaliser and recorded as NFC adds.
 - No whole-folder listing or hashing at launch or before every sync (R1855).
 - Reset (R1502, R1581): clears sync state and the media USN but keeps the hash cache. The next sync then re-checks every file against the server and transfers nothing for files that match.
@@ -8051,7 +8262,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Approach:**
 1. Server media USN comes from the collection sync outcome (R1534) or `begin` (R1575).
 2. Pull: page `mediaChanges` until empty and apply the R1576 decision rules. Server deletions move local files to U31's trash, never a permanent delete (R2018). Downloads go 25 names per request; files are written through U31 (normalisation, dedupe). A non-normalised server name is saved under a normalised unique name and recorded as a deletion of the old name plus an upload of the new one (R1578). After each batch, one transaction records the entries and advances the media USN to the highest fully processed USN, which is the resume point (R1577).
-3. Push: up to 25 dirty entries per zip; stop adding files once the zip passes about 2.5 MB; deletions as tombstones (R1579). Files over 100 MB or empty are never included (R1565). An entry that fails validation is dropped from the state and the batch rebuilt. Processed entries are marked clean, and the USN advances only when the server USN equals the last USN plus the count sent (R1580).
+3. Push: up to 25 dirty entries per zip; stop adding files once the zip passes about 2.5 MB; deletions as tombstones (R1579). Files over 100 MB or empty are never included (R1565). An entry that fails validation is dropped from the state and the batch rebuilt. After the server accepts a batch, an entry is marked clean only if its U110 change counter is unchanged since it was added to the zip; otherwise it stays dirty for the next batch. The USN advances only when the server USN equals the last USN plus the count sent (R1580).
 4. After any change, `mediaSanity` with the present-file count. On a mismatch: reset (U110) and one automatic re-run, then report media-resync-failed (R1581).
 5. Events and flags:
    - MediaArrived(names) per batch drives re-rendering of pre-rendered and visible cards (spec-flow Q14; consumed by U67/U175).
@@ -8070,6 +8281,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Covers AE65. `a.mp3` is deleted locally before the first media sync finished, and the server still has it → `a.mp3` is downloaded again and no deletion is sent.
 - The server adds 60 files → three download requests of at most 25 names. Killed after batch 2 → the restart downloads only the remaining 10 (request log).
 - 30 small pending files → two upload zips (25 + 5). Five 1 MB files → the zip closes after the third file passes 2.5 MB.
+- `clip.mp3` is replaced with new bytes while its zip is in flight → after the batch the entry is still dirty, the next batch uploads the new bytes, and an oracle client receives them.
 - A 101 MB file → never put in a zip; the status records it once for Check Media (U130).
 - Server file named with forbidden characters → saved under the normalised name; delete plus upload recorded; an oracle client sees the normalised name after its next media sync.
 - An NFD-named file from an oracle client → stored as NFC locally; two more round trips produce no churn.
@@ -8084,21 +8296,22 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U113. Sync policy and status model
 
-**Goal:** Decide in the core, headless and testable, when automatic syncs run, how failures back off, and what the single sync status is, so Swift only wires platform events and timers.
+**Goal:** Decide in the core, headless and testable, when automatic syncs and optimizer steps run, how failures back off, and what the single sync status is. Swift (U151, U51) only executes the actions and arms the returned deadline (KTD5).
 
 **Requirements:** R1549, R1550, R1555, R1556, R1558, R1559 (status emission), R1560 (data), R1561 and R1562 (presentation class), R1548 (pause semantics), R1534 (media trigger), R88, R726, R89, R458, R123, R124, R127 (decision part); AE9 (cadence), AE68 (second clause as amended; see coverage).
 
-**Dependencies:** U106, U107, U109, U111, U24 (lifecycle, change stream), U43 (session start and end events), U47 (optimizer-check contract).
+**Dependencies:** U106, U107, U109, U111, U24 (lifecycle, change stream), U38 (host wiring), U43 (session start and end events), U47 (optimizer-check contract).
 
 **Files:**
 - `core/crates/meguri-sync/src/policy/mod.rs`, `policy/events.rs`, `policy/backoff.rs`, `policy/status_model.rs`
+- `core/crates/meguri-host/src/wiring/sync.rs` (feeds U43's session events and the lifecycle into the policy)
 - `core/crates/meguri-sync/tests/policy.rs`
 - `specs/sync/policy.md`
 
 **Approach:**
 - A pure state machine with an injected clock and no I/O.
-  - Inputs: launch; foreground (with time away); background; quit requested; session started; session ended (summary dismissed, KTD6); editor dirty or clean; timer fired; sync finished (outcome); manual sync requested; login changed; preferences (auto sync, media sync, media interval, R122–R124); auto-sync paused (R1548); reachability; lifecycle exclusive; local change.
-  - Outputs: actions (start a normal sync with automatic hold-back; start a media sync; offer the one-way choice, for manual syncs only; run an optimizer check after a successful incremental sync with no session, per R699 and the U47 contract; arm one timer at a deadline, never polling, R1854; surface an error, for manual syncs only) plus a status snapshot.
+  - Inputs: launch; foreground (with time away); background; quit requested; session started and session ended (summary dismissed, KTD6), taken from U43's Session events inside the core and never from Swift; editor dirty or clean; timer fired; sync finished (outcome); manual sync requested; login changed; preferences (auto sync, media sync, media interval, R122–R124); auto-sync paused (R1548); reachability; lifecycle exclusive; local change; optimizer job awaiting its gate; `syncRequested(optimizerAdopted)` from U47's commit.
+  - Outputs: actions (start a normal sync with automatic hold-back; start a media sync; offer the one-way choice, for manual syncs only; start the optimizer job after a successful incremental sync with no session when today − `lastFsrsOptimize` ≥ 30, per R699; `optimizerGate` when the job awaits its gate; surface an error, for manual syncs only), plus `next_deadline` for Swift's single timer (never polling, R1854) and a status snapshot.
 - Cadence:
   - in a session, about 60 s after the last sync ended, and immediately on background (R88, R726);
   - idle, every 15 min (R1549);
@@ -8129,7 +8342,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Test scenarios:**
 - Covers AE9 (cadence). Session active, answers over 60 s → exactly one sync action with automatic hold-back at about 60 s; a background event → an immediate sync action.
-- Session ended → sync action, then an optimizer-check action after success. If a new session starts first → no optimizer check.
+- Session ended → sync action, then an optimizer start action after success. If a new session starts first → no optimizer action. Optimizer awaiting its gate → `optimizerGate`; `syncRequested(optimizerAdopted)` → a normal sync action under the usual gates.
+- A `SessionStarted` event from U43 reaches the policy through the host wiring; the policy API has no Swift input for session state.
 - Editor dirty at the 15-minute idle mark → no sync. Editor clean → the sync starts on that event.
 - Manual request during a session → refused with reason; manual request while idle → sync.
 - An automatic sync returns OneWayRequired → status OneWayNeeded, no prompt action; a later quit → no sync action.
@@ -8145,7 +8359,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U114. Sync FFI surface and CoreBridge sync service
 
-**Goal:** Expose contract C4, the media sync controls and the policy/status model to Swift through blocking UniFFI exports and a CoreBridge actor, plus a fake for UI work.
+**Goal:** Expose contract C4, the media sync controls and the policy/status model to Swift as KTD9 jobs and short exports behind a CoreBridge actor, plus a fake for UI work.
 
 **Requirements:** R1494 and R1857 (off the main thread), R1535 and R1545 (progress delivery), R1558–R1560 (data for U151/U160), R1562 (typed errors, no crash), R1496 (server-choice list), R1861 (sync signpost); contract C4.
 
@@ -8165,16 +8379,16 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - login;
   - available servers;
   - status snapshot;
-  - normal sync (auth = host key + endpoint; hold-back automatic or none; cancel token; progress callback), returning an outcome of NoChanges, Synced (incoming summary), OneWayRequired (facts, allowed directions) or Failed (error), plus server message, `newEndpoint` and media USN;
-  - one-way sync (direction, cancel, progress);
-  - media sync start, cancel and status; media-state reset;
+  - `start_normal_sync` (auth = host key + endpoint; hold-back automatic or none) → `JobHandle`; its `JobFinished` outcome is NoChanges, Synced (incoming summary), OneWayRequired (facts, allowed directions) or Failed (error), plus server message, `newEndpoint` and media USN;
+  - `start_one_way_sync(direction)` → `JobHandle`;
+  - `start_media_sync` → `JobHandle`, media status, media-state reset;
   - force one-way on next sync;
   - meta probe;
   - policy: handle an event, returning actions and status.
 - Auth is passed on every call, and the core persists none of it (KTD12). U151 keeps the host key and user name in the Keychain (this device only, after first unlock, not synchronizable, R119). It keeps the endpoint, any redirected endpoint and the flags in app-private storage, and persists `newEndpoint` when one is returned (AE70).
-- CoreBridge `SyncService` actor on the maintenance lane (KTD9):
+- CoreBridge `SyncService` actor (KTD9): job starts, the meta probe and policy calls on the maintenance lane; cancels on the control lane. Normal and media sync jobs may overlap (U24 arbitration):
   - progress callbacks (throttled to 10 Hz or less in Rust) bridge to an AsyncStream with bufferingNewest(1);
-  - status and MediaArrived arrive on the change-stream AsyncStream;
+  - status and MediaArrived arrive as SyncStatus and MediaArrived variants of the CoreEvent stream;
   - a signpost interval covers sync start→end (R1861);
   - policy calls are microsecond-cheap but go through the same actor for ordering.
 - Errors map to one Swift enum carrying kind, class and parameters, with a String Catalog key per kind (strings owned by U151/U160).
@@ -8189,6 +8403,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Swift, gated on the server: login, initial download, then a second sync → NoChanges; the progress stream yields at least one value and finishes.
 - Cancelling the token during a stub-slowed download → Cancelled within 250 ms; local collection unchanged.
 - A sync started from a MainActor context runs off the main thread (dispatch precondition through a test hook).
+- While a normal sync job runs, a media sync job starts alongside it, and a control-lane `suspend` call is not queued behind the sync.
 - A Rust panic injected via test hook → Swift receives an internal-error value; the process survives.
 - A 308 from the stub → `newEndpoint` present on the Swift outcome (AE70, Swift half).
 - `FakeSyncService` produces each R1558 state in order for a snapshot test fixture.
@@ -8235,7 +8450,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R1566, R1589, R1590, R1586 (sync-side guard), R1926–R1931, R1933, R2017 (sync slice); AE66, AE83 (sync part).
 
-**Dependencies:** U3, U4, U13, U11, U107, U109, U111, U43, U137 (Migaku bundled-file install, for AE66).
+**Dependencies:** U3, U4, U13, U11, U38 (headless runs open through `CoreHost`), U107, U109, U111, U43, U137 (Migaku bundled-file install, for AE66).
 
 **Files:**
 - `core/crates/meguri-testkit/src/sync/mod.rs` (multi-client executor: Meguri clients and labelled oracle clients; server lifecycle through U13)
@@ -8298,7 +8513,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - after each: integrity check passes, every op committed before the fault is present, and the next sync converges.
 - Server faults: clock skew of 301 s (second clock file), wrong password, 409 from a concurrent client, 500 and 503.
 - Disk full: a size-limited volume for one-way download and media download (R2015).
-- Hold-back property test: random interleavings of answers, undo/redo, bury, edits, LocalApi-source writes, rollovers, Meguri syncs and oracle-client edits and syncs → `sanityCheck2` never `bad`, undo of an uploaded step is always refused, and all parties converge after the session-end sync.
+- Hold-back property test: random interleavings of answers, undo/redo, bury, edits, LocalApi-source writes, local deletes during a sync, schema ops during a sync, rollovers, Meguri syncs and oracle-client edits and syncs → `sanityCheck2` never `bad`, undo of an uploaded step is always refused, and all parties converge after the session-end sync. Invariants checked after every step: no row is ever stamped with a server USN while its content differs from the server's copy; after any undo, every restored row whose USN is not -1 equals the server's copy of that row.
 - Weekly sync fuzz: 2–3 parties doing random edits and syncs → convergence; syncing twice in a row → the second is NoChanges (R1936).
 - Budgets:
   - a typical day (410 answers, 30 note edits, 150k-card generated collection) against the local server → at most 1 s of local work and 3 s end to end (R1842), measured by the sync signpost interval;
@@ -8312,6 +8527,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Test scenarios:**
 - Connection reset during `applyChunk` → local unchanged, `abort` attempted, next sync succeeds and converges.
 - Kill between `finish` and the local commit → after restart the next sync re-sends idempotently, and all parties converge.
+- The stub commits `finish` and drops the connection before replying → upload-pending steps are refused with `AlreadyUploaded`; the next sync converges with no sanity failure.
+- Budget: 150k incoming card updates merged while answering every 2 s → every answer durable within 1 s after the merge commits; the merge's write phase stays within its declared budget.
 - Covers AE86 (kill at 50% of a one-way download, repeated at 10%, 90% and during "Checking…").
 - Kill during media batch 3 of 6 → restart resumes at batch 3.
 - Server clock 301 s ahead → clock-incorrect; nothing written on either side.
@@ -8549,7 +8766,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Goal:**
 - Export the whole collection as `.colpkg` from a consistent snapshot.
 - Import a `.colpkg` through a verify-then-swap pipeline that leaves the previous collection untouched on any failure.
-- Provide that pipeline as the shared primitive for restore (U127) and full download (U109).
+- Provide that pipeline as the shared primitive for every collection swap: restore (U127), full download and full upload (U109).
 
 **Requirements:** R1596 (routing, shared with U120), R1625, R1626, R1627, R1628, R2004, R2005 (verified-replace gate, consumed by U109), R1489 (replace trigger), R1548 (signal only; enforcement in U151/U107).
 
@@ -8567,25 +8784,26 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - **Export (R1625):** `VACUUM INTO` a staging file from a reader connection. It does not close the collection and does not block the writer (rust-stack §1). The latest container comes from U122. "Include media" streams the whole media folder as zstd entries. "Support older Anki versions" downgrades the staging copy through U123. Output is atomic.
 - **Import pipeline**, a state machine the UI drives through U133:
   1. *Inspect:* classify, extract to staging, open, `integrity_check`, apply the R1479 refusals and R1478 upgrades to the copy, and return counts. A corrupt or unreadable package fails here, before any state change (R1628).
-  2. *Confirm:* enter KTD17's exclusive phase, lifecycle `ExclusiveBusy{op: ColpkgImport}` (C7).
-  3. *Safety backup:* a forced backup of the current collection through the engine `BackupService` hook (R1631/R2008, implemented in U126/U127).
+  2. *Confirm:* enter KTD17's exclusive phase, lifecycle `ExclusiveBusy{op: ColpkgImport}` (C7); U24 drains queued writes first.
+  3. *Safety backup:* after the drain, a forced backup of the current collection through the engine `BackupService` hook (R1631/R2008, implemented in U126/U127).
   4. *Prepare:* set `scm` and `mod` on the staging copy (R1626).
   5. *Media merge (R1627):* latest format skips files whose SHA-1 matches, legacy skips equal sizes, and existing files are never deleted. New files go through U31 temp-then-rename, and the media index is updated. Media is merged before the swap, so a cancel leaves the collection untouched (merged files are harmless). Same-name-different-content handling follows the oracle.
   6. *Swap:* uses the verified-replace primitive described below.
-- **Verified-replace primitive** (`lifecycle/replace.rs`; input is a staging file plus a `ReplaceReason` of ColpkgImport, Restore or FullDownload):
-  1. Run the mandatory integrity check (R2005).
-  2. Apply the reason-specific pre-swap mutation. `ls = mod` for a full download belongs to U109 (R1543).
-  3. Checkpoint, wait for in-flight read transactions, then close every connection.
-  4. Rename the staging file over the collection in the same directory.
-  5. Reopen, bump the generation, and emit `CollectionReplaced(generation)` (KTD5).
-  6. Mark the derived store stale for rebuild (U26, R1489).
+- **Verified-replace primitive** (`lifecycle/replace.rs`; the only swap path; input is a staging file plus a `ReplaceReason` of ColpkgImport, Restore, FullDownload or FullUpload):
+  1. Run the U22 open gate on the staging file for every reason: the two-phase probe with the R1479/R1482/R2013 refusals, the R1478 upgrade of schemas 11–17 applied to the staging copy, the R2016 expected-object check, then the integrity check (R2005).
+  2. Apply the reason-specific pre-swap mutation (`scm`/`mod` here for imports; `ls = mod` for a full download belongs to U109, R1543).
+  3. Finalise the staging file: run `wal_checkpoint(TRUNCATE)`, set `journal_mode=DELETE`, close every staging connection, and assert that no `-wal`, `-shm` or `-journal` sibling exists. Then run the integrity check again on the closed file.
+  4. Checkpoint, wait for in-flight read transactions, then close every live connection: writer, readers, the U107 snapshot reader and stage attachment, and derived-store attachments. Assert that the live `-wal` is absent or zero-length; if a non-empty `-wal` remains, abort with the old collection and generation intact.
+  5. Remove the live `-shm`/`-wal`, rename the staging file over the collection in the same directory, and fsync the directory.
+  6. Reopen; U24 bumps the generation and emits `CollectionReplaced(generation)` (KTD5).
+  7. Mark the derived store stale for rebuild (U26, R1489).
   Any failure before the rename leaves the old file and generation intact.
 - **Device-local sidecar:** `device_state.rs` keeps a sidecar in the app-private collection folder (KTD12), never synced. It holds `oneWayChoicePending`, the last-backup `mod` and timestamps, and the last check, optimize and quick-check results (used by U127 and U132). For import and restore, the flag is written before the rename, so a crash cannot lose it. U151 and U107 read it to pause auto-sync (R1548, R2010).
 - **Disk preflight:** staging collection plus incoming media plus the backup estimate.
 
 **Execution note:** spec writer first (colpkg format and import semantics, replacement contract), then implementer test-first. The replace primitive lands before U109 consumes it.
 
-**Patterns to follow:** KTD3 full-download recipe (temp, integrity check, atomic rename with all connections closed); KTD5 lifecycle and generation; KTD17 exclusive-phase entry and exit; U120 `fsutil`.
+**Patterns to follow:** KTD3; the U22 open gate; U32 atomic-file helper; KTD5 lifecycle and generation; KTD17 exclusive-phase entry and exit; U120 `fsutil`.
 
 **Test scenarios:**
 - Oracle-made latest `.colpkg` with media imported over a populated collection → dump equals the oracle's source dump except `scm`/`mod`; local media with the same SHA-1 is skipped; no existing file is deleted.
@@ -8596,6 +8814,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Cancel during media merge → collection, generation and lifecycle restored to Ready; no backup cleanup needed.
 - Failpoint kill before the rename → relaunch opens the old collection unchanged. Kill after the rename → relaunch opens the new collection, which passes integrity check (R2003/R2004 subset, the colpkg analogue of AE86).
 - `ReplaceReason::FullDownload` with a truncated staging file → refused by the integrity gate, old collection unchanged (R2005; U109 reuses this test fixture).
+- A schema-11 `.colpkg` is upgraded and its `scm` set, then the process is killed right after the rename → the reopened collection is schema 18 with the new `scm`.
+- A non-empty live `-wal` injected before the swap → swap refused; the old collection opens and passes the integrity check.
+- A staging copy left with a `-wal` sibling after its mutations → finalisation folds it in before the rename, and the swapped-in file contains those mutations.
 - `.colpkg` export during an active review session on the interactive lane → answers keep committing; the exported file passes integrity check and contains every review committed before the snapshot.
 - T1: Meguri `.colpkg` export → oracle import → dumps equal (R1922).
 - Two-client harness (U13): after import, the next sync reports one-way required.
@@ -8620,9 +8841,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - **Writer:**
   1. Snapshot with `VACUUM INTO` from a reader connection (R1635: never the live file bytes, never the whole file in memory).
   2. Stream zstd into the latest container with an empty media map and the dummy collection (U122/U124 writer).
-  3. Write a temp file in the backups folder, fsync, verify the container and zstd frames, then rename.
-  4. Name the file `backup-YYYY-MM-DD-HH.MM.SS.colpkg` from the injected local UTC offset (rust-stack §5 time). A name collision within the same second follows the spec.
-- **Retention (R1633):** a pure function of `(now, utc offset, backup timestamps parsed from names, limits)` that returns the files to keep and to delete. It runs after each successful backup and deletes only files matching the backup name pattern.
+  3. Write a temp file in the backups folder, fsync, verify the container and zstd frames, then rename with exclusive-create semantics: the rename never replaces an existing file. On a name collision the writer waits for the next second or uses the spec's collision suffix.
+  4. Name the file `backup-YYYY-MM-DD-HH.MM.SS.colpkg` from the injected local UTC offset (rust-stack §5 time).
+- **Retention (R1633):** a pure function of `(now, utc offset, backup timestamps parsed from names, limits)` that returns the files to keep and to delete. It runs only after the new backup is durable, deletes only files matching the backup name pattern, and never deletes a safety backup younger than its op's commit.
 - **Limits (R1634):** read from and written to the synced `backups` config key in Anki's JSON shape through U23, preserving unknown keys. Missing values take the defaults. Editing is a normal config op exposed via U133. The settings UI is U160.
 - **Listing:** newest first, with parsed date, time and size. Temp files and foreign files are ignored.
 - **Backups folder (KTD12):** `Documents/Backups` on iOS and iPadOS, where the Files app shows it (R1629), and a folder in the app's private container on the Mac (revealed by Show Backups, U163). U151 passes the path at collection open, separately from the collection directory; the core never derives it.
@@ -8642,6 +8863,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - T1: a Meguri backup restored by the oracle → dump equals the source (R2009).
 - Backup of a 150k-card synthetic collection → at most 2 s of background work (R1848), peak RSS within R1852. The writer is never blocked.
 - Disk full during the backup write → no partial `backup-*.colpkg` left; error returned; previous backups untouched.
+- Two forced backups start in the same second with a deck delete committed between them → two distinct files exist, and the first does not contain the deletion.
 
 **Verification:** retention property tests and AE69 pass. The T1 restore-in-oracle test passes. `benches/backup.rs` is within budget.
 
@@ -8651,20 +8873,21 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R1630, R1631, R1632, R1637 (core; list and flow UI in U160), R1638, R2008, R2010, R2020 (backup side), R1662 (backups only while running), R1539 (backup provided to U109).
 
-**Dependencies:** U126, U124, U24.
+**Dependencies:** U126, U124, U24, U38.
 
 **Files:**
 - `core/crates/meguri-engine/src/maintenance/{backup_hook.rs,scheduler.rs}`
 - `core/crates/meguri-package/src/backup/{service.rs,restore.rs}`
+- `core/crates/meguri-host/src/wiring/backup.rs` (registers the package BackupService with U38)
 - `core/crates/meguri-engine/tests/maintenance_scheduler.rs`, `core/crates/meguri-package/tests/restore.rs`
 - `specs/package/backup-triggers.md`
 
 **Approach:**
-- **Layering (KTD2):** the engine defines a `BackupService` hook trait, which `meguri-package` implements. `meguri-ffi` registers it at collection open (U133). Engine ops can then require a backup without depending on the package crate.
+- **Layering (KTD2):** the engine defines a `BackupService` hook trait, which `meguri-package` implements. meguri-host registers it at open (U38), so the app, the servers and headless runs all have it. Engine ops can then require a backup without depending on the package crate.
 - **Periodic backups (R1630, reconciled with R1854):** no polling.
   - The engine scheduler watches the change stream.
   - At the first committed change after the last backup, it arms a single one-shot deadline: the newest backup's creation time plus the minimum interval, or now if that is already past.
-  - The deadline fires on the maintenance lane. With no changes, nothing is armed.
+  - The scheduler only computes the deadline and reports it as `next_deadline`; U154's `BackupTrigger` arms the single timer and calls `run_due_maintenance(Deadline)` when it fires (KTD5). With no changes, nothing is armed. The scheduler is a `SuspendParticipant` (U32).
   - The same rule is evaluated on the `Background` and `Quit` triggers, which Swift sends within its background-task window (U151, KTD15).
   - "Changed since last backup" compares `col.mod` with the value recorded in the U124 device sidecar.
 - **Safety backups (R1631, R2008):** op descriptors carry a safety-backup class, and the executor runs a forced backup before the op takes the writer. Covered ops:
@@ -8730,7 +8953,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   2. Take the U127 safety backup.
   3. Run `quick_check`/`integrity_check`. On failure, stop with the "appears corrupt" outcome (R1640) and hand over to U132's corruption state.
   4. Optimize: vacuum, reindex, analyze (R1641), on the writer outside the repair transaction.
-  5. Run all repairs in one write op (source Maintenance, not undoable, clears undo per R725).
+  5. Run all repairs in one write op (source Maintenance, not undoable, clears undo per R725). Repairs are computed inside that write transaction against live rows, as Anki does, never on a snapshot (U24 write-phase rule).
 - **Report:** each repair category increments a counter. The counters equal the oracle's per-problem counters (R1924). Report text is Meguri's wording keyed by counter.
 - **Forced one-way sync:** `scm` is set if and only if a category listed in R1643 fired. This unit and U129 share the flag.
 - **Afterwards:** a broad ChangeSet; the derived store is marked stale (R1489).
@@ -8763,6 +8986,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Undo stack cleared afterwards, with the disabled reason from C3.
 - T1 (R1925): a collection opened, studied (200 answers) and closed by Meguri → oracle Check Database reports zero problems.
 - Bench: healthy 150k-card synthetic collection → at most 5 s total (R1847). An answer submitted during the run is committed and visible afterwards.
+- A card answered between the safety backup and the repair commit keeps its new scheduling unless a repair class applies to the new values.
 
 **Verification:** every `conformance/scenarios/maintenance/check-db/` scenario matches its golden, and the T1 R1925 suite passes. The bench is within budget.
 
@@ -8825,7 +9049,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - **Media lock:** the run holds the C9 media lock, so media sync (U111) defers until it finishes (resolves spec-flow gap 23).
 - **Scan (R1651):** uses U31's media index and rehashes only files whose size or mtime changed (R1573).
 - **References:** collected with the U20 media-ref scan over fields and U60 template and CSS references. Matching is case-insensitive (R1645).
-- **Fixes:** non-normalized names, inline base64 images and identical case-variants. Each fix rewrites references in notes in one write op (source Maintenance; replaced files go to the trash, so R2020 holds). Differing case-variants are reported only.
+- **Fixes:** non-normalized names, inline base64 images and identical case-variants. Each fix rewrites references in notes in one write op (source Maintenance; replaced files go to the trash, so R2020 holds), re-applying the rewrite to the live field text (U24 write-phase rule). Differing case-variants are reported only.
 - **Actions:**
   - Tag Missing is an undoable op.
   - Delete Unused takes a U127 safety backup (R2008), then moves the files to the trash, and media sync records the deletions.
@@ -8945,7 +9169,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U133. FFI and CoreBridge surface for packages and maintenance
 
-**Goal:** Expose import, export, backup, restore and maintenance as cancellable, progress-reporting jobs on the maintenance lane, with typed results and errors that the Settings, Home, Browse and onboarding UI consumes (U150, U152, U160, U210).
+**Goal:** Expose import, export, backup, restore and maintenance as cancellable, progress-reporting KTD9 jobs, with typed results and errors that the Settings, Home, Browse and onboarding UI consumes (U150, U152, U160, U210).
 
 **Requirements:** R1616 (non-freezing UI contract), R1624 (file handoff), R2015 (free-space provider). Co-covered: R170, R171, R1494, R1660, R1661, R1857, R1858.
 
@@ -8953,24 +9177,23 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Files:**
 - `core/crates/meguri-ffi/src/{package.rs,maintenance.rs}`
-- `app/Packages/MeguriCore/Sources/CoreBridge/{PackageService.swift,MaintenanceService.swift,DiskSpaceProvider.swift,MaintenanceTypes.swift}`
+- `app/Packages/MeguriCore/Sources/CoreBridge/{PackageService.swift,MaintenanceService.swift,MaintenanceTypes.swift}`
 - `app/Packages/MeguriCore/Tests/CoreBridgeTests/{PackageServiceTests.swift,MaintenanceServiceTests.swift}`
 
 **Approach:**
 - **Job contract (KTD9):**
-  - Every long call is a blocking export that takes a `CancelToken` and a progress callback: a stage enum plus done/total, throttled by Rust to about 10 Hz.
+  - Every long call is a `start_*` export that returns a `JobHandle` at once (KTD9); the outcome arrives as `JobFinished`. Progress is a stage enum plus done/total, throttled by Rust to about 10 Hz.
   - Results are value records, paged where large (import log, Check Media lists, Empty Cards report).
   - Errors are one typed set: `Cancelled`, `InsufficientSpace{needed, available}`, `Corrupt`, `TooNew`, `SchemaUnsupported`, `InvalidIds`, `SafetyBackupFailed`, `Busy{runningOp}` (R171 message source), `CollectionUnavailable`, `CollectionCorrupt`.
 - **Surface:**
   - Imports: classify file; inspect, import or cancel an apkg session; inspect a colpkg and import it (which enters the exclusive phase).
   - Exports: export apkg with a limit and options; export colpkg with options.
   - Backups: create backup; list backups; get and set backup limits; restore backup.
-  - Maintenance: Check Database; Check Media and its four actions; Empty Cards report and delete; maintenance status; `run_due_maintenance(trigger)` with trigger `Opened | Background | Quit | BackgroundProcessing`.
-  - The engine `BackupService` hook (U127) and `DiskSpaceProvider` are registered at open.
+  - Maintenance: Check Database; Check Media and its four actions; Empty Cards report and delete; maintenance status; `run_due_maintenance(trigger)` with trigger `Opened | Background | Quit | BackgroundProcessing | Deadline` (`Deadline` comes from U154's `BackupTrigger`).
+  - The `BackupService` hook is wired by U38 at open and the `DiskSpaceProvider` is passed to `start_open` (U37), so no registration happens here.
 - **Swift `CoreBridge`:**
-  - `PackageService` and `MaintenanceService` are actors on the maintenance lane's serial executor.
+  - `PackageService` and `MaintenanceService` start jobs, list and configure on the maintenance lane; cancels go to the control lane.
   - Progress reaches the UI as an `AsyncStream` with `.bufferingNewest(1)`, and results as Sendable values.
-  - `DiskSpaceProvider` is a synchronous foreign trait implemented with `volumeAvailableCapacityForImportantUsage`. Its required-reason declaration (E174.1, R2034) belongs to the release area.
 - **File handoff (R1624):**
   - Imports: Swift keeps the security-scoped URL open for the duration of the call, and the core reads the package in place, with no copy (R1599).
   - Exports: the core writes into the app-private Exports folder. Swift moves the file to the save-panel URL or hands it to the share sheet, then deletes it.
@@ -8998,7 +9221,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R1663, R1665, R1666, R1668, R1670, R1672 (status model), R1673–R1678, R1789 (write path), R1790 (read concurrency), R1949; AE78; also R1659.
 
-**Dependencies:** U1, U5, U6, U22, U24, U2 (clean-room process).
+**Dependencies:** U1, U5, U6, U22, U24, U38 (headless open through `CoreHost`), U2 (clean-room process).
 
 **Files:**
 - `core/crates/meguri-servers/Cargo.toml`, `core/crates/meguri-servers/AGENTS.md`
@@ -9006,22 +9229,22 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `core/crates/meguri-servers/src/host/{mod.rs,runtime.rs,listener.rs,guard.rs,limits.rs,status.rs,lifecycle.rs,interactions.rs}`
 - `core/crates/meguri-servers/src/config/{mod.rs,model.rs,store.rs}`
 - `core/crates/meguri-servers/src/fetch.rs` (shared remote-media fetcher used by U139/U143)
-- `core/crates/meguri-ffi/src/servers.rs` (feature `servers`, macOS target only)
+- `core/crates/meguri-ffi/src/servers.rs` (exports on every slice; implementation behind feature `servers` on macOS, `Unsupported` stubs on iOS)
 - `core/crates/meguri-servers/tests/{host_binding.rs,host_guard.rs,loopback_only.rs,lifecycle.rs,keepalive.rs}`
 - `specs/servers/host-security.md`
 - `conformance/scenarios/servers/host/*.yaml`
 
 **Approach:**
-- Crate compiled only for macOS and Linux (cfg + `servers` feature, KTD2/KTD13); never linked into the iOS staticlib. `meguri-ffi` enables it only for `aarch64-apple-darwin`.
+- Crate compiled only for macOS and Linux (cfg + `servers` feature, KTD2/KTD13); never linked into the iOS staticlib. `meguri-ffi` links it only for `aarch64-apple-darwin`; on iOS slices the same server exports compile to stubs that return `Unsupported`, so the generated bindings are identical on every slice (KTD9).
 - One `ServerHost` owns both servers; each server is an independent state machine `Off → Probing → Listening{addrs} | PortInUse{port} → …`, toggled by config. Servers start only after the engine reports the collection open (R1666), never on the launch path.
 - Binding (R1673, R1674): before binding, connect-probe the target port on 127.0.0.1; if something answers, report `PortInUse` and retry every 10 s. This probe is required because tokio sets `SO_REUSEADDR`, which on macOS lets a specific-address bind succeed while Anki holds the wildcard address (rust-stack §4), so a bind error alone is not a reliable signal. Bind `[::1]` only after the IPv4 bind succeeded. The bind address is a constant, not config.
 - Serving: use hyper-util's HTTP/1.1 connection builder directly (not `axum::serve`) so the 5 s idle keep-alive timeout is set explicitly (R1677); axum `Router` only as the service. No `Json` extractors; handlers read raw `Bytes` with a per-server streaming cap (AnkiConnect 256 MB, Migaku 128 MB per R1678), rejecting by `Content-Length` first and by counted bytes otherwise; the over-limit reply is produced by the server-specific error responder (U137/U141) without parsing the body.
 - `guard.rs` is a hand-rolled tower layer (KTD13) run before routing: Host check (R1676; missing Host accepted; 403 empty body otherwise). Origin evaluation is a per-server policy object injected by U137/U141 so this layer stays protocol-neutral.
-- Collection access: handlers obtain an engine handle per request keyed by `generation`; reads use the engine's read-only connection pool (R1790), writes go through the op executor with `source=LocalApi` (KTD5, R1789). A lifecycle waiter (C7) exposes "wait until Ready or timeout" with per-server timeouts supplied by U137/U141. During `ExclusiveBusy` the listeners stay up (R1670).
+- Collection access: in the app, the host receives the `CoreHost` that meguri-ffi opened; in headless Docker runs it opens the collection through `CoreHost::open` (U38). Handlers obtain an engine handle per request keyed by `generation`; reads use the engine's read-only connection pool (R1790), writes go through the op executor with `source=LocalApi` (KTD5, R1789). A lifecycle waiter (C7) exposes "wait until Ready or timeout" with per-server timeouts supplied by U137/U141. During `ExclusiveBusy` the listeners stay up (R1670).
 - Lifecycle robustness (R1670): listeners are re-validated on `resume`/wake and on `CollectionReplaced`; a listener task that dies is restarted by the host and reported in status; panics inside a handler are caught per request and answered with the server's error shape.
 - Status (R1672): a `ServerStatus` value per server (Off, Listening{addrs}, PortInUse{port}, CollectionUnavailable) plus a Migaku extension block filled by U137; changes are pushed to Swift through the host channel.
 - Integrations store: a small SQLite file `meguri-integrations.db` in the app-private Application Support directory beside (never inside) the collection (KTD12, R1665). U135 creates it with a versioned schema and a `config` document (toggles, AnkiConnect port, allow/deny lists, Migaku extra origins, read-only flag, keep-log flag, bring-to-front flag, readable folders, media dir path); U138/U139/U140/U141 add their own tables via migrations. The API key is not stored here: Swift keeps it in the Keychain and passes it in on apply. Config is applied atomically (swap of an immutable snapshot) so changes take effect on the next request (R1748).
-- Host-interaction channel (cross-area contract with U6 CoreBridge): Rust → Swift is one synchronous, non-blocking callback interface carrying `HostEvent`s (status changed, received-log changed, toast, activity appended, interaction request `{id, kind, payload}`). Swift → Rust is an FFI call `resolve_interaction(id, outcome)`. Rust awaits each interaction with a per-kind timeout (defined by the requesting unit). No blocking foreign callbacks, no async foreign traits (KTD9). A Rust `TestHost` implementation scripts outcomes for headless tests.
+- Host-interaction channel (cross-area contract with U6 CoreBridge): Rust → Swift is one synchronous, non-blocking callback interface, under the KTD9 delivery rules, carrying `HostEvent`s (status changed, received-log changed, toast, activity appended, interaction request `{id, kind, payload}`). Swift → Rust is an FFI call `resolve_interaction(id, outcome)`. Rust awaits each interaction with a per-kind timeout (defined by the requesting unit). No blocking foreign callbacks, no async foreign traits (KTD9). A Rust `TestHost` implementation scripts outcomes for headless tests.
 - Shared fetcher (`fetch.rs`): reqwest with the core's rustls config, `http`/`https` only, configurable per-item timeout and redirect limit (Migaku 8 s/5, AnkiConnect 30 s/5), streaming size cap equal to the server's body limit.
 
 **Execution note:** Spec writer writes `specs/servers/host-security.md` (binding, probe, Host/origin layering, limits, status states) first; implementer works test-first against the scenarios and the binding tests.
@@ -9039,8 +9262,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Starting servers before the collection is open does nothing until the open event; app-launch path measures no server work (R1666).
 - Config apply: toggling a server off closes its listeners within 1 s and status becomes Off; the integrations store reopens with the same config after restart; the collection file's `col.mod` and config table are untouched by any config change (R1665).
 - `resolve_interaction` with an unknown or expired id is a no-op; an interaction not resolved before its timeout yields the requester's timeout outcome.
+- On an iOS simulator build, the server-start export returns `Unsupported`; the same generated bindings start the server on the Mac.
 
-**Verification:** `tests/host_*` and `loopback_only.rs` pass in Docker; host-security scenarios pass; FFI exports compile only for the macOS slice (iOS XCFramework slices contain no tokio/axum symbols, checked by a symbol scan in U6's build job).
+**Verification:** `tests/host_*` and `loopback_only.rs` pass in Docker; host-security scenarios pass; FFI exports are identical on every slice, and the iOS slices contain no axum or meguri-servers symbols (tokio is present there through meguri-sync), checked by a symbol scan in U6's build job.
 
 ### U136. Server conformance harness and AnkiConnect transcript oracle
 
@@ -9393,9 +9617,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U144. Swift integrations controller and Settings › Integrations
 
-**Goal:** The Mac-side owner of the servers: lifecycle wiring, host-interaction routing, status display and every integration setting, including the permission alert, folder grants, login item and App Nap handling.
+**Goal:** The Mac-side owner of the servers: lifecycle wiring, host-interaction routing, status display and every integration setting, including the permission alert, folder grants, login item and App Nap handling. It is the only owner of server start and stop and of the `integrationsEnabled` flag; U164 only places its settings view.
 
-**Requirements:** R1663, R1664, R1665, R1666, R1667, R1669, R1671, R1672, R1679 (setting side), R1697 (transcoder), R1742 (UI), R1748, R1749–R1750 (alert UI), R1770, R1772 (grants UI), R1779–R1781 (UI), R1787 (bring-to-front setting).
+**Requirements:** R11 (integrations flag), R1663, R1664, R1665, R1666, R1667, R1669, R1671, R1672, R1679 (setting side), R1697 (transcoder), R1742 (UI), R1748, R1749–R1750 (alert UI), R1770, R1772 (grants UI), R1779–R1781 (UI), R1787 (bring-to-front setting).
 
 **Dependencies:** U6, U7, U9, U10, U135, U137, U141, U143, U150, U151, U160.
 
@@ -9409,7 +9633,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/MeguriUITests/Integrations/IntegrationsSettingsUITests.swift`
 
 **Approach:**
-- `IntegrationsController` (@Observable, @MainActor) is created by the Mac app target, not by a view, so it lives while the window is closed. It starts the server host after `CollectionStore` reports the collection open (R1666), applies config (API key from Keychain), pushes `UiContext` (selected deck, Browse visible) on navigation changes, and consumes host events through `ServersBridge` (AsyncStream over the callback interface, KTD9).
+- `IntegrationsController` (@Observable, @MainActor) is created by the Mac app target, not by a view, so it lives while the window is closed. It starts the server host after `CollectionStore` reports the collection open (R1666), stops servers on disable and quit, applies config (API key from Keychain), pushes `UiContext` (selected deck, Browse visible) on navigation changes, and consumes host events through `ServersBridge` (AsyncStream over the callback interface, KTD9). Server toggles are stored only in the U135 integrations store. It publishes `integrationsEnabled`, which U150's last-window policy reads.
 - `HostInteractionRouter` maps interaction kinds to handlers: PermissionPrompt (this unit), GUI and Sync kinds (U146), Browse-from-`/create` (U146). Every interaction is resolved exactly once, including on cancellation.
 - Permission alert (R1749, R1750): an in-window alert with Allow/Deny and the ignore checkbox; when the app is inactive it requests user attention without activating (Dock bounce).
 - Keep-alive (R1667): the delegate's last-window-closed decision returns false while any integration is enabled (depends on U150's S4 spike); "Open Meguri at login (hidden)" uses `SMAppService.mainApp`, and a login launch keeps the window closed.
@@ -9423,7 +9647,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Patterns to follow:** U151 CollectionStore lifecycle subscription; U9 DesignSystem components; U160 settings section composition; KTD10 state ownership.
 
 **Test scenarios:**
-- Controller starts servers only after the collection-open event; with integrations off, launch performs no server calls.
+- Controller starts servers only after the collection-open event; with integrations off, launch performs no server calls. Enabling Migaku starts it exactly once and sets `integrationsEnabled`; disabling both clears it; relaunch with AnkiConnect enabled starts it after `Ready`.
 - Toggling Migaku on shows "Listening on 127.0.0.1:44432" within 1 s; with the port held by another process shows the R1674 message.
 - With AnkiConnect enabled, closing the main window leaves the process running and the server answering; disabling both and closing the window quits.
 - PermissionPrompt from `https://site.example` shows the alert; Allow appends the origin to the visible allow-list; the router resolves the interaction once; an alert left for 120 s is dismissed by the core timeout outcome.
@@ -9578,7 +9802,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Tab reselection: a selection binding that detects reselect of the active tab → pop to root; a second reselect → scroll to top via the section's scroll anchor.
 - Review presentation: compact → full-screen cover above the tab bar (tab bar hidden); regular → the review fills the detail column and column visibility collapses to detail-only, restored at session end; the user can still reveal the sidebar. Selecting another sidebar row during review ends the session via U157 (no confirmation).
 - Sheets (Add, deck dialogs, import/export, login) are routed through `SheetRoute` and presented by `PresentationHost` over the current screen; dismissing returns to the exact prior screen. Nothing opens a second window (R6); no `Settings` scene — ⌘, selects the Settings section (U159).
-- Mac lifetime: `applicationShouldTerminateAfterLastWindowClosed` returns false only while an integration is enabled (flag published by U164); `applicationShouldHandleReopen` and Window > Meguri reopen the window.
+- Mac lifetime: `applicationShouldTerminateAfterLastWindowClosed` returns false only while an integration is enabled (flag published by U144); `applicationShouldHandleReopen` and Window > Meguri reopen the window.
 - Restoration: window frame, full-screen and sidebar width via `Window` restoration; section, selected deck and sidebar visibility persisted per device in `UIStateStore` (app-private, KTD12). Relaunch lands on the last section and deck page (sidebar) or Home (compact) and never inside review, unless U175's R455 resume applies (see coverage conflict).
 - Deep links: `DeepLinkRouter` parses `meguri://home`, `meguri://deck?id=`, `meguri://browse?search=`; it never writes to the collection or starts a review; unknown deck ids produce a short status message through U153 once that unit lands (plain alert before).
 - Test hook (KTD18): a launch argument forcing the horizontal size class and a debug command toggling it at runtime, so R5 is testable on simulators without a foldable.
@@ -9604,54 +9828,50 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U151. CollectionStore, lifecycle and sync coordinator
 
-**Goal:** The Swift-side owner of the open collection: mirrors core lifecycle and generation, fans out the change stream, runs the foreground/background/rollover sequences in a fixed order, and decides when syncs run.
+**Goal:** The Swift-side owner of the open collection: mirrors core lifecycle and generation, fans out the core event stream, runs the foreground and background sequences in a fixed order, and executes the sync policy's actions.
 
-**Requirements:** R14, R15 (no main-thread core work), R45 (refresh triggers), R87 (day-clock side), R88, R107 (refresh cadence), R114 (no-op writes reach core only on change), R123, R124, R126, R127 (logic), R324 (device-local storage); UI-independent parts of R1548–R1550, R1552, R1555–R1557, R1559 (status computation consumer); F1; spec-flow flows 1, 3 and 6 (lifecycle states).
+**Requirements:** R14, R15 (no main-thread core work), R45 (refresh triggers), R87 (day-clock side), R88, R107 (refresh cadence), R114 (no-op writes reach core only on change), R123, R124, R126, R127 (execution), R324 (device-local storage); UI-independent parts of R1548–R1550, R1552, R1555–R1557, R1559 (status computation consumer); F1; spec-flow flows 1, 3 and 6 (lifecycle states).
 
-**Dependencies:** U6, U24, U25, U40, U105, U107, U109, U111, U47, U150.
+**Dependencies:** U6, U24, U25, U37, U40, U105, U107, U109, U111, U113, U114, U150.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/AppModel/Collection/CollectionStore.swift`, `LifecycleState.swift`, `ChangeFanout.swift`, `GenerationScope.swift`
-- `app/Packages/MeguriKit/Sources/AppModel/Lifecycle/AppLifecycleCoordinator.swift`, `ForegroundReturnSequence.swift`, `SuspendSequence.swift`, `DayClockTimer.swift`
-- `app/Packages/MeguriKit/Sources/AppModel/Sync/SyncCoordinator.swift`, `SyncTriggerPolicy.swift`, `SyncBackoff.swift`, `SyncStatusModel.swift`
+- `app/Packages/MeguriKit/Sources/AppModel/Lifecycle/AppLifecycleCoordinator.swift`, `ForegroundReturnSequence.swift`, `BackgroundSequence.swift`
+- `app/Packages/MeguriKit/Sources/AppModel/Sync/SyncCoordinator.swift`, `SyncStatusModel.swift`
 - `app/Packages/MeguriKit/Sources/AppModel/Settings/DeviceSettings.swift`, `CredentialStore.swift`
 - `app/Packages/MeguriKit/Tests/AppModelTests/Support/FakeCore.swift`
-- `app/Packages/MeguriKit/Tests/AppModelTests/CollectionStoreTests.swift`, `LifecycleOrderTests.swift`, `SyncTriggerPolicyTests.swift`, `SyncStatusModelTests.swift`, `CredentialStoreTests.swift`
+- `app/Packages/MeguriKit/Tests/AppModelTests/CollectionStoreTests.swift`, `LifecycleOrderTests.swift`, `SyncCoordinatorTests.swift`, `SyncStatusModelTests.swift`, `CredentialStoreTests.swift`
 - `app/Packages/MeguriKit/Tests/AppModelTests/Integration/SyncCoordinatorServerTests.swift` (against U13 server)
 
 **Approach:**
-- `CollectionStore` mirrors C7 (`NoCollection`, `Opening`, `Upgrading`, `Ready(generation)`, `ExclusiveBusy`, `Failed`) from U24 and publishes it to the root view: `NoCollection` → onboarding (U166); `Failed` → blocking error (U153); `ExclusiveBusy` → gating (U153). Opening happens on the maintenance lane; Home meanwhile shows U152's cached snapshot (R15). At open it passes the core the collection directory in app-private Application Support and the backups folder (`Documents/Backups` on iOS and iPadOS, a private-container folder on the Mac; KTD12, U126).
-- `ChangeFanout` subscribes once to the core change stream (C2, delivered as AsyncStream by U6) and forwards coalesced `ChangeSet`s to registered feature stores, filtered by what each declares interest in. `CollectionReplaced(generation)` resets every `GenerationScope`-keyed cache, clears per-section paths, closes sheets and lands on Home (KTD17).
+- `CollectionStore` mirrors C7 (`NoCollection`, `Opening`, `Upgrading`, `Ready(generation)`, `ExclusiveBusy`, `Failed`) from Lifecycle events and publishes it to the root view: `NoCollection` → onboarding (U166); `Failed` → blocking error (U153); `ExclusiveBusy` → gating (U153). Opening is U37's `start_open` job; Home meanwhile shows U152's cached snapshot (R15). At open it passes the collection directory in app-private Application Support, the backups folder (`Documents/Backups` on iOS and iPadOS, a private-container folder on the Mac; KTD12, U126), the App Group snapshot path and the `DiskSpaceProvider`.
+- `ChangeFanout` subscribes once to the CoreEvent stream (U6) and is the only place that coalesces (KTD9): it forwards coalesced ChangeSets to registered feature stores, filtered by what each declares interest in, never merges across `CollectionReplaced`, and never drops Session or CommitFailed variants. `CollectionReplaced(generation)` resets every `GenerationScope`-keyed cache, clears per-section paths, closes sheets and lands on Home (KTD17).
 - All core calls go through CoreBridge lanes (KTD9); stores hold value snapshots only. A debug assertion fails any bridge call made on the main thread.
-- `DayClockTimer` arms one timer at `nextDayAt` from U40; on fire it asks the core to check rollover; `RolledOver` reaches subscribers through the change stream. No polling (R1854).
-- Foreground-return sequence (flow 1, spec-flow Q16), strictly ordered: external-change/`data_version` check → rollover check → notify review to refresh queue head (U175 hook) → sync (hold-back when a session is open) → widget snapshot flush (U165 coordinator).
-- Background sequence (flow 1 step 4; KTD15): notify review to pause timer, stop audio and persist the session record (U175 hooks) → `prepareForSuspend` (C8) → sync with hold-back inside a background-task assertion from U154 → widget snapshot flush → WAL checkpoint and connection release. The collection is in app-private storage (KTD12), so no App Group lock release is needed beyond C8.
-- `SyncCoordinator` owns trigger policy: launch; foreground after ≥5 min away (R123); background/quit; session end after the summary is dismissed (KTD6); every 15 min idle (R1549, single armed timer); every ~60 s during an active session with hold-back (R88, KTD6); periodic media sync (R124, 0 = off). Suppression: manual sync disabled during a session (R89 state exposed to U161/U159); no automatic sync while the editor reports unsaved changes (R1550, flag published by U190); auto-sync pause after restore/`.colpkg` import stored device-locally (R1548, KTD12); failed automatic syncs back off and only update status (R1555); 409 retries silently (R1556); an automatic sync that finds one-way required never prompts — status + persistent Home banner only; quit-time and background syncs are skipped in that state (spec-flow Q8).
-- After a successful sync with no active session and the 30-day condition met, the coordinator starts the optimizer job (U47) on the maintenance lane; a session start cancels it (KTD8).
+- Foreground-return sequence (flow 1, spec-flow Q16; owner of the order, KTD15), strictly ordered: `resume()` (U32: external-change check, then rollover; its `ResumeReport` reaches U51's day-clock monitor) → notify review to refresh the queue head (U175 hook) → U113 foreground event, which yields a sync action only when the policy says so (R123) → widget snapshot flush (U165 coordinator).
+- Background sequence (flow 1 step 4; KTD15): notify review to pause its timer, stop audio and persist the session record (U175 hooks) → `flush_for_background()` → sync with hold-back as a U113 action, inside a background-task assertion from U154 → widget snapshot flush → `suspend(deadline)`. The collection is in app-private storage (KTD12), so no App Group lock release is needed beyond C8.
+- `SyncCoordinator` executes U113's actions and nothing else (KTD5): it translates platform events (launch, foreground with time away, background, quit, timer fired, reachability, login, preferences, editor dirty flag from U190, auto-sync pause flag) into policy inputs, runs the returned actions as U114 jobs, and arms one timer at the returned `next_deadline`. Trigger cadence, backoff, 409 retries, one-way suppression and the session rules are U113's; session state never passes through Swift. Manual sync during a session is refused with U113's reason (R89, exposed to U161/U159). The auto-sync pause after restore or `.colpkg` import is stored device-locally (R1548, KTD12).
+- The optimizer starts only from U113's optimizer action, executed by U51.
 - Quit on Mac: delegate returns `.terminateLater` while a close-time sync runs; U161 shows the sheet; "Quit Without Syncing" cancels via CancelToken.
-- `SyncStatusModel` consumes the core status (R1559: offline rules plus a 300 s cached remote check) and refreshes remote state on foreground and at most every 10 min while online (R107), never on navigation.
+- `SyncStatusModel` mirrors U113's status snapshot (R1559) and requests remote state on foreground and at most every 10 min while online (R107), never on navigation.
 - `DeviceSettings` (app-private defaults suite, never iCloud) holds every device-local setting; `CredentialStore` holds host key and user name in the Keychain, not synchronizable, accessible after first unlock (R119, KTD12). Nothing here writes collection config (R324).
 
-**Execution note:** Test-first against `FakeCore` (generated UniFFI protocols from U6) for ordering and trigger policy; then one integration pass against the U13 sync server container.
+**Execution note:** Test-first against `FakeCore` (generated UniFFI protocols from U6) for ordering and action execution; then one integration pass against the U13 sync server container.
 
-**Patterns to follow:** KTD5 (C1–C8 contracts), KTD6, KTD9 lanes, KTD12, KTD15, KTD17; spec-flow Q2, Q8, Q16.
+**Patterns to follow:** KTD5 (C1–C8 contracts, core decides and Swift schedules), KTD6, KTD9 lanes and event rules, KTD12, KTD15, KTD17; spec-flow Q2, Q8, Q16.
 
 **Test scenarios:**
-- Foreground return with an open session and a pending rollover → recorded call order: external check, rollover, queue refresh, sync(holdBack: session), snapshot flush (`LifecycleOrderTests`).
-- Background on iOS → review pause/persist hooks before `prepareForSuspend`, sync inside the background assertion, snapshot flush, then checkpoint; background expiry mid-sync → sync cancelled, no further calls.
+- Foreground return with an open session and a pending rollover → recorded call order: `resume`, queue refresh, U113 foreground event, the sync action it returned (hold-back), snapshot flush (`LifecycleOrderTests`).
+- Background on iOS → review pause/persist hooks, then `flush_for_background`, the sync inside the background assertion, snapshot flush, then `suspend`; background expiry mid-sync → sync job cancelled, `suspend` still called within the deadline.
 - `CollectionReplaced(generation: 2)` while Browse has a path and an Add sheet is open → paths cleared, sheet route nil, section Home, every registered store reports generation 2.
-- Change stream burst of 50 card changes in 100 ms → each subscriber receives ≤ 2 coalesced deliveries.
-- Session active, 60 s elapse → one sync with hold-back requested; manual sync request during session → rejected with reason "session active" (R89).
-- Away 4 min then foreground → no sync; away 6 min → sync (R123).
-- Editor reports unsaved changes at the 15-min idle tick → sync deferred until the flag clears.
-- Auto sync result `oneWayRequired` → status `oneWayNeeded`, banner raised, no sheet route; following background event → no sync attempted.
-- Pause flag set after restore → automatic triggers skipped; manual sync allowed and clears the flag after the one-way choice completes.
-- Automatic sync fails with a network error three times → retry delays grow; status `needsAttention`; no alert route.
-- Successful sync, no session, last optimize 31 days ago → optimizer started; session starts → optimizer CancelToken cancelled.
+- Event burst of 50 card changes in 100 ms → each subscriber receives ≤ 2 coalesced deliveries; a `CommitFailed` inside the burst is delivered unmerged.
+- U113 returns a sync action → exactly one U114 job started; U113 returns `next_deadline` → exactly one timer armed; no Swift code decides cadence (FakeCore policy scripted).
+- Manual sync request during a session → refused with U113's reason "session active" (R89).
+- Auto sync result `oneWayRequired` → status `oneWayNeeded`, banner raised, no sheet route; the following background event → no sync attempted (policy action absent).
+- Pause flag set after restore → automatic triggers produce no action; a manual sync is allowed and clears the flag after the one-way choice completes.
 - `CredentialStore` writes with non-synchronizable, after-first-unlock attributes; server URL change clears the stored key.
-- Integration (U13 server): two-client run where this coordinator syncs on foreground and at session end; server shows the uploaded revlog rows except the held-back one until the summary is dismissed.
+- Integration (U13 server): two-client run where this coordinator syncs on foreground and at session end; the server shows the uploaded revlog rows except the held-back one until the summary is dismissed.
 
-**Verification:** Order and trigger-policy suites green under `swift test`; integration test green against the local sync server; no main-thread bridge assertion fires in UI test runs.
+**Verification:** Order and action-execution suites green under `swift test`; integration test green against the local sync server; no main-thread bridge assertion fires in UI test runs.
 
 ### U152. Home and deck list
 
@@ -9659,7 +9879,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R15 (cached render), R16 (implementation side), R24 (Home "+"), R28–R40, R41–R45, R50 (actions; import entry via U162), R53 (display and tap explanation), R74, R75, R182; AE1 (display side), AE3 (click semantics); R1819; also R766.
 
-**Dependencies:** U151, U28, U41, U95, U227 (heatmap grid component; the Home activity section builds on this unit), U9.
+**Dependencies:** U151, U28, U41, U95, U227 (heatmap grid component; the Home activity section builds on this unit), U9, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Home/HomeView.swift`, `HomeStore.swift`, `HomeSnapshotCache.swift`
@@ -9747,7 +9967,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R14 (background assertion), R127 (iOS side), R1455 (file protection on app-created directories), and the platform side of R1552–R1554, R1630, R1656 (owned by sync/packages areas); KTD15.
 
-**Dependencies:** U151, U47, U126, U128, U111.
+**Dependencies:** U151, U47, U126, U128, U111, U133.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/AppModel/Background/BackgroundScheduler.swift` (protocol), `IOSBackgroundTasks.swift`, `MacBackgroundActivities.swift`, `BackgroundTaskIdentifiers.swift`, `BackupTrigger.swift`, `ForegroundAssertion.swift`
@@ -9756,18 +9976,19 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/Packages/MeguriKit/Tests/AppModelTests/BackgroundSchedulerTests.swift`, `BackupTriggerTests.swift`
 
 **Approach:**
-- iOS: `BGProcessingTask` for the optimizer (U47) and the daily quick integrity check (R1656); `BGAppRefreshTask` for normal sync + media continuation (R1553); `BGContinuedProcessingTask` only for user-started one-way sync, first download and `.colpkg`/`.apkg` import, reporting `NSProgress` from core progress; `beginBackgroundTask` wrapper (`ForegroundAssertion`) used by U151's background sequence. Expiry handlers cancel through CancelToken (R1554 semantics in core).
+- This unit alone registers background-task identifiers (`BackgroundTaskIdentifiers.swift`, KTD5); other units attach handlers through it, so no identifier is registered twice.
+- iOS: `BGProcessingTask` for the optimizer (U51 attaches its handler) and the daily quick integrity check (R1656); `BGAppRefreshTask` for normal sync + media continuation as U113 actions run by U151 (R1553); `BGContinuedProcessingTask` only for user-started one-way sync, first download and `.colpkg`/`.apkg` import, reporting `NSProgress` from core progress; `beginBackgroundTask` wrapper (`ForegroundAssertion`) used by U151's background sequence. Expiry handlers cancel through CancelToken (R1554 semantics in core).
 - macOS: `NSBackgroundActivityScheduler` (utility QoS) for optimizer and integrity checks; `ProcessInfo` activities around sync and import to avoid App Nap.
-- `BackupTrigger`: event-armed rather than a 5-minute poll — on the first change after a backup, arm one timer at last-backup + interval; also run on background and quit (R1630 with R1854). The backup itself is U126.
+- `BackupTrigger`: arms the single timer at the `next_deadline` that U127's scheduler computes (KTD5) and calls `run_due_maintenance(Deadline)` (U133) when it fires; it also sends the Background and Quit triggers (R1630 with R1854). It computes no deadline itself. The backup itself is U126.
 - At first creation of the app's collection directory, set file protection "until first user authentication" (R1455) so core-created files inherit it (contract with U22).
 
 **Patterns to follow:** KTD15; swiftui-arch §0.5 and §6.
 
 **Test scenarios:**
-- Registration list equals the plist identifiers (unit test reading the bundle plist).
+- Registration list equals the plist identifiers (unit test reading the bundle plist); a second registration of any identifier fails the test.
 - Processing task launched while a review session is active → optimizer not started; task completes immediately.
 - Continued-processing expiry during a one-way download → CancelToken cancelled; collection generation unchanged (FakeCore).
-- No collection change for 2 h → no backup timer armed; one change at t0 → timer armed at last-backup + 30 min; backup created once.
+- No collection change for 2 h → U127 reports no deadline and no timer is armed; one change at t0 → U127's deadline (last backup + 30 min) is armed; backup created once.
 - Background event with changes pending → backup requested after the sync step.
 - Collection directory created on first launch has the expected protection class (iOS simulator test).
 
@@ -9820,7 +10041,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R26, R27, R46–R49, R53 (filtered-deck menu), R54, R55–R69 (UI side; name rules and records owned by U28), R225 (actions; keys via U158), R288 (deck-tree context menus); AE1 (delete Default), AE2.
 
-**Dependencies:** U152, U153, U28, U157, U162, U210, U225, U232.
+**Dependencies:** U152, U153, U28, U157, U162, U210, U225, U232, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Home/DeckManagement/DeckMenu.swift`, `DeckSwipeActions.swift`, `DeckNameSheet.swift`, `DeleteDeckConfirmation.swift`, `DeckDragAndDrop.swift`, `DeckActionsModel.swift`
@@ -9942,7 +10163,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R24 (File menu Add), R173–R175, R203–R218, R220, R278–R287, R288 (routing infrastructure); AE10 (⌥⌘N in Browse routes to Reset).
 
-**Dependencies:** U158, U150, U151, U25, U156, U157, U160, U161, U162, U163.
+**Dependencies:** U158, U150, U151, U25, U156, U157, U160, U161, U162, U163, U37.
 
 **Files:**
 - `app/Meguri/Commands/MeguriCommands.swift`, `FileCommands.swift`, `EditCommands.swift`, `ViewCommands.swift`, `DeckCommands.swift`, `CardCommands.swift`, `ToolsCommands.swift`, `WindowCommands.swift`, `HelpCommands.swift`
@@ -9956,7 +10177,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Routing: screens publish action targets via `focusedSceneValue` (`DeckCommandTarget` from Home/deck page, `CardCommandTarget` from review/preview/Browse, `BrowseCommandTarget`, `SearchFocusTarget`, `ZoomTarget`); an item is enabled only when its target exists and reports the action applicable (R278). Card-menu actions are implemented by U175/U210; flag names come from collection config.
 - Key equivalents come from `ShortcutCatalog` (U158); context-specific overrides (e.g. File > New Deck keeps no shortcut while review or Browse is shown, R238) are expressed in the catalog.
 - Global single keys D, A, B, T, Y, S, `/` are registered in the global context: D/B/T navigate (ending a review per U157), A opens Add, Y requests a manual sync (disabled during a session, R89), `/` opens Go to Deck. ⌘F focuses the current search or opens Browse with search focused (R216). ⌃⌘S sidebar, ⌃⌘F full screen. ⌘+/⌘−/⌘0 change device-local card zoom (R143, applied by U67). ⌘W closes the topmost sheet/panel, else the window.
-- `UndoStore` observes core undo `peek()` (C3) through change events and publishes "Undo <op>"/"Redo <op>" titles or plain disabled titles (R173). Edit > Undo/Redo: if the first responder is a text input, forward to its undo manager; otherwise call collection undo/redo (R174).
+- `UndoStore` observes core undo `peek(Global)` (C3, U37's `UndoService`) through change events and publishes "Undo <op>"/"Redo <op>" titles or plain disabled titles (R173). Edit > Undo/Redo: if the first responder is a text input, forward to its undo manager; otherwise call collection `undo(Global)`/`redo(Global)` (R174).
 - `CollectionUndoManager`: an `UndoManager` subclass installed on the root responder so iOS three-finger gestures reach the collection stack when no text field is focused (R175).
 
 **Execution note:** Spike the `UndoManager` subclass with the three-finger gesture on iPad and with Edit menu validation on Mac before wiring all menus; fall back to a responder-chain `undo:` override if the subclass is not consulted.
@@ -10064,7 +10285,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R50 (Import File action), R51, R52, R212, R213, R280 (Import/Export items); UI side of R1595, R1596, R1600, R1601, R1615–R1618, R1624–R1626, R1628, R1660, R1661 (rules owned by packages area).
 
-**Dependencies:** U151, U153, U154, U120, U122, U124, U157.
+**Dependencies:** U151, U153, U154, U120, U122, U124, U157, U133.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Settings/Collection/FileIntake.swift`, `ImportFlow.swift`, `ImportSheet.swift`, `ImportResultView.swift`, `CollectionImportConfirmation.swift`, `ExportSheet.swift`, `ExportDestination.swift`
@@ -10101,7 +10322,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R150–R152, R170 (for these ops), R285 (Tools menu targets); UI side of R1632, R1634, R1636–R1640, R1649, R1657, R1660, R1661 (rules owned by packages/maintenance area).
 
-**Dependencies:** U160, U153, U154, U126, U127, U128, U130, U131, U7.
+**Dependencies:** U160, U153, U154, U126, U127, U128, U130, U131, U7, U133.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Settings/Collection/BackupsPage.swift`, `RestoreSheet.swift`, `MaintenancePage.swift`, `CheckDatabaseReportView.swift`, `CheckMediaReportView.swift`, `EmptyCardsReportView.swift`, `ShowBackupsAction.swift`
@@ -10128,32 +10349,33 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** Maintenance UI tests and snapshots green on Mac and iPhone.
 
-### U164. Mac integrations entry and server lifecycle
+### U164. Mac integrations settings entry and Tools menu item
 
-**Goal:** The Integrations settings page on Mac with toggles and live status, and the app-side start/stop of the local servers that also controls app lifetime.
+**Goal:** Place U144's Integrations settings view in the Settings section list and add the Migaku "Recently received" Tools menu item. This unit has no server lifecycle or toggle state of its own; U144 owns both.
 
-**Requirements:** R11 (integrations flag), R153, R154, R285 (Migaku Recently Received item); AE78 (Settings text).
+**Requirements:** R153 and R154 (entry; content and behavior in U144), R285 (Migaku Recently Received item); AE78 (Settings text, through U144's view).
 
-**Dependencies:** U160, U150, U135, U137, U141.
+**Dependencies:** U144, U150, U160.
 
 **Files:**
-- `app/Packages/MeguriKit/Sources/Features/Settings/Integrations/IntegrationsPage.swift`
-- `app/Packages/MeguriKit/Sources/AppModel/Integrations/LocalServersController.swift`
-- `app/Packages/MeguriKit/Tests/SettingsTests/IntegrationsPageTests.swift`, `app/Packages/MeguriKit/Tests/AppModelTests/LocalServersControllerTests.swift`
+- `app/Packages/MeguriKit/Sources/Features/Settings/Integrations/IntegrationsSectionEntry.swift` (hosts U144's `IntegrationsSettingsView`)
+- `app/Meguri/Commands/IntegrationsCommands.swift` (Tools ▸ Migaku Recently Received)
+- `app/Packages/MeguriKit/Tests/SettingsTests/IntegrationsEntryTests.swift`
 
 **Approach:**
-- Toggles (device-local, default off): Migaku-compatible server (127.0.0.1:44432) and AnkiConnect-compatible server (127.0.0.1:8765). `LocalServersController` starts enabled servers after the collection opens, stops them on disable and quit, and publishes `integrationsEnabled` for U150's last-window policy.
-- Live status per server from the core host (U135): running, port in use by another app, stopped — in plain words; the core's retry-on-port-free behaviour is reflected live.
-- "Recently received" opens the Migaku list view owned by the integrations area (Features/Integrations); the Tools menu item appears only while Migaku is on.
+- The Settings section list (U160) gets an "Integrations" entry on macOS only. It hosts U144's `IntegrationsSettingsView`, which owns the toggles, live status and server start and stop. Toggle state lives only in the U135 integrations store.
+- The Tools menu shows "Migaku Recently Received" only while Migaku is enabled, read from U144's status model; it opens U145's list.
 - Compiled for macOS only.
 
-**Test scenarios:**
-- Covers AE78 (Settings side). Core reports port 8765 in use → page shows "Port 8765 is in use by another app"; status change to running → page updates within one status event.
-- Enable Migaku → controller starts the server once; app-lifetime flag true; disable both → flag false.
-- Relaunch with AnkiConnect enabled → server started after `Ready`.
-- iOS build → no Integrations page or Tools item.
+**Patterns to follow:** U160 settings section composition; U159 command catalog; U144 status model.
 
-**Verification:** Integration page tests green; Mac UI test toggles the server and sees "running".
+**Test scenarios:**
+- Covers AE78 (Settings side). Core reports port 8765 in use → the entry's view shows "Port 8765 is in use by another app"; a status change to running updates it within one status event.
+- The Tools item appears only while Migaku is enabled and opens Recently received.
+- Opening the entry makes no server call from this unit (FakeCore records none outside U144's controller).
+- iOS build → no Integrations entry or Tools item.
+
+**Verification:** Settings and menu tests green; a Mac UI test reaches Integrations from Settings and toggles a server through U144's view.
 
 ### U165. Heatmap and streak widget extension
 
@@ -10199,7 +10421,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R157–R163; UI side of R1591–R1593 and R1501; F4; spec-flow flow 6 paths a–d.
 
-**Dependencies:** U151, U153, U154, U161, U162, U22, U29, U109, U111.
+**Dependencies:** U151, U153, U154, U161, U162, U22, U29, U109, U111, U133.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Onboarding/WelcomeView.swift`, `OnboardingFlow.swift`, `FirstDownloadProgressView.swift`, `ArrivalSummaryLine.swift`, `EmptyCollectionHome.swift`
@@ -10303,11 +10525,11 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Dependencies:** U6, U7, U9, U24, U43, U44, U67, U150, U151.
 
 **Files:**
-- `app/Packages/MeguriKit/Sources/AppModel/Review/ReviewCoordinator.swift` (owns the active `ReviewSession`; single-session rule; entry from Home/deck page/sidebar; end reasons; session-open flag for sync and optimizer)
+- `app/Packages/MeguriKit/Sources/AppModel/Review/ReviewCoordinator.swift` (owns the active `ReviewSession`; single-session rule; entry from Home/deck page/sidebar; end reasons)
 - `app/Packages/MeguriKit/Sources/Features/Review/Session/ReviewSession.swift`
 - `app/Packages/MeguriKit/Sources/Features/Review/Session/ReviewPhase.swift`
 - `app/Packages/MeguriKit/Sources/Features/Review/Session/SessionEndReason.swift`
-- `app/Packages/MeguriKit/Sources/Features/Review/Session/CardPackage.swift` (Swift value mirror of one C5 head item)
+- `app/Packages/MeguriKit/Sources/Features/Review/Session/CardPackage.swift` (one U43 head item plus its `RenderedCard`)
 - `app/Packages/MeguriKit/Sources/Features/Review/Session/ReviewCoreClient.swift` (protocol; live implementation over CoreBridge's interactive lane; fixture implementation for previews and logic tests)
 - `app/Packages/MeguriKit/Sources/Features/Review/Session/ActiveTimeClock.swift` (monotonic clock that excludes background/hidden time)
 - `app/Packages/MeguriKit/Sources/Features/Review/Session/IdleLockPolicy.swift`
@@ -10319,10 +10541,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - Ownership (KTD10): `ReviewCoordinator` lives in AppModel above the layout branch and owns the `ReviewSession` (`@Observable @MainActor`) and, through U176, the two pages. No view owns session or page state, so iPhone ↔ iPad layout switches, Split View and Stage Manager resizes keep the session, card, side and page (continuity rules R576/R577 consumed from U67).
-- Core contract (C5, U43), via `ReviewCoreClient` on the interactive lane (KTD9):
-  - `startSession(deckId, resumeCardId?)` runs as one core op that sets `curDeck` (R326) and cancels a running optimizer job (KTD8). It returns a session id, the first three head items, counts by kind, `validUntil`, and session-level config (`timeLim`).
-  - A head item carries everything needed to show and answer a card without another call: card/note ids, kind before answering, `stateToken`, the four next states with their interval labels (strings verbatim from core, R353) plus interval seconds for spoken labels, the predicted next card id per rating, rendered question/answer HTML, AV tags, media refs for preload, flag and marked state, and per-card values from the card's home-deck preset (R330: autoplay, replay-question, timer display, maximum answer seconds, leech action, auto-advance values).
-  - `answer(sessionId, cardId, rating, stateToken, answeredAtMillis, msTaken)` updates the core's in-memory queue and returns at once with an outcome (accepted with leech/suspended flags, or stale), a head diff, counts and a rolled-over flag. The commit runs on the core op executor; `CommitFailed(cardId)` arrives on the change stream.
+- Core contract: C5 exactly as U43 defines it (start, `peekFirstCard`, head items, `renderHead`, answer outcomes, Session event variants), via `ReviewCoreClient` on the interactive lane (KTD9). `CardPackage` holds one head item plus its `RenderedCard`; HTML, AV tags and media refs arrive only through `renderHead`. Interval labels are shown verbatim from the core (R353), and the R330 per-card preset values come from the head item. The commit runs on the core executor; `CommitFailed(cardId)` arrives as a Session event.
 - Phase machine (`ReviewPhase`): loading → question(card) → answer(card) → transition → question(next) or congrats (U186) → ended. Accepting an answer flips to transition synchronously on the main actor before any async work. Answer inputs are honoured only in the answer phase of the presented card (R414). Every input source (buttons U178, tap zones U180, keys U181, auto advance U185) goes through this one gate.
 - Answer path, in order, all on the main actor within the 4 ms budget of R445:
   1. Take the input timestamp; answered-at is wall-clock at input (R361).
@@ -10336,7 +10555,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - Compact: the review is presented over the TabView with the tab bar hidden and the status bar visible. Interactive dismissal and the edge-swipe back gesture are disabled; ✕ is the only exit.
   - Regular and Mac: the review fills the detail column. AppNavigation (U150) collapses the sidebar at session start and restores it at the end; the user can re-show it mid-session.
   - Mac: the review contributes a minimum content width that keeps four buttons in one row; it stays in the main window and supports full screen.
-- Session boundaries (R325, R327): `ReviewCoordinator.start(deck)` first ends an open session with reason `anotherSession`. End reasons are exactly the R325 list (`close`, `escape`, `queueEmpty`, `timeboxFinish`, `anotherSession`, `sidebarNavigation`, `sKey`, `menuClose`, plus `navigationKey` for D/B/T per R90). Sheets, panels, Add over review (R90) and layout changes never end a session. The review phase ends at the end reason. The core session (hold-back, session-end sync, optimizer gate) ends only when the summary is dismissed (U157 calls `ReviewCoordinator.dismissSummary()`, which calls U43's `endSession` once), or at the end reason when no summary is shown (KTD6). `ReviewCoordinator` exposes that session-open flag to U151.
+- Session boundaries (R325, R327): `ReviewCoordinator.start(deck)` first ends an open session with reason `anotherSession`. End reasons are exactly the R325 list (`close`, `escape`, `queueEmpty`, `timeboxFinish`, `anotherSession`, `sidebarNavigation`, `sKey`, `menuClose`, plus `navigationKey` for D/B/T per R90). Sheets, panels, Add over review (R90) and layout changes never end a session. The review phase ends at the end reason. The core session (hold-back, session-end sync, optimizer gate) ends only when the summary is dismissed (U157 calls `ReviewCoordinator.dismissSummary()`, which calls U43's `endSession` once), or at the end reason when no summary is shown (KTD6). U113 learns session start and end inside the core (KTD5); Swift never forwards session state.
 - Idle lock (R340): on iOS the idle timer is disabled while a card is on screen and the last interaction is under 5 minutes old. One timer is re-armed on each interaction (no polling, R1854). On Mac the same rule holds a display-sleep-prevention activity.
 - Test hooks (KTD18, R1963): launch states `review.question`, `review.answer`, `review.menu`, `review.congrats` on fixture decks, with a fixed clock.
 - Accessibility identifiers: `review.screen`, `review.card`, `review.topbar`, `review.bottombar`, `review.toast`.
@@ -10363,9 +10582,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 ### U176. Pre-rendering pipeline over the two alternating pages
 
-**Goal:** Drive U67's two persistent pages so that the next card's question side, scripts and hooks included, is fully rendered in the occluded idle page before the user answers. Every swap, reveal and first card must then meet the review-loop budgets.
+**Goal:** Drive U67's two persistent pages so that the next card's question side, scripts and hooks included, is fully rendered and painted in the occluded idle page before the user answers. Every swap, reveal and first card must then meet the review-loop budgets.
 
-**Requirements:** R329, R350, R443, R444, R445, R446, R447, R448, R449, R450, R451, R1807, R1808, R1813, R1814, R1815 (R1807/R1808/R1813/R1815 as acceptance targets; the suites live in U240+); AE81 (target); F1.
+**Requirements:** R329, R350, R443, R444, R445, R446, R447, R448, R449, R450, R451, R1807, R1808, R1810, R1813, R1814, R1815, R1853 (session-end release, per the KTD11 call-out) (R1807/R1808/R1813/R1815 as acceptance targets; the suites live in U240+); AE81 (target); F1.
 
 **Dependencies:** U175, U67, U66, U43, U12, U11, U151.
 
@@ -10374,6 +10593,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/Packages/MeguriKit/Sources/Features/Review/Rendering/PageSlot.swift`
 - `app/Packages/MeguriKit/Sources/Features/Review/Rendering/PrefetchWindow.swift`
 - `app/Packages/MeguriKit/Sources/Features/Review/Rendering/InvalidationPolicy.swift`
+- `app/Packages/MeguriKit/Sources/Features/Review/Rendering/WarmUp.swift` (warm document, deck-page and touch-down first-card preparation)
+- `app/Packages/MeguriKit/Sources/Features/Review/Rendering/SnapshotSwapFallback.swift` (KTD11 fallback, behind a flag)
 - `app/Packages/MeguriKit/Sources/Features/Review/Rendering/ReviewSignposts.swift` (names registered in the U12 registry)
 - `app/Packages/MeguriKit/Sources/CardRendering/Resources/CardRuntime/review-host.js` (Meguri's isolated-world review script, created here: settle/preload probes, body-background probe, scroll rule; U180 and U181 add their sections)
 - `app/Packages/MeguriKit/Sources/Features/Review/AGENTS.md` (traps: never hide or remove the idle page; the answer path never awaits the core; all review input enters through `ReviewSession`; review-host.js runs in its own content world)
@@ -10381,46 +10602,51 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/MeguriUITests/Review/ReviewLoopPerfSmokeTests.swift`
 
 **Approach:**
-- Slots: two `PageSlot`s wrap U67's pages. Each records card id, `stateToken`, side, a settled flag and the side's computed body background. The visible slot always holds the current card, and both sides of one card render in that one page (R465 consumed). The idle slot holds the predicted next card's question, or is preparing it.
-- Warm-up (R329): at app launch, once the collection is Ready, `ReviewCoordinator` asks the pipeline to load the skeleton into both pages (U67). Starting a review never creates a page.
+- Slots: two `PageSlot`s wrap U67's pages. Each records card id, `stateToken`, `renderKey`, side, a settled flag and the side's computed body background. The visible slot always holds the current card, and both sides of one card render in that one page (R465 consumed). The idle slot holds the predicted next card's question, or is preparing it.
+- Warm-up (R329, R1813):
+  - At app launch, once the collection is Ready, `ReviewCoordinator` asks the pipeline to load the skeleton into both pages (U67). Starting a review never creates a page.
+  - After Ready, at utility priority, both pages load a warm document that links the CSS and `@font-face` fonts of every notetype with cards due today (from U41 counts), so both web content processes hold decoded fonts before the first card.
+  - On Mac and iPad, opening a deck page prepares that deck's first card in the idle page through U43's `peekFirstCard`; on iPhone, touch-down on a deck row does the same. `startSession` reuses the prepared page when `(cardId, stateToken)` match.
 - Prefetch window (R443, R444), kept up to date after every presentation:
   1. Current card N: its answer side's images are decoded and its stylesheets and fonts loaded in the visible slot while the question is shown (preload through review-host.js, never touching `#qa`).
-  2. N+1: its question is inserted in the idle slot through U67's side update (scripts and hooks run) until settled. Settled means fonts, images and stylesheets have loaded, or the R449 budgets have run out.
-  3. N+2: states and HTML are already in the head item. Its media is preloaded into the slot it will land in (the currently visible slot, since pages alternate).
-- Choosing the next card: on answer input, take the head item's predicted next card for that rating.
-  - If the idle slot matches (card id + `stateToken`), swap via U67's z-order change in one CATransaction. The swap does no FFI, no HTML work and no SwiftUI layout invalidation (R445, R1815), and has no fade or transition (R448).
+  2. N+1: its question is inserted in the idle slot through U67's prepare phase (scripts and hooks run, `#qa` visible) until settled. Settled means painted beneath (pre-swap double rAF) after fonts, images and stylesheets have loaded, or the R449 budgets have run out.
+  3. N+2: its `RenderedCard` comes from U43's `renderHead` when it enters the window, and its media is preloaded into the slot it will land in (the currently visible slot, since pages alternate).
+- Choosing the next card: on answer input, take the head item's `predictedNext` for that rating.
+  - If the idle slot matches (card id, `stateToken`, `renderKey`), present it through U67's z-order change. The z-order change, the `ReviewPhase` change that switches the bottom bar, and the chrome colour (U177) are applied in the same main-thread turn and land in one Core Animation commit, with no explicit flush. Both bottom-bar states stay in the view tree and switch by opacity, so the switch adds no layout pass. The swap does no FFI, no HTML work and no SwiftUI layout invalidation (R445, R1810, R1815), and has no fade or transition (R448).
   - If it does not match (a requeued learning card, or a learning card that became due, R446), render the actual card on demand into the idle slot, then swap within 50 ms. The wrong card is never shown.
 - Time-based validity: each head carries `validUntil`, the earliest moment a learning due time or the learn-ahead edge can change the head. The pipeline arms one timer for it and refetches the head when it fires (no polling, R1854).
-- Head diffs (KTD7; spec-flow Q15): `QueueHeadChanged` and answer diffs keep slots whose (card id, `stateToken`) is unchanged and re-prepare only the rest.
-- Invalidation (R447): `InvalidationPolicy` maps events to discarding prepared slots and prefetches. The events are change-stream sets touching cards, notes or notetypes in the window, undo/redo, deck-config saves, sync-incoming and local-API changes, rollover (U188), appearance change and card-zoom change. Visible-side handling belongs to U184, U187 and U188.
+- Head diffs and invalidation (R447, KTD7): `InvalidationPolicy` reacts only to U43 head diffs (`restate`, `rerender`), appearance change, card-zoom change and `MediaArrived`, never to raw ChangeSets. A slot is kept only while `(cardId, stateToken, renderKey)` is unchanged. Visible-side handling belongs to U184, U187 and U188.
 - After a swap, the former visible slot becomes idle. U67 pauses and unloads its videos (R471 consumed), then it prepares the new N+1.
 - Presentation event: every swap or reveal emits `presented(card, side, time)`. U175 starts the answer timer on it, U178 shows buttons, U177 applies chrome colour, and autoplay starts through U67's audio player for the card's preset (R1814; R548 consumed).
 - Scroll (R350): review-host.js scrolls to the top on question sides. On answer sides it waits for `#qa` images (within the R449 image budget), then scrolls `#answer` into view when present; otherwise the scroll stays at the top.
-- Measurement (R1861/R1862 from U12): signposts `review.startToFirstCard`, `review.answerToNextVisible`, `review.revealToAnswerVisible`, `review.onDemandRender` and `review.answerMainThread`. Each interval ends at the native commit completion; the page then confirms painting with a double-rAF message, and both ends are recorded.
-- Bounded memory (R450): the prefetch window holds at most 3 cards' payloads. Preload caches are trimmed per card. Pages are recreated only after a web content process termination (U187).
+- Measurement (R1861/R1862 from U12, read per the KTD11 call-out): signposts `review.startToFirstCard`, `review.answerToNextVisible`, `review.revealToAnswerVisible`, `review.onDemandRender`, `review.answerMainThread` and `review.presentToNextSettled` (N presented → N+1 settled in the idle page; registered in U12 and catalogued in U241, its p95 budget equals the p5 of U243's real dwell histogram). `answerToNextVisible` ends at the display frame that presents the swap commit; the post-swap double-rAF message is recorded too and must name the same card.
+- Bounded memory (R450): the prefetch window holds at most 3 cards' payloads. Preload caches are trimmed per card. Pages are recreated only after a web content process termination (U187). At session end, both pages drop their `#qa` content, pause media and load the warm document: the runtime and decoded fonts stay, no card DOM or images remain, and the web content processes stay alive (KTD11 call-out on R1853).
+- The KTD11 snapshot-image fallback (swap in a pre-captured image of the settled page while the live page catches up) is built behind a flag before M1 closes, so a failed device S1(b) checkpoint has a ready path.
 - R451: perf runs on Antoine's real collection use a fixture path passed by launch argument and run only on his machine; nothing from `local-data/` is committed or uploaded. Synthetic Migaku-like, image-occlusion and type-in fixtures come from U11.
 
-**Execution note:** Start only after U67 records spike S1 (occluded page renders fully, swap committed in the input's frame at 120 Hz, no white flash, double-rAF confirmation works). If S1 fails, stop and escalate rather than adding a fade or a delay.
+**Execution note:** Start only after U65 records S1 on the Mac host (occluded page paints fully, swap committed in the input's frame at 120 Hz, no white flash, double-rAF confirmation works); the iPhone confirmation is a U256 checkpoint. If S1 fails, stop and escalate rather than adding a fade or a delay.
 
-**Patterns to follow:** swiftui-arch §1.2 (two stacked opaque pages, z-order swap, double-rAF confirmation); U12 signpost registry names; fixture-driven fake core from U175.
+**Patterns to follow:** swiftui-arch §1.2 (two stacked opaque pages, z-order swap, the page has painted while beneath); U12 signpost registry names; fixture-driven fake core from U175.
 
 **Test scenarios:**
-- Fixture head A, B, C → after A is presented, the idle slot holds B's question with settled = true, and C's media preload was requested into A's slot.
-- Answer Good on A with predicted next B → swap with zero render calls; `review.answerToNextVisible` recorded with both end points.
+- Fixture head A, B, C → after A is presented, the idle slot holds B's question with settled = true only after the pre-swap double rAF, C's `renderHead` was requested, and C's media preload went into A's slot.
+- Answer Good on A with predicted next B → swap with zero render calls; `review.answerToNextVisible` recorded with the presented frame and the post-swap confirmation for B.
+- Frame capture on the Mac host: the first frame after an answer input shows the new card content, the Show Answer bar and the new chrome colour together. A frame with a hidden `#qa` or the old bar fails (R448, R1810).
 - Answer Again on learning card A when A is the only card left (prediction = A) → on-demand render of A's question into the idle slot, presented within 50 ms on the synthetic fixture (R446).
 - Head has `validUntil` = now + 90 s because learning card L becomes due → at that time the head is refetched and the idle slot is re-prepared with L before the next answer.
-- Change stream edits B's note while A is shown → B's prepared slot is discarded and re-prepared (R447).
+- A head diff marking B `rerender` → B's prepared slot is discarded and re-prepared; a raw ChangeSet touching B without a head diff discards nothing (R447).
 - Appearance switches to dark while A is shown → prepared slot discarded; A's visible side is not re-rendered (live class switch is U67's, R490).
-- Answer arrives 30 ms after B's insertion while a font is still loading → swap waits only for the rest of the 800 ms font budget, then swaps (R449).
-- Transition recording on device (U8 video-to-contact-sheet tooling) → the first frame after input shows the new card's content fully opaque (R448).
+- Answer arrives 30 ms after B's insertion while a font is still loading → swap waits only for the rest of the 800 ms font budget, then swaps (R449); the sample counts as a miss in U243.
 - Answer side with `<hr id=answer>` below the fold and two images → scroll happens after both images load. A side without `#answer` stays at the top (R350) (ReviewHostScriptTests).
-- 1,000-card synthetic session → zero page recreations, memory growth below the bound recorded in the test (R450).
+- 1,000-card synthetic session → zero page recreations, memory growth below the bound recorded in the test (R450). After the session closes, both pages hold the warm document and no `#qa` content.
 - Migaku-like fixture with ~30 KB of script per side → a hook counter proves the next question's scripts ran in the idle page before the answer input (R1808).
+- Warm-up: after launch, both pages report the due notetypes' fonts as loaded before any review starts; opening a deck page leaves its first card settled in the idle page, and `startSession` presents it without a render.
 - Card with question audio → audio player start requested at the presented event, signpost under 100 ms (R1814).
 - Cold launch, then tap deck → `review.startToFirstCard` recorded; app-running variant recorded (R1813 smoke).
-- Covers AE81 (smoke level): ReviewLoopPerfSmokeTests answers Good on 200 synthetic cards and emits the signposts and hitch metrics that the U240+ suite asserts on devices.
+- With the fallback flag on, a swap presents the snapshot image in the input frame and the live page replaces it after its confirmation.
+- Covers AE81 (smoke level): ReviewLoopPerfSmokeTests answers Good on 200 synthetic cards and emits the signposts and hitch metrics that the U240+ suite asserts.
 
-**Verification:** Pipeline and script tests pass. The smoke perf test on the iOS 27 simulator shows answer→next card at the earliest frame at p95 against the native-swap baseline, and signposts appear in Instruments. R1807, R1808, R1813 and R1815 are met on reference devices in the U240+ suites.
+**Verification:** Pipeline and script tests pass. The smoke perf test on the Mac host shows answer→next card at the earliest frame at p95 against the native-swap baseline, the iOS 27 simulator run stays within U241's regression rule, and signposts appear in Instruments. R1807, R1808, R1813 and R1815 are met on reference devices in the U240+ suites.
 
 ### U177. Top bar: progress bar, on-screen timer and card-coloured chrome
 
@@ -10521,7 +10747,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R365, R366, R367, R368, R369, R370, R371, R1811; review side of R1264; AE14; review side of AE4 and AE9; also R724.
 
-**Dependencies:** U175, U176, U177, U25, U43, U151, U150.
+**Dependencies:** U175, U176, U177, U25, U43, U151, U150, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Review/Undo/BackButton.swift`
@@ -10530,8 +10756,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/MeguriUITests/Review/ReviewUndoUITests.swift`
 
 **Approach:**
-- Authority (C3, U25; KTD5/KTD7): the core `peek(sessionId)` returns either an available step (name, kind, affected card id) or a disabled reason: none, cleared by rollover, cleared by sync, cleared by one-way, changed externally, or already uploaded. The core enforces "no uploaded step is undoable" and the 30-step depth (R367); the UI never overrides it. Undo status rides on op results and change events, so the button never polls.
-- Back button (R365, R366): it is always visible. It calls `undo(sessionId)`, which reverts the top step only when that step belongs to this session. Disabled, it stays visible and gives the reason as its help text and accessibility hint: "Undo is unavailable after the day changed" (R462, U188), or that answers already synced cannot be undone. ⌘Z and Edit ▸ Undo stay the shell's global undo (R215, R173). When a global undo changes review state, review follows the change stream.
+- Authority (C3, U25; KTD5/KTD7): the core `peek(Session(sessionId))` (U43 answers it first while its overlay holds uncommitted answers) returns either an available step (name, kind, affected card id) or a disabled reason: none, cleared by rollover, cleared by sync, cleared by one-way, changed externally, already uploaded, or upload pending. The core enforces "no uploaded step is undoable" and the 30-step depth (R367); the UI never overrides it. Undo status rides on op results and change events, so the button never polls.
+- Back button (R365, R366): it is always visible. It calls `undo(Session(sessionId))`, which reverts the top step only when that step belongs to this session. Disabled, it stays visible and gives the reason as its help text and accessibility hint: "Undo is unavailable after the day changed" (R462, U188), that answers already synced cannot be undone, or, for `UploadPending`, that the answer is being synced and undo returns if the sync fails. ⌘Z and Edit ▸ Undo stay the shell's global undo (R215, R173). When a global undo changes review state, review follows the change stream.
 - After an undo (R365, R368): the core reverts the card, its revlog row, deck counters, queue position, buried siblings, and any leech tag or suspension, then returns the affected card id at the head. The pipeline renders that card's question on demand into the idle slot and swaps it in (R1811, under 50 ms). The answer timer restarts, progress steps back, and the session record drops the answer (R100 consumed). "Previous card" now means the card answered before the restored one (R1264). Steps other than answers (bury, suspend, forget, set due, delete, flag, mark, edit) also show the affected card on its question side, as R365 states.
 - Redo (R369): ⌘⇧Z or Edit ▸ Redo re-applies the step through the core, then shows the head that follows it.
 - Names (R370): "Undo <op name>", using the core's Anki op names in the accessibility label and the Mac tooltip.
@@ -10550,7 +10776,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Queue empty → congrats shown → ⌘Z → review reopens on the last card's question side with its answer reverted (R371, AE4 review side).
 - Mac tooltip and accessibility label read "Undo Answer Card", then "Undo Bury" after a bury (R370).
 - Previous Card Info after undoing C (answered after B) → refers to B (R1264).
-- `review.undoToCardVisible` signpost under 50 ms on the synthetic fixture (R1811 target).
+- `review.undoToCardVisible` signpost under 50 ms on the synthetic fixture (R1811 target). An undo issued during a 200 ms sync commit shows the card ≤ 50 ms after input.
+- Fake core reports `UploadPending` during a sync → disabled with the syncing explanation; after the fake sync fails before `finish` → enabled again.
 
 **Verification:** Unit and integration tests pass and AE14 passes as a UI test on iPhone and Mac. R1811 is met in the U240+ suite.
 
@@ -10578,6 +10805,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   1. **Native recognizer** (iOS/iPadOS) on the card container. It recognises simultaneously with WebKit's recognizers and never cancels or delays touches. It records touch-down time and location, finger count, movement and duration. Its verdict is valid only for a single-finger tap under 10 pt of movement and under 500 ms (R404), whose touch-down came after the current card's presentation time (R415).
   2. **review-host.js** in its own isolated content world, installed through U67's extension point (R407). It adds a passive document `touchstart` listener (R408). After each presentation, and on DOM mutation, scroll or resize (coalesced to one per frame), it publishes an exempt-region hit map built from the R405 selectors, ancestors included. A bubble-phase `click` listener on `window` reports the point, `defaultPrevented`, whether the target is exempt, whether a selection exists (the tap then only clears it, R406), and whether a text input has focus. Card scripts cannot reach this world.
   3. **`TapDecision`** (pure): verdict + click report + side + platform + settings → reveal, answer Again, answer Good, dismiss keyboard, or nothing.
+- Fast path: when the visible side has no card-registered `click`/`touchend`/`pointerup` listener or inline handler (U66 listener scan), the hit map marks the point non-exempt, and no selection exists, the native recognizer decides at touch-up and the swap happens in the same turn; review-host.js only confirms afterwards. Otherwise the web-confirmed path above runs. R407 and R426 still hold, because no card handler exists that could call `preventDefault`.
 - Tint (R403, R1816): on touch-down on the answer side, when the cached hit map says the point is not exempt, the touched half is tinted with the rating token at low opacity. The tint is set in the same main-thread turn as the touch-down, as a CALayer change with implicit actions disabled. It clears on touch-up, cancel or an invalid verdict. If the click report later classifies the target as exempt (stale hit map), the tint is removed. There is never a tint on the question side, on Mac, or on pointer hover (R411).
 - Zones (R402): the boundary is the horizontal midpoint of the card view's visible width, after safe areas and any inspector. Nothing marks the zones.
 - Mac (R413): no answer-side zones. A click on non-exempt question-side content reveals, through the same click report.
@@ -10605,6 +10833,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Mac click on answer-side content → nothing; on question-side content → reveal (R413).
 - Software keyboard up for `#typeans`, tap outside → keyboard dismissed only; next tap reveals (R412).
 - Touch-down handling sets the tint state synchronously; signpost `review.touchDownToTint` is in the same frame (R1816).
+- Fast path: on a side without card tap listeners, a right-half tap answers Good at touch-up with no web round trip (message counter); on a side whose script adds a `click` listener, the same tap waits for the click report.
 
 **Verification:** Decision and script tests pass. AE11 and AE12 pass as UI tests on the iPhone simulator and on a device. The spike record exists, and the tap-answer path meets R1807 in the U240+ suite, or an approved deviation is recorded.
 
@@ -10614,7 +10843,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R227–R244, R339, R373, R417, R418, R419, R420 (consumes bindings; conflict rejection is in Settings, U160), R421, R422, R423, R424, R425, R426, R427, R428.
 
-**Dependencies:** U175, U178, U179, U182, U183, U184, U185, U150, U160, U67.
+**Dependencies:** U175, U178, U179, U182, U183, U184, U185, U150, U160, U67, U66.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Review/Input/ReviewKeyMap.swift` (pure: key + modifiers + side + focus state + settings → action)
@@ -10628,6 +10857,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - One map, two routes:
+  - **Fast path:** when the visible side has no card-registered `keydown`/`keypress` listener or inline handler (U66 listener scan) and focus is not in a text field, the native handler decides at key-down and swaps in the same turn; review-host.js only confirms afterwards. Otherwise the web-confirmed route below runs. R426 still holds, because no card handler exists that could call `preventDefault`.
   - **Unmodified keys** (Space, Return, the answer keys, U, E, M, O, I, R, 5–7, `*`, `-`, `=`, `@`, `!`, ⇧A, Esc), when the card page has focus, are reported by review-host.js from a bubble-phase `keydown` on `window`, after card listeners. Meguri acts only when the event is not `defaultPrevented` (R426), not an auto-repeat (R417), and focus is not in an input, textarea or contenteditable. The exceptions are Return in `#typeans`, handled by the page's `_typeAnsPress` (U66), and Esc (R244, R425). Outside text fields, keys match by physical key code so they work under Japanese, Korean or Cyrillic input sources (R427). When focus is in native chrome rather than the page, the same `ReviewKeyMap` is applied to native key events.
   - **Modified shortcuts** (⌘Z, ⇧⌘Z, ⌘1–⌘7, ⇧⌘D, ⌥⌘N, ⌘⌫, ⌥⌘E, ⌥⌘I, ⌘+/−/0) are SwiftUI commands. The shell's Card menu (R284, U150) binds to `ReviewActions` through a `FocusedValue`, so an item is enabled only when its action applies (R339; R377 enablement shared with U182). The same declarations feed the iPad menu bar and the ⌘-hold shortcut overlay (R428).
 - Menu items for unmodified keys show their key, but must never take the key before the page. Spike S3 picks between a display-only hint and a key equivalent that is disabled while the card page has focus.
@@ -10636,7 +10866,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Escape stack (R373, R243): open menus, dialogs, panels and a focused card input register on `EscapeStack`. Esc closes the topmost; with none, it acts as ✕ (U186).
 - Panels (U183, U184), Add over review (R90) and the timebox sheet (U185) suspend the review key routes while open.
 
-**Execution note:** Run spike S3 first. Test unmodified shortcuts against a focused `#typeans` on Mac and on iPad with a hardware keyboard, including a Japanese input source, and record the mechanism in `docs/design/decisions/review-key-routing.md`.
+**Execution note:** Run spike S3 first. Test unmodified shortcuts against a focused `#typeans` on Mac and on iPad with a hardware keyboard, including a Japanese input source, and record the mechanism in `docs/design/decisions/review-key-routing.md`. S3 also measures key-down → swap commit with and without the fast path on the Mac host.
 
 **Patterns to follow:** One command catalog for menu bar, iPad overlay and context menus, as in the Browser area's command catalog (U210 range); `FocusedValue` routing (swiftui-arch §2).
 
@@ -10644,6 +10874,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Table test: every key in R227–R243 maps to its action on the right side; 1–4 on the question side → no action (R418).
 - Space on the answer side with "Space and Return answer Good" off → nothing; on → Good (R227, R419).
 - A keydown with `repeat` = true → ignored; the first press acts once (R417).
+- Fast path: on a side without card key listeners, key 3 answers Good at native key-down with no web round trip; on a side whose script adds a `keydown` listener, the same key waits for the page report.
 - An image-occlusion card's keydown listener calls `preventDefault()` for M → the ⋯ menu does not open (R426).
 - `#typeans` focused: "1" types into the box, Return reveals, Esc blurs the field, ⌘1 still flags (R244, R425).
 - Japanese input source active, focus on the card (not a text field), physical key 1 → Again (R427).
@@ -10661,7 +10892,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R374, R375, R376, R377, R378, R379, R380, R381, R382, R383, R387, R392, R393, R1812.
 
-**Dependencies:** U175, U176, U179, U27, U30, U43, U44, U48 (bury, suspend, forget, set due date), U67, U66.
+**Dependencies:** U175, U176, U179, U27, U30, U43, U44, U48 (bury, suspend, forget, set due date), U67, U66, U37.
 
 **Files:**
 - `specs/review/reviewer-strings.md` (spec writer: Anki's English wording and plural forms for bury/suspend/delete toasts, the leech toast, the timebox prompt, congrats notices, unbury options and the external-change notice)
@@ -10894,8 +11125,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   2. Stop audio (U67).
   3. Read typed text, scroll position and zoom from the visible slot.
   4. Persist the `SessionSnapshot`: deck, card id, side, scroll, typed text, zoom, timebox, and the session record reference.
-  5. Signal U151, which runs C8 `prepareForSuspend` and the hold-back sync (KTD6).
-- Returning on the same scheduler day (R453), in the spec-flow Q16 order: external-change check → rollover (U188) → head refresh → sync (U151). Both pages are pinged. When the visible page is alive, nothing is re-rendered and the timers resume.
+  5. Signal U151, which runs its background sequence (`flush_for_background`, the hold-back sync, `suspend`; KTD6).
+- Returning on the same scheduler day (R453), in U151's foreground order: `resume()` (external-change check, then rollover, U188) → head refresh → the U113 foreground event (U151). Both pages are pinged. When the visible page is alive, nothing is re-rendered and the timers resume.
 - Page termination (R454; R538 consumed): U67's termination callback triggers recreating that page's skeleton and re-rendering the current side, with the typed text restored into `#typeans`. No error is shown. A terminated idle page is re-prepared lazily.
 - Relaunch after termination (R455): U150's launch routing reads the snapshot.
   - Same scheduler day (core day clock): review of the deck reopens through `startSession(deck, resumeCardId)`. The core puts that card first if it is still eligible, and it shows on its question side with typed text restored.
@@ -10905,7 +11136,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - `{removed}` → next card plus the toast "This card was changed elsewhere" (strings spec).
   - `{memoryOnly}` → refresh labels through U178's gate, no re-render (spec-flow gap 18).
 - Queue changes from other sources (R457): new Migaku cards or sync-incoming rows lead to a background head refresh that keeps the current card and the still-valid prepared slots (KTD7). Counts update the progress bar.
-- One-way sync (R458): U151's sync coordinator reads `ReviewCoordinator`'s session-open flag, which stays set until summary dismissal, and never runs a one-way sync while it is set. The status and banner are U151's.
+- One-way sync (R458): U113 never starts a one-way sync while U43's session is open (until summary dismissal), learning session state inside the core (KTD5), and U109 refuses one during a session. The status and banner are U151's.
 - Media arrival (spec-flow Q14): `MediaArrived` names used by prepared slots re-prepare those slots. On the visible side, review-host.js resets the `src` of failed media elements in place, without re-running scripts (R498 consumed).
 
 **Patterns to follow:** C8 suspend protocol (U24/U151); foreground-return order from spec-flow Q16; KTD12 app-private storage for the snapshot.
@@ -10963,7 +11194,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R825–R833, R820 (mechanics), R823, R248, R254; R5 (editor part); AE40 (editor part); supports R1833, R1834.
 
-**Dependencies:** U6, U7, U9, U10, U12, U20, U24, U27, U29, U31, U67, U150, U151.
+**Dependencies:** U6, U7, U9, U10, U12, U20, U24, U27, U29, U31, U67, U150, U151, U37.
 
 **Files:**
 - `specs/editor/field-html.md` (spec-writer: Return / Shift-Return markup, empty-field normalization, editor-only attributes, media `src` display encoding round trip)
@@ -11203,7 +11434,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R849–R856, R878–R881, R252.
 
-**Dependencies:** U190, U192, U31, U67.
+**Dependencies:** U190, U192, U31, U67, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Editor/Media/MediaImporter.swift`, `MediaKind.swift`, `ImageEncoder.swift`, `AttachSources.swift` (Files, PhotosPicker, camera representable), `AudioRecorderView.swift`, `AudioRecorderModel.swift`
@@ -11259,7 +11490,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R796–R817, R245, R246, R247, R255, R259 (Add), R862; R804 (semantics); AE34, AE35.
 
-**Dependencies:** U190, U191, U192, U193, U27, U28, U29, U80, U150, U151, U152, U175, U210.
+**Dependencies:** U190, U191, U192, U193, U27, U28, U29, U80, U150, U151, U152, U175, U210, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Editor/Add/AddScreen.swift`, `AddScreenModel.swift`, `AddPresenter.swift`, `NotetypeChooser.swift`, `DeckChooser.swift`, `NotetypeSwitchMapper.swift`, `StickyFieldsController.swift`, `AddHistory.swift`, `AddCloseGuard.swift`
@@ -11421,7 +11652,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R915–R919, R929–R937, R942–R943 (UI side), R276; R914 (confirmation UI); F6.
 
-**Dependencies:** U9, U29, U34, U28, U60, U150, U151, U190.
+**Dependencies:** U9, U29, U34, U28, U60, U150, U151, U190, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/NoteTypes/NoteTypesScreen.swift`, `NoteTypesModel.swift`, `AddNotetypeSheet.swift`
@@ -11479,7 +11710,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R920–R928 (UI side; template rewrites R923/R924 and note rewrites R926/R927 enforced in U34); AE39 (field part).
 
-**Dependencies:** U200, U29, U34, U9.
+**Dependencies:** U200, U29, U34, U9, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/NoteTypes/Fields/FieldsEditor.swift`, `FieldsEditorModel.swift`, `FieldNameValidator.swift`, `FieldOptionsForm.swift`
@@ -11514,7 +11745,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R938–R941; supports R1835, R143; F6.
 
-**Dependencies:** U200, U60, U61, U64, U66, U67, U190.
+**Dependencies:** U200, U60, U61, U64, U66, U67, U190, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/NoteTypes/Preview/TemplatePreviewView.swift`, `TemplatePreviewModel.swift`, `PreviewOptions.swift`
@@ -11549,7 +11780,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R944–R948.
 
-**Dependencies:** U200, U29, U35, U210, U151.
+**Dependencies:** U200, U29, U35, U210, U151, U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/NoteTypes/ChangeNotetype/ChangeNotetypeView.swift`, `ChangeNotetypeModel.swift`, `MappingRow.swift`, `LossSummary.swift`
@@ -12037,7 +12268,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R1171, R1172, R1173, R1174, R1175, R1176, R1177, R1178, R1179, R1180, R274.
 
-**Dependencies:** U216, U28, U30, U27, U25, U195 (Add with deck preset), U200 (note type manager, template editor, fields), U220 (Find and Replace preset to a field).
+**Dependencies:** U216, U28, U30, U27, U25, U195 (Add with deck preset), U200 (note type manager, template editor, fields), U220 (Find and Replace preset to a field), U37.
 
 **Files:**
 - `app/Packages/MeguriKit/Sources/Features/Browse/Sidebar/SidebarActions.swift`
@@ -12355,7 +12586,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - `StatsScreenModel` (@Observable @MainActor) is owned by `AppNavigation`'s Stats section state (KTD10), not by the view, so a trip to the Browser and back restores scope, controls, scroll position and selection unchanged (R1419). It holds: scope (Deck id / Collection / Search text), history (12 months / all), per-graph control state, the last `GraphsData` per scope key, load state, and the scope error.
-- One core call per scope/history change: `CoreBridge` query lane `graphs(search, history, cancel)` (U98 contract) returns all raw graph data; per-graph controls never call the core (R1355, R1290). A superseded request is cancelled through its `CancelToken` (KTD9). Deck scope builds `deck:"<name>"`, Collection the empty search, Search the typed text run on Return or focus loss (R1351); a scope error from the search engine shows inline under the field and the previous graphs stay (R1351).
+- Each scope or history change makes two `statsGraphs` calls on the query lane (U98 contract and its R1355/R1838 call-out): the above-the-fold set first, then the rest as cards scroll into view (R1838). Both are memoized by U98's scope key and return finest-resolution aggregates; per-graph controls never call the core (R1355, R1290). A superseded request is cancelled through its `CancelToken` (KTD9). Deck scope builds `deck:"<name>"`, Collection the empty search, Search the typed text run on Return or focus loss (R1351); a scope error from the search engine shows inline under the field and the previous graphs stay (R1351).
 - The screen opens instantly on the last result for that scope (or size-stable placeholders) and swaps fresh data without layout jumps (R1291); every open triggers a refresh because retrievability is time-dependent (R1294).
 - Live refresh: subscribe to the change stream (revlog, card scheduling fields, decks, `rollover` config), `RolledOver` and `CollectionReplaced` (U24, U40). While visible, refresh in place debounced (~500 ms) keeping every control and the scroll position (R1356); while hidden, mark stale and refresh on appear. On `CollectionReplaced` the cache is dropped by generation.
 - Header: sticky top bar with a segmented scope control, a deck picker listing every deck including filtered decks (deck list from U151), a search field, and the history segmented control. Choosing a deck never sets the current deck (R1353). Last scope/deck/search/history persist per device in app-private preferences (KTD12) and are restored, except when opened from a deck, which forces that deck's scope (R1354). Graph cards render in Anki's order without Card Ease (R1357, R1360).
@@ -12411,7 +12642,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Approach:**
 - Spec writer (KTD1) writes `specs/stats/graph-presentation.md` (per-graph ranges and defaults, bin edges and the ≤70-bin rule, range-dependent bin shifting, quantile trimming, day/tooltip/table text, which ranges need all history, fallback when "all" disappears) and `specs/stats/browse-queries.md` (every clickable item's query and the scope join), plus neutral scenarios. Goldens come from the oracle's headless graphs-page driver (cross-area contract with U3, see coverage note).
-- `StatsBinning` is pure value code: raw per-day / per-value arrays from U98 + control state → bins, cumulative series, and table values. Quantiles come from cumulative histograms, never per-card expansion (R1293). Re-binning on a control change stays ≤16 ms with no core call (R1290); measured in a Swift Testing performance assertion on 1.2M-row-equivalent inputs.
+- `StatsBinning` is pure value code and the only owner of Anki's bin edges: U98's finest-resolution aggregates (per-day arrays, finest-width histograms) + control state → bins, cumulative series, and table values. Quantiles come from cumulative histograms, never per-card expansion (R1293). Re-bucketing on a control change stays ≤16 ms with no core call (R1290); measured in a Swift Testing performance assertion on the largest aggregate size U98 returns at 150k / 1.2M rows.
 - `GraphRange`: segmented-picker model per graph; selection remembered per device (R1366); "all" offered only with all history and auto-selected on switching to all history for the history-following graphs (R1367).
 - `ChartColors` tokens: New blue, Learning orange, Relearning red, Young light green, Mature dark green, Suspended yellow, Buried grey, Filtered purple, red→green ramps for difficulty/retrievability/buttons; light, dark and increased-contrast variants (R1363, KTD20).
 - `CumulativeOverlay`: translucent `AreaMark` on a right axis for Future Due, Reviews, Intervals, Stability, Added (R1364).
@@ -12430,7 +12661,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Browse query join: scope `deck:"Japanese"` + item `"prop:ivl>=3" "prop:ivl<=5"` → `(deck:"Japanese") AND "prop:ivl>=3" "prop:ivl<=5"`; Collection scope → item query alone.
 - Every generated query in the browse-queries scenarios parses with the core search parser (U80) without error (R1420).
 - Range persistence: set Reviews to 3 months, relaunch → 3 months; history back to 12 months while Reviews was "all" → falls back to the spec'd default.
-- Re-binning 1.2M-row-equivalent Reviews data under 16 ms (performance assertion).
+- Re-bucketing the largest Reviews and Intervals aggregates returned at 150k / 1.2M rows under 16 ms (performance assertion).
 - VoiceOver element tree of a 70-bar chart → summary first, 70 bin elements with tooltip text, "Show in Browser" action present on clickable graphs only.
 
 **Verification:** All presentation goldens match; binning perf assertion passes; chart colour tokens pass the contrast checks of the snapshot/lint gate (U10, KTD20).
@@ -12920,7 +13151,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - the 500k multiplier: 2× for time budgets (R1803);
   - the 1M rule: "completes, no crash or hang";
   - where it is measured: core-docker, core-mac, simulator or device.
-- Budgets are absolute on devices and on the Mac core benchmarks. On simulators, the gate applies the absolute rule only to frame-relative, hitch-ratio and memory metrics, and applies the 10% baseline rule to ms metrics, because simulator timing is not device timing. See the conflict note.
+- Budgets are absolute on devices and on the Mac core benchmarks. On simulators, the gate applies the absolute rule only to frame-relative, hitch-ratio and memory metrics, and applies the 10% baseline rule to ms metrics, because simulator timing is not device timing. See the conflict note. The review-loop frame budgets are gated absolutely per change on the Mac host (U243).
+- Conflict call-out (R1825–R1827, R1861, R1106): R1825–R1827 run from query dispatch (when the R1106 debounce fires) to the first page visible. `keystroke→search results visible` (R1861) is reported as 60 ms + the R1825 value.
+- Budgets are decomposed in `budgets.yaml` so each layer has its own gate. Search: core first page on the M3 Max ≤ 50% of the device budget (simple ≤ 15 ms, plain ≤ 50 ms, slow leaves ≤ 150 ms; U90), row page plus render ≤ 15 ms. Review: `review.presentToNextSettled` (U176) with its p95 budget equal to the p5 of the real dwell histogram (U243).
 - Regression rules: UI metrics fail above +10% against the stored baseline (R1863). Instruction counts fail above +5% (R1864). Wall-clock core benchmarks are tracked for p50, p95 and p99 and fail only on an absolute budget breach.
 - Baselines are keyed by runner identity: simulator model and OS build, device model and OS, or host CPU. Baselines change only through an explicit `perf-gate --rebaseline` commit with a reason line.
 - The R1861 completeness check: a registry test asserts that every interval R1861 names has a catalog entry and is emitted at least once in the UI perf suites (U243–U245).
@@ -12983,7 +13216,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `import` of a 10k-note .apkg ≤ 3 s, and .colpkg import of `realistic-150k` ≤ 10 s, excluding media (R1846).
 - `check-db` on a healthy 150k collection ≤ 5 s (R1847). `backup` ≤ 2 s (R1848).
 - `memory-states` at 100k ≤ 3 s, and cancelled at 50%, leaves the collection byte-identical (R1849).
-- `optimize` on 1M revlog ≤ 30 s at utility QoS. Cancelled and resumed, it causes no collection change before the commit step (R1850).
+- `optimize` on 1M revlog ≤ 30 s at utility QoS. Cancelled and resumed, it causes no collection change before the commit step (R1850). A `realistic-500k` run asserts peak footprint ≤ 300 MB (R1852); a breach is U47's stop condition.
 - `open` and `sync-prepare` with 30k media files: the filesystem-call counter records zero directory listings and zero file hashes (R1855).
 - An instruction-count regression of +6% injected by a test-only slow path: `bench-icount` fails.
 
@@ -13006,7 +13239,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `app/MeguriUITests/Performance/ReviewMenuOpsPerfTests.swift`
 - `app/Packages/MeguriKit/Sources/Features/Review/Diagnostics/FrameProbe.swift` (under `MEGURI_TEST_HOOKS`)
 - `app/Packages/MeguriKit/Sources/Features/Review/Diagnostics/BaselineSwapProbe.swift` (under `MEGURI_TEST_HOOKS`)
-- `core/crates/meguri-testkit/profiles/review-corpus.toml`
+- `core/crates/meguri-testkit/profiles/review-corpus.toml`, `core/crates/meguri-testkit/profiles/review-dwell.json` (dwell histogram, aggregates only)
 - `app/TestPlans/Performance.xctestplan`
 
 **Approach:**
@@ -13027,9 +13260,12 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Tint latency (R1816): the frame probe compares the touch-down frame with the tint layer's commit frame.
 - Audio (R1814): the native audio player emits a signpost when it starts playback. The suite asserts ≤ 100 ms from side-visible.
 - Durability (R1817): after each answer, a test hook asks the core for the commit timestamp of that card's revlog row, and the suite asserts ≤ 1 s. The UI-thread signpost shows that no commit wait sits on the answer path.
-- Runs per change on the pinned iPhone and iPad simulators and on the Mac host. The gate uses U241 simulator rules.
+- Interval rule: KTD11's conflict call-out. Frames-to-visible ends at the frame that presents the swap commit; the post-swap confirmation must name the same card.
+- The scripted session draws question and answer dwell times from a committed histogram of real answer times (`core/crates/meguri-testkit/profiles/review-dwell.json`; aggregates only, R1940), including its fastest 5%. A sample where the swap waited on settle, or used an on-demand render, counts as a miss for R1807, and the cause of each miss is reported.
+- Frames-to-visible is reported separately for fast-path and web-confirmed samples (U180, U181).
+- Absolute per-change gating of R1807, R1808, R1815 and R1816 runs on the Mac host (M3 Max, 120 Hz built-in display). The iPhone and iPad simulators run the suite as a 10% regression check at their native 60 Hz. Device runs are U256's.
 
-**Execution note:** Gate only after S1 confirms that the probe's frame attribution matches an Instruments trace on one device. Until then, run report-only.
+**Execution note:** S1(b) and the probe attribution are checked on the Mac host against an Instruments trace, and on the iOS simulator for function only (U65); gating starts once that check passes. The iPhone 120 Hz confirmation is a U256 checkpoint.
 
 **Patterns to follow:**
 - KTD11 two-page swap.
@@ -13037,8 +13273,9 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - R1964 identifiers for the buttons and zones.
 
 **Test scenarios:**
-- Covers AE81 (simulator form). On a 200-card mixed corpus deck at 120 Hz, answering Good by button on every card: p95 frames-to-visible ≤ the baseline probe, p99 ≤ baseline + 1, every card confirmed painted, and every revlog row committed ≤ 1 s after its answer.
-- The same session using only the Migaku-like script-heavy subset: the same frame result (R1808).
+- Covers AE81 (Mac-host and simulator form). On a 200-card mixed corpus deck, answering Good by button on every card with fastest-5% dwell: p95 frames-to-visible ≤ the baseline probe, p99 ≤ baseline + 1, every card confirmed painted, and every revlog row committed ≤ 1 s after its answer.
+- The same session using only the Migaku-like script-heavy subset: the same frame result (R1808), and `review.presentToNextSettled` stays within its budget.
+- Start review on the Migaku-like deck right after launch warm-up: first card ≤ 150 ms p95 with the font files cold on disk (R1813).
 - An answer-side template with a 30 ms script: reveal to answer visible ≤ 50 ms at p95. A template without scripts: within one refresh interval (R1809).
 - The interval labels' text is present in the same presented frame as the answer side. The frame probe snapshot shows labels and answer together (R1810).
 - Covers AE14 (timing). Three answers, then undo twice: each undo returns the card question-side within 50 ms at p95 (R1811).
@@ -13095,7 +13332,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Finish a session, then return to Home: the "Studied N cards" line and the heatmap cell update within one refresh interval (R1820, R1839).
 - A sync merge and a bulk tag op completing while Home is visible: the deck list updates within 100 ms, with no full reload signpost and no layout jump detected by frame-diffing the list (R1821).
 - Expand and collapse a deck with 200 children: one refresh interval (R1822).
-- Type "über" in Browse search: each keystroke echoes within one refresh interval, the older query is cancelled, and the first page appears ≤ 100 ms at p95 (R1824, R1825).
+- Type "über" in Browse search: each keystroke echoes within one refresh interval, the older query is cancelled, and the first page appears ≤ 100 ms at p95 from query dispatch (R1824, R1825; U241 call-out).
 - `re:` search and `nc:` search: first page ≤ 300 ms at p95, and later pages stream (R1826).
 - Open Browse with the default search ≤ 200 ms (R1827). Change the sort column ≤ 200 ms (R1828).
 - Scrub the browser scroll indicator from top to bottom: hitch ratio < 5 ms/s and zero template renders (R1829).
@@ -13140,7 +13377,8 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - The op list is taken from the engine's registry of cancellable ops, so a new op without a test fails.
 - **Memory (R1851–R1853, R1840).**
   - XCTMemoryMetric peaks on iPhone simulators at 150k and 500k: normal use ≤ 150 MB; sync, import, export, backup, Check DB and optimize ≤ 300 MB at 500k.
-  - A 1,000-card session grows ≤ 5 MB, and web content memory is released at session end.
+  - A 1,000-card session grows ≤ 5 MB, and web content memory returns to within 10 MB of the post-warm-up level after the session closes (KTD11 call-out on R1853).
+  - The 500k stats memory test runs with all history selected.
   - The widget extension renders every family from a maximum-size snapshot within the system widget memory limit and never opens the collection (a file-access assertion).
   - Device numbers come from U256.
 - **Idle (R1854).** After launch settles, 60 s idle on Home, then in Browse and in a paused review. Zero timer fires from app code (signpost counter) and CPU ≈ 0. A test also asserts that the only scheduled wake-up is the C6 rollover timer.
@@ -13158,7 +13396,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - A synthetic progress source at 1 kHz: UI updates ≤ 11 per second (R1858).
 - Import of a 10k-note apkg cancelled at its third progress callback: the collection dump equals the pre-import dump, and the media folder is unchanged (R1860).
 - An iPhone simulator at 500k: browse, search, edit, stats and review for 2 minutes stay at peak ≤ 150 MB. Check DB stays at peak ≤ 300 MB (R1851, R1852).
-- 1,000 answers: the resident memory delta ≤ 5 MB, and both web views' content memory drops after the session closes (R1853).
+- 1,000 answers: the resident memory delta ≤ 5 MB, and both web views' content memory returns to within 10 MB of the post-warm-up level after the session closes (R1853).
 - The widget renders the Extra Large family from a 400-day snapshot under the extension memory cap and performs zero opens of `collection.anki2` (R1840).
 - 60 s idle on Home: zero app timer fires and no repeated scans (R1854).
 - MetricKit delivers a diagnostic payload in a test harness: it is persisted locally, and no network API is touched (R1867).
@@ -13418,7 +13656,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Dependencies:**
 - U4, U3, U246
-- U22, U23, U24, U25, U26, U31, U107, U109, U111, U120, U122, U124, U126, U128, U130, U47
+- U22, U23, U24, U25, U26, U31, U38, U107, U109, U111, U120, U122, U124, U126, U128, U130, U47
 
 **Files:**
 - `core/crates/meguri-model/src/faultpoint.rs` (behind feature `test-hooks`)
@@ -13491,7 +13729,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Approach:**
 - XCUITest drives an operation through UI identifiers.
 - The test hook signals "operation in progress" through a launch-environment file channel. The host helper SIGKILLs the app process. The test relaunches and verifies through the UI and through a test-hook integrity report.
-- Suspend (R2007): the test backgrounds the app mid-session, then asserts through a test hook that no SQLite lock is held after `prepareForSuspend`, and that pending answers are committed.
+- Suspend (R2007): the test backgrounds the app mid-session, then asserts through a test hook that no SQLite lock is held after `suspend` (U32), and that pending answers were committed by `flush_for_background`.
 - Restore (R2010): Settings → Backups → restore an older backup. The collection matches that backup's dump, auto-sync is off, and the sync status asks for a direction.
 - Disk full (R2015): a test hook reports low free space to the core's space provider. Import and full download show the clear refusal message, and no progress UI is left behind.
 - Media trash (R2018): delete unused media, then restore from trash, then empty trash with a confirmation.
@@ -13734,6 +13972,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Test scenarios:**
 - Covers AE81. On the user's iPhone at 120 Hz with his collection's Migaku Japanese deck (200 due), the automated session answering Good: p95 next-card in the earliest allowed frame, p99 ≤ +1 frame, no transition hitch above one refresh interval, every review committed ≤ 1 s.
+- S1(b) checkpoint (U65): on the iPhone 17 Pro at 120 Hz, the U243 frame probe's attribution matches an Instruments trace; a failure switches U176's snapshot fallback on and keeps the milestone open.
 - The device-run script with no device attached: it exits with the runbook step to perform, not an error trace.
 - A device run whose iPad cold launch is 540 ms at p95 on 150k: the evidence file records the R1818 failure, and the M1 gate stays open.
 - The real-collection copy is deleted from the device container after the run (a post-run listing shows it absent).
@@ -13801,7 +14040,7 @@ All verification runs through `tools/mg <job>` (U1). Each job writes `build/mg/<
 | Milestone | `tools/mg milestone-gate M<n>` | milestone close | every suite listed for that milestone in `docs/process/milestones.yaml` (U240) passes on one commit, and every user-step evidence file exists |
 | Release | `tools/mg release-check`, `tools/mg release-audit` | release | AnkiWeb switch, trademark, privacy manifest, required-reason symbols, licenses and notices (R2021–R2042) |
 
-The exit criteria for performance-shaped goals are the numeric budgets in R1807–R1855, checked on reference devices at milestones (U256), and frame-relative budgets plus the regression rule on simulators for every change.
+The exit criteria for performance-shaped goals are the numeric budgets in R1807–R1855, checked on reference devices at milestones (U256), absolute review-loop frame budgets on the Mac host for every change (U243), and frame-relative budgets plus the regression rule on simulators for every change.
 
 ---
 
