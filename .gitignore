@@ -1,0 +1,5 @@
+# Local copy of the real Anki collection (personal data, never commit)
+/local-data/
+
+# Reference checkouts (separate git repos; Anki is AGPL and never part of Meguri)
+/refs/
