@@ -1,0 +1,8 @@
+# tools/
+
+- `tools/mg <job>` is the only documented way to build, test and verify. A run writes `build/mg/<job>/<run-id>/result.json` (schema `mg-result.schema.json`, bump `schema_version` on incompatible changes), points `latest` at it (never for `--dry-run`), prints only the result path on stdout, and exits 0 for pass and warn, 1 for fail, 2 for error. Job output goes to stderr and `log.txt`.
+- Add a job by adding or extending a family in `mg.d/<family>.sh`: `mg_job <name> <host|docker:<service>> <fn> <description>`, then record results with `mg_status`, `mg_count`, `mg_failure`, `mg_artifact`, `mg_user_step`, `mg_detail`, `mg_message`. Do not echo JSON yourself. Every job must survive `--dry-run`; `tools/mg selftest` dry-runs them all.
+- Placement is the R1952 rule. A `docker:<service>` job runs its whole function inside that compose service (`tools/mg __exec`), so write it as plain commands for that container. A `host` job runs on macOS and may call `mg_compose` itself.
+- `tools/mg` and `mg.d/` must run under macOS `/bin/bash` 3.2 with BSD tools: no associative arrays, `mapfile` or `${x,,}`; guard empty arrays under `set -u` with `${a[0]+"${a[@]}"}`. Pass job arguments to jq with `--arg` or `mg_json_array`, never `--args` (jq parses `-E`, `-c` and `--` there).
+- Agents never perform `user_steps` (R1969). doctor only reads host state; `tests/mg_selftest.bats` stubs host commands and fails on any call outside a read-only allowlist, so extend that allowlist when doctor learns a new read.
+- Self-tests: `tools/mg selftest` (bats, in the dev container) and `tools/mg selftest-host` (macOS bash, real doctor, Docker from the host). Both run copies of `tools/` in a throwaway repo and never write to the real `build/mg/`.

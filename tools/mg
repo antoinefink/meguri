@@ -1,0 +1,469 @@
+#!/usr/bin/env bash
+# tools/mg: the single entry point for builds, tests and verification jobs.
+#
+#   tools/mg <job> [--dry-run] [args...]   run a job
+#   tools/mg --list                        registered jobs: name<TAB>placement<TAB>description
+#   tools/mg --help
+#
+# Every run writes build/mg/<job>/<run-id>/result.json (tools/mg-result.schema.json),
+# points build/mg/<job>/latest at it (not for dry runs), prints the result path as
+# the only stdout line, and exits 0 for pass/warn, 1 for fail, 2 for error.
+# Job output goes to stderr and to log.txt in the run directory.
+#
+# Job families live in tools/mg.d/*.sh and register jobs with mg_job. A job's
+# placement is `host` or `docker:<compose service>`; docker jobs run their whole
+# job function inside that service container (R1952). Keep this file runnable
+# under macOS /bin/bash 3.2.
+
+set -u
+
+MG_SCHEMA_VERSION=1
+MG_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+MG_ROOT="$(cd "$MG_TOOLS/.." && pwd -P)"
+export MG_TOOLS MG_ROOT
+
+# ---------------------------------------------------------------------------
+# Registry
+
+MG_JOB_NAMES=()
+MG_JOB_PLACEMENTS=()
+MG_JOB_FNS=()
+MG_JOB_DESCS=()
+MG_REGISTRY_ERRORS=""
+
+# mg_job <name> <host|docker:service> <function> <description>
+mg_job() {
+  local name="$1" placement="$2" fn="$3" desc="$4"
+  if ! printf '%s' "$name" | grep -Eq '^[a-z][a-z0-9-]*$'; then
+    MG_REGISTRY_ERRORS="${MG_REGISTRY_ERRORS}invalid job name '$name'"$'\n'
+    return 0
+  fi
+  case "$placement" in
+    host | docker:?*) ;;
+    *)
+      MG_REGISTRY_ERRORS="${MG_REGISTRY_ERRORS}job '$name' has invalid placement '$placement'"$'\n'
+      return 0
+      ;;
+  esac
+  if mg__job_index "$name" >/dev/null; then
+    MG_REGISTRY_ERRORS="${MG_REGISTRY_ERRORS}job '$name' is registered twice"$'\n'
+    return 0
+  fi
+  MG_JOB_NAMES[${#MG_JOB_NAMES[@]}]="$name"
+  MG_JOB_PLACEMENTS[${#MG_JOB_PLACEMENTS[@]}]="$placement"
+  MG_JOB_FNS[${#MG_JOB_FNS[@]}]="$fn"
+  MG_JOB_DESCS[${#MG_JOB_DESCS[@]}]="$desc"
+}
+
+mg__job_index() {
+  local i=0
+  while [ "$i" -lt "${#MG_JOB_NAMES[@]}" ]; do
+    if [ "${MG_JOB_NAMES[$i]}" = "$1" ]; then
+      printf '%s\n' "$i"
+      return 0
+    fi
+    i=$((i + 1))
+  done
+  return 1
+}
+
+mg__load_families() {
+  local f
+  for f in "$MG_TOOLS"/mg.d/*.sh; do
+    [ -f "$f" ] || continue
+    # shellcheck source=/dev/null
+    if ! . "$f"; then
+      MG_REGISTRY_ERRORS="${MG_REGISTRY_ERRORS}failed to load ${f#"$MG_ROOT"/}"$'\n'
+    fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Helpers for job functions. They record into $MG_STATE; the dispatcher turns
+# that into result.json. They work the same on the host and in a container.
+
+mg_status() {
+  case "$1" in
+    pass | warn | fail | error) printf '%s\n' "$1" >"$MG_STATE/status" ;;
+    *)
+      echo "tools/mg: mg_status: invalid status '$1'" >&2
+      printf 'error\n' >"$MG_STATE/status"
+      ;;
+  esac
+}
+
+mg_message() { printf '%s' "$*" >"$MG_STATE/message"; }
+
+# mg_count <name> <non-negative integer>  (total, passed, failed, skipped, or any other count)
+mg_count() { jq -nc --arg k "$1" --argjson v "$2" '{($k): $v}' >>"$MG_STATE/counts.jsonl"; }
+
+# mg_failure <id> <message> [repro command; default: rerun this job]
+mg_failure() {
+  local repro="${3:-}"
+  [ -n "$repro" ] || repro="$MG_DEFAULT_REPRO"
+  jq -nc --arg id "$1" --arg m "$2" --arg r "$repro" '{id: $id, message: $m, repro: $r}' >>"$MG_STATE/failures.jsonl"
+}
+
+# mg_artifact <kind> <path> [label]  (paths under the repo root are stored relative,
+# then resolved against the host checkout when result.json is written)
+mg_artifact() {
+  local p="$2"
+  case "$p" in "$MG_ROOT"/*) p="${p#"$MG_ROOT"/}" ;; esac
+  jq -nc --arg k "$1" --arg p "$p" --arg l "${3:-}" \
+    '{kind: $k, path: $p} + (if $l == "" then {} else {label: $l} end)' >>"$MG_STATE/artifacts.jsonl"
+}
+
+# mg_user_step <id> <missing|unverified> <required: true|false> <title> <how>
+mg_user_step() {
+  jq -nc --arg id "$1" --arg s "$2" --argjson r "$3" --arg t "$4" --arg h "$5" \
+    --arg d "docs/process/one-time-setup.md#$1" \
+    '{id: $id, state: $s, required: $r, title: $t, how: $h, doc: $d}' >>"$MG_STATE/user_steps.jsonl"
+}
+
+# mg_detail <key> <JSON value>
+mg_detail() { jq -nc --arg k "$1" --argjson v "$2" '{($k): $v}' >>"$MG_STATE/details.jsonl"; }
+
+# Compose for this checkout: one project per checkout path, so worktrees never
+# share an image tag or a target volume.
+mg_compose_project() {
+  local base sum
+  base="$(basename "$MG_ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')"
+  sum="$(printf '%s' "$MG_ROOT" | cksum | cut -d' ' -f1)"
+  printf 'meguri-%s-%s\n' "$base" "$sum"
+}
+
+# BUILDX_NO_DEFAULT_ATTESTATIONS: a provenance attestation carries build
+# timestamps, so it would change the image id on every rebuild even when every
+# layer is cached. Compose 5.5 ignores `provenance: false` in compose.yml.
+mg_compose() {
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$(mg_compose_project)" -f "$MG_ROOT/docker/compose.yml" "$@"
+}
+
+# ---------------------------------------------------------------------------
+# Dispatcher internals
+
+mg__now_ms() { jq -n 'now * 1000 | floor'; }
+mg__now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+mg__usage() {
+  cat <<'EOF'
+usage: tools/mg <job> [--dry-run] [args...]
+       tools/mg --list
+Each run prints the path of its result.json (tools/mg-result.schema.json).
+Exit code: 0 pass or warn, 1 fail, 2 error.
+
+jobs:
+EOF
+  local i=0
+  while [ "$i" -lt "${#MG_JOB_NAMES[@]}" ]; do
+    printf '  %-16s %-14s %s\n' "${MG_JOB_NAMES[$i]}" "${MG_JOB_PLACEMENTS[$i]}" "${MG_JOB_DESCS[$i]}"
+    i=$((i + 1))
+  done
+}
+
+mg__list() {
+  local i=0
+  while [ "$i" -lt "${#MG_JOB_NAMES[@]}" ]; do
+    printf '%s\t%s\t%s\n' "${MG_JOB_NAMES[$i]}" "${MG_JOB_PLACEMENTS[$i]}" "${MG_JOB_DESCS[$i]}"
+    i=$((i + 1))
+  done
+}
+
+mg__known_jobs_json() {
+  mg__list | cut -f1 | jq -R . | jq -sc .
+}
+
+mg__init_state() {
+  MG_STATE="$MG_RUN_DIR/.mg"
+  export MG_STATE
+  mkdir -p "$MG_STATE"
+  local f
+  for f in status message counts.jsonl failures.jsonl artifacts.jsonl user_steps.jsonl details.jsonl; do
+    : >>"$MG_STATE/$f"
+  done
+}
+
+mg__quote_args() {
+  local out="" a
+  for a in "$@"; do
+    case "$a" in
+      *[!A-Za-z0-9_./:=@%+,-]* | "") a="'$(printf '%s' "$a" | sed "s/'/'\\\\''/g")'" ;;
+    esac
+    out="$out $a"
+  done
+  printf '%s' "$out"
+}
+
+# Run the job function in a subshell from the repo root.
+mg__invoke() {
+  local fn="$1"
+  shift
+  (
+    cd "$MG_ROOT" || exit 2
+    "$fn" "$@"
+  )
+}
+
+# Run a docker job: build the service image, then re-enter tools/mg inside it.
+mg__invoke_docker() {
+  local service="$1" fn="$2"
+  shift 2
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    mg_failure docker-unreachable "Docker is not reachable; start Docker Desktop" "tools/mg doctor"
+    mg_status error
+    return 2
+  fi
+  echo "tools/mg: building image for service '$service'" >&2
+  if ! mg_compose --progress plain build "$service"; then
+    mg_failure image-build "building the '$service' image failed; see log.txt" \
+      "docker compose -p $(mg_compose_project) -f docker/compose.yml build $service"
+    mg_status error
+    return 2
+  fi
+  local rel="${MG_RUN_DIR#"$MG_ROOT"/}"
+  mg_compose run --rm -T --no-deps \
+    -e MG_JOB="$MG_JOB" -e MG_RUN_ID="$MG_RUN_ID" -e MG_DEFAULT_REPRO="$MG_DEFAULT_REPRO" \
+    "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"}
+}
+
+# Inside a container: tools/mg __exec <job> <run-dir relative to root> -- args
+mg__exec() {
+  local job="$1" rel="$2"
+  shift 2
+  [ "${1:-}" = "--" ] && shift
+  mg__load_families
+  local idx
+  if ! idx="$(mg__job_index "$job")"; then
+    echo "tools/mg __exec: unknown job '$job'" >&2
+    return 2
+  fi
+  local placement="${MG_JOB_PLACEMENTS[$idx]}"
+  if [ "$placement" != "docker:${MG_CONTAINER:-}" ]; then
+    echo "tools/mg __exec: job '$job' runs in $placement, not in container '${MG_CONTAINER:-none}'" >&2
+    return 2
+  fi
+  MG_RUN_DIR="$MG_ROOT/$rel"
+  MG_STATE="$MG_RUN_DIR/.mg"
+  MG_PLACEMENT=docker
+  MG_SERVICE="${placement#docker:}"
+  export MG_RUN_DIR MG_STATE MG_PLACEMENT MG_SERVICE MG_JOB MG_RUN_ID MG_DEFAULT_REPRO
+  mg__invoke "${MG_JOB_FNS[$idx]}" ${1+"$@"}
+}
+
+# JSON array of the arguments. `jq --args` would still parse options such as
+# -E or -- among them, so each value goes through --arg.
+mg_json_array() {
+  local a
+  for a in "$@"; do
+    jq -n --arg a "$a" '$a'
+  done | jq -sc .
+}
+
+mg__status_exit_code() {
+  case "$1" in
+    pass | warn) echo 0 ;;
+    fail) echo 1 ;;
+    *) echo 2 ;;
+  esac
+}
+
+# mg__write_result <result path> <job> <placement> <service> <dry_run> <rc> args...
+mg__write_result() {
+  local out="$1" job="$2" placement="$3" service="$4" dry="$5" rc="$6"
+  shift 6
+  local status message finished end_ms
+  status="$(head -n 1 "$MG_STATE/status")"
+  if [ -z "$status" ]; then
+    if [ -s "$MG_STATE/failures.jsonl" ]; then
+      status=fail
+    elif [ "$rc" = 0 ]; then
+      status=pass
+    else
+      status=error
+      mg_failure job-exit "job exited with code $rc without reporting a status; see log.txt"
+    fi
+  fi
+  message="$(cat "$MG_STATE/message")"
+  [ -n "$message" ] || message="$job: $status"
+  finished="$(mg__now_iso)"
+  end_ms="$(mg__now_ms)"
+  jq -n \
+    --argjson sv "$MG_SCHEMA_VERSION" \
+    --arg job "$job" \
+    --arg run_id "$MG_RUN_ID" \
+    --arg status "$status" \
+    --argjson exit_code "$(mg__status_exit_code "$status")" \
+    --arg placement "$placement" \
+    --arg service "$service" \
+    --argjson dry "$dry" \
+    --arg root "$MG_ROOT" \
+    --arg started "$MG_STARTED_AT" \
+    --arg finished "$finished" \
+    --argjson duration "$((end_ms - MG_START_MS))" \
+    --arg sha "$MG_COMMIT_SHA" \
+    --arg dirty "$MG_COMMIT_DIRTY" \
+    --arg message "$message" \
+    --argjson args "$(mg_json_array ${1+"$@"})" \
+    --slurpfile counts "$MG_STATE/counts.jsonl" \
+    --slurpfile failures "$MG_STATE/failures.jsonl" \
+    --slurpfile artifacts "$MG_STATE/artifacts.jsonl" \
+    --slurpfile steps "$MG_STATE/user_steps.jsonl" \
+    --slurpfile details "$MG_STATE/details.jsonl" \
+    '{
+      schema_version: $sv,
+      job: $job,
+      run_id: $run_id,
+      status: $status,
+      exit_code: $exit_code,
+      placement: $placement,
+      service: (if $service == "" then null else $service end),
+      dry_run: $dry,
+      args: $args,
+      root: $root,
+      started_at: $started,
+      finished_at: $finished,
+      duration_ms: (if $duration < 0 then 0 else $duration end),
+      commit: {
+        sha: (if $sha == "" then null else $sha end),
+        dirty: (if $dirty == "" then null else ($dirty == "true") end)
+      },
+      message: $message,
+      summary: ({total: 0, passed: 0, failed: 0, skipped: 0} + (reduce $counts[] as $c ({}; . + $c))),
+      failures: $failures,
+      artifacts: [$artifacts[] | .path |= (if startswith("/") then . else $root + "/" + . end)],
+      user_steps: $steps,
+      details: (reduce $details[] as $d ({}; . + $d))
+    }' >"$out.tmp" && mv -f "$out.tmp" "$out"
+}
+
+mg__commit_info() {
+  MG_COMMIT_SHA=""
+  MG_COMMIT_DIRTY=""
+  if git -C "$MG_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    MG_COMMIT_SHA="$(git -C "$MG_ROOT" rev-parse --verify -q HEAD 2>/dev/null || true)"
+    if [ -n "$(git -C "$MG_ROOT" status --porcelain 2>/dev/null | head -n 1)" ]; then
+      MG_COMMIT_DIRTY=true
+    else
+      MG_COMMIT_DIRTY=false
+    fi
+  fi
+}
+
+mg__run() {
+  local job="$1"
+  shift
+  local dry=false passthrough=false a
+  local args=()
+  for a in "$@"; do
+    if [ "$passthrough" = false ] && [ "$a" = "--dry-run" ]; then
+      dry=true
+      continue
+    fi
+    [ "$a" = "--" ] && passthrough=true
+    args[${#args[@]}]="$a"
+  done
+
+  MG_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  MG_STARTED_AT="$(mg__now_iso)"
+  MG_START_MS="$(mg__now_ms)"
+  MG_JOB="$job"
+  MG_DEFAULT_REPRO="tools/mg $job$(mg__quote_args ${args[0]+"${args[@]}"})"
+  export MG_RUN_ID MG_JOB MG_DEFAULT_REPRO
+  mg__commit_info
+
+  local idx="" job_dir placement="none" service="" fn=""
+  if [ -z "$MG_REGISTRY_ERRORS" ]; then
+    idx="$(mg__job_index "$job")" || idx=""
+  fi
+  if [ -n "$idx" ]; then
+    job_dir="$MG_ROOT/build/mg/$job"
+    fn="${MG_JOB_FNS[$idx]}"
+    case "${MG_JOB_PLACEMENTS[$idx]}" in
+      host) placement=host ;;
+      docker:*) placement=docker service="${MG_JOB_PLACEMENTS[$idx]#docker:}" ;;
+    esac
+  else
+    job_dir="$MG_ROOT/build/mg/_dispatch"
+  fi
+  MG_RUN_DIR="$job_dir/$MG_RUN_ID"
+  MG_PLACEMENT="$placement"
+  MG_SERVICE="$service"
+  export MG_RUN_DIR MG_PLACEMENT MG_SERVICE
+  mg__init_state
+  local log="$MG_RUN_DIR/log.txt"
+  : >"$log"
+  mg_artifact log "$log"
+
+  local rc=0
+  if [ -n "$MG_REGISTRY_ERRORS" ]; then
+    local line
+    while IFS= read -r line; do
+      [ -n "$line" ] && mg_failure registry "$line" "tools/mg --list"
+    done <<EOF
+$MG_REGISTRY_ERRORS
+EOF
+    mg_message "tools/mg: job registry is invalid; fix tools/mg.d"
+    mg_status error
+    printf '%s' "$MG_REGISTRY_ERRORS" | tee -a "$log" >&2
+  elif [ -z "$idx" ]; then
+    mg_failure unknown-job "unknown job '$job'" "tools/mg --list"
+    mg_detail known_jobs "$(mg__known_jobs_json)"
+    mg_message "unknown job '$job'; known jobs: $(mg__list | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+    mg_status error
+    echo "tools/mg: unknown job '$job' (tools/mg --list shows the known jobs)" | tee -a "$log" >&2
+  elif [ "$dry" = true ]; then
+    mg_detail job "$(jq -nc --arg p "${MG_JOB_PLACEMENTS[$idx]}" --arg f "$fn" --arg d "${MG_JOB_DESCS[$idx]}" \
+      '{placement: $p, function: $f, description: $d}')"
+    mg_message "dry run: $job would run on ${MG_JOB_PLACEMENTS[$idx]}"
+    mg_status pass
+  elif [ "$placement" = host ] || [ "${MG_CONTAINER:-}" = "$service" ]; then
+    mg__invoke "$fn" ${args[0]+"${args[@]}"} 2>&1 | tee -a "$log" >&2
+    rc=${PIPESTATUS[0]}
+  elif [ -n "${MG_CONTAINER:-}" ]; then
+    mg_failure wrong-container "job '$job' runs in service '$service'; this is container '$MG_CONTAINER'. Run tools/mg from the host."
+    mg_status error
+  else
+    mg__invoke_docker "$service" "$fn" ${args[0]+"${args[@]}"} 2>&1 | tee -a "$log" >&2
+    rc=${PIPESTATUS[0]}
+  fi
+
+  local result="$MG_RUN_DIR/result.json"
+  if ! mg__write_result "$result" "$job" "$placement" "$service" "$dry" "$rc" ${args[0]+"${args[@]}"}; then
+    echo "tools/mg: could not write $result" >&2
+    exit 2
+  fi
+  rm -rf "$MG_STATE"
+  if [ "$dry" = false ] && [ -n "$idx" ]; then
+    ln -sfn "$MG_RUN_ID" "$job_dir/latest"
+  fi
+  printf '%s\n' "$result"
+  exit "$(jq -r .exit_code "$result")"
+}
+
+mg__main() {
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "tools/mg: jq is required (macOS ships /usr/bin/jq)" >&2
+    exit 2
+  fi
+  case "${1:-}" in
+    __exec)
+      shift
+      mg__exec "$@"
+      exit $?
+      ;;
+  esac
+  mg__load_families
+  case "${1:-}" in
+    "" | -h | --help | help)
+      mg__usage
+      exit 0
+      ;;
+    --list)
+      mg__list
+      exit 0
+      ;;
+  esac
+  mg__run "$@"
+}
+
+mg__main "$@"

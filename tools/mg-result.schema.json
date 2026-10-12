@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:meguri:mg-result:1",
+  "title": "tools/mg job result",
+  "description": "Written by tools/mg to build/mg/<job>/<run-id>/result.json for every run, including dry runs and dispatcher errors. Bump schema_version on any incompatible change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "job", "run_id", "status", "exit_code", "placement", "service",
+    "dry_run", "args", "root", "started_at", "finished_at", "duration_ms", "commit",
+    "message", "summary", "failures", "artifacts", "user_steps", "details"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "job": { "type": "string", "description": "The job name as requested, also for unknown jobs." },
+    "run_id": { "type": "string", "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9]+$" },
+    "status": { "enum": ["pass", "warn", "fail", "error"] },
+    "exit_code": {
+      "type": "integer",
+      "description": "Process exit code: 0 for pass and warn, 1 for fail, 2 for error.",
+      "enum": [0, 1, 2]
+    },
+    "placement": { "enum": ["host", "docker", "none"], "description": "Where the job ran; none for dispatcher errors before a job was found." },
+    "service": { "type": ["string", "null"], "description": "docker/compose.yml service for docker jobs, else null." },
+    "dry_run": { "type": "boolean" },
+    "args": { "type": "array", "items": { "type": "string" } },
+    "root": { "type": "string", "description": "Absolute path of the checkout the job ran in." },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "dirty"],
+      "properties": {
+        "sha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}$" },
+        "dirty": { "type": ["boolean", "null"], "description": "Uncommitted or untracked changes at job start; null outside a git checkout." }
+      }
+    },
+    "message": { "type": "string", "description": "One-line human summary." },
+    "summary": {
+      "type": "object",
+      "required": ["total", "passed", "failed", "skipped"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "message", "repro"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "message": { "type": "string" },
+          "repro": { "type": "string", "minLength": 1, "description": "Command that reproduces this failure from the repo root." }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1, "description": "For example log, png, contact-sheet, junit, json." },
+          "path": { "type": "string", "pattern": "^/", "description": "Absolute path on the machine that ran tools/mg." },
+          "label": { "type": "string" }
+        }
+      }
+    },
+    "user_steps": {
+      "type": "array",
+      "description": "One-time steps only the user may perform (R1969). Agents never perform them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "state", "required", "title", "how", "doc"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "state": { "enum": ["missing", "unverified"] },
+          "required": { "type": "boolean" },
+          "title": { "type": "string" },
+          "how": { "type": "string" },
+          "doc": { "type": "string" }
+        }
+      }
+    },
+    "details": { "type": "object", "description": "Job-specific data." }
+  }
+}
