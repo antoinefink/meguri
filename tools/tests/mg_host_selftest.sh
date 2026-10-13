@@ -2,8 +2,8 @@
 # Host self-tests for tools/mg, run by `tools/mg selftest-host`; prints TAP.
 # They cover what the container suite cannot: macOS /bin/bash 3.2 and BSD
 # tools, the real doctor on this Mac, a docker job started (and killed) from
-# the host, cargo's lock shared between dev containers, and a dev image
-# rebuild that reuses every layer.
+# the host, cargo's lock shared between dev containers, a dev image rebuild
+# that reuses every layer, and the simulator pool's locks (with a fake simctl).
 #
 # usage: mg_host_selftest.sh <sandbox dir>
 # The sandbox is a throwaway copy of tools/ and docker/ in its own git repo
@@ -681,6 +681,55 @@ t_sync_rig_up_fails_when_the_recording_is_unwritable() {
   expect "down status" "$(field .status)" pass
 }
 
+# The simulator pool under macOS /bin/bash 3.2 and BSD tools, against the fake
+# `xcrun simctl` (sim_pool_fake_xcrun.sh): no real simulator is touched.
+t_sim_pool_on_macos_bash() {
+  local dir="$SB/sim-pool" u u2 i check
+  local PATH="$dir/bin:$PATH" STUB_LOG="$dir/stub.log" FAKE_SIM_DB="$dir/sims.json"
+  local MEGURI_SIM_POOL_DIR="$dir/pool" MEGURI_SIM_DEVICES_DIR="$dir/Devices"
+  local MEGURI_SIM_POOL_SETTLE_SECONDS=0 MEGURI_SIM_POOL_POLL_SECONDS=1 MEGURI_SIM_POOL_WAIT_SECONDS=3
+  export PATH STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR
+  export MEGURI_SIM_POOL_SETTLE_SECONDS MEGURI_SIM_POOL_POLL_SECONDS MEGURI_SIM_POOL_WAIT_SECONDS
+  mkdir -p "$dir/bin" "$MEGURI_SIM_DEVICES_DIR" && : >"$STUB_LOG" || return 1
+  ln -s "$SB/tools/tests/sim_pool_fake_xcrun.sh" "$dir/bin/xcrun" || return 1
+  [ "$(command -v xcrun)" = "$dir/bin/xcrun" ] || { echo "the fake xcrun is not first on PATH"; return 1; }
+
+  mg sim acquire iphone --holder host-test
+  u="$(field .details.udid)"
+  expect "acquire exit" "$RC" 0 &&
+    expect "lease holder" "$(field .details.lease.holder)" host-test &&
+    expect "device state" "$(xcrun simctl __state "$u")" Booted || return 1
+  mg sim release "$u"
+  expect "release exit" "$RC" 0 || return 1
+  : >"$STUB_LOG"
+  mg sim acquire iphone
+  expect "reacquire exit" "$RC" 0 &&
+    expect "reused device" "$(field .details.udid)" "$u" &&
+    expect "no boot or create on reuse" "$(grep -Ec '^xcrun simctl (boot|create) ' "$STUB_LOG")" 0 || return 1
+
+  # Parallel acquires with mkdir locks: two more fit under the cap of three.
+  for i in 1 2 3; do
+    "$SB/tools/scripts/sim-pool.sh" acquire iphone >"$dir/out$i" 2>"$dir/err$i" &
+  done
+  wait
+  expect "parallel leases" "$(cat "$dir"/out1 "$dir"/out2 "$dir"/out3 | sort -u | wc -l | tr -d ' ')" 2 &&
+    expect "pool devices" "$(jq '[.devices[] | select(.name | startswith("Meguri-Pool-iphone-"))] | length' "$FAKE_SIM_DB")" 3 || return 1
+
+  check="$(xcrun simctl __add Meguri-check-1-iPhone17Pro Booted)"
+  touch -t 202601010000 "$MEGURI_SIM_DEVICES_DIR/$check" "$MEGURI_SIM_DEVICES_DIR/$u"
+  mg sim gc --list
+  expect "gc --list targets" "$(field '[.details.targets[].name] | join(" ")')" Meguri-check-1-iPhone17Pro &&
+    expect "gc --list deletes nothing" "$(grep -Ec '^xcrun simctl (shutdown|delete) ' "$STUB_LOG")" 0 || return 1
+  mg sim gc
+  expect "gc deleted" "$(field '.details.deleted | join(" ")')" "$check" &&
+    expect "only the leftover was shut down and deleted" \
+      "$(grep -E '^xcrun simctl (shutdown|delete|erase) ' "$STUB_LOG" | tr '\n' ' ')" \
+      "xcrun simctl shutdown $check xcrun simctl delete $check " || return 1
+  mg sim status
+  expect "status devices" "$(field '.details.devices | length')" 3 &&
+    expect "status leased" "$(field '[.details.devices[] | select(.leased)] | length')" 3
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -695,7 +744,7 @@ t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_
 t_parallel_session_records_on_macos t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
 t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_removes_it
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
-t_sync_rig_up_fails_when_the_recording_is_unwritable t_results_validate_against_schema"
+t_sync_rig_up_fails_when_the_recording_is_unwritable t_sim_pool_on_macos_bash t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then
