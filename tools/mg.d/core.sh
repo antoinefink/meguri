@@ -16,15 +16,21 @@ mg_core_test() {
       '{container: $container, os: $os, rustc: $rustc, nextest: $nextest}'
   )"
 
+  # Only a bare run may match no tests (no or empty workspace). With nextest
+  # arguments, an empty match must fail, or a stale repro command would pass.
   if [ ! -f core/Cargo.toml ]; then
-    mg_message "core-test: no Cargo workspace in core/ yet; 0 tests"
-    mg_status pass
+    if [ "$#" -eq 0 ]; then
+      mg_message "core-test: no Cargo workspace in core/ yet; 0 tests"
+      mg_status pass
+    else
+      mg_failure no-tests-matched "core/ has no Cargo workspace yet, so no test matches the nextest arguments"
+      mg_message "core-test: no Cargo workspace in core/ yet; no test matches the nextest arguments"
+      mg_status fail
+    fi
     return 0
   fi
 
   local out="$MG_RUN_DIR/nextest.jsonl" rc
-  # Only a bare run may match no tests (empty workspace). With a filter, an
-  # empty match must fail, or a stale repro command would pass.
   if [ "$#" -eq 0 ]; then
     set -- --no-tests=pass
   fi

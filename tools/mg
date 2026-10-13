@@ -8,7 +8,9 @@
 # Every run writes build/mg/<job>/<run-id>/result.json (tools/mg-result.schema.json),
 # points build/mg/<job>/latest at it (not for dry runs), prints the result path as
 # the only stdout line, and exits 0 for pass/warn, 1 for fail, 2 for error.
-# Job output goes to stderr and to log.txt in the run directory.
+# Job output goes to stderr and to log.txt in the run directory. SIGINT, SIGTERM
+# or SIGHUP cancel a run: the job (and a docker job's container) is stopped and
+# result.json still gets written, as an error with a `cancelled` failure.
 #
 # Job families live in tools/mg.d/*.sh and register jobs with mg_job. A job's
 # placement is `host` or `docker:<compose service>`; docker jobs run their whole
@@ -204,6 +206,84 @@ mg__invoke() {
   )
 }
 
+# Process ids of every descendant of process $1 (BSD ps on macOS, procps in containers).
+mg__descendants() {
+  ps -A -o pid= -o ppid= 2>/dev/null | awk -v root="$1" '
+    { kids[$2] = kids[$2] " " $1 }
+    END {
+      n = split(kids[root], queue, " ")
+      for (i = 1; i <= n; i++) {
+        print queue[i]
+        m = split(kids[queue[i]], more, " ")
+        for (j = 1; j <= m; j++) queue[++n] = more[j]
+      }
+    }'
+}
+
+# mg__run_job <log> <on-cancel command> <command> [args...]: run the job with
+# its output on stderr and in the log; sets MG_JOB_RC. The job runs in the
+# background so that a trapped INT, TERM or HUP (MG_INTERRUPTED) interrupts
+# `wait` at once, also when the signal reached tools/mg alone. The job's
+# process tree then gets SIGTERM (background commands ignore SIGINT), tools/mg
+# waits until it has exited, runs <on-cancel> (which must leave nothing that
+# can still write the run's state) and records the run as an error with a
+# `cancelled` failure.
+mg__run_job() {
+  local log="$1" on_cancel="$2" pid kids
+  shift 2
+  MG_JOB_RC=0
+  if [ -z "$MG_INTERRUPTED" ]; then
+    # The wrapper ignores the signals so that it outlives the job and returns
+    # its status; tee inherits that, so the log keeps the job's last output.
+    # The job gets the default dispositions back, except SIGINT under bash 3.2,
+    # which keeps it ignored in background commands. `<&0` keeps stdin, which
+    # a background command would otherwise lose.
+    (
+      trap '' INT TERM HUP
+      (
+        trap - INT TERM HUP
+        "$@"
+      ) 2>&1 | (exec tee -a "$log") >&2
+      exit "${PIPESTATUS[0]}"
+    ) <&0 &
+    pid=$!
+    wait "$pid"
+    MG_JOB_RC=$?
+    if [ -n "$MG_INTERRUPTED" ]; then
+      kids="$(mg__descendants "$pid")"
+      # shellcheck disable=SC2086 # one process id per word
+      [ -z "$kids" ] || kill -TERM $kids 2>/dev/null
+      while kill -0 "$pid" 2>/dev/null; do
+        wait "$pid"
+        MG_JOB_RC=$?
+      done
+    fi
+  fi
+  if [ -n "$MG_INTERRUPTED" ]; then
+    "$on_cancel" 2>&1 | tee -a "$log" >&2
+    mg_failure cancelled "tools/mg received $MG_INTERRUPTED and stopped the job before it finished; its results are incomplete"
+    mg_message "$MG_JOB: cancelled by $MG_INTERRUPTED"
+    mg_status error
+    echo "tools/mg: $MG_JOB cancelled by $MG_INTERRUPTED" | tee -a "$log" >&2
+  fi
+}
+
+# Stop and remove the containers of a cancelled docker run. The compose client
+# does not do it reliably: it forwards SIGINT, which the container's shell
+# ignores while its job runs, and once the `docker` CLI wrapping the compose
+# plugin gets a signal, the plugin exits without stopping the container.
+mg__remove_run_containers() {
+  local ids
+  ids="$(docker ps -aq --filter "label=meguri.mg.run-id=$MG_RUN_ID" 2>/dev/null)"
+  [ -n "$ids" ] || return 0
+  echo "tools/mg: stopping and removing the run's container: $(printf '%s' "$ids" | tr '\n' ' ')"
+  # shellcheck disable=SC2086 # one container id per word
+  docker stop -t 10 $ids >/dev/null 2>&1
+  # shellcheck disable=SC2086
+  docker rm -f $ids >/dev/null 2>&1
+  return 0
+}
+
 # Run a docker job: build the service image, then re-enter tools/mg inside it.
 mg__invoke_docker() {
   local service="$1" fn="$2"
@@ -221,7 +301,7 @@ mg__invoke_docker() {
     return 2
   fi
   local rel="${MG_RUN_DIR#"$MG_ROOT"/}"
-  mg_compose run --rm -T --no-deps \
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
     -e MG_JOB="$MG_JOB" -e MG_RUN_ID="$MG_RUN_ID" -e MG_DEFAULT_REPRO="$MG_DEFAULT_REPRO" \
     "$service" tools/mg __exec "$MG_JOB" "$rel" -- ${1+"$@"} </dev/null
 }
@@ -397,6 +477,12 @@ mg__run() {
   MG_PLACEMENT="$placement"
   MG_SERVICE="$service"
   export MG_RUN_DIR MG_PLACEMENT MG_SERVICE
+  # From here on a signal no longer kills tools/mg: mg__run_job turns it into
+  # a cancelled run, so result.json is always written.
+  MG_INTERRUPTED=""
+  trap 'MG_INTERRUPTED=SIGINT' INT
+  trap 'MG_INTERRUPTED=SIGTERM' TERM
+  trap 'MG_INTERRUPTED=SIGHUP' HUP
   mg__init_state
   local log="$MG_RUN_DIR/log.txt"
   : >"$log"
@@ -425,14 +511,14 @@ EOF
     mg_message "dry run: $job would run on ${MG_JOB_PLACEMENTS[$idx]}"
     mg_status pass
   elif [ "$placement" = host ] || [ "${MG_CONTAINER:-}" = "$service" ]; then
-    mg__invoke "$fn" ${args[0]+"${args[@]}"} 2>&1 | tee -a "$log" >&2
-    rc=${PIPESTATUS[0]}
+    mg__run_job "$log" : mg__invoke "$fn" ${args[0]+"${args[@]}"}
+    rc=$MG_JOB_RC
   elif [ -n "${MG_CONTAINER:-}" ]; then
     mg_failure wrong-container "job '$job' runs in service '$service'; this is container '$MG_CONTAINER'. Run tools/mg from the host."
     mg_status error
   else
-    mg__invoke_docker "$service" "$fn" ${args[0]+"${args[@]}"} 2>&1 | tee -a "$log" >&2
-    rc=${PIPESTATUS[0]}
+    mg__run_job "$log" mg__remove_run_containers mg__invoke_docker "$service" "$fn" ${args[0]+"${args[@]}"}
+    rc=$MG_JOB_RC
   fi
 
   local result="$MG_RUN_DIR/result.json"

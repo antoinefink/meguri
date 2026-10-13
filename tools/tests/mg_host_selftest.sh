@@ -119,36 +119,80 @@ t_core_test_runs_in_dev_container() {
     expect "latest" "$(readlink "$SB/build/mg/core-test/latest")" "$(field .run_id)"
 }
 
-# An orchestrator timeout sends SIGTERM to the process group of tools/mg. The
-# docker job's container must stop with it instead of running to completion.
-t_killing_mg_stops_the_docker_job_container() {
-  local fixture="$SB/tools/mg.d/zz-sleep.sh" pid
+# An orchestrator timeout sends SIGTERM to the process group of tools/mg;
+# Ctrl-C sends it SIGINT. Either way the docker job's container must be
+# stopped and removed instead of running to completion, and the run must
+# still end with an error result saying it was cancelled.
+signal_docker_job() { # <signal name without SIG>
+  local sig="$1" fixture="$SB/tools/mg.d/zz-sleep.sh" out="$SB/fx-sleep-$1.out" err="$SB/fx-sleep-$1.err"
+  local pid rc=0 gone=false
   printf '%s\n' 'mg_job fx-sleep docker:dev fx_sleep "fixture: sleep in the dev container"' \
     'fx_sleep() { echo "fx-sleep started"; sleep 120; mg_status pass; }' >"$fixture"
+  # Under `tools/mg selftest-host` this script is a background job, and macOS
+  # bash 3.2 gives background jobs an ignored SIGINT that their children
+  # inherit and cannot trap. A terminal starts tools/mg with SIGINT at its
+  # default, so do that.
   set -m # the run gets its own process group
-  /bin/bash "$MG" fx-sleep >/dev/null 2>>"$SB/stderr.log" &
+  /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
+    /bin/bash "$MG" fx-sleep >"$out" 2>"$err" &
   pid=$!
   set +m
   for _ in $(seq 120); do
-    grep -qs "fx-sleep started" "$SB"/build/mg/fx-sleep/*/log.txt && break
+    grep -qs "fx-sleep started" "$err" && break
     sleep 1
   done
   rm -f "$fixture"
   if [ -z "$(project_containers)" ]; then
-    echo "the fx-sleep container did not start"
+    echo "the fx-sleep container did not start:"
+    cat "$err"
     kill -TERM -- "-$pid"
     return 1
   fi
-  kill -TERM -- "-$pid"
-  for _ in $(seq 20); do
-    [ -z "$(project_containers)" ] && return 0
+  kill -"$sig" -- "-$pid"
+  for _ in $(seq 30); do
+    kill -0 "$pid" 2>/dev/null || break
     sleep 1
   done
-  echo "the fx-sleep container still runs 20 s after SIGTERM:"
-  docker ps --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}} {{.Status}}'
-  remove_project_containers
-  return 1
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "tools/mg still runs 30 s after SIG$sig"
+    kill -KILL -- "-$pid"
+    remove_project_containers
+    return 1
+  fi
+  wait "$pid" || rc=$?
+  cat "$err" >>"$SB/stderr.log"
+  for _ in $(seq 20); do
+    [ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")" ] && gone=true && break
+    sleep 1
+  done
+  if [ "$gone" = false ]; then
+    echo "the fx-sleep container is still there 20 s after SIG$sig:"
+    docker ps -a --filter "label=com.docker.compose.project=$PROJECT" --format '{{.Names}} {{.Status}}'
+    remove_project_containers
+    return 1
+  fi
+  RESULT="$(tail -n 1 "$out")"
+  if [ ! -f "$RESULT" ]; then
+    echo "the interrupted run wrote no result.json (tools/mg exit $rc); run directories:"
+    ls -la "$SB"/build/mg/fx-sleep/*/
+    return 1
+  fi
+  RESULTS="$RESULTS ${RESULT#"$SB"/}"
+  jq -c '{status, exit_code, message, failures}' "$RESULT"
+  # shellcheck disable=SC2016 # $s is a jq variable
+  expect "exit code" "$rc" 2 &&
+    expect "status" "$(field .status)" error &&
+    expect "exit_code" "$(field .exit_code)" 2 &&
+    expect "placement" "$(field .placement)" docker &&
+    expect "cancelled failure" \
+      "$(field --arg s "SIG$sig" '[.failures[] | select(.id == "cancelled") | "\(.repro) \(.message | contains($s))"] | join(",")')" \
+      "tools/mg fx-sleep true" &&
+    expect "state directory" "$([ -e "$(dirname "$RESULT")/.mg" ] && echo present || echo removed)" removed
 }
+
+t_killing_mg_stops_the_docker_job_container() { signal_docker_job TERM; }
+
+t_interrupting_mg_stops_the_docker_job_container() { signal_docker_job INT; }
 
 # Cargo guards downloads into the shared registry with lock files in
 # CARGO_HOME. Every dev container must see the same lock: cargo in one
@@ -212,7 +256,8 @@ t_results_validate_against_schema() {
 }
 
 TESTS="t_unknown_job t_dry_run_every_job t_doctor_on_this_mac t_core_test_runs_in_dev_container
-t_killing_mg_stops_the_docker_job_container t_dev_containers_share_the_cargo_package_cache_lock
+t_killing_mg_stops_the_docker_job_container t_interrupting_mg_stops_the_docker_job_container
+t_dev_containers_share_the_cargo_package_cache_lock
 t_every_compose_service_runs_an_init_process t_dev_image_rebuild_reuses_layers
 t_results_validate_against_schema"
 

@@ -27,7 +27,7 @@ Add the Apple account for team DNQ34W43XX: Xcode › Settings › Accounts › +
 
 ### `docker-resources`
 
-Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Settings › Resources. The oracle runs 12 workers. Doctor warns below these values.
+Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Settings › Resources. The oracle runs 12 workers. Doctor warns below these values. It reads the memory total inside Docker's Linux VM, which is up to about 1 GB below the setting, so it accepts 90% of 16 GB.
 
 ### `uitest-automation`
 

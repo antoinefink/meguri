@@ -138,11 +138,16 @@ mg_doctor() {
     else
       mg__doctor_check docker fail "Docker $server is reachable but 'docker compose' is missing"
     fi
-    local mem_gib=$((mem / 1073741824))
-    if [ "$cpus" -ge "$MG_DOCTOR_MIN_DOCKER_CPUS" ] && [ "$mem_gib" -ge "$MG_DOCTOR_MIN_DOCKER_MEM_GIB" ]; then
-      mg__doctor_check docker-resources pass "$cpus CPUs, $mem_gib GiB memory"
+    # MemTotal is the Linux VM's total after the kernel's reservation, up to
+    # about 1 GiB below what Docker was given (OrbStack: 44 GiB given, 43.1
+    # reported), so accept 90% of the documented setting.
+    local mem_text
+    mem_text="$(jq -n --argjson m "$mem" '$m / 1073741824 * 10 | floor / 10')"
+    if [ "$cpus" -ge "$MG_DOCTOR_MIN_DOCKER_CPUS" ] &&
+      [ "$mem" -ge $((MG_DOCTOR_MIN_DOCKER_MEM_GIB * 1073741824 * 9 / 10)) ]; then
+      mg__doctor_check docker-resources pass "$cpus CPUs, $mem_text GiB memory in the Docker VM"
     else
-      mg__doctor_check docker-resources warn "$cpus CPUs, $mem_gib GiB memory; want at least $MG_DOCTOR_MIN_DOCKER_CPUS CPUs and $MG_DOCTOR_MIN_DOCKER_MEM_GIB GiB"
+      mg__doctor_check docker-resources warn "$cpus CPUs, $mem_text GiB memory in the Docker VM; give Docker at least $MG_DOCTOR_MIN_DOCKER_CPUS CPUs and $MG_DOCTOR_MIN_DOCKER_MEM_GIB GB"
       mg_user_step docker-resources missing true "Give Docker enough CPUs and memory" \
         "Docker Desktop > Settings > Resources: at least $MG_DOCTOR_MIN_DOCKER_CPUS CPUs and $MG_DOCTOR_MIN_DOCKER_MEM_GIB GB memory (12 oracle workers)."
     fi

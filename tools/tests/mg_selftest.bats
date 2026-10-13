@@ -49,6 +49,15 @@ mg_job fx-pass-exit host fx_pass_exit "fixture: pass then non-zero exit"
 mg_job fx-warn-exit host fx_warn_exit "fixture: warn then non-zero exit"
 mg_job fx-failure-only host fx_failure_only "fixture: failure, no status"
 mg_job fx-args host fx_args "fixture: echo args"
+mg_job fx-sleep host fx_sleep "fixture: sleep in a child process until stopped"
+fx_sleep() {
+  echo "fx-sleep started"
+  sleep 60 &
+  echo "$!" >"$MG_RUN_DIR/sleep.pid"
+  wait "$!"
+  : >"$MG_RUN_DIR/finished"
+  mg_status pass
+}
 fx_pass() {
   echo "hello from fx-pass"
   : >"$MG_RUN_DIR/shot.png"
@@ -110,7 +119,7 @@ case "$name $*" in
     # Like the real CLI: with the daemon down it still prints the client-side
     # JSON, with an empty ServerVersion, and exits 1.
     if [ "${STUB_DOCKER:-1}" = 1 ]; then
-      echo '{"ServerVersion":"29.8.2","NCPU":16,"MemTotal":46278615040}'
+      echo "{\"ServerVersion\":\"29.8.2\",\"NCPU\":${STUB_DOCKER_CPUS:-16},\"MemTotal\":${STUB_DOCKER_MEM:-46278615040}}"
     else
       echo '{"ServerVersion":"","NCPU":0,"MemTotal":0}'
       exit 1
@@ -307,6 +316,47 @@ write_workspace() {
   [ "$(field .message)" = "fx-args: pass" ]
 }
 
+# SIGTERM goes to tools/mg alone, not to its process group, so tools/mg must
+# stop the job's processes itself. (bats starts it in the background, where
+# SIGINT is ignored; the host self-test kills a docker job's process group.)
+@test "a run stopped by SIGTERM stops the job's processes and writes an error result" {
+  add_fixture_jobs
+  local out="$BATS_TEST_TMPDIR/out" pid rc=0 sleeper="" start run_dir
+  "$SB/tools/mg" fx-sleep >"$out" 2>"$BATS_TEST_TMPDIR/err" 3>&- &
+  pid=$!
+  for _ in $(seq 100); do
+    sleeper="$(cat "$SB"/build/mg/fx-sleep/*/sleep.pid 2>/dev/null)" && [ -n "$sleeper" ] && break
+    sleep 0.1
+  done
+  [ -n "$sleeper" ]
+  start=$SECONDS
+  kill -TERM "$pid"
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 2 ]
+  [ $((SECONDS - start)) -lt 10 ]
+  for _ in $(seq 20); do
+    kill -0 "$sleeper" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$sleeper" 2>/dev/null; then
+    echo "the job's sleep ($sleeper) still runs"
+    kill "$sleeper"
+    return 1
+  fi
+  [ "$(wc -l <"$out")" -eq 1 ]
+  result="$(cat "$out")"
+  run_dir="$(dirname "$result")"
+  [[ "$run_dir" == "$SB/build/mg/fx-sleep/"* ]]
+  [ "$(field .status)" = error ]
+  [ "$(field .exit_code)" = 2 ]
+  jq -e '.failures[] | select(.id == "cancelled" and (.message | contains("SIGTERM")) and .repro == "tools/mg fx-sleep")' "$result"
+  [ ! -e "$run_dir/finished" ]
+  [ ! -e "$run_dir/.mg" ]
+  grep -q "fx-sleep started" "$run_dir/log.txt"
+  [ "$(readlink "$SB/build/mg/fx-sleep/latest")" = "$(basename "$run_dir")" ]
+  validate "$result"
+}
+
 @test "a job registered twice makes every run an error" {
   echo 'mg_job doctor host true "duplicate"' >"$SB/tools/mg.d/zz-dup.sh"
   mg doctor --dry-run
@@ -403,6 +453,33 @@ write_workspace() {
   validate "$result"
 }
 
+# MemTotal is the Linux VM's total after the kernel's reservation: a VM given
+# exactly 16 GB reports about 0.9 GiB less (OrbStack: 44 GiB assigned, 43.1 GiB
+# MemTotal).
+@test "doctor accepts a Docker VM given exactly the documented 12 CPUs and 16 GB" {
+  make_stubs
+  export STUB_DOCKER_CPUS=12 STUB_DOCKER_MEM=16213720000
+  mg doctor
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "docker-resources" and .status == "pass")' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "docker-resources")] | length')" = 0 ]
+  assert_read_only_calls
+  validate "$result"
+}
+
+@test "doctor warns and lists the docker-resources step for a Docker VM given 8 GB" {
+  make_stubs
+  export STUB_DOCKER_CPUS=12 STUB_DOCKER_MEM=8217301504
+  mg doctor
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "docker-resources" and .status == "warn" and (.message | contains("16 GB")))' "$result"
+  jq -e '.user_steps[] | select(.id == "docker-resources" and .state == "missing" and .required == true)' "$result"
+  assert_read_only_calls
+  validate "$result"
+}
+
 @test "doctor warns about missing Rust targets without making it a user step" {
   make_stubs
   export STUB_RUST_TARGETS="aarch64-apple-darwin"
@@ -481,6 +558,18 @@ mod tests {
   [ "$(field .status)" != pass ]
   [ "$(field .summary.total)" -eq 0 ]
   [ "$(field '.failures[0].id')" = no-tests-matched ]
+  validate "$result"
+}
+
+@test "core-test with a filter fails when core/ has no Cargo workspace yet" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  [ ! -e "$SB/core/Cargo.toml" ]
+  mg core-test -- -E 'package(nonexistent)'
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .summary.total)" -eq 0 ]
+  [ "$(field '.failures[0].id')" = no-tests-matched ]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-test -- -E 'package(nonexistent)'" ]
   validate "$result"
 }
 
