@@ -1,0 +1,51 @@
+import Foundation
+import SwiftUI
+
+/// What the app takes from its launch (KTD18 seams). Normal launches use the
+/// defaults; in Debug and Profile builds the app's test hooks override them
+/// from the launch arguments before the first scene appears (R1963). Nothing
+/// here knows about the hooks.
+public struct LaunchConfiguration {
+    public var clock: AppClock = .system
+    public var collectionLocation: CollectionLocation = .standard
+    /// Overrides of the system time zone and locale; nil keeps the system's.
+    public var timeZone: TimeZone?
+    public var locale: Locale?
+    /// Ports for the Mac's local servers; nil keeps each server's default,
+    /// so tests never bind the ports a running daily-driver app holds.
+    public var ankiConnectPort: UInt16?
+    public var migakuPort: UInt16?
+    /// What the root shows over Home at launch; nil opens Home (the initial
+    /// route seam, which U150's navigation state takes over).
+    public var initialPresentation: InitialPresentation?
+
+    public init() {}
+}
+
+/// A screen, sheet or alert shown over the root at launch.
+public struct InitialPresentation {
+    public enum Style: Sendable, Hashable {
+        case screen, sheet, alert
+    }
+
+    public let style: Style
+    /// The view of a screen or sheet.
+    public let content: AnyView?
+    public let alertTitle: String?
+    public let alertMessage: String?
+
+    /// A screen pushed onto the root navigation stack.
+    public static func screen<Content: View>(@ViewBuilder _ content: () -> Content) -> InitialPresentation {
+        InitialPresentation(style: .screen, content: AnyView(content()), alertTitle: nil, alertMessage: nil)
+    }
+
+    /// A sheet over the root.
+    public static func sheet<Content: View>(@ViewBuilder _ content: () -> Content) -> InitialPresentation {
+        InitialPresentation(style: .sheet, content: AnyView(content()), alertTitle: nil, alertMessage: nil)
+    }
+
+    /// An alert over the root, for error states.
+    public static func alert(title: String, message: String) -> InitialPresentation {
+        InitialPresentation(style: .alert, content: nil, alertTitle: title, alertMessage: message)
+    }
+}
