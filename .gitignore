@@ -14,6 +14,10 @@
 /app/Packages/MeguriCore/Binaries/
 /app/Packages/MeguriCore/Sources/MeguriCoreBindings/
 
+# SwiftPM build output of the local packages
+/app/Packages/*/.build/
+/app/Packages/*/.swiftpm/
+
 # Xcode
 DerivedData/
 

@@ -4,6 +4,8 @@ mg_job selftest docker:dev mg_selftest \
   "tools/mg self-tests (bats, tools/tests/*.bats) in the dev container; args go to bats, e.g. --filter doctor"
 mg_job selftest-host host mg_selftest_host \
   "tools/mg host self-tests: macOS bash, real doctor, Docker placement, image rebuild (tools/tests/mg_host_selftest.sh)"
+mg_job selftest-xcframework host mg_selftest_xcframework \
+  "build-core-xcframework.sh self-tests in a sandbox copy: no-change skip, compare-before-replace, device pre-action and link, symbol-set check, AppStore features"
 
 # mg_tap_report <tap file> <test-runner rc> <repro prefix>
 # Records counts and one failure per `not ok` line. With a repro prefix, a
@@ -63,5 +65,17 @@ mg_selftest_host() {
   /bin/bash tools/tests/mg_host_selftest.sh "$MG_RUN_DIR/sandbox" | tee "$tap"
   rc=${PIPESTATUS[0]}
   mg_artifact tap "$tap"
+  mg_tap_report "$tap" "$rc" ""
+}
+
+# The sandbox and its cargo target dir stay in build/selftest-xcframework/
+# between runs, so dependencies build once per slice.
+mg_selftest_xcframework() {
+  local tap="$MG_RUN_DIR/selftest-xcframework.tap" rc
+  /bin/bash tools/tests/xcframework_selftest.sh build/selftest-xcframework/sandbox build/selftest-xcframework/target |
+    tee "$tap"
+  rc=${PIPESTATUS[0]}
+  mg_artifact tap "$tap"
+  mg_artifact log build/selftest-xcframework/sandbox/build.log "build-core-xcframework.sh output"
   mg_tap_report "$tap" "$rc" ""
 }
