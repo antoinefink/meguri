@@ -1,0 +1,54 @@
+# cargo-deny gate for the whole Rust dependency graph (R2025, R2021).
+# Run it with `tools/mg core-deny`.
+
+[graph]
+# Every feature and every target, so optional and platform-only crates are
+# checked too (the App Store build turns `ankiweb` off, Linux builds skip the
+# Apple-only crates, and so on).
+all-features = true
+
+[advisories]
+# Vulnerability and unsound advisories always fail. Unmaintained crates and
+# yanked versions fail as well.
+unmaintained = "all"
+yanked = "deny"
+
+[licenses]
+# Anything not listed is rejected: GPL, AGPL, LGPL-only and unknown or missing
+# licenses all fail. MPL-2.0 is allowed unmodified (Meguri's own license).
+allow = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "Zlib",
+]
+confidence-threshold = 0.93
+# The list is the policy, not the current graph.
+unused-allowed-license = "allow"
+
+# fsrs pins priority-queue, licensed "LGPL-3.0-or-later OR MPL-2.0". Meguri
+# takes it under MPL-2.0, and the notices say so.
+[[licenses.clarify]]
+crate = "priority-queue"
+expression = "MPL-2.0"
+license-files = []
+
+[bans]
+# rand 0.9 (interval fuzz) and the rand 0.10 that fsrs brings must both stay
+# in the graph at the oracle's versions (core/pins.toml), with their own
+# rand_core and getrandom.
+multiple-versions = "allow"
+
+[sources]
+# crates.io only: no other registry and no git dependencies.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

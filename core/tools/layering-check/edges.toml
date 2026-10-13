@@ -1,0 +1,92 @@
+# KTD2 allowed-edge table, enforced by layering-check (`tools/mg core-lint`).
+#
+# A row crate may depend only on crates in lower rows (smaller numbers). Crates
+# in the same row are siblings with no edge between them. The rule covers every
+# dependency kind: normal, build and dev. Every workspace crate must appear
+# exactly once below, and every name below must be a workspace crate.
+
+[[row]]
+row = 1
+crates = ["meguri-text"]
+
+[[row]]
+row = 2
+crates = ["meguri-model"]
+note = "owns the change value types ChangeSet, OpSource and ChangeKind"
+
+[[row]]
+row = 3
+crates = ["meguri-storage"]
+note = "the only crate that issues SQL against collection.anki2"
+
+[[row]]
+row = 4
+crates = ["meguri-template"]
+
+[[row]]
+row = 5
+crates = ["meguri-search"]
+
+[[row]]
+row = 6
+crates = ["meguri-sched"]
+note = "pure: no executor, undo or event access"
+
+[[row]]
+row = 7
+crates = ["meguri-engine"]
+note = "declares the ports"
+
+[[row]]
+row = 8
+crates = ["meguri-stats", "meguri-package"]
+note = "siblings; no edge between them"
+
+[[row]]
+row = 9
+crates = ["meguri-sync"]
+
+[[row]]
+row = 10
+crates = ["meguri-host"]
+note = "the only composition root"
+
+[[row]]
+row = 11
+crates = ["meguri-servers"]
+note = "macOS and Linux only"
+
+[[row]]
+row = 12
+crates = ["meguri-ffi"]
+note = "the only crate built for Apple targets"
+
+# Development crates: may depend on any row crate and on each other, except
+# the crates listed in `except`.
+[any]
+crates = ["meguri-testkit", "meguri-cli"]
+except = ["meguri-ffi"]
+
+# Workspace tools: depend on no workspace crate, and no workspace crate
+# depends on them.
+[isolated]
+crates = ["layering-check"]
+
+# Third-party crates allowed only in the listed workspace crates, whether a
+# crate depends on them directly or through other third-party crates.
+[restricted.tokio]
+allowed = ["meguri-sync", "meguri-servers"]
+
+[restricted.axum]
+allowed = ["meguri-servers"]
+
+[restricted.reqwest]
+allowed = ["meguri-sync"]
+
+# The engine's raw open entry point (U24). Every other crate opens a collection
+# through meguri-host's CoreHost::open, so headless runs get the same port
+# wiring as the app. layering-check flags this identifier anywhere in the Rust
+# code of any other crate.
+[raw_open]
+ident = "open_raw"
+allowed = ["meguri-engine", "meguri-host"]

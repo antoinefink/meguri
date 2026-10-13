@@ -1,0 +1,13 @@
+[package]
+name = "meguri-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# AnkiWeb build switch (KTD21); off in the App Store build.
+ankiweb = []
+# Test-only hooks (KTD18); filled by U6. Never on by default or in Release.
+test-hooks = []

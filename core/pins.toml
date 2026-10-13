@@ -1,0 +1,69 @@
+# Parity pins (KTD2, R2027): third-party crates whose output must equal the
+# oracle's, so Meguri uses the exact versions in the oracle's lockfile. The
+# infra/spec role reads those versions from the lockfile and records them here;
+# implementers work from this file only.
+#
+# A pin with `version` and no `via` must appear as `=<version>` in
+# Cargo.toml [workspace.dependencies]. Every pinned version must be in
+# Cargo.lock. A pin with `via` is brought in by that crate and is checked in
+# Cargo.lock only. A `pending` pin has no recorded version yet: no workspace
+# crate may depend on it until the spec role records one.
+#
+# The pin canary (tools/layering-check/tests/canary_pins.rs) checks all this
+# and runs before every other test in `tools/mg core-test`.
+
+[source]
+oracle = "anki 26.09.3"
+lockfile = "Cargo.lock of Anki at tag 26.09.3"
+rule = "Change a pin only together with an oracle re-pin, in the same commit."
+
+[[pin]]
+crate = "unicase"
+version = "2.6.0"
+why = "unicase collation: B-tree order of the name indexes and the tags primary key"
+
+[[pin]]
+crate = "htmlescape"
+version = "0.3.1"
+why = "entity decoding inside HTML stripping, which feeds sfld and csum"
+
+[[pin]]
+crate = "fsrs"
+version = "6.6.2"
+why = "FSRS memory states, intervals and parameter training"
+
+[[pin]]
+crate = "rand"
+version = "0.9.4"
+why = "interval fuzz: seeded StdRng output changes between versions (R2027, R660)"
+
+[[pin]]
+crate = "rand"
+version = "0.10.1"
+via = "fsrs"
+why = "the rand fsrs 6.6.2 uses in the oracle's graph"
+
+[[pin]]
+crate = "regex"
+pending = true
+why = "re: search syntax and case folding (R1041, R1202)"
+
+[[pin]]
+crate = "unicode-normalization"
+pending = true
+why = "NFC, and NFKD for nc: searches"
+
+[[pin]]
+crate = "sha1"
+pending = true
+why = "csum and media checksums"
+
+[[pin]]
+crate = "blake3"
+pending = true
+why = "hint: ids (U60)"
+
+[[pin]]
+crate = "difflib"
+pending = true
+why = "type-in answer diff (U64)"

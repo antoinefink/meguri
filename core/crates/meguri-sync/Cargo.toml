@@ -1,0 +1,11 @@
+[package]
+name = "meguri-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# AnkiWeb build switch (KTD21); off in the App Store build.
+ankiweb = []
