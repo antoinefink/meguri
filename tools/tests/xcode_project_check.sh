@@ -8,8 +8,9 @@
 # into <work dir>/DerivedData and checks build settings, zero warnings, the
 # core stamp, entitlements, architectures, the hook code (present in Debug
 # and Profile, absent in Release and AppStore), folder-synchronized groups
-# and the test plans, then runs the Unit plan, the app-hosted tests and
-# TestHooksTests (into <work dir>/DerivedData-tests).
+# and the test plans, launches the Mac Debug app hidden on Home and on every
+# test-hook route and checks it stays up, then runs the Unit plan, the
+# app-hosted tests and TestHooksTests (into <work dir>/DerivedData-tests).
 # Without --iphone/--ipad it creates throwaway simulators and deletes them at
 # exit. Release and AppStore builds are launched on simulators only: on the
 # Mac they would replace the daily-driver app; their Mac builds are
@@ -82,6 +83,28 @@ forget_mac_app() { # forget_mac_app <config>: unregisters and deletes a Release 
   rm -rf "$app"
 }
 
+# running <executable>: the PIDs of the processes running it.
+running() {
+  ps -Aww -o pid=,command= | awk -v e="$1" '
+    { pid = $1; sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "") }
+    $0 == e || index($0, e " ") == 1 { print pid }'
+}
+
+# quit_running <executable>: terminates the processes running it (SIGKILL after 10 s).
+quit_running() {
+  local pids
+  pids="$(running "$1")"
+  [ -n "$pids" ] || return 0
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [ -n "$(running "$1")" ] || return 0
+    sleep 1
+  done
+  # shellcheck disable=SC2046
+  kill -9 $(running "$1") 2>/dev/null
+}
+
 CREATED=()
 cleanup() {
   local udid
@@ -89,6 +112,7 @@ cleanup() {
     xcrun simctl shutdown "$udid" >/dev/null 2>&1
     xcrun simctl delete "$udid" >/dev/null 2>&1
   done
+  quit_running "$DD/Build/Products/Debug/Meguri.app/Contents/MacOS/Meguri"
   forget_mac_app Release
   forget_mac_app AppStore
   rm -f "$REPO/app/Meguri/App/SyncedFolderProbe"*.swift
@@ -188,6 +212,26 @@ check "the project has the four targets, configurations and shared schemes" jq -
 
 check "project.pbxproj holds no build settings (they live in app/Config)" no_build_settings_in_pbxproj
 
+# routes_from_source: the test-hook routes, read from their registrations
+# (`register("area/screen")`), for the hidden-launch check below. Fails when a
+# route is registered with a computed path, which this cannot read.
+routes_from_source() {
+  local dir="$REPO/app/Meguri/TestHooks" literal='register\("[a-z0-9][a-z0-9/-]*"[,)]' other routes
+  [ -d "$dir" ] || { echo "no $dir" && return 1; }
+  other="$(grep -rn --include='*.swift' 'register(' "$dir" |
+    grep -vE -e '^[^:]+:[0-9]+:[[:space:]]*//' -e 'func register\(' -e 'register\(in:' -e "$literal")"
+  [ -z "$other" ] || { printf 'registered with a computed path:\n%s\n' "$other" && return 1; }
+  routes="$(grep -rhoE --include='*.swift' "$literal" "$dir" | sed -E 's/^register\("//; s/"[,)]$//' | sort -u)"
+  [ -n "$routes" ] || { echo "no route registration in $dir" && return 1; }
+  echo "$routes"
+}
+if ROUTES="$(routes_from_source 2>&1)"; then
+  ok "test-hook routes are registered with literal paths: ${ROUTES//$'\n'/ }"
+else
+  not_ok "test-hook routes are registered with literal paths" "$ROUTES"
+  ROUTES=""
+fi
+
 # --- Build settings per configuration (R2031, R1967, KTD18, KTD21, KTD22) ----
 conditions_ok() { # conditions_ok <config> <sdk> <hooks yes|no> <ankiweb yes|no>
   local c
@@ -274,6 +318,27 @@ entitlements_are() { # entitlements_are <bundle> <expected keys...>
   [ "$actual" = "$expected" ] || { printf 'entitlements: %s\nexpected: %s\n' "$(echo $actual)" "$(echo $expected)" && return 1; }
 }
 
+# stays_up <app> [launch args...]: launches the app hidden and in the
+# background, as agents must (`open -g -j`, root AGENTS.md), checks that it
+# still runs 3 s later, then quits it. On the Mac an alert presented while the
+# app is hidden closes the window, and the app quits (app/AGENTS.md).
+stays_up() {
+  local app="$1" opener rc=0
+  shift
+  open -g -j -n -W "$app" --args -ApplePersistenceIgnoreState YES "$@" >/dev/null 2>&1 &
+  opener=$!
+  sleep 3
+  if ! kill -0 "$opener" 2>/dev/null; then
+    wait "$opener"
+    echo "the app quit within 3 s of a hidden launch (open -W exit $?)"
+    rc=1
+  fi
+  quit_running "$app/Contents/MacOS/Meguri"
+  kill "$opener" 2>/dev/null
+  wait "$opener" 2>/dev/null
+  return "$rc"
+}
+
 KTD22="com.apple.security.app-sandbox com.apple.security.network.client com.apple.security.network.server com.apple.security.files.user-selected.read-write com.apple.security.files.bookmarks.app-scope"
 FIXTURES=com.apple.security.temporary-exception.files.absolute-path.read-only
 for config in $CONFIGS; do
@@ -313,6 +378,12 @@ for config in $CONFIGS; do
       bash -c 'case "$1" in TestHooks*" rust") ;; *) exit 1 ;; esac' _ "$markers" ;;
     *) check "mac-$config contains no test hook (found: $markers)" test "$markers" = "- -" ;;
   esac
+  if [ "$config" = Debug ]; then
+    check "mac-Debug launched hidden stays up: Home" stays_up "$app"
+    for route in $ROUTES; do
+      check "mac-Debug launched hidden stays up: route $route" stays_up "$app" -MeguriRoute "$route"
+    done
+  fi
   forget_mac_app "$config"
 done
 

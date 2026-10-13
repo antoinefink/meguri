@@ -2,7 +2,7 @@
 # (xcodebuild, simctl, codesign).
 
 mg_job xcode-check host mg_xcode_check \
-  "Xcode project checks: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, synced folders, test plans, TestHooksTests (on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, --no-ui)"
+  "Xcode project checks: build settings, zero-warning builds of every configuration (Mac, iPhone and iPad simulators), core stamp, entitlements, arm64, hook code, hidden Mac launches of every route, synced folders, test plans, TestHooksTests (on the Mac only with MEGURI_ALLOW_MAC_UI=1, from tools/mg mac-ui); args go to tools/tests/xcode_project_check.sh (--iphone UDID, --ipad UDID, --no-ui)"
 
 # Builds and logs stay in build/xcode-check/ between runs, so builds are
 # incremental.

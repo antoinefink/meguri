@@ -24,11 +24,12 @@
 - Packages never test app compilation conditions: SwiftPM sees only debug/release. `MEGURI_TEST_HOOKS` code lives only in `Meguri/TestHooks/`, `ANKIWEB_ENABLED` code only in `Meguri/AnkiWeb/` (KTD21). `App/MeguriApp.swift` is the one other file that names the hooks.
 - Packages expose seams instead (`AppModel`: `LaunchConfiguration`, `AppClock`, `CollectionLocation`, `InitialPresentation`). Views read time through `@Environment(\.appClock)`, never `Date()`.
 - On the Mac a sheet takes `\.locale` from its own window, not from its presenter: presented content gets the launch environment again (`RootView`).
+- On the Mac, never present an alert while the app is hidden (launched with `open -j`, as agents must, or a login item set to Hide): the window closes and the app quits, with no crash report. Present launch-time alerts after `await NSApp.untilUnhidden()`, as `RootView` does.
 
 ## Test hooks
 
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.
-- Each UI area registers its routes (`area/screen[/state]`) in `RouteRegistry.standard`, from a `TestHooks/<Area>Routes.swift`.
+- Each UI area registers its routes (`area/screen[/state]`) in `RouteRegistry.standard`, from a `TestHooks/<Area>Routes.swift`, with literal paths: `tools/mg xcode-check` reads them from the source, launches the Mac app hidden on each and fails on a computed path.
 - Fixtures must sit inside the checkout: launched outside XCTest, the sandboxed Mac hook build can read only there (`-Dev` entitlements). The Mac UI-test runner is sandboxed too and cannot write them: create fixtures before the run (committed under `Fixtures/`, or by `tools/mg` jobs), never from a test. Keep them out of the synchronized folders, whose files are copied into bundles (a folder in an exception set is not excluded).
 
 ## Signing and entitlements

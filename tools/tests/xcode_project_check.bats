@@ -16,21 +16,26 @@ setup() {
   mkdir -p "$STUBS"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
   : >"$STUB_LOG"
-  # Every call is logged. Builds fail, so no product check runs; test runs pass.
+  # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
+  # product check runs; test runs pass. A launched app stays up, except on the
+  # route stub/quits.
   cat >"$STUBS/_stub" <<'EOF'
 #!/usr/bin/env bash
 name="$(basename "$0")"
 printf '%s\n' "$name $*" >>"$STUB_LOG"
-case "$name $1 $2" in
-  "xcrun simctl create") echo "UDID-$3" ;;
-  "xcrun xcresulttool get") echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
-  "xcodebuild build "*) exit 65 ;;
+case "$name $*" in
+  "xcrun simctl create "*) echo "UDID-$3" ;;
+  "xcrun xcresulttool get build-results "*) echo '{"errorCount":0,"warningCount":0,"warnings":[]}' ;;
+  "xcrun xcresulttool get "*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
+  "xcodebuild build "*) [ "${STUB_BUILD_OK:-}" = 1 ] || exit 65 ;;
+  "open "*"-MeguriRoute stub/quits"*) ;;
+  "open "*) exec sleep 30 ;;
 esac
 exit 0
 EOF
   chmod +x "$STUBS/_stub"
   local c
-  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint; do
+  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint open; do
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
@@ -77,4 +82,38 @@ tap_line() { grep -qxE "$1" <<<"$output" || { echo "no TAP line matches: $1" && 
   MEGURI_ALLOW_MAC_UI=1 check_project --iphone PHONE-1 --ipad PAD-1
   tap_line 'ok [0-9]+ mac-Debug-TestHooksTests: Passed .*'
   called '^xcodebuild test -project .* -scheme Meguri -testPlan UI -configuration Debug -destination platform=macOS,arch=arm64 .* -only-testing:MeguriUITests/TestHooksTests$'
+}
+
+@test "xcode-check reads the test-hook routes from their registrations and refuses a computed path" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  cat >"$SB/app/Meguri/TestHooks/AreaRoutes.swift" <<'SWIFT'
+    static func register(in registry: inout RouteRegistry) {
+        // registry.register(path) in a comment is not a registration
+        registry.register("area/one") { _ in .screen { Text("1") } }
+        registry.register("area/two-b/state", handler)
+    }
+SWIFT
+  check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'ok [0-9]+ test-hook routes are registered with literal paths: area/one area/two-b/state'
+  echo '        registry.register("area/\(state)") { _ in .screen { Text("") } }' >>"$SB/app/Meguri/TestHooks/AreaRoutes.swift"
+  check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ test-hook routes are registered with literal paths'
+  grep -qF 'registry.register("area/\(state)")' <<<"$output"
+}
+
+@test "xcode-check launches the Mac Debug app hidden on Home and on every route, and fails when it quits" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  printf '%s\n' 'registry.register("stub/stays") { _ in .screen { Text("") } }' \
+    'registry.register("stub/quits") { _ in .alert(title: "", message: "") {} }' >"$SB/app/Meguri/TestHooks/StubRoutes.swift"
+  STUB_BUILD_OK=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  local app
+  app="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData/Build/Products/Debug/Meguri.app"
+  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES\$"
+  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
+  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/quits\$"
+  [ "$(grep -c '^open ' "$STUB_LOG")" -eq 3 ]
+  tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: route stub/stays'
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: route stub/quits'
+  tap_line '# the app quit within 3 s of a hidden launch \(open -W exit 0\)'
 }

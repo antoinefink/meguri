@@ -15,7 +15,12 @@ struct RootView: View {
         let style = configuration.initialPresentation?.style
         _showsScreen = State(initialValue: style == .screen)
         _showsSheet = State(initialValue: style == .sheet)
+        #if os(macOS)
+        // Presented by `.task` once the app is visible (`untilUnhidden`).
+        _showsAlert = State(initialValue: false)
+        #else
         _showsAlert = State(initialValue: style == .alert)
+        #endif
     }
 
     var body: some View {
@@ -37,6 +42,11 @@ struct RootView: View {
             Text(configuration.initialPresentation?.alertMessage ?? "")
         }
         #if os(macOS)
+        .task {
+            guard configuration.initialPresentation?.style == .alert else { return }
+            await NSApplication.shared.untilUnhidden()
+            showsAlert = true
+        }
         .frame(minWidth: WindowMetrics.minimum.width, minHeight: WindowMetrics.minimum.height)
         #endif
         .modifier(LaunchEnvironment(configuration: configuration))
