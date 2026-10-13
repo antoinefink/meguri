@@ -378,7 +378,7 @@ fn run_live_checks_the_fault_proxy_api_before_any_worker_starts() {
         assert!(!started.exists(), "{api}: a worker started");
     }
     // The compose service passes, and empty means no fault proxy.
-    for api in ["mg-sync-faults-20261013t090853z-68330:8474", ""] {
+    for api in ["sync-faults:8474", ""] {
         let out = run(api);
         assert_eq!(out.status.code(), Some(0), "{api:?}: {}", text(&out.stderr));
         assert!(started.exists());

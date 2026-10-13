@@ -1075,7 +1075,7 @@ case "$1" in
 esac
 case " $* " in
   *" build oracle "*) exit 0 ;;
-  *" run -d "*" sync-faults "*) exit 0 ;;
+  *" up "*" sync-faults "*) exit 0 ;;
   *" run -d "*" sync-recorder "*) printf '%s' "$STUB_EXCHANGES" >"$MEGURI_RECORD_DIR/exchanges.jsonl"; exit 0 ;;
   *" harness "*) printf '%s\n' "$STUB_REPORT" >"$out${report#/out}"; exit "${STUB_RC:-0}" ;;
 esac
@@ -1119,16 +1119,12 @@ harness_report() {
   STUB_REPORT="$(harness_report compare smoke/sync/pair=pass)"
   mg oracle compare smoke/sync
   [ "$status" -eq 0 ]
-  local run_id name
-  run_id="$(field -r .run_id | tr 'A-Z' 'a-z')"
-  name="mg-sync-faults-$run_id"
-  # One labeled toxiproxy on the internal network, healthy before the harness.
-  grep -q -- "--profile oracle-sync run -d --no-deps --name $name --label meguri.mg.run-id=$(field -r .run_id) sync-faults" "$STUB_LOG"
-  grep -q -- "inspect --format .* $name" "$STUB_LOG"
-  [ "$(grep -n -- ' harness compare ' "$STUB_LOG" | cut -d: -f1)" -gt "$(grep -n -- "inspect --format" "$STUB_LOG" | head -n 1 | cut -d: -f1)" ]
-  # The workers get its API; the run removes it afterwards.
-  grep -q -- "-e ORACLE_SYNC_FAULTS=$name:8474 .* harness compare" "$STUB_LOG"
-  [ "$(tail -n 1 "$STUB_LOG")" = "rm -f $name" ]
+  # The checkout's toxiproxy, healthy (--wait) before the harness starts;
+  # the workers get its API, and it stays up for other runs.
+  grep -q -- "--profile oracle-sync up --detach --wait --wait-timeout 60 sync-faults" "$STUB_LOG"
+  [ "$(grep -n -- ' harness compare ' "$STUB_LOG" | cut -d: -f1)" -gt "$(grep -n -- " up --detach --wait " "$STUB_LOG" | cut -d: -f1)" ]
+  grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 .* harness compare" "$STUB_LOG"
+  ! grep -q -- "^rm " "$STUB_LOG"
   validate "$result"
 }
 
@@ -1169,13 +1165,13 @@ harness_report() {
     '{oracle: {anki_version: "26.9.3", driver_sha256: ("d" * 64), lock_sha256: ("l" * 64)},
       scenario_id: "smoke/sync/pair", scenario_sha256: $sha}')" ]
   [ "$(tail -c 1 "$dest/recording.json" | od -An -c | tr -d ' ')" = '\n' ]
-  # The recorder and the fault proxy were this run's; both are gone, and the
-  # harness compared one scenario at a time through the recorder.
+  # The recorder was this run's and is gone; the harness compared one
+  # scenario at a time through it.
   local run_id
   run_id="$(field -r .run_id | tr 'A-Z' 'a-z')"
-  grep -q -- "-e ORACLE_SYNC_FAULTS=mg-sync-faults-$run_id:8474 -e ORACLE_SYNC_RECORDER=mg-sync-recorder-$run_id-1:8080 .* harness compare .*--jobs 1 .*--filter smoke/sync/pair" "$STUB_LOG"
+  grep -q -- "--profile oracle-record run -d --no-deps --name mg-sync-recorder-$run_id-1 --label meguri.mg.run-id=$(field -r .run_id) sync-recorder" "$STUB_LOG"
+  grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 -e ORACLE_SYNC_RECORDER=mg-sync-recorder-$run_id-1:8080 .* harness compare .*--jobs 1 .*--filter smoke/sync/pair" "$STUB_LOG"
   grep -q -- "^rm -f mg-sync-recorder-$run_id-1$" "$STUB_LOG"
-  grep -q -- "^rm -f  *mg-sync-faults-$run_id" "$STUB_LOG"
 
   # A recorder that missed an exchange: the old recording stays as it was.
   STUB_HEALTH='{"ok": false, "written": 1, "errors": 1, "last_error": "no prefix"}'

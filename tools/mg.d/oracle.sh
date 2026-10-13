@@ -171,15 +171,16 @@ mg_oracle__harness() {
 }
 
 # --- Actor scenarios (specs/conformance/sync-ops.md S8.2, S9) ---------------
-# Their workers create one fault proxy per run in a sync-faults container this
-# run starts (`mg-sync-faults-<run id>`, given to them as ORACLE_SYNC_FAULTS),
-# and recordings route the oracle actors through a sync-recorder container of
-# their own (ORACLE_SYNC_RECORDER). Both are only on oracle-internal and carry
-# the run label, so a cancelled run removes them too.
+# Their workers create one fault proxy per run, named for the run, in this
+# checkout's `sync-faults` service (ORACLE_SYNC_FAULTS=sync-faults:8474),
+# which runs share and which stays up between them. Recordings route the
+# oracle actors through a sync-recorder container of their own
+# (ORACLE_SYNC_RECORDER), labeled with the run, so a cancelled run removes it.
+# Both are only on oracle-internal.
 
 MG_ORACLE_SYNC_FAULTS=""
 MG_ORACLE_SYNC_RECORDER=""
-MG_ORACLE_SYNC_CONTAINERS=""
+MG_ORACLE_SYNC_CONTAINERS="" # this run's recorders
 
 # mg_oracle__actor_scenarios [filter...]: the ids of the actor scenarios (a
 # top-level `actors` key) that the filters select, by meguri-cli's rules: an
@@ -217,46 +218,45 @@ mg_oracle__actor_scenarios() {
   done
 }
 
-# mg_oracle__sync_container <service> <name>: starts a labeled container of
-# the service and waits (up to 60 s) until its health check passes.
-mg_oracle__sync_container() {
-  local service="$1" name="$2" profile=oracle-sync state _
-  [ "$service" = sync-faults ] || profile=oracle-record
+# mg_oracle__recorder <name>: starts a sync-recorder container with the run's
+# label (its recording directory: $MEGURI_RECORD_DIR) and waits (up to 60 s)
+# until the addon reports that it records.
+mg_oracle__recorder() {
+  local name="$1" state _
   MG_ORACLE_SYNC_CONTAINERS="$MG_ORACLE_SYNC_CONTAINERS $name"
-  mg_compose --profile "$profile" run -d --no-deps --name "$name" --label "meguri.mg.run-id=$MG_RUN_ID" \
-    "$service" >/dev/null </dev/null || return 1
+  mg_compose --profile oracle-record run -d --no-deps --name "$name" --label "meguri.mg.run-id=$MG_RUN_ID" \
+    sync-recorder >/dev/null </dev/null || return 1
   for _ in $(seq 120); do
     state="$(docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$name" 2>/dev/null)"
     case "$state" in
       "true healthy") return 0 ;;
       "true "*) sleep 0.5 ;;
       *)
-        echo "oracle: the $service container $name stopped (${state:-gone})" >&2
+        echo "oracle: the recorder $name stopped (${state:-gone})" >&2
         return 1
         ;;
     esac
   done
-  echo "oracle: the $service container $name did not become healthy" >&2
+  echo "oracle: the recorder $name did not become healthy" >&2
   return 1
 }
 
-# mg_oracle__sync_faults: starts this run's fault proxy (once) and sets
-# MG_ORACLE_SYNC_FAULTS to its API, which every oracle worker of the run gets.
+# mg_oracle__sync_faults: starts the checkout's sync-faults service unless it
+# runs, and sets MG_ORACLE_SYNC_FAULTS, which every oracle worker of the run
+# gets.
 mg_oracle__sync_faults() {
   [ -z "$MG_ORACLE_SYNC_FAULTS" ] || return 0
-  local name
-  name="mg-sync-faults-$(printf '%s' "$MG_RUN_ID" | tr 'A-Z' 'a-z')"
-  echo "oracle: starting $name (toxiproxy) for actor scenarios" >&2
-  if ! mg_oracle__sync_container sync-faults "$name"; then
-    mg_oracle__sync_stop
-    mg_failure sync-faults "the sync-faults container (toxiproxy) did not start or become healthy; see log.txt"
+  echo "oracle: starting sync-faults (toxiproxy) for actor scenarios" >&2
+  if ! mg_compose --profile oracle-sync up --detach --wait --wait-timeout 60 sync-faults >&2 </dev/null; then
+    mg_failure sync-faults "the sync-faults service (toxiproxy) did not start or become healthy; see log.txt"
     mg_status error
     return 1
   fi
-  MG_ORACLE_SYNC_FAULTS="$name:8474"
+  MG_ORACLE_SYNC_FAULTS="sync-faults:8474"
 }
 
-# mg_oracle__sync_stop: removes this run's sync-faults and recorder containers.
+# mg_oracle__sync_stop: removes this run's recorders; sync-faults stays up
+# for other runs.
 mg_oracle__sync_stop() {
   # shellcheck disable=SC2086 # one container name per word
   [ -z "${MG_ORACLE_SYNC_CONTAINERS// /}" ] || docker rm -f $MG_ORACLE_SYNC_CONTAINERS >/dev/null 2>&1
@@ -429,7 +429,7 @@ mg_oracle__record_one() {
   report="$out/compare-report.json"
   mkdir -p "$out/recorder"
   echo "oracle: recording $id through $rec" >&2
-  if ! MEGURI_RECORD_DIR="$out/recorder" mg_oracle__sync_container sync-recorder "$rec"; then
+  if ! MEGURI_RECORD_DIR="$out/recorder" mg_oracle__recorder "$rec"; then
     docker rm -f "$rec" >/dev/null 2>&1
     mg_oracle__recording_failure "$id" "the recorder did not start or become healthy; see log.txt"
     return 1
