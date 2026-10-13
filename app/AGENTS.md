@@ -29,6 +29,7 @@
 ## Test hooks
 
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.
+- On the Mac, SwiftUI keeps the window frame in the `NSWindow Frame main` default, which `-ApplePersistenceIgnoreState` does not reset. Hook launches therefore always set a size (`default` when `-MeguriWindowSize` is absent); a launch with no hook option keeps the previous run's frame.
 - Each UI area registers its routes (`area/screen[/state]`) in `RouteRegistry.standard`, from a `TestHooks/<Area>Routes.swift`, with literal paths: `tools/mg xcode-check` reads them from the source, launches the Mac app hidden on each and fails on a computed path.
 - Fixtures must sit inside the checkout: launched outside XCTest, the sandboxed Mac hook build can read only there (`-Dev` entitlements). The Mac UI-test runner is sandboxed too and cannot write them: create fixtures before the run (committed under `Fixtures/`, or by `tools/mg` jobs), never from a test. Keep them out of the synchronized folders, whose files are copied into bundles (a folder in an exception set is not excluded).
 

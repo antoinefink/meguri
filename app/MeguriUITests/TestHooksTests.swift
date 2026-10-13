@@ -123,6 +123,15 @@ final class TestHooksTests: XCTestCase {
         let resized = expectation(for: NSPredicate { _, _ in abs(window.frame.width - 1000) < 1 }, evaluatedWith: nil)
         wait(for: [resized], timeout: 10)
         XCTAssertGreaterThanOrEqual(window.frame.height, 700)
+
+        // SwiftUI saved that frame. A hook launch without a size must still
+        // open at the default (WindowMetrics.standard, 1180x780).
+        app.terminate()
+        let defaultApp = try launch(MeguriLaunch(animations: false, route: "sample/screen"), build)
+        XCTAssert(defaultApp.staticTexts["sample.screen.title"].waitForExistence(timeout: 15))
+        let defaultWindow = defaultApp.windows.firstMatch
+        let reset = expectation(for: NSPredicate { _, _ in abs(defaultWindow.frame.width - 1180) < 1 }, evaluatedWith: nil)
+        wait(for: [reset], timeout: 10)
         #else
         throw XCTSkip("the window size option is Mac only")
         #endif

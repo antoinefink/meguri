@@ -16,7 +16,7 @@ extension TestHooks {
     /// | `-MeguriLocale` | locale id, e.g. `en_US`; also pass `-AppleLanguages` and `-AppleLocale` for system strings (the UI-test launch helper does) |
     /// | `-MeguriAnimations` | `on` or `off` |
     /// | `-MeguriReduceMotion`, `-MeguriReduceTransparency` | `on` or `off` |
-    /// | `-MeguriWindowSize` | Mac only: `minimum`, `default`, `large` or `<width>x<height>` |
+    /// | `-MeguriWindowSize` | Mac only: `minimum`, `default`, `large` or `<width>x<height>`; a launch with any other hook option and without this one gets `default` |
     /// | `-MeguriAnkiConnectPort`, `-MeguriMigakuPort` | 1–65535 |
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     struct LaunchOptions: Equatable {

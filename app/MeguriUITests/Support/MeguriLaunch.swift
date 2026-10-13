@@ -18,7 +18,9 @@ struct MeguriLaunch {
     var extra: [String] = []
 
     var arguments: [String] {
-        // Windows and sheets never come back from a previous run.
+        // Windows and sheets are not restored from a previous run. The Mac
+        // window frame still is (SwiftUI keeps it in the `NSWindow Frame main`
+        // default); the hooks reset it on every launch with a hook option.
         var arguments = ["-ApplePersistenceIgnoreState", "YES"]
         func add(_ name: String, _ value: String?) {
             if let value { arguments += ["-Meguri\(name)", value] }

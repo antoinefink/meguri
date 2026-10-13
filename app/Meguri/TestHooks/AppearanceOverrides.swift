@@ -39,7 +39,10 @@ extension TestHooks {
                     }
                 }
                 #if os(macOS)
-                .background(WindowConfigurator(size: options.windowSize, animationsEnabled: options.animationsEnabled))
+                .background(WindowConfigurator(
+                    size: options.windowSize ?? (options == LaunchOptions() ? nil : .standard),
+                    animationsEnabled: options.animationsEnabled
+                ))
                 #endif
         }
     }
