@@ -1,0 +1,13 @@
+# The scheduler day after 0, 20 minutes, 1, 5 and 26 days in one worker.
+id: smoke/timing-advance
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - advance: 20m
+  - observe: [timing]
+  - advance: 23h40m
+  - observe: [timing]
+  - advance: 4d
+  - observe: [timing]
+  - advance: 21d
+  - observe: [timing]

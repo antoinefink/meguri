@@ -1,0 +1,16 @@
+# Ids come from the frozen clock in milliseconds; each collision adds 1.
+id: smoke/ids-frozen-collision
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [one, uno]}
+    - {notetype: Pair, deck: Inbox, fields: [two, dos]}
+    - {notetype: Pair, deck: Inbox, fields: [three, tres]}
+steps:
+  - observe: [ids]

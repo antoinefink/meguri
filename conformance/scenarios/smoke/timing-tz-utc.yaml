@@ -1,0 +1,9 @@
+# The same day boundaries seen from UTC: its own offset and rollover.
+id: smoke/timing-tz-utc
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]

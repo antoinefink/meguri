@@ -1,0 +1,28 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "ids": {
+          "#c1": 1894698000000,
+          "#c2": 1894698000001,
+          "#c3": 1894698000002,
+          "#n1": 1894698000000,
+          "#n2": 1894698000001,
+          "#n3": 1894698000002
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "36b9ec60ceb5cfd481d04cca460ae53d5809f349a1fc4728af25b316c6a92036",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "smoke/ids-frozen-collision",
+  "scenario_sha256": "3c208bfb64c216403890283cfb92a2cc0c52ee1c4b8c92189e3fefef0c19cf41",
+  "tz": "Europe/Paris"
+}

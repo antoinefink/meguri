@@ -1,0 +1,44 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894766399,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894852800,
+          "now": 1894766400,
+          "utc_offset_secs": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "36b9ec60ceb5cfd481d04cca460ae53d5809f349a1fc4728af25b316c6a92036",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "smoke/timing-tz-utc",
+  "scenario_sha256": "4a6d80898cbced8f2a59a29253486688dffd88066574b6588d4a4ae8422eff0d",
+  "tz": "UTC"
+}

@@ -1,0 +1,23 @@
+# FSRS: a new card through learning, review and a lapse; load balancer off.
+id: smoke/fsrs-new-card
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00", mode: step}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Daily, learn_steps: [1m, 10m], relearn_steps: [10m], desired_retention: 0.9, max_interval_days: 36500}
+  decks: [{name: Words, preset: Daily}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [cat, gato]}]
+steps:
+  - observe: [ids, "next_states(#c1)"]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - advance: 10m
+  - observe: ["next_states(#c1)", "card(#c1)"]
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - advance: 3d
+  - observe: ["next_states(#c1)", "card(#c1)"]
+  - answer: {card: "#c1", rating: again, time_ms: 9000}
+  - observe: ["next_states(#c1)", "card(#c1)", "revlog(#c1)", timing]

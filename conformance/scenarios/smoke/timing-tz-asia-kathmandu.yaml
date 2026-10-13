@@ -1,0 +1,9 @@
+# The same day boundaries seen from Asia/Kathmandu: its own offset and rollover.
+id: smoke/timing-tz-asia-kathmandu
+clock: {tz: Asia/Kathmandu, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]

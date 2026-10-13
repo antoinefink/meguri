@@ -1,0 +1,33 @@
+# SM-2 (FSRS off): learning steps, graduation, an easy review and a lapse.
+id: smoke/sm2-new-card
+clock: {tz: America/New_York, start: "2030-01-15T10:00:00", mode: step}
+setup:
+  config: {fsrs: false, loadBalancerEnabled: false}
+  presets:
+    - name: Classic
+      learn_steps: [1m, 10m]
+      relearn_steps: [10m]
+      graduating_interval_days: 1
+      easy_interval_days: 4
+      starting_ease: 2.5
+      easy_bonus: 1.3
+      hard_interval: 1.2
+      interval_modifier: 1.0
+      lapse_new_interval: 0.0
+  decks: [{name: Words, preset: Classic}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [dog, perro]}]
+steps:
+  - observe: ["next_states(#c1)"]
+  - answer: {card: "#c1", rating: good}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good}
+  - advance: 1d
+  - observe: ["next_states(#c1)", "card(#c1)"]
+  - answer: {card: "#c1", rating: easy}
+  - advance: 5d
+  - answer: {card: "#c1", rating: again}
+  - observe: ["next_states(#c1)", "card(#c1)", "revlog(#c1)"]

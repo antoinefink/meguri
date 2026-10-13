@@ -1,0 +1,25 @@
+# Interval fuzz for a few (card id, reps) pairs; the 10,000-pair table belongs
+# to the scheduler area.
+id: smoke/fuzz-table-small
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Long, max_interval_days: 36500}]
+  decks: [{name: Words, preset: Long}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - observe:
+      - fuzz_table:
+          card: "#c1"
+          intervals: [1, 2, 3, 7, 20, 100, 1000]
+          pairs:
+            - [1, 0]
+            - [1, 1]
+            - [1700000000000, 0]
+            - [1700000000000, 5]
+            - [1894680000000, 2]
+            - [1894680000001, 2]
+            - [9007199254740000, 100]
