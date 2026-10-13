@@ -501,6 +501,26 @@ commit_with() {
   [ "$(git -C "$SB" log -1 --format=%s)" = "Add the grammar" ]
 }
 
+@test "commit-msg: implementer renames out of core/ need Spec and Session" {
+  mg hooks install
+  [ "$status" -eq 0 ]
+  WT="$SB"
+  git -C "$SB" config diff.renames true
+  commit_with $'Add demo\n\nRole: infra' core/demo.rs
+  [ "$status" -eq 0 ]
+  git -C "$SB" mv core/demo.rs tools/demo.rs
+  [ "$(git -C "$SB" diff --cached --name-status)" = $'R100\tcore/demo.rs\ttools/demo.rs' ]
+
+  commit_with $'Move demo\n\nRole: implementer'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"need a Spec: trailer"* ]]
+  commit_with $'Move demo\n\nRole: implementer\nSpec: search/grammar#G3'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"need a Session: trailer"* ]]
+  commit_with $'Move demo\n\nRole: implementer\nSpec: search/grammar#G3\nSession: s-20261013T000000Z-0a1b2c3d'
+  [ "$status" -eq 0 ]
+}
+
 @test "commit-msg: spec paths, several ids, other roles and paths outside the code tree" {
   mg hooks install
   WT="$SB"

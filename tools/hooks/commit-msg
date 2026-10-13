@@ -52,7 +52,8 @@ if [ -n "$roles" ]; then
 fi
 
 # NUL-separated, so git does not quote (and hide) non-ASCII or tab names.
-code_paths="$(git diff --cached --name-only -z | tr '\0' '\n' | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
+# No rename detection: a move out of core/ must still list its core/ source.
+code_paths="$(git diff --cached --no-renames --name-only -z | tr '\0' '\n' | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
 [ -n "$code_paths" ] || exit 0
 first_path="$(printf '%s\n' "$code_paths" | head -n 1)"
 
