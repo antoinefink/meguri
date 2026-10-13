@@ -1,6 +1,7 @@
 # Meguri dev services. tools/mg is the only intended caller: it passes a
 # per-checkout project name (-p), so each worktree gets its own image tag and
-# target volume while the cargo registry caches are shared.
+# target volume while CARGO_HOME (registry, git checkouts and cargo's lock
+# files) is shared.
 # Images are built locally from digest-pinned bases and never pushed.
 
 services:
@@ -10,22 +11,25 @@ services:
       dockerfile: docker/dev.Dockerfile
       target: dev
     pull_policy: build
+    # tini as PID 1 forwards SIGTERM, so killing tools/mg stops the container.
+    init: true
     working_dir: /work
     volumes:
       - ..:/work
-      - cargo-registry:/usr/local/cargo/registry
-      - cargo-git:/usr/local/cargo/git
+      - cargo-home:/cargo-home
       - cargo-target:/cargo-target
     # SQLite files and other test scratch stay on tmpfs, never on the bind mount.
     tmpfs:
       - /tmp:exec,mode=1777
     environment:
+      # The whole CARGO_HOME is shared, not just registry/ and git/: cargo's
+      # package-cache lock files live in its root. The image's tools stay in
+      # /usr/local/cargo/bin, which is on PATH.
+      CARGO_HOME: /cargo-home
       CARGO_TARGET_DIR: /cargo-target
       TMPDIR: /tmp
 
 volumes:
-  cargo-registry:
-    name: meguri-cargo-registry
-  cargo-git:
-    name: meguri-cargo-git
+  cargo-home:
+    name: meguri-cargo-home
   cargo-target: {}

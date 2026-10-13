@@ -124,9 +124,11 @@ mg_doctor() {
   fi
 
   # Docker
+  # With the daemon unreachable, `docker info` still prints the client-side
+  # JSON (ServerVersion "", NCPU 0) and exits 1, so check both.
   local info="" cpus=0 mem=0 server="" compose=""
-  info="$(docker info --format '{{json .}}' 2>/dev/null)"
-  if [ -n "$info" ] && jq -e '.ServerVersion' >/dev/null 2>&1 <<<"$info"; then
+  if info="$(docker info --format '{{json .}}' 2>/dev/null)" &&
+    jq -e '(.ServerVersion // "") != ""' >/dev/null 2>&1 <<<"$info"; then
     server="$(jq -r '.ServerVersion' <<<"$info")"
     cpus="$(jq -r '.NCPU // 0' <<<"$info")"
     mem="$(jq -r '.MemTotal // 0' <<<"$info")"

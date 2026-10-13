@@ -107,8 +107,14 @@ case "$name $*" in
     echo "The domain/default pair does not exist" >&2
     exit 1 ;;
   "docker info --format {{json .}}")
-    [ "${STUB_DOCKER:-1}" = 1 ] || exit 1
-    echo '{"ServerVersion":"29.8.2","NCPU":16,"MemTotal":46278615040}' ;;
+    # Like the real CLI: with the daemon down it still prints the client-side
+    # JSON, with an empty ServerVersion, and exits 1.
+    if [ "${STUB_DOCKER:-1}" = 1 ]; then
+      echo '{"ServerVersion":"29.8.2","NCPU":16,"MemTotal":46278615040}'
+    else
+      echo '{"ServerVersion":"","NCPU":0,"MemTotal":0}'
+      exit 1
+    fi ;;
   "docker compose version --short") echo 5.5.0 ;;
   "rustup toolchain list") echo 1.99.0-aarch64-apple-darwin ;;
   "rustup +1.99.0 target list --installed")
@@ -390,6 +396,9 @@ write_workspace() {
   [ "$status" -eq 1 ]
   jq -e '.details.checks[] | select(.id == "docker" and .status == "fail")' "$result"
   jq -e '.failures[] | select(.id == "docker" and .message == "Docker is not reachable; start Docker Desktop" and .repro == "tools/mg doctor")' "$result"
+  # A stopped daemon is not a resource problem.
+  [ "$(field '[.details.checks[] | select(.id == "docker-resources")] | length')" = 0 ]
+  [ "$(field '[.user_steps[] | select(.id == "docker-resources")] | length')" = 0 ]
   assert_read_only_calls
   validate "$result"
 }

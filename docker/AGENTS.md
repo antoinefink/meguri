@@ -1,7 +1,9 @@
 # docker/
 
 - Never push an image to a registry. Pin every base image by digest (`FROM name:tag@sha256:...`); `tools/mg selftest` checks it.
-- Drive compose through `tools/mg` (`mg_compose`). It sets a per-checkout project name, so worktrees never share an image tag, network or `cargo-target` volume, while the cargo registry volumes are shared. It also sets `BUILDX_NO_DEFAULT_ATTESTATIONS=1`: with a provenance attestation, every rebuild gets a new image id even when all layers are cached, and compose 5.5 ignores `provenance: false`.
+- Every service sets `init: true`, so killing `tools/mg` stops the container; without it bash runs as PID 1 and SIGTERM is dropped. `tools/mg selftest-host` checks it.
+- Drive compose through `tools/mg` (`mg_compose`). It sets a per-checkout project name, so worktrees never share an image tag, network or `cargo-target` volume. It also sets `BUILDX_NO_DEFAULT_ATTESTATIONS=1`: with a provenance attestation, every rebuild gets a new image id even when all layers are cached, and compose 5.5 ignores `provenance: false`.
+- Every worktree shares the `meguri-cargo-home` volume, mounted as the whole `CARGO_HOME`. Cargo's package-cache lock files live in the `CARGO_HOME` root, so if only `registry/` were shared, parallel containers could unpack the same crate at the same time. Installed cargo tools stay in the image's `/usr/local/cargo/bin`, which is on `PATH`.
 - SQLite files and other test scratch go to the container's tmpfs `/tmp` (`TMPDIR`), never to the `/work` bind mount: virtiofs locking is slow and unreliable. Rust output goes to the `cargo-target` volume (`CARGO_TARGET_DIR`), never to `core/target/`, which holds host builds.
 - The dev image installs exactly what `core/rust-toolchain.toml` lists, so rustup never needs the network at run time. The `FROM rust:<x.y>` tag must match that file's channel; bump both together. Each Dockerfile has a `<name>.Dockerfile.dockerignore` allowlist, because the build context is the repo root, which holds `local-data/` and `refs/`.
 - Pin new tool versions as `ARG`s and install them with `cargo install --locked --version`.
