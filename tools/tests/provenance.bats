@@ -722,6 +722,16 @@ cd /tmp && python3 -m pip download --no-deps anki
 pip wheel --no-deps anki
 python3 -m pip wheel --no-deps -w out anki
 uv pip install anki
+pip install aqt[qt6]
+pip install --upgrade aqt[qt6]
+pip download aqt==25.9
+python3 -m pip install aqt
+pip install Anki
+pip download ANKI==25.9
+uv add anki
+uv tool install aqt
+uvx --from aqt anki
+pipx run --spec aqt anki
 EOF
   while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
