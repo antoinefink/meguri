@@ -41,7 +41,7 @@ Enable Developer Mode on each iPhone and iPad used for milestone device runs: Se
 
 ### `screen-recording`
 
-Only if macOS motion capture is wanted: allow Screen Recording for the capture tool in System Settings › Privacy & Security › Screen Recording. Doctor cannot verify this.
+Allow Screen Recording for the app that runs `tools/mg` (the terminal, or Claude) in System Settings › Privacy & Security › Screen Recording. `tools/mg screenshot --platform mac` needs it to capture the hidden Mac app's window. Without it the job reports blocked, and Mac screenshots come only from `tools/mg drive --platform mac` in the hourly Mac UI slot. Doctor cannot verify this.
 
 ### `xcode-external-agents`
 
@@ -54,6 +54,12 @@ Install Xcode 27.1 when it ships. It adds the foldable iPhone simulator (R1962);
 ### `nightly-scheduler`
 
 Approve the scheduler entry for nightly jobs when `tools/mg nightly` (U19) asks for it. There is no git remote, so nightly runs happen on this Mac only. Doctor cannot verify this.
+
+## While agents run
+
+### `host-session`
+
+Not a one-time step. App, simulator and Mac UI jobs (`build-app` excepted) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later, so UI gates wait too. While they run, they keep the display awake. Mac UI-driving suites take the screen at most once an hour (`tools/mg mac-ui`).
 
 ## Not user steps
 

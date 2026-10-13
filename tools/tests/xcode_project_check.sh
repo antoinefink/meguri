@@ -10,7 +10,8 @@
 # and Profile, absent in Release and AppStore), folder-synchronized groups
 # and the test plans, launches the Mac Debug app hidden on Home and on every
 # test-hook route and checks it stays up, then runs the Unit plan, the
-# app-hosted tests and TestHooksTests (into <work dir>/DerivedData-tests).
+# app-hosted tests, TestHooksTests and the agent driver's DriveScriptTests
+# (into <work dir>/DerivedData-tests).
 # Without --iphone/--ipad it leases the simulators from the shared pool
 # (tools/scripts/sim-pool.sh) after the Mac configuration builds, and releases
 # them at exit; it never creates, shuts down or deletes a simulator (root
@@ -472,6 +473,8 @@ if [ "$UI" = true ]; then
     done
     # Profile through its own scheme and the Performance plan (no debugger).
     run_tests iphone-Profile-TestHooksTests Meguri-Profile Performance Profile "id=$IPHONE" -only-testing:MeguriUITests/TestHooksTests
+    # The agent driver's script parser (U8); it launches no app.
+    run_tests iphone-Debug-DriveScriptTests Meguri UI Debug "id=$IPHONE" -only-testing:MeguriUITests/DriveScriptTests
   fi
   [ -z "$IPAD" ] || run_tests ipad-Debug-TestHooksTests Meguri UI Debug "id=$IPAD" -only-testing:MeguriUITests/TestHooksTests
 fi

@@ -1,0 +1,12 @@
+{
+  "name": "capture-hierarchy-fixtures",
+  "description": "Captures the real exports the hierarchy-check tests read (fixtures/README.md).",
+  "steps": [
+    {"launch": {"route": "sample/defects", "locale": "en_US", "animations": false}},
+    {"wait": "sample.defects.first"},
+    {"snapshot": "sample-defects"},
+    {"launch": {"route": "sample/sheet", "fixture": "app/Fixtures/TestHooks/single-file.fixture", "now": "2030-01-15T10:00:00", "timeZone": "Asia/Tokyo", "locale": "en_US", "animations": false}},
+    {"wait": "sample.sheet.coreFeatures"},
+    {"snapshot": "sample-sheet"}
+  ]
+}

@@ -71,6 +71,25 @@ services:
     environment:
       TMPDIR: /tmp
 
+  # Image tools (U8): ffmpeg and Python for contact sheets, scene-change and
+  # freeze detection (tools/scripts/contact-sheet) and the hierarchy check
+  # (tools/scripts/hierarchy-check). Docker jobs run in it; host jobs such as
+  # `tools/mg drive` start it themselves with mg_compose.
+  image-tools:
+    build:
+      context: ..
+      dockerfile: docker/image-tools.Dockerfile
+      target: image-tools
+    pull_policy: build
+    init: true
+    working_dir: /work
+    volumes:
+      - ..:/work
+    tmpfs:
+      - /tmp:exec,mode=1777
+    environment:
+      TMPDIR: /tmp
+
   # Local sync server for simulator and Mac app end-to-end runs (U13): Anki's
   # own server from the oracle image (the pinned release), on the real clock,
   # with the test users of syncserver.env.example. `tools/mg sync-rig up`
