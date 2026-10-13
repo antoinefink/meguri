@@ -187,6 +187,33 @@ fn every_reported_endpoint_passes_the_guard_before_the_first_step() {
 }
 
 #[test]
+fn a_begin_that_leaves_out_an_endpoint_ends_the_session_before_the_first_step() {
+    // protocol.json `sync_info` requires all four endpoints, `upstream` and
+    // `recorder` as null when the run has no fault proxy or recorder. One the
+    // worker leaves out would never pass the guard (sync-ops.md S8.3).
+    let (text, golden) = two_party();
+    for name in ["actors", "converge", "upstream", "recorder"] {
+        let dir = tree(&[("smoke/sync/two-party", &text, golden.clone())]);
+        let log = dir.path().join("requests.jsonl");
+        let report = t1(
+            &Suite::open(dir.path()).unwrap(),
+            &oracle(&log, &[format!("OMIT={name}")]),
+            &MeguriExecutor::new(),
+            None,
+        );
+        let outcome = only(&report);
+        assert_eq!(outcome.status, Status::Error, "{name}: {}", report.render_text());
+        assert!(
+            outcome.message.contains("protocol_error") && outcome.message.contains(&format!("`{name}`")),
+            "{name}: {}",
+            outcome.message
+        );
+        let cmds: Vec<Value> = requests(&log).iter().map(|r| r["cmd"].clone()).collect();
+        assert_eq!(cmds, [json!("hello"), json!("begin"), json!("end")], "{name}");
+    }
+}
+
+#[test]
 fn a_worker_that_cannot_start_the_server_is_an_error_not_a_failure() {
     let (text, golden) = two_party();
     let dir = tree(&[("smoke/sync/two-party", &text, golden)]);

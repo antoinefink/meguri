@@ -31,9 +31,13 @@ pub struct Endpoints {
     pub actors: String,
     /// The converge client's: the server, on loopback.
     pub converge: String,
-    /// The fault proxy's upstream (`host:port`); `None` without a fault proxy.
+    /// The fault proxy's upstream (`host:port`); null without a fault proxy.
+    /// Required, like `recorder`: an endpoint the worker leaves out would
+    /// escape the check (S8.3).
+    #[serde(deserialize_with = "Option::deserialize")]
     pub upstream: Option<String>,
-    /// The recorder (`host:port`) in a recording run.
+    /// The recorder (`host:port`) in a recording run, else null.
+    #[serde(deserialize_with = "Option::deserialize")]
     pub recorder: Option<String>,
 }
 
@@ -109,18 +113,22 @@ impl Parties<'_> {
 
         let mut worker = self.oracle.interactive(&scenario.clock.tz)?;
         let begun = worker.request(&begin)?;
-        let sync: SyncInfo = begun
+        let edge = actors.as_ref().and(self.meguri_edge);
+        let sync = match begun
             .get("sync")
             .cloned()
             .ok_or_else(|| ExecError::new("protocol_error", "begin reported no sync endpoints"))
-            .and_then(|v| from_value(v, "begin's sync"))?;
-        let edge = actors.as_ref().and(self.meguri_edge);
-        if let Err(refused) = check(&sync, edge) {
-            // No step has run, so nothing has connected (S8.3); `end` stops
-            // the server before the session is reported.
-            let _ = worker.request(&json!({"cmd": "end"}));
-            return Err(refused);
-        }
+            .and_then(|v| from_value::<SyncInfo>(v, "begin's sync"))
+            .and_then(|sync| check(&sync, edge).map(|()| sync))
+        {
+            Ok(sync) => sync,
+            Err(e) => {
+                // No step has run, so nothing has connected (S8.3); `end`
+                // stops the server before the session is reported.
+                let _ = worker.request(&json!({"cmd": "end"}));
+                return Err(e);
+            }
+        };
         table.extend(&ids_in(&begun, "begin")?);
         if let Some(actors) = actors.as_mut() {
             actors.seat(edge, &sync.account);
