@@ -1,0 +1,29 @@
+{
+  "configurations" : [
+    {
+      "id" : "5A1B2C3D-0003-4000-8000-000000000001",
+      "name" : "Default",
+      "options" : {}
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Meguri.xcodeproj",
+      "identifier" : "4D4547555249000000000100",
+      "name" : "Meguri"
+    },
+    "testRepetitionMode" : "none"
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:Meguri.xcodeproj",
+        "identifier" : "4D4547555249000000000400",
+        "name" : "MeguriSnapshotTests"
+      }
+    }
+  ],
+  "version" : 1
+}

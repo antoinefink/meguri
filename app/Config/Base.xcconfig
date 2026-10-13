@@ -1,0 +1,95 @@
+// Project settings shared by every configuration (U7). Debug, Profile,
+// Release and AppStore include this file and set only what differs; the
+// target files (Meguri.xcconfig, ...) add per-target settings. Build settings
+// never go into project.pbxproj.
+
+#include "Signing.xcconfig"
+
+// Identity (Assumptions). Debug and Profile append `.dev` (their own
+// container, Keychain items and App Group); Release and AppStore keep the
+// daily-driver identifiers.
+MEGURI_TEAM_ID = DNQ34W43XX
+MEGURI_BUNDLE_ID = com.antoinefink.meguri$(MEGURI_BUNDLE_ID_SUFFIX)
+// Per-platform App Group ids (swiftui-arch §0.7): `group.` on iOS, the team
+// prefix on macOS. The app reads its own from Info.plist (MeguriAppGroupIdentifier).
+MEGURI_APP_GROUP[sdk=iphone*] = group.$(MEGURI_BUNDLE_ID)
+MEGURI_APP_GROUP[sdk=macosx*] = $(MEGURI_TEAM_ID).$(MEGURI_BUNDLE_ID)
+// The checkout this build comes from, with a trailing slash. Hook builds may
+// read fixtures under it on the sandboxed Mac (Meguri-macOS-Dev*.entitlements).
+MEGURI_REPO_ROOT = $(SRCROOT:dir)
+
+// Swift compilation conditions: MEGURI_TEST_HOOKS (KTD18), ANKIWEB_ENABLED
+// (KTD21). Each configuration sets MEGURI_SWIFT_CONDITIONS.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) $(MEGURI_SWIFT_CONDITIONS)
+// The Rust feature set of the linked core, exactly as
+// tools/scripts/build-core-xcframework.sh writes it into the core stamp
+// (sorted, comma-separated). The Meguri target's "Check core configuration"
+// phase fails the build when the linked core differs.
+// MEGURI_CORE_FEATURES is set by each configuration.
+
+// Platforms (R1, KTD22): one multiplatform target per product, Apple silicon only.
+SDKROOT = auto
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator macosx
+SUPPORTS_MACCATALYST = NO
+SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO
+SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO
+TARGETED_DEVICE_FAMILY = 1,2
+IPHONEOS_DEPLOYMENT_TARGET = 27.0
+MACOSX_DEPLOYMENT_TARGET = 27.0
+ARCHS = arm64
+
+MARKETING_VERSION = 0.1
+CURRENT_PROJECT_VERSION = 1
+
+// Swift 6 strict concurrency (KTD10); zero warnings.
+SWIFT_VERSION = 6.0
+SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES
+SWIFT_TREAT_WARNINGS_AS_ERRORS = YES
+GCC_TREAT_WARNINGS_AS_ERRORS = YES
+SWIFT_EMIT_LOC_STRINGS = YES
+LOCALIZATION_PREFERS_STRING_CATALOGS = YES
+STRING_CATALOG_GENERATE_SYMBOLS = YES
+ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES
+
+ALWAYS_SEARCH_USER_PATHS = NO
+ENABLE_USER_SCRIPT_SANDBOXING = YES
+ENABLE_STRICT_OBJC_MSGSEND = YES
+DEAD_CODE_STRIPPING = YES
+// Embedded products keep their signatures (no strip on copy).
+COPY_PHASE_STRIP = NO
+CLANG_ANALYZER_NONNULL = YES
+CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE
+CLANG_CXX_LANGUAGE_STANDARD = gnu++20
+CLANG_ENABLE_MODULES = YES
+CLANG_ENABLE_OBJC_ARC = YES
+CLANG_ENABLE_OBJC_WEAK = YES
+CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES
+CLANG_WARN_BOOL_CONVERSION = YES
+CLANG_WARN_COMMA = YES
+CLANG_WARN_CONSTANT_CONVERSION = YES
+CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES
+CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR
+CLANG_WARN_DOCUMENTATION_COMMENTS = YES
+CLANG_WARN_EMPTY_BODY = YES
+CLANG_WARN_ENUM_CONVERSION = YES
+CLANG_WARN_INFINITE_RECURSION = YES
+CLANG_WARN_INT_CONVERSION = YES
+CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES
+CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES
+CLANG_WARN_OBJC_LITERAL_CONVERSION = YES
+CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR
+CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES
+CLANG_WARN_RANGE_LOOP_ANALYSIS = YES
+CLANG_WARN_STRICT_PROTOTYPES = YES
+CLANG_WARN_SUSPICIOUS_MOVE = YES
+CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE
+CLANG_WARN_UNREACHABLE_CODE = YES
+CLANG_WARN__DUPLICATE_METHOD_MATCH = YES
+GCC_C_LANGUAGE_STANDARD = gnu17
+GCC_NO_COMMON_BLOCKS = YES
+GCC_WARN_64_TO_32_BIT_CONVERSION = YES
+GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR
+GCC_WARN_UNDECLARED_SELECTOR = YES
+GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE
+GCC_WARN_UNUSED_FUNCTION = YES
+GCC_WARN_UNUSED_VARIABLE = YES

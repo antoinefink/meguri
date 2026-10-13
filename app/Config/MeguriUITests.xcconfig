@@ -1,0 +1,12 @@
+// The MeguriUITests bundle (XCUITest).
+
+PRODUCT_NAME = MeguriUITests
+PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID).uitests
+TEST_TARGET_NAME = Meguri
+// The Info.plist tells the tests which configuration they were built in and
+// where the app under test was built (TestHooksTests).
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE = MeguriUITests/Info.plist
+
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @loader_path/Frameworks
+LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks @loader_path/../Frameworks

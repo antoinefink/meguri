@@ -23,6 +23,7 @@
 
 # Xcode
 DerivedData/
+xcuserdata/
 
 # Python virtual environments (macOS-native oracle lane)
 .venv*

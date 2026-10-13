@@ -28,6 +28,12 @@ RUN --mount=type=cache,id=meguri-dev-cargo-registry,target=/usr/local/cargo/regi
 COPY core/rust-toolchain.toml /opt/meguri/rust-toolchain.toml
 RUN cd /opt/meguri && rustup toolchain install && rustup show active-toolchain
 
+# PyYAML for tools/mg design-docs (docs/design/screen-inventory.yaml). Its own
+# layer, after the cargo installs, so their cached layers stay valid.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3-yaml \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV MG_CONTAINER=dev
 
 FROM dev AS fuzz

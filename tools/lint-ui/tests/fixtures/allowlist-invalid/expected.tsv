@@ -1,0 +1,6 @@
+allowlist-invalid	tools/lint-ui/allowlist.tsv:2
+allowlist-invalid	tools/lint-ui/allowlist.tsv:3
+allowlist-invalid	tools/lint-ui/allowlist.tsv:4
+allowlist-invalid	tools/lint-ui/allowlist.tsv:5
+allowlist-invalid	tools/lint-ui/allowlist.tsv:6
+glass-outside-chrome	app/Packages/MeguriKit/Sources/Features/Home/Banner.swift:5

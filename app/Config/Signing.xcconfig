@@ -1,0 +1,26 @@
+// Code signing (U7, KTD22). Included by Base.xcconfig.
+//
+// MEGURI_SIGNING picks the mode:
+//   adhoc  (default) until the Apple account for team DNQ34W43XX is in Xcode
+//          (one-time step `xcode-account`). Mac and simulator builds sign ad
+//          hoc with no team; the Mac build carries no App Group, so App Group
+//          and widget behaviour on the Mac wait for `team`; device builds fail.
+//   team   once the account is added: automatic signing for the team, App
+//          Groups on every platform.
+MEGURI_SIGNING = adhoc
+
+CODE_SIGN_STYLE = $(MEGURI_CODE_SIGN_STYLE_$(MEGURI_SIGNING))
+DEVELOPMENT_TEAM = $(MEGURI_DEVELOPMENT_TEAM_$(MEGURI_SIGNING))
+CODE_SIGN_IDENTITY = $(MEGURI_CODE_SIGN_IDENTITY_$(MEGURI_SIGNING))
+// Mac entitlement files: the ad-hoc variants omit the App Group.
+MEGURI_ENTITLEMENTS_SIGNING_SUFFIX = $(MEGURI_ENTITLEMENTS_SIGNING_SUFFIX_$(MEGURI_SIGNING))
+
+MEGURI_CODE_SIGN_STYLE_adhoc = Manual
+MEGURI_DEVELOPMENT_TEAM_adhoc =
+MEGURI_CODE_SIGN_IDENTITY_adhoc = -
+MEGURI_ENTITLEMENTS_SIGNING_SUFFIX_adhoc = -AdHoc
+
+MEGURI_CODE_SIGN_STYLE_team = Automatic
+MEGURI_DEVELOPMENT_TEAM_team = $(MEGURI_TEAM_ID)
+MEGURI_CODE_SIGN_IDENTITY_team = Apple Development
+MEGURI_ENTITLEMENTS_SIGNING_SUFFIX_team =
