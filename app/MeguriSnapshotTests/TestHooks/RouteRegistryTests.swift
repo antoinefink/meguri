@@ -10,11 +10,12 @@ import Testing
 @MainActor
 @Suite struct RouteRegistryTests {
     @Test func theStandardRegistryHasTheSampleRoutes() {
-        #expect(TestHooks.RouteRegistry.standard.routes.map(\.path) == ["sample/alert", "sample/screen", "sample/sheet"])
+        #expect(TestHooks.RouteRegistry.standard.routes.map(\.path) == ["sample/alert", "sample/defects", "sample/screen", "sample/sheet"])
     }
 
     @Test(arguments: [
         ("sample/screen", InitialPresentation.Style.screen),
+        ("sample/defects", .screen),
         ("sample/sheet", .sheet),
         ("sample/alert", .alert),
     ])
@@ -25,7 +26,7 @@ import Testing
 
     @Test func anUnknownRouteNamesTheRegisteredOnes() throws {
         let route = try TestHooks.Route("review/answer")
-        #expect(throws: TestHookError("-MeguriRoute: no route 'review/answer'; registered: sample/alert, sample/screen, sample/sheet")) {
+        #expect(throws: TestHookError("-MeguriRoute: no route 'review/answer'; registered: sample/alert, sample/defects, sample/screen, sample/sheet")) {
             try TestHooks.RouteRegistry.standard.presentation(for: route, configuration: LaunchConfiguration())
         }
     }
