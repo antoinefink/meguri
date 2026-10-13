@@ -1,0 +1,6 @@
+# Direct dependencies of the oracle image. Regenerate requirements.lock with
+# `tools/mg oracle lock` (uv in Docker, hashes for every published wheel), and
+# bump anki only through `tools/mg oracle bump <version>`.
+anki==26.9.3
+# Scenario files are YAML; the driver loads them with a YAML 1.2 core-schema loader.
+PyYAML==6.0.3

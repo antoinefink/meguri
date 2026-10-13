@@ -1,0 +1,7 @@
+# Build context is oracle/. Send only what the image needs.
+*
+!entrypoint.sh
+!requirements.lock
+!driver/
+**/__pycache__
+**/*.pyc

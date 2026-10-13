@@ -823,7 +823,7 @@ EOF
 
 @test "every Docker base image is pinned by digest and the dev image matches the Rust toolchain file" {
   local f line image stages
-  for f in "$SB"/docker/*.Dockerfile; do
+  for f in "$SB"/docker/*.Dockerfile "$REPO_ROOT/oracle/Dockerfile"; do
     stages=" "
     while read -r line; do
       image="$(awk '{print $2}' <<<"$line")"
@@ -842,7 +842,7 @@ EOF
 
 @test "every Dockerfile's build context is an allowlist that starts by excluding everything" {
   local f ignore first
-  for f in "$SB"/docker/*.Dockerfile; do
+  for f in "$SB"/docker/*.Dockerfile "$REPO_ROOT/oracle/Dockerfile"; do
     ignore="$f.dockerignore"
     [ -f "$ignore" ] || { echo "$f has no $(basename "$ignore"); the repo root holds local-data/"; return 1; }
     first="$(grep -Ev '^[[:space:]]*(#|$)' "$ignore" | head -n 1)"
@@ -851,5 +851,24 @@ EOF
       echo "$ignore re-includes a private path"
       return 1
     fi
+  done
+}
+
+# --- oracle -----------------------------------------------------------------
+
+@test "oracle rejects bad usage before touching Docker" {
+  local stubs="$BATS_TEST_TMPDIR/oracle-stubs" args
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  for args in "" "frobnicate" "bump" "bump 26.x" "record --jobs 0" "hello --verbose" "build extra"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg oracle $args
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [[ "$stderr" != *"docker must not run"* ]]
+    validate "$result"
   done
 }

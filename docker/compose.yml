@@ -29,6 +29,36 @@ services:
       CARGO_TARGET_DIR: /cargo-target
       TMPDIR: /tmp
 
+  # The Anki oracle (oracle/, AGPL quarantine). `tools/mg oracle build` sets
+  # MEGURI_ORACLE_TAG (<anki version>-<hash of the image inputs>) and builds it;
+  # `tools/mg oracle bump` points MEGURI_ORACLE_CONTEXT at a staging copy.
+  # One worker: `compose run --rm -T -e TZ=<zone> oracle`, JSON lines on
+  # stdin/stdout (conformance/schema/protocol.json). Never pushed (R1869).
+  oracle:
+    build:
+      context: ${MEGURI_ORACLE_CONTEXT:-../oracle}
+      dockerfile: Dockerfile
+    image: meguri-oracle:${MEGURI_ORACLE_TAG:-untagged}
+    pull_policy: never
+    init: true
+    stdin_open: true
+    networks:
+      - oracle-internal
+    # Collections and clock files stay on tmpfs: SQLite on it is ~10x faster
+    # than on the container's overlay, and never touches a bind mount.
+    tmpfs:
+      - /scratch:exec,mode=1777
+    environment:
+      TZ: UTC
+      TMPDIR: /scratch
+      ORACLE_SCRATCH_ROOT: /scratch
+
+networks:
+  # No route out of oracle containers: nothing in them can reach AnkiWeb or
+  # any other host (R1876).
+  oracle-internal:
+    internal: true
+
 volumes:
   cargo-home:
     name: meguri-cargo-home

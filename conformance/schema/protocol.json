@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/protocol.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Meguri-owned protocol between Meguri tooling and oracle workers.",
+  "title": "Meguri oracle worker protocol, version 1",
+  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, then `docker compose run --rm -T -e TZ=<zone> oracle` (compose project and image tag as tools/mg sets them). Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats.",
+  "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/response" }],
+  "$defs": {
+    "id": {
+      "description": "Optional correlation value, echoed unchanged in the response."
+    },
+    "request": {
+      "oneOf": [
+        { "$ref": "#/$defs/hello_request" },
+        { "$ref": "#/$defs/run_request" },
+        { "$ref": "#/$defs/begin_request" },
+        { "$ref": "#/$defs/step_request" },
+        { "$ref": "#/$defs/end_request" }
+      ]
+    },
+    "hello_request": {
+      "type": "object",
+      "required": ["cmd"],
+      "properties": { "cmd": { "const": "hello" }, "id": { "$ref": "#/$defs/id" } },
+      "additionalProperties": false
+    },
+    "run_request": {
+      "description": "Batch mode: run one scenario on a fresh collection and return every step's output.",
+      "type": "object",
+      "required": ["cmd", "scenario"],
+      "properties": {
+        "cmd": { "const": "run" },
+        "id": { "$ref": "#/$defs/id" },
+        "scenario": { "$ref": "#/$defs/scenario" }
+      },
+      "additionalProperties": false
+    },
+    "begin_request": {
+      "description": "Interactive mode: set up the scenario (clock, collection, setup) without running its steps.",
+      "type": "object",
+      "required": ["cmd", "scenario"],
+      "properties": {
+        "cmd": { "const": "begin" },
+        "id": { "$ref": "#/$defs/id" },
+        "scenario": { "$ref": "#/$defs/scenario" }
+      },
+      "additionalProperties": false
+    },
+    "step_request": {
+      "description": "Interactive mode: run the scenario's next step, or the given ad-hoc step.",
+      "type": "object",
+      "required": ["cmd"],
+      "properties": {
+        "cmd": { "const": "step" },
+        "id": { "$ref": "#/$defs/id" },
+        "step": { "$ref": "#/$defs/step" }
+      },
+      "additionalProperties": false
+    },
+    "end_request": {
+      "description": "Interactive mode: close and delete the session's collection and return the outputs of the steps run.",
+      "type": "object",
+      "required": ["cmd"],
+      "properties": { "cmd": { "const": "end" }, "id": { "$ref": "#/$defs/id" } },
+      "additionalProperties": false
+    },
+    "response": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["ok"],
+          "properties": { "ok": { "const": true } },
+          "anyOf": [
+            { "$ref": "#/$defs/hello_response" },
+            { "$ref": "#/$defs/run_response" },
+            { "$ref": "#/$defs/begin_response" },
+            { "$ref": "#/$defs/step_response" },
+            { "$ref": "#/$defs/end_response" }
+          ]
+        },
+        { "$ref": "#/$defs/error_response" }
+      ]
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hello_response": {
+      "type": "object",
+      "required": ["ok", "protocol", "anki_version", "lock_sha256", "driver_sha256", "tz"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "$ref": "#/$defs/id" },
+        "protocol": { "const": 1 },
+        "anki_version": { "type": "string", "description": "The pinned distribution version, e.g. 26.9.3." },
+        "lock_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 of oracle/requirements.lock, which pins the per-architecture wheel hashes." },
+        "driver_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 over the driver's source files (tests excluded)." },
+        "tz": { "type": "string", "description": "The worker's IANA time zone." }
+      },
+      "additionalProperties": false
+    },
+    "run_response": {
+      "type": "object",
+      "required": ["ok", "scenario_id", "observations", "elapsed_ms"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "$ref": "#/$defs/id" },
+        "scenario_id": { "type": "string" },
+        "observations": { "$ref": "#/$defs/observations" },
+        "elapsed_ms": { "type": "number", "minimum": 0, "description": "Wall time inside the worker; never part of a golden." }
+      },
+      "additionalProperties": false
+    },
+    "begin_response": {
+      "type": "object",
+      "required": ["ok", "scenario_id", "steps"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "$ref": "#/$defs/id" },
+        "scenario_id": { "type": "string" },
+        "steps": { "type": "integer", "minimum": 0, "description": "Number of steps in the scenario." }
+      },
+      "additionalProperties": false
+    },
+    "step_response": {
+      "type": "object",
+      "required": ["ok", "index", "observation"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "$ref": "#/$defs/id" },
+        "index": { "type": "integer", "minimum": 0 },
+        "observation": { "$ref": "#/$defs/step_output" }
+      },
+      "additionalProperties": false
+    },
+    "end_response": {
+      "type": "object",
+      "required": ["ok", "scenario_id", "observations"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "$ref": "#/$defs/id" },
+        "scenario_id": { "type": "string" },
+        "observations": { "$ref": "#/$defs/observations" }
+      },
+      "additionalProperties": false
+    },
+    "error_response": {
+      "type": "object",
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": { "const": false },
+        "id": { "$ref": "#/$defs/id" },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "description": "Driver-authored fields only: never Anki's (localized) message text.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "protocol_error",
+            "unknown_cmd",
+            "invalid_scenario",
+            "unsupported_op",
+            "unsupported_observation",
+            "unsupported_setup",
+            "unknown_ref",
+            "tz_mismatch",
+            "anki_error",
+            "internal_error",
+            "session_open",
+            "no_session",
+            "no_more_steps"
+          ],
+          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); anki_error: Anki raised (exception names its class); internal_error: a driver bug."
+        },
+        "step": { "type": "integer", "minimum": 0, "description": "Index of the failing step." },
+        "op": { "type": "string" },
+        "observation": { "type": "string" },
+        "sections": { "type": "array", "items": { "type": "string" } },
+        "exception": { "type": "string", "description": "Exception class name." },
+        "ref": { "type": "string" },
+        "scenario_tz": { "type": "string" },
+        "worker_tz": { "type": "string" },
+        "cmd": { "type": "string" },
+        "steps": { "type": "integer" },
+        "detail": { "type": "string", "description": "Driver-authored English, for people; never compare it." }
+      },
+      "additionalProperties": false
+    },
+    "observations": {
+      "description": "One output per scenario step, in step order, so /steps/<i>/... points into step i.",
+      "type": "object",
+      "required": ["steps"],
+      "properties": { "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } } },
+      "additionalProperties": false
+    },
+    "step_output": {
+      "description": "An op step: {} or {<op>: <result>}. An observe step: {<kind>: <value>} per requested kind; per-card kinds are keyed by logical id (#c1, #n1). f32 values are the shortest decimal that parses back to the same f32.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "scenario": {
+      "description": "Driver vocabulary v0; scenario.schema.json (U4) is authoritative for the file format. Logical ids: notes #n1, #n2... and cards #c1, #c2... in creation order (a note's cards in template order). Setup sections run in this order: config, presets, decks, notetypes, notes.",
+      "type": "object",
+      "required": ["id", "clock"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "compare": { "description": "Comparison hints for the runner; the driver ignores them." },
+        "clock": {
+          "type": "object",
+          "required": ["tz", "start"],
+          "properties": {
+            "tz": { "type": "string", "description": "IANA zone; must equal the worker's zone." },
+            "start": { "type": "string", "description": "ISO 8601 date-time in whole seconds: wall time in tz, or with an offset. A wall time inside a DST gap is invalid; a repeated one means its first occurrence." },
+            "mode": { "enum": ["frozen", "step"], "description": "Recorded in the golden. The clock is frozen in both; it moves only through advance and set_clock." }
+          },
+          "additionalProperties": false
+        },
+        "setup": {
+          "type": "object",
+          "properties": {
+            "config": { "type": "object", "description": "Collection config keys and JSON values (e.g. fsrs, loadBalancerEnabled, rollover), written in sorted key order." },
+            "presets": {
+              "type": "array",
+              "description": "Deck option presets. A preset named Default edits the default preset. Options: learn_steps, relearn_steps (durations), graduating_interval_days, easy_interval_days, new_per_day, reviews_per_day, max_interval_days, min_lapse_interval_days, starting_ease, easy_bonus, hard_interval, interval_modifier, lapse_new_interval, leech_threshold, leech_action (suspend|tag_only), bury_new, bury_reviews, bury_interday_learning, desired_retention, fsrs_params.",
+              "items": { "type": "object", "required": ["name"] }
+            },
+            "decks": {
+              "type": "array",
+              "description": "Deck names ('::' nests) or {name, preset}.",
+              "items": { "anyOf": [{ "type": "string" }, { "type": "object", "required": ["name"] }] }
+            },
+            "notetypes": {
+              "type": "array",
+              "description": "{name, kind?: standard|cloze, fields: [names], templates: [{name, front, back}], css?}. Scenarios define their own note types and CSS.",
+              "items": { "type": "object", "required": ["name", "fields", "templates"] }
+            },
+            "notes": {
+              "type": "array",
+              "description": "{notetype, deck?, fields: [values] | {field: value}, tags?}, as add_note.",
+              "items": { "type": "object", "required": ["notetype"] }
+            }
+          },
+          "additionalProperties": false
+        },
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } }
+      },
+      "additionalProperties": false
+    },
+    "step": {
+      "description": "One key. Ops v0: advance <duration: 20m, 1d, 23h40m; a day is 86400 s>; set_clock <date-time as clock.start>; add_note <note, as setup.notes; output {note, cards}>; answer {card, rating: again|hard|good|easy, time_ms?}. observe [<kind> | '<kind>(#ref, ...)' | {<kind>: args}]: ids, timing {days_elapsed, next_day_at, now, utc_offset_secs}, card (cards row: nid as #nN, did/odid as deck names, data parsed), revlog (rows by id, cid as #cN), next_states ({current, again, hard, good, easy}: {kind, ...fields, memory_state?}), fuzz_table {card, pairs: [[card_id, reps]], intervals} -> {intervals, rows: [[card_id, reps, delta...]]} (fuzz when answering a card with that id and review count), net_probe {host, port, timeout_ms?} -> {connected, error}.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1
+    }
+  }
+}
