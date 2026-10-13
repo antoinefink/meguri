@@ -24,7 +24,6 @@ disallowed-methods = [
   { path = "rand::fill", reason = "draw randomness through meguri_model::rng::RandomSource (R1875)" },
   { path = "rand::SeedableRng::from_os_rng", reason = "seed from meguri_model::rng::RandomSource (R1875)" },
   { path = "rand::SeedableRng::try_from_os_rng", reason = "seed from meguri_model::rng::RandomSource (R1875)" },
-  { path = "rand::SeedableRng::from_entropy", reason = "seed from meguri_model::rng::RandomSource (R1875)" },
 ]
 
 disallowed-types = [
