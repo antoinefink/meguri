@@ -12,15 +12,20 @@ import XCTest
 /// hit point the hierarchy gives for the identifier, never to a guessed
 /// position. At the end it attaches `drive-log.json`, which names every
 /// capture's attachments and each step's timing; `tools/mg drive` exports
-/// them from the result bundle.
+/// them from the result bundle. With `MEGURI_DRIVE_FRAMES=1` (`tools/mg drive
+/// --platform mac --record` without Screen Recording) a step marked with a
+/// transition also gets fixed-rate frames (`FrameSampler`), listed under the
+/// step's `frames`.
 @MainActor
 final class AgentDriverTests: XCTestCase {
     func testDriveScript() throws {
         guard let path = ProcessInfo.processInfo.environment["MEGURI_DRIVE_SCRIPT"], !path.isEmpty else {
             throw XCTSkip("no drive script: tools/mg drive passes it as MEGURI_DRIVE_SCRIPT")
         }
-        // The driver stops at the first failed step itself. Stopping the test
-        // from XCTFail would unwind past the drive log's attachment.
+        // The driver stops at the first failed step and reports it in the
+        // drive log, which `tools/mg drive` reads; it records no test
+        // failure of its own. A failure XCTest records still fails the step,
+        // and must not stop the test before the log is attached.
         continueAfterFailure = true
         let driver = AgentDriver(build: try BuildUnderTest.current(), test: self)
         driver.run(scriptAt: URL(filePath: path))
@@ -103,7 +108,6 @@ final class AgentDriver {
             script = try DriveScript(contentsOf: url)
         } catch {
             log.error = error.message
-            XCTFail("drive script \(log.path): \(error.message)")
             return
         }
         log.script = script.name
@@ -170,7 +174,9 @@ final class AgentDriver {
         }
         log.steps.append(record)
         if failed {
-            XCTFail("step \(index) (\(kind)) failed: \(record.message ?? "")")
+            // Not XCTFail: on a test failure XCTest attaches the app's whole
+            // UI hierarchy, which on the Mac lists the user's recent files.
+            print("drive: step \(index) (\(kind)) failed: \(record.message ?? "")")
             return false
         }
         return true

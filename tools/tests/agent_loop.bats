@@ -109,11 +109,11 @@ mg_app_xcodebuild_test() {
   sleep "${FX_DRIVE_SECONDS:-0.6}"
   t1="$(fx_now)"
   [ "${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-0}" != 1 ] || n="${FX_FRAMES:-5}"
-  jq -n --argjson t0 "$t0" --argjson t1 "$t1" --argjson n "$n" --arg p "$platform" '
+  jq -n --argjson t0 "$t0" --argjson t1 "$t1" --argjson n "$n" --arg p "$platform" --arg s2 "${FX_STEP2_STATUS:-ok}" '
     def cap($b; $ph): {phase: $ph, hierarchy: "\($b)-\($ph).json", screenshot: "\($b)-\($ph).png"};
     {script: "fixture", path: "/fixture.json", platform: $p, error: null, steps: [
       {index: 1, kind: "launch", transition: null, started: $t0, ended: ($t0 + 0.05), status: "ok", captures: [cap("drive-01-launch"; "after")]},
-      ({index: 2, kind: "tap", transition: "dismiss-sheet", started: ($t0 + 0.1), ended: ($t1 - 0.1), status: "ok",
+      ({index: 2, kind: "tap", transition: "dismiss-sheet", started: ($t0 + 0.1), ended: ($t1 - 0.1), status: $s2,
         captures: [cap("drive-02-tap"; "before"), cap("drive-02-tap"; "after")]}
        + (if $n > 0 then {frames: [range($n) | {file: "drive-02-tap-frame-\("00\(. + 1)" | .[-3:]).png", time: ($t0 + 0.1 + . * 0.1)}]} else {} end)),
       {index: 3, kind: "snapshot", transition: null, started: $t1, ended: $t1, status: "ok", captures: [{phase: "home", hierarchy: "drive-03-snapshot-home.json", screenshot: "drive-03-snapshot-home.png"}]}
@@ -630,6 +630,14 @@ EOF
   FAKE_SIM_RECORD_EXIT_AFTER=0.1 mg drive "$script" --platform iphone --record
   [ "$status" -eq 2 ]
   [[ "$(field '.failures[0].message')" == *"stopped before the drive ended"* ]]
+}
+
+@test "a failed step in the drive log fails the drive even when XCTest passed" {
+  add_drive_fakes
+  FX_STEP2_STATUS=failed mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform iphone
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = drive/step-2-tap ]
 }
 
 @test "failed steps keep a drive with a capture error a fail" {

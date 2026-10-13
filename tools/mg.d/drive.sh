@@ -384,7 +384,9 @@ mg_drive_run() {
       "$(jq -r '.message + " at " + ((.frame // .frames[0]) | "\(.x),\(.y) \(.width)x\(.height)")' <<<"$line")" "tools/mg drive $script"
   done
 
-  if [ "$rc" -ne 0 ] || [ "$(jq '.issues' "$out/manifest.json")" -gt 0 ]; then
+  # The driver reports failed steps in its log, not as test failures.
+  if [ "$rc" -ne 0 ] || [ "$(jq '.issues' "$out/manifest.json")" -gt 0 ] ||
+    jq -e '.error != null or any(.steps[]; .status == "failed")' "$out/manifest.json" >/dev/null; then
     return 1
   fi
   if [ "$capture_error" -ne 0 ] || { [ "${#files[@]}" -gt 0 ] && [ "$checked" = false ]; }; then
