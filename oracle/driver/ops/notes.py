@@ -5,6 +5,15 @@ add_note / setup.notes: {notetype, deck?, fields: [str] | {field: str}, tags?: [
 Each note gets the next #nN; its cards get the next #cN in template order.
 Field values and tags must be strings: str(1.0) or str(True) is Python's text,
 which a Meguri adapter would not reproduce.
+
+edit_note: {note: #nN, fields?, tags?}   (record-ops.md W2) the stored note,
+    loaded when the step runs; a fields list replaces from the first field, a
+    mapping the named fields; tags replace all tags. Saved with the
+    collection's note update (undoable). A deleted note is Anki's NotFoundError
+    (anki_error).
+delete_notes: {notes: [#nN, ...]}   (record-ops.md W3) the collection's note
+    removal (undoable) with the listed notes that still exist; when none does,
+    nothing is called.
 """
 
 from __future__ import annotations
@@ -14,12 +23,35 @@ from ..registry import op, setup_section
 from .decks import deck_id
 
 NOTE_KEYS = {"notetype", "deck", "fields", "tags"}
+EDIT_KEYS = {"note", "fields", "tags"}
 
 
 def _text(value, what: str) -> str:
     if not isinstance(value, str):
         raise invalid(f"{what} are strings; quote numbers, booleans and null")
     return value
+
+
+def _set_fields(note, fields, owner: str) -> None:
+    """fields as add_note takes them, onto note; owner names its note type."""
+    if isinstance(fields, list):
+        if len(fields) > len(note.fields):
+            raise invalid(f"{owner} has {len(note.fields)} fields")
+        for i, value in enumerate(fields):
+            note.fields[i] = _text(value, "field values")
+    elif isinstance(fields, dict):
+        for key, value in fields.items():
+            if key not in note.keys():
+                raise invalid(f"{owner} has no field {key!r}")
+            note[key] = _text(value, "field values")
+    else:
+        raise invalid("fields is a list or a mapping")
+
+
+def _tags(tags) -> list[str]:
+    if not isinstance(tags, list):
+        raise invalid("tags is a list")
+    return [_text(t, "tags") for t in tags]
 
 
 def add(session, spec) -> dict:
@@ -33,23 +65,8 @@ def add(session, spec) -> dict:
         raise invalid(f"note type {name!r} is not in setup.notetypes")
     col = session.col
     note = col.new_note(col.models.get(session.notetypes[name]))
-    fields = spec.get("fields", [])
-    if isinstance(fields, list):
-        if len(fields) > len(note.fields):
-            raise invalid(f"note type {name!r} has {len(note.fields)} fields")
-        for i, value in enumerate(fields):
-            note.fields[i] = _text(value, "field values")
-    elif isinstance(fields, dict):
-        for key, value in fields.items():
-            if key not in note.keys():
-                raise invalid(f"note type {name!r} has no field {key!r}")
-            note[key] = _text(value, "field values")
-    else:
-        raise invalid("fields is a list or a mapping")
-    tags = spec.get("tags", [])
-    if not isinstance(tags, list):
-        raise invalid("tags is a list")
-    note.tags = [_text(t, "tags") for t in tags]
+    _set_fields(note, spec.get("fields", []), f"note type {name!r}")
+    note.tags = _tags(spec.get("tags", []))
     col.add_note(note, deck_id(session, spec.get("deck")))
     session.notes.append(note.id)
     new_cards = col.db.list("select id from cards where nid = ? order by ord", note.id)
@@ -68,3 +85,36 @@ def notes(session, items):
 @op("add_note")
 def add_note(session, args):
     return add(session, args)
+
+
+@op("edit_note")
+def edit_note(session, args):
+    if not isinstance(args, dict) or "note" not in args:
+        raise invalid("edit_note takes {note, fields?, tags?}")
+    unknown = sorted(set(args) - EDIT_KEYS)
+    if unknown:
+        raise invalid(f"unknown edit_note keys: {', '.join(unknown)}")
+    ref = args["note"]
+    nid = session.resolve(ref, "n")
+    tags = _tags(args["tags"]) if "tags" in args else None
+    note = session.col.get_note(nid)
+    if "fields" in args:
+        _set_fields(note, args["fields"], f"{ref}'s note type")
+    if tags is not None:
+        note.tags = tags
+    session.col.update_note(note)
+
+
+@op("delete_notes")
+def delete_notes(session, args):
+    if not isinstance(args, dict) or set(args) != {"notes"}:
+        raise invalid("delete_notes takes {notes: [#nN, ...]}")
+    refs = args["notes"]
+    if not isinstance(refs, list) or not refs:
+        raise invalid("delete_notes takes a list of at least one note")
+    listed = list(dict.fromkeys(session.resolve(ref, "n") for ref in refs))
+    marks = ", ".join("?" * len(listed))
+    stored = set(session.col.db.list(f"select id from notes where id in ({marks})", *listed))
+    existing = [nid for nid in listed if nid in stored]
+    if existing:
+        session.col.remove_notes(existing)

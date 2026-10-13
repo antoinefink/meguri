@@ -136,9 +136,9 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
 | `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing | none | stable |
 | `observe` | list of observation requests (`observations.md` O2) | `{<kind>: <value>, ...}` | stable |
-| `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | draft (notes; shape fixed in `record-ops.md` W2) |
-| `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | draft (notes; shape fixed in `record-ops.md` W3) |
-| `set_config` | `{key, value}`: one collection config key and its JSON value | none | draft (storage; shape fixed in `record-ops.md` W4) |
+| `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
+| `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
+| `set_config` | `{key, value}`: one collection config key and its JSON value | none | stable (`record-ops.md` W4) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
@@ -148,7 +148,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
 | `export` | `{format: apkg \| colpkg, name: <file name>, ...options}` | `{name, sha256}` of the file written | draft (package) |
 | `check_db` | `{}` | the check's counters | draft (maintenance) |
-| `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | draft (storage; shape fixed in `record-ops.md` W1) |
+| `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `sync` | `{kind?: normal \| full_upload \| full_download, client?: <name>}` | `{result: <kind>}` | draft (sync) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
 
