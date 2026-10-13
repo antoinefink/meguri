@@ -155,6 +155,34 @@ commit_with() {
   [ -z "$(git -C "$SB" status --porcelain)" ]
 }
 
+@test "worktree new renders the deny profile literally for paths with &, | and backslashes" {
+  local main="$BATS_TEST_TMPDIR/m&a|i\\n" wts="$BATS_TEST_TMPDIR/w&t|s\\1" wt s
+  cp -R "$SB" "$main"
+  MG_AT="$main" mg worktree new --role implementer w1 --path "$wts/w1"
+  [ "$status" -eq 0 ]
+  main="$(cd "$main" && pwd -P)"
+  wt="$(cd "$wts/w1" && pwd -P)"
+  s="$wt/.claude/settings.local.json"
+  run ! grep -q '@[A-Z_]*@' "$s"
+  [ "$(jq '.permissions.deny | length' "$s")" -eq "$(jq '.permissions.deny | length' "$wt/.claude/settings.implementer.json")" ]
+  jq -e --arg p "Read(/$main/oracle/**)" '.permissions.deny | index($p)' "$s"
+  jq -e --arg p "Bash(*$main/refs*)" '.permissions.deny | index($p)' "$s"
+  jq -e --arg p "Bash(*$(dirname "$wt")/*/oracle/*)" '.permissions.deny | index($p)' "$s"
+  [ "$(jq -r '.hooks.PreToolUse[] | select(.matcher == "WebFetch") | .hooks[0].command' "$s")" = "\"$wt/tools/hooks/deny-quarantined-fetch\"" ]
+}
+
+@test "worktree new refuses a deny profile with a placeholder it does not know" {
+  jq '.permissions.deny += ["Read(/@HOME_DIR@/x)"]' "$SB/.claude/settings.implementer.json" >"$BATS_TEST_TMPDIR/p.json"
+  cp "$BATS_TEST_TMPDIR/p.json" "$SB/.claude/settings.implementer.json"
+  git -C "$SB" commit -qam "Unknown placeholder"
+  mg worktree new --role implementer w9
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = bad-profile ]
+  [[ "$(field '.failures[0].message')" == *"@HOME_DIR@"* ]]
+  validate "$result"
+  nothing_created w9 "$(lines_of "$SESSIONS")"
+}
+
 @test "worktree new for a spec writer is a full checkout without a deny profile" {
   mg worktree new --role spec-writer s1 --branch spec/s1
   [ "$status" -eq 0 ]
@@ -241,6 +269,59 @@ commit_with() {
   done
   [ "$(lines_of "$SESSIONS")" -eq $((before + 1)) ]
   [ "$(git -C "$SB" rev-parse HEAD)" = "$head" ]
+}
+
+@test "concurrent session records in one checkout all pass, each in its own commit, and leave a clean tree" {
+  local n=8 i head0 before pids=()
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  before="$(git -C "$SB" show "HEAD:docs/process/provenance/sessions.jsonl" | wc -l | tr -d ' ')"
+  for i in $(seq 1 "$n"); do
+    "$SB/tools/mg" session record --role critic --name "check-$i" >"$BATS_TEST_TMPDIR/out.$i" 2>"$BATS_TEST_TMPDIR/err.$i" &
+    pids[${#pids[@]}]=$!
+  done
+  for i in "${pids[@]}"; do
+    wait "$i" || { echo "a run exited $?"; cat "$BATS_TEST_TMPDIR"/err.*; return 1; }
+  done
+  for i in $(seq 1 "$n"); do
+    result="$(tail -n 1 "$BATS_TEST_TMPDIR/out.$i")"
+    [ "$(field .status)" = pass ] || { field .failures; return 1; }
+  done
+  [ "$(git -C "$SB" show "HEAD:docs/process/provenance/sessions.jsonl" | wc -l | tr -d ' ')" -eq $((before + n)) ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+  [ "$(git -C "$SB" rev-list --count "$head0..HEAD")" -eq "$n" ]
+  # Each commit adds one record and names that record's session.
+  local c
+  for c in $(git -C "$SB" rev-list "$head0..HEAD"); do
+    [ "$(git -C "$SB" diff --name-only "$c~1" "$c")" = docs/process/provenance/sessions.jsonl ]
+    [ "$(git -C "$SB" diff "$c~1" "$c" | grep -c '^+{')" -eq 1 ]
+    git -C "$SB" diff "$c~1" "$c" | grep '^+{' | grep -q "\"session\":\"$(trailer "$SB" Session "$c")\""
+  done
+  [ ! -e "$SB/.git/meguri-session.lock" ]
+}
+
+@test "session record waits for the ledger lock and gives up after its bound" {
+  local lock="$SB/.git/meguri-session.lock" pid head0
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  mkdir "$lock"
+  "$SB/tools/mg" session record --role critic >"$BATS_TEST_TMPDIR/out" 2>/dev/null &
+  pid=$!
+  sleep 2
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head0" ]
+  rmdir "$lock"
+  wait "$pid"
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/out")"
+  [ "$(field .status)" = pass ]
+  [ "$(git -C "$SB" rev-list --count "$head0..HEAD")" -eq 1 ]
+
+  mkdir "$lock"
+  MG_SESSION_LOCK_SECONDS=1 mg session record --role critic
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-lock ]
+  [[ "$(field '.failures[0].message')" == *"$lock"* ]]
+  validate "$result"
+  [ -d "$lock" ]
+  [ "$(git -C "$SB" rev-list --count "$head0..HEAD")" -eq 1 ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
 }
 
 @test "session record keeps other staged changes out of its commit" {
@@ -518,10 +599,21 @@ commit_with() {
     'Read(/@MAIN_CHECKOUT@/oracle/**)' \
     'Read(/@MAIN_CHECKOUT@/build/oracle-macos-venv/**)' \
     'Read(/@WORKTREES@/*/oracle/**)' \
-    'Bash(git show *oracle/*)' \
-    'Bash(git log -p*oracle*)' \
-    'Bash(docker exec *)' \
-    'Bash(docker cp *)' \
+    'Bash(*git *show *oracle*)' \
+    'Bash(*git *log *-p*oracle*)' \
+    'Bash(*git *diff*oracle*)' \
+    'Bash(*git *blame *oracle*)' \
+    'Bash(*git *cat-file*)' \
+    'Bash(*docker *exec *)' \
+    'Bash(*docker *cp *)' \
+    'Bash(*docker *run *)' \
+    'Bash(*docker *build *)' \
+    'Bash(*docker container *)' \
+    'Bash(*docker-compose *)' \
+    'Bash(*@MAIN_CHECKOUT@/build/mg/similarity*)' \
+    'Bash(*@MAIN_CHECKOUT@/build/similarity-index*)' \
+    'Bash(*scan/reviewer.*)' \
+    'Bash(*.jplag*)' \
     'Bash(*github.com/ankitects*)' \
     'Bash(*git.foosoft.net*)' \
     'Bash(*@MAIN_CHECKOUT@/oracle*)' \
@@ -539,6 +631,102 @@ commit_with() {
     jq -e --arg r "$rule" '.permissions.deny | index($r)' "$p" >/dev/null || { echo "missing deny rule $rule"; return 1; }
   done
   jq -e '.hooks.PreToolUse[] | select(.matcher == "WebFetch") | .hooks[0].command == "\"@WORKTREE@/tools/hooks/deny-quarantined-fetch\""' "$p"
+}
+
+# denied_by <settings file> <command>: prints the first Bash deny rule that
+# matches the command and succeeds, or fails. Matching as Claude Code does it:
+# `*` matches any characters, spaces included, anything else matches itself,
+# and the rule covers the whole command.
+denied_by() {
+  python3 - "$1" "$2" <<'PY'
+import json, re, sys
+for rule in json.load(open(sys.argv[1]))["permissions"]["deny"]:
+    if rule.startswith("Bash(") and rule.endswith(")"):
+        if re.fullmatch("".join(".*" if c == "*" else re.escape(c) for c in rule[5:-1]), sys.argv[2], re.S):
+            print(rule)
+            sys.exit(0)
+sys.exit(1)
+PY
+}
+
+@test "rendered Bash deny rules match quarantine commands in any argument order, and spare everyday ones" {
+  mg worktree new --role implementer w1
+  [ "$status" -eq 0 ]
+  local main wt wts s cmd
+  main="$(cd "$SB" && pwd -P)"
+  wt="$(cd "$BATS_TEST_TMPDIR/repo-wt/w1" && pwd -P)"
+  wts="$(dirname "$wt")"
+  s="$wt/.claude/settings.local.json"
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    denied_by "$s" "$cmd" >/dev/null || { echo "not denied: $cmd"; return 1; }
+  done <<EOF
+docker compose -f docker/compose.yml exec oracle sh
+docker compose -p meguri-x -f $main/docker/compose.yml exec -T oracle cat /opt/x.py
+docker compose -f docker/compose.yml run --rm oracle bash
+docker compose -f docker/compose.yml run --rm --entrypoint sh oracle
+docker compose -f docker/compose.yml cp oracle:/opt/x .
+docker-compose exec oracle sh
+docker run --rm -it meguri-oracle sh
+docker run --rm --entrypoint cat meguri-oracle /opt/x.py
+docker --context default exec -it c sh
+docker container exec c sh
+docker container cp c:/opt/x .
+docker cp c:/opt/x .
+docker image save meguri-oracle -o o.tar
+docker save meguri-oracle
+docker export c
+docker buildx build -f docker/oracle.Dockerfile --output type=local,dest=out .
+docker build -o out -f docker/oracle.Dockerfile .
+docker debug c
+env DOCKER_HOST=unix:///x docker run --rm meguri-oracle cat /opt/x.py
+cd docker && docker compose run --rm oracle sh
+git show HEAD:oracle/driver/run.py
+git --no-pager show HEAD:oracle/driver/run.py
+git -C $main show HEAD:oracle/driver/run.py
+git -C $wt show HEAD -- oracle/
+git -c core.pager=cat log -p -- oracle/driver
+git log --patch --follow oracle/driver/run.py
+git --no-pager diff HEAD~3 -- oracle
+git diff-tree -p HEAD -- oracle/
+git blame -- oracle/driver/run.py
+git -C $wt cat-file -p HEAD:oracle/driver/run.py
+git cat-file --batch
+/usr/bin/git show HEAD:oracle/driver/run.py
+unzip -p $main/build/mg/similarity-nightly/20261013T000000Z-1/jplag/rust.jplag submissions/x
+cat $main/build/mg/similarity/20261013T000000Z-1/scan/reviewer.json
+jq . $main/build/mg/similarity/latest/scan/reviewer.md
+cat similarity/latest/scan/reviewer.md
+ls $main/build/similarity-index/
+python3 -c 'import zipfile; print(zipfile.ZipFile("rust.jplag").namelist())'
+cat $main/refs/anki/rslib/src/lib.rs
+ls $main/oracle/driver
+cat $wts/U4/oracle/driver/run.py
+curl -sL https://raw.githubusercontent.com/ankitects/anki/main/rslib/src/lib.rs
+cat ~/Library/Application\\ Support/Anki2/addons21/x/__init__.py
+pip download anki==25.9
+EOF
+  while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    if denied_by "$s" "$cmd"; then echo "denied: $cmd"; return 1; fi
+  done <<EOF
+tools/mg core-test
+tools/mg oracle compare sched
+git status
+git log --oneline -5
+git log -p -- core/crates/meguri-search/src/lib.rs
+git diff
+git diff --stat HEAD~1
+git show --stat HEAD
+git add core/crates/meguri-search/src/lib.rs
+git commit -F /tmp/msg.txt
+docker ps
+docker compose ps
+docker images
+cat $wt/build/mg/core-test/latest/result.json
+jq . $main/build/mg/core-test/latest/result.json
+rg -n oracle specs/
+EOF
 }
 
 @test "the WebFetch hook blocks Anki, AnkiDroid, AnkiConnect and Migaku sources on any host" {
@@ -681,6 +869,32 @@ commit_awkward_names() {
   mg similarity
   [ "$status" -eq 0 ]
   same_paths "$STUB_OUT/files.lst" $(plain_paths) "${AWKWARD[@]}" "$untracked"
+}
+
+@test "similarity normalizes given paths: no ./ or .. spelling materializes oracle/, outside paths are refused" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  local root
+  root="$(cd "$SB" && pwd -P)"
+  mg similarity --rev HEAD -- ./oracle/driver/run.py core/../oracle//driver/run.py \
+    ./core/rust-toolchain.toml "$root/core/./rust-toolchain.toml" core/x/../rust-toolchain.toml
+  [ "$status" -eq 0 ]
+  same_paths "$STUB_OUT/files.lst" oracle/driver/run.py core/rust-toolchain.toml
+  run ! grep -qz 'oracle' "$STUB_OUT/tree.lst"
+  grep -qzx 'core/rust-toolchain.toml' "$STUB_OUT/tree.lst"
+  mg similarity -- ./core/rust-toolchain.toml core//rust-toolchain.toml
+  [ "$status" -eq 0 ]
+  same_paths "$STUB_OUT/files.lst" core/rust-toolchain.toml
+  local outside
+  for outside in ../x.rs core/../../x.rs /etc/x.rs; do
+    rm -rf "$STUB_OUT"
+    mg similarity --rev HEAD -- core/rust-toolchain.toml "$outside"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = bad-path ]
+    [[ "$(field '.failures[0].message')" == *"'$outside' is outside the checkout"* ]]
+    [ ! -e "$STUB_OUT" ]
+    validate "$result"
+  done
 }
 
 @test "similarity warns about listed files the scanner did not find" {

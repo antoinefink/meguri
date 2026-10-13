@@ -36,7 +36,9 @@ import numpy as np
 from .fingerprint import IdSpace, kgram_hashes, periodicity
 from .lexer import STRUCT_FAMILY, Lexer, language_of
 
-INDEX_VERSION = 1  # bump when lexing or fingerprinting changes corpus hashes
+# Bump when lexing or fingerprinting changes corpus hashes or the lines stored
+# with them. 2: words inside a multi-line string literal carry their own line.
+INDEX_VERSION = 2
 CHANNELS = ("struct", "lex", "com", "text")
 _RELEASE_TAG = re.compile(r"^\d+(?:\.\d+)+$")
 KEEP_INDEXES = 3  # published indexes kept, most recently used first (a few hundred MB each)

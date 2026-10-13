@@ -22,8 +22,30 @@ from .scan import Scanner, read_list, read_text
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+class InputError(Exception):
+    """Scan input the scanner refuses."""
+
+
 def log(msg):
     print(msg, file=sys.stderr, flush=True)
+
+
+def checkout_paths(root, paths):
+    """The given paths relative to `root`, normalized and deduplicated: `./x`,
+    `a/../x`, `a//x` and `<root>/x` all become `x`, so the scope rules, the
+    allowlist and the reports see one spelling. A path outside root is an
+    InputError."""
+    base = os.path.abspath(root)
+    out, outside = set(), []
+    for path in paths:
+        rel = os.path.relpath(os.path.normpath(os.path.join(base, path)), base)
+        if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+            outside.append(path)
+        else:
+            out.add(rel)
+    if outside:
+        raise InputError(f"paths outside the scanned tree {root}: {', '.join(outside)}")
+    return sorted(out)
 
 
 def stopwords_of(cfg):
@@ -69,16 +91,17 @@ def cmd_index(args):
 
 def cmd_scan(args):
     t_start = time.monotonic()
+    paths = list(args.paths)
+    if args.files_from:
+        paths += read_list(args.files_from, args.null)
+    paths = checkout_paths(args.root, paths)
     cfg, stop, mask, index, corpus = _prepare(args)
     allow = load_allowlist(args.allowlist)
     t_scan = time.monotonic()
     lexer = Lexer(mask, stop)
     scanner = Scanner(cfg, index, lexer, allow)
-    paths = list(args.paths)
-    if args.files_from:
-        paths += read_list(args.files_from, args.null)
     files, skipped, missing = [], 0, []
-    for path in sorted(set(paths)):
+    for path in paths:
         if not scanner.in_scope(path):
             skipped += 1
             continue
@@ -162,7 +185,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         return args.func(args)
-    except (ConfigError, CorpusError) as e:
+    except (ConfigError, CorpusError, InputError) as e:
         log(f"similarity: {e}")
         result = {"status": "error", "error": str(e)}
         if args.cmd == "scan":

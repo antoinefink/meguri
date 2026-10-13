@@ -89,8 +89,9 @@ mg__similarity_excluded_dirs() {
 # mg__similarity_materialize <rev> <NUL list> <dir> [check]: checks out, under
 # <dir>, the listed files of <rev> outside the excluded directories (so oracle/
 # never lands in build/), plus its interop vocabulary. With `check`, listed
-# paths that <rev> lacks are left out (given paths; checkout-index would fail
-# on them). Uses a private index, so the checkout's own index and files stay
+# paths that <rev> lacks are left out (given paths, which mg_similarity has
+# normalized for the excluded-directory check; checkout-index would fail on
+# them). Uses a private index, so the checkout's own index and files stay
 # untouched. Returns 1 after recording an error.
 mg__similarity_materialize() {
   local rev="$1" list="$2" dir="$3" check="${4:-}" index="$MG_RUN_DIR/rev-index" p d skip
@@ -130,8 +131,48 @@ EOF
   fi
 }
 
+# mg__similarity_relpath <path>: sets MG__RELPATH to the path relative to the
+# checkout root with its `.`, `..` and empty segments resolved, without
+# touching the filesystem (the scanner does the same), so that `./oracle/x`
+# meets the excluded-directory checks as `oracle/x`. Empty for the root itself.
+# Returns 1 for a path outside the checkout.
+mg__similarity_relpath() {
+  local p="$1" rest seg n out=()
+  MG__RELPATH=""
+  case "$p" in
+    "$MG_ROOT") p="" ;;
+    "$MG_ROOT"/*) p="${p#"$MG_ROOT"/}" ;;
+    /*) return 1 ;;
+  esac
+  rest="$p"
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      */*) seg="${rest%%/*}" rest="${rest#*/}" ;;
+      *) seg="$rest" rest="" ;;
+    esac
+    case "$seg" in
+      "" | .) ;;
+      ..)
+        n=${#out[@]}
+        [ "$n" -gt 0 ] || return 1
+        unset "out[$((n - 1))]"
+        ;;
+      *) out[${#out[@]}]="$seg" ;;
+    esac
+  done
+  for seg in ${out[0]+"${out[@]}"}; do
+    MG__RELPATH="${MG__RELPATH:+$MG__RELPATH/}$seg"
+  done
+}
+
+# mg__similarity_given <path>...: the given (normalized) paths as a NUL list,
+# each once: checkout-index refuses a path listed twice.
+mg__similarity_given() {
+  [ "$#" -eq 0 ] || printf '%s\0' "$@" | sort -zu
+}
+
 mg_similarity() {
-  local base="" rev="" rebuild="" paths=() a
+  local base="" rev="" rebuild="" given="" paths=() a
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --base) base="${2:-}"; shift 2 || shift ;;
@@ -139,7 +180,20 @@ mg_similarity() {
       --rev) rev="${2:-}"; shift 2 || shift ;;
       --rev=*) rev="${1#--rev=}"; shift ;;
       --rebuild-index) rebuild=--rebuild; shift ;;
-      --) shift; for a in "$@"; do paths[${#paths[@]}]="$a"; done; break ;;
+      --)
+        shift
+        for a in "$@"; do
+          given=yes
+          if ! mg__similarity_relpath "$a"; then
+            mg_failure bad-path "'$a' is outside the checkout $MG_ROOT; give paths relative to it"
+            mg_status error
+            return 0
+          fi
+          # The root is a directory, which the scanner never scans.
+          [ -z "$MG__RELPATH" ] || paths[${#paths[@]}]="$MG__RELPATH"
+        done
+        break
+        ;;
       *)
         mg_failure usage "unknown argument '$1'; usage: tools/mg similarity [--base <ref>] [--rev <ref>] [--rebuild-index] [-- paths...]"
         mg_status error
@@ -167,8 +221,8 @@ mg_similarity() {
       mg_status error
       return 0
     fi
-    if [ "${#paths[@]}" -gt 0 ]; then
-      printf '%s\0' "${paths[@]}" >"$list"
+    if [ -n "$given" ]; then
+      mg__similarity_given ${paths[0]+"${paths[@]}"} >"$list"
     elif [ -n "$base" ]; then
       git -C "$MG_ROOT" diff -z --name-only --no-renames --diff-filter=d "$base" "$rev" >"$list" || {
         mg_failure bad-base "git diff $base $rev failed"
@@ -178,10 +232,10 @@ mg_similarity() {
     else
       git -C "$MG_ROOT" ls-tree -r -z --name-only "$rev" >"$list"
     fi
-    mg__similarity_materialize "$rev" "$list" "$tree" ${paths[0]+check} || return 0
+    mg__similarity_materialize "$rev" "$list" "$tree" ${given:+check} || return 0
     root_rel="$rel/tree"
-  elif [ "${#paths[@]}" -gt 0 ]; then
-    printf '%s\0' "${paths[@]}" >"$list"
+  elif [ -n "$given" ]; then
+    mg__similarity_given ${paths[0]+"${paths[@]}"} >"$list"
   elif [ -n "$base" ]; then
     { git -C "$MG_ROOT" diff -z --name-only --no-renames --diff-filter=d "$base"; git -C "$MG_ROOT" ls-files -z --others --exclude-standard; } |
       sort -zu >"$list"

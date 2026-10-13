@@ -53,29 +53,77 @@ mg_session_new_id() {
   printf 's-%s-%s\n' "$(date -u +%Y%m%dT%H%M%SZ)" "$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 }
 
-# mg_session_append <checkout> <record JSON>: one line, appended to that
-# checkout's ledger (O_APPEND keeps concurrent appends whole).
-mg_session_append() {
-  local file="$1/$MG_SESSIONS_FILE" line
-  line="$(jq -c . <<<"$2")" && [ -n "$line" ] || return 1
-  mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >>"$file"
+# mg_session_store <checkout> <record JSON>: appends the record to the
+# checkout's ledger and commits it on the checkout's current branch, that path
+# only (other staged changes stay staged; the commit goes through the
+# commit-msg hook like any other). Records made in parallel (critic sessions,
+# spec writers in the main checkout) would race on git's index.lock: one run
+# fails while another commits its line, or a line stays uncommitted. A mkdir
+# lock in the repository's common git dir serializes append and commit across
+# all its checkouts, waiting at most MG_SESSION_LOCK_SECONDS. A commit that
+# fails is tried again, since another git command may hold index.lock for a
+# moment; once HEAD's ledger has the line (a commit that was not a session
+# record took it along), the record is stored. On failure sets
+# MG_SESSION_FAILURE (failure id) and MG_SESSION_MESSAGE and returns 1.
+mg_session_store() {
+  local dir="$1" record="$2" file="$1/$MG_SESSIONS_FILE" line lock waited=0 tries=0
+  MG_SESSION_FAILURE=session-ledger
+  MG_SESSION_MESSAGE="could not append the record to $MG_SESSIONS_FILE; see log.txt"
+  line="$(jq -c . <<<"$record")" && [ -n "$line" ] || return 1
+  lock="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/meguri-session.lock" || return 1
+  trap 'mg__session_unlock; exit 143' TERM
+  trap 'mg__session_unlock; exit 129' HUP
+  trap 'mg__session_unlock' EXIT
+  until mkdir "$lock" 2>/dev/null; do
+    if [ "$waited" -ge $((${MG_SESSION_LOCK_SECONDS:-60} * 10)) ]; then
+      trap - TERM HUP EXIT
+      MG_SESSION_FAILURE=session-lock
+      MG_SESSION_MESSAGE="$lock has been held for ${MG_SESSION_LOCK_SECONDS:-60} s; if no tools/mg session record or worktree new is running, remove that directory and run again"
+      return 1
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  MG__SESSION_LOCK="$lock"
+  if ! { mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >>"$file"; }; then
+    mg__session_unlock
+    return 1
+  fi
+  until mg__session_commit "$dir" "$record" || mg__session_in_head "$dir" "$line"; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+      mg__session_unlock
+      MG_SESSION_FAILURE=session-commit
+      MG_SESSION_MESSAGE="appended the record to $MG_SESSIONS_FILE but could not commit it (see log.txt)"
+      return 1
+    fi
+    sleep 1
+  done
+  mg__session_unlock
 }
 
-# mg_session_commit <checkout> <record JSON>: commits the checkout's ledger on
-# its current branch, that path only (other staged changes stay staged). The
-# commit goes through the commit-msg hook like any other.
-mg_session_commit() {
-  local dir="$1" id role name
+mg__session_unlock() {
+  [ -z "${MG__SESSION_LOCK:-}" ] || rmdir "$MG__SESSION_LOCK" 2>/dev/null
+  MG__SESSION_LOCK=""
+  trap - TERM HUP EXIT
+}
+
+mg__session_commit() {
+  local id role name
   id="$(jq -r .session <<<"$2")"
   role="$(jq -r .role <<<"$2")"
   name="$(jq -r '.name // ""' <<<"$2")"
-  git -C "$dir" add -- "$MG_SESSIONS_FILE" >&2 &&
-    git -C "$dir" commit -q -F - -- "$MG_SESSIONS_FILE" >&2 <<EOF
+  git -C "$1" add -- "$MG_SESSIONS_FILE" >&2 &&
+    git -C "$1" commit -q -F - -- "$MG_SESSIONS_FILE" >&2 <<EOF
 Record session $id ($role${name:+, $name})
 
 Role: infra
 Session: $id
 EOF
+}
+
+mg__session_in_head() {
+  git -C "$1" show "HEAD:$MG_SESSIONS_FILE" 2>/dev/null | grep -Fxq -- "$2"
 }
 
 # mg_session_record_json <id> <role> <kind> <name> <base commit> [extra JSON object]
@@ -129,13 +177,11 @@ mg_session() {
   record="$(mg_session_record_json "$id" "$role" session "$name" "$base" \
     "$(jq -nc --arg note "$note" --arg checkout "$MG_ROOT" \
       '{checkout: $checkout} + (if $note == "" then {} else {note: $note} end)')")"
-  if ! mg_session_append "$MG_ROOT" "$record"; then
-    mg_failure session-ledger "could not append the record to $MG_SESSIONS_FILE; see log.txt"
-    mg_status error
-    return 0
-  fi
-  if ! mg_session_commit "$MG_ROOT" "$record"; then
-    mg_failure session-commit "appended the record to $MG_SESSIONS_FILE but could not commit it (see log.txt); commit that file by hand"
+  if ! mg_session_store "$MG_ROOT" "$record"; then
+    case "$MG_SESSION_FAILURE" in
+      session-commit) MG_SESSION_MESSAGE="$MG_SESSION_MESSAGE; commit that file by hand" ;;
+    esac
+    mg_failure "$MG_SESSION_FAILURE" "$MG_SESSION_MESSAGE"
     mg_status error
     return 0
   fi

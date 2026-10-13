@@ -168,6 +168,19 @@ class SyntheticCorpus(unittest.TestCase):
             json.dump({"entries": entries}, f)  # JSON is valid YAML
         return path
 
+    def no_stopwords_config(self):
+        """The test config without string stopwords: corpus words placed in a
+        string literal then match the corpus code word for word."""
+        import yaml
+
+        with open(self.config) as f:
+            cfg = yaml.safe_load(f)
+        cfg["channels"]["lex"]["string_stopwords"] = []
+        config = os.path.join(self.root, "config.yaml")
+        with open(config, "w") as f:
+            yaml.safe_dump(cfg, f)
+        return config
+
     # -- detection -----------------------------------------------------------
 
     def test_copied_function_with_renamed_identifiers_fails_on_struct(self):
@@ -360,6 +373,25 @@ class SyntheticCorpus(unittest.TestCase):
         self.assertEqual(code, 1, err)
         self.assertEqual(file_entry(views["implementer"], "core/storage/schema.rs")["status"], "flagged")
 
+    def test_allowlist_lines_do_not_cover_the_later_lines_of_a_multiline_string(self):
+        # The corpus file's lex words, one per line (three times over, for
+        # enough fingerprints), in a raw string that starts on line 1: an entry
+        # for line 1 must not exempt the lines below it.
+        from meguri_similarity.lexer import Lexer
+
+        words = Lexer().lex(CORPUS_RS, "rust").lex * 3
+        files = {"core/notes.rs": 'pub const NOTES: &str = r#"\n' + "\n".join(words) + '\n"#;\n'}
+        allow = self.allowlist(
+            [{"path": "core/notes.rs", "lines": "1-1", "channels": ["lex"], "reason": "r", "approved_by": "antoine"}]
+        )
+        code, _s, views, err = self.scan(files, allowlist=allow, config=self.no_stopwords_config())
+        self.assertEqual(code, 1, err)
+        f = file_entry(views["implementer"], "core/notes.rs")
+        self.assertEqual(f["status"], "flagged")
+        regions = next(x for x in f["flags"] if x["channel"] == "lex")["regions"]
+        self.assertGreaterEqual(min(r["lines"][0] for r in regions), 2)
+        self.assertLessEqual(max(r["lines"][1] for r in regions), len(words) + 1)
+
     def test_allowlist_entries_need_a_reason_and_antoines_approval(self):
         for entry in (
             {"path": "core/a.rs", "reason": "r"},
@@ -382,14 +414,7 @@ class SyntheticCorpus(unittest.TestCase):
         # structure: only the lex channel can see it.
         from meguri_similarity.lexer import Lexer
 
-        import yaml
-
-        with open(self.config) as f:
-            cfg = yaml.safe_load(f)
-        cfg["channels"]["lex"]["string_stopwords"] = []  # isolate masking from stopwords
-        config = os.path.join(self.root, "config.yaml")
-        with open(config, "w") as f:
-            yaml.safe_dump(cfg, f)
+        config = self.no_stopwords_config()  # isolate masking from stopwords
         words = Lexer().lex(CORPUS_RS, "rust").lex
         files = {"tools/reuse.py": "NAMES = " + json.dumps(" ".join(words)) + "\n"}
         code, _s, views, err = self.scan(files, config=config)
@@ -421,6 +446,36 @@ class SyntheticCorpus(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(summary["counts"]["scanned"], 0)
         self.assertEqual(summary["counts"]["skipped"], 5)
+
+    def test_given_paths_are_normalized_before_scope_and_allowlist_checks(self):
+        write_tree(self.root, {"oracle/driver/run.rs": CORPUS_RS, "core/storage/schema.rs": CORPUS_RS})
+        allow = self.allowlist([{"path": "core/storage/schema.rs", "reason": "r", "approved_by": "antoine"}])
+        spellings = [
+            "./oracle/driver/run.rs",
+            "core/../oracle/driver/run.rs",
+            "./core/storage/schema.rs",
+            "core//storage/./schema.rs",
+            "core/x/../storage/schema.rs",
+            os.path.join(self.root, "core", "storage", "schema.rs"),
+        ]
+        code, summary, views, err = scan(
+            self.refs, self.cache, self.root, spellings, self.out, allowlist=allow, config=self.config
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual((summary["counts"]["scanned"], summary["counts"]["skipped"]), (1, 1))
+        self.assertEqual([f["path"] for f in views["implementer"]["files"]], ["core/storage/schema.rs"])
+        self.assertEqual(file_entry(views["implementer"], "core/storage/schema.rs")["status"], "allowlisted")
+
+    def test_paths_outside_the_scanned_tree_are_an_error(self):
+        write_tree(self.root, {"core/stats.rs": MEGURI_OWN_RS})
+        for outside in ("../stats.rs", "core/../../stats.rs", "/etc/stats.rs"):
+            code, summary, _v, err = scan(
+                self.refs, self.cache, self.root, ["core/stats.rs", outside], self.out, config=self.config
+            )
+            self.assertEqual(code, 2, (outside, err))
+            self.assertEqual(summary["status"], "error")
+            self.assertIn(outside, summary["error"])
+            self.assertIn("outside", summary["error"])
 
     def test_swift_uses_only_the_cross_language_channels(self):
         code, _s, views, err = self.scan({"app/A.swift": "func f() -> Int { return 1 }\n"})

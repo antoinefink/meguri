@@ -147,8 +147,19 @@ EOF
     fi
     mkdir -p "$path/.claude"
     # Deny rules name absolute paths: the main checkout, the directory that
-    # holds the worktrees and this worktree (its hook scripts).
-    sed -e "s|@MAIN_CHECKOUT@|$main|g" -e "s|@WORKTREES@|$(dirname "$path")|g" -e "s|@WORKTREE@|$path|g" \
+    # holds the worktrees and this worktree (its hook scripts). jq inserts them
+    # literally and JSON-escaped, whatever characters they hold (sed would read
+    # & and \ in them). A placeholder it does not know fails the run.
+    local unknown
+    unknown="$(jq -r '[.. | strings | scan("@[A-Z_]+@")] - ["@MAIN_CHECKOUT@", "@WORKTREES@", "@WORKTREE@"] | unique | join(" ")' \
+      "$path/$profile")" || unknown="(unreadable JSON)"
+    if [ -n "$unknown" ]; then
+      mg__worktree_abort "$path" "$branch" "$new_branch" bad-profile "$profile has placeholders tools/mg worktree does not fill: $unknown"
+      return 0
+    fi
+    jq --arg main "$main" --arg wts "$(dirname "$path")" --arg wt "$path" '
+      {MAIN_CHECKOUT: $main, WORKTREES: $wts, WORKTREE: $wt} as $v
+      | walk(if type == "string" then gsub("@(?<k>MAIN_CHECKOUT|WORKTREES|WORKTREE)@"; $v[.k]) else . end)' \
       "$path/$profile" >"$path/.claude/settings.local.json"
     if ! jq -e '.permissions.deny | length > 0' "$path/.claude/settings.local.json" >/dev/null; then
       mg__worktree_abort "$path" "$branch" "$new_branch" bad-profile "$profile did not render to a settings file with deny rules"
@@ -178,12 +189,8 @@ EOF
     mg__worktree_abort "$path" "$branch" "$new_branch" session-marker "could not write the worktree's role marker (meguri-session.json); see log.txt"
     return 0
   }
-  if ! mg_session_append "$path" "$record"; then
-    mg__worktree_abort "$path" "$branch" "$new_branch" session-ledger "could not append the session record to $MG_SESSIONS_FILE at $base; see log.txt"
-    return 0
-  fi
-  if ! mg_session_commit "$path" "$record"; then
-    mg__worktree_abort "$path" "$branch" "$new_branch" session-commit "could not commit the session record on $branch; see log.txt"
+  if ! mg_session_store "$path" "$record"; then
+    mg__worktree_abort "$path" "$branch" "$new_branch" "$MG_SESSION_FAILURE" "$MG_SESSION_MESSAGE (worktree $name, branch $branch)"
     return 0
   fi
   mg_detail session "$record"

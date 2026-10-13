@@ -10,7 +10,7 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 ## You may read
 
 - `specs/`, `conformance/` (schema, scenarios, goldens, fixtures, catalog), the plan and its research dossiers under `docs/plans/` (not the private research notes in `local-data/research/`).
-- Oracle outputs, by running the oracle as a black box through `tools/mg` jobs.
+- Oracle outputs, by running the oracle as a black box through `tools/mg` jobs. Run containers only through `tools/mg`: the deny profile refuses direct `docker` commands that run, exec into, build or copy from a container or image.
 - fsrs-rs source, on docs.rs (source view) or from its crate on static.crates.io; GitHub is denied to implementer sessions. Some fsrs-rs files carry text that came from Anki (its revlog converter tests, simulator types and a benchmark header). Depend on the crate; never copy from fsrs-rs either.
 - Meguri's own code and docs.
 
@@ -19,7 +19,7 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 - `oracle/` (driver, harvest links, provenance notes), or its history (`git show`, `git log -p` and the like on `oracle/`).
 - `refs/` (any Anki checkout), `local-data/` (the private collection and research notes).
 - Anki, AnkiDroid, AnkiConnect or Migaku code, wherever it is: their repositories on the web, an installed Anki app (`/Applications/Anki.app`), Anki add-ons (`~/Library/Application Support/Anki2/addons21/`), Python packages `anki` and `aqt`, the macOS oracle venv (`build/oracle-macos-venv/`) (R1956).
-- Similarity reviewer views and JPlag reports: they name or embed Anki sources.
+- Similarity reviewer views and JPlag reports: they name or embed Anki sources. Shell commands on the main checkout's `build/mg/similarity*` and `build/similarity-index` are denied; read an implementer view the orchestrator points you to with the Read tool.
 
 ## Rules
 

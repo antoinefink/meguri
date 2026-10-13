@@ -55,6 +55,19 @@ class RustLexing(unittest.TestCase):
         self.assertNotIn("modified", out.lex)
         self.assertIn("row", out.lex)
 
+    def test_words_in_multiline_strings_carry_their_own_line(self):
+        src = 'let q = r#"alpha\nbeta gamma\n\ndelta"#;\nlet s = "one\ntwo";\nlet z = 7;'
+        out = self.lx.lex(src, "rust", want_text_strings=True)
+        self.assertEqual(
+            list(zip(out.lex, out.lex_lines)),
+            [("q", 1), ("alpha", 1), ("beta", 2), ("gamma", 2), ("delta", 4), ("s", 5), ("one", 5), ("two", 6),
+             ("z", 7), ("7", 7)],
+        )
+        self.assertEqual(
+            [(w, l) for words, lines, _k in out.texts for w, l in zip(words, lines)],
+            [("alpha", 1), ("beta", 2), ("gamma", 2), ("delta", 4), ("one", 5), ("two", 6)],
+        )
+
     def test_stopwords_apply_inside_strings_only(self):
         lx = Lexer(stopwords={"select", "from", "where"})
         out = lx.lex('fn select(from: u8) { q("select id from cards where x") }', "rust")
@@ -71,6 +84,14 @@ class OtherLanguages(unittest.TestCase):
         out = self.lx.lex(src, "python")
         self.assertEqual([w for w, _ in out.comments], [["return", "the", "double", "of", "x"], ["twice"]])
         self.assertEqual(out.struct[:2], ["def", "I"])
+
+    def test_swift_and_js_multiline_strings_carry_each_words_line(self):
+        swift = 'let s = """\n    first words\n    second\n    """\nlet t = 1\n'
+        out = self.lx.lex(swift, "swift")
+        self.assertEqual(list(zip(out.lex, out.lex_lines)), [("s", 1), ("first", 2), ("words", 2), ("second", 3), ("t", 5), ("1", 5)])
+        js = "const t = `one\ntwo ${x}\nthree`;\n"
+        out = self.lx.lex(js, "js")
+        self.assertEqual(list(zip(out.lex, out.lex_lines)), [("t", 1), ("one", 1), ("two", 2), ("x", 2), ("three", 3)])
 
     def test_sql_keywords_are_case_insensitive(self):
         out = self.lx.lex("SELECT id FROM cards WHERE due <= ? -- due cards\n", "sql")

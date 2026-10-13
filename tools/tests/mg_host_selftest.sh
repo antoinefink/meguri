@@ -340,6 +340,43 @@ Session: $id" || return 1
   git -C "$SB" worktree remove --force "$wt"
 }
 
+# Parallel session records in one checkout under macOS /bin/bash 3.2: each
+# waits for the ledger lock, so all pass with one commit each; a run cancelled
+# while it waits leaves the lock it never took.
+t_parallel_session_records_on_macos() {
+  local n=6 i head0 pids="" pid rc=0 lock="$SB/.git/meguri-session.lock"
+  head0="$(git -C "$SB" rev-parse HEAD)"
+  for i in 1 2 3 4 5 6; do
+    /bin/bash "$MG" session record --role critic --name "h$i" >"$SB/rec.$i" 2>>"$SB/stderr.log" &
+    pids="$pids $!"
+  done
+  for pid in $pids; do wait "$pid" || rc=$?; done
+  expect "every run exits 0" "$rc" 0 || return 1
+  for i in 1 2 3 4 5 6; do
+    RESULT="$(tail -n 1 "$SB/rec.$i")"
+    RESULTS="$RESULTS ${RESULT#"$SB"/}"
+    expect "record $i" "$(field .status)" pass || { field .failures; return 1; }
+  done
+  expect "one commit per record" "$(git -C "$SB" rev-list --count "$head0..HEAD")" "$n" &&
+    expect "ledger committed" "$(git -C "$SB" status --porcelain -- docs/process/provenance)" "" &&
+    expect "lines in HEAD" "$(git -C "$SB" diff "$head0" HEAD -- docs/process/provenance | grep -c '^+{')" "$n" &&
+    expect "lock released" "$([ -e "$lock" ] && echo held || echo free)" free || return 1
+  mkdir "$lock"
+  /bin/bash "$MG" session record --role critic >"$SB/rec.cancel" 2>>"$SB/stderr.log" &
+  pid=$!
+  sleep 2
+  kill -TERM "$pid"
+  wait "$pid"
+  rc=$?
+  RESULT="$(tail -n 1 "$SB/rec.cancel")"
+  RESULTS="$RESULTS ${RESULT#"$SB"/}"
+  expect "cancelled exit" "$rc" 2 &&
+    expect "cancelled" "$(field '[.failures[].id] | index("cancelled") != null')" true &&
+    expect "another holder's lock kept" "$([ -d "$lock" ] && echo held || echo free)" held &&
+    expect "nothing committed" "$(git -C "$SB" rev-list --count "$head0..HEAD")" "$n" || return 1
+  rmdir "$lock"
+}
+
 similarity_corpus() { # a stand-in Anki repository with one release tag
   local repo="$SB/refs/anki"
   mkdir -p "$repo/rslib/src"
@@ -447,7 +484,7 @@ t_killing_mg_stops_the_docker_job_container t_interrupting_mg_stops_the_docker_j
 t_dev_containers_share_the_cargo_package_cache_lock
 t_every_compose_service_runs_an_init_process t_dev_image_rebuild_reuses_layers
 t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_hook_on_macos
-t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
+t_parallel_session_records_on_macos t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
 t_similarity_nightly_runs_jplag t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"

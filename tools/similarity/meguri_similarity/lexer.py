@@ -161,6 +161,17 @@ def _split_identifier(ident: str):
     return [p.lower() for p in _IDENT_PART.findall(ident)]
 
 
+def _words_with_lines(word_re, text, first_line):
+    """(word, line) for each match of `word_re` in `text`, a comment or string
+    literal that starts on `first_line`: a word after a newline inside it is on
+    a later line."""
+    line, pos = first_line, 0
+    for m in word_re.finditer(text):
+        line += text.count("\n", pos, m.start())
+        pos = m.start()
+        yield m.group(0), line
+
+
 class Lexer:
     """Lexes files for one scan or index build. `mask` holds normalized interop
     vocabulary; `stopwords` are dropped from the lex channel everywhere."""
@@ -184,12 +195,12 @@ class Lexer:
     def _lex_string(self, content, line, out, out_lines):
         # Stopwords (SQL keywords by default) only apply inside string literals,
         # where embedded SQL would otherwise make keyword runs look like reuse.
-        for w in _STRING_WORD.findall(content):
+        for w, wline in _words_with_lines(_STRING_WORD, content, line):
             if w[0].isdigit():
                 out.append(w)
-                out_lines.append(line)
+                out_lines.append(wline)
             else:
-                self._lex_identifier(w, line, (), out, out_lines, self.stopwords)
+                self._lex_identifier(w, wline, (), out, out_lines, self.stopwords)
 
     # -- main entry ----------------------------------------------------------
 
@@ -219,9 +230,9 @@ class Lexer:
                 body = m.group("com")
                 block_line = lines.line(start)
                 words, wlines = [], []
-                for wm in _COMMENT_WORD.finditer(body.lower()):
-                    words.append(wm.group(0))
-                    wlines.append(block_line + body.count("\n", 0, wm.start()))
+                for w, wline in _words_with_lines(_COMMENT_WORD, body.lower(), block_line):
+                    words.append(w)
+                    wlines.append(wline)
                 gap = text[prev_comment_end:start] if prev_comment_end is not None else None
                 if out.comments and gap is not None and gap.strip() == "":
                     out.comments[-1][0].extend(words)
@@ -283,9 +294,9 @@ class Lexer:
             out.texts.append((words, wlines, "css"))
         if want_text_strings:
             for content, sline in strings:
-                words = TEXT_WORD.findall(content.lower())
-                if words:
-                    out.texts.append((words, [sline] * len(words), "string"))
+                pairs = list(_words_with_lines(TEXT_WORD, content.lower(), sline))
+                if pairs:
+                    out.texts.append(([w for w, _l in pairs], [l for _w, l in pairs], "string"))
         return out
 
     # -- Fluent and String Catalogs ----------------------------------------
