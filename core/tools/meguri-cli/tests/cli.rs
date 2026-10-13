@@ -27,7 +27,15 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert!(out.status.success());
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["supports"]["ops"], serde_json::json!(["advance", "set_clock"]));
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 19);
+    // dsl.md D7.2: 23 ops besides observe, the actor ops of sync-ops.md
+    // among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 23);
+    for op in ["actor", "sync", "net_fault", "converge", "reopen"] {
+        assert!(
+            json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
+    }
     assert!(
         json["language"]["ops"]
             .as_array()
@@ -317,4 +325,74 @@ fn harvest_report_refuses_a_live_report_from_another_oracle_pin() {
     let out = report(LOCK);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(text(&out.stderr).contains("in-scope: 1 rows"), "{}", text(&out.stderr));
+}
+
+#[test]
+fn run_live_checks_the_fault_proxy_api_before_any_worker_starts() {
+    use meguri_testkit::exec::sync_guard::ANKIWEB_HOST;
+
+    let dir = tree();
+    let root = dir.path();
+    let golden: Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("goldens/smoke/timing-tz-utc.json")).unwrap()).unwrap();
+    let recorded = serde_json::to_string(&golden["observations"]).unwrap();
+    // A worker that leaves a mark when it starts.
+    let started = root.join("worker-started");
+    let script = root.join("marking.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "touch '{}'\nexec sh '{}'\n",
+            started.display(),
+            root.join("worker.sh").display()
+        ),
+    )
+    .unwrap();
+    let _ = worker(root, &recorded, LOCK);
+    let cmd = serde_json::to_string(&["env", "TZ={tz}", "sh", script.to_str().unwrap()]).unwrap();
+    let run = |api: &str| {
+        Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+            .args([
+                "conformance",
+                "run",
+                "--live",
+                "--conformance",
+                root.to_str().unwrap(),
+                "--oracle-cmd",
+                &cmd,
+            ])
+            .env("ORACLE_SYNC_FAULTS", api)
+            .output()
+            .unwrap()
+    };
+
+    // sync-ops.md S8.3: an API the guard refuses stops the run first.
+    for api in [format!("api.{ANKIWEB_HOST}:8474"), "203.0.113.5:8474".to_owned()] {
+        let out = run(&api);
+        assert_eq!(out.status.code(), Some(2), "{api}: {}", text(&out.stderr));
+        let stderr = text(&out.stderr);
+        assert!(
+            stderr.contains("ORACLE_SYNC_FAULTS") && stderr.contains("refused"),
+            "{stderr}"
+        );
+        assert!(!started.exists(), "{api}: a worker started");
+    }
+    // The compose service passes, and empty means no fault proxy.
+    for api in ["mg-sync-faults-20261013t090853z-68330:8474", ""] {
+        let out = run(api);
+        assert_eq!(out.status.code(), Some(0), "{api:?}: {}", text(&out.stderr));
+        assert!(started.exists());
+    }
+}
+
+#[test]
+fn exec_sends_actor_scenarios_to_the_parties_executor() {
+    let downloads = conformance().join("scenarios/smoke/sync/meguri-downloads.yaml");
+    let out = cli(&["conformance", "exec", downloads.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("smoke/sync/meguri-downloads: an actor scenario"),
+        "{}",
+        text(&out.stderr)
+    );
 }
