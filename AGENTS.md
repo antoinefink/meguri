@@ -20,3 +20,10 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 - Add or update an `AGENTS.md` in a subdirectory when it has conventions or traps the code doesn't make obvious.
 - Keep every `AGENTS.md` terse. Readers are highly capable agents: write only what they can't infer. No restating code, no tutorials, no obvious advice.
+
+## Running tests and apps on this Mac
+
+The Mac is also Antoine's workstation. Unattended runs must never take over the screen.
+- Simulators: boot with `xcrun simctl boot`; never open Simulator.app; capture with `xcrun simctl io`.
+- Never run macOS XCUITest, or anything that drives the real cursor or keyboard, unless `MEGURI_ALLOW_MAC_UI=1` is set. Mac UI-driving suites (accessibility audit, keyboard flows, UI perf) are queued for that explicit run.
+- Check Mac screens with in-process snapshot tests, which render off-screen. When a running Mac app is unavoidable, launch it hidden and in the background (`open -g -j`), capture its window with `screencapture -l <windowid>`, and quit it afterwards.
