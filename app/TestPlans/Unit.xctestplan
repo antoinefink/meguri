@@ -31,6 +31,14 @@
         "identifier" : "AppModelTests",
         "name" : "AppModelTests"
       }
+    },
+    {
+      "parallelizable" : true,
+      "target" : {
+        "containerPath" : "container:Packages/MeguriKit",
+        "identifier" : "DesignSystemTests",
+        "name" : "DesignSystemTests"
+      }
     }
   ],
   "version" : 1

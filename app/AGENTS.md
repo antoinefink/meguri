@@ -26,6 +26,12 @@
 - On the Mac a sheet takes `\.locale` from its own window, not from its presenter: presented content gets the launch environment again (`RootView`).
 - On the Mac, never present an alert while the app is hidden (launched with `open -j`, as agents must, or a login item set to Hide): the window closes and the app quits, with no crash report. Present launch-time alerts after `await NSApp.untilUnhidden()`, as `RootView` does.
 
+## Design system
+
+- UI code takes colours, spacing, radii and motion only from `DesignSystem/Tokens/`, text from system styles, icons from SF Symbols, glass only from `DesignSystem/Chrome/` (KTD20). `tools/mg lint-ui` enforces it on every Swift file under `app/` except tests and MeguriCore; inline `swiftlint:` comments fail it, and the only exemption is a reasoned entry in `tools/lint-ui/allowlist.tsv`. Lint is not a build phase: run it before building.
+- A new colour token needs a colour set with light, dark and both increased-contrast variants and a `role` naming the backgrounds it is drawn on; `ContrastTests` and `TokenCoverageTests` (`tools/mg swift-test --package MeguriKit`) check them. Increase Contrast has no public environment setter: tests resolve colours with `EnvironmentValues._colorSchemeContrast`, and `NSAppearance`'s high-contrast names do not select the catalog's high-contrast variants.
+- Reusable components go into `ComponentGallery.entries` first (route `designsystem/gallery`, identifiers `designsystem.gallery.<component>.<state>`); the gallery's VStack is deliberately not lazy so UI tests see off-screen entries.
+
 ## Test hooks
 
 - Launch options are `-Meguri<Name> <value>` (table in `TestHooks/LaunchOptions.swift`); UI tests build them with `MeguriUITests/Support/MeguriLaunch.swift`. A bad option replaces the UI with `testhooks.error.message`.

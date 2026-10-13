@@ -1,5 +1,6 @@
 #if MEGURI_TEST_HOOKS
 import AppModel
+import DesignSystem
 import Foundation
 import SwiftUI
 
@@ -54,7 +55,7 @@ enum TestHooks {
         let error: TestHookError
 
         var body: some View {
-            VStack(spacing: 12) {
+            VStack(spacing: Spacing.small) {
                 Text("Test hook error")
                     .font(.headline)
                 Text(error.message)

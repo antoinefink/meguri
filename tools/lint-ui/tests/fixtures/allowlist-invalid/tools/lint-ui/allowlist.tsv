@@ -1,0 +1,6 @@
+# rule	path	reason
+glass-outside-chrome	app/Packages/MeguriKit/Sources/Features/Home/Banner.swift	
+glass-everywhere	app/Packages/MeguriKit/Sources/Features/Home/Banner.swift	a rule that does not exist
+glass-outside-chrome	app/Packages/MeguriKit/Sources/Features/Home/Missing.swift	a file that does not exist
+inline-disable	app/Packages/MeguriKit/Sources/Features/Home/Banner.swift	inline commands cannot be exempted
+glass-outside-chrome app/Packages/MeguriKit/Sources/Features/Home/Banner.swift spaces instead of tabs
