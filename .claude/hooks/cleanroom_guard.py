@@ -40,6 +40,7 @@ PATH_RULES = [
 # Bash-only rules: reading oracle history, raw docker, installing Anki packages.
 BASH_RULES = [
     (re.compile(r"\bgit\b[^|;&]*\bcat-file\b"), "git cat-file"),
+    (re.compile(r"\battic/"), "archived attic/ branches (code built outside the clean room)"),
     (re.compile(r"\bdocker(-compose)?\b\s+(exec|cp|run|save|export|build|debug|container)\b|\bdocker-compose\b"), "raw docker (use tools/mg)"),
     (re.compile(r"\b(pip3?|pipx|uv|uvx|python3?\s+-m\s+pip)\b[^|;&]*\b(install|download|wheel|add|tool|run)\b[^|;&]*\b(anki|aqt)\b", re.I), "installing anki/aqt"),
 ]
