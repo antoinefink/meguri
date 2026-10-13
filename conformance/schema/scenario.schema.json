@@ -271,7 +271,18 @@
               "properties": { "tables": { "type": "array", "items": { "type": "string" } } }
             },
             "stats": { "description": "Draft.", "type": ["object", "null"] },
-            "digest": { "type": "null" }
+            "digest": { "type": "null" },
+            "legacy_json": {
+              "description": "Draft (model-ops.md L1): schema-11 objects of the named records.",
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "notetypes": { "$ref": "#/$defs/names" },
+                "decks": { "$ref": "#/$defs/names" },
+                "presets": { "$ref": "#/$defs/names" }
+              }
+            }
           },
           "additionalProperties": false
         }
@@ -281,6 +292,7 @@
       "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
       "type": "object"
     },
+    "names": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
     "step": {
       "description": "One op per step (dsl.md D7).",
       "type": "object",
@@ -338,6 +350,19 @@
         },
         "update_preset": {
           "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"], "properties": { "name": { "type": "string" } } }]
+        },
+        "legacy_update": {
+          "description": "Draft (model-ops.md L2): merge patch into a record's schema-11 object and save it.",
+          "type": "object",
+          "required": ["patch"],
+          "additionalProperties": false,
+          "properties": {
+            "notetype": { "type": "string", "minLength": 1 },
+            "deck": { "type": "string", "minLength": 1 },
+            "preset": { "type": "string", "minLength": 1 },
+            "patch": { "type": "object" }
+          },
+          "oneOf": [{ "required": ["notetype"] }, { "required": ["deck"] }, { "required": ["preset"] }]
         },
         "build_filtered": {
           "allOf": [

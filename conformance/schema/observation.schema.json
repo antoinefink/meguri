@@ -83,6 +83,20 @@
           "required": ["connected", "error"],
           "additionalProperties": false,
           "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
+        },
+        "legacy_json": {
+          "description": "model-ops.md L1: schema-11 objects keyed by record name.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notetypes": { "type": "object", "additionalProperties": { "type": "object" } },
+            "decks": { "type": "object", "additionalProperties": { "type": "object" } },
+            "presets": { "type": "object", "additionalProperties": { "type": "object" } }
+          }
+        },
+        "legacy_update": {
+          "description": "model-ops.md L2: the op has no output, so only a rejection appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
         }
       }
     },

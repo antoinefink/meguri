@@ -1,0 +1,40 @@
+# Model area specs and model ops (U21)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to write `specs/model/*.md` and
+`specs/conformance/model-ops.md`. No code was copied; every rule was restated
+in the spec writer's words and checked with black-box experiments against the
+oracle image's `anki` wheel (blob bytes, card data rewrites, schema-11
+leniency, refusals).
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| protobuf-records P1, P6.1-P6.3 | `proto/anki/notetypes.proto`, `proto/anki/generic.proto`, `rslib/src/storage/notetype/mod.rs` | message fields and numbers, which message each column holds, stored `ord` = list position |
+| protobuf-records P6.4-P6.5 | `proto/anki/decks.proto`, `rslib/src/storage/deck/mod.rs` | deck common and kind fields, reserved numbers, a kind blob with no member is an error |
+| protobuf-records P6.6 | `proto/anki/deck_config.proto`, `rslib/src/storage/deckconfig/mod.rs` | deck config fields, enums, reserved numbers 7, 8, 39 |
+| protobuf-records P1, P2, P9 | `rslib/src/storage/*/mod.rs`, `Cargo.lock` (prost 0.13.5) | blobs read with `as_blob` (TEXT refused), decode errors, encode order |
+| protobuf-records P1 (`tags.config`) | `rslib/src/storage/tag/mod.rs`, `rslib/src/storage/tag/*.sql`, `rslib/src/storage/upgrades/schema17_upgrade.sql` | the column is never written (NULL) |
+| card-data-json C1-C5 | `rslib/src/storage/card/data.rs`, `rslib/src/storage/card/mod.rs`, `rslib/src/serde.rs` | keys and types, per-key rounding, skip rules for `cd`, lenient per-key reading, memory state needs both values, rebuild on every card write |
+| card-data-json C4 (custom data limits) | `rslib/src/storage/card/data.rs` | where the custom data limits apply |
+| json-numbers N2, N4, N6 | `rslib/src/serde.rs`, `Cargo.lock` (serde_json 1.0.143 without `preserve_order`/`float_roundtrip`, serde-aux 4.7.0) | f32 reading through f64, `ryu` f32 text, integer-or-string and bool-from-anything readers |
+| schema11-json S3 | `rslib/src/notetype/schema11.rs` (`other` parsing and serialization), `rslib/src/decks/schema11.rs`, `rslib/src/deckconfig/schema11.rs` | flattening, reserved key lists, HashMap order of top-level members |
+| schema11-json S4-S6 | `rslib/src/notetype/schema11.rs`, `rslib/src/notetype/templates.rs`, `rslib/src/notetype/fields.rs` | keys, defaults, lenient readers, `did` and `req` conversions, random field and template ids, template mtime and usn stay 0 |
+| schema11-json S7-S9 | `rslib/src/decks/schema11.rs` | `dyn` handling, `return` removal, day counters, percentage desired retention, filtered deck keys |
+| schema11-json S10 | `rslib/src/deckconfig/schema11.rs`, `rslib/src/deckconfig/mod.rs` | keys, sub-object defaults, `ints`, swapped `order`, `other` split into `new`/`rev`/`lapse`, read-time range checks |
+| schema11-json S11 | `rslib/src/decks/name.rs`, `rslib/src/text.rs` (`normalize_to_nfc`) | native and human forms, component normalization |
+| schema11-json S12 | `rslib/src/storage/upgrades/mod.rs`, `rslib/src/storage/{notetype,deck,deckconfig,config,tag}/mod.rs`, `rslib/src/storage/schema11.sql` | the five `col` JSON columns, map keys, the `dconf` retry through a plain JSON value, `''` at schema 18 |
+| row-records R2-R9 | `rslib/src/storage/schema11.sql`, `rslib/src/storage/upgrades/schema1[4-8]_upgrade.sql`, `rslib/src/card/mod.rs`, `rslib/src/storage/card/mod.rs`, `rslib/src/revlog/mod.rs`, `rslib/src/storage/revlog/*`, `rslib/src/storage/note/*`, `rslib/src/storage/graves/mod.rs` | column types, enums, read tolerances (`unwrap_or_default` columns, low-8-bit casts) |
+| model-ops L2 | `rslib/src/notetype/service.rs`, `rslib/src/notetype/mod.rs`, `rslib/src/decks/service.rs`, `rslib/src/decks/addupdate.rs`, `rslib/src/deckconfig/service.rs`, `rslib/src/deckconfig/mod.rs`, `rslib/src/sync/collection/changes.rs` | which save path matches sync's merge: notetypes `add_or_update_notetype(json, preserve_usn_and_mtime=true, skip_checks=true)`, decks `add_or_update_deck_legacy(deck, preserve_usn_and_mtime=true)`, presets `add_or_update_deck_config_legacy(json)` (stamps usn and mtime) |
+| model-ops L1 | `rslib/src/collection/mod.rs`, `rslib/src/backend/dbproxy.rs` | note type and deck caches are not cleared by raw SQL writes, so the driver must reopen the collection before reading legacy JSON |
+| model-ops L3 | `rslib/src/scheduler/bury_and_suspend.rs`, `rslib/src/card/mod.rs` | suspending rewrites the whole card row through the card update path |
+
+Driver hints for the oracle maintainer (model ops):
+
+- `legacy_json`: close and reopen the collection, then call the backend's
+  `get_notetype_legacy`, `get_deck_legacy` and `get_deck_config_legacy` and
+  parse the returned bytes (keep integer versus float kinds).
+- `legacy_update`: read as above, apply the merge patch, then call the three
+  add-or-update methods named in the table; map a backend `JsonError` to the
+  rejection `invalid_json`, nothing else.
+- `db_exec` blob literals and `CAST(... || X'..' AS BLOB)` need no driver
+  support; a statement that writes must be followed by a reopen before any
+  read through Anki's caches.

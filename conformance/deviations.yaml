@@ -2,4 +2,18 @@
 # schema/deviations.schema.json). The runner applies only the transforms listed
 # here; any other difference from a golden fails. Every entry names the
 # requirement and a scenario or test that asserts Meguri's own behavior.
-deviations: []
+deviations:
+  - id: card-data-unknown-keys
+    requirement: R1461
+    summary: When a card row is rewritten, Meguri keeps unknown keys of the card data JSON after the known keys, with their exact value text; Anki drops them (specs/model/card-data-json.md C3, C4).
+    test: core/crates/meguri-model/tests/card_data_json.rs unknown_keys_survive_rewrite
+    scenarios: [model/card-data/unknown-keys]
+    pointer: /steps/7/db_exec/rows
+    transform:
+      replace:
+        - ['{"pos":0,"s":0.212,"d":0.212,"dr":0.21,"decay":0.212,"lrt":5,"zz":1}']
+        - ['{"pos":3,"s":1.0,"d":5.0,"dr":0.9,"decay":0.154,"lrt":1894701600,"cd":"{\"x\":1}","zz":7}']
+        - ['{"s":1.0,"d":2.0,"zz":2}']
+        - ['{"s":3.5,"d":6.25,"cd":"{\"k\":true}","xyz":[1,2]}']
+        - ['{"pos":1,"zz":{"b":1,"a":[1, 2]}}']
+        - ['{"zz":null}']

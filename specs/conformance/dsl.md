@@ -143,6 +143,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
 | `reposition` | `{cards, start, step?, randomize?, shift?}` | none | draft (sched) |
 | `update_preset` | `{name, <option>: <value>, ...}` with the D6.2 options | none | draft (deckconfig) |
+| `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | draft (model) |
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
 | `export` | `{format: apkg \| colpkg, name: <file name>, ...options}` | `{name, sha256}` of the file written | draft (package) |
