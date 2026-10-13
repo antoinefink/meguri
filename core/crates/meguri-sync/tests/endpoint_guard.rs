@@ -1,12 +1,14 @@
 //! The sync endpoint guard (R1876): every sync endpoint a test, harness or
-//! scenario uses must be loopback, a private address or a Docker compose
-//! name, and an AnkiWeb host is refused by name. The guard decides from the
-//! text alone, so a refused endpoint never reaches DNS or a socket.
+//! scenario uses must be loopback, a private address, a Docker compose name or
+//! a name under the reserved `.test` TLD, and an AnkiWeb host is refused by
+//! name. The guard decides from the text alone, so a refused endpoint never
+//! reaches DNS or a socket. meguri-testkit re-exports this guard; these tests
+//! are the rule's only test vectors.
 //!
 //! No AnkiWeb host is written out here (the gate's static scan, U19): the
 //! cases build it from the guard's own constant.
 
-use meguri_testkit::exec::sync_guard::{ANKIWEB_HOST, Allowed, Reason, check_endpoint};
+use meguri_sync::endpoint_guard::{ANKIWEB_HOST, Allowed, Reason, check_endpoint};
 
 fn ankiweb(template: &str) -> String {
     template.replace("{ankiweb}", ANKIWEB_HOST)
@@ -117,6 +119,37 @@ fn private_ranges_are_allowed_and_their_neighbours_are_not() {
     ] {
         refused_as(endpoint, Reason::NotLocal);
     }
+}
+
+#[test]
+fn names_under_the_reserved_test_tld_are_allowed() {
+    for endpoint in [
+        // The stand-in AnkiWeb suffix and its numbered sync hosts (U105).
+        "https://sync20.meguri-sync.test/",
+        "https://meguri-sync.test/sync/meta",
+        "http://stub.test:8443/sync/",
+        "stub.test",
+        "stub.test:443",
+        "https://a.b-c.d_e.test/",
+        "HTTPS://Sync20.Stub.TEST/",
+    ] {
+        allowed_as(endpoint, Allowed::ReservedTestName);
+    }
+    for endpoint in [
+        // A trailing dot, an empty label or another TLD is not a test name.
+        "http://stub.test./",
+        "http://.test/",
+        "http://a..test/",
+        "http://stub.testing/",
+        "http://stub.test.example.com/",
+        "http://test.example/",
+    ] {
+        refused_as(endpoint, Reason::NotLocal);
+    }
+    // The rest of the rule still applies to test names.
+    refused_as("http://user@stub.test/", Reason::Malformed);
+    refused_as("http://stub.test:0/", Reason::Malformed);
+    refused_as("ftp://stub.test/", Reason::Malformed);
 }
 
 #[test]

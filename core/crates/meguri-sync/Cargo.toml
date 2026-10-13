@@ -9,3 +9,10 @@ publish.workspace = true
 [features]
 # AnkiWeb build switch (KTD21); off in the App Store build.
 ankiweb = []
+# Test-only code (KTD18): the sync endpoint guard (R1876). meguri-testkit
+# turns it on.
+test-hooks = []
+
+[[test]]
+name = "endpoint_guard"
+required-features = ["test-hooks"]

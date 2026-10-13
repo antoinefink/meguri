@@ -7,5 +7,5 @@
 - Time and randomness come only from `meguri_model::clock` and `meguri_model::rng` (R1875). `clippy.toml` rejects the system clock and thread or OS randomness; only a clock module or a bench may `#[allow(clippy::disallowed_methods)]`.
 - Test files named `tests/canary_*.rs` run first and alone in `tools/mg core-test`, and a failure there stops the run (AE82 ordering). Keep them fast. That phase builds only the packages holding a canary, so keep the pin canary in layering-check, which depends on no workspace crate: a pin bump that breaks a domain crate then still reports the drift.
 - Keep domain crates Linux-buildable: Docker runs all Rust tests. Apple-only dependencies go under `cfg(target_vendor = "apple")`.
-- The `test-hooks` (engine, ffi) and `ankiweb` (sync, ffi) features are never default.
+- The `test-hooks` (engine, sync, ffi) and `ankiweb` (sync, ffi) features are never default.
 - Host builds write `core/target/`; Docker builds use the `cargo-target` volume.

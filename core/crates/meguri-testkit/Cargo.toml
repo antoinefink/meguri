@@ -10,6 +10,9 @@ publish.workspace = true
 granit-parser.workspace = true
 jiff.workspace = true
 meguri-model.workspace = true
+# The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
+# the transport and the harnesses share one rule; exec::sync_guard re-exports it.
+meguri-sync = { workspace = true, features = ["test-hooks"] }
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:

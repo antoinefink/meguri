@@ -836,6 +836,7 @@ dependencies = [
  "granit-parser",
  "jiff",
  "meguri-model",
+ "meguri-sync",
  "ryu",
  "serde",
  "serde_json",
