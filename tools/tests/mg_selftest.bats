@@ -798,6 +798,67 @@ EOF
   validate "$result"
 }
 
+# --- design-docs -------------------------------------------------------------
+
+# design_fixture: a valid inventory, one reference pattern, and the screens.md
+# it generates.
+design_fixture() {
+  mkdir -p "$SB/docs/design/references"
+  printf '| Pattern | What |\n|---|---|\n| `list-counts` | rows with counts |\n' >"$SB/docs/design/references/index.md"
+  cat >"$SB/docs/design/screen-inventory.yaml" <<'YAML'
+version: 1
+screens:
+  - id: home.deckList
+    title: Home and deck list
+    units: [U152]
+    signature: true
+    platforms: [iphone, mac]
+    states: [empty, typical]
+    variants: full
+    references: [list-counts]
+    purpose: The deck tree with counts.
+YAML
+  python3 "$SB/tools/scripts/design-screens.py" write --root "$SB"
+}
+
+@test "design-docs passes when screens.md is generated from the inventory" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  grep -q '| Home and deck list (signature) | `home.deckList` | U152 | iphone, mac | empty, typical | full covering set | `list-counts` |' "$SB/docs/design/screens.md"
+  mg design-docs
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  [ "$(field .status)" = pass ]
+  validate "$result"
+}
+
+@test "design-docs fails on a hand-edited screens.md and --write repairs it" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  echo "edited by hand" >>"$SB/docs/design/screens.md"
+  mg design-docs
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = design-docs/screens.md ]
+  mg design-docs --write
+  [ "$status" -eq 0 ]
+  mg design-docs
+  [ "$status" -eq 0 ]
+}
+
+@test "design-docs rejects a status, an unknown state, an unknown reference and a pairwise signature screen" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  sed -i 's/^    variants: full/    variants: pairwise\n    status: built/; s/\[empty, typical\]/[empty, glorious]/; s/\[list-counts\]/[list-counts, tab-bar]/' \
+    "$SB/docs/design/screen-inventory.yaml"
+  mg design-docs
+  [ "$status" -eq 1 ]
+  local messages
+  messages="$(field '.failures[].message')"
+  grep -qF 'home.deckList: status lives only in docs/design/screen-status.yaml' <<<"$messages"
+  grep -qF 'home.deckList: states must be a non-empty list from' <<<"$messages"
+  grep -qF "home.deckList: reference 'tab-bar' is not in docs/design/references/index.md" <<<"$messages"
+  grep -qF 'home.deckList: a signature screen uses the full covering set (R1972)' <<<"$messages"
+}
+
 # --- images ----------------------------------------------------------------
 
 @test "dev-image reports an error when image inspection fails or returns an empty ID" {
