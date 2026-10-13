@@ -347,6 +347,15 @@ mg_oracle__bump() {
     mg_status fail
     return 0
   fi
+  # The conformance pin (conformance/oracle.json) moves with the lock file.
+  mkdir -p "$staging/conformance"
+  if [ -f "$MG_ROOT/conformance/oracle.json" ]; then
+    jq --slurpfile h "$hello" '.anki_version = $h[0].anki_version | .lock_sha256 = $h[0].lock_sha256' \
+      "$MG_ROOT/conformance/oracle.json" >"$staging/conformance/oracle.json"
+  else
+    jq '{anki_version, lock_sha256}' "$hello" >"$staging/conformance/oracle.json"
+  fi
+  mg_artifact pin "$staging/conformance/oracle.json" "staged conformance pin"
   mg_oracle__harness "$MG_ORACLE_TAG" "$staging/oracle" "$staging/goldens" \
     record --scenarios /in/scenarios --goldens /in/goldens --jobs "$jobs" --report /out/record-report.json
   local rc=$?
@@ -402,7 +411,7 @@ mg_oracle__bump() {
     mg_message "oracle bump to $version: $failed of $total scenarios could not be recorded, $orphans goldens have no scenario, $changed goldens changed; see bump-report.md"
     mg_status fail
   else
-    mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock and staging/goldens in one change"
+    mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock, staging/conformance/oracle.json and staging/goldens in one change"
     mg_status pass
   fi
 }

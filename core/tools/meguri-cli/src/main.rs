@@ -1,6 +1,20 @@
 //! Headless driver for scenarios, generators, benchmarks, oracle comparison
-//! and the private suite. A shell until its first command lands.
+//! and the private suite. Commands land with their units.
+
+mod conformance;
 
 fn main() {
-    println!("meguri-cli {}", env!("CARGO_PKG_VERSION"));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let status = match args.split_first() {
+        Some((command, rest)) if command == "conformance" => conformance::main(rest),
+        Some((command, _)) if command == "--version" => {
+            println!("meguri-cli {}", env!("CARGO_PKG_VERSION"));
+            0
+        }
+        _ => {
+            eprintln!("usage: meguri-cli conformance <command> ...   (meguri-cli conformance help)");
+            2
+        }
+    };
+    std::process::exit(status);
 }

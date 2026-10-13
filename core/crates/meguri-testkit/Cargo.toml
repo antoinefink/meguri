@@ -5,3 +5,21 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+granit-parser.workspace = true
+jiff.workspace = true
+meguri-model.workspace = true
+ryu.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+datatest-stable.workspace = true
+tempfile.workspace = true
+
+# One test per scenario file under conformance/scenarios (T0).
+[[test]]
+name = "conformance"
+harness = false

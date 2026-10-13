@@ -1007,6 +1007,8 @@ diff_report() {
   run_dir="$(dirname "$result")"
   # The staged requirements stay for adoption; no copy of the driver does.
   [ -f "$run_dir/staging/oracle/requirements.lock" ] && [ -f "$run_dir/staging/oracle/requirements.in" ]
+  # The conformance pin is staged from the new oracle's hello.
+  [ "$(jq -r '.anki_version + " " + .lock_sha256' "$run_dir/staging/conformance/oracle.json")" = "26.10.0 l" ]
   [ -z "$(find "$run_dir" -name worker.py -o -name Dockerfile -o -name entrypoint.sh)" ]
 
   # No scenario recorded: nothing proves the new oracle works.
@@ -1032,5 +1034,38 @@ diff_report() {
   [ "$status" -eq 1 ]
   [ "$(field -c '[.failures[].id]')" = '["smoke/a"]' ]
   [ "$(field .summary.failed)" -eq 1 ]
+  validate "$result"
+}
+
+@test "conformance jobs reject bad usage before touching Docker" {
+  local stubs="$BATS_TEST_TMPDIR/conf-stubs" job args
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  printf '#!/bin/sh\necho "cargo must not run" >&2\nexit 97\n' >"$stubs/cargo"
+  chmod +x "$stubs/docker" "$stubs/cargo"
+  export PATH="$stubs:$PATH"
+  for args in "conformance --lane moon" "conformance --jobs 0" "conformance --frobnicate" \
+    "conformance --live --lane docker" "goldens-check --base no-such-revision" "goldens-check extra" \
+    "harvest-report extra" "harvest-inventory --bogus"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg $args
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [[ "$stderr" != *"must not run"* ]]
+    validate "$result"
+  done
+}
+
+@test "harvest-inventory refuses in a checkout without oracle/" {
+  local stubs="$BATS_TEST_TMPDIR/conf-stubs"
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  mg harvest-inventory
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = no-oracle-tree ]
+  [[ "$stderr" != *"must not run"* ]]
   validate "$result"
 }
