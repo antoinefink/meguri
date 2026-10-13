@@ -41,4 +41,4 @@ NFC is the Unicode Normalization Form C of `unicode-normalization` 0.1.24 (Unico
 
 - `fold/unicase`: the table above and more cased scripts.
 - `corpus/unicase-01`: 2,000 distinct generated pairs (case variants, near misses, unrelated strings).
-- Observation function (`specs/conformance/observations.md` O8): `unicase_compare`.
+- Observation function (`specs/conformance/observations.md` O9): `unicase_compare`.

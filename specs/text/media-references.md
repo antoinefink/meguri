@@ -96,4 +96,4 @@ Property tests over the corpus must restrict themselves to texts meeting all fou
 ## M9. Scenarios
 
 - `refs/extract` (M2–M5, and the matches of the M8 condition 4 example and its encoding), `refs/iri` (M5–M8: the M8 examples, each with the text its encoding gives), and the 48,000 distinct generated texts of `corpus/fields-*`.
-- Observation functions (`specs/conformance/observations.md` O8): `media_refs` (M4, remote names included), `iri_encode` (M6), `iri_decode` (M7).
+- Observation functions (`specs/conformance/observations.md` O9): `media_refs` (M4, remote names included), `iri_encode` (M6), `iri_decode` (M7).

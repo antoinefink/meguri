@@ -142,5 +142,5 @@ def deck_id(session, name: Any) -> int:
     if name is None:
         return 1
     if name not in session.decks:
-        raise invalid(f"deck {name!r} is not in setup.decks")
+        raise invalid(f"deck {name!r} is not in setup.decks or not in the current collection")
     return session.decks[name]

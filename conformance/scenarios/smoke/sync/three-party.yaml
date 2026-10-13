@@ -1,0 +1,44 @@
+# Three oracle clients (specs/conformance/sync-ops.md): client_a uploads,
+# client_b and client_c download; a note added on client_b and a review made
+# on client_c reach the others by incremental syncs; all converge.
+# The clock advances before each actor's block (sync-ops.md S4.3).
+id: smoke/sync/three-party
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, client_b, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - advance: 1m
+  - actor: client_b
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - add_note: {notetype: Pair, deck: Words, fields: [moon, luna]}
+  - sync: {kind: normal}
+  - advance: 1m
+  - actor: client_c
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - sync: {kind: normal}
+  - advance: 1m
+  - actor: client_a
+  - sync: {kind: normal}
+  - observe: ["card(#c1)", "card(#c2)", "revlog(#c1)"]
+  - advance: 1m
+  - actor: client_b
+  - sync: {kind: normal}
+  - observe: ["card(#c1)", "revlog(#c1)"]
+  - converge: {}

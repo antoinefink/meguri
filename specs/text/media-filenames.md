@@ -5,7 +5,7 @@ Requirements: R979
 Anki: 26.09.3
 Scenarios: conformance/scenarios/text/filenames/, conformance/scenarios/text/corpus/filenames-01.json
 
-The pure transform a desired media file name goes through before the media store adds a file. The store's own rules (F8) build on it.
+The pure transform a desired media file name goes through before the media store adds a file. The store's own rules (F4) build on it.
 
 ## F1. Steps
 
@@ -66,4 +66,4 @@ Deciding whether a name already on disk is in normalized form (Check Media renam
 
 - `filenames/normalize`: every step and the examples above.
 - `corpus/filenames-01`: 2,000 distinct generated names (device prefixes, removed and kept characters, multi-byte truncation).
-- Observation function (`specs/conformance/observations.md` O8): `media_filename`.
+- Observation function (`specs/conformance/observations.md` O9): `media_filename`.
