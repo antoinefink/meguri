@@ -1,0 +1,136 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Pair": {
+              "css": ".card { margin: 0; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1001,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null,
+                  "zz_fld": true
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "% post",
+              "latexPre": "% pre",
+              "latexsvg": false,
+              "mod": 1894701600,
+              "name": "Pair",
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{Back}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2001,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}",
+                  "zz_tmpl": 1
+                }
+              ],
+              "type": 0,
+              "usn": -1,
+              "zz_nt": 1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["1A142E63617264207B206D617267696E3A20303B207D2A05252070726532062520706F7374420510011A0100FA0F0B7B227A7A5F6E74223A317D"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "1A05417269616C201448E907FA0F0F7B227A7A5F666C64223A747275657D"],
+            [1, "1A05417269616C201448EA07"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "0A097B7B46726F6E747D7D12087B7B4261636B7D7D40D10FFA0F0D7B227A7A5F746D706C223A317D"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/schema11/notetype-other-reserved",
+  "scenario_sha256": "abe6dac9c05c5fa1f483d01b04dda8cd5b3eeb4209fb22396eaac8730719797d",
+  "tz": "UTC"
+}
