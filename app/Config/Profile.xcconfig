@@ -1,0 +1,10 @@
+// Profile: performance tests (R1866). Release in every setting but the test
+// hooks, which performance tests need to load fixtures, and therefore the
+// `.dev` identifiers. Never archived or distributed.
+
+#include "Release.xcconfig"
+
+MEGURI_BUNDLE_ID_SUFFIX = .dev
+MEGURI_SWIFT_CONDITIONS = MEGURI_TEST_HOOKS ANKIWEB_ENABLED
+MEGURI_CORE_FEATURES = ankiweb,test-hooks
+MEGURI_ENTITLEMENTS_HOOKS_SUFFIX = -Dev

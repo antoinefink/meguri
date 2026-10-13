@@ -22,6 +22,8 @@ Fields: `session` (id), `role`, `kind` (`worktree` or `session`), `name`, `base_
 
 A worktree made with plain `git worktree add` has no record, no marker and no deny profile. Create implementer worktrees only through `tools/mg worktree new`.
 
+The deny profile binds a Claude session started in the worktree. An orchestrator's subagents start in the main checkout and never load it, so `.claude/hooks/cleanroom_guard.py` (a project PreToolUse hook in `.claude/settings.json`) applies the same rules to every subagent labelled as an implementer or fixer (workflow labels `U<n>:implement…`, `U<n>:fix-…`, `U<n>:codexfix-…`; Agent descriptions starting `implementer` or `fixer`). It also refuses git commands that would print `oracle/` content: unit branches carry the spec side's `oracle/` commits, which the sparse checkout keeps off disk but `git diff` and `git show` still print. Test: `.claude/hooks/test_cleanroom_guard.sh`.
+
 ## Commit trailers
 
 | Trailer | Required on |

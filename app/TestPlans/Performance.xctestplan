@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "5A1B2C3D-0004-4000-8000-000000000001",
+      "name" : "Default",
+      "options" : {}
+    }
+  ],
+  "defaultOptions" : {
+    "addressSanitizer" : {
+      "enabled" : false
+    },
+    "codeCoverage" : false,
+    "mainThreadCheckerEnabled" : false,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:Meguri.xcodeproj",
+      "identifier" : "4D4547555249000000000100",
+      "name" : "Meguri"
+    },
+    "testRepetitionMode" : "none",
+    "threadSanitizerEnabled" : false,
+    "uiTestingScreenshotsLifetime" : "keepNever",
+    "undefinedBehaviorSanitizerEnabled" : false,
+    "userAttachmentLifetime" : "keepNever"
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:Meguri.xcodeproj",
+        "identifier" : "4D4547555249000000000300",
+        "name" : "MeguriUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

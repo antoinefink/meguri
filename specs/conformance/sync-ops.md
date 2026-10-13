@@ -65,7 +65,10 @@ Each Meguri actor has its own random source (dsl.md D5). Its seed is the first e
   - a port the worker chooses for the run (`SYNC_PORT`);
   - one account (`SYNC_USER1=<username>:<password>`). Its credentials are test values fixed in the driver, the same for every scenario, so recordings do not change from one run to the next (S9).
 - The server creates the account's collection the first time a request reads it (the first status check), at the server's clock. Until an upload, that collection is a new, empty one.
-- The server listens (`SYNC_HOST`) on loopback, or on the worker's `oracle-internal` address when the fault proxy or the recorder must reach it (S8). It gets no proxy variables.
+- The server listens on one IP address, `SYNC_HOST` (an address, never a host name):
+  - `127.0.0.1` when the run has no fault proxy and no recorder (S8.1): every client then connects over loopback;
+  - `0.0.0.0`, all of the worker's addresses, when the fault proxy or the recorder must reach it. The proxies connect to the worker's `oracle-internal` address, while the converge client still connects over loopback (S7.1), so the server must accept both. Listening on the worker's `oracle-internal` address alone would refuse the converge client. The worker has no network but `oracle-internal` (S8.2), so this exposes the server to nothing else.
+- The server gets no proxy variables.
 - Before the first step, the worker waits until the server accepts connections. If the server exits, or does not accept connections within 10 s, the session fails with `sync_unavailable` (S10.5). The server's log goes to the worker's stderr, which `tools/mg` keeps in its logs.
 
 ### S3.2 Clock
@@ -167,13 +170,26 @@ The raw dump of a collection is the value of the `db_dump` observation (observat
 
 ### S7.3 Excluded fields
 
-Three columns of the `col` row record a party's sync history, not its collection's content. They differ between parties whose content is equal:
+The fields below record a party's sync history, not its collection's content. They differ between parties whose content is equal. `<key>` stands for every row of the `config` table (its `KEY`, O8).
 
 | Pointer | Column | Why it is excluded |
 |---|---|---|
-| `/col/1/mod` | modification time of the collection | Every incremental sync ends with the server setting it to the instant the sync finished and the client copying that value. The server also sets it when it serves a full download, and an uploader sets it when it prepares the upload. So each party holds the time of its own last sync. Each changed row carries its own modification time, which stays compared. |
-| `/col/1/usn` | update sequence number of the collection | It counts sync rounds. The server raises it by one at the end of each incremental sync, which the client then copies, and when it serves a full download; an uploader raises its own before it uploads. Each party holds the count of its own last round. Each row keeps its own `usn`, which stays compared. |
+| `/col/1/mod` | modification time of the collection | Every incremental sync ends with the server setting it to the instant the sync finished and the client copying that value. The server also sets it when it serves a full download, and an uploader sets it when it prepares the upload. So each party holds the time of its own last sync. Each changed row carries its own modification time, which stays compared, except in `config` (below). |
+| `/col/1/usn` | update sequence number of the collection | It counts sync rounds. The server raises it by one at the end of each incremental sync, which the client then copies, and when it serves a full download; an uploader raises its own before it uploads. Each party holds the count of its own last round. Each row keeps its own `usn`, which stays compared, except in `config` (below). |
 | `/col/1/ls` | last sync time | An incremental sync sets it to the instant the server finished, a full upload to the uploader's new schema time, a full download to the downloaded collection's modification time. It records when and how the party last synced. |
+| `/config/<key>/mtime_secs` | modification time of a config entry, in seconds | Config travels whole, and the receiver of an incremental round rewrites every entry with its own current time, whether or not the value changed (below). So the time records when the party last received the config, not when the entry last changed. |
+| `/config/<key>/usn` | update sequence number of a config entry | In the same round, the receiver writes every entry with the round's usn and the sender sets every one of its entries to 0 (below). So the value records the party's role in its last round, not a pending change. |
+
+How config moves in an incremental sync (the sync area specifies it in full):
+
+- Every incremental round moves the whole config in one direction. The client sends all of its config entries when its collection's modification time (as the status check compared them) is later than the server's; otherwise, equal times included, the server sends all of its own. Config entries are never chosen by their `usn`.
+- The receiver deletes its config and writes each received key and value with `usn` set to the round's usn (the server collection's `usn` when the round began) and `mtime_secs` set to the receiver's current time, in seconds.
+- The sender sets `usn` to 0 on every one of its config entries and leaves their `mtime_secs` as they were.
+- A full upload or download copies the config entries as stored; the uploader does not change them first.
+
+The key set and each entry's `val` stay compared, so a config value that did not reach a party is still a difference.
+
+Example, `smoke/sync/three-party` (times are scenario clock times on 2030-01-15): client_c sends its config in its round at 10:05, so the server holds every entry with that round's usn and 10:05, and client_c holds every entry with usn 0 and 10:03: the server stamped 10:03 when it received client_b's config, and client_c's download at 10:04 copied that. In the rounds of client_a at 10:06 and client_b at 10:07 the server sends its config: its entries go to usn 0 and keep 10:05, client_a's get that round's usn and 10:06, and client_b's that round's usn and 10:07. The converge client downloads entries with usn 0 and 10:05. Without the two config exclusions, client_a and client_b would differ in both columns of every config entry, and client_c in `mtime_secs` only.
 
 No other field is excluded. If oracle actors that last synced with nothing pending differ anywhere else, that is a finding for the spec writer: never exclude a field to hide it.
 
@@ -310,4 +326,5 @@ The parties executor drives one worker per actor scenario through `begin`, `step
 - Stock note types: Meguri's new collections hold Meguri's own stock note types (R1959). When a Meguri actor runs the setup and uploads, the converged dump holds Meguri's stock note types where the golden holds Anki's. Scenarios in which a Meguri actor's collection reaches the server need a decision of the sync area (a deviation, or a `db_dump` option) before they can pass. `meguri-downloads` has the Meguri actor download, so its golden applies as it is.
 - BLOB digests compare bytes: an actor's dump matches only when Meguri encodes each record's protobuf bytes as Anki does.
 - FSRS memory states inside `cards.data` compare as text, exactly; O7's tolerances do not apply to dumps.
+- `converge` does not check the history fields of S7.3, so it cannot show that a Meguri actor sets the `col` row's `mod`, `usn` and `ls`, or the `usn` and `mtime_secs` of config entries, as Anki does. The sync area pins those per party with `db_dump` observations (`{db_dump: {tables: [col, config]}}`) after each kind of round, in its own scenarios.
 - Media sync, wrong credentials, server errors and the other faults of R1932: their kinds and arguments come with U106, U111 and U118.

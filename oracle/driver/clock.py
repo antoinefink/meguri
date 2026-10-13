@@ -6,6 +6,9 @@ libfaketime reads $FAKETIME_TIMESTAMP_FILE on every clock call
 plain epoch seconds and the clock stays frozen at that instant until the driver
 writes another one (R1870). Epoch seconds avoid any local-time parsing, so DST
 gaps and repeated hours cannot shift the clock. Monotonic clocks are real.
+
+A follower is another clock file kept at the worker clock plus a fixed offset
+on every change (a sync server whose clock runs ahead, sync-ops.md S3.2).
 """
 
 from __future__ import annotations
@@ -65,10 +68,18 @@ def parse_instant(text: object, tz: ZoneInfo) -> int:
     return int(dt.astimezone(timezone.utc).timestamp())
 
 
+def write_epoch(path: str, epoch_secs: int) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="ascii") as f:
+        f.write(f"{epoch_secs}\n")
+    os.replace(tmp, path)
+
+
 class Clock:
     def __init__(self, path: str) -> None:
         self.path = path
         self.now = self._read()
+        self.followers: dict[str, int] = {}
 
     def _read(self) -> int:
         try:
@@ -78,13 +89,22 @@ class Clock:
             return int(time.time())
 
     def set(self, epoch_secs: int) -> None:
-        if epoch_secs < 0:
+        if epoch_secs < 0 or any(epoch_secs + off < 0 for off in self.followers.values()):
             raise invalid("the clock cannot go before 1970")
-        tmp = f"{self.path}.tmp"
-        with open(tmp, "w", encoding="ascii") as f:
-            f.write(f"{epoch_secs}\n")
-        os.replace(tmp, self.path)
+        write_epoch(self.path, epoch_secs)
+        for path, offset in self.followers.items():
+            write_epoch(path, epoch_secs + offset)
         self.now = epoch_secs
+
+    def follow(self, path: str, offset_secs: int) -> None:
+        """Keep the clock file at path at this clock plus offset_secs."""
+        if self.now + offset_secs < 0:
+            raise invalid("the clock cannot go before 1970")
+        write_epoch(path, self.now + offset_secs)
+        self.followers[path] = offset_secs
+
+    def unfollow(self, path: str) -> None:
+        self.followers.pop(path, None)
 
     def advance(self, secs: int) -> None:
         self.set(self.now + secs)

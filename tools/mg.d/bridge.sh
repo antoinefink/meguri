@@ -4,7 +4,7 @@
 mg_job core-xcframework host mg_core_xcframework \
   "Build the core XCFramework and Swift bindings for MeguriCore; args go to tools/scripts/build-core-xcframework.sh (--configuration, --slices)"
 mg_job swift-test host mg_swift_test \
-  "swift test on a local package (--package, default MeguriCore) after core-xcframework (Debug); any compiler warning fails; args after -- go to swift test"
+  "swift test on a local package (--package, default MeguriCore) after lint-ui and core-xcframework (Debug); any compiler warning fails; args after -- go to swift test"
 
 # mg__xcframework <report> [script args...]: run the build script, record its
 # report, and return its exit code.
@@ -66,6 +66,7 @@ mg_swift_test() {
     return 0
   fi
 
+  mg_lint_ui_first || return 0
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_status fail

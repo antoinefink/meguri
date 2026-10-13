@@ -224,7 +224,10 @@ compare_in_a_sparse_worktree() {
   rc=$?
   result="$(printf '%s\n' "$out" | tail -n 1)"
   project="meguri-impl-$(printf '%s' "$(cd "$impl" && pwd -P)" | cksum | cut -d' ' -f1)"
-  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f "$impl/docker/compose.yml" down >/dev/null 2>&1
+  # compare starts the profiled sync-faults for actor scenarios; down without
+  # its profile would leave it and the network up.
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f "$impl/docker/compose.yml" \
+    --profile oracle-sync --profile oracle-record down >/dev/null 2>&1
   if [ "$rc" -ne 0 ] || [ ! -f "$result" ]; then
     echo "tools/mg oracle compare smoke exited $rc in the sparse worktree:"
     tail -n 20 "$base/compare.log"
@@ -234,7 +237,9 @@ compare_in_a_sparse_worktree() {
   expect "status" "$(jq -r .status "$result")" pass &&
     expect "image tag" "$(jq -r .details.image.tag "$result")" "meguri-oracle:$MG_ORACLE_TAG" &&
     expect "every scenario passed" "$(jq -r '.summary.passed > 0 and .summary.passed == .summary.total' "$result")" true &&
-    expect "oracle/ in the sparse worktree after the run" "$([ -e "$impl/oracle" ] && echo present || echo absent)" absent
+    expect "oracle/ in the sparse worktree after the run" "$([ -e "$impl/oracle" ] && echo present || echo absent)" absent &&
+    expect "containers left by the run" \
+      "$(docker ps -aq --filter "label=com.docker.compose.project=$project" | wc -l | tr -d ' ')" 0
 }
 
 # Runs last. The checks above copy oracle/ into the run directory, under this

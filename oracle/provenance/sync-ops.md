@@ -15,6 +15,9 @@ behavior in Meguri's own words; no code was copied.
 | `rslib/src/sync/collection/upload.rs`, `rslib/src/sync/collection/download.rs` | full upload and download make no status check; the server raises its usn when it serves a download; a downloader sets `ls` to `mod` | S4.1, S7.3 |
 | `rslib/src/collection/mod.rs` (preparing an upload), `rslib/src/collection/transact.rs` | what an uploader changes locally before it uploads; transactions without undo set `mod` | S7.3 |
 | `rslib/src/sync/collection/finish.rs`, `rslib/src/sync/collection/graves.rs` | `mod`, `usn` and `ls` at the end of an incremental sync on both sides; received deletions are stored with the server's usn | S7.3 |
+| `rslib/src/sync/http_server/mod.rs` (server config) | `SYNC_HOST` is parsed as an IP address, default all addresses; one bind address only | S3.1 |
+| `rslib/src/sync/collection/changes.rs`, `rslib/src/storage/config/mod.rs`, `rslib/src/sync/collection/start.rs` | the whole config travels from the side with the later collection `mod` (the server on a tie); the receiver replaces all entries with the round's server usn and its own current time; the sender zeroes every entry's usn; the round's usn is the server collection's usn at start | S7.3 |
+| `rslib/src/collection/mod.rs` (preparing an upload) | the uploader leaves config entries unchanged | S7.3 |
 | `rslib/src/error/network.rs`, `rslib/src/backend/error.rs`, `pylib/anki/errors.py`, `pylib/anki/_backend.py` | error classes seen from Python: network errors, auth errors, other sync errors; a reset after the response headers surfaces as an other sync error | S4.4 |
 | `rslib/src/sync/http_client/io_monitor.rs`, `rslib/src/sync/http_client/full_sync.rs` | the 30 s stall timeout; how body read failures are reported | S4.4 |
 | `rslib/src/backend/mod.rs` | the sync HTTP client is built with the library's defaults, so it honors proxy environment variables | S8.1, S9 |
@@ -38,3 +41,12 @@ behavior in Meguri's own words; no code was copied.
   direction; the golden of `smoke/sync/reset-during-download` confirms it (its
   first full download must record `network`). If it does not, report it to
   the spec writer rather than changing the scenario.
+- S7.3 also excludes `/config/<key>/mtime_secs` and `/config/<key>/usn`
+  for every config row, from the actors' raw dumps and from the converge
+  output's `dump`. The three-party golden recorded before this change showed
+  exactly the pattern S7.3's example predicts (client_a and client_b differ
+  in both columns of all 19 entries, client_c in `mtime_secs` only), and no
+  other difference. After the change every `differences` list of the smoke
+  scenarios must be `[]`; if one is not, report it to the spec writer.
+- S3.1: the server listens on `0.0.0.0` whenever a fault proxy or recorder
+  must reach it, because the converge client still uses loopback.

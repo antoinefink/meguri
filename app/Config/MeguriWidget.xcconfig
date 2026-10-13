@@ -1,0 +1,18 @@
+// The MeguriWidget extension. It reads only the App Group snapshot and never
+// links the core (KTD16).
+
+PRODUCT_NAME = MeguriWidget
+PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID).widget
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
+APPLICATION_EXTENSION_API_ONLY = YES
+SKIP_INSTALL = YES
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE = MeguriWidget/Info.plist
+INFOPLIST_KEY_CFBundleDisplayName = Meguri
+
+CODE_SIGN_ENTITLEMENTS[sdk=iphone*] = MeguriWidget/MeguriWidget-iOS.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = MeguriWidget/MeguriWidget-macOS$(MEGURI_ENTITLEMENTS_SIGNING_SUFFIX).entitlements
+
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks
+LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks
