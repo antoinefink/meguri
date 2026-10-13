@@ -17,7 +17,8 @@ output, so tests can write the golden by hand.
 
 Environment: TZ, LOCK; LOG, a file that receives every request line;
 ACTORS, CONVERGE, UPSTREAM and RECORDER, the endpoints begin reports (empty:
-null); FAIL_BEGIN, an error kind begin answers with instead.
+null); OMIT, a comma-separated list of those names (lower case) begin leaves
+out of `endpoints`; FAIL_BEGIN, an error kind begin answers with instead.
 """
 
 import json
@@ -105,11 +106,14 @@ def main():
                 ids = {"notes": [], "cards": []}
             else:
                 ids = session.setup()
+            endpoints = {"actors": endpoint("ACTORS", "http://172.20.0.5:31000/"),
+                         "converge": endpoint("CONVERGE", "http://127.0.0.1:27701/"),
+                         "upstream": endpoint("UPSTREAM", "172.20.0.4:27701"),
+                         "recorder": endpoint("RECORDER", "")}
+            for name in filter(None, os.environ.get("OMIT", "").split(",")):
+                del endpoints[name]
             reply({"ok": True, "scenario_id": session.id, "steps": len(session.steps), "ids": ids,
-                   "sync": {"endpoints": {"actors": endpoint("ACTORS", "http://172.20.0.5:31000/"),
-                                          "converge": endpoint("CONVERGE", "http://127.0.0.1:27701/"),
-                                          "upstream": endpoint("UPSTREAM", "172.20.0.4:27701"),
-                                          "recorder": endpoint("RECORDER", "")},
+                   "sync": {"endpoints": endpoints,
                             "account": {"username": "user1", "password": "test-only"}}})
         elif cmd == "step":
             index = len(session.outputs)

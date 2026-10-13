@@ -1111,6 +1111,67 @@ dockerfiles() {
   [ -z "$(find "$impl/build" -name worker.py)" ]
 }
 
+@test "a checkout without oracle/ builds the main worktree's only when its branch has no other oracle/" {
+  local stubs="$BATS_TEST_TMPDIR/oracle-stubs" impl="$BATS_TEST_TMPDIR/impl" same="$BATS_TEST_TMPDIR/same" args
+  local git=(git -c user.name=selftest -c user.email=selftest@localhost)
+  mkdir -p "$stubs" "$SB/oracle/driver"
+  cat >"$stubs/docker" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >>"$STUB_LOG"
+case "$1" in
+  info) exit 0 ;;
+  image) echo sha256:main; exit 0 ;;
+  compose) case " $* " in *" build oracle "*) exit 0 ;; esac ;;
+esac
+exit 97
+STUB
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/docker.log"
+  printf 'FROM python:3.12-slim\n' >"$SB/oracle/Dockerfile"
+  printf 'anki==26.9.3\n' >"$SB/oracle/requirements.in"
+  printf 'anki==26.9.3 \\\n' >"$SB/oracle/requirements.lock"
+  : >"$SB/oracle/Dockerfile.dockerignore"
+  : >"$SB/oracle/entrypoint.sh"
+  printf '# driver\n' >"$SB/oracle/driver/worker.py"
+  "${git[@]}" -C "$SB" add oracle
+  "${git[@]}" -C "$SB" commit -qm "add the oracle"
+  # Two branches checked out without oracle/, like implementer worktrees: one
+  # whose spec side changed the driver, one that did not touch oracle/.
+  "${git[@]}" -C "$SB" worktree add -q -b unit/changed "$impl"
+  printf '# a new op\n' >>"$impl/oracle/driver/worker.py"
+  "${git[@]}" -C "$impl" commit -qam "change the driver"
+  rm -rf "$impl/oracle"
+  "${git[@]}" -C "$SB" worktree add -q -b unit/same "$same"
+  rm -rf "$same/oracle"
+
+  # The main worktree's driver is not the changed branch's: refuse rather
+  # than run (or record goldens) on another oracle.
+  for args in "build" "hello"; do
+    : >"$STUB_LOG"
+    # shellcheck disable=SC2086 # each case is a word list
+    run --separate-stderr "$impl/tools/mg" oracle $args
+    result="${lines[${#lines[@]} - 1]:-}"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = oracle-tree-differs ]
+    [[ "$(field '.failures[0].message')" == *"this branch changes oracle/"* ]]
+    ! grep -q -- ' build oracle' "$STUB_LOG"
+    validate "$result"
+  done
+
+  run --separate-stderr "$same/tools/mg" oracle build
+  result="${lines[${#lines[@]} - 1]:-}"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"using the main worktree's"* ]]
+  validate "$result"
+
+  # Once the main worktree has the branch's oracle/, the branch builds it.
+  "${git[@]}" -C "$SB" merge -q --no-edit unit/changed
+  run --separate-stderr "$impl/tools/mg" oracle build
+  result="${lines[${#lines[@]} - 1]:-}"
+  [ "$status" -eq 0 ]
+  validate "$result"
+}
+
 # A docker stub for `oracle bump`: the lock resolver writes a lock, builds and
 # hello succeed, and the harness writes $STUB_RECORD and $STUB_DIFF as the
 # record and diff reports.
@@ -1218,8 +1279,11 @@ diff_report() {
 # logs every call to $STUB_LOG, reports every container running and healthy,
 # lets a sync-recorder container write $STUB_EXCHANGES to its recording
 # directory and answer $STUB_HEALTH, and makes the harness write $STUB_REPORT
-# as its report and exit $STUB_RC. A cargo stub writes $STUB_PLAN as the T0
-# plan report. The tree has one actor scenario (smoke/sync/pair) and one
+# as its report and exit $STUB_RC. A cargo stub stands in for meguri-cli: it
+# writes $STUB_PLAN as the T0 plan report, and `conformance to-json` answers
+# each scenario file with the value $STUB_PARSED gives its id, as the scenario
+# parser would read it; with $STUB_CARGO_RC set it prints nothing and exits
+# with that code. The tree has one actor scenario (smoke/sync/pair) and one
 # other (smoke/plain).
 actor_fixture() {
   local stubs="$BATS_TEST_TMPDIR/actor-stubs"
@@ -1260,15 +1324,26 @@ exit 97
 STUB
   cat >"$stubs/cargo" <<'STUB'
 #!/bin/bash
-prev=""
+[ -z "${STUB_CARGO_RC:-}" ] || exit "$STUB_CARGO_RC"
+prev="" files=false rc=0 rel=""
 for a in "$@"; do
+  if [ "$files" = true ]; then
+    rel="${a#*/conformance/scenarios/}"
+    jq -nc --arg p "$a" --arg id "${rel%.*}" --argjson parsed "$STUB_PARSED" \
+      'if $parsed | has($id) then {path: $p, value: $parsed[$id]} else {path: $p, error: "not parsed"} end'
+    jq -e --arg id "${rel%.*}" 'has($id)' <<<"$STUB_PARSED" >/dev/null || rc=1
+    continue
+  fi
+  [ "$a" = to-json ] && files=true
   [ "$prev" = --report ] && printf '%s\n' "$STUB_PLAN" >"$a"
   prev="$a"
 done
-exit 0
+exit "$rc"
 STUB
   chmod +x "$stubs/docker" "$stubs/cargo"
   export PATH="$stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/docker.log"
+  export STUB_PARSED='{"smoke/sync/pair": {"id": "smoke/sync/pair", "actors": ["client_a", "client_c"]},
+    "smoke/plain": {"id": "smoke/plain"}}'
   : >"$STUB_LOG"
 }
 
@@ -1302,6 +1377,40 @@ harness_report() {
   [ "$(grep -n -- ' harness compare ' "$STUB_LOG" | cut -d: -f1)" -gt "$(grep -n -- " up --detach --wait " "$STUB_LOG" | cut -d: -f1)" ]
   grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 .* harness compare" "$STUB_LOG"
   ! grep -q -- "^rm " "$STUB_LOG"
+  validate "$result"
+}
+
+@test "oracle runs read actor scenarios with the scenario parser, however actors is written" {
+  actor_fixture
+  # A quoted key and a flow mapping parse to the same top-level `actors`
+  # member as `actors:`, and hash alike.
+  printf '%s\n' 'id: smoke/sync/quoted' 'clock: {tz: UTC, start: "2030-01-15T10:00:00"}' "'actors': [client_a]" \
+    >"$SB/conformance/scenarios/smoke/sync/quoted.yaml"
+  printf '%s\n' '{id: smoke/sync/flow, clock: {tz: UTC, start: "2030-01-15T10:00:00"}, actors: [client_a]}' \
+    >"$SB/conformance/scenarios/smoke/sync/flow.yaml"
+  STUB_PARSED="$(jq -c '. + {"smoke/sync/quoted": {id: "smoke/sync/quoted", actors: ["client_a"]},
+    "smoke/sync/flow": {id: "smoke/sync/flow", actors: ["client_a"]}}' <<<"$STUB_PARSED")"
+  export STUB_PARSED STUB_REPORT
+  local id
+  for id in smoke/sync/quoted smoke/sync/flow; do
+    : >"$STUB_LOG"
+    STUB_REPORT="$(harness_report compare "$id=pass")"
+    mg oracle compare "$id"
+    [ "$status" -eq 0 ]
+    grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 .* harness compare .*--filter $id" "$STUB_LOG"
+    validate "$result"
+  done
+
+  # A parser that cannot run leaves the actor scenarios unknown: an error
+  # before the image build, not a run without the fault proxy.
+  : >"$STUB_LOG"
+  export STUB_CARGO_RC=101
+  mg oracle compare smoke/sync
+  unset STUB_CARGO_RC
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = scenario-parse ]
+  ! grep -q -- ' build oracle' "$STUB_LOG"
+  ! grep -q -- ' harness ' "$STUB_LOG"
   validate "$result"
 }
 

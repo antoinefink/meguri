@@ -54,13 +54,25 @@ mg_oracle__tag() {
 
 # mg_oracle__tree: sets MG_ORACLE_DIR to the oracle/ tree to build from: this
 # checkout's, or the main worktree's (the first `git worktree list` entry) when
-# this checkout has none.
+# this checkout has none. It refuses the main worktree's when this branch has
+# changed oracle/ since it forked and the main worktree's HEAD lacks those
+# changes (a unit branch carrying its spec side's driver work): the run would
+# replay, or record goldens, on another oracle than the branch's.
 mg_oracle__tree() {
-  local main
+  local main head base
   MG_ORACLE_DIR="$MG_ROOT/oracle"
   [ -f "$MG_ORACLE_DIR/Dockerfile" ] && return 0
   main="$(git -C "$MG_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
   if [ -n "$main" ] && [ -f "$main/oracle/Dockerfile" ]; then
+    head="$(git -C "$main" rev-parse -q --verify HEAD 2>/dev/null)"
+    base="$(git -C "$MG_ROOT" merge-base "${head:-HEAD}" HEAD 2>/dev/null)"
+    if [ -n "$head" ] && [ -n "$base" ] &&
+      ! git -C "$MG_ROOT" diff --quiet "$base" HEAD -- oracle/ &&
+      ! git -C "$MG_ROOT" diff --quiet "$head" HEAD -- oracle/; then
+      mg_failure oracle-tree-differs "this branch changes oracle/ since $(git -C "$MG_ROOT" rev-parse --short "$base"), and the main worktree ($main, at $(git -C "$main" rev-parse --short HEAD)) does not have those changes, so its oracle/ is not this branch's oracle; run oracle jobs in a worktree that has oracle/ (the unit's spec worktree) or after the branch is integrated"
+      mg_status error
+      return 1
+    fi
     MG_ORACLE_DIR="$main/oracle"
     echo "oracle: this checkout has no oracle/; using the main worktree's" >&2
     return 0
@@ -182,23 +194,24 @@ MG_ORACLE_SYNC_FAULTS=""
 MG_ORACLE_SYNC_RECORDER=""
 MG_ORACLE_SYNC_CONTAINERS="" # this run's recorders
 
-# mg_oracle__actor_scenarios [filter...]: the ids of the actor scenarios (a
-# top-level `actors` key) that the filters select, by meguri-cli's rules: an
-# id, a directory prefix or a pattern (`*` also matches `/`), with or without
-# suffix; every actor scenario without filters.
+# mg_oracle__actor_scenarios [filter...]: the ids of the actor scenarios that
+# the filters select, by meguri-cli's rules: an id, a directory prefix or a
+# pattern (`*` also matches `/`), with or without suffix; every actor scenario
+# without filters. An actor scenario is one whose parsed value has a top-level
+# `actors` member, as meguri-cli's scenario parser reads it (`conformance
+# to-json`), so a quoted key or a flow mapping counts as `actors:` does. When
+# the parser cannot run, it records an error and returns 1: a run that missed
+# an actor scenario would start its workers without the fault proxy.
 mg_oracle__actor_scenarios() {
-  local dir="$MG_ROOT/conformance/scenarios" file rel id f
+  local dir="$MG_ROOT/conformance/scenarios" file rel id f out rc
+  local files=()
   [ -d "$dir" ] || return 0
-  find "$dir" -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) ! -name 'area.yaml' ! -name 'area.yml' |
-    LC_ALL=C sort | while IFS= read -r file; do
-    case "$file" in
-      *.json) jq -e 'has("actors")' "$file" >/dev/null 2>&1 || continue ;;
-      *) grep -q '^actors:' "$file" || continue ;;
-    esac
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
     rel="${file#"$dir"/}"
     id="${rel%.*}"
     if [ "$#" -eq 0 ]; then
-      printf '%s\n' "$id"
+      files[${#files[@]}]="$file"
       continue
     fi
     for f in "$@"; do
@@ -210,12 +223,30 @@ mg_oracle__actor_scenarios() {
       # shellcheck disable=SC2254 # the filter is a pattern
       case "$id" in
         "$f" | "$f"/* | $f)
-          printf '%s\n' "$id"
+          files[${#files[@]}]="$file"
           break
           ;;
       esac
     done
-  done
+  done <<EOF
+$(find "$dir" -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) ! -name 'area.yaml' ! -name 'area.yml' | LC_ALL=C sort)
+EOF
+  [ "${#files[@]}" -gt 0 ] || return 0
+  out="$(mg_conf__cli_native conformance to-json "${files[@]}")"
+  rc=$?
+  # to-json exits 1 when a file does not parse, and still answers for it: that
+  # file is no actor scenario here, and the harness reports it invalid.
+  if [ "$rc" -ge 2 ] || [ "$(printf '%s\n' "$out" | grep -c '^{')" -ne "${#files[@]}" ]; then
+    mg_failure scenario-parse "meguri-cli could not read the selected scenarios (exit $rc), so which of them are actor scenarios is unknown; see log.txt" \
+      "cd core && cargo run -p meguri-cli -- conformance to-json <scenario file>"
+    mg_status error
+    return 1
+  fi
+  printf '%s\n' "$out" | jq -r 'select(.value | type == "object" and has("actors")) | .path' |
+    while IFS= read -r file; do
+      rel="${file#"$dir"/}"
+      printf '%s\n' "${rel%.*}"
+    done
 }
 
 # mg_oracle__recorder <name>: starts a sync-recorder container with the run's
@@ -340,8 +371,10 @@ mg_oracle_record_compare() {
     return 0
   fi
   mg_oracle__docker_ok || return 0
+  local actors
+  actors="$(mg_oracle__actor_scenarios ${selected[0]+"${selected[@]}"})" || return 0
   mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
-  if [ -n "$(mg_oracle__actor_scenarios ${selected[0]+"${selected[@]}"})" ]; then
+  if [ -n "$actors" ]; then
     mg_oracle__sync_faults || return 0
   fi
   mg_oracle__harness "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" "$MG_ROOT/conformance/goldens" \
@@ -366,7 +399,7 @@ mg_oracle_recordings() {
     case "$arg" in -*) mg_oracle__usage "recordings: unknown option '$arg'"; return 0 ;; esac
   done
   local ids plan="$MG_RUN_DIR/plan.json"
-  ids="$(mg_oracle__actor_scenarios "$@")"
+  ids="$(mg_oracle__actor_scenarios "$@")" || return 0
   if [ -z "$ids" ]; then
     mg_failure no-scenarios "no actor scenario matches $*; only actor scenarios have oracle-client exchanges"
     mg_message "oracle recordings: no actor scenario matched"
@@ -581,7 +614,9 @@ mg_oracle__bump() {
   fi
   mg_artifact pin "$staging/conformance/oracle.json" "staged conformance pin"
   # Re-recording actor scenarios needs the fault proxy (sync-ops.md S8.2).
-  if [ -n "$(mg_oracle__actor_scenarios)" ]; then
+  local actors
+  actors="$(mg_oracle__actor_scenarios)" || return 0
+  if [ -n "$actors" ]; then
     mg_oracle__sync_faults || return 0
   fi
   mg_oracle__harness "$MG_ORACLE_TAG" "$staging/oracle" "$staging/goldens" \

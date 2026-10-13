@@ -129,6 +129,45 @@ fn to_json_prints_parsed_values_and_flags_bad_files() {
 }
 
 #[test]
+fn to_json_reads_quoted_keys_and_flow_mappings_as_the_same_members() {
+    // tools/mg finds actor scenarios by the top-level `actors` member that
+    // to-json prints (sync-ops.md S2.1), so every spelling of the key must
+    // come out as that member.
+    let dir = tempfile::tempdir().unwrap();
+    let texts = [
+        "id: smoke/sync/x\nactors: [client_a, client_c]\n",
+        "id: smoke/sync/x\n'actors': [client_a, client_c]\n",
+        "id: smoke/sync/x\n\"actors\": [client_a, client_c]\n",
+        "{id: smoke/sync/x, actors: [client_a, client_c]}\n",
+        "{\"id\": \"smoke/sync/x\", 'actors': [client_a, client_c]}\n",
+    ];
+    let paths: Vec<String> = texts
+        .iter()
+        .enumerate()
+        .map(|(i, text)| {
+            let path = dir.path().join(format!("s{i}.yaml"));
+            std::fs::write(&path, text).unwrap();
+            path.to_str().unwrap().to_owned()
+        })
+        .collect();
+    let mut args = vec!["conformance", "to-json"];
+    args.extend(paths.iter().map(String::as_str));
+    let out = cli(&args);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let values: Vec<Value> = text(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap()["value"].clone())
+        .collect();
+    assert_eq!(values.len(), texts.len());
+    for value in values {
+        assert_eq!(
+            value,
+            serde_json::json!({"id": "smoke/sync/x", "actors": ["client_a", "client_c"]})
+        );
+    }
+}
+
+#[test]
 fn usage_errors_exit_2() {
     assert_eq!(cli(&["conformance", "frobnicate"]).status.code(), Some(2));
     assert_eq!(cli(&["conformance", "run", "--jobs"]).status.code(), Some(2));
