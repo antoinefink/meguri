@@ -279,7 +279,7 @@ h6dcf8bd3ec8f,python,tag,engine,unclassified,,,open
 h795ae9753da0,python,tag,engine,unclassified,,,open
 h7e4c18df6974,python,tag,engine,unclassified,,,open
 h89de56ad40bd,python,tag,engine,unclassified,,,open
-h91d384fa40f0,python,tag,engine,unclassified,,,open
+h91d384fa40f0,python,tag,engine,in-scope,Many note types created at one instant get distinct ids,storage/ids/all-tables,done
 h938b8896f278,python,tag,engine,unclassified,,,open
 hbcd13325e1bf,python,tag,engine,unclassified,,,open
 hec0725d1a35e,python,tag,engine,unclassified,,,open
@@ -298,7 +298,7 @@ h876dbf5f6be7,rust,tag,engine,unclassified,,,open
 h8c7ca9736257,rust,tag,engine,unclassified,,,open
 h8e35ff39a69f,rust,tag,engine,unclassified,,,open
 h9a09160808bf,rust,tag,engine,unclassified,,,open
-h9a4da0026b9a,rust,tag,engine,unclassified,,,open
+h9a4da0026b9a,rust,tag,engine,in-scope,A config write that changes nothing leaves col.mod alone; a real change moves it,storage/config/rewrite-same-value storage/config/current-deck,done
 h9e254f805a25,rust,tag,engine,unclassified,,,open
 hbcc38ba4659c,rust,tag,engine,unclassified,,,open
 hc80955057f3f,rust,tag,engine,unclassified,,,open
@@ -334,21 +334,21 @@ hd6632486d7a9,rust,tag,media,unclassified,,,open
 hec37a4cc2d38,rust,tag,media,unclassified,,,open
 hfc5d2785b867,rust,tag,media,unclassified,,,open
 hfe84eb8e5a8e,rust,tag,media,unclassified,,,open
-h1617b31103f7,python,tag,model,unclassified,,,open
-h259a80791fb5,python,tag,model,unclassified,,,open
-h32c56ad2dd75,python,tag,model,unclassified,,,open
-h41cb2879dea9,python,tag,model,unclassified,,,open
-h7f33038d26bd,python,tag,model,unclassified,,,open
-h8ebcef230655,python,tag,model,unclassified,,,open
-h9b13d454ebdb,python,tag,model,unclassified,,,open
-h9f6e6bc22339,python,tag,model,unclassified,,,open
-hc3bca137eeb2,python,tag,model,unclassified,,,open
-hdadc818e52d7,python,tag,model,unclassified,,,open
-he051a468be4b,python,tag,model,unclassified,,,open
+h1617b31103f7,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
+h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,,deferred
+h32c56ad2dd75,python,tag,model,in-scope,"Config values keep their JSON kind through a write: integers, floats, booleans, null, strings, lists and objects",storage/config/rewrite-same-value,done
+h41cb2879dea9,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
+h7f33038d26bd,python,tag,model,in-scope,"Removing a config key deletes its row; scenarios come with deck and note type removal, which remove key families (U28, U29)",,deferred
+h8ebcef230655,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
+h9b13d454ebdb,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
+h9f6e6bc22339,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
+hc3bca137eeb2,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
+hdadc818e52d7,python,tag,model,in-scope,A config value written through the config API is stored and reads back as written,storage/config/rewrite-same-value storage/config/current-deck,done
+he051a468be4b,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h09c785fd688d,rust,tag,model,unclassified,,,open
-h6719d2739159,rust,tag,model,unclassified,,,open
-had3c7e0753e9,rust,tag,model,unclassified,,,open
-hde5c73b93e34,rust,tag,model,unclassified,,,open
+h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
+had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",,deferred
+hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes restores the earlier row, removes an added key and restores a removed one; scenarios come with the undo op (U25)",,deferred
 h00dd7a3ecf58,python,tag,notes,unclassified,,,open
 h086997a07e68,python,tag,notes,unclassified,,,open
 h093e8eefc4fb,python,tag,notes,unclassified,,,open

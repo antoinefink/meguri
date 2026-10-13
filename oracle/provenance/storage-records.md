@@ -32,3 +32,14 @@ Driver hints for the oracle maintainer (U23 role work):
 - `edit_note`: load the note with the collection's note getter when the step runs, change fields and tags, and save with the collection's note update (undoable).
 - `delete_notes`: the collection's note removal with the ids of the notes that still exist.
 - `set_config`: the collection's config setter with its default (no undo entry); the value goes through Python's JSON encoder, so the scenario's floats stay floats.
+
+Harvest classification (completion pass, same tag): the config tests in
+`pylib/tests/test_config.py`, `rslib/src/config/mod.rs` and
+`rslib/src/config/undo.rs`, `test_timestamps` in
+`pylib/tests/test_collection.py` and `undo_mtime_bump` in
+`rslib/src/undo/mod.rs`, read with `rslib/src/collection/transact.rs` (a
+config write without an undo entry runs as a skip-undo op, so `col.mod` moves
+only on a real change; removal is an undoable op). Rows covered by existing
+scenarios are `done`; typed-read defaults are `deferred` to the areas that
+own each key's reader, key removal to U28 and U29 (key families), config undo
+to U25. Tests of the Python-only config wrappers are not applicable.
