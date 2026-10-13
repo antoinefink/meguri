@@ -34,6 +34,8 @@ struct AnyEntry {
     crates: Vec<String>,
     #[serde(default)]
     except: Vec<String>,
+    #[serde(default)]
+    row_dev_dependencies: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,6 +59,25 @@ pub struct RawOpen {
     pub allowed: Vec<String>,
 }
 
+/// How a crate depends on another. An edge declared as several kinds counts
+/// as the first of normal, build and dev.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    Normal,
+    Build,
+    Dev,
+}
+
+impl EdgeKind {
+    fn suffix(self) -> &'static str {
+        match self {
+            EdgeKind::Normal => "",
+            EdgeKind::Build => " as a build-dependency",
+            EdgeKind::Dev => " as a dev-dependency",
+        }
+    }
+}
+
 /// Where edges.toml places a workspace crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Place {
@@ -70,6 +91,8 @@ pub enum Place {
 pub struct Edges {
     places: BTreeMap<String, Place>,
     any_except: BTreeSet<String>,
+    /// `[any]` crates that row crates may use as dev-dependencies.
+    row_dev: BTreeSet<String>,
     pub restricted: BTreeMap<String, Restricted>,
     pub raw_open: RawOpen,
 }
@@ -104,9 +127,17 @@ impl Edges {
         for name in &file.isolated.crates {
             place(name, Place::Isolated)?;
         }
+        for name in &file.any.row_dev_dependencies {
+            if !file.any.crates.contains(name) {
+                return Err(Error::new(format!(
+                    "[any] row_dev_dependencies names {name}, which is not an [any] crate"
+                )));
+            }
+        }
         Ok(Edges {
             places,
             any_except: file.any.except.into_iter().collect(),
+            row_dev: file.any.row_dev_dependencies.into_iter().collect(),
             restricted: file.restricted,
             raw_open: file.raw_open,
         })
@@ -129,36 +160,42 @@ impl Edges {
         names
     }
 
-    /// Why `from` must not depend on `to`, or `None` when the edge is allowed
-    /// or either crate is unplaced (reported separately). `kind` is empty for
-    /// a normal dependency, else " as a dev-dependency" or " as a build-dependency".
-    pub fn deny(&self, from: &str, to: &str, kind: &str) -> Option<String> {
+    /// Why `from` must not depend on `to` as `kind`, or `None` when the edge is
+    /// allowed or either crate is unplaced (reported separately).
+    pub fn deny(&self, from: &str, to: &str, kind: EdgeKind) -> Option<String> {
         let (Some(from_place), Some(to_place)) = (self.place(from), self.place(to)) else {
             return None;
         };
+        let row_dev = self.row_dev.contains(to);
+        let suffix = kind.suffix();
         match (from_place, to_place) {
             (Place::Row(a), Place::Row(b)) if b < a => None,
             (Place::Row(a), Place::Row(b)) if b == a => Some(format!(
-                "{from} (edges.toml row {a}) must not depend on {to} (row {b}){kind}: \
+                "{from} (edges.toml row {a}) must not depend on {to} (row {b}){suffix}: \
                  crates in the same row are siblings with no edge between them"
             )),
             (Place::Row(a), Place::Row(b)) => Some(format!(
-                "{from} (edges.toml row {a}) must not depend on {to} (row {b}){kind}: \
+                "{from} (edges.toml row {a}) must not depend on {to} (row {b}){suffix}: \
                  a crate may depend only on crates in lower rows"
             )),
+            (Place::Row(_), Place::Any) if row_dev && kind == EdgeKind::Dev => None,
+            (Place::Row(a), Place::Any) if row_dev => Some(format!(
+                "{from} (edges.toml row {a}) must not depend on {to} ([any] group){suffix}: \
+                 row crates may use {to} only as a dev-dependency"
+            )),
             (Place::Row(a), Place::Any) => Some(format!(
-                "{from} (edges.toml row {a}) must not depend on {to} ([any] group){kind}: \
+                "{from} (edges.toml row {a}) must not depend on {to} ([any] group){suffix}: \
                  a crate may depend only on crates in lower rows"
             )),
             (Place::Row(_) | Place::Any, Place::Isolated) => Some(format!(
-                "{from} must not depend on {to}{kind}: no workspace crate depends on edges.toml [isolated] crates"
+                "{from} must not depend on {to}{suffix}: no workspace crate depends on edges.toml [isolated] crates"
             )),
             (Place::Any, _) if self.any_except.contains(to) => Some(format!(
-                "{from} must not depend on {to}{kind}: edges.toml [any] crates must not depend on {to}"
+                "{from} must not depend on {to}{suffix}: edges.toml [any] crates must not depend on {to}"
             )),
             (Place::Any, _) => None,
             (Place::Isolated, _) => Some(format!(
-                "{from} must not depend on {to}{kind}: edges.toml [isolated] crates depend on no workspace crate"
+                "{from} must not depend on {to}{suffix}: edges.toml [isolated] crates depend on no workspace crate"
             )),
         }
     }

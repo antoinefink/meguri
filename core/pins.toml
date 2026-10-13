@@ -5,9 +5,11 @@
 #
 # A pin with `version` and no `via` must appear as `=<version>` in
 # Cargo.toml [workspace.dependencies]. Every pinned version must be in
-# Cargo.lock. A pin with `via` is brought in by that crate and is checked in
-# Cargo.lock only. A `pending` pin has no recorded version yet: no workspace
-# crate may depend on it until the spec role records one.
+# Cargo.lock, and every workspace crate that uses a pinned crate must resolve
+# it in Cargo.lock to a pin without `via`. A pin with `via` is the version that
+# crate brings; no workspace crate may use it. A `pending` pin has no recorded
+# version yet: no workspace crate may depend on it until the spec role records
+# one.
 #
 # The pin canary (tools/layering-check/tests/canary_pins.rs) checks all this
 # and runs before every other test in `tools/mg core-test`.

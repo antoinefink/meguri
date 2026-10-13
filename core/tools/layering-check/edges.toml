@@ -2,8 +2,9 @@
 #
 # A row crate may depend only on crates in lower rows (smaller numbers). Crates
 # in the same row are siblings with no edge between them. The rule covers every
-# dependency kind: normal, build and dev. Every workspace crate must appear
-# exactly once below, and every name below must be a workspace crate.
+# dependency kind: normal, build and dev; the one exception is
+# [any] row_dev_dependencies. Every workspace crate must appear exactly once
+# below, and every name below must be a workspace crate.
 
 [[row]]
 row = 1
@@ -62,10 +63,13 @@ crates = ["meguri-ffi"]
 note = "the only crate built for Apple targets"
 
 # Development crates: may depend on any row crate and on each other, except
-# the crates listed in `except`.
+# the crates listed in `except`. Row crates may use the `row_dev_dependencies`
+# crates as dev-dependencies only, for integration tests that drive testkit
+# code (U36, U38, U91, U118, U250); normal and build edges to them stay forbidden.
 [any]
 crates = ["meguri-testkit", "meguri-cli"]
 except = ["meguri-ffi"]
+row_dev_dependencies = ["meguri-testkit"]
 
 # Workspace tools: depend on no workspace crate, and no workspace crate
 # depends on them.

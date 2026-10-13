@@ -159,45 +159,147 @@ pub fn check(pins_toml: &str, manifest_toml: &str, lock_toml: &str) -> Result<Pi
         }
     }
 
-    // Every workspace requirement on a pinned crate is exactly one of its pins.
+    // Every workspace requirement on a pinned crate is exactly one of its
+    // direct pins: a `via` pin is for the crate that brings it, never for ours.
     for dep in &deps {
-        let pinned: Vec<&str> = pins
-            .pin
-            .iter()
-            .filter(|p| p.name == dep.package)
-            .filter_map(|p| p.version.as_deref())
-            .collect();
-        if pinned.is_empty() {
+        let Some(versions) = Versions::of(&pins.pin, &dep.package) else {
             continue;
-        }
-        let exact: Vec<String> = pinned.iter().map(|v| format!("={v}")).collect();
+        };
+        let name = &dep.package;
+        let exact: Vec<String> = versions.direct.iter().map(|v| format!("={v}")).collect();
         if dep.requirement.as_ref().is_some_and(|r| exact.contains(r)) {
             continue;
         }
         let requires = dep.requirement.as_deref().unwrap_or("no version");
-        let key = if dep.key == dep.package {
+        let key = if &dep.key == name {
             String::new()
         } else {
             format!(" (as {})", dep.key)
         };
-        violations.push(Violation::new(
-            Rule::Pin,
-            &dep.package,
+        let message = if exact.is_empty() {
             format!(
-                "{}{key}: core/Cargo.toml [workspace.dependencies] requires {requires}, but pins.toml pins {} \
-                 {from}; the requirement must be exactly {}. {rule}",
-                dep.package,
-                pinned.join(" and "),
+                "{name}{key}: core/Cargo.toml [workspace.dependencies] requires {requires}, but pins.toml pins \
+                 {name} only as {}; remove it. {rule}",
+                versions.via_text()
+            )
+        } else {
+            format!(
+                "{name}{key}: core/Cargo.toml [workspace.dependencies] requires {requires}, but pins.toml pins {} \
+                 {from}{}; the requirement must be exactly {}. {rule}",
+                versions.direct.join(" and "),
+                versions.via_note(name, requires.trim_start_matches('=')),
                 exact
                     .iter()
                     .map(|e| format!("\"{e}\""))
                     .collect::<Vec<_>>()
                     .join(" or "),
-            ),
-        ));
+            )
+        };
+        violations.push(Violation::new(Rule::Pin, name, message));
+    }
+
+    // Every workspace crate resolves each pinned crate it uses to a direct pin,
+    // however its own manifest declares the dependency. Workspace and other
+    // path crates have no `source` in Cargo.lock.
+    for member in lock.package.iter().filter(|p| p.source.is_none()) {
+        for entry in &member.dependencies {
+            let name = entry.split_whitespace().next().unwrap_or_default();
+            let Some(versions) = Versions::of(&pins.pin, name) else {
+                continue;
+            };
+            let Some(version) = resolve(&lock, entry)? else {
+                continue; // no locked package of that name: reported above
+            };
+            if versions.direct.contains(&version) {
+                continue;
+            }
+            let message = if versions.direct.is_empty() {
+                format!(
+                    "{} depends on {name} {version}, but pins.toml pins {name} only as {}; no workspace crate \
+                     may depend on it directly. {rule}",
+                    member.name,
+                    versions.via_text()
+                )
+            } else {
+                format!(
+                    "{} depends on {name} {version}, but pins.toml pins {} {from}{}; depend on it with \
+                     `{name}.workspace = true`. {rule}",
+                    member.name,
+                    versions.direct.join(" and "),
+                    versions.via_note(name, version),
+                )
+            };
+            violations.push(Violation::new(Rule::Pin, name, message));
+        }
     }
 
     Ok(PinReport { violations, pending })
+}
+
+/// The recorded versions of one pinned crate.
+struct Versions<'a> {
+    /// Versions workspace crates use.
+    direct: Vec<&'a str>,
+    /// Versions only another crate brings: (version, that crate).
+    via: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> Versions<'a> {
+    /// `None` when `name` has no pin with a version.
+    fn of(pins: &'a [Pin], name: &str) -> Option<Versions<'a>> {
+        let mut versions = Versions {
+            direct: Vec::new(),
+            via: Vec::new(),
+        };
+        for pin in pins.iter().filter(|p| p.name == name) {
+            match (pin.version.as_deref(), pin.via.as_deref()) {
+                (Some(version), None) => versions.direct.push(version),
+                (Some(version), Some(via)) => versions.via.push((version, via)),
+                (None, _) => {}
+            }
+        }
+        (!versions.direct.is_empty() || !versions.via.is_empty()).then_some(versions)
+    }
+
+    /// ", and <name> <version> only as the version <via> brings" when
+    /// `version` is a `via` pin, else empty.
+    fn via_note(&self, name: &str, version: &str) -> String {
+        self.via
+            .iter()
+            .find(|(v, _)| *v == version)
+            .map(|(v, via)| format!(", and {name} {v} only as the version {via} brings"))
+            .unwrap_or_default()
+    }
+
+    /// "the version <via> brings (<version>)" for each `via` pin.
+    fn via_text(&self) -> String {
+        self.via
+            .iter()
+            .map(|(version, via)| format!("the version {via} brings ({version})"))
+            .collect::<Vec<_>>()
+            .join(" and ")
+    }
+}
+
+/// The version a Cargo.lock dependency entry resolves to. Cargo writes
+/// `name` when the lock holds one version of the crate, else `name version`
+/// (plus the source when even that is ambiguous). `None` when no locked
+/// package has the name.
+fn resolve<'a>(lock: &'a Lock, entry: &'a str) -> Result<Option<&'a str>, Error> {
+    let mut parts = entry.split_whitespace();
+    let name = parts.next().unwrap_or_default();
+    if let Some(version) = parts.next() {
+        return Ok(Some(version));
+    }
+    let mut locked = lock.package.iter().filter(|p| p.name == name);
+    match (locked.next(), locked.next()) {
+        (None, _) => Ok(None),
+        (Some(package), None) => Ok(Some(package.version.as_str())),
+        (Some(_), Some(_)) => Err(Error::new(format!(
+            "Cargo.lock: the dependency entry \"{entry}\" names no version, but the lock holds several versions of \
+             {name}"
+        ))),
+    }
 }
 
 fn pending_uses(name: &str, deps: &[WorkspaceDep], lock: &Lock, out: &mut Vec<Violation>) {

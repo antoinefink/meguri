@@ -271,7 +271,7 @@ fn dev_and_build_dependencies_follow_the_same_table() {
     fx.add(
         "meguri-text",
         "dev-dependencies",
-        "meguri-testkit = { path = \"../meguri-testkit\" }",
+        "meguri-model = { path = \"../meguri-model\" }",
     );
     fx.add(
         "meguri-model",
@@ -287,16 +287,94 @@ fn dev_and_build_dependencies_follow_the_same_table() {
         rules,
         [
             ("edge".to_owned(), "meguri-model -> meguri-storage".to_owned()),
-            ("edge".to_owned(), "meguri-text -> meguri-testkit".to_owned()),
+            ("edge".to_owned(), "meguri-text -> meguri-model".to_owned()),
         ]
     );
     assert!(
-        run.message("edge", "meguri-text -> meguri-testkit")
+        run.message("edge", "meguri-text -> meguri-model")
             .contains("dev-dependency")
     );
     assert!(
         run.message("edge", "meguri-model -> meguri-storage")
             .contains("build-dependency")
+    );
+}
+
+#[test]
+fn row_crates_may_use_testkit_as_a_dev_dependency() {
+    let fx = Fixture::new();
+    // Integration tests in a row crate's tests/ drive testkit code (U36, U91,
+    // U118, U250), while testkit depends on that crate: a dev-only cycle.
+    fx.depend("meguri-testkit", "meguri-engine");
+    for krate in [
+        "meguri-text",
+        "meguri-engine",
+        "meguri-search",
+        "meguri-sync",
+        "meguri-ffi",
+    ] {
+        fx.add(
+            krate,
+            "dev-dependencies",
+            "meguri-testkit = { path = \"../meguri-testkit\" }",
+        );
+    }
+
+    let run = fx.run();
+    assert_eq!((run.code, run.rules()), (0, vec![]), "{}", run.stderr);
+}
+
+#[test]
+fn row_crates_must_not_use_testkit_as_a_normal_or_build_dependency_nor_cli_at_all() {
+    let fx = Fixture::new();
+    fx.depend("meguri-text", "meguri-testkit");
+    fx.add(
+        "meguri-search",
+        "build-dependencies",
+        "meguri-testkit = { path = \"../meguri-testkit\" }",
+    );
+    fx.add(
+        "meguri-sched",
+        "dev-dependencies",
+        "meguri-cli = { path = \"../meguri-cli\" }",
+    );
+
+    let run = fx.run();
+    assert_eq!(run.code, 1, "{}", run.stderr);
+    let mut rules = run.rules();
+    rules.sort();
+    assert_eq!(
+        rules,
+        [
+            ("edge".to_owned(), "meguri-sched -> meguri-cli".to_owned()),
+            ("edge".to_owned(), "meguri-search -> meguri-testkit".to_owned()),
+            ("edge".to_owned(), "meguri-text -> meguri-testkit".to_owned()),
+        ]
+    );
+    let normal = run.message("edge", "meguri-text -> meguri-testkit");
+    assert!(
+        normal.contains("meguri-text (edges.toml row 1) must not depend on meguri-testkit ([any] group):"),
+        "{normal}"
+    );
+    assert!(normal.contains("only as a dev-dependency"), "{normal}");
+    let build = run.message("edge", "meguri-search -> meguri-testkit");
+    assert!(build.contains("as a build-dependency"), "{build}");
+    let cli = run.message("edge", "meguri-sched -> meguri-cli");
+    assert!(cli.contains("as a dev-dependency"), "{cli}");
+    assert!(!cli.contains("only as a dev-dependency"), "{cli}");
+}
+
+#[test]
+fn row_dev_dependencies_must_name_an_any_crate() {
+    let text = fs::read_to_string(edges_toml()).unwrap();
+    let entry = "row_dev_dependencies = [\"meguri-testkit\"]";
+    assert!(text.contains(entry), "edges.toml has no {entry}");
+    let text = text.replace(entry, "row_dev_dependencies = [\"meguri-text\"]");
+
+    let err = layering_check::edges::Edges::parse(&text).unwrap_err().to_string();
+    assert!(
+        err.contains("row_dev_dependencies names meguri-text, which is not an [any] crate"),
+        "{err}"
     );
 }
 

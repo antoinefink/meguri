@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use crate::edges::Edges;
+use crate::edges::{EdgeKind, Edges};
 use crate::metadata::{Metadata, Node};
 use crate::{Error, Rule, Violation, raw_open};
 
@@ -80,11 +80,11 @@ fn member_edges(graph: &Graph, edges: &Edges, out: &mut Vec<Violation>) {
             };
             let kinds: BTreeSet<Option<&str>> = dep.dep_kinds.iter().map(|k| k.kind.as_deref()).collect();
             let kind = if kinds.contains(&None) {
-                ""
+                EdgeKind::Normal
             } else if kinds.contains(&Some("build")) {
-                " as a build-dependency"
+                EdgeKind::Build
             } else {
-                " as a dev-dependency"
+                EdgeKind::Dev
             };
             if let Some(message) = edges.deny(from, to, kind) {
                 out.push(Violation::new(Rule::Edge, format!("{from} -> {to}"), message));
