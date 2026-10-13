@@ -45,6 +45,7 @@ t aimpl WebFetch '{"url":"https://github.com/ankitects/anki"}' deny
 t aimpl WebFetch '{"url":"https://docs.rs/fsrs/6.6.2/fsrs/"}' allow
 t aimpl Write "{\"file_path\":\"$W/U21/AGENTS.md\",\"content\":\"Never read oracle/.\"}" allow
 t aimpl StructuredOutput "{\"summary\":\"denied: $M/oracle/x\"}" allow
+t aimpl Bash "{\"command\":\"git -C $W/U20 log --oneline attic/U20-unclean\"}" deny
 t afix Read "{\"file_path\":\"$M/oracle/x\"}" deny
 t acfix Read "{\"file_path\":\"$M/refs/anki/x\"}" deny
 t arev Read "{\"file_path\":\"$M/refs/anki-26.09.3/x\"}" allow
