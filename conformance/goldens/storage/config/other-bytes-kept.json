@@ -1,0 +1,44 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [3, 1700000000, 1]
+          ]
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894705200, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32d2aa84804c05e6b99a7ed97fc78428deb0f6328e92abfd4a49400d42aa367f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/config/other-bytes-kept",
+  "scenario_sha256": "a45fa0353a1e45d2325eb12b2f8c2610528db6a206a34561dee728c0c9569b04",
+  "tz": "UTC"
+}

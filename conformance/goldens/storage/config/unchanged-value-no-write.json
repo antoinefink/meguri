@@ -1,0 +1,73 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", -1, 1894701600, "1894701600006"],
+            ["_nt_1894701600006_lastDeck", -1, 1894701600, "1894701600000"],
+            ["curModel", -1, 1894701600, "1894701600006"]
+          ]
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", -1, 1894701600, "1894701600006"],
+            ["_nt_1894701600006_lastDeck", -1, 1894701600, "1894701600000"],
+            ["curModel", -1, 1894701600, "1894701600006"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000]
+          ]
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", -1, 1894701600, "1894701600006"],
+            ["_deck_1894701600001_lastNotetype", -1, 1894708800, "1894701600006"],
+            ["_nt_1894701600006_lastDeck", -1, 1894708800, "1894701600001"],
+            ["curModel", -1, 1894701600, "1894701600006"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32d2aa84804c05e6b99a7ed97fc78428deb0f6328e92abfd4a49400d42aa367f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/config/unchanged-value-no-write",
+  "scenario_sha256": "8ce3a043e81733373c9bd8e919495091ddfd6966f05c465d902e823b3dbc7eb8",
+  "tz": "UTC"
+}

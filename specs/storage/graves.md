@@ -55,6 +55,6 @@ Undoing a deletion restores the rows and deletes the graves the deletion added; 
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `storage/graves/delete-note` | G2, G3 for a note with three cards, a pre-existing grave and a repeated deletion | awaits `db_exec`, `delete_notes` |
+| `storage/graves/delete-note` | G2, G3 for a note with three cards, a pre-existing grave and a repeated deletion | recorded |
 
 The ops are specified in `specs/conformance/record-ops.md`.

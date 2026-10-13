@@ -1,0 +1,65 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 1700000000, "{\"weeks\": 52, \"mode\":\"year\" , \"streak\":true}", 1894701600000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894705200, "{\"mode\":\"year\",\"streak\":true,\"weeks\":52}", 1894705200000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894708800, "{\"mode\":\"year\",\"streak\":true,\"weeks\":26}", 1894708800000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894708800, "{\"mode\":\"year\",\"streak\":true,\"weeks\":26}", 1894708800000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, "{\"Upper\":1.0,\"below\":1000000000000000.0,\"count\":-42,\"flags\":[true,false],\"large\":1e16,\"negative\":-0.0,\"none\":null,\"small\":1e-6,\"text\":\"a/b\\u0001\\u001b\\\"\\\\\\n\\t é\",\"tiny\":0.00001,\"zeta\":[1,2.5,\"Été\",{\"a\":{},\"b\":[]}]}", "blob"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32d2aa84804c05e6b99a7ed97fc78428deb0f6328e92abfd4a49400d42aa367f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/config/rewrite-same-value",
+  "scenario_sha256": "4b77d9a32891d3e12e05b1bb98e8d72a7fd74ef580ea7c845491e5436f7ec513",
+  "tz": "UTC"
+}

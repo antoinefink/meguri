@@ -141,9 +141,9 @@ Meguri applies S4 everywhere. Where an Anki operation stamps an unchanged row an
 | `storage/ids/clock-back-cap` | I3 after the clock moves back two days | recorded; deviation `ids-future-cap-notes` |
 | `storage/ids/cap-boundary` | I3 one millisecond past the cap | recorded; deviation `ids-future-cap-boundary` |
 | `storage/ids/revlog-clock-back-cap` | I3 for review-log rows | recorded; deviation `ids-future-cap-revlog` |
-| `storage/ids/all-tables` | I2 for decks, deck presets and note types | awaits `db_exec` |
-| `storage/noop/identical-note-rewrite` | S4 for a note, then S2 and S5 | awaits `db_exec`, `edit_note` |
-| `storage/stamps/answer` | S2 and S5 for a card, a review-log row and `col.mod` | awaits `db_exec` |
-| `storage/stamps/col-row` | S6 | awaits `db_exec` |
+| `storage/ids/all-tables` | I2 for decks, deck presets and note types | recorded |
+| `storage/noop/identical-note-rewrite` | S4 for a note, then S2 and S5 | recorded |
+| `storage/stamps/answer` | S2 and S5 for a card, a review-log row and `col.mod` | recorded |
+| `storage/stamps/col-row` | S6 | recorded |
 
 The ops `db_exec`, `edit_note`, `delete_notes` and `set_config` are specified in `specs/conformance/record-ops.md`. Behavior that only Meguri's own code shows (the write journal, write scopes, bulk paths) has no scenario; U23's Rust tests cover it.

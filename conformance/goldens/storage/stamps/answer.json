@@ -1,0 +1,101 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, 0]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "lrt": 1894705200,
+              "pos": 1
+            },
+            "did": "Inbox",
+            "due": 1894705939,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Inbox",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 7
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 0,
+              "id": 1894705200000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            }
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32d2aa84804c05e6b99a7ed97fc78428deb0f6328e92abfd4a49400d42aa367f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/stamps/answer",
+  "scenario_sha256": "a4417dcea4135c200099aff7b6326e7200382707458d947657207df14806296e",
+  "tz": "UTC"
+}

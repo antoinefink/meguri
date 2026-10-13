@@ -1,0 +1,54 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_nt_123_lastDeck", 4, 1700000500, "  1650000000000"],
+            ["cardStateCustomizer", -1, 1700000900, "\"if (states.current.normal) { customData.again.v = 1; }\""],
+            ["onigiri_sidebar_collapsed", 0, 1700000000, "{\"collapsed\": true,  \"width\":220 }"]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["_nt_123_lastDeck", 4, 1700000500, "  1650000000000"],
+            ["cardStateCustomizer", -1, 1700000900, "\"if (states.current.normal) { customData.again.v = 1; }\""],
+            ["onigiri_sidebar_collapsed", 0, 1700000000, "{\"collapsed\": true,  \"width\":220 }"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32d2aa84804c05e6b99a7ed97fc78428deb0f6328e92abfd4a49400d42aa367f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/config/unknown-keys-survive",
+  "scenario_sha256": "1ee5be62286ce5eafaed7b42b0dd19b2c991be5e5d310c8ba7a76d39f6d35bc6",
+  "tz": "UTC"
+}

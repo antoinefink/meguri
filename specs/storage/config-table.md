@@ -114,10 +114,10 @@ For U107; the table behaves this way when Anki clients sync:
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `storage/config/unchanged-value-no-write` | C4 for the keys adding a note writes | awaits `db_exec` |
-| `storage/config/other-bytes-kept` | C4 for a stored value with other spacing that adding a note writes again; deviation `config-same-value-other-bytes-add-note` | awaits `db_exec` |
-| `storage/config/unknown-keys-survive` | C2, C7 through reviews, edits, additions, deletions and a day rollover | awaits `db_exec`, `edit_note`, `delete_notes` |
-| `storage/config/rewrite-same-value` | C4, C5 through the config API; deviation `config-same-value-other-bytes` | awaits `db_exec`, `set_config` |
-| `storage/config/current-deck` | C4 for `curDeck` (R1474) | awaits `db_exec`, `set_config` |
+| `storage/config/unchanged-value-no-write` | C4 for the keys adding a note writes | recorded |
+| `storage/config/other-bytes-kept` | C4 for a stored value with other spacing that adding a note writes again; deviation `config-same-value-other-bytes-add-note` | recorded |
+| `storage/config/unknown-keys-survive` | C2, C7 through reviews, edits, additions, deletions and a day rollover | recorded |
+| `storage/config/rewrite-same-value` | C4, C5 through the config API; deviation `config-same-value-other-bytes` | recorded |
+| `storage/config/current-deck` | C4 for `curDeck` (R1474) | recorded |
 
 The ops are specified in `specs/conformance/record-ops.md`. U23's Rust tests cover what no scenario shows: C3's reading rules and defaults, C5's encoding table, C6, the TEXT storage class, and the 1,000-operation survival property.

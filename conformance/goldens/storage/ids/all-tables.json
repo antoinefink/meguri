@@ -1,0 +1,44 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "Slow"],
+            [1894701600001, "Fast"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "Inbox"],
+            [1894701600001, "Verbs"],
+            [1894701600002, "Nouns"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600006, "Alpha"],
+            [1894701600007, "Beta"],
+            [1894701600008, "Gamma"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32d2aa84804c05e6b99a7ed97fc78428deb0f6328e92abfd4a49400d42aa367f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/ids/all-tables",
+  "scenario_sha256": "2ada7c21a7f99162d9e34016f4f16b4c43eda2b93935f8166f53ee69fa4dd936",
+  "tz": "UTC"
+}
