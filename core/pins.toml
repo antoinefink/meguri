@@ -51,6 +51,18 @@ version = "1.11.2"
 why = "re: search syntax and case folding (R1041, R1202)"
 
 [[pin]]
+crate = "regex-syntax"
+version = "0.8.6"
+via = "regex"
+why = "the Unicode case-folding and class tables behind regex's (?i) (R1041, R1202)"
+
+[[pin]]
+crate = "regex-automata"
+version = "0.4.10"
+via = "regex"
+why = "the matching engines behind regex 1.11.2 in the oracle's graph"
+
+[[pin]]
 crate = "unicode-normalization"
 version = "0.1.24"
 why = "NFC, and NFKD for nc: searches"

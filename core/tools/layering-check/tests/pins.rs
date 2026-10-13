@@ -115,6 +115,20 @@ fn a_lock_only_bump_of_the_transitive_rand_fails() {
 }
 
 #[test]
+fn a_lock_only_bump_of_the_regex_case_folding_tables_fails() {
+    // A bare `cargo update` moves regex-syntax under the =-pinned regex.
+    let mut files = Files::real();
+    files.lock = bump_lock(&files.lock, "regex-syntax", "0.8.6", "0.8.11");
+
+    let report = files.check();
+    let text = messages(&report);
+    assert_eq!(report.violations.len(), 1, "{text}");
+    assert_eq!(report.violations[0].subject, "regex-syntax");
+    assert!(text.contains("Cargo.lock has regex-syntax 0.8.11"), "{text}");
+    assert!(text.contains("pins.toml pins 0.8.6 (via regex)"), "{text}");
+}
+
+#[test]
 fn a_caret_requirement_on_a_pinned_crate_fails() {
     let mut files = Files::real();
     files.manifest = files
