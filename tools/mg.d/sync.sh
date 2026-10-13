@@ -3,8 +3,9 @@
 # A host job: it builds the oracle image (the pinned Anki release; tools/mg
 # hashes oracle/, callers never read it) and runs Anki's sync server from it as
 # the compose service `syncserver`, with `toxiproxy` in front and, for
-# recordings, `mitmdump` (docker/compose.yml). Every port is published on
-# 127.0.0.1 only, at a port Docker picks (fixed ones through MEGURI_SYNC_PORT,
+# recordings, `mitmdump` (docker/compose.yml). They sit on an internal network;
+# `sync-edge`, a forwarder with fixed routes, publishes their ports on
+# 127.0.0.1 only, at ports Docker picks (fixed ones through MEGURI_SYNC_PORT,
 # MEGURI_SYNC_PROXY_PORT, MEGURI_TOXIPROXY_API_PORT, MEGURI_SYNC_RECORD_PORT);
 # `up` and `status` report them in details.endpoints. The rig stays up after
 # `up` until `down`. Conformance runs do not use it (their server is a child of
@@ -13,7 +14,7 @@
 mg_job sync-rig host mg_sync_rig \
   "Local Anki sync server on 127.0.0.1 with toxiproxy: up [--record <name>] | down | status"
 
-MG_SYNC_RIG_SERVICES="syncserver toxiproxy mitmdump"
+MG_SYNC_RIG_SERVICES="syncserver toxiproxy mitmdump sync-edge"
 # Anki's sync server rejects a client clock more than 300 s off (R1932); the
 # end-to-end server must be on the real clock.
 MG_SYNC_RIG_MAX_SKEW=300
@@ -51,7 +52,7 @@ mg_sync_rig_up() {
       *) mg_sync_rig__usage "up: unexpected argument '$1'"; return 0 ;;
     esac
   done
-  local services="syncserver toxiproxy" record_dir=""
+  local services="syncserver toxiproxy sync-edge" record_dir=""
   if [ -n "$record" ]; then
     if ! printf '%s' "$record" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
       mg_sync_rig__usage "--record name '$record' must be lower-case letters, digits and '-'"
@@ -94,7 +95,7 @@ mg_sync_rig_down() {
     mg_status error
     return 0
   fi
-  docker network rm "$(mg_compose_project)_sync-rig" >/dev/null 2>&1 || true
+  docker network rm "$(mg_compose_project)_sync-rig" "$(mg_compose_project)_sync-rig-edge" >/dev/null 2>&1 || true
   mg_detail running false
   mg_message "sync-rig: down"
   mg_status pass
@@ -117,9 +118,11 @@ mg_sync_rig__running() {
   mg_sync_rig__compose ps --quiet --status running "$1" 2>/dev/null | head -n 1
 }
 
-# mg_sync_rig__port <service> <container port>: the published host:port.
+# mg_sync_rig__port <sync-edge port>: the published host:port. sync-edge is the
+# only published service: 8080 syncserver, 8081 toxiproxy's proxy, 8474
+# toxiproxy's API, 8082 the recorder.
 mg_sync_rig__port() {
-  mg_sync_rig__compose port "$1" "$2" 2>/dev/null | head -n 1
+  mg_sync_rig__compose port sync-edge "$1" 2>/dev/null | head -n 1
 }
 
 mg_sync_rig__logs() {
@@ -137,12 +140,19 @@ mg_sync_rig__lan_address() {
   ipconfig getifaddr "$iface" 2>/dev/null
 }
 
-# mg_sync_rig__users: the test user names of the env file(s) as a JSON array.
+# mg_sync_rig__users: the test user names the running server was started with
+# (its SYNC_USER1, SYNC_USER2, ... up to the first gap), as a JSON array. Read
+# from the container, so a docker/syncserver.env override replaces the
+# example's user of the same number, as compose does.
 mg_sync_rig__users() {
-  local f
-  for f in docker/syncserver.env.example docker/syncserver.env; do
-    [ -f "$MG_ROOT/$f" ] && sed -n 's/^SYNC_USER[0-9][0-9]*=\([^:]*\):.*/\1/p' "$MG_ROOT/$f"
-  done | awk '!seen[$0]++' | jq -R . | jq -sc .
+  local id env
+  id="$(mg_sync_rig__running syncserver)"
+  env="$([ -z "$id" ] || docker inspect --format '{{json .Config.Env}}' "$id" 2>/dev/null)"
+  jq -c '
+    [.[] | capture("^SYNC_USER(?<key>[1-9][0-9]*)=(?<value>.*)$")] | from_entries as $env
+    | [foreach (range(1; ($env | length) + 1) | tostring) as $n (true; . and ($env | has($n));
+        if . then $env[$n] | split(":")[0] else empty end)]
+    | map(select(. != ""))' <<<"${env:-[]}" 2>/dev/null || echo '[]'
 }
 
 # mg_sync_rig__check <up|status>: endpoints, publish addresses, loopback and LAN
@@ -150,11 +160,11 @@ mg_sync_rig__users() {
 mg_sync_rig__check() {
   local verb="$1" failed=0 checks=0
   local server proxy api recorder
-  server="$(mg_sync_rig__port syncserver 8080)"
-  proxy="$(mg_sync_rig__port toxiproxy 8081)"
-  api="$(mg_sync_rig__port toxiproxy 8474)"
+  server="$(mg_sync_rig__port 8080)"
+  proxy="$(mg_sync_rig__port 8081)"
+  api="$(mg_sync_rig__port 8474)"
   recorder=""
-  [ -z "$(mg_sync_rig__running mitmdump)" ] || recorder="$(mg_sync_rig__port mitmdump 8080)"
+  [ -z "$(mg_sync_rig__running mitmdump)" ] || recorder="$(mg_sync_rig__port 8082)"
   mg_detail running true
   mg_detail endpoints "$(jq -nc --arg s "$server" --arg p "$proxy" --arg a "$api" --arg r "$recorder" '
     def url: if . == "" then null else "http://\(.)/" end;

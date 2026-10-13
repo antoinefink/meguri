@@ -74,10 +74,11 @@ services:
   # Local sync server for simulator and Mac app end-to-end runs (U13): Anki's
   # own server from the oracle image (the pinned release), on the real clock,
   # with the test users of syncserver.env.example. `tools/mg sync-rig up`
-  # builds the image and starts it. Every port is published on 127.0.0.1 only,
-  # at a port Docker picks unless MEGURI_SYNC_PORT sets one; `tools/mg sync-rig
-  # status` reports the endpoints. Conformance runs do not use this service:
-  # their server is a child of the oracle worker, on the scenario clock.
+  # builds the image and starts it; `tools/mg sync-rig status` reports the
+  # endpoints. Like toxiproxy and mitmdump, it is only on the internal
+  # `sync-rig` network and publishes nothing: `sync-edge` publishes the rig.
+  # Conformance runs do not use this service: their server is a child of the
+  # oracle worker, on the scenario clock.
   syncserver:
     image: meguri-oracle:${MEGURI_ORACLE_TAG:-untagged}
     pull_policy: never
@@ -97,8 +98,6 @@ services:
       LD_PRELOAD: ""
     tmpfs:
       - /data:mode=1777
-    ports:
-      - "127.0.0.1:${MEGURI_SYNC_PORT:-}:8080"
     networks:
       - sync-rig
     healthcheck:
@@ -110,6 +109,8 @@ services:
   # Fault injection between a client and the sync server (sync-rig profile):
   # proxy `syncserver` listens on 8081 (docker/toxiproxy.json); its toxics
   # (latency, limit_data, reset_peer, timeout) are set through the API on 8474.
+  # The API can repoint a proxy's upstream; on the internal network the new
+  # upstream can only be another rig service.
   toxiproxy:
     image: ghcr.io/shopify/toxiproxy:2.12.0@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
     profiles: [sync-rig]
@@ -117,9 +118,6 @@ services:
     command: ["-host=0.0.0.0", "-port=8474", "-config=/etc/toxiproxy.json"]
     volumes:
       - ./toxiproxy.json:/etc/toxiproxy.json:ro
-    ports:
-      - "127.0.0.1:${MEGURI_TOXIPROXY_API_PORT:-}:8474"
-      - "127.0.0.1:${MEGURI_SYNC_PROXY_PORT:-}:8081"
     networks:
       - sync-rig
     depends_on:
@@ -152,24 +150,65 @@ services:
     volumes:
       - ./mitm:/opt/mitm:ro
       - ${MEGURI_RECORD_DIR:-../build/sync-rig/recording}:/recordings
-    ports:
-      - "127.0.0.1:${MEGURI_SYNC_RECORD_PORT:-}:8080"
     networks:
       - sync-rig
     depends_on:
       syncserver:
         condition: service_healthy
 
+  # The rig's only published container (sync-rig profile): a TCP forwarder
+  # (sync-edge/forward.py) on the internal `sync-rig` network and on
+  # `sync-rig-edge`, whose routes are fixed in the script: 8080 syncserver,
+  # 8081 toxiproxy's proxy, 8474 toxiproxy's API, 8082 mitmdump. Every port is
+  # published on 127.0.0.1 only, at a port Docker picks unless
+  # MEGURI_SYNC_PORT, MEGURI_SYNC_PROXY_PORT, MEGURI_TOXIPROXY_API_PORT or
+  # MEGURI_SYNC_RECORD_PORT sets one. It runs from the oracle image, which the
+  # rig builds anyway, for its Python.
+  sync-edge:
+    image: meguri-oracle:${MEGURI_ORACLE_TAG:-untagged}
+    pull_policy: never
+    profiles: [sync-rig]
+    init: true
+    entrypoint: ["python", "/opt/sync-edge/forward.py"]
+    environment:
+      LD_PRELOAD: ""
+    volumes:
+      - ./sync-edge:/opt/sync-edge:ro
+    ports:
+      - "127.0.0.1:${MEGURI_SYNC_PORT:-}:8080"
+      - "127.0.0.1:${MEGURI_SYNC_PROXY_PORT:-}:8081"
+      - "127.0.0.1:${MEGURI_TOXIPROXY_API_PORT:-}:8474"
+      - "127.0.0.1:${MEGURI_SYNC_RECORD_PORT:-}:8082"
+    networks:
+      - sync-rig
+      - sync-rig-edge
+    depends_on:
+      toxiproxy:
+        condition: service_healthy
+    # Healthy once all four ports listen (read from /proc, so the probe
+    # reaches no service and no recording).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; up = {int(l.split()[1].rsplit(':', 1)[1], 16) for l in list(open('/proc/net/tcp'))[1:] if l.split()[3] == '0A'}; sys.exit(0 if {8080, 8081, 8474, 8082} <= up else 1)"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
 networks:
   # No route out of oracle containers: nothing in them can reach AnkiWeb or
   # any other host (R1876).
   oracle-internal:
     internal: true
-  # The sync rig's network. Docker publishes no port from an internal network,
-  # so this one is a plain bridge: its services are servers and proxies with
-  # fixed upstreams, and their ports are published on 127.0.0.1 only (R1876;
-  # `tools/mg sync-rig` checks that nothing answers on the LAN address).
-  sync-rig: {}
+  # The sync rig's network: no route out of syncserver, toxiproxy or mitmdump,
+  # whatever upstream toxiproxy's API is given (R1876). Docker publishes no
+  # port from an internal network, so sync-edge publishes the rig.
+  sync-rig:
+    internal: true
+  # sync-edge's publishing network, without masquerade: its 127.0.0.1 ports
+  # work and it has no route out either (`tools/mg sync-rig` also checks that
+  # nothing answers on the LAN address).
+  sync-rig-edge:
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
 
 volumes:
   cargo-home:

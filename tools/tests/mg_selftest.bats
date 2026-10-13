@@ -1128,7 +1128,70 @@ STUB
   mg sync-rig down
   [ "$status" -eq 0 ]
   [ "$(field .details.running)" = false ]
-  grep -q -- ' rm --stop --force --volumes syncserver toxiproxy mitmdump$' "$BATS_TEST_TMPDIR/docker-calls"
+  grep -q -- ' rm --stop --force --volumes syncserver toxiproxy mitmdump sync-edge$' "$BATS_TEST_TMPDIR/docker-calls"
   [ "$(grep -c -- ' down' "$BATS_TEST_TMPDIR/docker-calls")" -eq 0 ]
+  validate "$result"
+}
+
+# A docker stub for a running rig: sync-edge publishes its four ports at
+# $STUB_PUBLISH_URL, and the server's environment is $STUB_SERVER_ENV.
+running_rig_fixture() {
+  local stubs="$BATS_TEST_TMPDIR/sync-stubs"
+  mkdir -p "$stubs"
+  cat >"$stubs/docker" <<'STUB'
+#!/bin/bash
+echo "$*" >>"$BATS_TEST_TMPDIR/docker-calls"
+case "$1" in
+  info) exit 0 ;;
+  inspect) [ "${*: -1}" = srv1 ] && printf '%s\n' "$STUB_SERVER_ENV"; exit 0 ;;
+  compose) ;;
+  *) exit 97 ;;
+esac
+case " $* " in
+  *" ps --quiet --status running syncserver "*) echo srv1 ;;
+  *" ps --quiet --status running "*) ;;
+  *" ps --format json "*)
+    for s in syncserver toxiproxy; do printf '{"Service":"%s","Publishers":[]}\n' "$s"; done
+    printf '{"Service":"sync-edge","Publishers":['
+    printf '{"URL":"%s","TargetPort":8080,"PublishedPort":40080,"Protocol":"tcp"},' "$STUB_PUBLISH_URL"
+    printf '{"URL":"%s","TargetPort":8081,"PublishedPort":40081,"Protocol":"tcp"},' "$STUB_PUBLISH_URL"
+    printf '{"URL":"%s","TargetPort":8474,"PublishedPort":40474,"Protocol":"tcp"},' "$STUB_PUBLISH_URL"
+    printf '{"URL":"%s","TargetPort":8082,"PublishedPort":40082,"Protocol":"tcp"}]}\n' "$STUB_PUBLISH_URL" ;;
+  *" port sync-edge 8080 "*) echo "$STUB_PUBLISH_URL:40080" ;;
+  *" port sync-edge 8081 "*) echo "$STUB_PUBLISH_URL:40081" ;;
+  *" port sync-edge 8474 "*) echo "$STUB_PUBLISH_URL:40474" ;;
+  *" port sync-edge 8082 "*) echo "$STUB_PUBLISH_URL:40082" ;;
+esac
+exit 0
+STUB
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+}
+
+@test "sync-rig status stops a rig published beyond 127.0.0.1" {
+  running_rig_fixture
+  export STUB_PUBLISH_URL=0.0.0.0 STUB_SERVER_ENV='["SYNC_USER1=meguri-a:meguri-test-a"]'
+  mg sync-rig status
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | index("published-beyond-loopback") != null')" = true ]
+  [[ "$(field '.failures[] | select(.id == "published-beyond-loopback") | .message')" == *"sync-edge 0.0.0.0:40080"* ]]
+  [[ "$(field .message)" == *"stopped"* ]]
+  grep -q -- ' rm --stop --force --volumes syncserver toxiproxy mitmdump sync-edge$' "$BATS_TEST_TMPDIR/docker-calls"
+  validate "$result"
+}
+
+@test "sync-rig reports the users the running server has, overrides included" {
+  running_rig_fixture
+  # docker/syncserver.env replaced SYNC_USER1 for compose; the server has no
+  # meguri-a, and SYNC_USER6 comes after a gap.
+  export STUB_PUBLISH_URL=127.0.0.1 STUB_SERVER_ENV='["PATH=/usr/bin","SYNC_USER2=meguri-b:meguri-test-b","SYNC_USER1=alice:pw","SYNC_USER3=meguri-c:x:y","SYNC_USER4=meguri-d:meguri-test-d","SYNC_USER6=late:pw","SYNC_HOST=0.0.0.0"]'
+  printf 'SYNC_USER1=alice:pw\n' >"$SB/docker/syncserver.env"
+  mg sync-rig status
+  [ "$(field -c .details.users)" = '["alice","meguri-b","meguri-c","meguri-d"]' ]
+  [ "$(field .details.endpoints.syncserver)" = "http://127.0.0.1:40080/" ]
+  [ "$(field .details.endpoints.toxiproxy_api)" = "http://127.0.0.1:40474/" ]
+  [ "$(field '[.failures[].id] | index("published-beyond-loopback")')" = null ]
+  [ "$(grep -c -- ' rm ' "$BATS_TEST_TMPDIR/docker-calls")" -eq 0 ]
   validate "$result"
 }

@@ -17,6 +17,7 @@ mkdir -p "$1"
 SB="$(cd "$1" && pwd -P)"
 MG="$SB/tools/mg"
 RESULTS=""
+RIG_IMAGE="" # the stand-in oracle image t_sync_rig_* builds
 # Same naming rule as mg_compose_project in tools/mg; t_dev_image checks they agree.
 PROJECT="meguri-$(basename "$SB" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')-$(printf '%s' "$SB" | cksum | cut -d' ' -f1)"
 
@@ -55,6 +56,8 @@ remove_project_containers() {
 cleanup() {
   remove_project_containers
   sbcompose down >/dev/null 2>&1
+  sbcompose --profile sync-rig --profile spec-record down >/dev/null 2>&1
+  [ -z "$RIG_IMAGE" ] || docker image rm -f "$RIG_IMAGE" >/dev/null 2>&1
   docker image rm -f "$PROJECT-dev" "$PROJECT-fuzz" "$PROJECT-similarity" >/dev/null 2>&1
   rm -rf "$SB-wt"
   docker volume rm -f "${PROJECT}_cargo-target" >/dev/null 2>&1
@@ -473,6 +476,72 @@ t_similarity_nightly_runs_jplag() {
     expect "report" "$([ -f "$(field '.artifacts[] | select(.kind == "jplag-report") | .path')" ] && echo yes || echo no)" yes
 }
 
+# The sandbox has no oracle/, so sync-rig builds a stand-in oracle image: the
+# dev image plus a stand-in for Anki's sync server that answers every request.
+# Everything else is the real rig: compose, networks, toxiproxy, sync-edge.
+standin_oracle_tree() {
+  local o="$SB/oracle"
+  mkdir -p "$o/driver/anki"
+  printf 'FROM %s-dev\nRUN ln -sf /usr/bin/python3 /usr/local/bin/python\nCOPY driver /opt/driver\nENV PYTHONPATH=/opt/driver\n' \
+    "$PROJECT" >"$o/Dockerfile"
+  printf '*\n!driver\n' >"$o/Dockerfile.dockerignore"
+  printf 'anki==0.0.0.selftest\n' >"$o/requirements.lock"
+  : >"$o/entrypoint.sh"
+  : >"$o/driver/anki/__init__.py"
+  # The project name makes the image tag this sandbox's own.
+  printf '%s\n' "$PROJECT" >"$o/driver/sandbox.txt"
+  cat >"$o/driver/anki/syncserver.py" <<'PY'
+import http.server
+import os
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(404)
+        self.end_headers()
+
+
+http.server.ThreadingHTTPServer((os.environ["SYNC_HOST"], int(os.environ["SYNC_PORT"])), Handler).serve_forever()
+PY
+}
+
+# tools/mg sync-rig up: only sync-edge publishes, every port on 127.0.0.1;
+# nothing answers on the Mac's LAN address; the server and toxiproxy are only
+# on internal networks; the users are those the server was started with
+# (docker/syncserver.env overrides one). down removes the rig.
+t_sync_rig_publishes_on_loopback_only_and_down_removes_it() {
+  local ps nets lan
+  docker image inspect "$PROJECT-dev" >/dev/null 2>&1 || mg dev-image
+  standin_oracle_tree
+  printf 'SYNC_USER1=alice:pw\n' >"$SB/docker/syncserver.env"
+  mg sync-rig up
+  RIG_IMAGE="$(field -r '.details.image.tag // empty')"
+  jq -c '{status, message, failures: [.failures[].id], probes: .details.probes}' "$RESULT"
+  expect "up exit" "$RC" 0 &&
+    expect "up status" "$(field .status)" pass &&
+    expect "endpoints on 127.0.0.1" \
+      "$(field '[.details.endpoints[] | select(. != null) | startswith("http://127.0.0.1:")] | (length == 3 and all)')" true &&
+    expect "users" "$(field -c .details.users)" '["alice","meguri-b","meguri-c","meguri-d"]' || return 1
+  lan="$(field -r '.details.probes.lan_address // empty')"
+  if [ -n "$lan" ]; then
+    expect "every endpoint refused on the LAN address $lan" \
+      "$(field '[.details.probes.endpoints[].lan_curl_exit | IN(7, 28)] | (length == 3 and all)')" true || return 1
+  fi
+  ps="$(sbcompose --profile sync-rig ps --format json)" || return 1
+  expect "published ports (service host:port)" \
+    "$(jq -rs '[.[] | (if type == "array" then .[] else . end) | .Service as $s | (.Publishers // [])[]
+      | select(.PublishedPort > 0) | "\($s) \(.URL)"] | unique | join(",")' <<<"$ps")" "sync-edge 127.0.0.1" || return 1
+  nets="$(for c in $(sbcompose --profile sync-rig ps -q syncserver toxiproxy); do
+    docker inspect --format '{{range $n, $_ := .NetworkSettings.Networks}}{{println $n}}{{end}}' "$c"
+  done | sort -u | grep . | xargs docker network inspect --format '{{.Name}} {{.Internal}}')"
+  expect "networks of syncserver and toxiproxy" "$nets" "${PROJECT}_sync-rig true" || return 1
+  mg sync-rig down
+  expect "down exit" "$RC" 0 &&
+    expect "down status" "$(field .status)" pass &&
+    expect "rig containers left" "$(sbcompose --profile sync-rig --profile spec-record ps -aq | wc -l | tr -d ' ')" 0 &&
+    expect "rig networks left" "$(docker network ls -q --filter "name=^${PROJECT}_sync-rig" | wc -l | tr -d ' ')" 0
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -485,7 +554,8 @@ t_dev_containers_share_the_cargo_package_cache_lock
 t_every_compose_service_runs_an_init_process t_dev_image_rebuild_reuses_layers
 t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_hook_on_macos
 t_parallel_session_records_on_macos t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
-t_similarity_nightly_runs_jplag t_results_validate_against_schema"
+t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_removes_it
+t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then
