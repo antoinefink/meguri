@@ -4,14 +4,14 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 
 ## Session
 
-- Work only in a worktree made by `tools/mg worktree new --role implementer <name>` (or `--role fixer`). It has no `oracle/`, and `.claude/settings.local.json` holds the implementer deny profile. Its session id is in `$(git rev-parse --absolute-git-dir)/meguri-session.json` and in `docs/process/provenance/sessions.jsonl`.
+- Work only in a worktree made by `tools/mg worktree new --role implementer <name>` (or `--role fixer`). It has no `oracle/`, and `.claude/settings.local.json` holds the implementer deny profile. Its session id is in `$(git rev-parse --absolute-git-dir)/meguri-session.json` and in the last line of `docs/process/provenance/sessions.jsonl`, which the branch's first commit added.
 - `refs/` and `local-data/` are never in a worktree. Do not reach the main checkout's copies by absolute path.
 
 ## You may read
 
 - `specs/`, `conformance/` (schema, scenarios, goldens, fixtures, catalog), the plan and its research dossiers under `docs/plans/` (not the private research notes in `local-data/research/`).
 - Oracle outputs, by running the oracle as a black box through `tools/mg` jobs.
-- fsrs-rs source. Some fsrs-rs files carry text that came from Anki (its revlog converter tests, simulator types and a benchmark header). Depend on the crate; never copy from fsrs-rs either.
+- fsrs-rs source, on docs.rs (source view) or from its crate on static.crates.io; GitHub is denied to implementer sessions. Some fsrs-rs files carry text that came from Anki (its revlog converter tests, simulator types and a benchmark header). Depend on the crate; never copy from fsrs-rs either.
 - Meguri's own code and docs.
 
 ## You never read
@@ -32,10 +32,12 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 
 ## Commits
 
-Commits touching `core/`, `app/` or `conformance/runner/` carry these trailers; the commit-msg hook rejects them otherwise (`docs/process/provenance.md`):
+Commits touching `core/`, `app/` or `conformance/runner/` carry these trailers; the commit-msg hook, which `tools/mg worktree new` installs, rejects them otherwise (`docs/process/provenance.md`):
 
 ```
 Role: implementer
 Spec: search/grammar#G3, search/grammar#G4
 Session: s-20261013T091500Z-1a2b3c4d
 ```
+
+UI work that no spec covers cites Product Contract requirement ids instead: `Spec: R1987, R150`.

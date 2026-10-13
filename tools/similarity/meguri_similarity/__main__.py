@@ -1,7 +1,8 @@
 """Command line: python3 -m meguri_similarity {index,scan,jplag} ...
 
 Exit codes: 0 pass (or warn), 1 fail (a file is flagged), 2 error.
-Logs go to stderr; stdout carries one JSON summary line.
+Logs go to stderr; stdout carries one JSON summary line. `scan` also writes
+<out>/summary.json, with the reason when it fails with an error.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from . import report
 from .config import ConfigError, load_allowlist, load_config, load_vocab
 from .corpus import CorpusError, open_or_build, plan_corpus
 from .lexer import KEYWORDS, Lexer
-from .scan import Scanner, read_text
+from .scan import Scanner, read_list, read_text
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -66,11 +67,6 @@ def cmd_index(args):
     return 0
 
 
-def _read_list(path):
-    with open(path, encoding="utf-8") as f:
-        return [line.rstrip("\n") for line in f if line.strip()]
-
-
 def cmd_scan(args):
     t_start = time.monotonic()
     cfg, stop, mask, index, corpus = _prepare(args)
@@ -80,20 +76,22 @@ def cmd_scan(args):
     scanner = Scanner(cfg, index, lexer, allow)
     paths = list(args.paths)
     if args.files_from:
-        paths += _read_list(args.files_from)
-    files, skipped, missing = [], 0, 0
+        paths += read_list(args.files_from, args.null)
+    files, skipped, missing = [], 0, []
     for path in sorted(set(paths)):
         if not scanner.in_scope(path):
             skipped += 1
             continue
         if not os.path.isfile(os.path.join(args.root, path)):
-            missing += 1
+            # Listed for the scan but not there: a caller bug (or a race) that
+            # must not pass silently.
+            missing.append(path)
             continue
         files.append(scanner.scan_file(path, read_text(args.root, path)))
     scan_seconds = time.monotonic() - t_scan
     flagged = [f for f in files if f.status == "flagged"]
     errors = [f for f in files if f.status == "error"]
-    status = "error" if errors else "fail" if flagged else "pass"
+    status = "error" if errors else "fail" if flagged else "warn" if missing else "pass"
     summary = {
         "status": status,
         "counts": {
@@ -103,7 +101,7 @@ def cmd_scan(args):
             "clean": sum(1 for f in files if f.status == "clean"),
             "errors": len(errors),
             "skipped": skipped,
-            "missing": missing,
+            "missing": len(missing),
         },
         "thresholds": cfg["channels"],
         "timing": {"scan_seconds": round(scan_seconds, 3), "total_seconds": round(time.monotonic() - t_start, 3)},
@@ -123,11 +121,12 @@ def cmd_scan(args):
         if c.flagged
     ]
     summary["errors"] = [f.error for f in errors]
+    summary["missing"] = missing
     summary["reports"] = paths_out
     with open(os.path.join(args.out, "summary.json"), "w") as f:
         json.dump(summary, f, indent=1)
     print(json.dumps({"status": status, "summary": os.path.join(args.out, "summary.json")}))
-    return {"pass": 0, "fail": 1}.get(status, 2)
+    return {"pass": 0, "warn": 0, "fail": 1}.get(status, 2)
 
 
 def cmd_jplag(args):
@@ -147,6 +146,7 @@ def main(argv=None):
     p.add_argument("--root", required=True, help="Meguri tree the paths are relative to")
     p.add_argument("--allowlist", default=os.path.join(HERE, "allowlist.yaml"))
     p.add_argument("--files-from", help="file listing paths to scan, one per line")
+    p.add_argument("--null", action="store_true", help="paths in --files-from are NUL-terminated")
     p.add_argument("--out", required=True, help="report directory")
     p.add_argument("paths", nargs="*")
     p.set_defaults(func=cmd_scan)
@@ -155,6 +155,7 @@ def main(argv=None):
     p.add_argument("--config", default=os.path.join(HERE, "config.yaml"))
     p.add_argument("--root", required=True)
     p.add_argument("--files-from", required=True)
+    p.add_argument("--null", action="store_true", help="paths in --files-from are NUL-terminated")
     p.add_argument("--out", required=True)
     p.add_argument("--jar", default=os.environ.get("JPLAG_JAR", "/opt/jplag/jplag.jar"))
     p.set_defaults(func=cmd_jplag)
@@ -163,7 +164,12 @@ def main(argv=None):
         return args.func(args)
     except (ConfigError, CorpusError) as e:
         log(f"similarity: {e}")
-        print(json.dumps({"status": "error", "error": str(e)}))
+        result = {"status": "error", "error": str(e)}
+        if args.cmd == "scan":
+            os.makedirs(args.out, exist_ok=True)
+            with open(os.path.join(args.out, "summary.json"), "w") as f:
+                json.dump(result, f)
+        print(json.dumps(result))
         return 2
 
 

@@ -63,9 +63,71 @@ mg__similarity_run() {
     -v "$refs:/refs:ro" similarity "$@" </dev/null
 }
 
+# File lists are NUL-separated end to end (git -z, scanner --null): git
+# quotes names with non-ASCII, tab or newline characters otherwise, and the
+# scanner would skip them.
+
 # Files a full scan considers: tracked plus untracked, not ignored.
 mg__similarity_all_files() {
-  git -C "$1" ls-files -z --cached --others --exclude-standard | tr '\0' '\n'
+  git -C "$1" ls-files -z --cached --others --exclude-standard
+}
+
+# Directories the scanner never scans: the `<dir>/**` entries of scan.exclude
+# in tools/similarity/config.yaml (keep that a flat list of quoted globs, one
+# per line), always including oracle/. One per line, with a trailing slash.
+mg__similarity_excluded_dirs() {
+  echo oracle/
+  awk '
+    /^[^ #]/ { scan = ($0 ~ /^scan:/); ex = 0; next }
+    scan && /^  [A-Za-z_]+:/ { ex = ($0 ~ /^  exclude:/); next }
+    scan && ex && /^    - / {
+      v = $0; sub(/^    - */, "", v); sub(/[ \t]+#.*$/, "", v); gsub(/["\047]/, "", v)
+      if (v ~ /\/\*\*$/) print substr(v, 1, length(v) - 2)
+    }' "$MG_ROOT/tools/similarity/config.yaml"
+}
+
+# mg__similarity_materialize <rev> <NUL list> <dir> [check]: checks out, under
+# <dir>, the listed files of <rev> outside the excluded directories (so oracle/
+# never lands in build/), plus its interop vocabulary. With `check`, listed
+# paths that <rev> lacks are left out (given paths; checkout-index would fail
+# on them). Uses a private index, so the checkout's own index and files stay
+# untouched. Returns 1 after recording an error.
+mg__similarity_materialize() {
+  local rev="$1" list="$2" dir="$3" check="${4:-}" index="$MG_RUN_DIR/rev-index" p d skip
+  local excluded=()
+  while IFS= read -r d; do
+    [ -n "$d" ] && excluded[${#excluded[@]}]="$d"
+  done <<EOF
+$(mg__similarity_excluded_dirs)
+EOF
+  rm -f "$index"
+  if ! GIT_INDEX_FILE="$index" git -C "$MG_ROOT" read-tree "$rev"; then
+    rm -f "$index"
+    mg_failure bad-rev "git read-tree $rev failed"
+    mg_status error
+    return 1
+  fi
+  mkdir -p "$dir"
+  {
+    while IFS= read -r -d '' p; do
+      skip=""
+      for d in "${excluded[@]}"; do
+        case "$p" in "$d"*) skip=yes; break ;; esac
+      done
+      [ -z "$skip" ] || continue
+      [ -z "$check" ] || git -C "$MG_ROOT" cat-file -e "$rev:$p" 2>/dev/null || continue
+      printf '%s\0' "$p"
+    done <"$list"
+    GIT_INDEX_FILE="$index" git -C "$MG_ROOT" ls-files -z -- 'specs/*/interop-vocab.txt'
+  } | GIT_INDEX_FILE="$index" git -C "$MG_ROOT" checkout-index -z --stdin --prefix="$dir/"
+  local rc=$?
+  rm -f "$index"
+  if [ "$rc" -ne 0 ]; then
+    rm -rf "$dir"
+    mg_failure materialize "checking out the files of $rev under the run directory failed; see log.txt"
+    mg_status error
+    return 1
+  fi
 }
 
 mg_similarity() {
@@ -90,8 +152,13 @@ mg_similarity() {
   refs="$(mg__similarity_corpus)"
   [ -n "$refs" ] || { mg__similarity_no_corpus; return 0; }
 
-  local list="$MG_RUN_DIR/files.txt" root_rel="." rel="${MG_RUN_DIR#"$MG_ROOT"/}"
+  local list="$MG_RUN_DIR/files.lst" root_rel="." rel="${MG_RUN_DIR#"$MG_ROOT"/}" tree="$MG_RUN_DIR/tree"
   : >"$list"
+  if [ -n "$base" ] && ! git -C "$MG_ROOT" rev-parse --verify -q "$base^{commit}" >/dev/null; then
+    mg_failure bad-base "'$base' is not a commit"
+    mg_status error
+    return 0
+  fi
   if [ -n "$rev" ]; then
     # Scan a commit's tree: materialize its files (and its interop vocabulary)
     # under the run directory.
@@ -101,41 +168,23 @@ mg_similarity() {
       return 0
     fi
     if [ "${#paths[@]}" -gt 0 ]; then
-      printf '%s\n' "${paths[@]}" >"$list"
+      printf '%s\0' "${paths[@]}" >"$list"
     elif [ -n "$base" ]; then
-      git -C "$MG_ROOT" diff --name-only --no-renames --diff-filter=d "$base" "$rev" >"$list" || {
+      git -C "$MG_ROOT" diff -z --name-only --no-renames --diff-filter=d "$base" "$rev" >"$list" || {
         mg_failure bad-base "git diff $base $rev failed"
         mg_status error
         return 0
       }
     else
-      git -C "$MG_ROOT" ls-tree -r --name-only "$rev" >"$list"
+      git -C "$MG_ROOT" ls-tree -r -z --name-only "$rev" >"$list"
     fi
-    # Through a private index, so the checkout's own index and files stay
-    # untouched; paths that do not exist at the commit are skipped.
-    local index="$MG_RUN_DIR/rev-index"
-    mkdir -p "$MG_RUN_DIR/tree"
-    GIT_INDEX_FILE="$index" git -C "$MG_ROOT" read-tree "$rev" || {
-      mg_failure bad-rev "git read-tree $rev failed"
-      mg_status error
-      return 0
-    }
-    GIT_INDEX_FILE="$index" git -C "$MG_ROOT" ls-files | grep -Fx -f "$list" |
-      { cat; GIT_INDEX_FILE="$index" git -C "$MG_ROOT" ls-files -- 'specs/*/interop-vocab.txt'; } |
-      sort -u | tr '\n' '\0' |
-      GIT_INDEX_FILE="$index" git -C "$MG_ROOT" checkout-index -z --stdin --prefix="$MG_RUN_DIR/tree/"
-    rm -f "$index"
+    mg__similarity_materialize "$rev" "$list" "$tree" ${paths[0]+check} || return 0
     root_rel="$rel/tree"
   elif [ "${#paths[@]}" -gt 0 ]; then
-    printf '%s\n' "${paths[@]}" >"$list"
+    printf '%s\0' "${paths[@]}" >"$list"
   elif [ -n "$base" ]; then
-    if ! git -C "$MG_ROOT" rev-parse --verify -q "$base^{commit}" >/dev/null; then
-      mg_failure bad-base "'$base' is not a commit"
-      mg_status error
-      return 0
-    fi
-    { git -C "$MG_ROOT" diff --name-only --no-renames --diff-filter=d "$base"; git -C "$MG_ROOT" ls-files --others --exclude-standard; } |
-      sort -u >"$list"
+    { git -C "$MG_ROOT" diff -z --name-only --no-renames --diff-filter=d "$base"; git -C "$MG_ROOT" ls-files -z --others --exclude-standard; } |
+      sort -zu >"$list"
   else
     mg__similarity_all_files "$MG_ROOT" >"$list"
   fi
@@ -144,8 +193,9 @@ mg_similarity() {
   mg__similarity_run "$refs" python3 -m meguri_similarity scan \
     --refs /refs --cache /work/build/similarity-index \
     --root "/work/$root_rel" --vocab-root "/work/$root_rel" \
-    --files-from "/work/$rel/files.txt" --out "/work/$rel/scan" $rebuild
+    --files-from "/work/$rel/files.lst" --null --out "/work/$rel/scan" $rebuild
   rc=$?
+  rm -rf "$tree"
   [ "$rc" -eq 125 ] && return 0
   mg__similarity_record "$out/summary.json" "$rc"
 }
@@ -158,8 +208,15 @@ mg__similarity_record() {
     mg_status error
     return 0
   fi
-  local dir
+  local dir error
   dir="$(dirname "$summary")"
+  error="$(jq -r '.error // empty' "$summary")"
+  if [ -n "$error" ]; then
+    mg_failure similarity:error "$error"
+    mg_message "similarity: $error"
+    mg_status error
+    return 0
+  fi
   mg_artifact similarity-implementer "$dir/implementer.md" "implementer view"
   mg_artifact similarity-implementer-json "$dir/implementer.json"
   mg_artifact similarity-reviewer "$dir/reviewer.md" "reviewer view (names Anki paths; human review only)"
@@ -177,12 +234,14 @@ mg__similarity_record() {
       message: (.path + " lines " + ([.regions[] | "\(.[0])-\(.[1])"] | join(", ")) + ": " + (.reasons | join("; ")) + "; rewrite this region from the spec"),
       repro: ("tools/mg similarity -- " + (.path | @sh))}' "$summary" >>"$MG_STATE/failures.jsonl"
   jq -c '.errors[] | {id: "similarity:error", message: ., repro: "tools/mg similarity"}' "$summary" >>"$MG_STATE/failures.jsonl"
-  local status note
+  jq -c '(.missing // [])[] | {id: "similarity:missing",
+      message: (. + ": listed for the scan but not in the scanned tree; it was not checked"),
+      repro: ("tools/mg similarity -- " + (. | @sh))}' "$summary" >>"$MG_STATE/failures.jsonl"
+  local status
   status="$(jq -r '.status' "$summary")"
-  note="$(jq -r '.corpus | if (.missing_boundary_tags | length) > 0 then "; corpus lacks tags " + (.missing_boundary_tags | join(", ")) else "" end' "$summary")"
-  mg_message "$(jq -r '"similarity: \(.counts.scanned) files scanned, \(.counts.flagged) flagged, \(.counts.allowlisted) allowlisted; corpus \(.corpus.tags) tags \(.corpus.first_tag)..\(.corpus.last_tag)"' "$summary")$note"
+  mg_message "$(jq -r '"similarity: \(.counts.scanned) files scanned, \(.counts.flagged) flagged, \(.counts.allowlisted) allowlisted" + (if .counts.missing > 0 then ", \(.counts.missing) listed but missing" else "" end) + "; corpus \(.corpus.tags) tags \(.corpus.first_tag)..\(.corpus.last_tag)"' "$summary")"
   case "$status" in
-    pass | fail | error) mg_status "$status" ;;
+    pass | warn | fail | error) mg_status "$status" ;;
     *) mg_status error ;;
   esac
 }
@@ -192,9 +251,9 @@ mg_similarity_nightly() {
   mg__similarity_guard || return 0
   refs="$(mg__similarity_corpus)"
   [ -n "$refs" ] || { mg__similarity_no_corpus; return 0; }
-  mg__similarity_all_files "$MG_ROOT" >"$MG_RUN_DIR/files.txt"
+  mg__similarity_all_files "$MG_ROOT" >"$MG_RUN_DIR/files.lst"
   mg__similarity_run "$refs" python3 -m meguri_similarity jplag \
-    --refs /refs --root /work --files-from "/work/$rel/files.txt" --out "/work/$rel/jplag"
+    --refs /refs --root /work --files-from "/work/$rel/files.lst" --null --out "/work/$rel/jplag"
   rc=$?
   [ "$rc" -eq 125 ] && return 0
   local summary="$MG_RUN_DIR/jplag/jplag-summary.json"

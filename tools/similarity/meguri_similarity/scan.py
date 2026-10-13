@@ -214,3 +214,13 @@ def read_text(root, path):
     full = os.path.join(root, path)
     with open(full, "rb") as f:
         return f.read().decode("utf-8", "replace")
+
+
+def read_list(path, null=False):
+    """Paths listed one per line, or NUL-terminated with `null` (names may hold
+    newlines, tabs or any other character but NUL)."""
+    if null:
+        with open(path, "rb") as f:
+            return [p.decode("utf-8", "replace") for p in f.read().split(b"\0") if p]
+    with open(path, encoding="utf-8") as f:
+        return [line.rstrip("\n") for line in f if line.strip()]

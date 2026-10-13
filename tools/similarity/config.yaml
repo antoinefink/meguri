@@ -6,8 +6,11 @@ version: 1
 corpus:
   # Relative to the refs directory (refs/ of the main checkout).
   anki_repo: anki
-  # Every release tag in this range (inclusive). Pre-release tags are ignored.
-  tags: {min: "2.1.50", max: "26.09.3"}
+  # The pinned corpus: every release tag from min to max (inclusive), `count` of
+  # them (the 2026-10-13 calibration corpus). Pre-release tags are ignored. A
+  # corpus with other tags is an error, not a pass: missing releases would
+  # leave changes unchecked against them (R1957).
+  tags: {min: "2.1.50", max: "26.09.3", count: 54}
   # .scss is added to the plan's list so Meguri CSS is also compared with
   # Anki's stylesheet sources.
   extensions: [.rs, .py, .ts, .svelte, .js, .css, .scss, .html, .sql, .proto, .ftl]

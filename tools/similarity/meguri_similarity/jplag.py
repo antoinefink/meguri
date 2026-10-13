@@ -16,6 +16,7 @@ import tempfile
 
 from .config import glob_match, load_config
 from .corpus import _RELEASE_TAG, version_tuple
+from .scan import read_list
 
 
 def _tags(anki, cfg):
@@ -53,8 +54,7 @@ def main(args, log):
     jcfg = cfg["jplag"]
     anki = os.path.join(args.refs, cfg["corpus"]["anki_repo"])
     tags, missing = _tags(anki, cfg)
-    with open(args.files_from, encoding="utf-8") as f:
-        files = [l.strip() for l in f if l.strip()]
+    files = read_list(args.files_from, args.null)
     files = [p for p in files if not any(glob_match(p, g) for g in cfg["scan"].get("exclude") or [])]
     os.makedirs(args.out, exist_ok=True)
     summary = {"status": "pass", "tags": tags, "missing_tags": missing, "languages": {}}

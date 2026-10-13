@@ -4,8 +4,10 @@
 # agent session. Implementer and fixer worktrees are sparse: oracle/ is never
 # on disk, and .claude/settings.implementer.json is rendered into the
 # worktree's .claude/settings.local.json as its deny profile. refs/ and
-# local-data/ are untracked, so no worktree has them. Each worktree gets a
-# session record (session.sh).
+# local-data/ are untracked, so no worktree has them. Each worktree gets the
+# commit-msg hook (hooks.sh) and a session record, committed as its branch's
+# first commit (session.sh). A worktree whose record or role marker cannot be
+# written is removed again.
 
 mg_job worktree host mg_worktree \
   "Role worktrees (KTD1): tools/mg worktree new --role <role> <name> [--base <ref>] [--branch <branch>] [--path <dir>]"
@@ -56,14 +58,11 @@ mg_worktree() {
         ;;
     esac
   done
-  case " $MG_WORKTREE_ROLES " in
-    *" $role "*) [ -n "$role" ] ;;
-    *) false ;;
-  esac || {
+  if ! mg_word_in "$role" "$MG_WORKTREE_ROLES"; then
     mg_failure bad-role "--role must be one of: $MG_WORKTREE_ROLES (critic sessions use a packet, U10)"
     mg_status error
     return 0
-  }
+  fi
   if ! printf '%s' "$name" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$'; then
     mg_failure bad-name "worktree name '$name' must match [A-Za-z0-9][A-Za-z0-9._-]*"
     mg_status error
@@ -147,9 +146,9 @@ EOF
       return 0
     fi
     mkdir -p "$path/.claude"
-    # Deny rules name absolute paths: the main checkout and the directory that
-    # holds the worktrees.
-    sed -e "s|@MAIN_CHECKOUT@|$main|g" -e "s|@WORKTREES@|$(dirname "$path")|g" \
+    # Deny rules name absolute paths: the main checkout, the directory that
+    # holds the worktrees and this worktree (its hook scripts).
+    sed -e "s|@MAIN_CHECKOUT@|$main|g" -e "s|@WORKTREES@|$(dirname "$path")|g" -e "s|@WORKTREE@|$path|g" \
       "$path/$profile" >"$path/.claude/settings.local.json"
     if ! jq -e '.permissions.deny | length > 0' "$path/.claude/settings.local.json" >/dev/null; then
       mg__worktree_abort "$path" "$branch" "$new_branch" bad-profile "$profile did not render to a settings file with deny rules"
@@ -160,18 +159,42 @@ EOF
     profile_json="$(jq -nc --arg p "$profile" --arg s "$profile_sha" '{source: $p, installed: ".claude/settings.local.json", sha256: $s}')"
   fi
 
-  local id record
+  # The provenance-trailer hook, for every role. A foreign hook or
+  # core.hooksPath blocks it: the worktree is still made, with a warning.
+  local hook_ok=true
+  if ! mg_hooks_install; then
+    hook_ok=false
+    mg_failure "$MG_HOOKS_FAILURE" "$MG_HOOKS_MESSAGE; until it is fixed, commits are not checked for provenance trailers" "tools/mg hooks install"
+  fi
+
+  local id record git_dir
   id="$(mg_session_new_id)"
   record="$(mg_session_record_json "$id" "$role" worktree "$name" "$base_sha" \
     "$(jq -nc --arg branch "$branch" --arg path "$path" --argjson sparse "$sparse_json" \
       --argjson excluded "$excluded_json" --argjson profile "$profile_json" \
       '{branch: $branch, worktree: $path, sparse: $sparse, excluded_paths: $excluded, deny_profile: $profile}')")"
-  jq . <<<"$record" >"$(git -C "$path" rev-parse --absolute-git-dir)/meguri-session.json"
-  mg_session_append "$record"
+  git_dir="$(git -C "$path" rev-parse --absolute-git-dir)" &&
+    jq . <<<"$record" >"$git_dir/meguri-session.json" || {
+    mg__worktree_abort "$path" "$branch" "$new_branch" session-marker "could not write the worktree's role marker (meguri-session.json); see log.txt"
+    return 0
+  }
+  if ! mg_session_append "$path" "$record"; then
+    mg__worktree_abort "$path" "$branch" "$new_branch" session-ledger "could not append the session record to $MG_SESSIONS_FILE at $base; see log.txt"
+    return 0
+  fi
+  if ! mg_session_commit "$path" "$record"; then
+    mg__worktree_abort "$path" "$branch" "$new_branch" session-commit "could not commit the session record on $branch; see log.txt"
+    return 0
+  fi
   mg_detail session "$record"
   mg_detail worktree "$(jq -nc --arg p "$path" --arg b "$branch" '{path: $p, branch: $b}')"
-  mg_message "worktree $name at $path (role $role, branch $branch, session $id)"
-  mg_status pass
+  if [ "$hook_ok" = true ]; then
+    mg_message "worktree $name at $path (role $role, branch $branch, session $id)"
+    mg_status pass
+  else
+    mg_message "worktree $name at $path (role $role, branch $branch, session $id); the commit-msg hook is not installed: $MG_HOOKS_MESSAGE"
+    mg_status warn
+  fi
 }
 
 # mg__worktree_abort <path> <branch> <created branch?> <failure id> <message>

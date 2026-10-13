@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,20 @@ def make_corpus(root, tags):
     return root
 
 
+def synthetic_config(base, lo, hi, count):
+    """The scanner config with its pinned corpus (corpus.tags) set to a
+    synthetic corpus's release tags; returns its path."""
+    import yaml
+
+    with open(CONFIG) as f:
+        cfg = yaml.safe_load(f)
+    cfg["corpus"]["tags"] = {"min": lo, "max": hi, "count": count}
+    path = os.path.join(base, f"config-{lo}-{hi}-{count}.yaml")
+    with open(path, "w") as f:
+        yaml.safe_dump(cfg, f)
+    return path
+
+
 def write_tree(root, files):
     for path, content in files.items():
         full = os.path.join(root, path)
@@ -51,6 +66,11 @@ def write_tree(root, files):
         with open(full, "w") as f:
             f.write(content)
     return root
+
+
+def read_json(path):
+    with open(path) as f:
+        return json.load(f)
 
 
 def run_cli(*args):
@@ -65,6 +85,7 @@ def run_cli(*args):
 
 
 def scan(refs, cache, root, paths, out, allowlist=None, config=CONFIG, vocab_root=None, extra=()):
+    shutil.rmtree(out, ignore_errors=True)  # never read a previous scan's reports
     args = ["scan", "--refs", refs, "--cache", cache, "--root", root, "--out", out, "--config", config]
     args += ["--allowlist", allowlist or os.path.join(FIXTURES, "empty-allowlist.yaml")]
     if vocab_root:

@@ -43,6 +43,21 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 
 lines_of() { if [ -f "$1" ]; then wc -l <"$1" | tr -d ' '; else echo 0; fi; }
 
+# The session ledger of a checkout.
+ledger() { printf '%s\n' "$1/docs/process/provenance/sessions.jsonl"; }
+
+# trailer <checkout> <key> [rev]: the trailer's value in a commit message.
+trailer() { git -C "$1" log -1 --format="%(trailers:key=$2,valueonly)" "${3:-HEAD}" | sed '/^$/d'; }
+
+# No worktree, no unit branch, no session record, a clean main checkout.
+nothing_created() {
+  [ ! -e "$BATS_TEST_TMPDIR/repo-wt/$1" ]
+  [ -z "$(git -C "$SB" branch --list "unit/$1")" ]
+  [ "$(git -C "$SB" worktree list | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(lines_of "$SESSIONS")" -eq "${2:-0}" ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+}
+
 # commit_with <message> [paths to create and stage...]
 commit_with() {
   local msg="$1" p
@@ -55,7 +70,7 @@ commit_with() {
   run --separate-stderr git -C "$WT" commit -q -F - <<<"$msg"
 }
 
-@test "worktree new --role implementer: no oracle/, the deny profile, one session record" {
+@test "worktree new --role implementer: no oracle/, the deny profile, one session record committed on the branch" {
   local before head wt marker
   before="$(lines_of "$SESSIONS")"
   head="$(git -C "$SB" rev-parse HEAD)"
@@ -77,15 +92,31 @@ commit_with() {
   local main
   main="$(cd "$SB" && pwd -P)"
   [ -f "$wt/.claude/settings.local.json" ]
-  run ! grep -q '@MAIN_CHECKOUT@\|@WORKTREES@' "$wt/.claude/settings.local.json"
+  run ! grep -q '@[A-Z_]*@' "$wt/.claude/settings.local.json"
   jq -e --arg p "Read(/$main/refs/**)" '.permissions.deny | index($p)' "$wt/.claude/settings.local.json"
   jq -e --arg p "Read(/$main/oracle/**)" '.permissions.deny | index($p)' "$wt/.claude/settings.local.json"
   jq -e --arg p "Read(/$main/local-data/**)" '.permissions.deny | index($p)' "$wt/.claude/settings.local.json"
+  jq -e --arg p "Bash(*$main/oracle*)" '.permissions.deny | index($p)' "$wt/.claude/settings.local.json"
+  jq -e --arg p "Bash(*$(dirname "$wt")/*/oracle/*)" '.permissions.deny | index($p)' "$wt/.claude/settings.local.json"
+  # The WebFetch hook runs the worktree's own copy of the script.
+  local hook
+  hook="$(jq -r '.hooks.PreToolUse[] | select(.matcher == "WebFetch") | .hooks[0].command' "$wt/.claude/settings.local.json")"
+  [ "$hook" = "\"$wt/tools/hooks/deny-quarantined-fetch\"" ]
+  [ -x "$wt/tools/hooks/deny-quarantined-fetch" ]
+
+  # The record is committed as the branch's first commit, in the worktree's
+  # own ledger; the main checkout's ledger and status are untouched.
+  [ "$(lines_of "$SESSIONS")" -eq "$before" ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+  [ "$(git -C "$wt" rev-parse HEAD~1)" = "$head" ]
+  [ "$(git -C "$wt" diff --name-only HEAD~1 HEAD)" = docs/process/provenance/sessions.jsonl ]
+  [ "$(lines_of "$(ledger "$wt")")" -eq $((before + 1)) ]
+  local rec sum
+  rec="$(git -C "$wt" show HEAD:docs/process/provenance/sessions.jsonl | tail -n 1)"
+  [ "$(trailer "$wt" Role)" = infra ]
+  [ "$(trailer "$wt" Session)" = "$(jq -r .session <<<"$rec")" ]
 
   # One record, role implementer, linked to the profile and the role doc.
-  [ "$(lines_of "$SESSIONS")" -eq $((before + 1)) ]
-  local rec sum
-  rec="$(tail -n 1 "$SESSIONS")"
   [ "$(jq -r .role <<<"$rec")" = implementer ]
   [ "$(jq -r .kind <<<"$rec")" = worktree ]
   [ "$(jq -r .name <<<"$rec")" = w1 ]
@@ -106,6 +137,22 @@ commit_with() {
   # The main checkout keeps oracle/ and no sparse checkout of its own.
   [ -f "$SB/oracle/driver/run.py" ]
   [ -z "$(git -C "$SB" config --get core.sparseCheckout || true)" ]
+
+  # The commit-msg hook is installed for every worktree.
+  grep -q 'tools/hooks/commit-msg' "$SB/.git/hooks/commit-msg"
+
+  # A record appended later on the branch merges into a main checkout that
+  # appended its own (union driver), and the merge is not blocked.
+  git -C "$SB" checkout -q -b integration
+  echo '{"session":"s-main"}' >>"$SESSIONS"
+  git -C "$SB" commit -qm "Main record" -m "Role: infra" -- "$SESSIONS"
+  echo '{"session":"s-later"}' >>"$(ledger "$wt")"
+  git -C "$wt" commit -qam "Later record" -m "Role: infra"
+  git -C "$SB" merge -q --no-edit unit/w1
+  grep -q '"s-main"' "$SESSIONS"
+  grep -q '"s-later"' "$SESSIONS"
+  grep -q "\"$(jq -r .session <<<"$rec")\"" "$SESSIONS"
+  [ -z "$(git -C "$SB" status --porcelain)" ]
 }
 
 @test "worktree new for a spec writer is a full checkout without a deny profile" {
@@ -116,8 +163,10 @@ commit_with() {
   [ ! -e "$wt/.claude/settings.local.json" ]
   [ "$(git -C "$wt" rev-parse --abbrev-ref HEAD)" = spec/s1 ]
   local rec
-  rec="$(tail -n 1 "$SESSIONS")"
+  rec="$(tail -n 1 "$(ledger "$wt")")"
   [ "$(jq -r .role <<<"$rec")" = spec-writer ]
+  [ -z "$(git -C "$wt" status --porcelain)" ]
+  [ -z "$(git -C "$SB" status --porcelain)" ]
   [ "$(jq -c .excluded_paths <<<"$rec")" = '[]' ]
   [ "$(jq -r .deny_profile <<<"$rec")" = null ]
 }
@@ -126,18 +175,30 @@ commit_with() {
   git -C "$SB" branch unit/again
   echo more >>"$SB/core/rust-toolchain.toml"
   git -C "$SB" commit -qam "move main ahead"
+  local tip
+  tip="$(git -C "$SB" rev-parse unit/again)"
   mg worktree new --role fixer again
   [ "$status" -eq 0 ]
-  [ "$(jq -r .base_commit <<<"$(tail -n 1 "$SESSIONS")")" = "$(git -C "$SB" rev-parse unit/again)" ]
-  [ ! -e "$BATS_TEST_TMPDIR/repo-wt/again/oracle" ]
+  local wt="$BATS_TEST_TMPDIR/repo-wt/again"
+  [ "$(jq -r .base_commit <<<"$(tail -n 1 "$(ledger "$wt")")")" = "$tip" ]
+  [ "$(git -C "$SB" rev-parse unit/again~1)" = "$tip" ]
+  [ ! -e "$wt/oracle" ]
 }
 
 @test "worktree new rejects a bad role, a bad name or an existing path, and records nothing" {
-  local before
+  local before role
   before="$(lines_of "$SESSIONS")"
   mg worktree new --role critic c1
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = bad-role ]
+  # Compound or padded values are not roles: each would skip the sparse
+  # checkout and the deny profile.
+  for role in "implementer fixer" "fixer spec-writer" " implementer" "implementer " ""; do
+    mg worktree new --role "$role" c2
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = bad-role ]
+    nothing_created c2 "$before"
+  done
   mg worktree new --role implementer "../escape"
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = bad-name ]
@@ -152,7 +213,7 @@ commit_with() {
   [ -z "$(git -C "$SB" branch --list 'unit/*')" ]
 }
 
-@test "session record appends a record for a session without a worktree" {
+@test "session record commits a record for a session without a worktree" {
   local before
   before="$(lines_of "$SESSIONS")"
   mg session record --role critic --name review-home --note "packet build/critic/1"
@@ -161,14 +222,88 @@ commit_with() {
   [ "$(lines_of "$SESSIONS")" -eq $((before + 1)) ]
   local rec
   rec="$(tail -n 1 "$SESSIONS")"
+  # Committed on the checkout's branch, that file only, with an infra role.
+  [ -z "$(git -C "$SB" status --porcelain)" ]
+  [ "$(git -C "$SB" diff --name-only HEAD~1 HEAD)" = docs/process/provenance/sessions.jsonl ]
+  [ "$(trailer "$SB" Role)" = infra ]
+  [ "$(trailer "$SB" Session)" = "$(jq -r .session <<<"$rec")" ]
   [ "$(jq -r .role <<<"$rec")" = critic ]
   [ "$(jq -r .kind <<<"$rec")" = session ]
   [ "$(jq -r .note <<<"$rec")" = "packet build/critic/1" ]
   [ "$(jq -r .role_doc_blob <<<"$rec")" = "$(git -C "$SB" rev-parse HEAD:docs/process/roles/critic.md)" ]
   [ "$(field .details.session.session)" = "$(jq -r .session <<<"$rec")" ]
-  mg session record --role wizard
+  local role head
+  head="$(git -C "$SB" rev-parse HEAD)"
+  for role in wizard "critic integrator" "implementer fixer" " critic"; do
+    mg session record --role "$role"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = bad-role ]
+  done
+  [ "$(lines_of "$SESSIONS")" -eq $((before + 1)) ]
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$head" ]
+}
+
+@test "session record keeps other staged changes out of its commit" {
+  mkdir -p "$SB/core/x"
+  echo "fn x() {}" >"$SB/core/x/lib.rs"
+  git -C "$SB" add core/x/lib.rs
+  mg session record --role spec-writer
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$SB" diff --name-only HEAD~1 HEAD)" = docs/process/provenance/sessions.jsonl ]
+  [ "$(git -C "$SB" diff --cached --name-only)" = core/x/lib.rs ]
+}
+
+@test "a ledger that cannot be written or committed is an error, and worktree new leaves nothing behind" {
+  local before
+  before="$(lines_of "$SESSIONS")"
+  # The ledger is a directory in the checkout: session record cannot append.
+  rm "$SESSIONS"
+  mkdir -p "$SESSIONS"
+  touch "$SESSIONS/x"
+  mg session record --role critic
   [ "$status" -eq 2 ]
-  [ "$(field '.failures[0].id')" = bad-role ]
+  [ "$(field '.failures[0].id')" = session-ledger ]
+  validate "$result"
+
+  # ... and at the base commit of a new worktree.
+  git -C "$SB" add -A
+  git -C "$SB" commit -qm "Break the ledger"
+  mg worktree new --role implementer w4
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-ledger ]
+  validate "$result"
+  [ ! -e "$BATS_TEST_TMPDIR/repo-wt/w4" ]
+  [ -z "$(git -C "$SB" branch --list unit/w4)" ]
+  [ "$(git -C "$SB" worktree list | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "worktree new removes the worktree when its record commit fails" {
+  printf '#!/bin/sh\necho "pre-commit: refused" >&2\nexit 1\n' >"$SB/.git/hooks/pre-commit"
+  chmod +x "$SB/.git/hooks/pre-commit"
+  mg worktree new --role implementer w5
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-commit ]
+  validate "$result"
+  nothing_created w5 "$(lines_of "$SESSIONS")"
+  # An existing branch keeps its tip.
+  git -C "$SB" branch unit/w6
+  local tip
+  tip="$(git -C "$SB" rev-parse unit/w6)"
+  mg worktree new --role implementer w6
+  [ "$status" -eq 2 ]
+  [ "$(git -C "$SB" rev-parse unit/w6)" = "$tip" ]
+  [ ! -e "$BATS_TEST_TMPDIR/repo-wt/w6" ]
+}
+
+@test "worktree new removes the worktree when its role marker cannot be written" {
+  # A post-checkout hook puts a directory where the marker goes.
+  printf '#!/bin/sh\nmkdir -p "$(git rev-parse --absolute-git-dir)/meguri-session.json"\n' >"$SB/.git/hooks/post-checkout"
+  chmod +x "$SB/.git/hooks/post-checkout"
+  mg worktree new --role implementer w7
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = session-marker ]
+  validate "$result"
+  nothing_created w7 "$(lines_of "$SESSIONS")"
 }
 
 @test "session records merge without conflicts when branches append" {
@@ -198,6 +333,50 @@ commit_with() {
   [ "$(field '.failures[0].id')" = hook-exists ]
 }
 
+@test "hooks install reports an error when the hook cannot be written or renamed" {
+  local hook="$SB/.git/hooks/commit-msg"
+  mkdir -p "$hook.tmp"
+  mg hooks install
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = hook-write ]
+  validate "$result"
+  [ ! -e "$hook" ]
+  rmdir "$hook.tmp"
+
+  # mv fails for the hook only.
+  local stubs="$BATS_TEST_TMPDIR/stubs"
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\nfor last; do :; done\ncase "$last" in */hooks/commit-msg) echo "mv: injected failure" >&2; exit 1 ;; esac\nexec %s "$@"\n' \
+    "$(command -v mv)" >"$stubs/mv"
+  chmod +x "$stubs/mv"
+  PATH="$stubs:$PATH" mg hooks install
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = hook-write ]
+  [ ! -e "$hook" ]
+
+  # worktree new still creates the worktree, but warns.
+  PATH="$stubs:$PATH" mg worktree new --role implementer w8
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field '.failures[0].id')" = hook-write ]
+  validate "$result"
+  [ -d "$BATS_TEST_TMPDIR/repo-wt/w8" ]
+}
+
+@test "worktree new installs the hook: a fresh implementer worktree rejects a core/ commit without Spec" {
+  mg worktree new --role implementer w9
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  WT="$BATS_TEST_TMPDIR/repo-wt/w9"
+  local id
+  id="$(jq -r .session "$(git -C "$WT" rev-parse --absolute-git-dir)/meguri-session.json")"
+  commit_with $'Add parser\n\nRole: implementer\nSession: '"$id" core/crates/meguri-search/src/parse.rs
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"need a Spec: trailer"* ]]
+  commit_with $'Add parser\n\nRole: implementer\nSpec: search/grammar#G1\nSession: '"$id" core/crates/meguri-search/src/parse.rs
+  [ "$status" -eq 0 ]
+}
+
 @test "commit-msg: implementer commits on core/ need Spec and Session; one-line reasons" {
   mg hooks install
   WT="$SB"
@@ -218,8 +397,21 @@ commit_with() {
   commit_with $'Add the grammar\n\nSpec: search/grammar#G3' core/crates/meguri-search/src/lib.rs
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"need a Role: trailer"* ]]
+  # Names git would quote are code paths too.
+  commit_with $'Add the grammar\n\nSpec: search/grammar#G3' $'core/crates/meguri-search/src/gr\303\244mmar.rs'
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"need a Role: trailer"* ]]
+  git -C "$SB" reset -q
 
   commit_with $'Add the grammar\n\nRole: implementor\nSpec: search/grammar#G3' core/crates/meguri-search/src/lib.rs
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"unknown Role"* ]]
+
+  # A compound value is not a role: it must not skip the Spec and Session checks.
+  commit_with $'Add the grammar\n\nRole: implementer fixer' core/crates/meguri-search/src/lib.rs
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"unknown Role: 'implementer fixer'"* ]]
+  commit_with $'Add the grammar\n\nRole: fixer spec-writer' core/crates/meguri-search/src/lib.rs
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"unknown Role"* ]]
 
@@ -243,6 +435,26 @@ commit_with() {
   [ "$status" -eq 0 ]
   commit_with $'Docs\n\nRole: wizard' docs/process/notes.md
   [ "$status" -ne 0 ]
+  commit_with $'Docs\n\nRole: infra critic' docs/process/notes.md
+  [ "$status" -ne 0 ]
+}
+
+@test "commit-msg: UI implementer commits may cite Product Contract requirement ids" {
+  mg hooks install
+  WT="$SB"
+  commit_with $'Add the deck list\n\nRole: implementer\nSpec: R1987, R150\nSession: s-20261013T000000Z-0a1b2c3d' app/Meguri/Decks/DeckList.swift
+  [ "$status" -eq 0 ]
+  commit_with $'Add the deck list\n\nRole: implementer\nSpec: R1987, search/grammar#G3\nSession: s-1x' app/Meguri/Decks/DeckList.swift
+  [ "$status" -eq 0 ]
+  local bad
+  for bad in R r150 R15a AE85 R-1; do
+    commit_with $'Add the deck list\n\nRole: implementer\nSpec: '"$bad"$'\nSession: s-1x' app/Meguri/Decks/DeckList.swift
+    [ "$status" -ne 0 ]
+    [[ "$stderr" == *"is not a spec id"* ]]
+  done
+  # Infra units (U5-U7) touch core/ and app/ with Role: infra and no Spec.
+  commit_with $'Add the workspace\n\nRole: infra' core/Cargo.toml
+  [ "$status" -eq 0 ]
 }
 
 @test "commit-msg: merge commits are not checked" {
@@ -312,7 +524,183 @@ commit_with() {
     'Bash(docker cp *)' \
     'Bash(*github.com/ankitects*)' \
     'Bash(*git.foosoft.net*)' \
+    'Bash(*@MAIN_CHECKOUT@/oracle*)' \
+    'Bash(*@WORKTREES@/*/oracle/*)' \
+    'Bash(*@WORKTREES@/*/oracle)' \
+    'Bash(*@MAIN_CHECKOUT@/refs*)' \
+    'Bash(*Application Support/Anki2*)' \
+    'Bash(*github.com/migaku*)' \
+    'Bash(*githubusercontent.com/migaku*)' \
+    'Read(/@MAIN_CHECKOUT@/build/mg/similarity/**/tree/**)' \
+    'WebFetch(domain:github.com)' \
+    'WebFetch(domain:raw.githubusercontent.com)' \
+    'WebFetch(domain:codeload.github.com)' \
     'WebFetch(domain:ankiweb.net)'; do
     jq -e --arg r "$rule" '.permissions.deny | index($r)' "$p" >/dev/null || { echo "missing deny rule $rule"; return 1; }
   done
+  jq -e '.hooks.PreToolUse[] | select(.matcher == "WebFetch") | .hooks[0].command == "\"@WORKTREE@/tools/hooks/deny-quarantined-fetch\""' "$p"
+}
+
+@test "the WebFetch hook blocks Anki, AnkiDroid, AnkiConnect and Migaku sources on any host" {
+  local hook="$SB/tools/hooks/deny-quarantined-fetch" url
+  for url in \
+    https://github.com/ankitects/anki/blob/main/rslib/src/lib.rs \
+    https://cdn.jsdelivr.net/gh/ankitects/anki@26.09.3/rslib/src/lib.rs \
+    https://sourcegraph.com/github.com/AnkiTects/anki \
+    https://github.com/ankidroid/Anki-Android \
+    https://git.foosoft.net/alex/anki-connect \
+    https://github.com/FooSoft/anki-connect/blob/master/plugin/__init__.py \
+    https://github.com/migaku-official/Migaku-Anki; do
+    run --separate-stderr "$hook" <<<"$(jq -nc --arg u "$url" '{tool_name: "WebFetch", tool_input: {url: $u, prompt: "read it"}}')"
+    [ "$status" -eq 2 ] || { echo "not blocked: $url"; return 1; }
+    [[ "$stderr" == *"implementer deny profile"* ]]
+  done
+  for url in https://docs.rs/fsrs/latest/fsrs/ https://static.crates.io/crates/fsrs/fsrs-6.6.2.crate https://developer.apple.com/documentation/swiftui; do
+    run "$hook" <<<"$(jq -nc --arg u "$url" '{tool_name: "WebFetch", tool_input: {url: $u, prompt: "how do I compare with ankitects?"}}')"
+    [ "$status" -eq 0 ] || { echo "blocked: $url"; return 1; }
+  done
+  # Input it cannot parse is matched as a whole (fails closed).
+  run "$hook" <<<'not json https://github.com/ankitects/anki'
+  [ "$status" -eq 2 ]
+}
+
+# make_docker_stub: a `docker` that stands in for the similarity service. It
+# records what the job hands the scanner (the NUL-separated file list, whether
+# --null was passed, the files under --root while the scan runs) in $STUB_OUT
+# and writes the summary a scan with $STUB_STATUS and $STUB_MISSING would, or
+# the error summary for $STUB_ERROR.
+make_docker_stub() {
+  local stubs="$BATS_TEST_TMPDIR/docker-stubs"
+  mkdir -p "$stubs"
+  export STUB_OUT="$BATS_TEST_TMPDIR/stub-out"
+  cat >"$stubs/docker" <<'STUB'
+#!/usr/bin/env bash
+case "$1 $*" in
+  "info "*) exit 0 ;;
+  compose*" build "*) exit 0 ;;
+  compose*" run "*) ;;
+  *) exit 97 ;;
+esac
+args=("$@") root="" files="" out="" null="" compose="" i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  case "${args[$i]}" in
+    -f) compose="${args[$((i + 1))]}" ;;
+    --root) root="${args[$((i + 1))]}" ;;
+    --files-from) files="${args[$((i + 1))]}" ;;
+    --out) out="${args[$((i + 1))]}" ;;
+    --null) null=yes ;;
+  esac
+  i=$((i + 1))
+done
+host="$(dirname "$(dirname "$compose")")"
+root="$host${root#/work}" files="$host${files#/work}" out="$host${out#/work}"
+rm -rf "$STUB_OUT"
+mkdir -p "$STUB_OUT" "$out"
+cp "$files" "$STUB_OUT/files.lst"
+echo "$null" >"$STUB_OUT/null"
+(cd "$root" && find . -type f -print0 | sed -z 's|^\./||') >"$STUB_OUT/tree.lst"
+if [ -n "${STUB_ERROR:-}" ]; then
+  jq -n --arg e "$STUB_ERROR" '{status: "error", error: $e}' >"$out/summary.json"
+  exit 2
+fi
+jq -n --arg st "${STUB_STATUS:-pass}" --argjson missing "${STUB_MISSING:-[]}" '{
+  status: $st, flags: [], errors: [], missing: $missing, timing: {}, corpus: {tags: 54, first_tag: "2.1.50", last_tag: "26.09.3"},
+  counts: {scanned: 1, clean: 1, allowlisted: 0, flagged: 0, errors: 0, skipped: 0, missing: ($missing | length)}}' >"$out/summary.json"
+STUB
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+}
+
+# same_paths <NUL list file> <path>...: the list holds exactly these paths.
+same_paths() {
+  local list="$1"
+  shift
+  cmp <(sort -z "$list") <(printf '%s\0' "$@" | sort -z)
+}
+
+AWKWARD=($'core/f\303\251.rs' $'core/tab\there.rs' $'core/new\nline.rs' 'core/plain.rs')
+
+# Tracked paths of a tree that git lists unquoted, without the plain AWKWARD one.
+plain_paths() { git -C "$SB" ls-tree -r --name-only "${1:-HEAD}" | grep -v '^"' | grep -vx core/plain.rs; }
+
+commit_awkward_names() {
+  local n
+  for n in "${AWKWARD[@]}"; do
+    mkdir -p "$SB/$(dirname "$n")"
+    echo "pub fn f() -> u8 { 1 }" >"$SB/$n"
+  done
+  mkdir -p "$SB/specs/storage"
+  echo cards >"$SB/specs/storage/interop-vocab.txt"
+  git -C "$SB" add -A
+  git -C "$SB" commit -qm "Awkward names"
+}
+
+@test "similarity --rev materializes no excluded path, oracle/ included, and removes its tree" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  commit_awkward_names
+  mg similarity --rev HEAD
+  [ "$status" -eq 0 ]
+  validate "$result"
+  [ "$(cat "$STUB_OUT/null")" = yes ]
+  # The scanner got every file of the commit, and a tree without oracle/,
+  # docs/ or specs/ (but with the interop vocabulary).
+  same_paths "$STUB_OUT/files.lst" $(plain_paths) "${AWKWARD[@]}"
+  run ! grep -qz '^oracle/' "$STUB_OUT/tree.lst"
+  run ! grep -qz '^docs/' "$STUB_OUT/tree.lst"
+  grep -qzx 'specs/storage/interop-vocab.txt' "$STUB_OUT/tree.lst"
+  grep -qzx 'tools/mg' "$STUB_OUT/tree.lst"
+  cmp <(grep -z '^core/' "$STUB_OUT/tree.lst" | sort -z) <(git -C "$SB" ls-tree -r -z --name-only HEAD -- core | sort -z)
+  # Nothing is left in the run directory but the reports.
+  [ ! -e "$(dirname "$result")/tree" ]
+  [ ! -e "$(dirname "$result")/rev-index" ]
+}
+
+@test "similarity --base and --rev pass names with non-ASCII, tab and newline characters intact" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  commit_awkward_names
+  mg similarity --rev HEAD --base HEAD~1
+  [ "$status" -eq 0 ]
+  same_paths "$STUB_OUT/files.lst" "${AWKWARD[@]}" specs/storage/interop-vocab.txt
+  cmp <(grep -z '^core/' "$STUB_OUT/tree.lst" | sort -z) <(printf '%s\0' "${AWKWARD[@]}" | sort -z)
+
+  # Working-tree scan: changed and untracked files.
+  local untracked=$'core/un\ttracked\n\303\251.rs'
+  echo "pub fn g() {}" >"$SB/$untracked"
+  mg similarity --base HEAD~1
+  [ "$status" -eq 0 ]
+  same_paths "$STUB_OUT/files.lst" "${AWKWARD[@]}" specs/storage/interop-vocab.txt "$untracked"
+
+  # Given paths.
+  mg similarity -- "$untracked" core/plain.rs
+  [ "$status" -eq 0 ]
+  same_paths "$STUB_OUT/files.lst" "$untracked" core/plain.rs
+
+  # A full scan of the checkout.
+  mg similarity
+  [ "$status" -eq 0 ]
+  same_paths "$STUB_OUT/files.lst" $(plain_paths) "${AWKWARD[@]}" "$untracked"
+}
+
+@test "similarity warns about listed files the scanner did not find" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  STUB_STATUS=warn STUB_MISSING='["core/gone.rs"]' mg similarity -- core/gone.rs
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field '.failures[0].id')" = similarity:missing ]
+  [[ "$(field '.failures[0].message')" == *core/gone.rs* ]]
+  validate "$result"
+}
+
+@test "a scanner error reaches the result with its reason" {
+  make_docker_stub
+  mkdir -p "$SB/refs/anki"
+  STUB_ERROR="the Anki corpus is incomplete: it has 53 of the 54 release tags" mg similarity -- core/a.rs
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = similarity:error ]
+  [[ "$(field '.failures[0].message')" == *"53 of the 54"* ]]
+  [[ "$(field .message)" == *"53 of the 54"* ]]
+  validate "$result"
 }

@@ -20,7 +20,7 @@ Specs describe Anki's observable behavior that Meguri reproduces, in the spec wr
 
 - Every normative section has an id in its heading: `## G3. Operator precedence`. An id is a capital letter prefix chosen per file and a number, with optional dotted sub-numbers: `G3`, `G3.1`. Ids are never reused or renumbered; a removed section keeps its heading with "Removed".
 - A spec id is `<area>/<topic>#<id>`, for example `search/grammar#G3`. `<area>/<topic>` names a whole file.
-- Commit `Spec:` trailers list spec ids, comma-separated. The paths `specs/search/grammar.md` and `specs/search/grammar.md#G3` are accepted too. Implementer commits touching `core/`, `app/` or `conformance/runner/` must name at least one (`docs/process/provenance.md`).
+- Commit `Spec:` trailers list spec ids, comma-separated. The paths `specs/search/grammar.md` and `specs/search/grammar.md#G3` are accepted too, and so are Product Contract requirement ids (`R1987`) for UI work that reproduces no Anki behavior. Implementer commits touching `core/`, `app/` or `conformance/runner/` must name at least one. Infrastructure units with no behavior to specify (U5–U7 and the tooling units) commit with `Role: infra` and no `Spec:` (`docs/process/provenance.md`).
 
 ## Allowed content
 

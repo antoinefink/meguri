@@ -34,6 +34,10 @@ def load_config(path):
     for key in ("corpus", "channels", "scan"):
         if key not in cfg:
             raise ConfigError(f"{path}: missing '{key}'")
+    tags = cfg["corpus"].get("tags") or {}
+    count = tags.get("count")
+    if not all(isinstance(tags.get(k), str) for k in ("min", "max")) or not isinstance(count, int) or count < 1:
+        raise ConfigError(f"{path}: corpus.tags needs min and max (release tags) and count (the pinned number of release tags)")
     return cfg
 
 

@@ -6,6 +6,7 @@
       "Read(/@MAIN_CHECKOUT@/oracle/**)",
       "Read(/@MAIN_CHECKOUT@/build/oracle-macos-venv/**)",
       "Read(/@MAIN_CHECKOUT@/build/mg/similarity/**/reviewer.*)",
+      "Read(/@MAIN_CHECKOUT@/build/mg/similarity/**/tree/**)",
       "Read(/@MAIN_CHECKOUT@/build/mg/similarity-nightly/**)",
       "Read(/@MAIN_CHECKOUT@/build/similarity-index/**)",
       "Read(/@WORKTREES@/*/oracle/**)",
@@ -21,8 +22,21 @@
       "Bash(git diff *oracle/*)",
       "Bash(git blame *oracle/*)",
       "Bash(git cat-file *)",
+      "Bash(*@MAIN_CHECKOUT@/oracle*)",
+      "Bash(*@WORKTREES@/*/oracle/*)",
+      "Bash(*@WORKTREES@/*/oracle)",
+      "Bash(*@WORKTREES@/*/oracle *)",
+      "Bash(*@MAIN_CHECKOUT@/refs*)",
+      "Bash(*@MAIN_CHECKOUT@/local-data*)",
       "Bash(*refs/anki*)",
       "Bash(*local-data/*)",
+      "Bash(*oracle-macos-venv*)",
+      "Bash(*/Applications/Anki.app*)",
+      "Bash(*Application Support/Anki2*)",
+      "Bash(*Application\\ Support/Anki2*)",
+      "Bash(*Anki2/addons21*)",
+      "Bash(*site-packages/anki/*)",
+      "Bash(*site-packages/aqt/*)",
       "Bash(docker exec *)",
       "Bash(docker cp *)",
       "Bash(docker save *)",
@@ -39,8 +53,12 @@
       "Bash(docker compose run *oracle* bash*)",
       "Bash(*github.com/ankitects*)",
       "Bash(*github.com/ankidroid*)",
+      "Bash(*github.com/migaku*)",
+      "Bash(*github.com/Migaku*)",
       "Bash(*githubusercontent.com/ankitects*)",
       "Bash(*githubusercontent.com/ankidroid*)",
+      "Bash(*githubusercontent.com/migaku*)",
+      "Bash(*githubusercontent.com/Migaku*)",
       "Bash(*ankitects/anki*)",
       "Bash(*ankidroid/Anki-Android*)",
       "Bash(*FooSoft/anki-connect*)",
@@ -50,6 +68,12 @@
       "Bash(pip install anki*)",
       "Bash(pip3 download anki*)",
       "Bash(pip3 install anki*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:codeload.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:objects.githubusercontent.com)",
       "WebFetch(domain:ankiweb.net)",
       "WebFetch(domain:apps.ankiweb.net)",
       "WebFetch(domain:docs.ankiweb.net)",
@@ -57,6 +81,19 @@
       "WebFetch(domain:foosoft.net)",
       "WebFetch(domain:ankidroid.org)",
       "WebFetch(domain:docs.ankidroid.org)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"@WORKTREE@/tools/hooks/deny-quarantined-fetch\""
+          }
+        ]
+      }
     ]
   }
 }

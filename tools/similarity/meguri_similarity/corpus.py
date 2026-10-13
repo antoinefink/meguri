@@ -9,10 +9,16 @@ scanned file's side is winnowed, so a copied region matches on nearly every
 fingerprint.
 
 Nothing here prints corpus text. Reports name an Anki tag, path and line only.
+
+The cache (build/similarity-index/<key>/) is shared by concurrent scans, in one
+container or several: builds write to their own `.tmp-*` directory, and
+publishing, eviction and opening an index hold `.lock` (flock, exclusive for
+the first two, shared for the last).
 """
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import multiprocessing
@@ -20,7 +26,9 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import numpy as np
@@ -31,6 +39,8 @@ from .lexer import STRUCT_FAMILY, Lexer, language_of
 INDEX_VERSION = 1  # bump when lexing or fingerprinting changes corpus hashes
 CHANNELS = ("struct", "lex", "com", "text")
 _RELEASE_TAG = re.compile(r"^\d+(?:\.\d+)+$")
+KEEP_INDEXES = 3  # published indexes kept, most recently used first (a few hundred MB each)
+STALE_BUILD_SECONDS = 3600  # a `.tmp-*` build directory older than this was left by a crashed build
 
 
 class CorpusError(Exception):
@@ -65,7 +75,6 @@ class Plan:
     refs_dir: str
     sources: list  # dicts: name, kind, path, [tags: [(tag, commit)]] / [head] / [files]
     missing_sources: list
-    missing_boundary_tags: list
     params: dict
     vocab_digest: str
     key: str
@@ -78,7 +87,6 @@ class Plan:
             "tags": len(tags),
             "first_tag": tags[0] if tags else None,
             "last_tag": tags[-1] if tags else None,
-            "missing_boundary_tags": self.missing_boundary_tags,
             "extra_sources": [s["name"] for s in self.sources if s["name"] != "anki"],
             "missing_sources": self.missing_sources,
         }
@@ -89,7 +97,8 @@ def plan_corpus(refs_dir: str, cfg: dict, vocab_digest: str, stopwords) -> Plan:
     anki_path = os.path.join(refs_dir, ccfg["anki_repo"])
     if not _is_git_repo(anki_path):
         raise CorpusError(f"no Anki repository at {ccfg['anki_repo']} in the corpus directory")
-    lo, hi = version_tuple(ccfg["tags"]["min"]), version_tuple(ccfg["tags"]["max"])
+    lo_tag, hi_tag, pinned = ccfg["tags"]["min"], ccfg["tags"]["max"], ccfg["tags"]["count"]
+    lo, hi = version_tuple(lo_tag), version_tuple(hi_tag)
     refs = _git(anki_path, "for-each-ref", "--format=%(refname:short)\t%(objectname)\t%(*objectname)", "refs/tags")
     tags = []
     for line in refs.splitlines():
@@ -97,10 +106,21 @@ def plan_corpus(refs_dir: str, cfg: dict, vocab_digest: str, stopwords) -> Plan:
         if _RELEASE_TAG.match(name) and lo <= version_tuple(name) <= hi:
             tags.append((name, peeled or obj))
     tags.sort(key=lambda t: version_tuple(t[0]))
-    if not tags:
-        raise CorpusError(f"no release tags between {ccfg['tags']['min']} and {ccfg['tags']['max']} in the Anki repository")
+    # The corpus is pinned (R1957): a corpus missing releases would pass changes
+    # it never compared, and one with more is not the calibrated corpus.
     present = {version_tuple(t) for t, _ in tags}
-    missing_boundary = [t for t in (ccfg["tags"]["min"], ccfg["tags"]["max"]) if version_tuple(t) not in present]
+    missing_boundary = [t for t in (lo_tag, hi_tag) if version_tuple(t) not in present]
+    if len(tags) < pinned or missing_boundary:
+        lacks = f" (missing {', '.join(missing_boundary)})" if missing_boundary else ""
+        raise CorpusError(
+            f"the Anki corpus is incomplete: it has {len(tags)} of the {pinned} release tags from {lo_tag} to {hi_tag}{lacks}; "
+            f"fetch the missing tags into {ccfg['anki_repo']} (git fetch --tags) before scanning"
+        )
+    if len(tags) > pinned:
+        raise CorpusError(
+            f"the Anki corpus has {len(tags)} release tags from {lo_tag} to {hi_tag}, the config pinned {pinned}; "
+            "recalibrate (tools/mg similarity-selftest) and update corpus.tags.count in tools/similarity/config.yaml"
+        )
     sources = [{"name": "anki", "kind": "git-tags", "path": anki_path, "tags": tags}]
     missing = []
     for extra in ccfg.get("extra_sources") or []:
@@ -139,7 +159,7 @@ def plan_corpus(refs_dir: str, cfg: dict, vocab_digest: str, stopwords) -> Plan:
         ],
     }
     key = hashlib.sha256(json.dumps(key_material, sort_keys=True).encode()).hexdigest()[:20]
-    return Plan(refs_dir, sources, missing, missing_boundary, params, vocab_digest, key)
+    return Plan(refs_dir, sources, missing, params, vocab_digest, key)
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +329,10 @@ def _batches(blobs, target=48):
         yield batch
 
 
-def build_index(plan: Plan, cache_root: str, mask, stopwords, workers=None, log=print):
+def build_index(plan: Plan, cache_root: str, mask, stopwords, workers=None, log=print, replace=False):
+    """Builds the index in a private directory, then publishes it as
+    <cache_root>/<key> unless another scan published that key meanwhile
+    (`replace` publishes over it: --rebuild)."""
     t0 = time.monotonic()
     blobs, skipped_large = enumerate_blobs(plan)
     t_enum = time.monotonic() - t0
@@ -330,51 +353,96 @@ def build_index(plan: Plan, cache_root: str, mask, stopwords, workers=None, log=
     t_lex = time.monotonic() - t0 - t_enum
 
     os.makedirs(cache_root, exist_ok=True)
-    tmp = os.path.join(cache_root, f".tmp-{plan.key}-{os.getpid()}")
-    shutil.rmtree(tmp, ignore_errors=True)
-    os.makedirs(tmp)
-    counts = {}
-    for c, (hs, ls, bs) in acc.items():
-        if hs:
-            h = np.concatenate(hs)
-            uh, first = np.unique(h, return_index=True)
-            np.save(os.path.join(tmp, f"{c}.h.npy"), uh)
-            np.save(os.path.join(tmp, f"{c}.b.npy"), np.concatenate(bs)[first])
-            np.save(os.path.join(tmp, f"{c}.l.npy"), np.concatenate(ls)[first])
-            counts[c] = int(len(uh))
-        else:
-            for suffix, dt in (("h", np.uint64), ("b", np.uint32), ("l", np.uint32)):
-                np.save(os.path.join(tmp, f"{c}.{suffix}.npy"), np.empty(0, dt))
-            counts[c] = 0
-    elapsed = time.monotonic() - t0
-    meta = {
-        "index_version": INDEX_VERSION,
-        "key": plan.key,
-        "plan": plan.summary(),
-        "params": plan.params,
-        "sources": [s["name"] for s in plan.sources],
-        "blobs": [[sha, si, tag, path] for sha, si, tag, path, _lang in blobs],
-        "stats": {
-            "blobs": len(blobs),
-            "skipped_large_blobs": skipped_large,
-            "tokens": tokens,
-            "fingerprints": counts,
-            "seconds": round(elapsed, 2),
-            "seconds_enumerate": round(t_enum, 2),
-            "seconds_lex": round(t_lex, 2),
-        },
-    }
-    with open(os.path.join(tmp, "meta.json"), "w") as f:
-        json.dump(meta, f)
-    final = os.path.join(cache_root, plan.key)
-    shutil.rmtree(final, ignore_errors=True)
-    os.rename(tmp, final)
-    # Keep only the current index: each one is a few hundred MB.
-    for name in os.listdir(cache_root):
-        if name != plan.key:
-            shutil.rmtree(os.path.join(cache_root, name), ignore_errors=True)
+    tmp = tempfile.mkdtemp(prefix=f".tmp-{plan.key}-", dir=cache_root)
+    try:
+        counts = {}
+        for c, (hs, ls, bs) in acc.items():
+            if hs:
+                h = np.concatenate(hs)
+                uh, first = np.unique(h, return_index=True)
+                np.save(os.path.join(tmp, f"{c}.h.npy"), uh)
+                np.save(os.path.join(tmp, f"{c}.b.npy"), np.concatenate(bs)[first])
+                np.save(os.path.join(tmp, f"{c}.l.npy"), np.concatenate(ls)[first])
+                counts[c] = int(len(uh))
+            else:
+                for suffix, dt in (("h", np.uint64), ("b", np.uint32), ("l", np.uint32)):
+                    np.save(os.path.join(tmp, f"{c}.{suffix}.npy"), np.empty(0, dt))
+                counts[c] = 0
+        elapsed = time.monotonic() - t0
+        meta = {
+            "index_version": INDEX_VERSION,
+            "key": plan.key,
+            "plan": plan.summary(),
+            "params": plan.params,
+            "sources": [s["name"] for s in plan.sources],
+            "blobs": [[sha, si, tag, path] for sha, si, tag, path, _lang in blobs],
+            "stats": {
+                "blobs": len(blobs),
+                "skipped_large_blobs": skipped_large,
+                "tokens": tokens,
+                "fingerprints": counts,
+                "seconds": round(elapsed, 2),
+                "seconds_enumerate": round(t_enum, 2),
+                "seconds_lex": round(t_lex, 2),
+            },
+        }
+        with open(os.path.join(tmp, "meta.json"), "w") as f:
+            json.dump(meta, f)
+        index = _publish(cache_root, tmp, plan.key, replace)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)  # already gone once published
     log(f"similarity: indexed {len(blobs)} blobs from {plan.summary()['tags']} tags in {elapsed:.1f}s")
-    return Index(final)
+    return index
+
+
+def _publish(cache_root, tmp, key, replace):
+    """Moves a finished build to <cache_root>/<key> (keeping one a concurrent
+    scan published first, unless `replace`), evicts, and opens the index."""
+    final = os.path.join(cache_root, key)
+    with _cache_lock(cache_root, exclusive=True):
+        if os.path.exists(os.path.join(final, "meta.json")) and not replace:
+            shutil.rmtree(tmp)
+        else:
+            if os.path.exists(final):
+                old = tempfile.mkdtemp(prefix=".old-", dir=cache_root)
+                os.rename(final, os.path.join(old, key))
+                shutil.rmtree(old)
+            os.rename(tmp, final)
+        os.utime(final)
+        _evict(cache_root, key)
+        return Index(final)
+
+
+@contextmanager
+def _cache_lock(cache_root, exclusive):
+    fd = os.open(os.path.join(cache_root, ".lock"), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+        yield
+    finally:
+        os.close(fd)
+
+
+def _evict(cache_root, current):
+    """Under the exclusive lock: keeps the KEEP_INDEXES most recently used
+    published indexes and every build still in progress."""
+    now = time.time()
+    published = []
+    for name in os.listdir(cache_root):
+        path = os.path.join(cache_root, name)
+        try:
+            if name == ".lock" or not os.path.isdir(path):
+                continue
+            mtime = os.path.getmtime(path)
+        except FileNotFoundError:  # a failed build removing its own directory
+            continue
+        if name.startswith(".old-") or (name.startswith(".tmp-") and now - mtime > STALE_BUILD_SECONDS):
+            shutil.rmtree(path, ignore_errors=True)
+        elif not name.startswith("."):
+            published.append((name == current, mtime, name))
+    published.sort(reverse=True)
+    for _current, _mtime, name in published[KEEP_INDEXES:]:
+        shutil.rmtree(os.path.join(cache_root, name), ignore_errors=True)
 
 
 class Index:
@@ -406,6 +474,10 @@ class Index:
 
 def open_or_build(plan: Plan, cache_root: str, mask, stopwords, log=print, rebuild=False):
     path = os.path.join(cache_root, plan.key)
-    if not rebuild and os.path.exists(os.path.join(path, "meta.json")):
-        return Index(path), False
-    return build_index(plan, cache_root, mask, stopwords, log=log), True
+    os.makedirs(cache_root, exist_ok=True)
+    if not rebuild:
+        with _cache_lock(cache_root, exclusive=False):
+            if os.path.exists(os.path.join(path, "meta.json")):
+                os.utime(path)  # most recently used: eviction keeps it
+                return Index(path), False
+    return build_index(plan, cache_root, mask, stopwords, log=log, replace=rebuild), True

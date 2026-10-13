@@ -1,11 +1,13 @@
 #!/bin/bash
 # commit-msg hook: provenance trailers (U2, R1958). `tools/mg hooks install`
-# installs a shim that runs this file from the checkout being committed in.
+# and `tools/mg worktree new` install a shim that runs this file from the
+# checkout being committed in.
 #
 # - A Role: trailer, when present, names one known role.
 # - Commits touching core/, app/ or conformance/runner/ need a Role: trailer.
 # - Implementer and fixer commits touching those paths also need Spec: (one
-#   or more spec ids, specs/README-format.md) and Session: (the session id
+#   or more spec ids, specs/README-format.md, or Product Contract requirement
+#   ids such as R1987 for UI work no spec covers) and Session: (the session id
 #   from docs/process/provenance/sessions.jsonl).
 # Merge commits are not checked. Runs under macOS /bin/bash 3.2.
 
@@ -42,13 +44,15 @@ if [ -n "$roles" ]; then
     reject "one Role: trailer per commit, found: $(printf '%s' "$roles" | tr '\n' ' ')"
   fi
   role="$(printf '%s\n' "$roles" | head -n 1)"
-  case " $ROLES " in
-    *" $role "*) ;;
-    *) reject "unknown Role: '$role' (one of: $ROLES)" ;;
-  esac
+  known=no
+  for r in $ROLES; do
+    [ "$role" = "$r" ] && known=yes
+  done
+  [ "$known" = yes ] || reject "unknown Role: '$role' (one of: $ROLES)"
 fi
 
-code_paths="$(git diff --cached --name-only | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
+# NUL-separated, so git does not quote (and hide) non-ASCII or tab names.
+code_paths="$(git diff --cached --name-only -z | tr '\0' '\n' | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
 [ -n "$code_paths" ] || exit 0
 first_path="$(printf '%s\n' "$code_paths" | head -n 1)"
 
@@ -63,8 +67,8 @@ specs="$(values Spec | tr ',' ' ')"
 [ -n "$(printf '%s' "$specs" | tr -d ' \n\t')" ] ||
   reject "$role commits touching $first_path need a Spec: trailer with the spec ids they implement, e.g. 'Spec: search/grammar#G3'"
 for id in $specs; do
-  printf '%s' "$id" | grep -Eq '^(specs/)?[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9_-]*(\.md)?(#[A-Za-z0-9][A-Za-z0-9._-]*)?$' ||
-    reject "Spec: '$id' is not a spec id (<area>/<topic>#<section>, e.g. search/grammar#G3)"
+  printf '%s' "$id" | grep -Eq '^((specs/)?[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9_-]*(\.md)?(#[A-Za-z0-9][A-Za-z0-9._-]*)?|R[0-9]+)$' ||
+    reject "Spec: '$id' is not a spec id (<area>/<topic>#<section>, e.g. search/grammar#G3, or a requirement id such as R1987)"
 done
 
 sessions="$(values Session)"

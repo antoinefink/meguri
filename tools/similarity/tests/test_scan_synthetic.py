@@ -11,7 +11,7 @@ import re
 import shutil
 import unittest
 
-from support import CONFIG, file_entry, make_corpus, run_cli, scan, tmpdir, write_tree
+from support import file_entry, git, make_corpus, read_json, run_cli, scan, synthetic_config, tmpdir, write_tree
 
 CORPUS_RS = '''\
 // Spreads the given number of items over buckets so that no bucket exceeds the
@@ -147,6 +147,8 @@ class SyntheticCorpus(unittest.TestCase):
             ],
         )
         cls.cache = os.path.join(cls.base, "cache")
+        # The pinned corpus: the two release tags from 2.1.51 to 23.10.
+        cls.config = synthetic_config(cls.base, "2.1.51", "23.10", 2)
 
     def setUp(self):
         self.root = tmpdir()
@@ -157,6 +159,7 @@ class SyntheticCorpus(unittest.TestCase):
 
     def scan(self, files, paths=None, **kw):
         write_tree(self.root, files)
+        kw.setdefault("config", self.config)
         return scan(self.refs, self.cache, self.root, paths or list(files), self.out, **kw)
 
     def allowlist(self, entries):
@@ -223,7 +226,76 @@ class SyntheticCorpus(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(summary["corpus"]["tags"], 2)
         self.assertEqual((summary["corpus"]["first_tag"], summary["corpus"]["last_tag"]), ("2.1.51", "23.10"))
-        self.assertEqual(summary["corpus"]["missing_boundary_tags"], ["2.1.50", "26.09.3"])
+
+    # -- the pinned corpus (R1957) -------------------------------------------
+
+    def pinned_scan(self, refs, lo, hi, count):
+        config = synthetic_config(self.root, lo, hi, count)
+        files = {"core/stats.rs": MEGURI_OWN_RS}
+        write_tree(self.root, files)
+        return scan(refs, os.path.join(self.root, "cache"), self.root, list(files), self.out, config=config)
+
+    def assert_corpus_error(self, result, *needles):
+        code, summary, _views, err = result
+        self.assertEqual(code, 2, err)
+        self.assertEqual(summary["status"], "error")
+        for needle in needles:
+            self.assertIn(needle, summary["error"])
+
+    def test_corpus_without_a_boundary_release_is_an_error(self):
+        # The real pin starts at 2.1.50 and ends at 26.09.3; a corpus lacking
+        # either must not pass changes it never compared.
+        self.assert_corpus_error(self.pinned_scan(self.refs, "2.1.50", "23.10", 2), "2.1.50", "fetch")
+        self.assert_corpus_error(self.pinned_scan(self.refs, "2.1.51", "26.09.3", 2), "26.09.3")
+
+    def test_corpus_without_an_interior_release_is_an_error(self):
+        refs = os.path.join(self.root, "refs")
+        shutil.copytree(self.refs, refs, symlinks=True)
+        anki = os.path.join(refs, "anki")
+        git(anki, "tag", "2.1.66", "2.1.51")
+        code, summary, _v, err = self.pinned_scan(refs, "2.1.51", "23.10", 3)
+        self.assertEqual((code, summary["corpus"]["tags"]), (0, 3), err)
+        git(anki, "tag", "-d", "2.1.66")
+        self.assert_corpus_error(self.pinned_scan(refs, "2.1.51", "23.10", 3), "2 of the 3")
+
+    def test_corpus_with_an_unpinned_release_is_an_error(self):
+        self.assert_corpus_error(self.pinned_scan(self.refs, "2.1.51", "23.10", 1), "2 release tags", "pinned 1")
+
+    def test_the_real_pin_covers_2_1_50_to_26_09_3(self):
+        import yaml
+
+        from support import CONFIG
+
+        with open(CONFIG) as f:
+            tags = yaml.safe_load(f)["corpus"]["tags"]
+        self.assertEqual(tags, {"min": "2.1.50", "max": "26.09.3", "count": 54})
+
+    # -- file lists ------------------------------------------------------------
+
+    def test_nul_separated_lists_keep_unicode_tab_and_newline_names(self):
+        names = ["core/f\u00e9.rs", "core/tab\there.rs", "core/new\nline.rs", "core/plain.rs"]
+        files = {n: renamed_and_stripped(CORPUS_RS) for n in names}
+        write_tree(self.root, files)
+        listing = os.path.join(self.root, "files.lst")
+        with open(listing, "wb") as f:
+            f.write(b"".join(n.encode() + b"\0" for n in names))
+        code, summary, views, err = scan(
+            self.refs, self.cache, self.root, [], self.out, config=self.config, extra=["--files-from", listing, "--null"]
+        )
+        self.assertEqual(code, 1, err)
+        self.assertEqual(summary["counts"]["scanned"], 4)
+        self.assertEqual(summary["counts"]["flagged"], 4)
+        self.assertEqual(sorted(f["path"] for f in views["implementer"]["files"]), sorted(names))
+
+    def test_a_listed_file_missing_from_the_tree_is_a_warning(self):
+        write_tree(self.root, {"core/stats.rs": MEGURI_OWN_RS})
+        code, summary, _v, err = scan(
+            self.refs, self.cache, self.root, ["core/stats.rs", "core/gone.rs", "docs/gone.md"], self.out, config=self.config
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(summary["status"], "warn")
+        self.assertEqual(summary["counts"]["missing"], 1)
+        self.assertEqual(summary["missing"], ["core/gone.rs"])
 
     def test_verbatim_comment_fails_on_com_even_when_code_differs(self):
         comment = (
@@ -297,10 +369,11 @@ class SyntheticCorpus(unittest.TestCase):
         ):
             code, out, err = run_cli(
                 "scan", "--refs", self.refs, "--cache", self.cache, "--root", self.root, "--out", self.out,
-                "--allowlist", self.allowlist([entry]), "core/a.rs",
+                "--config", self.config, "--allowlist", self.allowlist([entry]), "core/a.rs",
             )
             self.assertEqual(code, 2, entry)
             self.assertEqual(out["status"], "error")
+            self.assertIn("allow.yaml", out["error"])
 
     # -- interop vocabulary --------------------------------------------------
 
@@ -311,7 +384,7 @@ class SyntheticCorpus(unittest.TestCase):
 
         import yaml
 
-        with open(CONFIG) as f:
+        with open(self.config) as f:
             cfg = yaml.safe_load(f)
         cfg["channels"]["lex"]["string_stopwords"] = []  # isolate masking from stopwords
         config = os.path.join(self.root, "config.yaml")
@@ -365,20 +438,22 @@ class SyntheticCorpus(unittest.TestCase):
         shutil.copytree(self.refs, refs, symlinks=True)
         files = {"core/stats.rs": MEGURI_OWN_RS}
         write_tree(self.root, files)
-        _c, s1, _v, _e = scan(refs, cache, self.root, list(files), self.out)
-        _c, s2, _v, _e = scan(refs, cache, self.root, list(files), self.out)
-        from support import git
-
-        git(os.path.join(refs, "anki"), "tag", "24.06", "23.10")
-        _c, s3, _v, _e = scan(refs, cache, self.root, list(files), self.out)
-        self.assertEqual((s1["corpus"]["built"], s2["corpus"]["built"], s3["corpus"]["built"]), (True, False, True))
+        _c, s1, _v, _e = scan(refs, cache, self.root, list(files), self.out, config=self.config)
+        _c, s2, _v, _e = scan(refs, cache, self.root, list(files), self.out, config=self.config)
+        # A new release in the pinned range, with the pin updated to match.
+        git(os.path.join(refs, "anki"), "tag", "2.1.66", "2.1.51")
+        config3 = synthetic_config(self.root, "2.1.51", "23.10", 3)
+        _c, s3, _v, e3 = scan(refs, cache, self.root, list(files), self.out, config=config3)
+        self.assertEqual((s1["corpus"]["built"], s2["corpus"]["built"], s3.get("corpus", {}).get("built")), (True, False, True), e3)
         self.assertNotEqual(s1["corpus"]["key"], s3["corpus"]["key"])
-        self.assertEqual(sorted(os.listdir(cache)), [s3["corpus"]["key"]])
+        self.assertEqual(sorted(n for n in os.listdir(cache) if not n.startswith(".")), sorted([s1["corpus"]["key"], s3["corpus"]["key"]]))
 
     def test_missing_corpus_is_an_error(self):
         code, out, err = run_cli("scan", "--refs", self.root, "--cache", self.cache, "--root", self.root, "--out", self.out)
         self.assertEqual(code, 2)
         self.assertIn("no Anki repository", out["error"])
+        # tools/mg reads the reason from the report directory.
+        self.assertEqual(read_json(os.path.join(self.out, "summary.json")), {"status": "error", "error": out["error"]})
 
 
 if __name__ == "__main__":

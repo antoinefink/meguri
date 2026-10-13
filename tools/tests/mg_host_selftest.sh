@@ -30,8 +30,10 @@ setup_sandbox() {
   cp "$REPO/.gitignore" "$REPO/.gitattributes" "$SB/"
   echo "stand-in for the AGPL driver" >"$SB/oracle/driver/run.py"
   git -C "$SB" init -q &&
+    git -C "$SB" config user.name selftest &&
+    git -C "$SB" config user.email selftest@localhost &&
     git -C "$SB" add -A &&
-    git -C "$SB" -c user.name=selftest -c user.email=selftest@localhost commit -qm sandbox
+    git -C "$SB" commit -qm sandbox
 }
 
 # Compose for the sandbox project, the way mg_compose drives it.
@@ -312,6 +314,13 @@ t_implementer_worktree_and_commit_hook_on_macos() {
     expect "profile hash" "$(jq -r .deny_profile.sha256 "$(git -C "$wt" rev-parse --absolute-git-dir)/meguri-session.json")" \
       "$(shasum -a 256 "$wt/.claude/settings.local.json" | cut -d' ' -f1)" || return 1
   id="$(jq -r .session "$(git -C "$wt" rev-parse --absolute-git-dir)/meguri-session.json")"
+  expect "record committed on the branch" "$(git -C "$wt" log -1 --format=%s)" "Record session $id (implementer, hw1)" &&
+    expect "record in the branch's ledger" "$(tail -n 1 "$wt/docs/process/provenance/sessions.jsonl" | jq -r .session)" "$id" &&
+    expect "main checkout's ledger untouched" "$(git -C "$SB" status --porcelain -- docs/process/provenance)" "" &&
+    expect "hook installed" "$([ -x "$SB/.git/hooks/commit-msg" ] && echo yes || echo no)" yes || return 1
+  mg worktree new --role "implementer fixer" hw2
+  expect "compound role exit" "$RC" 2 &&
+    expect "compound role failure" "$(field '.failures[0].id')" bad-role || return 1
   mg hooks install
   expect "hooks exit" "$RC" 0 || return 1
   mkdir -p "$wt/core/crates/meguri-search/src"
@@ -357,7 +366,10 @@ RS
   git -C "$repo" init -q &&
     git -C "$repo" add -A &&
     git -C "$repo" -c user.name=t -c user.email=t@t commit -qm corpus &&
-    git -C "$repo" tag 2.1.51
+    git -C "$repo" tag 2.1.51 &&
+    # Pin the sandbox's scanner config to this one-tag corpus.
+    sed -i '' 's/^  tags: {min: .*/  tags: {min: "2.1.51", max: "2.1.51", count: 1}/' "$SB/tools/similarity/config.yaml" &&
+    grep -q 'count: 1}' "$SB/tools/similarity/config.yaml"
 }
 
 t_similarity_flags_a_copy_through_tools_mg() {
@@ -381,26 +393,34 @@ t_similarity_flags_a_copy_through_tools_mg() {
 t_similarity_scans_changed_files_and_commits() {
   rm -f "$SB/core/copied.rs"
   printf 'pub fn total(xs: &[u32]) -> u64 {\n    xs.iter().map(|&x| u64::from(x)).sum()\n}\n' >"$SB/core/own.rs"
+  # A name git quotes unless asked for NUL-separated output.
+  local other
+  other="$(printf 'core/r\303\251sum\303\251.rs')"
+  printf 'pub fn half(x: u32) -> u32 {\n    x / 2\n}\n' >"$SB/$other"
   mg similarity --base HEAD
   expect "changed-files exit" "$RC" 0 &&
     expect "changed-files status" "$(field .status)" pass &&
-    expect "changed files scanned" "$(field .summary.total)" 1 || return 1
-  git -C "$SB" add core/own.rs &&
+    expect "changed files scanned" "$(field .summary.total)" 2 || return 1
+  git -C "$SB" add core/own.rs "$other" &&
     git -C "$SB" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -qm own
-  rm -f "$SB/core/own.rs"
+  rm -f "$SB/core/own.rs" "$SB/$other"
   mg similarity --rev HEAD --base HEAD~1
   expect "rev exit" "$RC" 0 &&
-    expect "rev files scanned" "$(field .summary.total)" 1 &&
-    expect "index reused" "$(field .details.corpus.built)" false || return 1
+    expect "rev files scanned" "$(field .summary.total)" 2 &&
+    expect "index reused" "$(field .details.corpus.built)" false &&
+    expect "rev tree removed" "$([ -e "$(dirname "$RESULT")/tree" ] && echo present || echo absent)" absent || return 1
   local before
   before="$(git -C "$SB" status --porcelain)"
   mg similarity --rev HEAD -- core/own.rs core/not-there.rs tools/similarity/meguri_similarity/scan.py
   expect "rev paths exit" "$RC" 0 &&
+    expect "rev paths status" "$(field .status)" warn &&
+    expect "rev paths missing" "$(field '[.failures[].id] | index("similarity:missing") != null')" true &&
     expect "rev paths scanned" "$(field .summary.total)" 2 || return 1
   mg similarity --rev HEAD
   expect "full rev exit" "$RC" 0 &&
     expect "full rev scans the scanner too" "$(field '.summary.total > 10')" true &&
-    expect "checkout untouched" "$(git -C "$SB" status --porcelain)" "$before"
+    expect "checkout untouched" "$(git -C "$SB" status --porcelain)" "$before" &&
+    expect "no oracle/ copy left" "$(find "$SB/build/mg/similarity" -path '*/oracle/*' | wc -l | tr -d ' ')" 0
 }
 
 t_similarity_nightly_runs_jplag() {

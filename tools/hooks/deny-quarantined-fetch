@@ -1,0 +1,19 @@
+#!/bin/sh
+# Claude Code PreToolUse hook for WebFetch in implementer and fixer worktrees
+# (U2, R1956). .claude/settings.implementer.json registers it; tools/mg
+# worktree new renders that into the worktree's .claude/settings.local.json.
+#
+# The deny profile's WebFetch rules work per domain (github.com and its
+# content hosts are denied). This hook blocks Anki, AnkiDroid, AnkiConnect and
+# Migaku sources on any host, such as mirrors, CDNs and code search sites.
+# Exit 2 blocks the fetch and shows stderr to the model. Input that is not the
+# expected JSON is matched as a whole, so the hook fails closed.
+
+input="$(cat)"
+url="$(printf '%s' "$input" | jq -r '.tool_input.url // empty' 2>/dev/null)" || url=""
+[ -n "$url" ] || url="$input"
+if printf '%s' "$url" | grep -Eiq 'ankitects|ankidroid|anki-android|foosoft|anki-?connect|migaku'; then
+  echo "blocked by the implementer deny profile: $url is or may hold Anki, AnkiDroid, AnkiConnect or Migaku source (R1956). Work from the spec; ask for a spec update through the orchestrator." >&2
+  exit 2
+fi
+exit 0
