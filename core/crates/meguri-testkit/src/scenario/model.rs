@@ -16,7 +16,7 @@ use super::FormatError;
 #[serde(deny_unknown_fields)]
 pub struct Scenario {
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     pub description: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -63,16 +63,25 @@ pub struct CompareSpec {
     pub set: Vec<String>,
 }
 
-/// Setup sections; `None` when the scenario does not use a section.
+/// Setup sections; `None` when the scenario does not use a section. Optional
+/// members may be left out but never be null (scenario.schema.json): see
+/// `present`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Setup {
+    #[serde(default, deserialize_with = "present")]
     pub config: Option<Map<String, Value>>,
+    #[serde(default, deserialize_with = "present")]
     pub presets: Option<Vec<Preset>>,
+    #[serde(default, deserialize_with = "present")]
     pub decks: Option<Vec<DeckSpec>>,
+    #[serde(default, deserialize_with = "present")]
     pub notetypes: Option<Vec<NotetypeSpec>>,
+    #[serde(default, deserialize_with = "present")]
     pub notes: Option<Vec<NoteSpec>>,
+    #[serde(default, deserialize_with = "present")]
     pub cards: Option<Vec<CardOverride>>,
+    #[serde(default, deserialize_with = "present")]
     pub revlog: Option<Vec<RevlogRow>>,
 }
 
@@ -104,25 +113,45 @@ impl Setup {
 #[serde(deny_unknown_fields)]
 pub struct Preset {
     pub name: String,
+    #[serde(default, deserialize_with = "present")]
     pub learn_steps: Option<Vec<Duration>>,
+    #[serde(default, deserialize_with = "present")]
     pub relearn_steps: Option<Vec<Duration>>,
+    #[serde(default, deserialize_with = "present")]
     pub graduating_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub easy_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub new_per_day: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub reviews_per_day: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub max_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub min_lapse_interval_days: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub starting_ease: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
     pub easy_bonus: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
     pub hard_interval: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
     pub interval_modifier: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
     pub lapse_new_interval: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
     pub leech_threshold: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub leech_action: Option<LeechAction>,
+    #[serde(default, deserialize_with = "present")]
     pub bury_new: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
     pub bury_reviews: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
     pub bury_interday_learning: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
     pub desired_retention: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
     pub fsrs_params: Option<Vec<f64>>,
 }
 
@@ -144,6 +173,7 @@ pub enum DeckSpec {
 #[serde(deny_unknown_fields)]
 pub struct DeckWithPreset {
     pub name: String,
+    #[serde(default, deserialize_with = "present")]
     pub preset: Option<String>,
 }
 
@@ -211,6 +241,7 @@ impl Default for Fields {
 #[serde(deny_unknown_fields)]
 pub struct NoteSpec {
     pub notetype: String,
+    #[serde(default, deserialize_with = "present")]
     pub deck: Option<String>,
     #[serde(default)]
     pub fields: Fields,
@@ -223,17 +254,27 @@ pub struct NoteSpec {
 #[serde(deny_unknown_fields)]
 pub struct CardOverride {
     pub card: CardRef,
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default, deserialize_with = "present")]
     pub kind: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub queue: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub due: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub ivl: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub factor: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub reps: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub lapses: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub left: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub odue: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub flags: Option<i64>,
+    #[serde(default, deserialize_with = "present")]
     pub data: Option<Map<String, Value>>,
 }
 
@@ -351,6 +392,17 @@ impl Step {
             _ => None,
         }
     }
+}
+
+/// An optional member that is present: its value, never null. With
+/// `#[serde(default)]` a missing member stays `None`; serde alone would read
+/// an explicit null as missing, which the schema forbids for these members.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 /// Who runs a part of a live scenario (D9).

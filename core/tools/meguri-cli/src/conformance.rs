@@ -4,14 +4,12 @@
 
 use std::path::{Path, PathBuf};
 
-use std::collections::BTreeMap;
-
-use meguri_testkit::catalog::{self, Catalog};
+use meguri_testkit::catalog::{self, Catalog, LiveReport};
 use meguri_testkit::exec::{Executor, MeguriExecutor, OracleExecutor};
 use meguri_testkit::observe;
 use meguri_testkit::scenario::{self, ObservationKind, Setup, Step};
 use meguri_testkit::suite::{GoldensCheck, LiveRun, Status, Suite};
-use serde_json::{Value, json};
+use serde_json::json;
 
 const USAGE: &str = "usage: meguri-cli conformance <command> [options]
 
@@ -25,7 +23,8 @@ const USAGE: &str = "usage: meguri-cli conformance <command> [options]
   capabilities                          what Meguri's executor supports, and the language
   goldens-check [--base DIR] [--oracle-lock-sha256 HEX] [--report FILE]
   harvest-report [--catalog FILE] [--live-report FILE] [--report FILE] [--markdown FILE]
-        --live-report: a run --live report whose statuses replace `live`
+        --live-report: a run --live report at the current oracle pin; its
+        statuses replace `live` and `pending` for the scenario texts it ran
   to-json <file>...                     parsed YAML or JSON, one JSON line per file
 
 common options:
@@ -379,8 +378,8 @@ fn harvest_report(options: &Options) -> Result<i32, String> {
         .unwrap_or_else(|| suite.root().join("catalog/harvest.csv"));
     let catalog = Catalog::read(&catalog_path).map_err(|e| format!("{}: {e}", catalog_path.display()))?;
     let live = match &options.live_report {
-        Some(path) => live_statuses(path)?,
-        None => BTreeMap::new(),
+        Some(path) => LiveReport::read(path, &suite.pin).map_err(|e| e.to_string())?,
+        None => LiveReport::default(),
     };
     let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new(), &live);
     for p in &report.problems {
@@ -403,27 +402,6 @@ fn harvest_report(options: &Options) -> Result<i32, String> {
         write_file(path, &report.render_markdown())?;
     }
     Ok(i32::from(!report.problems.is_empty()))
-}
-
-/// The statuses of a `run --live` report (T1), by scenario id.
-fn live_statuses(path: &Path) -> Result<BTreeMap<String, Status>, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let report: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    if report["tier"] != "t1" {
-        return Err(format!("{} is not a run --live report", path.display()));
-    }
-    let mut statuses = BTreeMap::new();
-    for item in report["scenarios"].as_array().into_iter().flatten() {
-        let (Some(id), Some(status)) = (item["scenario"].as_str(), item["status"].as_str()) else {
-            return Err(format!("{}: a scenario without id or status", path.display()));
-        };
-        let status = Status::ALL
-            .into_iter()
-            .find(|s| s.as_str() == status)
-            .ok_or_else(|| format!("{}: unknown status {status:?}", path.display()))?;
-        statuses.insert(id.to_owned(), status);
-    }
-    Ok(statuses)
 }
 
 fn to_json(options: &Options) -> Result<i32, String> {

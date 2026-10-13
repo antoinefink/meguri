@@ -42,6 +42,33 @@ def read(path: Path) -> list[dict]:
         return list(csv.DictReader(f))
 
 
+def edit(root: Path, rel: str, old: str, new: str) -> None:
+    path = root / rel
+    text = path.read_text(encoding="utf-8")
+    assert text.count(old) == 1, (rel, old)
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+# Test sources whose spans hold braces, parens and quotes that are not code.
+SPAN_TREE = {
+    "rslib/src/template.rs": (
+        "#[test]\n#[should_panic]\nfn renders_braces() {\n"
+        "    let a = \"}}{{Front}\";\n    let b = '}';\n    let r = r#\"\"}\"#;\n"
+        "    // }\n    /* } /* } */ } */\n    let l: &'static str = \"\\\"}\";\n}\n"
+        "fn helper() {}\n#[test]\nfn after_braces() {}\n"
+    ),
+    "pylib/tests/test_span.py": (
+        "import pytest\n\n@pytest.mark.skip\ndef test_first():\n    x = '}'\n\n"
+        "def helper():\n    pass\n\ndef test_second():\n    pass\n"
+    ),
+    "ts/lib/span.test.ts": (
+        'test("first", () => {\n  const s = `)${f(")")}`;\n  expect(/\\)/.test(s)).toBe(true); // )\n});\n'
+        "const helper = 1;\n"
+        'test("second", () => {});\n'
+    ),
+}
+
+
 class InventoryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -220,6 +247,107 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("inventoried at 26.09.3, the oracle pin is 26.10.0", out)
         self.assertIn("tools/mg harvest-inventory", out)
+
+    def test_a_test_whose_source_changes_is_listed_and_its_row_reopened(self) -> None:
+        self.run_inventory()
+        links = {r["test"]: r for r in read(self.links)}
+        for row in links.values():
+            self.assertRegex(row["body_sha256"], r"^[0-9a-f]{64}$")
+        moved = links["answering_moves_the_card"]["harvest_id"]
+        rebuild = links["TestFiltered.test_rebuild"]["harvest_id"]
+        steps = links["parses learning steps from text"]["harvest_id"]
+        kept = links["plain_search_matches"]["harvest_id"]
+        toolbar = links["test_toolbar_draws"]["harvest_id"]
+        catalog = read(self.catalog)
+        for row in catalog:
+            if row["harvest_id"] in (moved, rebuild, steps, kept):
+                row.update(classification="in-scope", reason="Covered by a scenario",
+                           scenarios="sched/answer-good", status="done")
+        inventory.write_csv(self.catalog, inventory.CATALOG_HEADER, catalog)
+
+        # The next release changes three test bodies, a helper next to one of
+        # them and a desktop test, and keeps every name.
+        release = self.root / "anki-next"
+        shutil.copytree(self.anki, release)
+        edit(release, "rslib/src/scheduler/answering.rs", "fn answering_moves_the_card() {}",
+             "fn answering_moves_the_card() {\n    assert_eq!(1, 1);\n}")
+        edit(release, "rslib/src/scheduler/answering.rs", "fn helper() {}", "fn helper() { let _ = 1; }")
+        edit(release, "pylib/tests/test_schedv3.py", "    def test_rebuild(self):\n        pass\n",
+             "    def test_rebuild(self):\n        assert True\n")
+        edit(release, "ts/routes/deck-options/steps.test.ts", 'test("parses learning steps from text", () => {});',
+             'test("parses learning steps from text", () => { expect(1).toBe(1); });')
+        edit(release, "qt/tests/test_toolbar.py", "pass", "assert True")
+        summary = self.run_inventory(anki=release, tag="26.10.0")
+
+        after = {r["test"]: r for r in read(self.links)}
+        self.assertEqual(after["answering_moves_the_card"]["harvest_id"], moved)
+        self.assertEqual(after["answering_moves_the_card"]["tag"], "26.10.0")
+        self.assertNotEqual(after["answering_moves_the_card"]["body_sha256"],
+                            links["answering_moves_the_card"]["body_sha256"])
+        self.assertEqual(after["plain_search_matches"]["body_sha256"], links["plain_search_matches"]["body_sha256"])
+        line = next(x for x in summary.splitlines() if "changed since 26.09.3" in x)
+        self.assertIn("4 tests changed since 26.09.3", line)
+        for hid in (moved, rebuild, steps, toolbar):
+            self.assertIn(hid, line)
+        self.assertNotIn(kept, line)
+        rows = {r["harvest_id"]: r for r in read(self.catalog)}
+        for hid in (moved, rebuild, steps):
+            self.assertEqual(
+                (rows[hid]["classification"], rows[hid]["scenarios"], rows[hid]["status"]),
+                ("in-scope", "sched/answer-good", "open"),
+            )
+        self.assertEqual(rows[kept]["status"], "done")
+        # Its path alone makes the desktop test not applicable, which the
+        # inventory decides again at every release: listed, not reopened.
+        self.assertEqual((rows[toolbar]["classification"], rows[toolbar]["status"]), ("not-applicable", "done"))
+        self.assertIn("3 catalog rows reopened", summary)
+        self.assertEqual(self.run_check()[0], 0)
+
+        # Unchanged at the next inventory, the rows stay as reviewers leave them.
+        summary = self.run_inventory(anki=release, tag="26.10.0")
+        self.assertNotIn("changed since", summary)
+
+    def test_a_test_span_ends_with_its_own_source(self) -> None:
+        for rel, text in SPAN_TREE.items():
+            p = self.anki / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text, encoding="utf-8")
+
+        def hashes() -> dict[str, str]:
+            return {t.name: t.body_sha256 for t in inventory.scan(self.anki)}
+
+        before = hashes()
+        for first, second, rel, old, new in [
+            ("renders_braces", "after_braces", "rslib/src/template.rs", "fn after_braces() {}", "fn after_braces() { }"),
+            ("test_first", "test_second", "pylib/tests/test_span.py", "def test_second():\n    pass",
+             "def test_second():\n    return"),
+            ("first", "second", "ts/lib/span.test.ts", 'test("second", () => {});', 'test("second", () => { });'),
+        ]:
+            edit(self.anki, rel, old, new)
+            now = hashes()
+            self.assertEqual(now[first], before[first], f"{first} changed with {second}")
+            self.assertNotEqual(now[second], before[second], second)
+            before = now
+        # Code between tests is in no test's span.
+        for rel, old, new in [
+            ("rslib/src/template.rs", "fn helper() {}", "fn helper() { }"),
+            ("pylib/tests/test_span.py", "def helper():\n    pass", "def helper():\n    return"),
+            ("ts/lib/span.test.ts", "const helper = 1;", "const helper = 2;"),
+        ]:
+            edit(self.anki, rel, old, new)
+            self.assertEqual(hashes(), before, rel)
+        # The attribute or decorator and the last line belong to the test.
+        for name, rel, old, new in [
+            ("renders_braces", "rslib/src/template.rs", "#[should_panic]", "#[ignore]"),
+            ("renders_braces", "rslib/src/template.rs", '"\\"}";\n}', '"\\"}"; \n}'),
+            ("test_first", "pylib/tests/test_span.py", "@pytest.mark.skip", "@pytest.mark.slow"),
+            ("test_first", "pylib/tests/test_span.py", "x = '}'", "x = '{'"),
+            ("first", "ts/lib/span.test.ts", "toBe(true); // )\n});", "toBe(true); // )\n });"),
+        ]:
+            edit(self.anki, rel, old, new)
+            now = hashes()
+            self.assertNotEqual(now[name], before[name], (name, old))
+            before = now
 
     def test_check_flags_a_source_that_disagrees_with_links(self) -> None:
         self.run_inventory()

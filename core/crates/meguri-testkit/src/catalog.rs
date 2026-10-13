@@ -10,7 +10,7 @@ use std::path::Path;
 use serde_json::{Value, json};
 
 use crate::exec::Executor;
-use crate::suite::{Status, Suite};
+use crate::suite::{OraclePin, Outcome, Status, Suite};
 
 #[derive(Debug, Clone)]
 pub struct CatalogError(String);
@@ -198,6 +198,69 @@ fn csv_records(text: &str) -> Result<Vec<Vec<String>>, CatalogError> {
     Ok(records)
 }
 
+/// The T1 results of a `run --live` report (dsl.md D12), for harvest-report:
+/// only T1 runs live chains, so their rows can pass only through one.
+#[derive(Debug, Clone, Default)]
+pub struct LiveReport {
+    /// By scenario id: the T1 status and the hash of the scenario text it ran.
+    scenarios: BTreeMap<String, (Status, Option<String>)>,
+}
+
+impl LiveReport {
+    pub fn read(path: &Path, pin: &OraclePin) -> Result<LiveReport, CatalogError> {
+        let text =
+            std::fs::read_to_string(path).map_err(|e| CatalogError(format!("reading {}: {e}", path.display())))?;
+        LiveReport::parse(&text, pin).map_err(|e| CatalogError(format!("{}: {e}", path.display())))
+    }
+
+    /// Reads a T1 report run at `pin` (the tree's current oracle pin); a
+    /// report from another pin says nothing about the current goldens.
+    pub fn parse(text: &str, pin: &OraclePin) -> Result<LiveReport, CatalogError> {
+        let report: Value = serde_json::from_str(text).map_err(|e| CatalogError(e.to_string()))?;
+        if report["tier"] != "t1" {
+            return Err(CatalogError("not a run --live (T1) report".to_owned()));
+        }
+        let ran = |key: &str| report["oracle_pin"][key].as_str().unwrap_or("none").to_owned();
+        let (version, lock) = (ran("anki_version"), ran("lock_sha256"));
+        if version != pin.anki_version || lock != pin.lock_sha256 {
+            return Err(CatalogError(format!(
+                "the report ran at oracle pin {version} {lock}, the current oracle pin is {} {} \
+                 (conformance/oracle.json); run tools/mg conformance --live again",
+                pin.anki_version, pin.lock_sha256
+            )));
+        }
+        let mut scenarios = BTreeMap::new();
+        for item in report["scenarios"].as_array().into_iter().flatten() {
+            let (Some(id), Some(status)) = (item["scenario"].as_str(), item["status"].as_str()) else {
+                return Err(CatalogError("a scenario without id or status".to_owned()));
+            };
+            let status = Status::ALL
+                .into_iter()
+                .find(|s| s.as_str() == status)
+                .ok_or_else(|| CatalogError(format!("unknown status {status:?}")))?;
+            let sha = item["scenario_sha256"].as_str().map(str::to_owned);
+            scenarios.insert(id.to_owned(), (status, sha));
+        }
+        Ok(LiveReport { scenarios })
+    }
+
+    /// The T1 status of a live scenario whose T0 outcome is `t0`: only when
+    /// T0 found it valid and its golden fresh (`live` or `pending`) and the
+    /// report ran this scenario text; otherwise the T0 status stands.
+    fn status(&self, id: &str, t0: &Outcome) -> Status {
+        match self.scenarios.get(id) {
+            Some((t1, Some(sha)))
+                if t0.live
+                    && matches!(t0.status, Status::Live | Status::Pending)
+                    && t0.scenario_sha256.as_deref() == Some(sha.as_str()) =>
+            {
+                *t1
+            }
+            _ => t0.status,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ClassSummary {
     pub rows: usize,
@@ -245,14 +308,10 @@ const SEVERITY: [Status; 8] = [
 ];
 
 /// Counts rows per language and classification, and the status of every
-/// linked scenario: its T0 status with this executor, or for a live scenario
-/// its T1 status when `live` (a `run --live` report) has one.
-pub fn harvest_report(
-    catalog: &Catalog,
-    suite: &Suite,
-    executor: &dyn Executor,
-    live: &BTreeMap<String, Status>,
-) -> HarvestReport {
+/// linked scenario: its T0 status with this executor, or for a fresh live
+/// scenario its T1 status when `live` (a `run --live` report at the current
+/// pin) ran its current text.
+pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor, live: &LiveReport) -> HarvestReport {
     let mut report = HarvestReport {
         anki_version: suite.pin.anki_version.clone(),
         rows_total: catalog.rows.len(),
@@ -276,13 +335,10 @@ pub fn harvest_report(
         let mut scenario_statuses = BTreeMap::new();
         for id in &row.scenarios {
             let status = *cache.entry(id.clone()).or_insert_with(|| {
-                files.iter().find(|f| &f.rel == id).map(|f| {
-                    let outcome = suite.check(f, executor);
-                    match live.get(id) {
-                        Some(t1) if outcome.live => *t1,
-                        _ => outcome.status,
-                    }
-                })
+                files
+                    .iter()
+                    .find(|f| &f.rel == id)
+                    .map(|f| live.status(id, &suite.check(f, executor)))
             });
             match status {
                 Some(status) => {

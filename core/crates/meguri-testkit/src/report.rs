@@ -111,6 +111,9 @@ fn outcome_json(o: &Outcome, tier: Tier) -> Value {
         "repro": o.repro,
     });
     let map = out.as_object_mut().expect("an object");
+    if let Some(sha) = &o.scenario_sha256 {
+        map.insert("scenario_sha256".to_owned(), json!(sha));
+    }
     if let Some(first) = &o.first_divergence {
         map.insert(
             "first_divergence".to_owned(),

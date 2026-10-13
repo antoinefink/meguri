@@ -18,9 +18,11 @@ pub struct Chain<'a> {
 }
 
 /// Where the session crosses at a handoff step, relative to the handoff
-/// directory.
+/// directory (dsl.md D9.2). `@` is outside the id alphabet (D1), so no
+/// scenario's handoff directory lies inside or above another's: T1 runs
+/// `smoke/rt` and `smoke/rt/1` at the same time.
 pub fn handoff_dir(scenario_id: &str, step: usize) -> String {
-    format!("{scenario_id}/{step}")
+    format!("{scenario_id}@{step}")
 }
 
 impl Chain<'_> {

@@ -201,6 +201,8 @@ fn run_live_fails_on_oracle_drift_or_errors_in_scenarios_that_are_not_active() {
         (Some("t1"), Some(false))
     );
     assert_eq!(json["oracle"]["lock_sha256"], LOCK);
+    // Each result names the scenario text it ran (harvest-report checks it).
+    assert_eq!(json["scenarios"][0]["scenario_sha256"], golden["scenario_sha256"]);
 
     // The oracle no longer reproduces the golden of an inactive scenario.
     let drifted = recorded.replace("\"now\":", "\"now\":1,\"was\":");
@@ -278,4 +280,41 @@ fn goldens_check_lists_each_changed_value_with_before_and_after() {
         (before, serde_json::json!(7))
     );
     assert_eq!(json["changed"][0]["count"], 1);
+}
+
+#[test]
+fn harvest_report_refuses_a_live_report_from_another_oracle_pin() {
+    let dir = tree();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("catalog")).unwrap();
+    std::fs::write(
+        root.join("catalog/harvest.csv"),
+        "harvest_id,language,source,area,classification,reason,scenarios,status\n\
+         h0123456789ab,rust,tag,smoke,in-scope,The day boundary in UTC,smoke/timing-tz-utc,done\n",
+    )
+    .unwrap();
+    let golden: Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("goldens/smoke/timing-tz-utc.json")).unwrap()).unwrap();
+    let report = |lock: &str| {
+        let path = root.join(format!("t1-{}.json", &lock[..8]));
+        let json = serde_json::json!({
+            "tier": "t1", "oracle_pin": {"anki_version": "26.9.3", "lock_sha256": lock},
+            "scenarios": [{"scenario": "smoke/timing-tz-utc", "status": "pass", "scenario_sha256": golden["scenario_sha256"]}],
+        });
+        std::fs::write(&path, json.to_string()).unwrap();
+        cli(&[
+            "conformance",
+            "harvest-report",
+            "--conformance",
+            root.to_str().unwrap(),
+            "--live-report",
+            path.to_str().unwrap(),
+        ])
+    };
+    let out = report(&"0".repeat(64));
+    assert_eq!(out.status.code(), Some(2), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("oracle pin"), "{}", text(&out.stderr));
+    let out = report(LOCK);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("in-scope: 1 rows"), "{}", text(&out.stderr));
 }

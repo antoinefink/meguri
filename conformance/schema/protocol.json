@@ -42,7 +42,7 @@
         "resume": { "$ref": "#/$defs/handoff_state", "description": "Start from this handoff instead of a fresh collection and the setup." },
         "handoff": {
           "type": "string",
-          "description": "After the last step, close the collection, copy the session directory to this directory (relative to ORACLE_HANDOFF; it must not exist) and return state."
+          "description": "After the last step, close the collection, copy the session directory to this directory (relative to ORACLE_HANDOFF; it must not exist) and return state. The runner names it <scenario id>@<handoff step index> (dsl.md D9.2), so chains of different scenarios never share or nest directories and may run at the same time."
         }
       },
       "additionalProperties": false

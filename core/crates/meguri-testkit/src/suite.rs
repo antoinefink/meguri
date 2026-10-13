@@ -178,6 +178,9 @@ pub struct Outcome {
     pub active: bool,
     /// It has handoff steps (D9).
     pub live: bool,
+    /// The hash of the scenario text this outcome is for (D3); `None` when
+    /// the file did not load.
+    pub scenario_sha256: Option<String>,
     pub status: Status,
     pub message: String,
     pub repro: String,
@@ -195,6 +198,7 @@ impl Outcome {
             area: file.area.clone(),
             active,
             live: false,
+            scenario_sha256: None,
             status: Status::Pass,
             message: String::new(),
             repro: format!("tools/mg conformance {}", file.rel),
@@ -462,8 +466,9 @@ impl Suite {
         self.root.join("goldens").join(format!("{rel}.json"))
     }
 
-    /// The scenario's file, metadata and golden checks, before any run.
-    fn prepare(&self, file: &ScenarioFile) -> Result<(LoadedScenario, Golden), Box<Outcome>> {
+    /// The scenario's file, metadata and golden checks, before any run; the
+    /// outcome so far (active, live, hash) for the run to finish.
+    fn prepare(&self, file: &ScenarioFile) -> Result<(LoadedScenario, Golden, Outcome), Box<Outcome>> {
         let active = self.is_active(&file.rel);
         let outcome = Outcome::new(file, active);
         if self.duplicates.contains(&file.rel) {
@@ -478,6 +483,7 @@ impl Suite {
         };
         let mut outcome = outcome;
         outcome.live = loaded.scenario.is_live();
+        outcome.scenario_sha256 = Some(loaded.sha256.clone());
         let golden_path = self.golden_path(&file.rel);
         if !golden_path.exists() {
             let mut outcome = outcome.with(Status::Missing, "no golden");
@@ -511,7 +517,7 @@ impl Suite {
             outcome.repro = format!("tools/mg oracle bump {}", self.pin.anki_version);
             return Err(Box::new(outcome));
         }
-        Ok((loaded, golden))
+        Ok((loaded, golden, outcome))
     }
 
     /// Compares observations with a golden's and turns the result into a
@@ -567,12 +573,10 @@ impl Suite {
     }
 
     fn check_t0(&self, file: &ScenarioFile, meguri: &dyn Executor) -> Outcome {
-        let (loaded, golden) = match self.prepare(file) {
+        let (loaded, golden, outcome) = match self.prepare(file) {
             Ok(prepared) => prepared,
             Err(outcome) => return *outcome,
         };
-        let mut outcome = Outcome::new(file, self.is_active(&file.rel));
-        outcome.live = loaded.scenario.is_live();
         let needs = if outcome.live {
             loaded.scenario.needs_on(Side::Meguri)
         } else {
@@ -608,12 +612,10 @@ impl Suite {
     }
 
     fn check_t1(&self, file: &ScenarioFile, live: &LiveRun<'_>) -> Outcome {
-        let (loaded, golden) = match self.prepare(file) {
+        let (loaded, golden, outcome) = match self.prepare(file) {
             Ok(prepared) => prepared,
             Err(outcome) => return *outcome,
         };
-        let mut outcome = Outcome::new(file, self.is_active(&file.rel));
-        outcome.live = loaded.scenario.is_live();
         let drift = match live.oracle.run(&loaded) {
             Ok(actual) => self.judge(
                 outcome.clone(),

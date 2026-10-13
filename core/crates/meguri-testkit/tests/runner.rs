@@ -843,6 +843,71 @@ fn an_inactive_scenario_that_breaks_the_schema_fails_t0() {
     assert!(outcome.fails_t0());
 }
 
+/// The schema lets these members be left out, never be null.
+#[test]
+fn an_inactive_scenario_with_a_null_the_schema_forbids_fails_t0() {
+    let dir = tree();
+    let root = dir.path();
+    let cases = [
+        ("description", "description: null\n"),
+        ("config", "setup: {config: null}\n"),
+        (
+            "preset-option",
+            "setup: {presets: [{name: Default, new_per_day: null}]}\n",
+        ),
+        ("deck-preset", "setup: {decks: [{name: Words, preset: null}]}\n"),
+        (
+            "note-deck",
+            "setup: {notes: [{notetype: Pair, deck: null, fields: [a]}]}\n",
+        ),
+        ("card-column", "setup: {cards: [{card: \"#c1\", due: null}]}\n"),
+        ("card-data", "setup: {cards: [{card: \"#c1\", data: null}]}\n"),
+        ("add-note-deck", "steps: [{add_note: {notetype: Pair, deck: null}}]\n"),
+    ];
+    let scenario = |name: &str, body: &str| {
+        format!("id: nulls/{name}\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{body}")
+    };
+    for (name, body) in cases {
+        write(root, &format!("scenarios/nulls/{name}.yaml"), &scenario(name, body));
+    }
+    // With a golden, Meguri lacking add_note would make it pending.
+    let text = scenario("add-note-deck", cases[7].1);
+    let sha = meguri_testkit::scenario::scenario_sha256(&meguri_testkit::scenario::parse_yaml(&text).unwrap()).unwrap();
+    write(
+        root,
+        "goldens/nulls/add-note-deck.json",
+        &serde_json::to_string_pretty(&json!({
+            "scenario_id": "nulls/add-note-deck", "scenario_sha256": sha, "tz": "UTC",
+            "oracle": {"anki_version": "26.9.3", "lock_sha256": LOCK, "driver_sha256": "a".repeat(64)},
+            "clock": {"start": "2030-01-15T10:00:00", "mode": "frozen"},
+            "observations": {"steps": [{"add_note": {"note": "#n1", "cards": ["#c1"]}}]},
+        }))
+        .unwrap(),
+    );
+    // Left out instead, the same members are fine (no golden: missing).
+    write(
+        root,
+        "scenarios/nulls/left-out.yaml",
+        &scenario(
+            "left-out",
+            "setup: {presets: [{name: Default}], decks: [{name: Words}], notes: [{notetype: Pair, fields: [a]}], cards: [{card: \"#c1\"}]}\n",
+        ),
+    );
+    let suite = Suite::open(root).unwrap();
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    assert_eq!(report.outcomes.len(), cases.len() + 1);
+    for outcome in &report.outcomes {
+        assert!(!outcome.active);
+        let want = if outcome.scenario == "nulls/left-out" {
+            Status::Missing
+        } else {
+            Status::Invalid
+        };
+        assert_eq!(outcome.status, want, "{}: {}", outcome.scenario, outcome.message);
+    }
+    assert_eq!(report.failures().len(), cases.len(), "{}", report.render_text());
+}
+
 #[test]
 fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
     let dir = tree();

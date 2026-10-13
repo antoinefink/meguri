@@ -1,17 +1,55 @@
 //! The harvest catalog and its coverage report (specs/conformance/dsl.md D14).
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use meguri_testkit::catalog::{self, Catalog};
+use meguri_testkit::catalog::{self, Catalog, LiveReport};
 use meguri_testkit::exec::MeguriExecutor;
-use meguri_testkit::suite::{Status, Suite};
+use meguri_testkit::suite::Suite;
+use serde_json::json;
 
 const HEADER: &str = "harvest_id,language,source,area,classification,reason,scenarios,status\n";
+const LOCK: &str = "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7";
+const ID: &str = "preservation/filtered-deck-sync";
 
-fn no_live() -> BTreeMap<String, Status> {
-    BTreeMap::new()
+fn no_live() -> LiveReport {
+    LiveReport::default()
+}
+
+/// A `run --live` report (dsl.md D12) at this oracle lock: (scenario, status,
+/// scenario_sha256) per scenario.
+fn t1_report(lock: &str, scenarios: &[(&str, &str, &str)]) -> String {
+    json!({
+        "runner": "meguri-testkit", "tier": "t1", "executor": "oracle", "lane": "live-oracle",
+        "oracle_pin": {"anki_version": "26.9.3", "lock_sha256": lock},
+        "scenarios": scenarios.iter().map(|(id, status, sha)| json!({
+            "scenario": id, "status": status, "scenario_sha256": sha, "live": true,
+        })).collect::<Vec<_>>(),
+    })
+    .to_string()
+}
+
+/// The scenario's hash as the oracle records it in goldens.
+fn sha_of(root: &Path) -> String {
+    meguri_testkit::scenario::load(&root.join(format!("scenarios/{ID}.yaml")))
+        .unwrap()
+        .sha256
+}
+
+/// A golden for the scenario as it now is, recorded with this oracle lock.
+fn golden(root: &Path, lock: &str) {
+    let sha = sha_of(root);
+    write(
+        root,
+        &format!("goldens/{ID}.json"),
+        &format!(
+            "{{\"scenario_id\": \"{ID}\", \"scenario_sha256\": \"{sha}\", \"tz\": \"UTC\", \
+             \"oracle\": {{\"anki_version\": \"26.9.3\", \"lock_sha256\": \"{lock}\", \"driver_sha256\": \"{}\"}}, \
+             \"clock\": {{\"start\": \"2030-01-15T10:00:00\", \"mode\": \"frozen\"}}, \
+             \"observations\": {{\"steps\": [{{}}, {{}}, {{}}, {{}}, {{\"card\": {{\"#c1\": null}}}}]}}}}",
+            "b".repeat(64)
+        ),
+    );
 }
 
 fn write(root: &Path, rel: &str, text: &str) {
@@ -26,7 +64,7 @@ fn tree() -> tempfile::TempDir {
     write(
         root,
         "oracle.json",
-        "{\"anki_version\": \"26.9.3\", \"lock_sha256\": \"232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7\"}",
+        &format!("{{\"anki_version\": \"26.9.3\", \"lock_sha256\": \"{LOCK}\"}}"),
     );
     write(root, "deviations.yaml", "deviations: []\n");
     fs::create_dir_all(root.join("goldens")).unwrap();
@@ -45,21 +83,8 @@ steps:
   - handoff: oracle
   - observe: ["card(#c1)"]
 "#;
-    write(root, "scenarios/preservation/filtered-deck-sync.yaml", scenario);
-    let sha = meguri_testkit::scenario::load(&root.join("scenarios/preservation/filtered-deck-sync.yaml"))
-        .unwrap()
-        .sha256;
-    write(
-        root,
-        "goldens/preservation/filtered-deck-sync.json",
-        &format!(
-            "{{\"scenario_id\": \"preservation/filtered-deck-sync\", \"scenario_sha256\": \"{sha}\", \"tz\": \"UTC\", \
-             \"oracle\": {{\"anki_version\": \"26.9.3\", \"lock_sha256\": \"232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7\", \"driver_sha256\": \"{}\"}}, \
-             \"clock\": {{\"start\": \"2030-01-15T10:00:00\", \"mode\": \"frozen\"}}, \
-             \"observations\": {{\"steps\": [{{}}, {{}}, {{}}, {{}}, {{\"card\": {{\"#c1\": null}}}}]}}}}",
-            "b".repeat(64)
-        ),
-    );
+    write(root, &format!("scenarios/{ID}.yaml"), scenario);
+    golden(root, LOCK);
     dir
 }
 
@@ -117,14 +142,93 @@ fn a_preservation_only_row_is_counted_with_its_scenario_status() {
     assert!(markdown.contains("not in the counts at the tag: 1"), "{markdown}");
 
     // With a T1 report, the row shows the live chain's own status (R1880).
-    for (t1, shown) in [(Status::Pass, "pass"), (Status::Fail, "fail")] {
-        let live = BTreeMap::from([("preservation/filtered-deck-sync".to_owned(), t1)]);
+    for t1 in ["pass", "fail"] {
+        let live = LiveReport::parse(&t1_report(LOCK, &[(ID, t1, &sha_of(root))]), &suite.pin).unwrap();
         let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new(), &live);
-        assert_eq!(
-            report.by_classification["preservation-only"].statuses.get(shown),
-            Some(&1)
-        );
+        assert_eq!(report.by_classification["preservation-only"].statuses.get(t1), Some(&1));
     }
+}
+
+/// A T1 status stands only for the scenario text, golden and oracle pin it
+/// ran with: after a scenario edit, a golden deletion or a pin change an old
+/// passing report shows nothing passing.
+#[test]
+fn a_t1_status_counts_only_for_the_scenario_golden_and_pin_it_ran() {
+    let dir = tree();
+    let root = dir.path();
+    let csv =
+        format!("{HEADER}h0123456789ab,python,tag,sched,preservation-only,Filtered decks survive a sync,{ID},done\n");
+    let catalog = Catalog::parse(&csv).unwrap();
+    let row_status = |t1: &str| {
+        let suite = Suite::open(root).unwrap();
+        let live = LiveReport::parse(t1, &suite.pin).unwrap();
+        let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new(), &live);
+        assert!(report.problems.is_empty(), "{:?}", report.problems);
+        report.rows[0].status.clone()
+    };
+    let before = sha_of(root);
+    let passed = t1_report(LOCK, &[(ID, "pass", &before)]);
+    assert_eq!(row_status(&passed), "pass");
+
+    // Edited and not re-recorded: the golden is stale, and so is the row,
+    // whatever the report says.
+    let path = root.join(format!("scenarios/{ID}.yaml"));
+    let edited = format!(
+        "{}description: survives a full upload\n",
+        fs::read_to_string(&path).unwrap()
+    );
+    write(root, &format!("scenarios/{ID}.yaml"), &edited);
+    let after = sha_of(root);
+    assert_ne!(after, before);
+    assert_eq!(row_status(&passed), "stale");
+    assert_eq!(row_status(&t1_report(LOCK, &[(ID, "pass", &after)])), "stale");
+
+    // Re-recorded: the golden is fresh again, but the old report ran the old
+    // text, so the row keeps its T0 status until T1 runs the new one.
+    golden(root, LOCK);
+    assert_eq!(row_status(&passed), "pending");
+    assert_eq!(row_status(&t1_report(LOCK, &[(ID, "pass", &after)])), "pass");
+
+    // No golden: missing.
+    fs::remove_file(root.join(format!("goldens/{ID}.json"))).unwrap();
+    assert_eq!(row_status(&t1_report(LOCK, &[(ID, "pass", &after)])), "missing");
+
+    // Another pin: a report from the old one is refused, and one at the new
+    // pin cannot pass goldens recorded with the old lock.
+    golden(root, LOCK);
+    let new_lock = "c".repeat(64);
+    write(
+        root,
+        "oracle.json",
+        &format!("{{\"anki_version\": \"26.10.0\", \"lock_sha256\": \"{new_lock}\"}}"),
+    );
+    let suite = Suite::open(root).unwrap();
+    let err = LiveReport::parse(&t1_report(LOCK, &[(ID, "pass", &after)]), &suite.pin).unwrap_err();
+    assert!(err.to_string().contains("oracle pin"), "{err}");
+    let at_new_pin = t1_report(&new_lock, &[(ID, "pass", &after)]).replace("\"26.9.3\"", "\"26.10.0\"");
+    assert_eq!(row_status(&at_new_pin), "stale");
+}
+
+#[test]
+fn a_live_report_must_be_a_t1_report_with_known_statuses() {
+    let dir = tree();
+    let suite = Suite::open(dir.path()).unwrap();
+    let sha = sha_of(dir.path());
+    let t0 = t1_report(LOCK, &[(ID, "pass", &sha)]).replace("\"t1\"", "\"t0\"");
+    assert!(
+        LiveReport::parse(&t0, &suite.pin)
+            .unwrap_err()
+            .to_string()
+            .contains("run --live")
+    );
+    let odd = t1_report(LOCK, &[(ID, "passed", &sha)]);
+    assert!(
+        LiveReport::parse(&odd, &suite.pin)
+            .unwrap_err()
+            .to_string()
+            .contains("passed")
+    );
+    assert!(LiveReport::parse("{", &suite.pin).is_err());
 }
 
 #[test]
