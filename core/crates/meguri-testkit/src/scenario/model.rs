@@ -1109,7 +1109,7 @@ fn unknown_kind(name: &str) -> FormatError {
     FormatError::new(format!("unknown observation kind {name:?}"))
 }
 
-/// The functions of the `text` kind (observations.md O8).
+/// The functions of the `text` kind (observations.md O9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TextFunction {
     StripMarkup,
@@ -1172,7 +1172,7 @@ pub enum TextInputs {
     Pairs(Vec<(String, String)>),
 }
 
-/// A `text` observation request: `{fns, inputs}` (observations.md O4, O8).
+/// A `text` observation request: `{fns, inputs}` (observations.md O4, O9).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextRequest {
     pub fns: Vec<TextFunction>,

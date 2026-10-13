@@ -2,7 +2,7 @@
 //! `conformance/scenarios/text/corpus/` through meguri-text, compared with
 //! the oracle's goldens. Zero mismatches, on macOS and in Linux Docker.
 //!
-//! The functions are composed as observations.md O8 defines them: "as saved"
+//! The functions are composed as observations.md O9 defines them: "as saved"
 //! means the field save normalization (checksum-and-sort-field.md C1, with
 //! note text normalization on) comes first.
 

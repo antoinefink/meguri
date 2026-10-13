@@ -1,4 +1,4 @@
-//! The `text` observation kind (observations.md O4, O8): meguri-text's pure
+//! The `text` observation kind (observations.md O4, O9): meguri-text's pure
 //! functions applied to a list of inputs. It never reads or changes the
 //! scenario's collection, so it needs no session state.
 
@@ -43,7 +43,7 @@ fn observe(_session: &mut Session<'_>, request: &ObservationRequest) -> Result<V
     Ok(Value::Object(value))
 }
 
-/// O8 "as saved": the value a note save stores for a field in a collection
+/// O9 "as saved": the value a note save stores for a field in a collection
 /// with the default settings (note text normalization on).
 fn as_saved(input: &str) -> Cow<'_, str> {
     normalize::field_as_saved(input, true)

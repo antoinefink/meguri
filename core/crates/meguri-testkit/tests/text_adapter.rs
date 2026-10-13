@@ -1,4 +1,4 @@
-//! The `text` observation kind on Meguri's executor (observations.md O8).
+//! The `text` observation kind on Meguri's executor (observations.md O9).
 //! Expected values come from the spec tables in specs/text/.
 
 use std::path::Path;
