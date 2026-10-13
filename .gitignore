@@ -7,6 +7,9 @@
 # tools/mg job results and reports
 /build/
 
+# Local overrides of the sync server's test users (docker/syncserver.env.example)
+/docker/syncserver.env
+
 # Rust build output (host builds; Docker builds use a named volume)
 /core/target/
 

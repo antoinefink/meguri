@@ -1070,3 +1070,65 @@ diff_report() {
   [[ "$stderr" != *"must not run"* ]]
   validate "$result"
 }
+
+# --- sync-rig ----------------------------------------------------------------
+
+@test "sync-rig rejects bad usage before touching Docker" {
+  local stubs="$BATS_TEST_TMPDIR/sync-stubs" args
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  for args in "" "frobnicate" "up extra" "up --record" "up --record Bad_Name" "up --record -x" \
+    "down extra" "status extra"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg sync-rig $args
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [[ "$stderr" != *"docker must not run"* ]]
+    validate "$result"
+  done
+}
+
+@test "sync-rig up never appends to an existing recording" {
+  local stubs="$BATS_TEST_TMPDIR/sync-stubs"
+  mkdir -p "$stubs" "$SB/conformance/recordings/sync/taken"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  printf '{"seq":1}\n' >"$SB/conformance/recordings/sync/taken/exchanges.jsonl"
+  mg sync-rig up --record taken
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = recording-exists ]
+  [[ "$stderr" != *"docker must not run"* ]]
+  [ "$(cat "$SB/conformance/recordings/sync/taken/exchanges.jsonl")" = '{"seq":1}' ]
+  validate "$result"
+}
+
+@test "sync-rig status reports a stopped rig as down, and down removes only the rig's services" {
+  local stubs="$BATS_TEST_TMPDIR/sync-stubs"
+  mkdir -p "$stubs"
+  # Docker answers, and compose lists no running container.
+  cat >"$stubs/docker" <<STUB
+#!/bin/sh
+echo "\$*" >>"$BATS_TEST_TMPDIR/docker-calls"
+case "\$1" in info | compose | network) exit 0 ;; esac
+exit 97
+STUB
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  mg sync-rig status
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.running)" = false ]
+  [[ "$(field .message)" == *down* ]]
+  validate "$result"
+  : >"$BATS_TEST_TMPDIR/docker-calls"
+  mg sync-rig down
+  [ "$status" -eq 0 ]
+  [ "$(field .details.running)" = false ]
+  grep -q -- ' rm --stop --force --volumes syncserver toxiproxy mitmdump$' "$BATS_TEST_TMPDIR/docker-calls"
+  [ "$(grep -c -- ' down' "$BATS_TEST_TMPDIR/docker-calls")" -eq 0 ]
+  validate "$result"
+}
