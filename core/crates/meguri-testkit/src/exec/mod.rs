@@ -7,6 +7,7 @@ pub mod clock;
 pub mod live;
 mod meguri;
 mod oracle;
+pub mod sync_guard;
 
 use std::fmt;
 use std::ops::Range;
