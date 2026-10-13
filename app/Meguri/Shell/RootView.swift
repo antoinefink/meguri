@@ -32,6 +32,7 @@ struct RootView: View {
             presentedContent
         }
         .alert(configuration.initialPresentation?.alertTitle ?? "", isPresented: $showsAlert) {
+            configuration.initialPresentation?.alertActions
         } message: {
             Text(configuration.initialPresentation?.alertMessage ?? "")
         }

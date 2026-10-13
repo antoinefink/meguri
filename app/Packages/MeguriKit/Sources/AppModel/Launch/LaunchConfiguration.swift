@@ -33,19 +33,24 @@ public struct InitialPresentation {
     public let content: AnyView?
     public let alertTitle: String?
     public let alertMessage: String?
+    /// The buttons of an alert.
+    public let alertActions: AnyView?
 
     /// A screen pushed onto the root navigation stack.
     public static func screen<Content: View>(@ViewBuilder _ content: () -> Content) -> InitialPresentation {
-        InitialPresentation(style: .screen, content: AnyView(content()), alertTitle: nil, alertMessage: nil)
+        InitialPresentation(style: .screen, content: AnyView(content()), alertTitle: nil, alertMessage: nil, alertActions: nil)
     }
 
     /// A sheet over the root.
     public static func sheet<Content: View>(@ViewBuilder _ content: () -> Content) -> InitialPresentation {
-        InitialPresentation(style: .sheet, content: AnyView(content()), alertTitle: nil, alertMessage: nil)
+        InitialPresentation(style: .sheet, content: AnyView(content()), alertTitle: nil, alertMessage: nil, alertActions: nil)
     }
 
-    /// An alert over the root, for error states.
-    public static func alert(title: String, message: String) -> InitialPresentation {
-        InitialPresentation(style: .alert, content: nil, alertTitle: title, alertMessage: message)
+    /// An alert over the root, for error states. `actions` are its buttons
+    /// (retry, cancel…); given none, the system would add a bare OK.
+    public static func alert<Actions: View>(
+        title: String, message: String, @ViewBuilder actions: () -> Actions
+    ) -> InitialPresentation {
+        InitialPresentation(style: .alert, content: nil, alertTitle: title, alertMessage: message, alertActions: AnyView(actions()))
     }
 }

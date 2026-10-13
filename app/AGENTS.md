@@ -39,6 +39,7 @@
 ## Tests
 
 - Accessibility identifiers: `area.screen.element[.id]`, element names lowerCamel (R1964).
+- System alerts drop the identifiers of their buttons, on iOS and on the Mac. Tests reach them through the alert (`app.alerts` on iOS, `app.sheets` on the Mac) and the button's label; identifier audits must accept them.
 - `MeguriSnapshotTests` is the app-hosted bundle: snapshots and in-process tests of app code (`@testable import Meguri`, Debug only).
 - Xcode gives every Mac app it builds for testing, UI tests included, read access to `/` (plus testmanagerd lookups): no Mac test can catch a sandbox read denial. The `-Dev` fixture entitlement matters for launches outside XCTest; check entitlements on products of `xcodebuild build`, never of a test build.
 - Mac UI tests (`TestHooksTests`, `testMacWindowSize` included) run only through `tools/mg mac-ui`, never directly (root `AGENTS.md`). `tools/mg xcode-check` reports them as queued unless `MEGURI_ALLOW_MAC_UI=1`, so Mac-only coverage (window size, Mac routes) comes from the hourly mac-ui sweep.

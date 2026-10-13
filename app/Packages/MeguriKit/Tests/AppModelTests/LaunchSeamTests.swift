@@ -67,9 +67,10 @@ import AppModel
     @Test func anInitialPresentationNamesItsStyle() {
         #expect(InitialPresentation.screen { Text("a") }.style == .screen)
         #expect(InitialPresentation.sheet { Text("a") }.style == .sheet)
-        let alert = InitialPresentation.alert(title: "T", message: "M")
+        let alert = InitialPresentation.alert(title: "T", message: "M") { Button("OK") {} }
         #expect(alert.style == .alert)
         #expect(alert.alertTitle == "T")
         #expect(alert.alertMessage == "M")
+        #expect(alert.alertActions != nil)
     }
 }

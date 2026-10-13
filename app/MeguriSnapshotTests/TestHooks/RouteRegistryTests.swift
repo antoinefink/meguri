@@ -1,6 +1,7 @@
 #if MEGURI_TEST_HOOKS
 import AppModel
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import Meguri
@@ -34,7 +35,7 @@ import Testing
         var seen: TimeZone?
         registry.register("probe/zone") { context in
             seen = context.configuration.timeZone
-            return .alert(title: context.route.path, message: "")
+            return .alert(title: context.route.path, message: "") { Button("OK") {} }
         }
         var configuration = LaunchConfiguration()
         let options = try TestHooks.LaunchOptions(arguments: ["-MeguriTimeZone", "Asia/Tokyo", "-MeguriRoute", "probe/zone"])

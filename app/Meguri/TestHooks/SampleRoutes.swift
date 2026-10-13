@@ -25,7 +25,10 @@ extension TestHooks {
                 }
             }
             registry.register("sample/alert") { _ in
-                .alert(title: "Sample error", message: "The sample error state.")
+                .alert(title: "Sample error", message: "The sample error state.") {
+                    Button("Try Again") {}
+                    Button("Cancel", role: .cancel) {}
+                }
             }
         }
     }

@@ -72,6 +72,67 @@ import Testing
         #expect(try contents(of: location.directory) == ["collection.anki2": "fixture"])
     }
 
+    private func type(at url: URL) throws -> FileAttributeType? {
+        // attributesOfItem does not follow a link at the path itself, unless
+        // the path ends in a slash.
+        var path = url.path(percentEncoded: false)
+        while path.count > 1, path.hasSuffix("/") { path.removeLast() }
+        return try FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType
+    }
+
+    /// The app opens and writes the installed collection (WAL, journal,
+    /// upgrades). Installed as a link, those writes would reach the fixture
+    /// itself: a committed file under app/Fixtures that every later test
+    /// would start from.
+    @Test func aLinkedFileIsInstalledAsACopyOfItsTarget() throws {
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        try write(["fixtures/real.anki2": "fixture"], under: scratch)
+        let link = scratch.appending(path: "source/link.anki2")
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link.path(percentEncoded: false), withDestinationPath: "../fixtures/real.anki2")
+        let location = CollectionLocation(directory: scratch.appending(path: "Collection", directoryHint: .isDirectory))
+        try TestHooks.FixtureInstaller(bundleIdentifier: "x.dev").install(from: link, into: location)
+        #expect(try type(at: location.collectionFile) == .typeRegular)
+        try Data("written by the app".utf8).write(to: location.collectionFile)
+        #expect(try contents(of: scratch.appending(path: "fixtures")) == ["real.anki2": "fixture"])
+    }
+
+    @Test func aLinkedDirectoryIsInstalledAsACopyOfItsTarget() throws {
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        try write(["fixtures/real/collection.anki2": "db"], under: scratch)
+        let link = scratch.appending(path: "source/link", directoryHint: .notDirectory)
+        try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            atPath: link.path(percentEncoded: false), withDestinationPath: scratch.appending(path: "fixtures/real").path(percentEncoded: false)
+        )
+        let location = CollectionLocation(directory: scratch.appending(path: "Collection", directoryHint: .isDirectory))
+        try TestHooks.FixtureInstaller(bundleIdentifier: "x.dev").install(from: link, into: location)
+        #expect(try type(at: location.directory) == .typeDirectory)
+        #expect(try type(at: location.collectionFile) == .typeRegular)
+        try Data("written by the app".utf8).write(to: location.collectionFile)
+        #expect(try contents(of: scratch.appending(path: "fixtures")) == ["real/collection.anki2": "db"])
+    }
+
+    /// A link inside a directory fixture would be copied as a link: refused,
+    /// before anything at the collection location is touched.
+    @Test func aDirectoryFixtureContainingALinkIsRefused() throws {
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        try write(["fixtures/real.anki2": "fixture", "source/collection.media/a.png": "png", "Collection/collection.anki2": "old"], under: scratch)
+        try FileManager.default.createSymbolicLink(
+            atPath: scratch.appending(path: "source/collection.anki2").path(percentEncoded: false), withDestinationPath: "../fixtures/real.anki2"
+        )
+        let source = scratch.appending(path: "source", directoryHint: .isDirectory)
+        let location = CollectionLocation(directory: scratch.appending(path: "Collection", directoryHint: .isDirectory))
+        #expect(
+            throws: TestHookError(
+                "-MeguriFixture: \(source.path(percentEncoded: false)) contains a symbolic link (collection.anki2); put a copy of its target in the fixture"
+            )
+        ) {
+            try TestHooks.FixtureInstaller(bundleIdentifier: "x.dev").install(from: source, into: location)
+        }
+        #expect(try contents(of: location.directory) == ["collection.anki2": "old"])
+    }
+
     @Test func aMissingSourceIsAnError() throws {
         defer { try? FileManager.default.removeItem(at: scratch) }
         let location = CollectionLocation(directory: scratch.appending(path: "Collection", directoryHint: .isDirectory))

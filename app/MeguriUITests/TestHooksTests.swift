@@ -76,10 +76,23 @@ final class TestHooksTests: XCTestCase {
         XCTAssert(app.staticTexts["sample.screen.title"].waitForExistence(timeout: 15), "the sample screen is not on screen")
     }
 
+    /// An error-state route shows the route's own buttons, never only the
+    /// system's OK. System alerts drop the accessibility identifiers of their
+    /// buttons (iOS and the Mac), so the test reaches them through the alert
+    /// and their labels.
     func testSampleAlertRoute() throws {
         let build = try requireHooks()
-        let app = try launch(MeguriLaunch(animations: false, route: "sample/alert"), build)
-        XCTAssert(app.staticTexts["Sample error"].waitForExistence(timeout: 15), "the sample error alert is not on screen")
+        let app = try launch(MeguriLaunch(locale: "en_US", animations: false, route: "sample/alert"), build)
+        #if os(macOS)
+        let alert = app.sheets.firstMatch
+        #else
+        let alert = app.alerts.firstMatch
+        #endif
+        XCTAssert(alert.waitForExistence(timeout: 15), "the sample error alert is not on screen")
+        XCTAssert(alert.staticTexts["The sample error state."].exists, "the alert lacks the sample message")
+        XCTAssertEqual(Set(alert.buttons.allElementsBoundByIndex.map(\.label)), ["Try Again", "Cancel"])
+        alert.buttons["Cancel"].tap()
+        XCTAssert(alert.waitForNonExistence(timeout: 5), "Cancel did not dismiss the alert")
     }
 
     func testBadLaunchOptionsReplaceTheAppWithTheHookError() throws {
