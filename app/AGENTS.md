@@ -20,6 +20,7 @@
 
 - Profile is Release plus `MEGURI_TEST_HOOKS` (so performance tests can load fixtures) and therefore the `.dev` ids. R1866's "Release configuration" for performance tests means Profile. Never archive or distribute it.
 - Never launch a Release or AppStore build on the Mac: it would replace the daily-driver app. Run their UI tests on simulators only (`TestHooksTests` skips them on the Mac).
+- Building Release or AppStore for the Mac is enough to harm it: Xcode registers the product (daily-driver ids, widget included) with LaunchServices and PlugInKit. Unregister and delete it once done (`lsregister -u`, `pluginkit -r`, as `tools/mg xcode-check` does).
 - Packages never test app compilation conditions: SwiftPM sees only debug/release. `MEGURI_TEST_HOOKS` code lives only in `Meguri/TestHooks/`, `ANKIWEB_ENABLED` code only in `Meguri/AnkiWeb/` (KTD21). `App/MeguriApp.swift` is the one other file that names the hooks.
 - Packages expose seams instead (`AppModel`: `LaunchConfiguration`, `AppClock`, `CollectionLocation`, `InitialPresentation`). Views read time through `@Environment(\.appClock)`, never `Date()`.
 - On the Mac a sheet takes `\.locale` from its own window, not from its presenter: presented content gets the launch environment again (`RootView`).
@@ -40,6 +41,6 @@
 - Accessibility identifiers: `area.screen.element[.id]`, element names lowerCamel (R1964).
 - `MeguriSnapshotTests` is the app-hosted bundle: snapshots and in-process tests of app code (`@testable import Meguri`, Debug only).
 - Xcode gives every Mac app it builds for testing, UI tests included, read access to `/` (plus testmanagerd lookups): no Mac test can catch a sandbox read denial. The `-Dev` fixture entitlement matters for launches outside XCTest; check entitlements on products of `xcodebuild build`, never of a test build.
-- Mac XCUITest needs the `uitest-automation` user step; until then UI tests run on simulators only.
+- Mac UI tests (`TestHooksTests`, `testMacWindowSize` included) run only through `tools/mg mac-ui`, never directly (root `AGENTS.md`). `tools/mg xcode-check` reports them as queued unless `MEGURI_ALLOW_MAC_UI=1`, so Mac-only coverage (window size, Mac routes) comes from the hourly mac-ui sweep.
 - Test plans never retry failures (R1953). The `Performance` plan's options are fixed by R1866, and the `Meguri-Profile` scheme runs it without a debugger.
 - The `Unit` plan runs on the Mac: `CoreBridgeTests` expects the Mac slice.

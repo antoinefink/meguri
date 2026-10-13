@@ -12,7 +12,10 @@
 # TestHooksTests (into <work dir>/DerivedData-tests).
 # Without --iphone/--ipad it creates throwaway simulators and deletes them at
 # exit. Release and AppStore builds are launched on simulators only: on the
-# Mac they would replace the daily-driver app. --no-ui skips the test runs.
+# Mac they would replace the daily-driver app; their Mac builds are
+# unregistered from LaunchServices and deleted once checked. TestHooksTests run
+# on the Mac only with MEGURI_ALLOW_MAC_UI=1 (`tools/mg mac-ui`) and are
+# reported as queued otherwise. --no-ui skips the test runs.
 
 set -u
 
@@ -65,6 +68,20 @@ check() { # check <name> <command...>: ok when the command succeeds; its output 
   if out="$("$@" 2>&1)"; then ok "$name"; else not_ok "$name" "${out:-exit $?}"; fi
 }
 
+# Xcode registers every Mac app it builds with LaunchServices, and the widget
+# inside with PlugInKit. Release and AppStore carry the daily-driver ids: left
+# registered, a build copy (ad hoc, no App Group) could take the installed
+# app's widget, URL scheme or documents. They are unregistered and deleted
+# once checked, and at exit.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+forget_mac_app() { # forget_mac_app <config>: unregisters and deletes a Release or AppStore Mac app
+  case "$1" in Release | AppStore) ;; *) return 0 ;; esac
+  local app="$DD/Build/Products/$1/Meguri.app"
+  pluginkit -r "$app/Contents/PlugIns/MeguriWidget.appex" >/dev/null 2>&1
+  "$LSREGISTER" -u "$app" >/dev/null 2>&1
+  rm -rf "$app"
+}
+
 CREATED=()
 cleanup() {
   local udid
@@ -72,20 +89,21 @@ cleanup() {
     xcrun simctl shutdown "$udid" >/dev/null 2>&1
     xcrun simctl delete "$udid" >/dev/null 2>&1
   done
+  forget_mac_app Release
+  forget_mac_app AppStore
   rm -f "$REPO/app/Meguri/App/SyncedFolderProbe"*.swift
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-simulator() { # simulator <name> <device type>: a throwaway device's UDID
-  local udid
-  udid="$(xcrun simctl create "Meguri-check-$$-$1" "$2" "$RUNTIME")" || return 1
-  CREATED+=("$udid")
-  echo "$udid"
+simulator() { # simulator <name> <device type>: creates a throwaway device and prints its UDID
+  xcrun simctl create "Meguri-check-$$-$1" "$2" "$RUNTIME"
 }
-[ -n "$IPHONE" ] || IPHONE="$(simulator iPhone17Pro com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro)" ||
+# CREATED is appended here, not in `simulator`: a command substitution runs
+# in a subshell, which would append to its own copy.
+[ -n "$IPHONE" ] || { IPHONE="$(simulator iPhone17Pro com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro)" && CREATED+=("$IPHONE"); } ||
   not_ok "create an iPhone 17 Pro simulator" "simctl create failed"
-[ -n "$IPAD" ] || IPAD="$(simulator iPadPro13 com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB)" ||
+[ -n "$IPAD" ] || { IPAD="$(simulator iPadPro13 com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB)" && CREATED+=("$IPAD"); } ||
   not_ok "create an iPad Pro 13-inch (M5) simulator" "simctl create failed"
 
 # setting <config> <sdk> <name>: one resolved build setting of the Meguri target.
@@ -264,7 +282,7 @@ for config in $CONFIGS; do
     Release) features=ankiweb ;;
     AppStore) features="" ;;
   esac
-  build "mac-$config" "$config" "platform=macOS,arch=arm64" || continue
+  build "mac-$config" "$config" "platform=macOS,arch=arm64" || { forget_mac_app "$config"; continue; }
   app="$DD/Build/Products/$config/Meguri.app"
   check "mac-$config links the $config core (features '$features')" stamp_is "$config" "$features" mac
   case "$config" in
@@ -295,7 +313,24 @@ for config in $CONFIGS; do
       bash -c 'case "$1" in TestHooks*" rust") ;; *) exit 1 ;; esac' _ "$markers" ;;
     *) check "mac-$config contains no test hook (found: $markers)" test "$markers" = "- -" ;;
   esac
+  forget_mac_app "$config"
 done
+
+# not_registered <app...>: the apps are gone, and LaunchServices and PlugInKit
+# hold no record of them or of anything inside them.
+not_registered() {
+  local records app found left=""
+  records="$("$LSREGISTER" -dump 2>/dev/null | sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p'
+    pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
+  for app in "$@"; do
+    [ ! -e "$app" ] || left="$left$app is still on disk"$'\n'
+    found="$(awk -v p="$app" '$0 == p || index($0, p "/") == 1 { print $0 " is registered" }' <<<"$records")"
+    [ -z "$found" ] || left="$left$found"$'\n'
+  done
+  [ -z "$left" ] || { printf '%s' "$left" && return 1; }
+}
+check "mac Release and AppStore apps are deleted and unregistered (LaunchServices, PlugInKit)" \
+  not_registered "$DD/Build/Products/Release/Meguri.app" "$DD/Build/Products/AppStore/Meguri.app"
 
 if [ -n "$IPHONE" ] && build "iphone-Debug" Debug "id=$IPHONE"; then
   check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
@@ -341,7 +376,13 @@ run_tests() {
 if [ "$UI" = true ]; then
   run_tests mac-unit Meguri Unit Debug "platform=macOS,arch=arm64"
   run_tests mac-app-hosted Meguri Snapshot Debug "platform=macOS,arch=arm64"
-  run_tests mac-Debug-TestHooksTests Meguri UI Debug "platform=macOS,arch=arm64" -only-testing:MeguriUITests/TestHooksTests
+  # Mac XCUITest takes over the cursor and keyboard: it runs only through
+  # `tools/mg mac-ui`, which sets MEGURI_ALLOW_MAC_UI (root AGENTS.md).
+  if [ "${MEGURI_ALLOW_MAC_UI:-}" = 1 ]; then
+    run_tests mac-Debug-TestHooksTests Meguri UI Debug "platform=macOS,arch=arm64" -only-testing:MeguriUITests/TestHooksTests
+  else
+    skip mac-Debug-TestHooksTests "queued for tools/mg mac-ui"
+  fi
   if [ -n "$IPHONE" ]; then
     run_tests iphone-app-hosted Meguri Snapshot Debug "id=$IPHONE"
     for config in Debug Release AppStore; do
