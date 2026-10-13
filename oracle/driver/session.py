@@ -111,6 +111,7 @@ class Session:
         self.presets: dict[str, int] = {}
         self.steps: list = scenario.get("steps", [])
         self.outputs: list[dict] = []
+        self.next_step = 0  # interactive mode: the next scenario step (ad-hoc steps do not move it)
         try:
             self.col = Collection(os.path.join(self.dir, "collection.anki2"))
             self._guard(None, "setup", lambda: self._setup(scenario.get("setup", {})))

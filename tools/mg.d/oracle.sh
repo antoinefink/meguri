@@ -2,7 +2,9 @@
 #
 # A host job: it builds the oracle image with a content-addressed tag and runs
 # oracle containers through compose (service `oracle`, internal network).
-# Implementers use these commands as black boxes and never read oracle/.
+# Implementers use these commands as black boxes and never read oracle/. Their
+# worktrees have none (U2's sparse checkout), so the image is built from the
+# main worktree's oracle/ (mg_oracle__tree): tools/mg reads it, they never do.
 
 mg_job oracle host mg_oracle \
   "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | bump <version> | lock | test [pattern]"
@@ -47,6 +49,24 @@ mg_oracle__tag() {
   printf '%s-%s\n' "$version" "$(printf '%s' "$hash" | cut -c1-16)"
 }
 
+# mg_oracle__tree: sets MG_ORACLE_DIR to the oracle/ tree to build from: this
+# checkout's, or the main worktree's (the first `git worktree list` entry) when
+# this checkout has none.
+mg_oracle__tree() {
+  local main
+  MG_ORACLE_DIR="$MG_ROOT/oracle"
+  [ -f "$MG_ORACLE_DIR/Dockerfile" ] && return 0
+  main="$(git -C "$MG_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+  if [ -n "$main" ] && [ -f "$main/oracle/Dockerfile" ]; then
+    MG_ORACLE_DIR="$main/oracle"
+    echo "oracle: this checkout has no oracle/; using the main worktree's" >&2
+    return 0
+  fi
+  mg_failure no-oracle-tree "neither this checkout nor its main worktree (${main:-none found}) has oracle/Dockerfile"
+  mg_status error
+  return 1
+}
+
 # mg_oracle__compose <tag> <context dir> compose args...
 mg_oracle__compose() {
   local tag="$1" ctx="$2"
@@ -63,7 +83,7 @@ mg_oracle__build() {
     mg_status error
     return 1
   fi
-  echo "oracle: building meguri-oracle:$MG_ORACLE_TAG from ${dir#"$MG_ROOT"/}" >&2
+  echo "oracle: building meguri-oracle:$MG_ORACLE_TAG from $dir" >&2
   mg_oracle__compose "$MG_ORACLE_TAG" "$dir" --progress plain build oracle 2>&1 | tee "$log" >&2
   rc=${PIPESTATUS[0]}
   mg_artifact log "$log" "oracle image build"
@@ -106,7 +126,7 @@ mg_oracle__hello() {
 # (uv in the oracle's base image, default network: it only talks to PyPI).
 mg_oracle__lock() {
   local dir="$1" base
-  base="$(sed -n 's/^FROM \(python:[^ ]*\).*/\1/p' "$MG_ROOT/oracle/Dockerfile" | head -n 1)"
+  base="$(sed -n 's/^FROM \(python:[^ ]*\).*/\1/p' "$dir/Dockerfile" | head -n 1)"
   docker run --rm --init --label "meguri.mg.run-id=$MG_RUN_ID" -v "$dir:/lock" -w /lock "$base" sh -c "
     pip install --quiet --disable-pip-version-check --root-user-action=ignore uv==$MG_ORACLE_UV_VERSION &&
     uv pip compile --quiet --generate-hashes --python-version 3.12 \
@@ -155,7 +175,7 @@ mg_oracle__docker_ok() {
 mg_oracle_build() {
   [ "$#" -eq 0 ] || { mg_oracle__usage "build takes no arguments"; return 0; }
   mg_oracle__docker_ok || return 0
-  mg_oracle__build "$MG_ROOT/oracle" || return 0
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
   mg_detail image "$(jq -nc --arg t "meguri-oracle:$MG_ORACLE_TAG" --arg i "$MG_ORACLE_ID" '{tag: $t, id: $i}')"
   mg_message "oracle: built meguri-oracle:$MG_ORACLE_TAG"
   mg_status pass
@@ -170,8 +190,8 @@ mg_oracle_hello() {
     esac
   done
   mg_oracle__docker_ok || return 0
-  mg_oracle__build "$MG_ROOT/oracle" || return 0
-  if ! mg_oracle__hello "$MG_ORACLE_TAG" "$MG_ROOT/oracle" "$tz" "$out"; then
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
+  if ! mg_oracle__hello "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" "$tz" "$out"; then
     mg_failure hello "the worker did not answer hello: $(head -c 2000 "$out" 2>/dev/null)"
     mg_status fail
     return 0
@@ -201,8 +221,8 @@ mg_oracle_record_compare() {
     return 0
   fi
   mg_oracle__docker_ok || return 0
-  mg_oracle__build "$MG_ROOT/oracle" || return 0
-  mg_oracle__harness "$MG_ORACLE_TAG" "$MG_ROOT/oracle" "$MG_ROOT/conformance/goldens" \
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
+  mg_oracle__harness "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" "$MG_ROOT/conformance/goldens" \
     "$cmd" --scenarios /in/scenarios --goldens /in/goldens --jobs "$jobs" --report /out/report.json \
     ${filters[0]+"${filters[@]}"}
   rc=$?
@@ -251,6 +271,12 @@ mg_oracle__report() {
 
 mg_oracle_lock() {
   [ "$#" -eq 0 ] || { mg_oracle__usage "lock takes no arguments"; return 0; }
+  # lock rewrites this checkout's lock file; never the main worktree's.
+  if [ ! -f "$MG_ROOT/oracle/requirements.in" ]; then
+    mg_failure no-oracle-tree "lock rewrites oracle/requirements.lock, and this checkout has no oracle/"
+    mg_status error
+    return 0
+  fi
   mg_oracle__docker_ok || return 0
   if ! mg_oracle__lock "$MG_ROOT/oracle"; then
     mg_failure lock "uv could not resolve oracle/requirements.in; see log.txt"
@@ -277,11 +303,12 @@ mg_oracle_bump() {
     esac
   done
   mg_oracle__docker_ok || return 0
+  mg_oracle__tree || return 0
   local staging="$MG_RUN_DIR/staging" old_tag
   mkdir -p "$staging/oracle"
-  (cd "$MG_ROOT/oracle" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.in "$staging/oracle/" &&
+  (cd "$MG_ORACLE_DIR" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.in "$staging/oracle/" &&
     tar -cf - --exclude __pycache__ --exclude '*.pyc' driver | tar -xf - -C "$staging/oracle")
-  sed "s/^anki==.*/anki==$version/" "$MG_ROOT/oracle/requirements.in" >"$staging/oracle/requirements.in"
+  sed "s/^anki==.*/anki==$version/" "$MG_ORACLE_DIR/requirements.in" >"$staging/oracle/requirements.in"
   echo "oracle: locking anki==$version" >&2
   if ! mg_oracle__lock "$staging/oracle"; then
     mg_failure lock "uv could not resolve anki==$version; see log.txt"
@@ -289,7 +316,7 @@ mg_oracle_bump() {
     return 0
   fi
   mg_artifact lock "$staging/oracle/requirements.lock" "staged lock for anki $version"
-  old_tag="$(mg_oracle__tag "$MG_ROOT/oracle")"
+  old_tag="$(mg_oracle__tag "$MG_ORACLE_DIR")"
   mg_oracle__build "$staging/oracle" || return 0
   local hello="$MG_RUN_DIR/hello-new.json"
   if ! mg_oracle__hello "$MG_ORACLE_TAG" "$staging/oracle" UTC "$hello"; then
@@ -348,12 +375,13 @@ mg_oracle_bump() {
 # stream, numbered across both.
 mg_oracle_test() {
   mg_oracle__docker_ok || return 0
-  mg_oracle__build "$MG_ROOT/oracle" || return 0
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
   local inner="$MG_RUN_DIR/driver.tap" outer="$MG_RUN_DIR/host.tap" tap="$MG_RUN_DIR/oracle-test.tap" rc1 rc2
-  mg_oracle__run "$MG_ORACLE_TAG" "$MG_ROOT/oracle" oracle selftest ${1+"$@"} </dev/null | tee "$inner"
+  mg_oracle__run "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" oracle selftest ${1+"$@"} </dev/null | tee "$inner"
   rc1=${PIPESTATUS[0]}
   if [ "$#" -eq 0 ]; then
-    MG_ORACLE_ID="$MG_ORACLE_ID" MG_ORACLE_TAG="$MG_ORACLE_TAG" MG_COMPOSE_PROJECT="$(mg_compose_project)" /bin/bash "$MG_ROOT/tools/tests/oracle_host_checks.sh" | tee "$outer"
+    MG_ORACLE_ID="$MG_ORACLE_ID" MG_ORACLE_TAG="$MG_ORACLE_TAG" MG_ORACLE_DIR="$MG_ORACLE_DIR" \
+      MG_COMPOSE_PROJECT="$(mg_compose_project)" /bin/bash "$MG_ROOT/tools/tests/oracle_host_checks.sh" | tee "$outer"
     rc2=${PIPESTATUS[0]}
   else
     : >"$outer"

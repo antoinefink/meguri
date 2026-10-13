@@ -22,3 +22,9 @@ def shout(session, args):
 @observation("echo")
 def echo(session, args):
     return args
+
+
+@op("unjsonable")
+def unjsonable(session, args):
+    """A result JSON cannot carry, as a buggy area module might return."""
+    return {"set": {1, 2}, "bytes": b"blob", "nan": float("nan"), "surrogate": "\ud800"}[args]

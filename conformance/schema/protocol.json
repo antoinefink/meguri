@@ -3,7 +3,7 @@
   "$id": "https://meguri.local/conformance/schema/protocol.json",
   "$comment": "SPDX-License-Identifier: MPL-2.0. Meguri-owned protocol between Meguri tooling and oracle workers.",
   "title": "Meguri oracle worker protocol, version 1",
-  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, then `docker compose run --rm -T -e TZ=<zone> oracle` (compose project and image tag as tools/mg sets them). Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats.",
+  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, whose result.json gives the image as details.image.tag (meguri-oracle:<tag>), then `MEGURI_ORACLE_TAG=<tag> docker compose -f docker/compose.yml run --rm -T --no-deps -e TZ=<zone> oracle`. A checkout without oracle/ (an implementer worktree) works the same way: tools/mg builds the image from the main worktree's oracle/, and the run needs only the built image. Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats.",
   "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/response" }],
   "$defs": {
     "id": {
@@ -47,7 +47,7 @@
       "additionalProperties": false
     },
     "step_request": {
-      "description": "Interactive mode: run the scenario's next step, or the given ad-hoc step.",
+      "description": "Interactive mode: without step, run the scenario's next step (no_more_steps after the last; a failed step stays next); with step, run that ad-hoc step, which does not move the scenario's next step.",
       "type": "object",
       "required": ["cmd"],
       "properties": {
@@ -125,7 +125,7 @@
       "properties": {
         "ok": { "const": true },
         "id": { "$ref": "#/$defs/id" },
-        "index": { "type": "integer", "minimum": 0 },
+        "index": { "type": "integer", "minimum": 0, "description": "The step's position in the output that end returns, ad-hoc steps included; a failed step request reports the same position as error.step." },
         "observation": { "$ref": "#/$defs/step_output" }
       },
       "additionalProperties": false
@@ -172,7 +172,7 @@
             "no_session",
             "no_more_steps"
           ],
-          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); anki_error: Anki raised (exception names its class); internal_error: a driver bug."
+          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); protocol_error: the line is not a JSON request (NaN and Infinity are not JSON); anki_error: Anki raised (exception names its class); internal_error: a driver bug, including a response JSON cannot carry (then id is echoed only if it can be)."
         },
         "step": { "type": "integer", "minimum": 0, "description": "Index of the failing step." },
         "op": { "type": "string" },
@@ -240,7 +240,7 @@
             },
             "notes": {
               "type": "array",
-              "description": "{notetype, deck?, fields: [values] | {field: value}, tags?}, as add_note.",
+              "description": "{notetype, deck?, fields: [string] | {field: string}, tags?: [string]}, as add_note. Field values and tags are strings: quote numbers, booleans and null.",
               "items": { "type": "object", "required": ["notetype"] }
             }
           },

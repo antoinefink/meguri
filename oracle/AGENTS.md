@@ -10,6 +10,8 @@ Only spec writers and oracle maintainers work here. Implementers never read this
 - Workers need `/scratch` on tmpfs (the compose service has it). On the container overlay a scenario is ~10x slower.
 - `canon.py` defines scenario_sha256 (RFC 8785 of the YAML 1.2 core-schema parse). The Rust runner (U4) must produce the same bytes; change both together.
 - Any driver edit changes `driver_sha256` and the image tag. Goldens go stale only on scenario or lock changes; re-record with `tools/mg oracle record` when an edit changes observations, and check with `tools/mg oracle compare`.
+- In a checkout without `oracle/` (an implementer worktree), `tools/mg oracle` builds from the main worktree's `oracle/` as checked out there: a driver change reaches implementers only once the main checkout has it.
+- Scenario values reach Anki unconverted: reject a wrong JSON type with `invalid_scenario`, never `str()` it (Python's `True`/`1.0`/`None` text is not what a Meguri adapter writes).
 - Pins move only through `tools/mg oracle bump <version>` (lock via `tools/mg oracle lock`). Adopting a bump is one separate change: staged `requirements.in`, `requirements.lock` and goldens together.
 - Add-on oracles (another quarantined image): `FROM meguri-oracle:<tag>`, add modules, list them in `ORACLE_EXTRA_MODULES`.
 - `tools/mg oracle test` runs `driver/tests/` in the container on the internal network (the isolation test fails anywhere else) plus `tools/tests/oracle_host_checks.sh`.

@@ -169,6 +169,50 @@ class Errors(unittest.TestCase):
         self.assertTrue(hello["ok"])
         self.assertEqual(leftovers, ["clock"])
 
+    def test_values_json_cannot_carry_get_errors_and_the_worker_lives_on(self):
+        env = {"ORACLE_EXTRA_MODULES": "driver.tests.extra_area"}
+        with WorkerProcess("UTC", extra_env=env) as w:
+            nan_id = w.request({"cmd": "hello", "id": float("nan")})  # sent as NaN
+            infinity = w.request({"cmd": "run", "scenario": {"clock": {"start": float("-inf")}}})
+            outputs = {
+                kind: w.request({"cmd": "run", "id": kind,
+                                 "scenario": scenario("t/u", "UTC", "2030-01-15T10:00:00", [{"unjsonable": kind}])})
+                for kind in ("set", "bytes", "nan", "surrogate")
+            }
+            # A lone surrogate is valid JSON text but cannot be written as UTF-8.
+            w.proc.stdin.write('{"cmd":"hello","id":"\\ud800"}\n')
+            w.proc.stdin.flush()
+            surrogate_id = json.loads(w.proc.stdout.readline())
+            hello = w.request({"cmd": "hello", "id": 2})
+        for resp in (nan_id, infinity):
+            self.assertEqual((resp["ok"], resp["error"]["kind"], "id" in resp), (False, "protocol_error", False), resp)
+        exceptions = {"set": "TypeError", "bytes": "TypeError", "nan": "ValueError", "surrogate": "UnicodeEncodeError"}
+        for kind, resp in outputs.items():
+            self.assertEqual(resp, {"ok": False, "id": kind, "error": {"kind": "internal_error", "exception": exceptions[kind]}})
+        self.assertEqual(surrogate_id, {"ok": False, "error": {"kind": "internal_error", "exception": "UnicodeEncodeError"}})
+        self.assertEqual((hello["ok"], hello["id"]), (True, 2))
+
+    def test_note_fields_and_tags_must_be_strings(self):
+        notes = [
+            {"fields": [True, None]},
+            {"fields": {"Q": 1}},
+            {"fields": ["q", "a"], "tags": [1.0]},
+            {"fields": ["q", "a"], "tags": [False]},
+        ]
+        with WorkerProcess("UTC") as w:
+            for extra in notes:
+                note = {"notetype": "QA", "deck": "A", **extra}
+                as_op = w.request({"cmd": "run", "scenario": scenario("t/op", "UTC", "2030-01-15T10:00:00",
+                                                                      [{"add_note": note}])})
+                in_setup = w.request({"cmd": "run", "scenario": scenario("t/setup", "UTC", "2030-01-15T10:00:00", [],
+                                                                         setup={"notes": [note]})})
+                with self.subTest(note=extra):
+                    self.assertEqual((as_op["error"]["kind"], as_op["error"].get("step")), ("invalid_scenario", 0))
+                    self.assertEqual((in_setup["error"]["kind"], "step" in in_setup["error"]), ("invalid_scenario", False))
+            quoted = {"notetype": "QA", "deck": "A", "fields": ["1", "true"], "tags": ["1.0", "false"]}
+            ok = w.request({"cmd": "run", "scenario": scenario("t/ok", "UTC", "2030-01-15T10:00:00", [{"add_note": quoted}])})
+        self.assertEqual(ok["observations"]["steps"], [{"add_note": {"note": "#n1", "cards": ["#c1"]}}])
+
     def test_scenario_in_another_zone_is_refused(self):
         with WorkerProcess("UTC") as w:
             err = w.request({"cmd": "run", "scenario": scenario("t/tz", "Europe/Paris", "2030-01-15T10:00:00", [])})
@@ -240,6 +284,31 @@ class Interactive(unittest.TestCase):
         self.assertEqual(adhoc, {"ok": True, "index": 1, "observation": {"ids": {"#c1": t}}})
         self.assertEqual(ended["observations"]["steps"], [{}, {"ids": {"#c1": t}}])
         self.assertEqual(after["error"]["kind"], "no_session")
+
+    def test_ad_hoc_steps_do_not_move_the_scenario_cursor(self):
+        # Step 0 needs a second card, which only an ad-hoc step creates.
+        sc = scenario("t/c", "UTC", "2030-01-15T10:00:00",
+                      [{"answer": {"card": "#c2", "rating": "good"}}, {"advance": "1d"}, {"observe": ["timing"]}],
+                      notes=1)
+        add = {"add_note": {"notetype": "QA", "deck": "A", "fields": ["q2", "a2"]}}
+        with WorkerProcess("UTC") as w:
+            w.request({"cmd": "begin", "scenario": sc})
+            peek = w.request({"cmd": "step", "step": {"observe": ["timing"]}})
+            missing = w.request({"cmd": "step"})
+            added = w.request({"cmd": "step", "step": add})
+            answered = w.request({"cmd": "step"})
+            advanced = w.request({"cmd": "step"})
+            timing = w.request({"cmd": "step"})
+            done = w.request({"cmd": "step"})
+            ended = w.request({"cmd": "end"})
+        self.assertEqual((peek["index"], peek["observation"]["timing"]["days_elapsed"]), (0, 0))
+        self.assertEqual(missing["error"], {"kind": "unknown_ref", "ref": "#c2", "step": 1})
+        self.assertEqual(added, {"ok": True, "index": 1, "observation": {"add_note": {"note": "#n2", "cards": ["#c2"]}}})
+        self.assertEqual(answered, {"ok": True, "index": 2, "observation": {}})  # scenario step 0, retried
+        self.assertEqual(advanced, {"ok": True, "index": 3, "observation": {}})
+        self.assertEqual((timing["index"], timing["observation"]["timing"]["days_elapsed"]), (4, 1))
+        self.assertEqual(done["error"], {"kind": "no_more_steps", "steps": 3})
+        self.assertEqual(len(ended["observations"]["steps"]), 5)
 
 
 class Isolation(unittest.TestCase):

@@ -6,11 +6,13 @@
 # refers to oracle/.
 #
 # Environment (set by tools/mg oracle test): MG_ROOT, MG_RUN_DIR, MG_RUN_ID,
-# MG_COMPOSE_PROJECT, and MG_ORACLE_TAG and MG_ORACLE_ID of the image just built.
+# MG_COMPOSE_PROJECT, and MG_ORACLE_TAG, MG_ORACLE_ID and MG_ORACLE_DIR (the
+# oracle/ tree) of the image just built.
 
 set -u
 
 REPO="$MG_ROOT"
+ORACLE="${MG_ORACLE_DIR:-$REPO/oracle}"
 WORK="$MG_RUN_DIR/host-checks"
 mkdir -p "$WORK"
 
@@ -39,15 +41,15 @@ hello_on() { # <tag> <context> <tz> <out>
 
 t_tag_is_content_addressed_and_stable() {
   local again pin
-  again="$(mg_oracle__tag "$REPO/oracle")" || return 1
-  pin="$(sed -n 's/^anki==\([^ ]*\).*/\1/p' "$REPO/oracle/requirements.lock")"
+  again="$(mg_oracle__tag "$ORACLE")" || return 1
+  pin="$(sed -n 's/^anki==\([^ ]*\).*/\1/p' "$ORACLE/requirements.lock")"
   expect "tag recomputed" "$again" "$MG_ORACLE_TAG" &&
     expect "tag shape" "$(printf '%s' "$again" | grep -Ec '^[0-9.]+-[0-9a-f]{16}$')" 1 &&
     expect "tag version" "${again%%-*}" "$pin"
 }
 
 t_rebuilding_an_unchanged_tree_keeps_tag_and_image() {
-  mg_oracle__compose "$MG_ORACLE_TAG" "$REPO/oracle" --progress quiet build oracle >"$WORK/rebuild.log" 2>&1 || {
+  mg_oracle__compose "$MG_ORACLE_TAG" "$ORACLE" --progress quiet build oracle >"$WORK/rebuild.log" 2>&1 || {
     cat "$WORK/rebuild.log"
     return 1
   }
@@ -57,7 +59,7 @@ t_rebuilding_an_unchanged_tree_keeps_tag_and_image() {
 t_editing_a_driver_file_changes_tag_and_driver_hash() {
   local edited="$WORK/edited-oracle" tag rc
   rm -rf "$edited" && mkdir -p "$edited"
-  (cd "$REPO/oracle" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.lock "$edited/" &&
+  (cd "$ORACLE" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.lock "$edited/" &&
     tar -cf - --exclude __pycache__ --exclude '*.pyc' driver | tar -xf - -C "$edited")
   printf '\n# edited by oracle_host_checks.sh\n' >>"$edited/driver/observe/ids.py"
   tag="$(mg_oracle__tag "$edited")" || return 1
@@ -69,7 +71,7 @@ t_editing_a_driver_file_changes_tag_and_driver_hash() {
     cat "$WORK/edited-build.log"
     return 1
   }
-  hello_on "$MG_ORACLE_TAG" "$REPO/oracle" UTC "$WORK/hello-original.json" &&
+  hello_on "$MG_ORACLE_TAG" "$ORACLE" UTC "$WORK/hello-original.json" &&
     hello_on "$tag" "$edited" UTC "$WORK/hello-edited.json"
   rc=$?
   docker image rm -f "meguri-oracle:$tag" >/dev/null 2>&1
@@ -87,9 +89,9 @@ t_editing_a_driver_file_changes_tag_and_driver_hash() {
 
 t_a_compose_worker_says_hello_in_its_zone() {
   local out="$WORK/hello-kathmandu.json" lock pin
-  hello_on "$MG_ORACLE_TAG" "$REPO/oracle" Asia/Kathmandu "$out" || return 1
-  lock="$(mg_oracle__sha256 <"$REPO/oracle/requirements.lock")"
-  pin="$(sed -n 's/^anki==\([^ ]*\).*/\1/p' "$REPO/oracle/requirements.lock")"
+  hello_on "$MG_ORACLE_TAG" "$ORACLE" Asia/Kathmandu "$out" || return 1
+  lock="$(mg_oracle__sha256 <"$ORACLE/requirements.lock")"
+  pin="$(sed -n 's/^anki==\([^ ]*\).*/\1/p' "$ORACLE/requirements.lock")"
   expect "anki_version" "$(jq -r .anki_version "$out")" "$pin" &&
     expect "anki pin" "$pin" "26.9.3" &&
     expect "lock_sha256" "$(jq -r .lock_sha256 "$out")" "$lock" &&
@@ -111,8 +113,8 @@ t_protocol_transcript_matches_the_schema() {
 {"cmd":"end"}
 {"cmd":"warp"}
 EOF
-  mg_oracle__run "$MG_ORACLE_TAG" "$REPO/oracle" oracle <"$req" >"$resp" || return 1
-  printf 'not json\n' | mg_oracle__run "$MG_ORACLE_TAG" "$REPO/oracle" oracle >>"$resp" || return 1
+  mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" oracle <"$req" >"$resp" || return 1
+  printf 'not json\n' | mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" oracle >>"$resp" || return 1
   expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 9 || return 1
   local rel_req="${req#"$REPO"/}" rel_resp="${resp#"$REPO"/}"
   mg_compose build dev >"$WORK/dev-build.log" 2>&1 || {
@@ -177,10 +179,47 @@ t_no_meguri_code_refers_to_oracle() {
   done
 }
 
+# An implementer worktree has no oracle/ (U2's sparse checkout). tools/mg there
+# builds from the main worktree's oracle/ and compares as usual. Throwaway
+# repo: a main checkout with a copy of the tree, and a sparse linked worktree.
+t_compare_runs_in_a_worktree_without_oracle() {
+  local base="$WORK/sparse" main impl out result project rc
+  main="$base/main"
+  impl="$base/impl"
+  rm -rf "$base" && mkdir -p "$main/oracle" || return 1
+  (cd "$REPO" && tar -cf - tools docker conformance) | tar -xf - -C "$main" &&
+    (cd "$ORACLE" && tar -cf - --exclude __pycache__ --exclude '*.pyc' .) | tar -xf - -C "$main/oracle" || return 1
+  git -C "$main" init -q && git -C "$main" add -A &&
+    git -C "$main" -c user.name=hostcheck -c user.email=hostcheck@localhost -c commit.gpgsign=false commit -qm main &&
+    git -C "$main" worktree add -q --no-checkout "$impl" HEAD &&
+    git -C "$impl" sparse-checkout set --no-cone '/*' '!/oracle/' &&
+    git -C "$impl" checkout -q || return 1
+  if [ -e "$impl/oracle" ]; then
+    echo "the sparse worktree has oracle/"
+    return 1
+  fi
+  out="$(/bin/bash "$impl/tools/mg" oracle compare smoke 2>"$base/compare.log")"
+  rc=$?
+  result="$(printf '%s\n' "$out" | tail -n 1)"
+  project="meguri-impl-$(printf '%s' "$(cd "$impl" && pwd -P)" | cksum | cut -d' ' -f1)"
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f "$impl/docker/compose.yml" down >/dev/null 2>&1
+  if [ "$rc" -ne 0 ] || [ ! -f "$result" ]; then
+    echo "tools/mg oracle compare smoke exited $rc in the sparse worktree:"
+    tail -n 20 "$base/compare.log"
+    [ -f "$result" ] && jq -c '{status, failures}' "$result"
+    return 1
+  fi
+  expect "status" "$(jq -r .status "$result")" pass &&
+    expect "image tag" "$(jq -r .details.image.tag "$result")" "meguri-oracle:$MG_ORACLE_TAG" &&
+    expect "every scenario passed" "$(jq -r '.summary.passed > 0 and .summary.passed == .summary.total' "$result")" true &&
+    expect "oracle/ in the sparse worktree after the run" "$([ -e "$impl/oracle" ] && echo present || echo absent)" absent
+}
+
 TESTS="t_tag_is_content_addressed_and_stable t_rebuilding_an_unchanged_tree_keeps_tag_and_image
 t_editing_a_driver_file_changes_tag_and_driver_hash t_a_compose_worker_says_hello_in_its_zone
 t_protocol_transcript_matches_the_schema t_the_oracle_service_has_no_route_out
-t_the_network_probe_connects_when_a_route_exists t_no_meguri_code_refers_to_oracle"
+t_the_network_probe_connects_when_a_route_exists t_no_meguri_code_refers_to_oracle
+t_compare_runs_in_a_worktree_without_oracle"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 n=0

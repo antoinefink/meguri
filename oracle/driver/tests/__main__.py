@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""TAP runner for the driver self-tests: python -m driver.tests [name-filter]."""
+"""TAP runner for the driver self-tests: python -m driver.tests [name-filter...].
+
+Exit 0 when every selected test passes, 1 when one fails, 2 when the runner
+breaks or the filters select no test.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +27,9 @@ def main(argv: list[str]) -> int:
     loader = unittest.TestLoader()
     suite = loader.discover(str(here), pattern="test_*.py", top_level_dir=str(here.parent.parent))
     tests = [t for t in _flatten(suite) if not argv or any(a in t.id() for a in argv)]
+    if not tests:  # a misspelled filter must not pass with nothing run
+        print(f"driver.tests: no self-test matches {' '.join(argv) or '(no filter)'}", file=sys.stderr)
+        return 2
     print(f"1..{len(tests)}", flush=True)
     failed = 0
     for n, test in enumerate(tests, 1):

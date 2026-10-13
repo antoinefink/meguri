@@ -5,7 +5,7 @@ Anki keeps FSRS memory states, ease factors and similar values as f32. Python
 widens them to f64, whose repr (11.262236595153809) is not what any f32-aware
 printer emits (11.262237). Observations carry the shortest decimal that parses
 back to the same f32, chosen like Ryu: fewest significant digits, then the one
-closest to the exact value.
+closest to the exact value, then (on a tie) the one with an even last digit.
 """
 
 from __future__ import annotations
@@ -62,7 +62,8 @@ def f32_shortest(x: float) -> str:
         candidates = [c for c in (nearest - step, nearest, nearest + step) if c > 0 and inside(c)]
         candidates = [c for c in candidates if len(c.normalize().as_tuple().digits) <= digits]
         if candidates:
-            best = min(candidates, key=lambda c: abs(Fraction(c) - exact))
+            # Closest to the exact value; a tie keeps the even last digit (Ryu).
+            best = min(candidates, key=lambda c: (abs(Fraction(c) - exact), int(c / step) % 2))
             return sign + _plain(best)
     raise AssertionError(f"no 9-digit decimal round-trips {x!r}")  # f32 needs at most 9
 

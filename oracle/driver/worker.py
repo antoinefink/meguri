@@ -4,8 +4,9 @@
 One JSON request per stdin line, one JSON response per stdout line, in order.
 Requests: hello | run | begin | step | end, each with an optional `id` echoed
 back. A failing request gets {"ok": false, "error": {...}} and the worker keeps
-serving. stdout carries protocol lines only: everything else the process prints
-(Python or Anki's Rust backend) goes to stderr.
+serving; so does a request with NaN or Infinity, or one whose response JSON
+cannot carry. stdout carries protocol lines only: everything else the process
+prints (Python or Anki's Rust backend) goes to stderr.
 
 The worker serves exactly one time zone, $TZ, for its whole life (R1871); its
 clock is the libfaketime file set up by entrypoint.sh.
@@ -58,14 +59,17 @@ class Worker:
             self.session = Session(req.get("scenario"), self.tz, self.scratch, self.clock)
             return {"scenario_id": self.session.scenario["id"], "steps": len(self.session.steps)}
         if cmd == "step":
+            # index: the step's position in the session output (what `end`
+            # returns). Ad-hoc steps leave the scenario cursor where it is.
             session = self._open_session()
-            if "step" in req:
-                index = len(session.outputs)
-                return {"index": index, "observation": session.run_step(index, req["step"])}
             index = len(session.outputs)
-            if index >= len(session.steps):
+            if "step" in req:
+                return {"index": index, "observation": session.run_step(index, req["step"])}
+            if session.next_step >= len(session.steps):
                 raise DriverError("no_more_steps", steps=len(session.steps))
-            return {"index": index, "observation": session.run_step(index, session.steps[index])}
+            observation = session.run_step(index, session.steps[session.next_step])
+            session.next_step += 1  # a failed step stays next
+            return {"index": index, "observation": observation}
         if cmd == "end":
             session = self._open_session()
             self.session = None
@@ -89,7 +93,7 @@ class Worker:
                 continue
             req_id = None
             try:
-                req = json.loads(line)
+                req = json.loads(line, parse_constant=_reject_constant)
                 if isinstance(req, dict):
                     req_id = req.get("id")
                 resp = {"ok": True, **self.handle(req)}
@@ -102,10 +106,39 @@ class Worker:
                 resp = {"ok": False, "error": {"kind": "internal_error", "exception": type(exc).__name__}}
             if req_id is not None:
                 resp["id"] = req_id
-            out.write(json.dumps(resp, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n")
+            out.write(_response_line(resp))
             out.flush()
         if self.session is not None:
             self.session.close()
+
+
+def _reject_constant(name: str):
+    raise DriverError("protocol_error", detail=f"{name} is not JSON")
+
+
+def _dumps(value: Any) -> str:
+    """JSON text that also encodes as UTF-8, or ValueError/TypeError."""
+    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    text.encode("utf-8")  # a lone surrogate raises UnicodeEncodeError, a ValueError
+    return text
+
+
+def _response_line(resp: dict) -> str:
+    """A response JSON cannot carry (a set, bytes, NaN, a lone surrogate from an
+    area module or in the echoed id) becomes an internal_error, so the worker
+    keeps serving."""
+    try:
+        return _dumps(resp) + "\n"
+    except (TypeError, ValueError) as exc:
+        traceback.print_exc(file=sys.stderr)
+        err: dict[str, Any] = {"ok": False, "error": {"kind": "internal_error", "exception": type(exc).__name__}}
+        if "id" in resp:
+            try:
+                _dumps(resp["id"])
+                err["id"] = resp["id"]
+            except (TypeError, ValueError):
+                pass
+        return _dumps(err) + "\n"
 
 
 def main() -> int:

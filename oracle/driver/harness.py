@@ -206,7 +206,13 @@ def _ptr(path: list[str]) -> str:
     return "".join("/" + str(p).replace("~", "~0").replace("/", "~1") for p in path)
 
 
-_ABSENT = "<absent>"
+# A missing key or list item. Unequal to every JSON value (a string sentinel
+# would equal that string); reports show it as "<absent>".
+_ABSENT = object()
+
+
+def _shown(value: Any) -> Any:
+    return "<absent>" if value is _ABSENT else value
 
 
 def json_diff(expected: Any, actual: Any, path: list[str] | None = None, out: list | None = None) -> list[dict]:
@@ -222,7 +228,7 @@ def json_diff(expected: Any, actual: Any, path: list[str] | None = None, out: li
             a = actual[i] if i < len(actual) else _ABSENT
             json_diff(e, a, path + [str(i)], out)
     elif type(expected) is not type(actual) or expected != actual:
-        out.append({"pointer": _ptr(path) or "/", "expected": expected, "actual": actual})
+        out.append({"pointer": _ptr(path) or "/", "expected": _shown(expected), "actual": _shown(actual)})
     return out
 
 

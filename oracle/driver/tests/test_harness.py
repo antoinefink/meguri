@@ -37,6 +37,17 @@ steps:
 """
 
 
+class JsonDiff(unittest.TestCase):
+    def test_a_missing_key_or_item_differs_from_every_value(self):
+        diff = harness.json_diff
+        self.assertEqual(diff({}, {"did": "<absent>"}), [{"pointer": "/did", "expected": "<absent>", "actual": "<absent>"}])
+        self.assertEqual(len(diff(["<absent>"], [])), 1)
+        self.assertEqual(diff({"a": [1]}, {"a": []}), [{"pointer": "/a/0", "expected": 1, "actual": "<absent>"}])
+        self.assertEqual(diff({"a": None}, {}), [{"pointer": "/a", "expected": None, "actual": "<absent>"}])
+        self.assertEqual(diff({"a": [1, "x"]}, {"a": [1, "x"]}), [])
+        json.dumps(diff({"k": 1}, {}), allow_nan=False)  # reports stay JSON
+
+
 class Harness(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
