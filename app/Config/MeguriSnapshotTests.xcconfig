@@ -1,0 +1,11 @@
+// The MeguriSnapshotTests bundle: unit tests hosted by the app (KTD19, U10).
+
+PRODUCT_NAME = MeguriSnapshotTests
+PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID).snapshottests
+GENERATE_INFOPLIST_FILE = YES
+TEST_HOST[sdk=iphone*] = $(BUILT_PRODUCTS_DIR)/Meguri.app/Meguri
+TEST_HOST[sdk=macosx*] = $(BUILT_PRODUCTS_DIR)/Meguri.app/Contents/MacOS/Meguri
+BUNDLE_LOADER = $(TEST_HOST)
+
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @loader_path/Frameworks
+LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks @loader_path/../Frameworks

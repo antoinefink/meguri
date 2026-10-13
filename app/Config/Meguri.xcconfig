@@ -1,0 +1,27 @@
+// The Meguri app target (iOS, iPadOS, macOS). Configuration-specific values
+// come from the project level (Debug.xcconfig, ...).
+
+PRODUCT_NAME = Meguri
+PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID)
+SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
+
+// Info.plist: the generated keys merged into the per-platform file, which
+// holds the keys other areas rely on (R499, R1629, KTD12).
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE[sdk=iphone*] = Meguri/Info-iOS.plist
+INFOPLIST_FILE[sdk=macosx*] = Meguri/Info-macOS.plist
+INFOPLIST_KEY_CFBundleDisplayName = Meguri
+INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
+INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = YES
+INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphone*] = YES
+INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
+INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+
+// Entitlements (R2041, KTD22). Mac: Meguri-macOS[-Dev][-AdHoc].entitlements,
+// -Dev for hook builds, -AdHoc without a signing team (Signing.xcconfig).
+CODE_SIGN_ENTITLEMENTS[sdk=iphone*] = Meguri/Meguri-iOS.entitlements
+CODE_SIGN_ENTITLEMENTS[sdk=macosx*] = Meguri/Meguri-macOS$(MEGURI_ENTITLEMENTS_HOOKS_SUFFIX)$(MEGURI_ENTITLEMENTS_SIGNING_SUFFIX).entitlements
+
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
+LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks

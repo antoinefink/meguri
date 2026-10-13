@@ -1,0 +1,114 @@
+# UI lint gate rules (U9, R1992-R1998, KTD20). Run only through
+# `tools/mg lint-ui` (SwiftLint in Docker); the gate picks the files (all app
+# UI code under app/, tests and the Rust bridge excluded) and owns the
+# per-file allowlist with reasons (tools/lint-ui/path-rules.sh,
+# tools/lint-ui/allowlist.tsv). Inline `swiftlint:` comments fail the gate.
+#
+# Rule ids are the keys below; a key `<id>--<variant>` is another pattern
+# reported as `<id>`. The rubric (docs/design/rubric.md) cites these ids.
+# Path exemptions here are structural only: token definitions live in
+# DesignSystem/Tokens/, glass and shadows in DesignSystem/Chrome/.
+#
+# A number in a spacing, padding, inset or radius position is allowed only when
+# it is zero. Patterns skip comments and string literals unless a variant says
+# otherwise.
+
+only_rules:
+  - custom_rules
+
+custom_rules:
+  raw-color:
+    name: Raw colour value
+    regex: '(?:\b(?:Color(?:\s*\.\s*Resolved)?|UIColor|NSColor|CGColor)\s*(?:\.\s*init\s*)?\(\s*(?:\.\w+\s*,\s*)?(?:red|white|hue|gray|hex|srgbRed|calibratedRed|deviceRed|displayP3Red|calibratedWhite|deviceWhite|calibratedHue|deviceHue|genericGrayGamma2_2Gray)\s*:|#colorLiteral\s*\()'
+    message: "Colours come from ColorToken (DesignSystem/Tokens/ColorTokens.swift and Colors.xcassets), never from raw values (R1992, R1994)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
+    excluded_match_kinds: [comment, doccomment, string]
+  raw-color--hex-string:
+    name: Hex colour literal
+    regex: '"#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})"'
+    message: "Hex colour literals are raw colours: use a ColorToken (R1994)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
+    match_kinds: [string]
+
+  fixed-font-size:
+    name: Fixed font size
+    regex: '(?:\.system\s*\(\s*size\s*:|\bFont\s*\.\s*custom\s*\(|\.custom\s*\((?=\s*")|\b(?:system|boldSystem|italicSystem|monospacedSystem|monospacedDigitSystem)Font\s*\(\s*ofSize\s*:|\b(?:UIFont|NSFont|Font)\s*\(\s*name\s*:)'
+    message: "Text uses system text styles only (.body, .headline, Typography helpers), never fixed sizes or custom fonts (R1993)."
+    severity: error
+    excluded_match_kinds: [comment, doccomment, string]
+
+  numeric-spacing:
+    name: Numeric spacing
+    regex: '(?:\.(?:padding|safeAreaPadding|contentMargins)\s*\(\s*(?:(?:\[[^\]]*\]|\.\w+)\s*,\s*)?|\b(?:spacing|horizontalSpacing|verticalSpacing|minLength)\s*:\s*|\.list(?:Row|Section)Spacing\s*\(\s*|\b(?:NS|UI|NSDirectional)?EdgeInsets\s*\([^)]*?\b(?:top|leading|left|bottom|trailing|right)\s*:\s*)-?(?<![\w.])(?:\d*[1-9]\d*(?:\.\d+)?|\d+\.\d*[1-9]\d*)(?![\w.])'
+    message: "Spacing, padding and insets use Spacing tokens (4-pt scale); only 0 may be written as a number (R1992, R1994)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
+    excluded_match_kinds: [comment, doccomment, string]
+
+  numeric-radius:
+    name: Numeric corner radius
+    regex: '(?:\bcornerRadius\s*:\s*|\.cornerRadius\s*\(\s*|\b(?:topLeading|topTrailing|bottomLeading|bottomTrailing)Radius\s*:\s*)(?<![\w.])(?:\d*[1-9]\d*(?:\.\d+)?|\d+\.\d*[1-9]\d*)(?![\w.])'
+    message: "Corner radii use Radius tokens or a concentric shape, never numbers (R1992)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
+    excluded_match_kinds: [comment, doccomment, string]
+
+  raw-motion:
+    name: Animation outside Motion tokens
+    regex: '(?:(?:\bwithAnimation|\.animation)\s*\(\s*(?:Animation\s*)?\.(?:default|linear|easeIn|easeOut|easeInOut|spring|bouncy|snappy|smooth|interactiveSpring|interpolatingSpring|timingCurve)\b|\bAnimation\s*\.\s*(?:linear|easeIn|easeOut|easeInOut|spring|bouncy|snappy|smooth|interactiveSpring|interpolatingSpring|timingCurve)\b|\.transition\s*\(\s*(?:AnyTransition\s*)?\.(?:move|slide|push|scale|offset)\b)'
+    message: "Animations and moving transitions come from Motion tokens, which carry the Reduce Motion alternative (R1992)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Tokens/'
+    excluded_match_kinds: [comment, doccomment, string]
+
+  content-shadow:
+    name: Shadow on content
+    regex: '(?:\.shadow\s*\(|\bNSShadow\s*\(|\.shadow(?:Opacity|Radius|Offset|Color|Path)\s*=)'
+    message: "Content views carry no shadows; depth comes from system materials on the control layer (DesignSystem/Chrome/) (R1994)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Chrome/'
+    excluded_match_kinds: [comment, doccomment, string]
+
+  glass-outside-chrome:
+    name: Glass outside the control layer
+    regex: '(?:\.glassEffect(?:ID|Union|Transition)?\s*\(|\bGlassEffectContainer\b|\bGlass(?:Prominent)?ButtonStyle\b|\.buttonStyle\s*\(\s*\.glass(?:Prominent)?\b|\bGlass\s*\.\s*(?:regular|clear|identity)\b|\.glassBackgroundEffect\s*\(|\b(?:UI|NS)Glass\w*|\b(?:UIVisualEffectView|NSVisualEffectView|UIBlurEffect)\b|\.(?:ultraThin|thin|regular|thick|ultraThick)Material\b|\bMaterial\s*\.\s*\w+)'
+    message: "Liquid Glass and materials belong to the navigation and control layer: use DesignSystem/Chrome/ (or an allowlisted control file), never card or list content (R1996, AE90)."
+    severity: error
+    excluded: '/app/Packages/MeguriKit/Sources/DesignSystem/Chrome/'
+    excluded_match_kinds: [comment, doccomment, string]
+
+  custom-tab-bar:
+    name: Custom tab bar
+    regex: '\b(?:struct|class|enum|actor|protocol|typealias)\s+\w*TabBar\w*'
+    message: "Use the system TabView; custom tab bars are not allowed (R1995)."
+    severity: error
+    excluded_match_kinds: [comment, doccomment, string]
+
+  custom-navigation-bar:
+    name: Custom navigation bar
+    regex: '\b(?:struct|class|enum|actor|protocol|typealias)\s+\w*(?:NavigationBar|NavBar)\w*'
+    message: "Use the system navigation bar and toolbars; custom navigation bars are not allowed (R1995)."
+    severity: error
+    excluded_match_kinds: [comment, doccomment, string]
+
+  hamburger-menu:
+    name: Hamburger menu
+    regex: '\b\w*(?:[Hh]amburger|SideMenu|SlideOutMenu|DrawerMenu)\w*'
+    message: "No hamburger or slide-out menus: use a sidebar, tab bar or toolbar menu (R1995)."
+    severity: error
+    excluded_match_kinds: [comment, doccomment, string]
+  hamburger-menu--symbol:
+    name: Hamburger menu symbol
+    regex: '"line\.3\.horizontal"'
+    message: "The three-line symbol reads as a hamburger menu: use a sidebar, tab bar or toolbar menu (R1995)."
+    severity: error
+    match_kinds: [string]
+
+  non-sf-symbol-icon:
+    name: Icon that is not an SF Symbol
+    regex: '(?:\bImage\s*(?:\.\s*init\s*)?\((?!\s*systemName\s*:)|\bLabel\s*\((?=[^)\n]*\bimage\s*:)|\b(?:UIImage|NSImage)\s*\(\s*(?:named|resource)\s*:)'
+    message: "Icons are SF Symbols (Image(systemName:)); other images need an allowlist entry with a reason (R1998)."
+    severity: error
+    excluded_match_kinds: [comment, doccomment, string]

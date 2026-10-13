@@ -1,0 +1,397 @@
+# Meguri's screen inventory (U9, R2001): the only list of screens. UI units
+# add and refine their own entries; screens.md is generated from this file
+# (`tools/mg design-docs --write`) and `tools/mg design-docs` fails when it is
+# stale or an entry breaks the rules below.
+#
+# Per screen:
+#   id          area.screen, lowerCamel parts; the prefix of the screen's
+#               accessibility identifiers (R1964)
+#   title       what the screen is called in reviews and the gallery
+#   units       plan units that build it
+#   signature   true for the signature set (R1972 plus deck options from the
+#               design-quality Success Criterion): full snapshot covering set
+#               and a variant pick (R1988)
+#   platforms   iphone, ipad, mac, widget
+#   states      from U10's five: empty, typical, overflow, error, loading;
+#               each needs a preview and a snapshot (R1970, U252)
+#   variants    full (signature screens) or pairwise (U252)
+#   references  pattern ids from references/index.md
+#   purpose     one line
+#
+# Status (sketch, built, verified, approved) is never kept here: it lives
+# only in screen-status.yaml (U10, U254).
+
+version: 1
+screens:
+  - id: shell.root
+    title: App shell
+    units: [U150]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, loading, error]
+    variants: pairwise
+    references: [sidebar, tab-bar, toolbar]
+    purpose: Root layout with the sidebar on iPad and Mac and the tab bar on iPhone, plus the status overlay.
+  - id: shell.keyboardShortcuts
+    title: Keyboard shortcuts help
+    units: [U158]
+    signature: false
+    platforms: [ipad, mac]
+    states: [typical, overflow]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: The list of keyboard shortcuts for the current context.
+
+  - id: onboarding.welcome
+    title: Welcome
+    units: [U166]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [onboarding]
+    purpose: First launch, opening or creating a collection and the sync choice.
+
+  - id: home.deckList
+    title: Home and deck list
+    units: [U152]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: full
+    references: [list-counts, sidebar, content-unavailable]
+    purpose: The deck tree with New, Learn and Due counts, the studied-today line and the sync button.
+  - id: home.deckPage
+    title: Deck page
+    units: [U155, U228]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: full
+    references: [list-counts, charts]
+    purpose: One deck's counts, study button, finished state and deck statistics.
+  - id: home.goToDeck
+    title: Go to Deck
+    units: [U156]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow]
+    variants: pairwise
+    references: [search-tokens, sheet-form]
+    purpose: Filter decks by name and jump to one.
+  - id: home.sessionSummary
+    title: Session summary
+    units: [U157]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow]
+    variants: pairwise
+    references: [sheet-form, charts]
+    purpose: End-of-session totals, time studied and the cards missed.
+  - id: home.fsrsSheet
+    title: FSRS optimization sheet
+    units: [U51]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error, loading]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: The FSRS-only notice and parameter optimization status for a collection.
+
+  - id: review.question
+    title: Review, question side
+    units: [U175, U177, U180, U181]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error, loading]
+    variants: full
+    references: [progress-header, floating-controls, toolbar]
+    purpose: The card's question side with the progress bar, the reveal control and the review menu.
+  - id: review.answer
+    title: Review, answer side
+    units: [U175, U178, U179]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error]
+    variants: full
+    references: [floating-controls, progress-header]
+    purpose: The answer side with the Again, Hard, Good and Easy buttons and their intervals, and undo.
+  - id: review.menu
+    title: Review menu
+    units: [U182]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical]
+    variants: pairwise
+    references: [toolbar, toast]
+    purpose: In-place card actions (bury, suspend, flag, mark, edit) and their toasts.
+  - id: review.setDueDate
+    title: Set Due Date
+    units: [U183]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: Set the current card's due date from the review screen.
+  - id: review.forget
+    title: Forget card
+    units: [U183]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical]
+    variants: pairwise
+    references: [sheet-form, confirmation-dialog]
+    purpose: Reset the current card to new with its two remembered options.
+  - id: review.editCurrent
+    title: Edit current card
+    units: [U184]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error]
+    variants: pairwise
+    references: [editor, sheet-form]
+    purpose: Edit the note of the card under review without leaving the session.
+  - id: review.congratulations
+    title: Congratulations
+    units: [U186]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical]
+    variants: pairwise
+    references: [content-unavailable]
+    purpose: Nothing left to study today, with what comes next.
+
+  - id: editor.add
+    title: Add note
+    units: [U190, U192, U193, U195]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error]
+    variants: full
+    references: [editor, toolbar]
+    purpose: Add notes with the note type and deck pickers, fields, formatting, tags and media.
+  - id: editor.edit
+    title: Edit note
+    units: [U190, U196]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error]
+    variants: pairwise
+    references: [editor, inspector]
+    purpose: Edit an existing note from the browser or review.
+
+  - id: noteTypes.list
+    title: Note types
+    units: [U200]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: pairwise
+    references: [list-counts]
+    purpose: The note types with their note counts and management actions.
+  - id: noteTypes.templates
+    title: Card templates
+    units: [U200]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error]
+    variants: pairwise
+    references: [editor, inspector]
+    purpose: Edit front, back and styling templates of a note type.
+  - id: noteTypes.fields
+    title: Fields
+    units: [U201]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error]
+    variants: pairwise
+    references: [grouped-form]
+    purpose: Add, rename, reorder and configure a note type's fields.
+  - id: noteTypes.preview
+    title: Template preview
+    units: [U202]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error, loading]
+    variants: pairwise
+    references: [inspector]
+    purpose: Preview the question and answer a template renders.
+  - id: noteTypes.changeNoteType
+    title: Change Note Type
+    units: [U203]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: Map fields and templates when moving notes to another note type.
+
+  - id: imageOcclusion.editor
+    title: Image occlusion editor
+    units: [U205, U206]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: pairwise
+    references: [toolbar, inspector]
+    purpose: Draw, group and edit masks over an image.
+
+  - id: browse.browser
+    title: Browser
+    units: [U210, U211, U213, U214, U216, U221, U223]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: full
+    references: [table, search-tokens, sidebar, inspector]
+    purpose: Search, sort and act on cards or notes, with the filter sidebar and the inspector.
+  - id: browse.findReplace
+    title: Find and Replace
+    units: [U220]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: Find and replace text in the selected notes' fields.
+  - id: browse.editField
+    title: Edit Field
+    units: [U220]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [sheet-form]
+    purpose: Set one field across the selected notes.
+
+  - id: cardInfo.card
+    title: Card Info
+    units: [U222]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error, loading]
+    variants: pairwise
+    references: [inspector, charts]
+    purpose: A card's properties and review history.
+
+  - id: stats.overview
+    title: Statistics
+    units: [U225, U228, U230, U231]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: full
+    references: [charts, calendar-grid]
+    purpose: Today, the heatmap and streaks, and the graph cards for a deck, the collection or a search.
+  - id: stats.heatmapSettings
+    title: Heatmap settings
+    units: [U229]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical]
+    variants: pairwise
+    references: [grouped-form, calendar-grid]
+    purpose: Heatmap theme, mode and limits.
+
+  - id: deckOptions.options
+    title: Deck options
+    units: [U232, U233, U234]
+    signature: true
+    platforms: [iphone, ipad, mac]
+    states: [typical, overflow, error, loading]
+    variants: full
+    references: [grouped-form]
+    purpose: A deck's preset with daily limits, desired retention and the advanced sections.
+
+  - id: settings.root
+    title: Settings
+    units: [U160]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical]
+    variants: pairwise
+    references: [grouped-form, sidebar]
+    purpose: The settings pages and their preferences.
+  - id: settings.sync
+    title: Sync account and status
+    units: [U161]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, error, loading]
+    variants: pairwise
+    references: [grouped-form, confirmation-dialog]
+    purpose: Log in, sync status and the one-way sync choice.
+  - id: settings.importExport
+    title: Import and export
+    units: [U162]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error, loading]
+    variants: pairwise
+    references: [grouped-form, sheet-form]
+    purpose: Import packages and export decks or the collection.
+  - id: settings.backups
+    title: Backups
+    units: [U163]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [empty, typical, overflow, error, loading]
+    variants: pairwise
+    references: [list-counts, confirmation-dialog]
+    purpose: The backup list, creating a backup and restoring one.
+  - id: settings.maintenance
+    title: Maintenance
+    units: [U163]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error, loading]
+    variants: pairwise
+    references: [grouped-form]
+    purpose: Check Database, Check Media and Empty Cards with their reports.
+  - id: settings.diagnostics
+    title: Diagnostics
+    units: [U51, U153]
+    signature: false
+    platforms: [iphone, ipad, mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [grouped-form]
+    purpose: Diagnostic information and Copy Debug Info.
+  - id: settings.integrations
+    title: Integrations
+    units: [U144, U164]
+    signature: false
+    platforms: [mac]
+    states: [typical, error]
+    variants: pairwise
+    references: [grouped-form]
+    purpose: The AnkiConnect and Migaku servers, their state and access settings.
+  - id: settings.migakuProfiles
+    title: Migaku profiles
+    units: [U145]
+    signature: false
+    platforms: [mac]
+    states: [empty, typical, overflow, error]
+    variants: pairwise
+    references: [table, sheet-form]
+    purpose: Routing profiles that map Migaku cards to decks and note types.
+  - id: settings.recentlyReceived
+    title: Recently received
+    units: [U145]
+    signature: false
+    platforms: [mac]
+    states: [empty, typical, overflow]
+    variants: pairwise
+    references: [table]
+    purpose: Notes the local servers created recently, with move actions.
+
+  - id: widget.heatmap
+    title: Heatmap widget
+    units: [U165]
+    signature: false
+    platforms: [widget]
+    states: [empty, typical]
+    variants: pairwise
+    references: [widget, calendar-grid]
+    purpose: The study heatmap and streak in small and medium widgets.
