@@ -1,23 +1,29 @@
 //! Executors run scenarios and return their observations (dsl.md D8). The
 //! oracle executor drives oracle workers; Meguri's runs the core in-process
-//! through per-area adapters registered in a capabilities registry.
+//! through per-area adapters registered in a capabilities registry. Live
+//! scenarios run as a chain of segments on both (dsl.md D9, `live`).
 
 pub mod clock;
+pub mod live;
 mod meguri;
 mod oracle;
 
 use std::fmt;
+use std::ops::Range;
+use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::scenario::LoadedScenario;
 pub use crate::scenario::Needs;
-pub use meguri::{MeguriExecutor, Registry, Session};
+pub use meguri::{HandoffFn, MeguriExecutor, ObserveFn, OpFn, OpResult, Registry, Session, SetupFn};
 pub use oracle::{Hello, OracleExecutor};
 
 /// A failed run: a protocol error kind (`unknown_ref`, `invalid_scenario`,
 /// `unsupported_op`, `anki_error`, `worker_died`, ...), the step when known and
-/// text for people, which is never compared.
+/// text for people, which is never compared. A rejection recorded as an op's
+/// output (dsl.md D7.3) is not an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecError {
     pub kind: String,
@@ -65,4 +71,48 @@ pub trait Executor: Sync {
 
     /// Runs the scenario on a fresh collection: `{"steps": [...]}`.
     fn run(&self, scenario: &LoadedScenario) -> Result<Value, ExecError>;
+}
+
+/// What crosses a handoff (dsl.md D9): the session directory copied to
+/// `dir` under the handoff directory (the collection file
+/// `collection.anki2`, its media and every file an op wrote), the clock and
+/// the real ids behind the logical ones. protocol.json `handoff_state`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Handoff {
+    /// Relative to the handoff directory, `/`-separated.
+    pub dir: String,
+    /// Epoch seconds.
+    pub now: i64,
+    pub notes: Vec<i64>,
+    pub cards: Vec<i64>,
+}
+
+/// One segment of a live chain for one side to run.
+#[derive(Debug, Clone)]
+pub struct SegmentRequest {
+    /// Where the previous segment handed over; `None` for the first, which
+    /// runs the setup on a fresh collection.
+    pub resume: Option<Handoff>,
+    /// The scenario steps to run.
+    pub steps: Range<usize>,
+    /// When set, the segment ends by handing the session over into this
+    /// directory (relative to the handoff directory).
+    pub hand_off_to: Option<String>,
+    /// The handoff directory as this process sees it. An oracle worker sees
+    /// the same directory at its own mount.
+    pub root: PathBuf,
+}
+
+/// What a segment produced: one output per step it ran, and the handoff
+/// state when it handed over.
+#[derive(Debug, Clone)]
+pub struct SegmentOutput {
+    pub steps: Vec<Value>,
+    pub handoff: Option<Handoff>,
+}
+
+/// An executor that can run one segment of a live scenario.
+pub trait SegmentExecutor: Executor {
+    fn segment(&self, scenario: &LoadedScenario, request: &SegmentRequest) -> Result<SegmentOutput, ExecError>;
 }

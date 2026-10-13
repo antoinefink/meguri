@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -55,20 +57,37 @@ class InventoryTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def run_inventory(self) -> str:
+    def run_inventory(self, *extra: str, anki: Path | None = None, tag: str = "26.09.3") -> str:
         err = io.StringIO()
         with redirect_stderr(err):
             rc = inventory.main(
-                ["inventory", "--anki", str(self.anki), "--tag", "26.09.3", "--links", str(self.links), "--catalog", str(self.catalog)]
+                ["inventory", "--anki", str(anki or self.anki), "--tag", tag, *extra,
+                 "--links", str(self.links), "--catalog", str(self.catalog)]
             )
         self.assertEqual(rc, 0, err.getvalue())
         return err.getvalue()
 
-    def run_check(self) -> tuple[int, str]:
+    def run_check(self, *extra: str) -> tuple[int, str]:
         err = io.StringIO()
         with redirect_stderr(err):
-            rc = inventory.main(["check", "--links", str(self.links), "--catalog", str(self.catalog)])
+            rc = inventory.main(["check", "--links", str(self.links), "--catalog", str(self.catalog), *extra])
         return rc, err.getvalue()
+
+    def main_checkout(self, added: dict[str, str]) -> Path:
+        """Anki's main branch: the tag's tree plus `added` (path -> text appended)."""
+        main = self.root / "anki-main"
+        shutil.copytree(self.anki, main)
+        for rel, text in added.items():
+            p = main / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with p.open("a", encoding="utf-8") as f:
+                f.write(text)
+        return main
+
+    def pin(self, version: str) -> Path:
+        path = self.root / "oracle.json"
+        path.write_text(json.dumps({"anki_version": version, "lock_sha256": "0" * 64}), encoding="utf-8")
+        return path
 
     def test_every_test_is_inventoried_once_with_an_opaque_id(self) -> None:
         summary = self.run_inventory()
@@ -97,6 +116,7 @@ class InventoryTest(unittest.TestCase):
         rows = {r["harvest_id"]: r for r in catalog}
         toolbar = rows[by_lang_file[("python", "qt/tests/test_toolbar.py")]]
         self.assertEqual((toolbar["area"], toolbar["classification"], toolbar["status"]), ("desktop", "not-applicable", "done"))
+        self.assertEqual({r["source"] for r in catalog}, {"tag"})
         build = rows[by_lang_file[("rust", "build/ninja_gen/src/lib.rs")]]
         self.assertEqual((build["area"], build["classification"]), ("tooling", "not-applicable"))
         search = rows[by_lang_file[("rust", "rslib/src/search/mod.rs")]]
@@ -144,6 +164,71 @@ class InventoryTest(unittest.TestCase):
         rc, out = self.run_check()
         self.assertEqual(rc, 1)
         self.assertIn("in links.csv but not in the catalog", out)
+
+    def test_tests_added_on_main_are_supplementary_and_survive_a_re_inventory(self) -> None:
+        self.run_inventory()
+        main = self.main_checkout({
+            "rslib/src/scheduler/answering.rs": "#[test]\nfn relearning_keeps_the_lapse_count() {}\n",
+            "pylib/tests/test_schedv3.py": "\ndef test_buried_siblings_return_next_day():\n    pass\n",
+        })
+        summary = self.run_inventory("--supplementary", str(main), "--supplementary-tag", "main@0123456789ab")
+        # The counts at the tag are unchanged; the new tests are listed apart.
+        self.assertIn("9 tests at 26.09.3: rust 4, python 3, typescript 2", summary)
+        self.assertIn("2 supplementary: rust 1, python 1, typescript 0", summary)
+        links = {r["test"]: r for r in read(self.links)}
+        added = links["relearning_keeps_the_lapse_count"]
+        self.assertEqual(added["tag"], "main@0123456789ab")
+        self.assertEqual(links["answering_moves_the_card"]["tag"], "26.09.3")
+        rows = {r["harvest_id"]: r for r in read(self.catalog)}
+        self.assertEqual(rows[added["harvest_id"]]["source"], "supplementary")
+        self.assertEqual(rows[added["harvest_id"]]["classification"], "unclassified")
+        self.assertEqual(rows[links["answering_moves_the_card"]["harvest_id"]]["source"], "tag")
+        self.assertEqual(len(rows), 11)
+        self.assertEqual(self.run_check()[0], 0)
+
+        # A spec writer classifies one; a re-inventory at the tag alone keeps
+        # both supplementary rows and the classification.
+        catalog = read(self.catalog)
+        for row in catalog:
+            if row["harvest_id"] == added["harvest_id"]:
+                row.update(classification="in-scope", reason="The lapse count after relearning exists at the release",
+                           status="deferred")
+        inventory.write_csv(self.catalog, inventory.CATALOG_HEADER, catalog)
+        summary = self.run_inventory()
+        self.assertIn("2 supplementary", summary)
+        rows = {r["harvest_id"]: r for r in read(self.catalog)}
+        self.assertEqual(rows[added["harvest_id"]]["classification"], "in-scope")
+        self.assertEqual(rows[added["harvest_id"]]["source"], "supplementary")
+
+        # Once the pinned release has the test (a bump), it is a tag row with
+        # the same id and keeps its classification.
+        summary = self.run_inventory(anki=main, tag="26.10.0")
+        self.assertIn("0 supplementary", summary)
+        links = {r["test"]: r for r in read(self.links)}
+        self.assertEqual(links["relearning_keeps_the_lapse_count"]["tag"], "26.10.0")
+        rows = {r["harvest_id"]: r for r in read(self.catalog)}
+        self.assertEqual(rows[added["harvest_id"]]["source"], "tag")
+        self.assertEqual(rows[added["harvest_id"]]["classification"], "in-scope")
+
+    def test_check_fails_when_the_inventory_is_not_at_the_oracle_pin(self) -> None:
+        main = self.main_checkout({"rslib/src/search/mod.rs": "#[test]\nfn search_after_the_release() {}\n"})
+        self.run_inventory("--supplementary", str(main), "--supplementary-tag", "main@0123456789ab")
+        # 26.9.3 is the pin's distribution version of tag 26.09.3; supplementary
+        # rows carry a main revision and do not count.
+        self.assertEqual(self.run_check("--pin", str(self.pin("26.9.3")))[0], 0)
+        rc, out = self.run_check("--pin", str(self.pin("26.10.0")))
+        self.assertEqual(rc, 1)
+        self.assertIn("inventoried at 26.09.3, the oracle pin is 26.10.0", out)
+        self.assertIn("tools/mg harvest-inventory", out)
+
+    def test_check_flags_a_source_that_disagrees_with_links(self) -> None:
+        self.run_inventory()
+        rows = read(self.catalog)
+        rows[0]["source"] = "supplementary"
+        inventory.write_csv(self.catalog, inventory.CATALOG_HEADER, rows)
+        rc, out = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn(f"{rows[0]['harvest_id']}: source supplementary in the catalog, tag in links.csv", out)
 
 
 if __name__ == "__main__":

@@ -9,20 +9,26 @@ imported after the built-in areas.
 
 Handlers take (session, args) where args is the step's value as written in the
 scenario. An op returns None or a JSON value recorded as the step's output under
-the op's name; an observation returns the JSON value recorded under its name.
+the op's name, or raises errors.Rejected(kind) with one of the rejection kinds
+it declared (dsl.md D7.3); an observation returns the JSON value recorded under
+its name.
 """
 
 from __future__ import annotations
 
 import importlib
 import os
+import re
 from typing import Any, Callable
 
 Handler = Callable[[Any, Any], Any]
 
 OPS: dict[str, Handler] = {}
+# op -> the rejection kinds it may record: its closed list in dsl.md D7.2.
+REJECTIONS: dict[str, frozenset[str]] = {}
 OBSERVATIONS: dict[str, Handler] = {}
 SETUP_SECTIONS: dict[str, tuple[int, Handler]] = {}
+_KIND = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _register(table: dict, name: str, value: Any) -> None:
@@ -31,9 +37,14 @@ def _register(table: dict, name: str, value: Any) -> None:
     table[name] = value
 
 
-def op(name: str) -> Callable[[Handler], Handler]:
+def op(name: str, rejects: tuple[str, ...] = ()) -> Callable[[Handler], Handler]:
+    bad = [k for k in rejects if not _KIND.match(k)]
+    if bad:
+        raise RuntimeError(f"{name!r}: rejection kinds are lower-case identifiers, not {bad}")
+
     def deco(fn: Handler) -> Handler:
         _register(OPS, name, fn)
+        REJECTIONS[name] = frozenset(rejects)
         return fn
 
     return deco

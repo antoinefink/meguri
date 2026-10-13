@@ -6,8 +6,27 @@ use serde_json::{Map, Value, json};
 use crate::diff;
 use crate::suite::{OraclePin, Outcome, SHOWN_DIFFERENCES, Status};
 
+/// Which tier a report belongs to; it decides what fails (dsl.md D10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tier {
+    /// Committed goldens on Meguri's executor.
+    T0,
+    /// Live oracle workers: golden replays and live chains.
+    T1,
+}
+
+impl Tier {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Tier::T0 => "t0",
+            Tier::T1 => "t1",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Report {
+    pub tier: Tier,
     pub executor: String,
     pub lane: String,
     pub oracle_pin: OraclePin,
@@ -16,9 +35,9 @@ pub struct Report {
 }
 
 impl Report {
-    /// Outcomes that fail T0.
+    /// Outcomes that fail this report's tier.
     pub fn failures(&self) -> Vec<&Outcome> {
-        self.outcomes.iter().filter(|o| o.fails_t0()).collect()
+        self.outcomes.iter().filter(|o| o.fails(self.tier)).collect()
     }
 
     /// Scenario count per status, every status listed.
@@ -37,13 +56,14 @@ impl Report {
     pub fn to_json(&self) -> Value {
         json!({
             "runner": "meguri-testkit",
+            "tier": self.tier.as_str(),
             "executor": self.executor,
             "lane": self.lane,
             "oracle_pin": {"anki_version": self.oracle_pin.anki_version, "lock_sha256": self.oracle_pin.lock_sha256},
             "wall_ms": self.wall_ms,
             "totals": self.totals(),
             "failed": self.failures().len(),
-            "scenarios": self.outcomes.iter().map(outcome_json).collect::<Vec<_>>(),
+            "scenarios": self.outcomes.iter().map(|o| outcome_json(o, self.tier)).collect::<Vec<_>>(),
         })
     }
 
@@ -60,7 +80,7 @@ impl Report {
             .map(|(status, n)| format!("{n} {status}"))
             .collect();
         text.push_str(&format!(
-            "{} scenario{} on {} ({}): {}; {} fail{} T0\n",
+            "{} scenario{} on {} ({}): {}; {} fail{} {}\n",
             self.outcomes.len(),
             if self.outcomes.len() == 1 { "" } else { "s" },
             self.executor,
@@ -72,19 +92,21 @@ impl Report {
             },
             self.failures().len(),
             if self.failures().len() == 1 { "s" } else { "" },
+            self.tier.as_str().to_uppercase(),
         ));
         text
     }
 }
 
-fn outcome_json(o: &Outcome) -> Value {
+fn outcome_json(o: &Outcome, tier: Tier) -> Value {
     let mut out = json!({
         "scenario": o.scenario,
         "path": o.path.display().to_string(),
         "area": o.area,
         "active": o.active,
+        "live": o.live,
         "status": o.status.as_str(),
-        "fails_t0": o.fails_t0(),
+        "fails": o.fails(tier),
         "message": o.message,
         "repro": o.repro,
     });

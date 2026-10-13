@@ -55,7 +55,7 @@ The `compare` section (D5) is part of the value, so changing a comparison hint m
 | `clock` | yes | D5 |
 | `compare` | no | D5 |
 | `setup` | no | D6 |
-| `steps` | no | D7; missing means none |
+| `steps` | no | D7; missing means none; `handoff` steps make the scenario live (D9.2) |
 
 No other key is allowed.
 
@@ -127,7 +127,7 @@ A step is a mapping with exactly one key, the op name. Steps run in order. Each 
 
 ### D7.2 Ops
 
-Ops marked *draft* have no driver support yet. Their arguments are the v0 shape; the owning area fixes the arguments and the output when it adds the driver op, and updates this table, the schema and the typed model together.
+Ops marked *draft* have no driver support yet. Their arguments are the v0 shape; the owning area fixes the arguments and the output when it adds the driver op, and updates this table, the schema and the typed model together. A scenario is checked against the arguments `scenario.schema.json` requires when it loads, in T0 too; other keys of a draft op are allowed until its area fixes it. An op records no rejection (D7.3) unless its row lists rejection kinds.
 
 | Op | Argument | Output | Status |
 |---|---|---|---|
@@ -149,48 +149,66 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `check_db` | `{}` | the check's counters | draft (maintenance) |
 | `db_exec` | `{sql, params?: [...]}`: raw SQL on the schema-18 tables, for corruption injection and time travel by data | `{rows: [[...], ...]}` for a query, none otherwise | draft (storage) |
 | `sync` | `{kind?: normal \| full_upload \| full_download, client?: <name>}` | `{result: <kind>}` | draft (sync) |
+| `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
 
-An op with no output records `{}`; an op with output records `{<op>: <output>}`.
+An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
+
+### D7.3 Rejections
+
+- When Anki refuses an op as part of its behavior (a duplicate name, an invalid input, a missing note), the step records `{<op>: {"error": "<kind>"}}`, the op changes nothing, no logical id is assigned, and the run goes on with the next step.
+- Kinds are lower-case identifiers (`[a-z][a-z0-9_]*`) from the op's closed list in the D7.2 table, which the owning area writes with the driver op; the observation schema restricts that op's `error` to the list. A refusal whose kind is not in the list is a run error (`anki_error` on the oracle), until the area adds the kind. Kinds are compared exactly, never the message (R1887).
+- Executor failures stay run errors: `invalid_scenario`, `unsupported_op`, `unknown_ref`, `worker_died` and the other protocol error kinds stop the run and give the scenario `error` (D10).
 
 ## D8. Executors and capabilities
 
 - An executor runs a scenario and returns its observations or an error. The oracle executor is a pool of oracle workers (`conformance/schema/protocol.json`), keyed by time zone. Meguri's executor runs the core in-process, with a scenario clock (D5) and the seeded random source, through the time and randomness seams (R1875).
 - Each executor declares capabilities: the setup sections, ops and observation kinds it implements. Before running, the runner compares the scenario's needs with them. A scenario that needs anything missing is `pending` (D10) and is not run.
-- Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them.
+- Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op.
 
-## D9. Area metadata
+## D9. Area metadata and live scenarios
 
-`conformance/scenarios/<area>/area.yaml` (schema `area.schema.json`):
+### D9.1 area.yaml
+
+`conformance/scenarios/<area>/area.yaml` (schema `area.schema.json`), at most one per area (`area.yml` counts: both is an error):
 
 ```yaml
 area: smoke
 active: [runner-empty]   # Meguri must pass these
-live: []                 # T1 only: no golden; run by tools/mg conformance --live
 ```
 
 - Entries are patterns over scenario ids relative to the area directory (`runner-empty` is `smoke/runner-empty`), with `*` matching any run of characters (also `/`) and `?` one character. An entry that matches no scenario is an error.
-- `active` scenarios are the area's promise: Meguri passes them. Areas add scenarios here as their implementation lands.
-- `live` scenarios feed Meguri's output to the oracle (export then import, Check Database on a Meguri-written collection, sync against the oracle's server). They have no golden and T0 does not run them. A scenario cannot be both.
-- An area with no `area.yaml` has no active and no live scenarios.
+- `active` scenarios are the area's promise: Meguri passes them (in T0, or for a live scenario in T1). Areas add scenarios here as their implementation lands.
+- An area with no `area.yaml` has no active scenarios.
+
+### D9.2 Live scenarios
+
+A scenario with `handoff` steps is live: Meguri's output is the oracle's input (export then import, Check Database on a Meguri-written collection, sync through Meguri and back, KTD23 T1).
+
+- **Segments.** Handoff steps split the steps into segments. Each `handoff: <side>` ends a segment and names the side that runs the next one; handoffs alternate, so the first segment runs on the side the first handoff leaves (`handoff: meguri` first means the oracle runs the setup and the first steps). Handing over to the side that already has the collection is invalid.
+- **What crosses.** At a handoff the side closes its collection and copies its session directory (the collection file `collection.anki2`, its media and every file an op wrote, such as an `export`'s package) to `<handoff dir>/<scenario id>/<handoff step index>/`, together with the clock (epoch seconds) and the real ids behind `#nN` and `#cN` (protocol.json `handoff_state`). The next side copies that directory, opens the collection at the same clock and keeps numbering logical ids after the handed ones. It runs no setup. The handoff directory is one directory both see: the runner's on the host, mounted into oracle workers (`ORACLE_HANDOFF`). Areas add files to the session directory (the sync area: the server's state) with the driver.
+- **Golden.** A live scenario has a golden like any other, recorded by `tools/mg oracle record`: the oracle runs every segment itself, and each handoff only closes and reopens its collection. So the golden is what the oracle observes of its own output.
+- **Pass.** T1 runs the segments on their sides (the chain) and compares the chain's observations, the oracle's observations of Meguri's output included, with the golden by the usual rules and deviations (`observations.md` O7). A handoff step records `{}`.
+- **Capabilities.** Meguri needs `handoff`, the setup sections when it runs the first segment, and the ops and observation kinds of its own segments. Without them the scenario is `pending`.
+- Meguri's executor alone, and T0, never run a live scenario.
 
 ## D10. Status of a scenario
 
 The runner gives each scenario exactly one status, checking in this order:
 
-| Status | When | Fails T0 |
-|---|---|---|
-| `invalid` | the file does not parse, violates the schema, or its id does not match its path | always |
-| `live` | listed as live in `area.yaml` and the executor has every capability it uses (not run in T0; a live scenario that needs a missing capability is `pending`) | never |
-| `missing` | no golden | if active |
-| `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`) | if active |
-| `pending` | the executor lacks a setup section, op or observation kind the scenario uses | if active |
-| `error` | the executor failed while running it | if active |
-| `fail` | observations differ from the golden after comparison rules and deviations | if active |
-| `pass` | observations match | never |
+| Status | When | Fails T0 | Fails T1 |
+|---|---|---|---|
+| `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), or its id does not match its path | always | always |
+| `missing` | no golden | if active | always |
+| `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`) | if active | always |
+| `pending` | Meguri lacks a setup section, op or observation kind the scenario uses (for a live scenario: what its own segments use, D9.2) | if active | if active |
+| `live` | T0 only: a live scenario Meguri could join; T0 does not run it | never | (not in T1) |
+| `error` | an executor failed while running it (a panic in an adapter included) | if active | always |
+| `fail` | observations differ from the golden after comparison rules and deviations | if active | always |
+| `pass` | observations match | never | never |
 
-- **T0** (`tools/mg conformance`, and the `conformance` test binary under `tools/mg core-test`) runs every scenario against its golden with Meguri's executor, natively on macOS and in the Linux dev container. It fails when any scenario is `invalid` or any active scenario is not `pass`. Other statuses are listed in the report.
-- **Freshness** (`tools/mg goldens-check`) fails when any scenario other than a live one is `invalid`, `missing` or `stale`, when a golden has no scenario, when an `area.yaml` entry matches nothing, or when the pin in `conformance/oracle.json` differs from the oracle's lock file (checked where `oracle/` is present). With a base revision it also lists every golden value that changed since that revision, grouped by area and observation kind (the review step of an oracle bump, R1874).
-- **T1** (`tools/mg conformance --live`) first re-records missing and stale goldens through `tools/mg oracle record` (the only writer of goldens), then runs T0, then replays the selected scenarios on live oracle workers through Meguri's runner and compares them with their goldens, and runs the live scenarios.
+- **T0** (`tools/mg conformance`, and the `conformance` test binary under `tools/mg core-test`) runs every scenario that is not live against its golden with Meguri's executor, natively on macOS and in the Linux dev container. It fails when any scenario is `invalid` or any active scenario is neither `pass` nor `live`. Other statuses are listed in the report.
+- **Freshness** (`tools/mg goldens-check`) fails when any scenario is `invalid`, `missing` or `stale`, when a golden has no scenario, when an `area.yaml` entry matches nothing, or when the pin in `conformance/oracle.json` differs from the oracle's lock file (checked where `oracle/` is present). With a base revision it also lists every golden value that changed since that revision (golden, pointer, value before and after), grouped by area and observation kind (the review step of an oracle bump, R1874); the text shows the first 20 per group and the `--report` JSON all of them.
+- **T1** (`tools/mg conformance --live`) first re-records missing and stale goldens through `tools/mg oracle record` (the only writer of goldens), then runs T0, then runs every selected scenario on live oracle workers: the oracle replays it against its golden with no deviation applied (deviations describe Meguri, D13), and a live scenario whose replay passes then runs as a chain (D9.2) and is compared with the same golden, deviations applied. Workers must answer the pinned `anki_version` and `lock_sha256` and all run the same driver, or the run is an `error`. Any scenario that is not `pass`, active or not, fails T1, except a `pending` one that is not active: an oracle that no longer reproduces its golden is drift to fix before anything else.
 
 ## D11. Goldens
 
@@ -209,6 +227,7 @@ A golden is written only by `tools/mg oracle record` (R1885). There is no path t
 
 - `lock_sha256` is the SHA-256 of the oracle's lock file, which pins the `anki` wheel hashes for both CPU architectures; goldens do not depend on the architecture. `driver_sha256` identifies the driver build and never makes a golden stale.
 - `clock.mode` is `frozen` when the scenario leaves it out.
+- A live scenario's golden comes from the oracle running all its segments (D9.2).
 - Text: UTF-8 JSON, keys sorted, two-space indents, an array of scalars on one line with `, ` between items, `": "` after keys, an empty object as `{}`, LF line ends and a final newline.
 - `conformance/oracle.json` records the current pin, `{anki_version, lock_sha256}`. Adopting an oracle bump updates it together with the lock file and every golden, in one change.
 
@@ -220,9 +239,10 @@ For every scenario that is not `pass`, the runner reports (R1888):
 - for `fail`: the index of the first step whose output differs and the differences as JSON pointers into the observations (`/steps/3/next_states/#c1/good/scheduled_days`), each with its expected and actual value (`<absent>` for a missing member), the first 20 in pointer order plus the total count;
 - for `pending`: the missing setup sections, ops and observation kinds;
 - for `stale`: which hash differs and the command that fixes it (`tools/mg oracle record <id>` for a scenario change, `tools/mg oracle bump <version>` for the oracle pin);
-- a one-line repro command, `tools/mg conformance <id>`.
+- for a T1 `fail` or `error`, whether the oracle's replay or the live chain differed;
+- a one-line repro command, `tools/mg conformance <id>` (`tools/mg conformance --live <id>` for T1 and live scenarios).
 
-`meguri-cli conformance run --report <file>` writes the same as JSON: `{runner, executor, lane, oracle_pin, wall_ms, totals, failed, scenarios: [{scenario, path, area, active, status, fails_t0, message, repro, first_divergence?, diffs?, diff_count?, missing?, deviations_applied?}]}`; a live run adds the workers' `oracle` metadata.
+`meguri-cli conformance run --report <file>` writes the same as JSON: `{runner, tier: t0|t1, executor, lane, oracle_pin, wall_ms, totals, failed, scenarios: [{scenario, path, area, active, live, status, fails, message, repro, first_divergence?, diffs?, diff_count?, missing?, deviations_applied?}]}`, where `fails` follows the report's tier; a T1 run adds the workers' `oracle` metadata.
 
 ## D13. Known deviations
 
@@ -239,7 +259,7 @@ deviations:
     transform: {replace: ["#n1", "#n2"]}
 ```
 
-- The runner applies an entry's transform to the expected (oracle) value at every pointer matching `pointer` in every scenario matching `scenarios`, before comparing. Applied entries are listed in the report.
+- The runner applies an entry's transform to the expected (oracle) value at every pointer matching `pointer` in every scenario matching `scenarios`, before comparing. Applied entries are listed in the report. Only comparisons that hold Meguri's observations apply them (T0, live chains); the oracle's replay of its own golden in T1 never does.
 - Transforms: `replace: <value>` makes the expected value `<value>`. Areas add transforms in `core/crates/meguri-testkit/src/diff/transforms.rs` with their spec.
 - No other difference is tolerated: an unlisted difference fails.
 - `test` names the scenario or test that asserts Meguri's own behavior; every entry needs one.
@@ -252,6 +272,7 @@ Every behavior test in Anki at the pinned tag is inventoried (R1877–R1882). Th
 |---|---|
 | `harvest_id` | opaque id: `h` and 12 hex digits |
 | `language` | `rust`, `python` or `typescript` |
+| `source` | `tag`: a test in Anki at the pinned release; `supplementary`: a test added on Anki's main branch after it |
 | `area` | a Meguri area (spec area names), or `desktop` and `tooling` for groups with no Meguri counterpart |
 | `classification` | `in-scope`, `preservation-only`, `out-of-scope`, `not-applicable` or `unclassified` |
 | `reason` | one line in Meguri's words; required unless `unclassified` |
@@ -261,5 +282,6 @@ Every behavior test in Anki at the pinned tag is inventoried (R1877–R1882). Th
 - `done` requires a classification other than `unclassified`, and linked scenarios unless the classification is `out-of-scope` or `not-applicable`. `unclassified` rows are `open`.
 - The catalog holds no Anki file names, paths or test names. The link from a harvest id to the Anki test lives only on the spec side, in `oracle/harvest/links.csv` (R1881).
 - Expected results of harvested scenarios come from the oracle, never from Anki's assertions (R1878).
-- `tools/mg harvest-report` writes the coverage report: rows per language and classification, and for each classification the statuses of the linked scenarios (pass, fail, pending and the rest of D10), plus the counts at the tag. Every row appears with its classification or `unclassified`. Where `oracle/harvest/links.csv` is readable, it also checks that no catalog value contains an Anki file name or test name.
-- On an oracle bump, new or changed tests at the new tag are inventoried in the same change (R1882).
+- Supplementary rows come from `tools/mg harvest-inventory --supplementary` (a checkout of Anki's main branch): tests whose language, file and name the tag does not have. Their spec writer classifies whether the behavior exists at the tag (in scope or preservation only when it does, not applicable otherwise). They stay through re-inventories at the tag, and become `tag` rows with the same id once a bump's release has them. They are not in the counts at the tag.
+- `tools/mg harvest-report` writes the coverage report: the counts at the tag per language (supplementary rows apart), rows per language and classification, and for each classification the statuses of the linked scenarios (pass, fail, pending and the rest of D10). A linked scenario's status is its T0 status; for a live scenario, its T1 status when a `tools/mg conformance --live` report is given (`--live-report`), since only T1 runs it. Every row appears with its classification or `unclassified`. Where `oracle/harvest/links.csv` is readable, it also checks that no catalog value contains an Anki file name or test name, that each row's source matches links.csv, and that links.csv was inventoried at the oracle pin's release.
+- On an oracle bump, new or changed tests at the new tag are inventoried in the same change (R1882): `tools/mg harvest-report` fails until `tools/mg harvest-inventory` has run at the new release.

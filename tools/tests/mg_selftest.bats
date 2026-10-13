@@ -1046,7 +1046,8 @@ diff_report() {
   export PATH="$stubs:$PATH"
   for args in "conformance --lane moon" "conformance --jobs 0" "conformance --frobnicate" \
     "conformance --live --lane docker" "goldens-check --base no-such-revision" "goldens-check extra" \
-    "harvest-report extra" "harvest-inventory --bogus"; do
+    "harvest-report extra" "harvest-report --live-report" "harvest-report --live-report /etc/hosts" \
+    "harvest-inventory --bogus"; do
     # shellcheck disable=SC2086 # each case is a word list
     mg $args
     [ "$status" -eq 2 ]

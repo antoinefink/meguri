@@ -133,6 +133,24 @@ fn set_comparison_ignores_order_only_where_declared() {
     assert!(!diff::compare("s/x", &expected, &dup, &options).differences.is_empty());
 }
 
+#[test]
+fn set_comparison_tells_integers_from_fractions_and_ignores_order() {
+    // JCS writes 1 and 1.0 alike; the multiset still holds two different
+    // values, and reordering them is no difference.
+    let set = vec!["/steps/*/rows".to_owned()];
+    let options = CompareOptions {
+        set: &set,
+        ..CompareOptions::default()
+    };
+    let expected = json!({"steps": [{"rows": [[1], [1.0], [{"a": 2}], [{"a": 2.0}]]}]});
+    let actual = json!({"steps": [{"rows": [[{"a": 2.0}], [1.0], [{"a": 2}], [1]]}]});
+    let result = diff::compare("s/x", &expected, &actual, &options);
+    assert!(result.differences.is_empty(), "{:?}", result.differences);
+    // Two 1.0s are not a 1 and a 1.0.
+    let other = json!({"steps": [{"rows": [[{"a": 2.0}], [1.0], [{"a": 2}], [1.0]]}]});
+    assert_eq!(diff::compare("s/x", &expected, &other, &options).differences.len(), 1);
+}
+
 fn fold_deviation() -> Deviation {
     serde_json::from_value(json!({
         "id": "search-unicode-case-folding",

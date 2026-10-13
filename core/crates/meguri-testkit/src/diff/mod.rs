@@ -58,7 +58,7 @@ pub fn compare(scenario_id: &str, expected: &Value, actual: &Value, options: &Co
         for side in [&mut expected, &mut actual] {
             pointer::for_each_match(side, &pattern, &mut |value| {
                 if let Value::Array(items) = value {
-                    items.sort_by_cached_key(|item| observe::jcs(item).unwrap_or_else(|_| item.to_string()));
+                    items.sort_by_cached_key(set_key);
                 }
             });
         }
@@ -69,6 +69,14 @@ pub fn compare(scenario_id: &str, expected: &Value, actual: &Value, options: &Co
         differences,
         deviations_applied: applied,
     }
+}
+
+/// The order of a `compare.set` array: JCS text first (O7), then serde_json's
+/// text, which tells 1 from 1.0 where JCS writes both as `1`. Equal keys mean
+/// equal values, so two equal multisets always sort alike.
+fn set_key(item: &Value) -> (String, String) {
+    let text = item.to_string();
+    (observe::jcs(item).unwrap_or_else(|_| text.clone()), text)
 }
 
 /// Every difference, with no tolerance, set comparison or deviation: what

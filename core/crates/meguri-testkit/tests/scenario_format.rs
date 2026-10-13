@@ -230,6 +230,7 @@ steps:
   - check_db: {}
   - db_exec: {sql: "update cards set due = 1"}
   - sync: {kind: normal}
+  - handoff: oracle
   - observe:
       - ids
       - "card(#c1, #c2)"
@@ -246,7 +247,7 @@ steps:
 "##;
     let value = scenario::parse_yaml(text).unwrap();
     let parsed = scenario::Scenario::from_value(&value).unwrap();
-    assert_eq!(parsed.steps.len(), 19);
+    assert_eq!(parsed.steps.len(), 20);
     assert!(matches!(parsed.steps[0], Step::Advance(d) if d.seconds() == 93_600));
     let needs = parsed.needs();
     assert_eq!(
@@ -274,4 +275,200 @@ steps:
         let value = scenario::parse_yaml(&text).unwrap();
         assert!(scenario::Scenario::from_value(&value).is_err(), "accepted {bad}");
     }
+}
+
+/// The schema's required draft-op arguments (scenario.schema.json
+/// `$defs/step`), read from the schema itself.
+fn schema_draft_requirements() -> Vec<(String, Vec<String>, Vec<String>)> {
+    let schema: Value =
+        serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
+            .unwrap();
+    let mut out = Vec::new();
+    for (op, def) in schema["$defs"]["step"]["properties"].as_object().unwrap() {
+        let parts: Vec<&Value> = match def.get("allOf") {
+            Some(all) => all.as_array().unwrap().iter().collect(),
+            None if def.get("$ref") == Some(&json!("#/$defs/draft_args")) => vec![def],
+            None => continue,
+        };
+        if !parts
+            .iter()
+            .any(|p| p.get("$ref") == Some(&json!("#/$defs/draft_args")))
+        {
+            continue;
+        }
+        let required: Vec<String> = parts
+            .iter()
+            .filter_map(|p| p.get("required"))
+            .flat_map(|r| r.as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_owned()))
+            .collect();
+        let typed: Vec<String> = parts
+            .iter()
+            .filter_map(|p| p.get("properties"))
+            .flat_map(|props| props.as_object().unwrap().keys().cloned())
+            .collect();
+        out.push((op.clone(), required, typed));
+    }
+    out
+}
+
+/// A valid argument mapping for each draft op.
+fn valid_draft_args(op: &str) -> Value {
+    match op {
+        "edit_note" => json!({"note": "#n1", "fields": ["x"], "tags": ["t"]}),
+        "delete_notes" => json!({"notes": ["#n1"]}),
+        "bury" | "suspend" | "forget" => json!({"cards": ["#c1"]}),
+        "set_due" => json!({"cards": ["#c1"], "days": "1-7"}),
+        "reposition" => json!({"cards": ["#c1"], "start": 5}),
+        "update_preset" => json!({"name": "Default"}),
+        "build_filtered" => json!({"name": "F", "search": "deck:A"}),
+        "import" => json!({"fixture": "package/x.apkg"}),
+        "export" => json!({"format": "apkg", "name": "out.apkg"}),
+        "check_db" => json!({}),
+        "db_exec" => json!({"sql": "select 1", "params": []}),
+        "sync" => json!({"kind": "normal", "client": "a"}),
+        other => panic!("no valid example for draft op {other}: add one with the schema change"),
+    }
+}
+
+fn model_accepts(step: Value) -> Result<(), String> {
+    let value = json!({"id": "area/x", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": [step]});
+    scenario::Scenario::from_value(&value)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[test]
+fn the_model_requires_what_the_schema_requires_of_draft_ops() {
+    let from_schema = schema_draft_requirements();
+    assert!(from_schema.len() >= 14, "{from_schema:?}");
+    let in_model: Vec<(String, Vec<String>)> = scenario::draft_requirements()
+        .into_iter()
+        .map(|(op, keys)| (op.to_owned(), keys.into_iter().map(str::to_owned).collect()))
+        .collect();
+    for (op, required, typed) in &from_schema {
+        let model = in_model.iter().find(|(o, _)| o == op);
+        assert_eq!(model.map(|(_, r)| r), Some(required), "required arguments of {op}");
+        let valid = valid_draft_args(op);
+        assert_eq!(model_accepts(json!({op.clone(): valid.clone()})), Ok(()), "{op}");
+        for key in required {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(key);
+            assert!(
+                model_accepts(json!({op.clone(): without})).is_err(),
+                "{op} without {key}"
+            );
+        }
+        // Every argument the schema types refuses a boolean.
+        for key in typed {
+            let mut wrong = valid.clone();
+            wrong[key.as_str()] = json!(true);
+            assert!(model_accepts(json!({op.clone(): wrong})).is_err(), "{op}.{key}: true");
+        }
+    }
+}
+
+#[test]
+fn the_model_enforces_the_schema_rules_beyond_types() {
+    for (bad, why) in [
+        ("tags: [a, a]", "appears twice"),
+        ("compare: {set: [steps/ids]}", "pointer pattern"),
+        ("setup: {decks: [\"\"]}", "deck name"),
+        ("setup: {presets: [{name: \"\"}]}", "preset name"),
+        (
+            "setup: {notetypes: [{name: Q, fields: [], templates: [{name: C}]}]}",
+            "field list",
+        ),
+        (
+            "setup: {notetypes: [{name: Q, fields: [F], templates: []}]}",
+            "template list",
+        ),
+        ("steps: [{observe: [{card: null}]}]", "cannot take null"),
+        ("steps: [{observe: [{card: []}]}]", "at least one reference"),
+        (
+            "steps: [{observe: [{fuzz_table: {card: \"#c1\", pairs: [[1]], intervals: [3]}}]}]",
+            "pairs",
+        ),
+        (
+            "steps: [{observe: [{fuzz_table: {card: \"#c1\", pairs: [], intervals: []}}]}]",
+            "intervals",
+        ),
+        ("steps: [{observe: [{net_probe: {host: h}}]}]", "net_probe"),
+        (
+            "steps: [{observe: [{search: {query: q, kind: decks}}]}]",
+            "cards or notes",
+        ),
+        ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
+        ("steps: [{handoff: elsewhere}]", "unknown variant"),
+        ("steps: [{handoff: oracle}, {handoff: oracle}]", "alternate"),
+    ] {
+        let text = format!("id: area/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{bad}\n");
+        let value = scenario::parse_yaml(&text).unwrap();
+        let err = scenario::Scenario::from_value(&value).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+    // Null where the schema allows it, and an empty id list (every id).
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{observe: [{timing: null}, {queue: null}, {ids: []}]}]\n";
+    assert!(scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).is_ok());
+}
+
+#[test]
+fn handoffs_split_a_live_scenario_into_alternating_segments() {
+    use meguri_testkit::scenario::{Segment, Side};
+
+    let text = r##"
+id: preservation/filtered-round-trip
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+  notetypes: [{name: Pair, fields: [Front, Back], templates: [{name: F, front: "{{Front}}"}]}]
+  notes: [{notetype: Pair, deck: Words, fields: [a, b]}]
+steps:
+  - build_filtered: {name: Filtered, search: "deck:Words"}
+  - handoff: meguri
+  - edit_note: {note: "#n1", fields: [c]}
+  - observe: ["card(#c1)"]
+  - handoff: oracle
+  - observe: ["card(#c1)", deck_tree]
+"##;
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(parsed.is_live());
+    assert_eq!(
+        parsed.segments(),
+        [
+            Segment {
+                side: Side::Oracle,
+                steps: 0..1,
+                handoff: Some(1)
+            },
+            Segment {
+                side: Side::Meguri,
+                steps: 2..4,
+                handoff: Some(4)
+            },
+            Segment {
+                side: Side::Oracle,
+                steps: 5..6,
+                handoff: None
+            },
+        ]
+    );
+    // Meguri runs no setup and no filtered-deck op here: only its segment.
+    let meguri = parsed.needs_on(Side::Meguri);
+    assert!(meguri.setup.is_empty());
+    assert_eq!(
+        meguri.ops.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["edit_note", "handoff"]
+    );
+    assert_eq!(
+        meguri.observations.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["card"]
+    );
+    assert!(parsed.needs().ops.contains("build_filtered"));
+
+    let plain =
+        scenario::parse_yaml("id: a/b\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{advance: 1d}]\n")
+            .unwrap();
+    let plain = scenario::Scenario::from_value(&plain).unwrap();
+    assert!(!plain.is_live());
+    assert_eq!(plain.segments().len(), 1);
 }

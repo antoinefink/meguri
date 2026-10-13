@@ -5,9 +5,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use meguri_testkit::exec::{ExecError, Executor, MeguriExecutor, Needs};
+use meguri_testkit::exec::{
+    ExecError, Executor, MeguriExecutor, Needs, SegmentExecutor, SegmentOutput, SegmentRequest,
+};
 use meguri_testkit::scenario::LoadedScenario;
-use meguri_testkit::suite::{GoldensCheck, Status, Suite};
+use meguri_testkit::suite::{GoldensCheck, LiveRun, Status, Suite};
 use meguri_testkit::wallclock::Stopwatch;
 use serde_json::{Value, json};
 
@@ -66,6 +68,42 @@ impl Executor for Canned {
     }
     fn run(&self, _scenario: &LoadedScenario) -> Result<Value, ExecError> {
         Ok(self.0.clone())
+    }
+}
+
+impl SegmentExecutor for Canned {
+    fn segment(&self, _scenario: &LoadedScenario, _request: &SegmentRequest) -> Result<SegmentOutput, ExecError> {
+        Err(ExecError::new("unsupported_op", "canned executors run no segments"))
+    }
+}
+
+/// An oracle that fails every run, as a worker that cannot start does.
+struct Broken;
+
+impl Executor for Broken {
+    fn name(&self) -> &str {
+        "oracle"
+    }
+    fn missing(&self, _needs: &Needs) -> Needs {
+        Needs::default()
+    }
+    fn run(&self, _scenario: &LoadedScenario) -> Result<Value, ExecError> {
+        Err(ExecError::new("worker_start", "no worker"))
+    }
+}
+
+impl SegmentExecutor for Broken {
+    fn segment(&self, _scenario: &LoadedScenario, _request: &SegmentRequest) -> Result<SegmentOutput, ExecError> {
+        Err(ExecError::new("worker_start", "no worker"))
+    }
+}
+
+/// T1 with this oracle and Meguri's executor, no handoff directory.
+fn t1<'a>(oracle: &'a dyn SegmentExecutor, meguri: &'a MeguriExecutor) -> LiveRun<'a> {
+    LiveRun {
+        oracle,
+        meguri,
+        handoff_root: None,
     }
 }
 
@@ -345,7 +383,7 @@ fn missing_orphaned_and_misplaced_files_fail_the_freshness_check() {
     write(
         root,
         "scenarios/smoke/area.yaml",
-        "area: smoke\nactive: [timing-tz-utc, nothing-*]\nlive: [no-golden]\n",
+        "area: smoke\nactive: [timing-tz-utc, nothing-*]\n",
     );
     let fresh = Suite::open(root)
         .unwrap()
@@ -363,14 +401,16 @@ fn missing_orphaned_and_misplaced_files_fail_the_freshness_check() {
             ("area_pattern".to_owned(), "smoke/nothing-*".to_owned()),
             ("duplicate".to_owned(), "smoke/twice".to_owned()),
             ("invalid".to_owned(), "smoke/wrong-id".to_owned()),
+            ("missing".to_owned(), "smoke/no-golden".to_owned()),
             ("orphan_golden".to_owned(), "smoke/gone".to_owned()),
         ]
     );
-    // A live scenario needs no golden; without the live entry it would be missing.
+    // A live scenario needs its golden like any other: the oracle records it
+    // running every segment itself.
     write(
         root,
-        "scenarios/smoke/area.yaml",
-        "area: smoke\nactive: [timing-tz-utc]\n",
+        "scenarios/smoke/chain.yaml",
+        "id: smoke/chain\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{advance: 1d}, {handoff: oracle}, {observe: [timing]}]\n",
     );
     let fresh = Suite::open(root)
         .unwrap()
@@ -380,12 +420,40 @@ fn missing_orphaned_and_misplaced_files_fail_the_freshness_check() {
         fresh
             .problems
             .iter()
-            .any(|p| p.kind == "missing" && p.scenario == "smoke/no-golden")
+            .any(|p| p.kind == "missing" && p.scenario == "smoke/chain")
     );
+    // area.yaml has no live list: a scenario is live by its handoff steps.
+    write(
+        root,
+        "scenarios/smoke/area.yaml",
+        "area: smoke\nactive: [timing-tz-utc]\nlive: [chain]\n",
+    );
+    assert!(Suite::open(root).unwrap_err().to_string().contains("live"));
 }
 
 #[test]
-fn goldens_check_groups_changed_values_by_area_and_kind_against_a_base() {
+fn two_metadata_files_for_one_area_are_an_error() {
+    let dir = tree();
+    let root = dir.path();
+    copy_smoke(root, "timing-tz-utc");
+    write(
+        root,
+        "scenarios/smoke/area.yaml",
+        "area: smoke\nactive: [timing-tz-utc]\n",
+    );
+    // An empty second file would otherwise drop the activation promise.
+    write(root, "scenarios/smoke/area.yml", "area: smoke\n");
+    let err = Suite::open(root).unwrap_err().to_string();
+    assert!(err.contains("one metadata file per area"), "{err}");
+    fs::remove_file(root.join("scenarios/smoke/area.yml")).unwrap();
+    let report = Suite::open(root)
+        .unwrap()
+        .run(&[], &Canned(json!({"steps": []})), "test");
+    assert!(report.outcomes[0].active);
+}
+
+#[test]
+fn goldens_check_lists_changed_values_by_area_and_kind_against_a_base() {
     let dir = tree();
     let root = dir.path();
     copy_smoke(root, "fsrs-new-card");
@@ -399,6 +467,12 @@ fn goldens_check_groups_changed_values_by_area_and_kind_against_a_base() {
             &fs::read_to_string(from).unwrap(),
         );
     }
+    let good = "/steps/3/next_states/#c1/good/scheduled_days";
+    // The base recorded 5 days for Good at step 3.
+    let base_path = base.path().join("smoke/fsrs-new-card.json");
+    let mut old = read_json(&base_path);
+    *old.pointer_mut(&format!("/observations{good}")).unwrap() = json!(5);
+    fs::write(&base_path, serde_json::to_string_pretty(&old).unwrap()).unwrap();
     // A re-recorded golden whose values moved (as after an oracle bump).
     let path = root.join("goldens/smoke/fsrs-new-card.json");
     let mut golden = read_json(&path);
@@ -416,7 +490,7 @@ fn goldens_check_groups_changed_values_by_area_and_kind_against_a_base() {
     let changed: Vec<(String, String, usize)> = fresh
         .changed
         .iter()
-        .map(|c| (c.area.clone(), c.kind.clone(), c.count))
+        .map(|c| (c.area.clone(), c.kind.clone(), c.values.len()))
         .collect();
     assert_eq!(
         changed,
@@ -424,6 +498,18 @@ fn goldens_check_groups_changed_values_by_area_and_kind_against_a_base() {
             ("smoke".to_owned(), "card".to_owned(), 1),
             ("smoke".to_owned(), "next_states".to_owned(), 2)
         ]
+    );
+    let next_states = &fresh.changed[1].values;
+    let value = next_states.iter().find(|v| v.pointer == good).unwrap();
+    assert_eq!(value.golden, "smoke/fsrs-new-card");
+    assert_eq!(
+        (value.before.clone(), value.after.clone()),
+        (Some(json!(5)), Some(json!(3)))
+    );
+    assert_eq!(next_states[1].pointer, "/steps/6/next_states/#c1/easy/scheduled_days");
+    assert_eq!(
+        (next_states[1].before.clone(), next_states[1].after.clone()),
+        (Some(json!(26)), Some(json!(27)))
     );
     assert_eq!(fresh.changed_goldens, ["smoke/fsrs-new-card"]);
 }
@@ -488,12 +574,27 @@ fn two_thousand_trivial_scenarios_run_in_under_ten_seconds() {
     write(root, "scenarios/bulk/area.yaml", "area: bulk\nactive: [\"*\"]\n");
 
     let watch = Stopwatch::start();
-    let report = Suite::open(root).unwrap().run(&[], &MeguriExecutor::new(), "test");
+    let suite = Suite::open(root).unwrap();
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
     let elapsed = watch.elapsed_ms();
     assert_eq!(report.outcomes.len(), 2000);
     assert!(report.failures().is_empty(), "{}", report.render_text());
     assert!(report.outcomes.iter().all(|o| o.status == Status::Pass));
     assert!(elapsed < 10_000, "T0 on 2,000 scenarios took {elapsed} ms");
+
+    // The T0 test harness goes through check_path, one scenario file at a
+    // time (tests/conformance.rs).
+    let executor = MeguriExecutor::new();
+    let watch = Stopwatch::start();
+    for n in 0..2000 {
+        let outcome = suite.check_path(&root.join(format!("scenarios/bulk/s{n}.yaml")), &executor);
+        assert_eq!(
+            (outcome.scenario.as_str(), outcome.status),
+            (format!("bulk/s{n}").as_str(), Status::Pass)
+        );
+    }
+    let elapsed = watch.elapsed_ms();
+    assert!(elapsed < 10_000, "check_path on 2,000 scenarios took {elapsed} ms");
 }
 
 fn golden_for_bulk(root: &Path, n: usize) {
@@ -535,4 +636,281 @@ fn filters_select_by_id_directory_or_pattern() {
         ["smoke/ids-frozen-collision"]
     );
     assert!(ids(&["sched"]).is_empty());
+}
+
+/// Meguri's executor, panicking in the middle of one scenario.
+struct PanicsOn(&'static str);
+
+impl Executor for PanicsOn {
+    fn name(&self) -> &str {
+        "meguri"
+    }
+    fn missing(&self, _needs: &Needs) -> Needs {
+        Needs::default()
+    }
+    fn run(&self, scenario: &LoadedScenario) -> Result<Value, ExecError> {
+        assert_ne!(scenario.scenario.id, self.0, "an adapter bug");
+        Ok(json!({"steps": [{}]}))
+    }
+}
+
+#[test]
+fn a_panicking_executor_fails_its_scenario_and_loses_no_other() {
+    let dir = tree();
+    let root = dir.path();
+    let template = "id: bulk/s{n}\nclock: {tz: Europe/Paris, start: \"2030-01-15T10:00:00\", mode: step}\nsteps: [{advance: 1d}]\n";
+    for n in 0..200 {
+        write(
+            root,
+            &format!("scenarios/bulk/s{n}.yaml"),
+            &template.replace("{n}", &n.to_string()),
+        );
+        golden_for_bulk(root, n);
+    }
+    let suite = Suite::open(root).unwrap();
+    let report = suite.run(&[], &PanicsOn("bulk/s7"), "test");
+    assert_eq!(report.outcomes.len(), 200);
+    let failed = &report.outcomes.iter().find(|o| o.scenario == "bulk/s7").unwrap();
+    assert_eq!(failed.status, Status::Error);
+    assert!(failed.message.contains("an adapter bug"), "{}", failed.message);
+    assert_eq!(report.outcomes.iter().filter(|o| o.status == Status::Pass).count(), 199);
+    // Inactive: listed, T0 still passes; active: T0 fails.
+    assert!(report.failures().is_empty());
+    write(root, "scenarios/bulk/area.yaml", "area: bulk\nactive: [s7]\n");
+    let report = Suite::open(root).unwrap().run(&[], &PanicsOn("bulk/s7"), "test");
+    assert_eq!(report.failures().len(), 1);
+    // The T0 test harness path reports it the same way.
+    let outcome = Suite::open(root)
+        .unwrap()
+        .check_path(&root.join("scenarios/bulk/s7.yaml"), &PanicsOn("bulk/s7"));
+    assert_eq!(outcome.status, Status::Error);
+    assert!(outcome.fails_t0());
+}
+
+#[test]
+fn seventeen_digit_floats_in_goldens_and_json_scenarios_are_read_exactly() {
+    let dir = tree();
+    let root = dir.path();
+    // serde_json's default float parser reads this as 39.43013383563368.
+    let exact = 39.430133835633676_f64;
+    let yaml = "id: fsrs/retention\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsetup:\n  presets: [{name: Default, desired_retention: 39.430133835633676}]\n";
+    write(root, "scenarios/fsrs/retention.yaml", yaml);
+    let json_text = r#"{"id": "fsrs/retention-json", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "setup": {"presets": [{"name": "Default", "desired_retention": 39.430133835633676}]}}"#;
+    write(root, "scenarios/fsrs/retention-json.json", json_text);
+    let from_yaml = meguri_testkit::scenario::load(&root.join("scenarios/fsrs/retention.yaml")).unwrap();
+    let from_json = meguri_testkit::scenario::load(&root.join("scenarios/fsrs/retention-json.json")).unwrap();
+    let retention = |l: &LoadedScenario| l.value["setup"]["presets"][0]["desired_retention"].as_f64().unwrap();
+    assert_eq!(retention(&from_yaml).to_bits(), exact.to_bits());
+    assert_eq!(retention(&from_json).to_bits(), exact.to_bits());
+    // So the JSON scenario hashes as the oracle's canon.py does (the id aside).
+    let mut renamed = from_json.value.clone();
+    renamed["id"] = json!("fsrs/retention");
+    assert_eq!(
+        meguri_testkit::scenario::scenario_sha256(&renamed).unwrap(),
+        from_yaml.sha256
+    );
+
+    // A golden holding the value compares exactly with Meguri's.
+    let observed = json!({"steps": [{"stats": {"retention": exact}}]});
+    golden_for(root, "fsrs/retention", observed.clone());
+    let text = fs::read_to_string(root.join("goldens/fsrs/retention.json")).unwrap();
+    assert!(text.contains("39.430133835633676"), "{text}");
+    write(root, "scenarios/fsrs/area.yaml", "area: fsrs\nactive: [retention]\n");
+    fs::remove_file(root.join("scenarios/fsrs/retention-json.json")).unwrap();
+    let report = Suite::open(root).unwrap().run(&[], &Canned(observed), "test");
+    assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
+}
+
+#[test]
+fn deviations_apply_to_meguri_comparisons_and_not_to_oracle_replays() {
+    let dir = tree();
+    let root = dir.path();
+    write(
+        root,
+        "scenarios/search/folding/umlaut.yaml",
+        "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: {query: \"über\"}}]\n",
+    );
+    write(
+        root,
+        "scenarios/search/area.yaml",
+        "area: search\nactive: [folding/*]\n",
+    );
+    let oracle_says = json!({"steps": [{"search": {"ids": ["#n1"]}}]});
+    golden_for(root, "search/folding/umlaut", oracle_says.clone());
+    write(
+        root,
+        "deviations.yaml",
+        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
+    );
+    let suite = Suite::open(root).unwrap();
+    // T0: Meguri's deliberate difference passes under the entry.
+    let meguri_says = Canned(json!({"steps": [{"search": {"ids": ["#n1", "#n2"]}}]}));
+    let t0 = suite.run(&[], &meguri_says, "test");
+    assert_eq!(t0.outcomes[0].status, Status::Pass, "{}", t0.render_text());
+    // T1: the oracle still reproduces its golden, untransformed.
+    let meguri = MeguriExecutor::new();
+    let oracle = Canned(oracle_says);
+    let report = suite.run_live(&[], &t1(&oracle, &meguri), "test");
+    assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
+    assert!(report.outcomes[0].deviations_applied.is_empty());
+}
+
+#[test]
+fn t1_fails_on_any_oracle_drift_or_worker_error_active_or_not() {
+    let dir = tree();
+    let root = dir.path();
+    copy_smoke(root, "timing-tz-utc");
+    copy_smoke(root, "runner-empty");
+    write(
+        root,
+        "scenarios/smoke/area.yaml",
+        "area: smoke\nactive: [runner-empty]\n",
+    );
+    let golden = read_json(&root.join("goldens/smoke/timing-tz-utc.json"));
+    let suite = Suite::open(root).unwrap();
+    let meguri = MeguriExecutor::new();
+
+    // The oracle reproduces both goldens: T1 passes.
+    struct Replays(Value);
+    impl Executor for Replays {
+        fn name(&self) -> &str {
+            "oracle"
+        }
+        fn missing(&self, _needs: &Needs) -> Needs {
+            Needs::default()
+        }
+        fn run(&self, scenario: &LoadedScenario) -> Result<Value, ExecError> {
+            Ok(match scenario.scenario.id.as_str() {
+                "smoke/runner-empty" => json!({"steps": []}),
+                _ => self.0.clone(),
+            })
+        }
+    }
+    impl SegmentExecutor for Replays {
+        fn segment(&self, _: &LoadedScenario, _: &SegmentRequest) -> Result<SegmentOutput, ExecError> {
+            unreachable!("no live scenario here")
+        }
+    }
+    let faithful = Replays(golden["observations"].clone());
+    let report = suite.run_live(&[], &t1(&faithful, &meguri), "test");
+    assert!(report.failures().is_empty(), "{}", report.render_text());
+
+    // An inactive scenario the oracle no longer reproduces fails T1 (T0
+    // would only list it).
+    let mut drifted = golden["observations"].clone();
+    drifted["steps"][0]["timing"]["now"] = json!(1);
+    let report = suite.run_live(&[], &t1(&Replays(drifted), &meguri), "test");
+    let outcome = report
+        .outcomes
+        .iter()
+        .find(|o| o.scenario == "smoke/timing-tz-utc")
+        .unwrap();
+    assert!(!outcome.active);
+    assert_eq!(outcome.status, Status::Fail);
+    assert!(outcome.message.contains("no longer reproduces"), "{}", outcome.message);
+    assert_eq!(report.failures().len(), 1);
+    assert_eq!(report.to_json()["tier"], "t1");
+    assert_eq!(report.to_json()["failed"], 1);
+
+    // Workers that cannot start fail T1 for every scenario.
+    let report = suite.run_live(&[], &t1(&Broken, &meguri), "test");
+    assert_eq!(report.failures().len(), 2);
+    assert!(report.outcomes.iter().all(|o| o.status == Status::Error));
+}
+
+#[test]
+fn an_inactive_scenario_that_breaks_the_schema_fails_t0() {
+    let dir = tree();
+    let root = dir.path();
+    write(
+        root,
+        "scenarios/sched/filtered.yaml",
+        "id: sched/filtered\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{build_filtered: {}}]\n",
+    );
+    let suite = Suite::open(root).unwrap();
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    let outcome = &report.outcomes[0];
+    assert!(!outcome.active);
+    assert_eq!(outcome.status, Status::Invalid, "{}", report.render_text());
+    assert!(
+        outcome.message.contains("build_filtered needs name"),
+        "{}",
+        outcome.message
+    );
+    assert_eq!(report.failures().len(), 1);
+    // The T0 test harness path.
+    let outcome = suite.check_path(&root.join("scenarios/sched/filtered.yaml"), &MeguriExecutor::new());
+    assert!(outcome.fails_t0());
+}
+
+#[test]
+fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
+    let dir = tree();
+    let root = dir.path();
+    let chain = "id: smoke/chain\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{advance: 1d}, {handoff: oracle}, {observe: [timing]}]\n";
+    write(root, "scenarios/smoke/chain.yaml", chain);
+    golden_for(root, "smoke/chain", json!({"steps": [{}, {}, {"timing": {}}]}));
+    let suite = Suite::open(root).unwrap();
+    // Meguri has no handoff adapters yet: pending.
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    assert_eq!(report.outcomes[0].status, Status::Pending);
+    assert!(report.outcomes[0].live);
+    assert!(report.outcomes[0].missing.as_ref().unwrap().ops.contains("handoff"));
+    // Its own segment needs only advance (timing is observed on the oracle).
+    assert!(
+        !report.outcomes[0]
+            .missing
+            .as_ref()
+            .unwrap()
+            .observations
+            .contains("timing")
+    );
+
+    let mut registry = MeguriExecutor::core_registry();
+    registry.handoff(|_, _| Ok(()), |_, _| Ok(()));
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
+    assert_eq!(report.outcomes[0].repro, "tools/mg conformance --live smoke/chain");
+    assert!(report.failures().is_empty());
+}
+
+#[test]
+fn an_op_anki_refuses_is_recorded_and_the_run_goes_on() {
+    use meguri_testkit::exec::{OpResult, Session};
+    use meguri_testkit::scenario::Step;
+
+    fn refuse(_: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+        Ok(OpResult::Rejected("no_such_note"))
+    }
+    fn refuse_oddly(_: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+        Ok(OpResult::Rejected("something_else"))
+    }
+    let dir = tree();
+    let root = dir.path();
+    let text = "id: notes/delete-twice\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{delete_notes: {notes: [\"#n1\"]}}, {advance: 1d}, {delete_notes: {notes: [\"#n1\"]}}]\n";
+    write(root, "scenarios/notes/delete-twice.yaml", text);
+    write(
+        root,
+        "scenarios/notes/area.yaml",
+        "area: notes\nactive: [delete-twice]\n",
+    );
+    let refused = json!({"delete_notes": {"error": "no_such_note"}});
+    golden_for(root, "notes/delete-twice", json!({"steps": [refused, {}, refused]}));
+    let suite = Suite::open(root).unwrap();
+
+    let mut registry = MeguriExecutor::core_registry();
+    registry.op_rejecting("delete_notes", &["no_such_note"], refuse);
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
+
+    // A kind outside the op's list is the adapter's error, not a rejection.
+    let mut registry = MeguriExecutor::core_registry();
+    registry.op_rejecting("delete_notes", &["no_such_note"], refuse_oddly);
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    assert_eq!(report.outcomes[0].status, Status::Error);
+    assert!(
+        report.outcomes[0].message.contains("internal_error at step 0"),
+        "{}",
+        report.outcomes[0].message
+    );
 }

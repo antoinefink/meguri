@@ -1,9 +1,10 @@
 //! A conformance tree (`conformance/`): scenarios, goldens, area metadata, the
-//! oracle pin and the deviations list; T0 statuses and the freshness check
-//! (dsl.md D9-D13).
+//! oracle pin and the deviations list; T0 and T1 statuses and the freshness
+//! check (dsl.md D9-D13).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -11,9 +12,11 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::diff::{self, CompareOptions, Difference, pointer};
-use crate::exec::{Executor, Needs};
-use crate::report::Report;
-use crate::scenario::{self, LoadedScenario};
+use crate::exec::live::Chain;
+use crate::exec::{Executor, Needs, SegmentExecutor};
+use crate::observe;
+use crate::report::{Report, Tier};
+use crate::scenario::{self, LoadedScenario, Side};
 use crate::wallclock::Stopwatch;
 
 #[derive(Debug, Clone)]
@@ -72,8 +75,6 @@ struct Area {
     area: String,
     #[serde(default)]
     active: Vec<String>,
-    #[serde(default)]
-    live: Vec<String>,
 }
 
 /// A golden file (D11).
@@ -101,6 +102,13 @@ struct GoldenOracle {
     driver_sha256: String,
 }
 
+/// Reads a golden, every float exactly (`observe::parse_json`).
+fn read_golden(path: &Path) -> Result<Golden, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let value = observe::parse_json(&text).map_err(|e| e.to_string())?;
+    serde_json::from_value(value).map_err(|e| e.to_string())
+}
+
 /// A scenario file in the tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScenarioFile {
@@ -110,14 +118,14 @@ pub struct ScenarioFile {
     pub area: String,
 }
 
-/// A scenario's T0 status, in the order the runner decides it (D10).
+/// A scenario's status, in the order the runner decides it (D10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Status {
     Invalid,
-    Live,
     Missing,
     Stale,
     Pending,
+    Live,
     Error,
     Fail,
     Pass,
@@ -126,10 +134,10 @@ pub enum Status {
 impl Status {
     pub const ALL: [Status; 8] = [
         Status::Invalid,
-        Status::Live,
         Status::Missing,
         Status::Stale,
         Status::Pending,
+        Status::Live,
         Status::Error,
         Status::Fail,
         Status::Pass,
@@ -168,6 +176,8 @@ pub struct Outcome {
     pub path: PathBuf,
     pub area: String,
     pub active: bool,
+    /// It has handoff steps (D9).
+    pub live: bool,
     pub status: Status,
     pub message: String,
     pub repro: String,
@@ -184,6 +194,7 @@ impl Outcome {
             path: file.path.clone(),
             area: file.area.clone(),
             active,
+            live: false,
             status: Status::Pass,
             message: String::new(),
             repro: format!("tools/mg conformance {}", file.rel),
@@ -200,9 +211,28 @@ impl Outcome {
         self
     }
 
-    /// Invalid always fails T0; anything but a pass fails it when active.
+    /// T0: invalid always fails; an active scenario fails unless it passes or
+    /// (live scenarios, which only T1 runs) is `live`.
     pub fn fails_t0(&self) -> bool {
-        self.status == Status::Invalid || (self.active && self.status != Status::Pass)
+        self.status == Status::Invalid || (self.active && !matches!(self.status, Status::Pass | Status::Live))
+    }
+
+    /// T1: anything but a pass or a pending live scenario fails, active or
+    /// not (an oracle that no longer reproduces a golden, a worker error);
+    /// pending fails when active.
+    pub fn fails_t1(&self) -> bool {
+        match self.status {
+            Status::Pass => false,
+            Status::Pending => self.active,
+            _ => true,
+        }
+    }
+
+    pub fn fails(&self, tier: Tier) -> bool {
+        match tier {
+            Tier::T0 => self.fails_t0(),
+            Tier::T1 => self.fails_t1(),
+        }
     }
 
     /// The report text for this scenario (D12).
@@ -210,11 +240,8 @@ impl Outcome {
         let active = if self.active { " [active]" } else { "" };
         let mut text = match (self.status, &self.first_divergence) {
             (Status::Fail, Some(first)) => format!(
-                "{}: fail at step {}{active} ({} difference{})\n",
-                self.scenario,
-                first.step,
-                self.differences.len(),
-                if self.differences.len() == 1 { "" } else { "s" }
+                "{}: fail at step {}{active} ({})\n",
+                self.scenario, first.step, self.message
             ),
             (Status::Pending, _) => format!("{}: pending ({}){active}\n", self.scenario, self.message),
             (Status::Pass, _) => format!("{}: pass{active}\n", self.scenario),
@@ -247,6 +274,15 @@ impl Outcome {
     }
 }
 
+/// What T1 runs scenarios with: oracle workers, Meguri for its side of live
+/// chains, and the handoff directory both see (dsl.md D9, D10).
+pub struct LiveRun<'a> {
+    pub oracle: &'a dyn SegmentExecutor,
+    pub meguri: &'a dyn SegmentExecutor,
+    /// `None`: live scenarios are errors (no directory to hand over through).
+    pub handoff_root: Option<&'a Path>,
+}
+
 /// Options of the freshness check.
 #[derive(Debug, Clone, Default)]
 pub struct GoldensCheck {
@@ -265,12 +301,23 @@ pub struct Problem {
     pub repro: String,
 }
 
+/// One golden value that changed since the base.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangedValue {
+    pub golden: String,
+    pub pointer: String,
+    /// `None`: absent on that side.
+    pub before: Option<Value>,
+    pub after: Option<Value>,
+}
+
 /// Changed golden values in one area and observation kind.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChangedGroup {
     pub area: String,
     pub kind: String,
-    pub count: usize,
+    /// In golden, then pointer order.
+    pub values: Vec<ChangedValue>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -297,6 +344,10 @@ pub struct Suite {
     pub deviations: Vec<Deviation>,
     areas: BTreeMap<String, Area>,
     files: Vec<ScenarioFile>,
+    /// Canonical scenarios directory and each file's index by its path
+    /// relative to it (suffix included), for `check_path`.
+    canonical_scenarios: Option<PathBuf>,
+    by_relative_path: BTreeMap<String, usize>,
     duplicates: BTreeSet<String>,
     goldens: BTreeSet<String>,
 }
@@ -320,14 +371,21 @@ impl Suite {
         };
 
         let scenarios_dir = root.join("scenarios");
-        let mut areas = BTreeMap::new();
+        let mut areas: BTreeMap<String, (String, Area)> = BTreeMap::new();
         let mut files = Vec::new();
+        let mut relative_paths = Vec::new();
         for path in walk(&scenarios_dir)? {
             let rel_full = relative(&scenarios_dir, &path);
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
             if name == "area.yaml" || name == "area.yml" {
                 let area = read_area(&path, &rel_full)?;
-                areas.insert(area.area.clone(), area);
+                if let Some((first, _)) = areas.get(&area.area) {
+                    return Err(suite_error(format!(
+                        "scenarios/{rel_full}: area {:?} already has scenarios/{first}; keep one metadata file per area",
+                        area.area
+                    )));
+                }
+                areas.insert(area.area.clone(), (rel_full, area));
                 continue;
             }
             let Some(suffix) = scenario::SUFFIXES.iter().find(|s| name.ends_with(*s)) else {
@@ -336,8 +394,21 @@ impl Suite {
             let rel = rel_full[..rel_full.len() - suffix.len()].to_owned();
             let area = rel.split('/').next().unwrap_or_default().to_owned();
             files.push(ScenarioFile { path, rel, area });
+            relative_paths.push(rel_full);
         }
-        files.sort_by(|a, b| a.rel.cmp(&b.rel).then_with(|| a.path.cmp(&b.path)));
+        let mut order: Vec<usize> = (0..files.len()).collect();
+        order.sort_by(|&a, &b| {
+            files[a]
+                .rel
+                .cmp(&files[b].rel)
+                .then_with(|| files[a].path.cmp(&files[b].path))
+        });
+        let files: Vec<ScenarioFile> = order.iter().map(|&i| files[i].clone()).collect();
+        let by_relative_path = order
+            .iter()
+            .enumerate()
+            .map(|(sorted, &i)| (relative_paths[i].clone(), sorted))
+            .collect();
         let duplicates = files
             .windows(2)
             .filter(|w| w[0].rel == w[1].rel)
@@ -355,8 +426,10 @@ impl Suite {
             root: root.to_path_buf(),
             pin,
             deviations,
-            areas,
+            areas: areas.into_values().map(|(_, a)| (a.area.clone(), a)).collect(),
             files,
+            canonical_scenarios: scenarios_dir.canonicalize().ok(),
+            by_relative_path,
             duplicates,
             goldens,
         })
@@ -378,25 +451,11 @@ impl Suite {
             .collect())
     }
 
-    /// The area's patterns for `rel`, as full scenario id patterns.
-    fn area_entries(&self, rel: &str, pick: fn(&Area) -> &Vec<String>) -> Vec<String> {
+    fn is_active(&self, rel: &str) -> bool {
         let area = rel.split('/').next().unwrap_or_default();
         self.areas
             .get(area)
-            .map(|a| pick(a).iter().map(|p| format!("{area}/{p}")).collect())
-            .unwrap_or_default()
-    }
-
-    fn is_active(&self, rel: &str) -> bool {
-        self.area_entries(rel, |a| &a.active)
-            .iter()
-            .any(|p| pointer::glob(p, rel))
-    }
-
-    fn is_live(&self, rel: &str) -> bool {
-        self.area_entries(rel, |a| &a.live)
-            .iter()
-            .any(|p| pointer::glob(p, rel))
+            .is_some_and(|a| a.active.iter().any(|p| pointer::glob(&format!("{area}/{p}"), rel)))
     }
 
     fn golden_path(&self, rel: &str) -> PathBuf {
@@ -404,7 +463,7 @@ impl Suite {
     }
 
     /// The scenario's file, metadata and golden checks, before any run.
-    fn prepare(&self, file: &ScenarioFile) -> Result<(LoadedScenario, Option<Golden>), Box<Outcome>> {
+    fn prepare(&self, file: &ScenarioFile) -> Result<(LoadedScenario, Golden), Box<Outcome>> {
         let active = self.is_active(&file.rel);
         let outcome = Outcome::new(file, active);
         if self.duplicates.contains(&file.rel) {
@@ -417,25 +476,15 @@ impl Suite {
             Ok(loaded) => loaded,
             Err(e) => return Err(Box::new(outcome.with(Status::Invalid, e.to_string()))),
         };
-        let live = self.is_live(&file.rel);
-        if live && active {
-            return Err(Box::new(
-                outcome.with(Status::Invalid, "area.yaml lists it as both active and live"),
-            ));
-        }
-        if live {
-            return Ok((loaded, None));
-        }
+        let mut outcome = outcome;
+        outcome.live = loaded.scenario.is_live();
         let golden_path = self.golden_path(&file.rel);
         if !golden_path.exists() {
             let mut outcome = outcome.with(Status::Missing, "no golden");
             outcome.repro = format!("tools/mg oracle record {}", file.rel);
             return Err(Box::new(outcome));
         }
-        let golden: Golden = match std::fs::read_to_string(&golden_path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
-        {
+        let golden = match read_golden(&golden_path) {
             Ok(golden) => golden,
             Err(e) => {
                 return Err(Box::new(outcome.with(
@@ -462,35 +511,27 @@ impl Suite {
             outcome.repro = format!("tools/mg oracle bump {}", self.pin.anki_version);
             return Err(Box::new(outcome));
         }
-        Ok((loaded, Some(golden)))
+        Ok((loaded, golden))
     }
 
-    /// The T0 status of one scenario with this executor (D10).
-    pub fn check(&self, file: &ScenarioFile, executor: &dyn Executor) -> Outcome {
-        let (loaded, golden) = match self.prepare(file) {
-            Ok(prepared) => prepared,
-            Err(outcome) => return *outcome,
-        };
-        let outcome = Outcome::new(file, self.is_active(&file.rel));
-        let missing = executor.missing(&loaded.scenario.needs());
-        if !missing.is_empty() {
-            let mut outcome = outcome.with(Status::Pending, format!("needs {}", missing.summary()));
-            outcome.missing = Some(missing);
-            return outcome;
-        }
-        let Some(golden) = golden else {
-            return outcome.with(Status::Live, "T1 only: tools/mg conformance --live runs it");
-        };
-        let actual = match executor.run(&loaded) {
-            Ok(actual) => actual,
-            Err(e) => return outcome.with(Status::Error, e.to_string()),
-        };
+    /// Compares observations with a golden's and turns the result into a
+    /// pass or a fail; `deviations` only where Meguri's behavior is in
+    /// `actual` (dsl.md D13).
+    fn judge(
+        &self,
+        mut outcome: Outcome,
+        loaded: &LoadedScenario,
+        golden: &Golden,
+        actual: &Value,
+        deviations: bool,
+        what: &str,
+    ) -> Outcome {
+        let none = [];
         let options = CompareOptions {
             set: &loaded.scenario.compare.set,
-            deviations: &self.deviations,
+            deviations: if deviations { &self.deviations } else { &none },
         };
-        let comparison = diff::compare(&file.rel, &golden.observations, &actual, &options);
-        let mut outcome = outcome;
+        let comparison = diff::compare(&loaded.scenario.id, &golden.observations, actual, &options);
         outcome.deviations_applied = comparison.deviations_applied;
         if comparison.differences.is_empty() {
             return outcome;
@@ -516,36 +557,145 @@ impl Suite {
         let at = step.map(|s| format!(" from step {s}")).unwrap_or_default();
         outcome.with(
             Status::Fail,
-            format!("{count} difference{}{at}", if count == 1 { "" } else { "s" }),
+            format!("{what}{count} difference{}{at}", if count == 1 { "" } else { "s" }),
         )
     }
 
-    /// `check` for a scenario file given by path.
-    pub fn check_path(&self, path: &Path, executor: &dyn Executor) -> Outcome {
-        let wanted = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let file = self
-            .files
-            .iter()
-            .find(|f| f.path.canonicalize().unwrap_or_else(|_| f.path.clone()) == wanted)
-            .cloned()
-            .unwrap_or_else(|| ScenarioFile {
-                path: path.to_path_buf(),
-                rel: path.display().to_string(),
-                area: String::new(),
-            });
-        self.check(&file, executor)
+    /// The T0 status of one scenario with Meguri's executor (D10).
+    pub fn check(&self, file: &ScenarioFile, meguri: &dyn Executor) -> Outcome {
+        guarded(file, self.is_active(&file.rel), || self.check_t0(file, meguri))
     }
 
-    /// Checks every selected scenario, in parallel, in id order.
-    pub fn run(&self, filters: &[String], executor: &dyn Executor, lane: &str) -> Report {
+    fn check_t0(&self, file: &ScenarioFile, meguri: &dyn Executor) -> Outcome {
+        let (loaded, golden) = match self.prepare(file) {
+            Ok(prepared) => prepared,
+            Err(outcome) => return *outcome,
+        };
+        let mut outcome = Outcome::new(file, self.is_active(&file.rel));
+        outcome.live = loaded.scenario.is_live();
+        let needs = if outcome.live {
+            loaded.scenario.needs_on(Side::Meguri)
+        } else {
+            loaded.scenario.needs()
+        };
+        let missing = meguri.missing(&needs);
+        if !missing.is_empty() {
+            let mut outcome = outcome.with(Status::Pending, format!("needs {}", missing.summary()));
+            outcome.missing = Some(missing);
+            return outcome;
+        }
+        if outcome.live {
+            let mut outcome = outcome.with(Status::Live, "a live chain: tools/mg conformance --live runs it");
+            outcome.repro = format!("tools/mg conformance --live {}", file.rel);
+            return outcome;
+        }
+        match meguri.run(&loaded) {
+            Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, ""),
+            Err(e) => outcome.with(Status::Error, e.to_string()),
+        }
+    }
+
+    /// The T1 status of one scenario (D10): the oracle replays it against its
+    /// golden (no deviations: they describe Meguri), and a live scenario then
+    /// runs as a chain with Meguri, compared with the same golden.
+    pub fn check_live(&self, file: &ScenarioFile, live: &LiveRun<'_>) -> Outcome {
+        let mut outcome = guarded(file, self.is_active(&file.rel), || self.check_t1(file, live));
+        outcome.repro = match outcome.status {
+            Status::Missing | Status::Stale => outcome.repro,
+            _ => format!("tools/mg conformance --live {}", file.rel),
+        };
+        outcome
+    }
+
+    fn check_t1(&self, file: &ScenarioFile, live: &LiveRun<'_>) -> Outcome {
+        let (loaded, golden) = match self.prepare(file) {
+            Ok(prepared) => prepared,
+            Err(outcome) => return *outcome,
+        };
+        let mut outcome = Outcome::new(file, self.is_active(&file.rel));
+        outcome.live = loaded.scenario.is_live();
+        let drift = match live.oracle.run(&loaded) {
+            Ok(actual) => self.judge(
+                outcome.clone(),
+                &loaded,
+                &golden,
+                &actual,
+                false,
+                "the oracle no longer reproduces its golden: ",
+            ),
+            Err(e) => return outcome.with(Status::Error, format!("oracle: {e}")),
+        };
+        if drift.status != Status::Pass || !outcome.live {
+            return drift;
+        }
+        let missing = live.meguri.missing(&loaded.scenario.needs_on(Side::Meguri));
+        if !missing.is_empty() {
+            let mut outcome = outcome.with(Status::Pending, format!("needs {}", missing.summary()));
+            outcome.missing = Some(missing);
+            return outcome;
+        }
+        let Some(root) = live.handoff_root else {
+            return outcome.with(
+                Status::Error,
+                "a live chain needs a handoff directory (--handoff-dir; tools/mg conformance --live sets it)",
+            );
+        };
+        let chain = Chain {
+            meguri: live.meguri,
+            oracle: live.oracle,
+            root,
+        };
+        match chain.run(&loaded) {
+            Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, "the live chain: "),
+            Err(e) => outcome.with(Status::Error, format!("live chain: {e}")),
+        }
+    }
+
+    /// `check` for a scenario file given by path (the T0 test harness).
+    pub fn check_path(&self, path: &Path, meguri: &dyn Executor) -> Outcome {
+        let found = path
+            .canonicalize()
+            .ok()
+            .zip(self.canonical_scenarios.as_deref())
+            .and_then(|(path, root)| path.strip_prefix(root).ok().map(|rel| relative(Path::new(""), rel)))
+            .and_then(|rel| self.by_relative_path.get(&rel))
+            .map(|&i| self.files[i].clone());
+        let file = found.unwrap_or_else(|| ScenarioFile {
+            path: path.to_path_buf(),
+            rel: path.display().to_string(),
+            area: String::new(),
+        });
+        self.check(&file, meguri)
+    }
+
+    /// T0: every selected scenario with Meguri's executor, in parallel, in id
+    /// order.
+    pub fn run(&self, filters: &[String], meguri: &dyn Executor, lane: &str) -> Report {
+        self.run_each(filters, Tier::T0, meguri.name(), lane, |file| self.check(file, meguri))
+    }
+
+    /// T1: every selected scenario on the oracle, and the live ones as chains.
+    pub fn run_live(&self, filters: &[String], live: &LiveRun<'_>, lane: &str) -> Report {
+        self.run_each(filters, Tier::T1, live.oracle.name(), lane, |file| {
+            self.check_live(file, live)
+        })
+    }
+
+    fn run_each(
+        &self,
+        filters: &[String],
+        tier: Tier,
+        executor: &str,
+        lane: &str,
+        check: impl Fn(&ScenarioFile) -> Outcome + Sync,
+    ) -> Report {
         let watch = Stopwatch::start();
         let files = self.discover(filters).unwrap_or_default();
         let threads = std::thread::available_parallelism()
             .map_or(4, usize::from)
             .min(files.len().max(1));
         let next = AtomicUsize::new(0);
-        let mut slots: Vec<Option<Outcome>> = vec![None; files.len()];
-        let results: Vec<Vec<(usize, Outcome)>> = std::thread::scope(|scope| {
+        let results: Vec<(usize, Outcome)> = std::thread::scope(|scope| {
             let handles: Vec<_> = (0..threads)
                 .map(|_| {
                     scope.spawn(|| {
@@ -553,29 +703,43 @@ impl Suite {
                         loop {
                             let i = next.fetch_add(1, Ordering::Relaxed);
                             let Some(file) = files.get(i) else { break };
-                            done.push((i, self.check(file, executor)));
+                            done.push((i, check(file)));
                         }
                         done
                     })
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+            // `check` catches panics, so a worker thread ends normally; were
+            // one to unwind anyway, its scenarios get an error below.
+            handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
         });
-        for (i, outcome) in results.into_iter().flatten() {
+        let mut slots: Vec<Option<Outcome>> = vec![None; files.len()];
+        for (i, outcome) in results {
             slots[i] = Some(outcome);
         }
+        let outcomes = slots
+            .into_iter()
+            .zip(&files)
+            .map(|(slot, file)| {
+                slot.unwrap_or_else(|| {
+                    Outcome::new(file, self.is_active(&file.rel))
+                        .with(Status::Error, "the runner lost this scenario's result")
+                })
+            })
+            .collect();
         Report {
-            executor: executor.name().to_owned(),
+            tier,
+            executor: executor.to_owned(),
             lane: lane.to_owned(),
             oracle_pin: self.pin.clone(),
-            outcomes: slots.into_iter().flatten().collect(),
+            outcomes,
             wall_ms: watch.elapsed_ms(),
         }
     }
 
-    /// The freshness check (D10): goldens for every scenario that needs one,
-    /// recorded for the current scenario and the pinned oracle; no orphaned
-    /// goldens; area entries that match; and, with a base, the changed values.
+    /// The freshness check (D10): goldens for every scenario, recorded for
+    /// the current scenario and the pinned oracle; no orphaned goldens; area
+    /// entries that match; and, with a base, the changed values.
     pub fn goldens_check(&self, options: &GoldensCheck) -> Result<Freshness, SuiteError> {
         let mut fresh = Freshness {
             scenarios: self.files.len(),
@@ -623,7 +787,7 @@ impl Suite {
             }
         }
         for (name, area) in &self.areas {
-            for pattern in area.active.iter().chain(&area.live) {
+            for pattern in &area.active {
                 let full = format!("{name}/{pattern}");
                 if !self.files.iter().any(|f| pointer::glob(&full, &f.rel)) {
                     fresh.problems.push(problem(
@@ -661,7 +825,7 @@ impl Suite {
             .map(|p| relative(base, p))
             .filter_map(|rel| rel.strip_suffix(".json").map(str::to_owned))
             .collect();
-        let mut groups: BTreeMap<(String, String), usize> = BTreeMap::new();
+        let mut groups: BTreeMap<(String, String), Vec<ChangedValue>> = BTreeMap::new();
         for rel in &self.goldens {
             if !base_goldens.contains(rel) {
                 fresh.added_goldens.push(rel.clone());
@@ -670,7 +834,7 @@ impl Suite {
             let observations = |path: PathBuf| -> Value {
                 std::fs::read_to_string(path)
                     .ok()
-                    .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+                    .and_then(|t| observe::parse_json(&t).ok())
                     .and_then(|g| g.get("observations").cloned())
                     .unwrap_or(Value::Null)
             };
@@ -688,16 +852,34 @@ impl Suite {
                     [steps, _, kind, ..] if steps == "steps" => kind.clone(),
                     _ => "(structure)".to_owned(),
                 };
-                *groups.entry((area.clone(), kind)).or_default() += 1;
+                groups.entry((area.clone(), kind)).or_default().push(ChangedValue {
+                    golden: rel.clone(),
+                    pointer: d.pointer,
+                    before: d.expected,
+                    after: d.actual,
+                });
             }
         }
         fresh.removed_goldens = base_goldens.difference(&self.goldens).cloned().collect();
         fresh.changed = groups
             .into_iter()
-            .map(|((area, kind), count)| ChangedGroup { area, kind, count })
+            .map(|((area, kind), values)| ChangedGroup { area, kind, values })
             .collect();
         Ok(())
     }
+}
+
+/// Runs a check; a panic in an executor or adapter becomes this scenario's
+/// `error` instead of unwinding the runner thread with every result it held.
+fn guarded(file: &ScenarioFile, active: bool, check: impl FnOnce() -> Outcome) -> Outcome {
+    catch_unwind(AssertUnwindSafe(check)).unwrap_or_else(|panic| {
+        let message = panic
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| panic.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "a panic without a message".to_owned());
+        Outcome::new(file, active).with(Status::Error, format!("panicked: {message}"))
+    })
 }
 
 fn short(hash: &str) -> &str {
@@ -733,11 +915,6 @@ fn read_area(path: &Path, rel: &str) -> Result<Area, SuiteError> {
         return Err(suite_error(format!(
             "scenarios/{rel}: area {:?} must name its directory {dir:?} (area files live directly in an area directory)",
             area.area
-        )));
-    }
-    if let Some(both) = area.active.iter().find(|p| area.live.contains(p)) {
-        return Err(suite_error(format!(
-            "scenarios/{rel}: {both:?} is listed as both active and live"
         )));
     }
     Ok(area)

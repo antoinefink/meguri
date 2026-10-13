@@ -2,21 +2,31 @@
 """Inventory of Anki's tests at the pinned tag (R1877-R1882; spec side only).
 
   python3 -B -I oracle/harvest/inventory.py inventory --anki DIR --tag 26.09.3 \
+      [--supplementary MAIN_DIR --supplementary-tag main@<sha>] \
       --links oracle/harvest/links.csv --catalog conformance/catalog/harvest.csv
-  python3 -B -I oracle/harvest/inventory.py check --links ... --catalog ...
+  python3 -B -I oracle/harvest/inventory.py check --links ... --catalog ... [--pin conformance/oracle.json]
 
 `inventory` lists every Rust `#[test]`, pytest-style Python test and
 vitest/playwright TypeScript test in an Anki checkout at the pinned tag. Each
 gets an opaque harvest id (h + 12 hex digits of a sha256 over language, path,
 name and occurrence). `links.csv` (here, AGPL) maps ids to Anki files and test
 names; `conformance/catalog/harvest.csv` (MPL, implementers read it) holds only
-the id, language, Meguri area, classification, reason, scenarios and status.
-Rows already in the catalog keep their classification, reason, scenarios and
-status; new rows get the rules below or `unclassified`; rows whose test no
-longer exists are dropped and listed.
+the id, language, source, Meguri area, classification, reason, scenarios and
+status. Rows already in the catalog keep their classification, reason,
+scenarios and status; new rows get the rules below or `unclassified`; rows
+whose test no longer exists are dropped and listed.
 
-`check` fails when the catalog and links disagree on ids, or when any catalog
-value contains an Anki file path, file name or distinctive test name (R1881).
+Supplementary tests: with --supplementary, tests on Anki's main branch whose
+(language, file, name) the tag does not have are added with links.csv tag
+`main@<sha>` and catalog source `supplementary`; spec writers classify whether
+their behavior exists at the tag. A re-inventory without --supplementary keeps
+the supplementary rows it has (dropping those the tag now holds), so only a
+main re-scan replaces them. They are not in the counts at the tag.
+
+`check` fails when the catalog and links disagree on ids or sources, when any
+catalog value contains an Anki file path, file name or distinctive test name
+(R1881), or, with --pin, when links.csv was inventoried at another release
+than the oracle pin (R1882: re-inventory in the change that adopts a bump).
 
 Only stdlib: it runs in any Python 3.10+ (`tools/mg harvest-inventory` runs it
 in the dev container).
@@ -29,6 +39,7 @@ import ast
 import csv
 import hashlib
 import io
+import json
 import re
 import sys
 import warnings
@@ -36,7 +47,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-CATALOG_HEADER = ["harvest_id", "language", "area", "classification", "reason", "scenarios", "status"]
+CATALOG_HEADER = ["harvest_id", "language", "source", "area", "classification", "reason", "scenarios", "status"]
 LINKS_HEADER = ["harvest_id", "language", "tag", "file", "test"]
 SKIP_DIRS = {".git", "node_modules", "target", "out", ".venv", "__pycache__", "dist"}
 
@@ -255,6 +266,17 @@ def write_csv(path: Path, header: list[str], rows: list[dict]) -> None:
     path.write_text(buf.getvalue(), encoding="utf-8", newline="")
 
 
+def is_supplementary(tag: str) -> bool:
+    """A links.csv tag is a release (26.09.3) or a branch revision (main@<sha>)."""
+    return "@" in tag
+
+
+def release_tag(anki_version: str) -> str:
+    """The pin's distribution version (26.9.3) as Anki's git tag (26.09.3)."""
+    major, minor, patch = (int(x) for x in anki_version.split("."))
+    return f"{major}.{minor:02d}.{patch}"
+
+
 def status_for(classification: str, scenarios: str) -> str:
     if classification in ("not-applicable", "out-of-scope"):
         return "done"
@@ -264,40 +286,66 @@ def status_for(classification: str, scenarios: str) -> str:
 
 
 def cmd_inventory(args) -> int:
-    root = Path(args.anki)
-    tests = scan(root)
-    ids = Counter(t.harvest_id for t in tests)
+    if bool(args.supplementary) != bool(args.supplementary_tag) or (
+        args.supplementary_tag and not is_supplementary(args.supplementary_tag)
+    ):
+        print("inventory: --supplementary needs --supplementary-tag main@<sha>, and the reverse", file=sys.stderr)
+        return 2
+    tests = scan(Path(args.anki))
+    at_tag = {(t.language, t.file, t.name) for t in tests}
+    links = [
+        {"harvest_id": t.harvest_id, "language": t.language, "tag": args.tag, "file": t.file, "test": t.name}
+        for t in tests
+    ]
+    if args.supplementary:
+        extra = [t for t in scan(Path(args.supplementary)) if (t.language, t.file, t.name) not in at_tag]
+        supplementary = [
+            {"harvest_id": t.harvest_id, "language": t.language, "tag": args.supplementary_tag, "file": t.file, "test": t.name}
+            for t in extra
+        ]
+    else:
+        supplementary = [
+            row
+            for row in read_csv(Path(args.links), LINKS_HEADER)
+            if is_supplementary(row["tag"]) and (row["language"], row["file"], row["test"]) not in at_tag
+        ]
+    links += supplementary
+    ids = Counter(row["harvest_id"] for row in links)
     clashes = [i for i, n in ids.items() if n > 1]
     if clashes:
         print(f"inventory: harvest id clash: {clashes}", file=sys.stderr)
         return 1
     existing = {row["harvest_id"]: row for row in read_csv(Path(args.catalog), CATALOG_HEADER)}
-    links, catalog = [], []
-    for t in tests:
-        links.append({"harvest_id": t.harvest_id, "language": t.language, "tag": args.tag, "file": t.file, "test": t.name})
-        row = existing.get(t.harvest_id)
+    catalog = []
+    for link in links:
+        source = "supplementary" if is_supplementary(link["tag"]) else "tag"
+        row = existing.get(link["harvest_id"])
         if row is None:
-            area, classification, reason = default_classification(t)
+            test = Test(link["language"], link["file"], link["test"], 1)
+            area, classification, reason = default_classification(test)
             row = {
-                "harvest_id": t.harvest_id,
-                "language": t.language,
+                "harvest_id": link["harvest_id"],
+                "language": link["language"],
                 "area": area,
                 "classification": classification,
                 "reason": reason,
                 "scenarios": "",
                 "status": status_for(classification, ""),
             }
-        catalog.append(row)
-    dropped = sorted(set(existing) - {t.harvest_id for t in tests})
+        catalog.append({**row, "source": source})
+    dropped = sorted(set(existing) - set(ids))
     links.sort(key=lambda r: (r["language"], r["file"], r["test"], r["harvest_id"]))
     catalog.sort(key=lambda r: (r["area"], r["language"], r["harvest_id"]))
     write_csv(Path(args.links), LINKS_HEADER, links)
     write_csv(Path(args.catalog), CATALOG_HEADER, catalog)
     counts = Counter(t.language for t in tests)
     classes = Counter(r["classification"] for r in catalog)
+    extra_counts = Counter(r["language"] for r in supplementary)
     print(
         f"inventory: {len(tests)} tests at {args.tag}: "
         + ", ".join(f"{lang} {counts[lang]}" for lang in ("rust", "python", "typescript"))
+        + f"; {len(supplementary)} supplementary: "
+        + ", ".join(f"{lang} {extra_counts[lang]}" for lang in ("rust", "python", "typescript"))
         + "; "
         + ", ".join(f"{c} {n}" for c, n in sorted(classes.items())),
         file=sys.stderr,
@@ -347,6 +395,21 @@ def cmd_check(args) -> int:
     link_ids = {r["harvest_id"] for r in links}
     problems += [f"{i}: in the catalog but not in links.csv" for i in sorted(catalog_ids - link_ids)]
     problems += [f"{i}: in links.csv but not in the catalog" for i in sorted(link_ids - catalog_ids)]
+    sources = {r["harvest_id"]: "supplementary" if is_supplementary(r["tag"]) else "tag" for r in links}
+    problems += [
+        f"{r['harvest_id']}: source {r['source']} in the catalog, {sources[r['harvest_id']]} in links.csv"
+        for r in catalog
+        if r["harvest_id"] in sources and r["source"] != sources[r["harvest_id"]]
+    ]
+    if args.pin:
+        pin = json.loads(Path(args.pin).read_text(encoding="utf-8"))
+        want = release_tag(pin["anki_version"])
+        found = sorted({r["tag"] for r in links if not is_supplementary(r["tag"])})
+        if found != [want]:
+            problems.append(
+                f"links.csv was inventoried at {', '.join(found) or 'no release'}, the oracle pin is {want}: "
+                "re-inventory in the change that adopts the bump (tools/mg harvest-inventory, R1882)"
+            )
     problems += leaks(catalog, links)
     for p in problems:
         print(f"check: {p}", file=sys.stderr)
@@ -360,11 +423,14 @@ def main(argv: list[str] | None = None) -> int:
     inv = sub.add_parser("inventory")
     inv.add_argument("--anki", required=True, help="Anki checkout at the pinned tag")
     inv.add_argument("--tag", required=True)
+    inv.add_argument("--supplementary", help="Anki checkout of the main branch")
+    inv.add_argument("--supplementary-tag", help="main@<sha> of that checkout")
     inv.add_argument("--links", required=True)
     inv.add_argument("--catalog", required=True)
     chk = sub.add_parser("check")
     chk.add_argument("--links", required=True)
     chk.add_argument("--catalog", required=True)
+    chk.add_argument("--pin", help="conformance/oracle.json: links.csv must be inventoried at its release")
     args = p.parse_args(argv)
     return {"inventory": cmd_inventory, "check": cmd_check}[args.command](args)
 

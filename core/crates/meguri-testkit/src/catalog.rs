@@ -23,9 +23,10 @@ impl fmt::Display for CatalogError {
 
 impl std::error::Error for CatalogError {}
 
-pub const HEADER: [&str; 7] = [
+pub const HEADER: [&str; 8] = [
     "harvest_id",
     "language",
+    "source",
     "area",
     "classification",
     "reason",
@@ -33,6 +34,10 @@ pub const HEADER: [&str; 7] = [
     "status",
 ];
 pub const LANGUAGES: [&str; 3] = ["rust", "python", "typescript"];
+/// `tag`: a test in Anki at the pinned release. `supplementary`: a test added
+/// on Anki's main branch after it (R1877; the spec writer classifies whether
+/// its behavior exists at the release).
+pub const SOURCES: [&str; 2] = ["tag", "supplementary"];
 pub const CLASSIFICATIONS: [&str; 5] = [
     "in-scope",
     "preservation-only",
@@ -46,6 +51,7 @@ pub const STATUSES: [&str; 3] = ["open", "deferred", "done"];
 pub struct HarvestRow {
     pub harvest_id: String,
     pub language: String,
+    pub source: String,
     pub area: String,
     pub classification: String,
     pub reason: String,
@@ -79,7 +85,7 @@ impl Catalog {
         for (i, record) in body.iter().enumerate() {
             let line = i + 2;
             let bad = |why: String| CatalogError(format!("line {line}: {why}"));
-            let [id, language, area, classification, reason, scenarios, status] = record.as_slice() else {
+            let [id, language, source, area, classification, reason, scenarios, status] = record.as_slice() else {
                 return Err(bad(format!("{} fields instead of {}", record.len(), HEADER.len())));
             };
             if !(id.len() == 13
@@ -98,6 +104,9 @@ impl Catalog {
                     "language {language:?} is not one of {}",
                     LANGUAGES.join(", ")
                 )));
+            }
+            if !SOURCES.contains(&source.as_str()) {
+                return Err(bad(format!("source {source:?} is not one of {}", SOURCES.join(", "))));
             }
             if area.is_empty() || !area.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
                 return Err(bad(format!("area {area:?} must be a lower-case area name")));
@@ -128,6 +137,7 @@ impl Catalog {
             rows.push(HarvestRow {
                 harvest_id: id.clone(),
                 language: language.clone(),
+                source: source.clone(),
                 area: area.clone(),
                 classification: classification.clone(),
                 reason: reason.clone(),
@@ -199,6 +209,7 @@ pub struct ClassSummary {
 pub struct RowReport {
     pub harvest_id: String,
     pub language: String,
+    pub source: String,
     pub area: String,
     pub classification: String,
     pub status: String,
@@ -209,7 +220,13 @@ pub struct RowReport {
 pub struct HarvestReport {
     pub anki_version: String,
     pub rows_total: usize,
+    /// Rows of tests at the pinned release (the counts at the tag, R1877).
+    pub rows_at_tag: usize,
+    /// Tests at the pinned release, per language and classification.
     pub by_language: BTreeMap<String, BTreeMap<String, usize>>,
+    /// Supplementary tests (Anki's main branch after the release), per
+    /// language; not in the counts at the tag.
+    pub supplementary: BTreeMap<String, usize>,
     pub by_classification: BTreeMap<String, ClassSummary>,
     pub rows: Vec<RowReport>,
     pub problems: Vec<String>,
@@ -227,9 +244,15 @@ const SEVERITY: [Status; 8] = [
     Status::Pass,
 ];
 
-/// Counts rows per language and classification, and the T0 status (with this
-/// executor) of every linked scenario.
-pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor) -> HarvestReport {
+/// Counts rows per language and classification, and the status of every
+/// linked scenario: its T0 status with this executor, or for a live scenario
+/// its T1 status when `live` (a `run --live` report) has one.
+pub fn harvest_report(
+    catalog: &Catalog,
+    suite: &Suite,
+    executor: &dyn Executor,
+    live: &BTreeMap<String, Status>,
+) -> HarvestReport {
     let mut report = HarvestReport {
         anki_version: suite.pin.anki_version.clone(),
         rows_total: catalog.rows.len(),
@@ -240,6 +263,7 @@ pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor)
             language.to_owned(),
             CLASSIFICATIONS.iter().map(|c| ((*c).to_owned(), 0)).collect(),
         );
+        report.supplementary.insert(language.to_owned(), 0);
     }
     for class in CLASSIFICATIONS {
         report
@@ -252,10 +276,13 @@ pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor)
         let mut scenario_statuses = BTreeMap::new();
         for id in &row.scenarios {
             let status = *cache.entry(id.clone()).or_insert_with(|| {
-                files
-                    .iter()
-                    .find(|f| &f.rel == id)
-                    .map(|f| suite.check(f, executor).status)
+                files.iter().find(|f| &f.rel == id).map(|f| {
+                    let outcome = suite.check(f, executor);
+                    match live.get(id) {
+                        Some(t1) if outcome.live => *t1,
+                        _ => outcome.status,
+                    }
+                })
             });
             match status {
                 Some(status) => {
@@ -271,18 +298,24 @@ pub fn harvest_report(catalog: &Catalog, suite: &Suite, executor: &dyn Executor)
             .find(|s| scenario_statuses.values().any(|v| v == s.as_str()))
             .map_or("unlinked", |s| s.as_str())
             .to_owned();
-        *report
-            .by_language
-            .entry(row.language.clone())
-            .or_default()
-            .entry(row.classification.clone())
-            .or_default() += 1;
+        if row.source == "tag" {
+            report.rows_at_tag += 1;
+            *report
+                .by_language
+                .entry(row.language.clone())
+                .or_default()
+                .entry(row.classification.clone())
+                .or_default() += 1;
+        } else {
+            *report.supplementary.entry(row.language.clone()).or_default() += 1;
+        }
         let summary = report.by_classification.entry(row.classification.clone()).or_default();
         summary.rows += 1;
         *summary.statuses.entry(status.clone()).or_default() += 1;
         report.rows.push(RowReport {
             harvest_id: row.harvest_id.clone(),
             language: row.language.clone(),
+            source: row.source.clone(),
             area: row.area.clone(),
             classification: row.classification.clone(),
             status,
@@ -301,7 +334,9 @@ impl HarvestReport {
         json!({
             "anki_version": self.anki_version,
             "rows_total": self.rows_total,
+            "rows_at_tag": self.rows_at_tag,
             "by_language": self.by_language,
+            "supplementary": self.supplementary,
             "by_classification": self.by_classification.iter().map(|(class, s)| {
                 (class.clone(), json!({"rows": s.rows, "statuses": s.statuses}))
             }).collect::<serde_json::Map<String, Value>>(),
@@ -309,6 +344,7 @@ impl HarvestReport {
             "rows": self.rows.iter().map(|r| json!({
                 "harvest_id": r.harvest_id,
                 "language": r.language,
+                "source": r.source,
                 "area": r.area,
                 "classification": r.classification,
                 "status": r.status,
@@ -327,10 +363,18 @@ impl HarvestReport {
         md.push_str(&format!(
             "Anki tests inventoried at the pinned release (anki {}): {} ({}).\n\n",
             self.anki_version,
-            self.rows_total,
+            self.rows_at_tag,
             per_language.join(", ")
         ));
-        md.push_str("## By classification\n\nRow status: the worst T0 status of its linked scenarios.\n\n");
+        let supplementary: Vec<String> = self.supplementary.iter().map(|(l, n)| format!("{l} {n}")).collect();
+        md.push_str(&format!(
+            "Supplementary tests from Anki's main branch after the release, not in the counts at the tag: {} ({}).\n\n",
+            self.supplementary.values().sum::<usize>(),
+            supplementary.join(", ")
+        ));
+        md.push_str(
+            "## By classification\n\nAll rows, supplementary ones included. Row status: the worst status of its linked scenarios (T0; T1 for live scenarios when a live report is given).\n\n",
+        );
         md.push_str(&format!("| Classification | Rows | {} |\n", ROW_STATUSES.join(" | ")));
         md.push_str(&format!("|---|---|{}\n", "---|".repeat(ROW_STATUSES.len())));
         for (class, summary) in &self.by_classification {
@@ -340,7 +384,7 @@ impl HarvestReport {
                 .collect();
             md.push_str(&format!("| {class} | {} | {} |\n", summary.rows, cells.join(" | ")));
         }
-        md.push_str("\n## By language\n\n");
+        md.push_str("\n## By language, at the tag\n\n");
         md.push_str(&format!("| Language | {} |\n", CLASSIFICATIONS.join(" | ")));
         md.push_str(&format!("|---|{}\n", "---|".repeat(CLASSIFICATIONS.len())));
         for (language, classes) in &self.by_language {
@@ -356,7 +400,7 @@ impl HarvestReport {
                 md.push_str(&format!("- {p}\n"));
             }
         }
-        md.push_str("\n## Rows\n\n| Harvest id | Language | Area | Classification | Status | Scenarios |\n|---|---|---|---|---|---|\n");
+        md.push_str("\n## Rows\n\n| Harvest id | Language | Source | Area | Classification | Status | Scenarios |\n|---|---|---|---|---|---|---|\n");
         for r in &self.rows {
             let scenarios: Vec<String> = r
                 .scenario_statuses
@@ -364,9 +408,10 @@ impl HarvestReport {
                 .map(|(id, s)| format!("{id} ({s})"))
                 .collect();
             md.push_str(&format!(
-                "| {} | {} | {} | {} | {} | {} |\n",
+                "| {} | {} | {} | {} | {} | {} | {} |\n",
                 r.harvest_id,
                 r.language,
+                r.source,
                 r.area,
                 r.classification,
                 r.status,

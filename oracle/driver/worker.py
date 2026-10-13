@@ -27,10 +27,11 @@ from .session import Session
 
 
 class Worker:
-    def __init__(self, tz: str, scratch: str, clock: Clock) -> None:
+    def __init__(self, tz: str, scratch: str, clock: Clock, handoff_root: str | None = None) -> None:
         self.tz = tz
         self.scratch = scratch
         self.clock = clock
+        self.handoff_root = handoff_root
         self.hello = meta.hello(tz)
         self.session: Session | None = None
 
@@ -41,18 +42,30 @@ class Worker:
         if cmd == "hello":
             return dict(self.hello)
         if cmd == "run":
+            # A whole scenario, or one segment of a live chain (steps, resume,
+            # handoff; dsl.md D9.2).
             self._no_open_session()
             started = time.perf_counter()
-            session = Session(req.get("scenario"), self.tz, self.scratch, self.clock)
+            session = Session(
+                req.get("scenario"), self.tz, self.scratch, self.clock,
+                resume=req.get("resume"), handoff_root=self.handoff_root,
+            )
+            state = None
             try:
-                observations = session.run_all()
+                first, end = _step_range(req.get("steps"), len(session.steps))
+                observations = session.run_range(first, end)
+                if "handoff" in req:
+                    state = session.hand_off(self.handoff_root, req["handoff"])
             finally:
                 session.close()
-            return {
+            resp = {
                 "scenario_id": session.scenario["id"],
                 "observations": observations,
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
             }
+            if state is not None:
+                resp["state"] = state
+            return resp
         if cmd == "begin":
             self._no_open_session()
             self.session = Session(req.get("scenario"), self.tz, self.scratch, self.clock)
@@ -111,6 +124,20 @@ class Worker:
             self.session.close()
 
 
+def _step_range(steps: Any, count: int) -> tuple[int, int]:
+    """A run request's steps: [first, end) of the scenario's steps."""
+    if steps is None:
+        return 0, count
+    if (
+        not isinstance(steps, list)
+        or len(steps) != 2
+        or not all(isinstance(x, int) and not isinstance(x, bool) for x in steps)
+        or not 0 <= steps[0] <= steps[1] <= count
+    ):
+        raise DriverError("protocol_error", detail=f"steps is [first, end) within the scenario's {count} steps")
+    return steps[0], steps[1]
+
+
 def _reject_constant(name: str):
     raise DriverError("protocol_error", detail=f"{name} is not JSON")
 
@@ -161,6 +188,6 @@ def main() -> int:
         print("oracle: start workers through entrypoint.sh (libfaketime is not set up)", file=sys.stderr)
         return 78
     registry.load_all()
-    worker = Worker(tz, scratch, Clock(clock_file))
+    worker = Worker(tz, scratch, Clock(clock_file), os.environ.get("ORACLE_HANDOFF") or None)
     worker.serve(sys.stdin, proto_out)
     return 0

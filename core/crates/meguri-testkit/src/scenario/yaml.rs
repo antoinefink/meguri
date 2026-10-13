@@ -227,7 +227,7 @@ fn float(x: f64) -> Option<Value> {
 /// Generated scenarios: JSON with no duplicate keys, numbers within the
 /// scenario range.
 pub(super) fn parse_json(text: &str) -> Result<Value, FormatError> {
-    let value: Value = serde_json::from_str(text).map_err(|e| FormatError::new(format!("JSON: {e}")))?;
+    let value = crate::observe::parse_json(text).map_err(|e| FormatError::new(format!("JSON: {e}")))?;
     // serde_json keeps the last of two equal keys: count the keys of the
     // text's objects by re-reading it as a stream of map entries.
     check_duplicates(text)?;

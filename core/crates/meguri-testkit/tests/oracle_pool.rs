@@ -7,16 +7,24 @@ use std::path::{Path, PathBuf};
 
 use meguri_testkit::exec::{Executor, OracleExecutor};
 use meguri_testkit::scenario;
+use meguri_testkit::suite::OraclePin;
 
 /// A worker that answers hello and run lines. It reports its own TZ and
 /// process id, fails a scenario containing "teleport" with unsupported_op at
-/// step 1, and exits on one containing "die".
+/// step 1, and exits on one containing "die". Its lock is all `a`s, except
+/// $LOCK_<zone> (Asia/Kathmandu: LOCK_Asia_Kathmandu) or $DRIVER_<zone>
+/// when set.
 const WORKER: &str = r#"
+zone=$(printf '%s' "$TZ" | tr '/' '_')
+lock=$(eval "printf '%s' \"\${LOCK_$zone:-$(printf 'a%.0s' $(seq 64))}\"")
+driver=$(eval "printf '%s' \"\${DRIVER_$zone:-$(printf 'b%.0s' $(seq 64))}\"")
 while IFS= read -r line; do
   case "$line" in
     *'"cmd":"hello"'*)
       printf '{"ok":true,"protocol":1,"anki_version":"26.9.3","lock_sha256":"%s","driver_sha256":"%s","tz":"%s"}\n' \
-        "$(printf 'a%.0s' $(seq 64))" "$(printf 'b%.0s' $(seq 64))" "$TZ" ;;
+        "$lock" "$driver" "$TZ" ;;
+    *exact*)
+      printf '{"ok":true,"scenario_id":"x","elapsed_ms":1,"observations":{"steps":[{"stats":{"retention":39.430133835633676}}]}}\n' ;;
     *teleport*)
       printf '{"ok":false,"error":{"kind":"unsupported_op","op":"teleport","step":1}}\n' ;;
     *'"die"'*)
@@ -28,13 +36,27 @@ done
 "#;
 
 fn worker_command(dir: &Path) -> Vec<String> {
+    worker_command_with(dir, &[])
+}
+
+/// The stand-in worker with extra environment (`NAME=value`).
+fn worker_command_with(dir: &Path, env: &[&str]) -> Vec<String> {
     let script = dir.join("worker.sh");
     fs::write(&script, WORKER).unwrap();
-    ["env", "TZ={tz}", "sh"]
+    ["env", "TZ={tz}"]
         .iter()
+        .chain(env)
+        .chain(&["sh"])
         .map(|s| (*s).to_owned())
         .chain([script.display().to_string()])
         .collect()
+}
+
+fn pin(lock: char) -> OraclePin {
+    OraclePin {
+        anki_version: "26.9.3".to_owned(),
+        lock_sha256: lock.to_string().repeat(64),
+    }
 }
 
 fn scenario_in(dir: &Path, name: &str, tz: &str, step: &str) -> scenario::LoadedScenario {
@@ -100,4 +122,42 @@ fn a_worker_command_that_cannot_start_is_an_error() {
     let pool = OracleExecutor::new(vec![dir.path().join("no-such-worker").display().to_string()], 1);
     let s = scenario_in(dir.path(), "g", "UTC", "{observe: [timing]}");
     assert_eq!(pool.run(&s).unwrap_err().kind, "worker_start");
+}
+
+#[test]
+fn every_worker_must_run_the_pinned_oracle() {
+    let dir = tempfile::tempdir().unwrap();
+    let utc = scenario_in(dir.path(), "h", "UTC", "{observe: [timing]}");
+    let kathmandu = scenario_in(dir.path(), "i", "Asia/Kathmandu", "{observe: [timing]}");
+
+    // The first worker already runs another lock than the pin.
+    let pool = OracleExecutor::new(worker_command(dir.path()), 2).expecting(pin('c'));
+    let err = pool.run(&utc).unwrap_err();
+    assert_eq!(err.kind, "oracle_mismatch");
+    assert!(err.detail.contains("conformance/oracle.json"), "{}", err.detail);
+
+    // A later worker of another zone runs another lock.
+    let other_lock = format!("LOCK_Asia_Kathmandu={}", "d".repeat(64));
+    let pool = OracleExecutor::new(worker_command_with(dir.path(), &[&other_lock]), 2).expecting(pin('a'));
+    assert!(pool.run(&utc).is_ok());
+    assert_eq!(pool.run(&kathmandu).unwrap_err().kind, "oracle_mismatch");
+    assert_eq!(pool.hello().unwrap().lock_sha256, "a".repeat(64));
+
+    // Without a pin, a later worker must still match the first one's driver.
+    let other_driver = format!("DRIVER_Asia_Kathmandu={}", "e".repeat(64));
+    let pool = OracleExecutor::new(worker_command_with(dir.path(), &[&other_driver]), 2);
+    assert!(pool.run(&utc).is_ok());
+    let err = pool.run(&kathmandu).unwrap_err();
+    assert_eq!(err.kind, "oracle_mismatch");
+    assert!(err.detail.contains("driver"), "{}", err.detail);
+}
+
+#[test]
+fn responses_keep_seventeen_digit_floats_exact() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = OracleExecutor::new(worker_command(dir.path()), 1);
+    let s = scenario_in(dir.path(), "exact", "UTC", "{observe: [timing]}");
+    let out = pool.run(&s).unwrap();
+    let x = out["steps"][0]["stats"]["retention"].as_f64().unwrap();
+    assert_eq!(x.to_bits(), 39.430133835633676_f64.to_bits());
 }

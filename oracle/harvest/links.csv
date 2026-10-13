@@ -242,6 +242,8 @@ hdcb5f68de05f,python,26.09.3,qt/tests/test_sound.py,test_mpv_binary_runs
 h0a83b45d0634,python,26.09.3,qt/tests/test_sound.py,test_mpv_can_play_generated_wav
 h5f44a5824887,python,26.09.3,qt/tests/test_sound.py,test_mpvmanager_can_play_generated_wav
 h26406c81f6bd,python,26.09.3,qt/tests/test_sound.py,test_packagedcmd_returns_absolute_path_when_anki_audio_available
+he33dfcceecc5,python,main@2f62b5e67807,qt/tests/test_startup.py,test_run_applies_video_driver_before_app_is_created
+h32ca7966c577,python,main@2f62b5e67807,qt/tests/test_startup.py,test_ui_scale_is_applied_before_app_is_created
 hd00442be7789,python,26.09.3,qt/tests/test_toolbar.py,test_theme_change_does_not_copy_background_outside_review
 h00001e1c4f09,python,26.09.3,qt/tests/test_toolbar.py,test_theme_change_refreshes_review_background
 h63f1987aa314,python,26.09.3,tools/tests/test_docs_converter.py,TestAdmonishConversion.test_caution_admonish_maps_to_warning
@@ -377,9 +379,17 @@ h1126a583e576,rust,26.09.3,rslib/src/card_rendering/service.rs,strip_av_tags_rem
 h163ba9c3036c,rust,26.09.3,rslib/src/card_rendering/service.rs,strip_html_normal_removes_all_tags
 hc74368fae72d,rust,26.09.3,rslib/src/card_rendering/service.rs,strip_html_preserve_mode_keeps_media_filename
 he865b016fdd9,rust,26.09.3,rslib/src/card_rendering/writer.rs,writing
+h5ab01c535673,rust,main@2f62b5e67807,rslib/src/cloze.rs,braces_in_mathjax_outside_clozes_are_text
 h88486ccb2459,rust,26.09.3,rslib/src/cloze.rs,cloze
 h74230fbcabe8,rust,26.09.3,rslib/src/cloze.rs,cloze_only
+hcafcd1e3bdc2,rust,main@2f62b5e67807,rslib/src/cloze.rs,cloze_opened_inside_mathjax_can_close_after_it
+hb6a47ef46c2d,rust,main@2f62b5e67807,rslib/src/cloze.rs,cloze_with_mathjax_braces
+hb1cbcd219c60,rust,main@2f62b5e67807,rslib/src/cloze.rs,cloze_with_mathjax_square_brackets
+h3ea8cdc8e835,rust,main@2f62b5e67807,rslib/src/cloze.rs,cloze_with_mismatched_mathjax_delimiters
+h9ecf3ff97171,rust,main@2f62b5e67807,rslib/src/cloze.rs,cloze_with_multiple_mathjax_expressions
+h0714128d5513,rust,main@2f62b5e67807,rslib/src/cloze.rs,cloze_with_unterminated_mathjax
 h9f15a141659a,rust,26.09.3,rslib/src/cloze.rs,clozes_for_typing
+h450787d61876,rust,main@2f62b5e67807,rslib/src/cloze.rs,clozes_opened_inside_mathjax_close_inside_it
 h3448f09e0c2c,rust,26.09.3,rslib/src/cloze.rs,image_cloze
 h5cd95f995780,rust,26.09.3,rslib/src/cloze.rs,image_occlusion_with_funny_text
 hf064837658a8,rust,26.09.3,rslib/src/cloze.rs,mathjax_html
@@ -392,6 +402,7 @@ h6954b568831d,rust,26.09.3,rslib/src/cloze.rs,multi_card_cloze_with_hints
 h1f6151e74934,rust,26.09.3,rslib/src/cloze.rs,multi_card_image_occlusion
 he406938dc7f7,rust,26.09.3,rslib/src/cloze.rs,multi_card_nested_cloze
 h50201233953a,rust,26.09.3,rslib/src/cloze.rs,nested_cloze_html
+h03d7c32a8571,rust,main@2f62b5e67807,rslib/src/cloze.rs,nested_cloze_inside_mathjax_does_not_reset_mathjax_state
 h6d969fd370f8,rust,26.09.3,rslib/src/cloze.rs,nested_cloze_plain_text
 h883b6ddbca06,rust,26.09.3,rslib/src/cloze.rs,nested_parent_child_card_same_cloze
 hf8d1651d6b66,rust,26.09.3,rslib/src/cloze.rs,non_latin
@@ -407,8 +418,48 @@ h45394f1a8123,rust,26.09.3,rslib/src/dbcheck.rs,note_card_link
 h19a3e91fc826,rust,26.09.3,rslib/src/dbcheck.rs,note_fields
 h5b5bc3629af2,rust,26.09.3,rslib/src/dbcheck.rs,revlog
 h984772533897,rust,26.09.3,rslib/src/dbcheck.rs,tags
+hd68f57dc3fd2,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_deck_config_inner_uses_usn
+h6c0d5ffc0db0,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_or_update_deck_config_adds_config
+h06c17c5eb2f4,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_or_update_deck_config_fails_with_not_found
+h69f9ba4c6483,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_or_update_deck_config_legacy_adds_config
+hc77e5ddeebb7,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_or_update_deck_config_legacy_updates_config
+hf1fc2f580d06,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_or_update_deck_config_legacy_uses_provided_id
+h05c549f3f6aa,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,add_or_update_deck_config_updates_config
+h29179d9ceae2,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,get_deck_config_returns_created_config
+h1df457b7a669,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,get_deck_config_returns_default_even_if_missing_when_flag_is_set
+h6a74f5728f8c,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,get_deck_config_returns_default_when_flag_is_set
+he9efe2bce55c,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,get_deck_config_returns_none_when_flag_is_unset
+h07c1d1d6c593,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,remove_deck_config_inner_fails_on_default_config
+h2e6e22823ea4,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,remove_deck_config_inner_removes_config
+hbfa3b0173663,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,update_deck_config_inner_ignores_usn_if_identical
+h65b62d476674,rust,main@2f62b5e67807,rslib/src/deckconfig/mod.rs,update_deck_config_inner_uses_usn
 h78189711cf81,rust,26.09.3,rslib/src/deckconfig/schema11.rs,all_reserved_fields_are_removed
 hd2c8c7020dc2,rust,26.09.3,rslib/src/deckconfig/schema11.rs,new_intervals
+h3d8240dabf39,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,add_or_update_deck_config_legacy_adds_config
+h17ecc898d745,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,add_or_update_deck_config_legacy_updates_config
+hfa91e7718197,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,all_deck_config_legacy_returns_all_configs
+h3dc2e6c7647a,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_deck_config_falls_back_to_default_for_unknown_id
+hd709478326d6,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_deck_config_legacy_falls_back_to_default_for_unknown_id
+h54bd0b969d29,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_deck_config_legacy_returns_config
+h351975c45911,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_deck_config_returns_config
+heaf6b0314ef9,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_deck_configs_for_update_returns_requested_deck
+hba00bf856693,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_ignored_before_count_counts_cards_learned_after_date
+h2e8ed638f17b,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_ignored_before_count_includes_all_learned_cards_when_date_is_empty
+hac8e0ee77853,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_ignored_before_count_rejects_invalid_date
+h4939abe921e2,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_retention_workload_includes_existing_cards_matching_search
+hb50a0cec5249,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_retention_workload_rejects_invalid_params
+h385f4aeda2a6,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,get_retention_workload_returns_cost_for_each_retention_from_70_to_99
+h87ef468beabc,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,new_deck_config_legacy_returns_valid_config
+habc378b0ea2b,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,remove_deck_config_removes_config
+h74f60c8aa789,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,update_deck_configs_applies_config_to_children_in_apply_to_children_mode
+h70e1bda7fbd5,rust,main@2f62b5e67807,rslib/src/deckconfig/service.rs,update_deck_configs_saves_configs_from_request
+h0f4f7e722f1e,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,add_deck_config_if_unique_undoable_adds_config
+h774fd17fd8ea,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,add_deck_config_if_unique_undoable_ignores_existing_config
+hc9c179bfb2ef,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,add_deck_config_undoable_adds_config
+h0fa4ffa48585,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,add_deck_config_undoable_gives_unique_id
+hc06112477870,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,remove_deck_config_undoable_removes_config
+hd3586154cc8d,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,restore_deleted_deck_config_restores_config
+h402aaecf9a85,rust,main@2f62b5e67807,rslib/src/deckconfig/undo.rs,update_deck_config_undoable_updates_config
 h788f98b55f1d,rust,26.09.3,rslib/src/deckconfig/update.rs,should_clamp_ignore_revlogs_before_date_to_today
 h27c58d269610,rust,26.09.3,rslib/src/deckconfig/update.rs,should_increase_remaining_learning_steps_if_unpassed_learning_step_added
 h81d3f640e8fd,rust,26.09.3,rslib/src/deckconfig/update.rs,should_increase_remaining_relearning_steps_if_unpassed_relearning_step_added
@@ -619,6 +670,7 @@ h6ce76081385b,rust,26.09.3,rslib/src/notes/service.rs,note_added
 haeb2e195c8b5,rust,26.09.3,rslib/src/notes/service.rs,note_fields_check
 h0e7337c9f130,rust,26.09.3,rslib/src/notes/service.rs,notes_updated
 hab3e195632ce,rust,26.09.3,rslib/src/notes/service.rs,remove_notes
+h862557d9421e,rust,main@2f62b5e67807,rslib/src/notetype/cardgen.rs,deck_for_adding_falls_back
 h919a58a1a82a,rust,26.09.3,rslib/src/notetype/cardgen.rs,new_cards_required_cloze_basic
 h5c2b22e2f617,rust,26.09.3,rslib/src/notetype/cardgen.rs,new_cards_required_cloze_multi
 h1eb30503b690,rust,26.09.3,rslib/src/notetype/cardgen.rs,new_cards_required_normal_basic
@@ -714,6 +766,7 @@ h6139479db902,rust,26.09.3,rslib/src/scheduler/fsrs/params.rs,skip_initial_relea
 hdbe181187e8a,rust,26.09.3,rslib/src/scheduler/fsrs/simulator.rs,request_config_uses_requested_retention
 h40a4438f58cc,rust,26.09.3,rslib/src/scheduler/fsrs/simulator.rs,simulate_uses_dr
 h10961bb95b4d,rust,26.09.3,rslib/src/scheduler/fsrs/simulator.rs,simulate_workload_varies
+h72fe93fb7887,rust,main@2f62b5e67807,rslib/src/scheduler/fsrs/simulator.rs,simulator_does_not_crash_with_review_priority_functions
 h151bd9c1b80b,rust,26.09.3,rslib/src/scheduler/new.rs,last_position
 h8c930cc4ef19,rust,26.09.3,rslib/src/scheduler/new.rs,new_order
 h37681aedbc38,rust,26.09.3,rslib/src/scheduler/new.rs,scheduling_as_new
@@ -889,6 +942,15 @@ he7473958b8cf,rust,26.09.3,rslib/src/stats/graphs/eases.rs,bins
 h05cbe1cb9526,rust,26.09.3,rslib/src/stats/today.rs,today
 h8deea0884574,rust,26.09.3,rslib/src/storage/card/data.rs,compact_floats
 he559261b12d3,rust,26.09.3,rslib/src/storage/card/data.rs,validation
+h51930b326444,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,cards_are_ordered_by_added_and_reverse_added
+hc4e797f560a0,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,cards_are_ordered_by_descending_lapses
+h6efeaad807ac,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,cards_are_ordered_by_interval_ascending_and_descending
+h209248bdfb33,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,due_order_compares_days_and_timestamps_chronologically
+h37999c439a16,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,fsrs_orders_sort_cards_by_retrievability
+h4442659ae131,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,limit_caps_the_number_of_returned_cards
+h802f402a566b,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,oldest_reviewed_cards_come_first
+hfb0061ec0b9b,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,random_order_returns_all_matching_cards
+h94c7daf74c2e,rust,main@2f62b5e67807,rslib/src/storage/card/filtered.rs,retrievability_orders_fall_back_to_random_without_fsrs
 h6c9e358dc5b8,rust,26.09.3,rslib/src/storage/card/mod.rs,add_card
 h589819e41760,rust,26.09.3,rslib/src/storage/card/mod.rs,fix_card_properties_last_review_time
 ha74ff67e3c1f,rust,26.09.3,rslib/src/storage/dbcheck/mod.rs,any_invalid_ids
@@ -896,8 +958,29 @@ h47132fac7656,rust,26.09.3,rslib/src/storage/dbcheck/mod.rs,fix_invalid_card_ids
 h0f974b774542,rust,26.09.3,rslib/src/storage/dbcheck/mod.rs,fix_invalid_note_ids_only_and_update_cards
 hebd3170b0ca5,rust,26.09.3,rslib/src/storage/dbcheck/mod.rs,update_revlog_when_fixing_card_ids
 h945f75ebb7a8,rust,26.09.3,rslib/src/storage/mod.rs,ids_string
+h16db5ee73722,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,add_revlog_entry_reassigns_id_on_collision_when_uniquify
+hc4d781660d05,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,add_revlog_entry_returns_new_id_and_persists_unique_entry
+hf7664c5a108b,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,add_revlog_entry_returns_none_on_collision_without_uniquify
+h1dc4ce816f33,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,get_revlog_entries_for_card_returns_only_matching_entries
+h493cbb0fdf6b,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,revlog_review_kind_from_sql_rejects_invalid_values
+hb30e802d8f2f,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,studied_today_by_deck_counts_only_cards_reviewed_after_day_start
+h5a31d6105048,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,studied_today_by_deck_groups_by_home_deck_and_skips_unrated
+h1586af627542,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,studied_today_by_deck_requires_rating_and_review_kind_or_factor
+hc0fc7c23426d,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,studied_today_counts_reviews_in_window_excluding_manual_and_rescheduled
+he69093b72b82,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,studied_today_returns_zero_for_empty_revlog
+hf613c9b636bd,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,time_of_last_review_ignores_entries_without_a_rating
+h2dc788fb8e1b,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,time_of_last_review_returns_most_recent_qualifying_review
+he9f3ecd2d21f,rust,main@2f62b5e67807,rslib/src/storage/revlog/mod.rs,unknown_review_kind_falls_back_to_default
+heba033e5deec,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,close_at_latest_version_leaves_schema_unchanged
+h26a287aeabf4,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,close_downgrades_stored_schema_version_to_v11
+h294205b39ddd,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,fresh_collection_is_created_at_latest_schema_version
 h4c7fe3f35b39,rust,26.09.3,rslib/src/storage/sqlite.rs,missing_memory_state_falls_back_to_sm2
+h0ee1aefb70dc,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,open_rejects_intermediate_schema_versions_12_and_13
+h4293e426bb44,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,open_rejects_schema_newer_than_maximum
+h0c40b44b59b9,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,open_rejects_schema_older_than_minimum
+h286ef51887e7,rust,main@2f62b5e67807,rslib/src/storage/sqlite.rs,rejected_schema_leaves_version_and_collection_data_unchanged
 h6b2af222819b,rust,26.09.3,rslib/src/storage/upgrades/mod.rs,assert_18_is_latest_schema_version
+hf00ddf9dbca8,rust,main@2f62b5e67807,rslib/src/storage/upgrades/mod.rs,migrated_entities_survive_schema_11_roundtrip
 h4556ee55f37f,rust,26.09.3,rslib/src/storage/upgrades/mod.rs,valid_ease_factor_survives_upgrade_roundtrip
 hacfb5a333b1c,rust,26.09.3,rslib/src/sync/collection/tests.rs,aborting_is_idempotent
 h291349aa0c71,rust,26.09.3,rslib/src/sync/collection/tests.rs,host_key
@@ -910,11 +993,24 @@ hd79863d619d2,rust,26.09.3,rslib/src/sync/collection/tests.rs,sanity_check_shoul
 h18ff6947756c,rust,26.09.3,rslib/src/sync/collection/tests.rs,string_grave_ids_are_handled
 h54c23550e27f,rust,26.09.3,rslib/src/sync/collection/tests.rs,sync_errors_should_prompt_db_check
 hfa9987445e9e,rust,26.09.3,rslib/src/sync/collection/tests.rs,sync_roundtrip
+h850281d2190d,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,check_upload_limit_allows_size_below_limit
+h054820efe6cf,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,check_upload_limit_errors_when_size_equals_limit
+h241c4726e626,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,check_upload_limit_reports_sizes_in_mb_when_over_limit
+h08e20ff5f483,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,full_upload_surfaces_server_rejection_as_server_message
+h46c1ebf32143,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,handle_received_upload_errors_when_collection_is_closed
+he0cb4f886c79,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,handle_received_upload_replaces_collection_with_valid_data
+hae529870cada,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,handle_received_upload_returns_corrupt_message_for_invalid_bytes
+h400e0628f27d,rust,main@2f62b5e67807,rslib/src/sync/collection/upload.rs,upload_response_preserves_legacy_http_body
 h1774219ddefc,rust,26.09.3,rslib/src/sync/http_client/io_monitor.rs,can_fail_before_any_bytes
 h862454dde0dd,rust,26.09.3,rslib/src/sync/http_client/io_monitor.rs,connect_timeout_works
 hf0311a8adc67,rust,26.09.3,rslib/src/sync/http_client/io_monitor.rs,delay_before_reply_fails
 h59143f82a4f9,rust,26.09.3,rslib/src/sync/http_client/io_monitor.rs,fails_when_data_stops_moving
 h32c2b927938a,rust,26.09.3,rslib/src/sync/http_client/io_monitor.rs,http_success
+h7298208250f2,rust,main@2f62b5e67807,rslib/src/sync/login.rs,host_key_request_uses_short_wire_field_names
+h15bc3d0e4efd,rust,main@2f62b5e67807,rslib/src/sync/login.rs,sync_login_maps_forbidden_to_auth_failed
+hbe80a0966cc8,rust,main@2f62b5e67807,rslib/src/sync/login.rs,sync_login_maps_server_error_to_server_error_kind
+h3f6a9ed898b8,rust,main@2f62b5e67807,rslib/src/sync/login.rs,sync_login_reports_network_error_when_connection_is_closed
+h8f638568ddc0,rust,main@2f62b5e67807,rslib/src/sync/login.rs,sync_login_returns_host_key_on_success
 hdaef1892f535,rust,26.09.3,rslib/src/sync/media/changes.rs,required_change
 h5c5b47431921,rust,26.09.3,rslib/src/sync/media/database/client/changetracker.rs,change_tracking
 h7709a37ac92a,rust,26.09.3,rslib/src/sync/media/database/client/mod.rs,database
@@ -965,6 +1061,8 @@ h627109a11e69,rust,26.09.3,rslib/src/text.rs,iri_encoding
 h1865ada81cd2,rust,26.09.3,rslib/src/text.rs,replacing
 h4b8f37d073df,rust,26.09.3,rslib/src/text.rs,stripping
 h9928c48fa7e7,rust,26.09.3,rslib/src/text.rs,truncate
+h22e00b0f1c78,rust,main@2f62b5e67807,rslib/src/typeanswer.rs,case_insensitive_comparison
+hee35c52dd8b3,rust,main@2f62b5e67807,rslib/src/typeanswer.rs,case_insensitive_noncombining_comparison
 heb300a3dbe24,rust,26.09.3,rslib/src/typeanswer.rs,correct_input_is_collapsed
 hf6db24b439e4,rust,26.09.3,rslib/src/typeanswer.rs,correct_input_is_escaped
 he79db754bc77,rust,26.09.3,rslib/src/typeanswer.rs,does_not_panic_with_certain_unicode
@@ -1028,8 +1126,11 @@ he1f7c4ce9bf3,typescript,26.09.3,ts/reviewer/mathjax.test.ts,doesnt reload once 
 h0b343b3380e0,typescript,26.09.3,ts/reviewer/mathjax.test.ts,"loads mathjax.js first, followed by actual mathjax logic"
 h94ade20fdbd8,typescript,26.09.3,ts/reviewer/mathjax.test.ts,preloads if needed by answer while on question
 h40284ca51ce0,typescript,26.09.3,ts/routes/card-info/lib.test.ts,hides ease when desiredRetention is provided
+h5889068b7624,typescript,main@2f62b5e67807,ts/routes/card-info/lib.test.ts,hides ease when fsrs is enabled
 h0f55ed16e296,typescript,26.09.3,ts/routes/card-info/lib.test.ts,shows ease when desiredRetention is undefined
+h5ba60fc7cbbf,typescript,main@2f62b5e67807,ts/routes/card-info/lib.test.ts,shows ease when fsrs is disabled
 hf27c621cefe8,typescript,26.09.3,ts/routes/card-info/lib.test.ts,"with memoryState and desiredRetention, shows FSRS rows and hides ease"
+ha75aa66eb13f,typescript,main@2f62b5e67807,ts/routes/card-info/lib.test.ts,"with memoryState and fsrs enabled, shows FSRS rows and hides ease"
 h33a369b7b2d4,typescript,26.09.3,ts/routes/card-info/lib.test.ts,"with memoryState and undefined desiredRetention, shows FSRS rows and hides ease"
 hcd2cb9d07eec,typescript,26.09.3,ts/routes/change-notetype/lib.test.ts,mapping
 hfe06705a799b,typescript,26.09.3,ts/routes/change-notetype/lib.test.ts,proto conversion

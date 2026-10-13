@@ -411,7 +411,7 @@ mg_oracle__bump() {
     mg_message "oracle bump to $version: $failed of $total scenarios could not be recorded, $orphans goldens have no scenario, $changed goldens changed; see bump-report.md"
     mg_status fail
   else
-    mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock, staging/conformance/oracle.json and staging/goldens in one change"
+    mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock, staging/conformance/oracle.json and staging/goldens in one change, with tools/mg harvest-inventory at the new tag (R1882; tools/mg harvest-report fails until then)"
     mg_status pass
   fi
 }

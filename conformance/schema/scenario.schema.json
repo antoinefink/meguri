@@ -336,7 +336,9 @@
             { "required": ["cards", "start"], "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "start": { "type": "integer" } } }
           ]
         },
-        "update_preset": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"] }] },
+        "update_preset": {
+          "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"], "properties": { "name": { "type": "string" } } }]
+        },
         "build_filtered": {
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
@@ -362,6 +364,10 @@
             { "$ref": "#/$defs/draft_args" },
             { "properties": { "kind": { "enum": ["normal", "full_upload", "full_download"] }, "client": { "type": "string" } } }
           ]
+        },
+        "handoff": {
+          "description": "Live scenarios (dsl.md D9.2): the side that runs the next steps; handoffs alternate.",
+          "enum": ["meguri", "oracle"]
         }
       }
     }

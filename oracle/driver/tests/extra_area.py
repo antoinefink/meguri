@@ -8,6 +8,7 @@ a misbehaving library would; the protocol stream must not see it.
 import os
 import sys
 
+from driver.errors import Rejected
 from driver.registry import observation, op
 
 
@@ -28,3 +29,11 @@ def echo(session, args):
 def unjsonable(session, args):
     """A result JSON cannot carry, as a buggy area module might return."""
     return {"set": {1, 2}, "bytes": b"blob", "nan": float("nan"), "surrogate": "\ud800"}[args]
+
+
+@op("claim", rejects=("taken",))
+def claim(session, args):
+    """A refusal the op declares (taken) and one it does not (other)."""
+    if args in ("taken", "other"):
+        raise Rejected(args)
+    return args

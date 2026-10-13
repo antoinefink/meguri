@@ -34,6 +34,17 @@ class DriverError(Exception):
         return {"kind": self.kind, **self.fields}
 
 
+class Rejected(Exception):
+    """Anki refused an op as part of its behavior (dsl.md D7.3): the step
+    records {op: {"error": kind}} and the run goes on. Raise it only when the
+    op changed nothing (Anki rolls a refused backend op back), and only with a
+    kind the op declared (`registry.op(name, rejects=...)`)."""
+
+    def __init__(self, kind: str) -> None:
+        super().__init__(kind)
+        self.kind = kind
+
+
 def invalid(detail: str, **fields: Any) -> DriverError:
     """The scenario does not follow the format (a driver-authored detail)."""
     return DriverError("invalid_scenario", detail=detail, **fields)

@@ -1,0 +1,19 @@
+# A live chain (specs/conformance/dsl.md D9.2): the oracle sets up and answers
+# a card, Meguri moves the clock on its copy of the collection, and the oracle
+# reads back what Meguri handed over. Pending until Meguri can join a chain.
+id: smoke/handoff-round-trip
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [moon, luna]}]
+steps:
+  - answer: {card: "#c1", rating: good}
+  - handoff: meguri
+  - advance: 1d
+  - handoff: oracle
+  - observe: ["card(#c1)", "revlog(#c1)", timing]

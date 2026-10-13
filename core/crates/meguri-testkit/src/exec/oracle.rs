@@ -1,7 +1,8 @@
 //! The oracle executor: a pool of long-lived oracle workers keyed by time zone
 //! (one zone per worker, R1871), speaking JSON lines over stdio
 //! (conformance/schema/protocol.json). `tools/mg conformance --live` passes a
-//! worker command that starts the oracle image through `docker compose run -i`.
+//! worker command that starts the oracle image through `docker compose run -i`,
+//! with the handoff directory of live chains mounted.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -9,8 +10,10 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 
 use serde_json::{Map, Value, json};
 
-use super::{ExecError, Executor, Needs};
+use super::{ExecError, Executor, Handoff, Needs, SegmentExecutor, SegmentOutput, SegmentRequest};
+use crate::observe;
 use crate::scenario::LoadedScenario;
+use crate::suite::OraclePin;
 
 /// A worker's hello response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,7 +93,7 @@ impl Worker {
                 .unwrap_or_default();
             return Err(died(format!("the worker exited {status}").trim_end().to_owned()));
         }
-        serde_json::from_str(&response).map_err(|_| died(format!("non-JSON line: {:.200}", response.trim_end())))
+        observe::parse_json(&response).map_err(|_| died(format!("non-JSON line: {:.200}", response.trim_end())))
     }
 }
 
@@ -113,6 +116,7 @@ struct Pool {
 pub struct OracleExecutor {
     command: Vec<String>,
     max_workers: usize,
+    pin: Option<OraclePin>,
     pool: Mutex<Pool>,
     freed: Condvar,
     hello: Mutex<Option<Hello>>,
@@ -125,13 +129,22 @@ impl OracleExecutor {
         OracleExecutor {
             command,
             max_workers: max_workers.max(1),
+            pin: None,
             pool: Mutex::new(Pool::default()),
             freed: Condvar::new(),
             hello: Mutex::new(None),
         }
     }
 
-    /// The first hello a worker answered.
+    /// Refuses workers of another oracle than the pin
+    /// (`conformance/oracle.json`): a run against them would compare goldens
+    /// with a different Anki.
+    pub fn expecting(mut self, pin: OraclePin) -> OracleExecutor {
+        self.pin = Some(pin);
+        self
+    }
+
+    /// The first hello a worker answered; every later worker matched it.
     pub fn hello(&self) -> Option<Hello> {
         self.hello.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -165,17 +178,53 @@ impl OracleExecutor {
         }
     }
 
+    /// Starts a worker and checks its hello against the pin and the first
+    /// worker's: one run never mixes oracles.
     fn start(&self, tz: &str) -> Result<Worker, ExecError> {
         let mut worker = Worker::start(&self.command, tz)?;
         let response = worker.request(&json!({"cmd": "hello"}))?;
         let hello = Hello::from_response(&response)
             .filter(|_| response.get("ok") == Some(&Value::Bool(true)))
             .ok_or_else(|| ExecError::new("worker_start", format!("no hello from the worker: {response}")))?;
-        self.hello
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get_or_insert(hello);
-        Ok(worker)
+        if let Some(pin) = &self.pin
+            && (hello.anki_version != pin.anki_version || hello.lock_sha256 != pin.lock_sha256)
+        {
+            return Err(ExecError::new(
+                "oracle_mismatch",
+                format!(
+                    "the {tz} worker runs anki {} with lock {}, the pin is anki {} with lock {} (conformance/oracle.json)",
+                    hello.anki_version,
+                    short(&hello.lock_sha256),
+                    pin.anki_version,
+                    short(&pin.lock_sha256)
+                ),
+            ));
+        }
+        let mut first = self.hello.lock().unwrap_or_else(|e| e.into_inner());
+        match &*first {
+            Some(seen)
+                if (&seen.anki_version, &seen.lock_sha256, &seen.driver_sha256)
+                    != (&hello.anki_version, &hello.lock_sha256, &hello.driver_sha256) =>
+            {
+                Err(ExecError::new(
+                    "oracle_mismatch",
+                    format!(
+                        "the {tz} worker runs anki {} (lock {}, driver {}), an earlier worker anki {} (lock {}, driver {})",
+                        hello.anki_version,
+                        short(&hello.lock_sha256),
+                        short(&hello.driver_sha256),
+                        seen.anki_version,
+                        short(&seen.lock_sha256),
+                        short(&seen.driver_sha256)
+                    ),
+                ))
+            }
+            Some(_) => Ok(worker),
+            None => {
+                *first = Some(hello);
+                Ok(worker)
+            }
+        }
     }
 
     fn checkin(&self, worker: Worker) {
@@ -189,6 +238,34 @@ impl OracleExecutor {
         drop(pool);
         self.freed.notify_all();
     }
+
+    /// One `run` request on a worker of the scenario's zone; the response's
+    /// `observations.steps` and the whole response.
+    fn run_request(&self, loaded: &LoadedScenario, request: Value) -> Result<(Vec<Value>, Value), ExecError> {
+        let mut worker = self.checkout(&loaded.scenario.clock.tz)?;
+        let response = match worker.request(&request) {
+            Ok(response) => response,
+            Err(e) => {
+                drop(worker);
+                self.release_slot();
+                return Err(e);
+            }
+        };
+        self.checkin(worker);
+        if response.get("ok") != Some(&Value::Bool(true)) {
+            return Err(protocol_error(response.get("error").and_then(Value::as_object)));
+        }
+        let steps = response
+            .pointer("/observations/steps")
+            .and_then(Value::as_array)
+            .cloned()
+            .ok_or_else(|| ExecError::new("protocol_error", "a run response without observations"))?;
+        Ok((steps, response))
+    }
+}
+
+fn short(hash: &str) -> &str {
+    hash.get(..12).unwrap_or(hash)
 }
 
 impl Executor for OracleExecutor {
@@ -203,24 +280,40 @@ impl Executor for OracleExecutor {
     }
 
     fn run(&self, loaded: &LoadedScenario) -> Result<Value, ExecError> {
-        let mut worker = self.checkout(&loaded.scenario.clock.tz)?;
         let request = json!({"cmd": "run", "id": loaded.scenario.id, "scenario": loaded.value});
-        let response = match worker.request(&request) {
-            Ok(response) => response,
-            Err(e) => {
-                drop(worker);
-                self.release_slot();
-                return Err(e);
-            }
-        };
-        self.checkin(worker);
-        if response.get("ok") == Some(&Value::Bool(true)) {
-            return response
-                .get("observations")
-                .cloned()
-                .ok_or_else(|| ExecError::new("protocol_error", "a run response without observations"));
+        let (steps, _) = self.run_request(loaded, request)?;
+        Ok(json!({"steps": steps}))
+    }
+}
+
+impl SegmentExecutor for OracleExecutor {
+    /// A `run` request for the segment: `resume`, `steps` and `handoff`
+    /// (protocol.json); the worker reads and writes the handoff directory at
+    /// its own mount.
+    fn segment(&self, loaded: &LoadedScenario, request: &SegmentRequest) -> Result<SegmentOutput, ExecError> {
+        let mut body = json!({
+            "cmd": "run",
+            "id": loaded.scenario.id,
+            "scenario": loaded.value,
+            "steps": [request.steps.start, request.steps.end],
+        });
+        if let Some(resume) = &request.resume {
+            body["resume"] =
+                serde_json::to_value(resume).map_err(|e| ExecError::new("internal_error", e.to_string()))?;
         }
-        Err(protocol_error(response.get("error").and_then(Value::as_object)))
+        if let Some(dir) = &request.hand_off_to {
+            body["handoff"] = json!(dir);
+        }
+        let (steps, response) = self.run_request(loaded, body)?;
+        let handoff = match (&request.hand_off_to, response.get("state")) {
+            (None, _) => None,
+            (Some(_), Some(state)) => Some(
+                serde_json::from_value::<Handoff>(state.clone())
+                    .map_err(|e| ExecError::new("protocol_error", format!("handoff state: {e}")))?,
+            ),
+            (Some(_), None) => return Err(ExecError::new("protocol_error", "a handoff without a state")),
+        };
+        Ok(SegmentOutput { steps, handoff })
     }
 }
 

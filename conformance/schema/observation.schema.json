@@ -86,6 +86,13 @@
         }
       }
     },
+    "rejection": {
+      "description": "An op Anki refused (dsl.md D7.3). An op whose D7.2 row lists rejection kinds takes anyOf [its output, this with error restricted to those kinds]; the others record none.",
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": { "error": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" } }
+    },
     "card_row": {
       "type": "object",
       "required": ["id", "nid", "did", "ord", "mod", "usn", "type", "queue", "due", "ivl", "factor", "reps", "lapses", "left", "odue", "odid", "flags", "data"],

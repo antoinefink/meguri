@@ -10,7 +10,7 @@ What each observation kind records, how values are written, and how the runner c
 ## O1. Observations of a run
 
 - A run's observations are `{"steps": [<output of step 0>, <output of step 1>, ...]}`, one output per scenario step, so `/steps/<i>/...` points into step `i`.
-- An op step's output is `{}` or `{<op>: <op output>}` (`dsl.md` D7.2). An observe step's output is `{<kind>: <value>, ...}` with one member per requested kind.
+- An op step's output is `{}`, `{<op>: <op output>}` (`dsl.md` D7.2) or a rejection `{<op>: {"error": <kind>}}` (`dsl.md` D7.3). An observe step's output is `{<kind>: <value>, ...}` with one member per requested kind. A `handoff` step's output is `{}`.
 - Values are plain JSON keyed by logical ids (`#nN`, `#cN`). A real id appears only in the `ids` kind, or where a value is a real id by definition (revlog row ids are review instants, fuzz-table card ids are inputs).
 - No localized text is ever an observation (R1887): errors and results are kinds, counts and enums. Driver-authored English (`detail` of a protocol error) is never compared.
 
@@ -70,7 +70,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 The runner compares the golden's observations (expected) with the executor's (actual) after applying deviation transforms to expected (`dsl.md` D13) and set comparison to both (`compare.set`).
 
 - Objects compare member by member: a member on one side only is a difference, shown as `<absent>` on the other side.
-- Arrays compare item by item; extra items on either side are differences. Under `compare.set` the two arrays are first sorted by the JCS text of their items.
+- Arrays compare item by item; extra items on either side are differences. Under `compare.set` the two arrays are first sorted by the JCS text of their items, ties broken by a text that keeps the number kind (JCS writes 1 and 1.0 alike), so two equal multisets always line up.
 - Strings, booleans, null and HTML compare exactly. Integers compare exactly. Order is significant everywhere except under `compare.set`.
 - A number compares exactly, kind included (1 and 1.0 differ), unless a tolerance below applies.
 - Tolerances (R1886), relative, `|actual − expected| ≤ tol × max(|expected|, |actual|)`, and only when both values are written with a fraction or exponent (an integer on either side compares exactly):

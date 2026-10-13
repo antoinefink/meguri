@@ -11,7 +11,7 @@ use jiff::civil::DateTime;
 use jiff::tz::{AmbiguousOffset, TimeZone};
 use meguri_model::clock::{Clock, UtcOffset};
 
-use super::{ExecError, Registry, Session};
+use super::{ExecError, OpResult, Registry, Session};
 use crate::scenario::{DateTimeText, Duration, FormatError, Step};
 
 #[derive(Debug)]
@@ -41,6 +41,11 @@ impl ScenarioClock {
     /// Moves forward by whole seconds; a day is 86,400 s.
     pub fn advance(&self, by: Duration) {
         self.now_secs.fetch_add(by.seconds(), Ordering::SeqCst);
+    }
+
+    /// Jumps to an instant in epoch seconds (a handoff's clock).
+    pub fn set_secs(&self, secs: i64) {
+        self.now_secs.store(secs, Ordering::SeqCst);
     }
 
     /// Jumps to a date-time: wall time in the zone, or with an offset.
@@ -89,19 +94,19 @@ pub(super) fn register(registry: &mut Registry) {
     registry.op("set_clock", set_clock);
 }
 
-fn advance(session: &mut Session<'_>, step: &Step) -> Result<Option<serde_json::Value>, ExecError> {
+fn advance(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     if let Step::Advance(by) = step {
         session.clock.advance(*by);
     }
-    Ok(None)
+    Ok(OpResult::Done)
 }
 
-fn set_clock(session: &mut Session<'_>, step: &Step) -> Result<Option<serde_json::Value>, ExecError> {
+fn set_clock(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     if let Step::SetClock(at) = step {
         session
             .clock
             .set(at.as_str())
             .map_err(|e| ExecError::new("invalid_scenario", e.to_string()))?;
     }
-    Ok(None)
+    Ok(OpResult::Done)
 }

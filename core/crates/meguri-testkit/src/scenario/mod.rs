@@ -2,6 +2,7 @@
 //! hash and the typed model (specs/conformance/dsl.md D1-D7).
 
 mod model;
+mod validate;
 mod yaml;
 
 use std::fmt;
@@ -11,6 +12,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 pub use model::*;
+pub use validate::draft_requirements;
 
 pub use crate::observe::jcs;
 

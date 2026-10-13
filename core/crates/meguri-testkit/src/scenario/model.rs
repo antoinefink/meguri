@@ -276,11 +276,13 @@ pub enum Step {
     CheckDb(DraftArgs),
     DbExec(DraftArgs),
     Sync(DraftArgs),
+    /// Live scenarios only (D9): the collection moves to this side.
+    Handoff(Side),
 }
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 19] = [
+    pub const NAMES: [&'static str; 20] = [
         "advance",
         "set_clock",
         "add_note",
@@ -300,6 +302,7 @@ impl Step {
         "check_db",
         "db_exec",
         "sync",
+        "handoff",
     ];
 
     /// The op name as written in scenarios.
@@ -324,8 +327,65 @@ impl Step {
             Step::CheckDb(_) => "check_db",
             Step::DbExec(_) => "db_exec",
             Step::Sync(_) => "sync",
+            Step::Handoff(_) => "handoff",
         }
     }
+
+    /// The arguments of a draft op.
+    pub fn draft_args(&self) -> Option<&DraftArgs> {
+        match self {
+            Step::EditNote(a)
+            | Step::DeleteNotes(a)
+            | Step::Bury(a)
+            | Step::Suspend(a)
+            | Step::Forget(a)
+            | Step::SetDue(a)
+            | Step::Reposition(a)
+            | Step::UpdatePreset(a)
+            | Step::BuildFiltered(a)
+            | Step::Import(a)
+            | Step::Export(a)
+            | Step::CheckDb(a)
+            | Step::DbExec(a)
+            | Step::Sync(a) => Some(a),
+            _ => None,
+        }
+    }
+}
+
+/// Who runs a part of a live scenario (D9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    Meguri,
+    Oracle,
+}
+
+impl Side {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Side::Meguri => "meguri",
+            Side::Oracle => "oracle",
+        }
+    }
+
+    pub fn other(self) -> Side {
+        match self {
+            Side::Meguri => Side::Oracle,
+            Side::Oracle => Side::Meguri,
+        }
+    }
+}
+
+/// One part of a live scenario: the steps one side runs, from setup (the first
+/// segment) or from the previous handoff, up to the next handoff step (D9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Segment {
+    pub side: Side,
+    /// Step indices this side runs.
+    pub steps: std::ops::Range<usize>,
+    /// The handoff step that ends the segment; `None` for the last one.
+    pub handoff: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -347,7 +407,7 @@ pub struct AnswerSpec {
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes
-/// (D7.2). Required keys are checked here so a typo fails early.
+/// (D7.2). `Scenario::from_value` checks the keys the schema requires.
 #[derive(Debug, Clone)]
 pub struct DraftArgs(pub Map<String, Value>);
 
@@ -557,7 +617,7 @@ pub enum ObservationKind {
 
 /// How a kind takes arguments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArgShape {
+pub(super) enum ArgShape {
     /// No arguments.
     None,
     /// Optional note or card references.
@@ -611,7 +671,7 @@ impl ObservationKind {
         ObservationKind::ALL.into_iter().find(|k| k.name() == name)
     }
 
-    fn shape(self) -> ArgShape {
+    pub(super) fn shape(self) -> ArgShape {
         match self {
             ObservationKind::Ids => ArgShape::AnyRefs,
             ObservationKind::Timing | ObservationKind::DeckTree | ObservationKind::Digest => ArgShape::None,
@@ -678,8 +738,16 @@ impl ObservationRequest {
         };
         let kind = ObservationKind::from_name(&name).ok_or_else(|| unknown_kind(&name))?;
         let args = match value {
-            Value::Null => ObservationArgs::None,
+            // Only kinds without required arguments take null (the schema).
+            Value::Null if matches!(kind.shape(), ArgShape::None | ArgShape::OptionalMapping) => ObservationArgs::None,
             Value::Object(map) => ObservationArgs::Mapping(map),
+            // `{ids: []}` is every id, like `ids`; a card list is never empty.
+            Value::Array(items) if items.is_empty() && kind.shape() == ArgShape::AnyRefs => ObservationArgs::None,
+            Value::Array(items) if items.is_empty() => {
+                return Err(FormatError::new(format!(
+                    "observation {name} needs at least one reference"
+                )));
+            }
             Value::Array(items) => ObservationArgs::Refs(
                 items
                     .into_iter()
@@ -708,16 +776,8 @@ impl ObservationRequest {
                 "observation {name} does not take these arguments"
             )));
         }
-        if let (ObservationKind::Search, ObservationArgs::Mapping(map)) = (kind, &args)
-            && !map.get("query").is_some_and(Value::is_string)
-        {
-            return Err(FormatError::new("search needs a query string"));
-        }
-        if let (ObservationKind::FuzzTable, ObservationArgs::Mapping(map)) = (kind, &args) {
-            let keys: BTreeSet<&str> = map.keys().map(String::as_str).collect();
-            if keys != BTreeSet::from(["card", "intervals", "pairs"]) {
-                return Err(FormatError::new("fuzz_table takes {card, pairs, intervals}"));
-            }
+        if let ObservationArgs::Mapping(map) = &args {
+            super::validate::observation_mapping(kind, map)?;
         }
         Ok(ObservationRequest { kind, args })
     }
@@ -767,27 +827,89 @@ impl Needs {
 }
 
 impl Scenario {
-    /// Reads the typed model from a parsed scenario value.
+    /// Reads the typed model from a parsed scenario value and checks what
+    /// the schema requires beyond the types (scenario.schema.json).
     pub fn from_value(value: &Value) -> Result<Scenario, FormatError> {
-        Scenario::deserialize(value).map_err(|e| FormatError::new(e.to_string()))
+        let scenario = Scenario::deserialize(value).map_err(|e| FormatError::new(e.to_string()))?;
+        super::validate::scenario(&scenario)?;
+        Ok(scenario)
     }
 
     /// The setup sections, ops and observation kinds the scenario uses.
     pub fn needs(&self) -> Needs {
         let mut needs = Needs::default();
         needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
-        for step in &self.steps {
-            match step {
-                Step::Observe(requests) => {
-                    needs
-                        .observations
-                        .extend(requests.iter().map(|r| r.kind.name().to_owned()));
-                }
-                other => {
-                    needs.ops.insert(other.name().to_owned());
-                }
+        add_step_needs(&mut needs, &self.steps);
+        needs
+    }
+
+    /// A live scenario has handoff steps (D9).
+    pub fn is_live(&self) -> bool {
+        self.steps.iter().any(|s| matches!(s, Step::Handoff(_)))
+    }
+
+    /// The segments of the scenario, split at its handoff steps; one segment
+    /// on the oracle when it has none. Handoffs alternate (checked on load),
+    /// so the first segment runs on the side the first handoff leaves.
+    pub fn segments(&self) -> Vec<Segment> {
+        let first = self
+            .steps
+            .iter()
+            .find_map(|s| match s {
+                Step::Handoff(to) => Some(to.other()),
+                _ => None,
+            })
+            .unwrap_or(Side::Oracle);
+        let mut segments = Vec::new();
+        let (mut side, mut start) = (first, 0);
+        for (i, step) in self.steps.iter().enumerate() {
+            if let Step::Handoff(to) = step {
+                segments.push(Segment {
+                    side,
+                    steps: start..i,
+                    handoff: Some(i),
+                });
+                side = *to;
+                start = i + 1;
             }
         }
+        segments.push(Segment {
+            side,
+            steps: start..self.steps.len(),
+            handoff: None,
+        });
+        segments
+    }
+
+    /// What one side needs to run its segments of a live scenario: the setup
+    /// sections when it runs the first segment, the ops and observations of
+    /// its segments, and `handoff`.
+    pub fn needs_on(&self, side: Side) -> Needs {
+        let mut needs = Needs::default();
+        for (i, segment) in self.segments().iter().enumerate().filter(|(_, s)| s.side == side) {
+            if i == 0 {
+                needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
+            }
+            add_step_needs(&mut needs, &self.steps[segment.steps.clone()]);
+        }
+        if self.is_live() {
+            needs.ops.insert("handoff".to_owned());
+        }
         needs
+    }
+}
+
+fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
+    for step in steps {
+        match step {
+            Step::Observe(requests) => {
+                needs
+                    .observations
+                    .extend(requests.iter().map(|r| r.kind.name().to_owned()));
+            }
+            other => {
+                needs.ops.insert(other.name().to_owned());
+            }
+        }
     }
 }

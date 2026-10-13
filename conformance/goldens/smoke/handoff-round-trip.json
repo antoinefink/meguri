@@ -1,0 +1,74 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894698000,
+              "pos": 1,
+              "s": 2.3065
+            },
+            "did": "Words",
+            "due": 1894698696,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894698000,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 224,
+              "id": 1894698000000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 0,
+              "usn": -1
+            }
+          ]
+        },
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894849200,
+          "now": 1894784400,
+          "utc_offset_secs": 3600
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "bc73d957035514ea998733480681c6b7af51c6b2028d5322bf1444dbd0d8307c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "smoke/handoff-round-trip",
+  "scenario_sha256": "cbb5442671d5938e023a141e1a548620b1a9fc1e9ec3d38faac8ca2f01b07c59",
+  "tz": "Europe/Paris"
+}

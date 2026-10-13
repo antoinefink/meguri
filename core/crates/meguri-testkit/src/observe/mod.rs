@@ -1,9 +1,54 @@
 //! Observation values: canonical JSON text, f32 formatting and tolerances
 //! (specs/conformance/observations.md O6, O7; dsl.md D3, D11).
 
-use serde_json::{Number, Value};
+use std::collections::BTreeMap;
+
+use serde_json::value::RawValue;
+use serde_json::{Map, Number, Value};
 
 use crate::scenario::FormatError;
+
+/// Parses JSON text with every fractional number read as the nearest double,
+/// as Python's `json` and std's parser do (scenario files, goldens, oracle
+/// responses). serde_json without its `float_roundtrip` feature is off by one
+/// ULP for some 17-digit numbers, which would change scenario hashes and
+/// fail exact f64 comparisons.
+pub fn parse_json(text: &str) -> Result<Value, serde_json::Error> {
+    let raw: &RawValue = serde_json::from_str(text)?;
+    exact(raw)
+}
+
+fn exact(raw: &RawValue) -> Result<Value, serde_json::Error> {
+    let text = raw.get();
+    match text.as_bytes().first() {
+        Some(b'{') => {
+            let members: BTreeMap<String, &RawValue> = serde_json::from_str(text)?;
+            members
+                .into_iter()
+                .map(|(key, value)| Ok((key, exact(value)?)))
+                .collect::<Result<Map<String, Value>, serde_json::Error>>()
+                .map(Value::Object)
+        }
+        Some(b'[') => {
+            let items: Vec<&RawValue> = serde_json::from_str(text)?;
+            items.into_iter().map(exact).collect::<Result<_, _>>().map(Value::Array)
+        }
+        Some(b'-' | b'0'..=b'9') => {
+            let value: Value = serde_json::from_str(text)?;
+            match &value {
+                // Integers are exact already; re-read fractions and exponents.
+                Value::Number(n) if n.is_f64() => text
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(Number::from_f64)
+                    .map(Value::Number)
+                    .ok_or_else(|| serde::de::Error::custom(format!("{text} is not a finite number"))),
+                _ => Ok(value),
+            }
+        }
+        _ => serde_json::from_str(text),
+    }
+}
 
 /// RFC 8785 (JCS) text of a value (dsl.md D3): sorted keys by UTF-16 code
 /// units, no whitespace, ECMAScript number text.

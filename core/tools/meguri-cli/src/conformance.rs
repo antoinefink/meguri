@@ -4,23 +4,28 @@
 
 use std::path::{Path, PathBuf};
 
+use std::collections::BTreeMap;
+
 use meguri_testkit::catalog::{self, Catalog};
 use meguri_testkit::exec::{Executor, MeguriExecutor, OracleExecutor};
 use meguri_testkit::observe;
 use meguri_testkit::scenario::{self, ObservationKind, Setup, Step};
-use meguri_testkit::suite::{GoldensCheck, Status, Suite};
-use serde_json::json;
+use meguri_testkit::suite::{GoldensCheck, LiveRun, Status, Suite};
+use serde_json::{Value, json};
 
 const USAGE: &str = "usage: meguri-cli conformance <command> [options]
 
-  run [--live] [--lane NAME] [--report FILE] [filter...]
+  run [--live] [--lane NAME] [--report FILE] [--handoff-dir DIR] [filter...]
         T0: every selected scenario on Meguri's executor against its golden.
-        --live replays them on oracle workers instead (drift check).
+        --live is T1: oracle workers replay every selected scenario against its
+        golden, and live scenarios run as Meguri/oracle chains through the
+        handoff directory (the workers must mount it).
   exec [--oracle] <scenario file>       print a run's observations (golden layout)
   diff [--live] <scenario file>         Meguri's run against the golden (or the live oracle)
   capabilities                          what Meguri's executor supports, and the language
   goldens-check [--base DIR] [--oracle-lock-sha256 HEX] [--report FILE]
-  harvest-report [--catalog FILE] [--report FILE] [--markdown FILE]
+  harvest-report [--catalog FILE] [--live-report FILE] [--report FILE] [--markdown FILE]
+        --live-report: a run --live report whose statuses replace `live`
   to-json <file>...                     parsed YAML or JSON, one JSON line per file
 
 common options:
@@ -30,6 +35,9 @@ common options:
   --jobs N            oracle workers at once (default 12)
 
 exit status: 0 pass, 1 failures, 2 usage or setup errors";
+
+/// Changed values goldens-check prints per area and kind; the report has all.
+const SHOWN_CHANGES: usize = 20;
 
 struct Options {
     conformance: Option<PathBuf>,
@@ -41,6 +49,8 @@ struct Options {
     markdown: Option<PathBuf>,
     base: Option<PathBuf>,
     catalog: Option<PathBuf>,
+    live_report: Option<PathBuf>,
+    handoff_dir: Option<PathBuf>,
     lock: Option<String>,
     rest: Vec<String>,
 }
@@ -56,6 +66,8 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         markdown: None,
         base: None,
         catalog: None,
+        live_report: None,
+        handoff_dir: None,
         lock: None,
         rest: Vec::new(),
     };
@@ -72,6 +84,8 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             "--markdown" => o.markdown = Some(value(arg)?.into()),
             "--base" => o.base = Some(value(arg)?.into()),
             "--catalog" => o.catalog = Some(value(arg)?.into()),
+            "--live-report" => o.live_report = Some(value(arg)?.into()),
+            "--handoff-dir" => o.handoff_dir = Some(value(arg)?.into()),
             "--oracle-lock-sha256" => o.lock = Some(value(arg)?),
             "--" => o.rest.extend(it.by_ref().cloned()),
             flag if flag.starts_with("--") => return Err(format!("unknown option {flag}")),
@@ -156,12 +170,18 @@ fn run(options: &Options) -> Result<i32, String> {
         .lane
         .clone()
         .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
+    let meguri = MeguriExecutor::new();
     let (report, hello) = if options.live {
-        let executor = oracle(options)?;
-        let report = suite.run(&options.rest, &executor, &lane);
-        (report, executor.hello())
+        let oracle = oracle(options)?.expecting(suite.pin.clone());
+        let live = LiveRun {
+            oracle: &oracle,
+            meguri: &meguri,
+            handoff_root: options.handoff_dir.as_deref(),
+        };
+        let report = suite.run_live(&options.rest, &live, &lane);
+        (report, oracle.hello())
     } else {
-        (suite.run(&options.rest, &MeguriExecutor::new(), &lane), None)
+        (suite.run(&options.rest, &meguri, &lane), None)
     };
     eprint!("{}", report.render_text());
     if let Some(path) = &options.report {
@@ -234,7 +254,10 @@ fn diff(options: &Options) -> Result<i32, String> {
         println!("{}: pending (needs {})", loaded.scenario.id, missing.summary());
         return Ok(1);
     }
-    let expected = oracle(options)?.run(&loaded).map_err(|e| format!("oracle: {e}"))?;
+    let expected = oracle(options)?
+        .expecting(suite.pin.clone())
+        .run(&loaded)
+        .map_err(|e| format!("oracle: {e}"))?;
     let actual = meguri.run(&loaded).map_err(|e| format!("meguri: {e}"))?;
     let compare = meguri_testkit::diff::CompareOptions {
         set: &loaded.scenario.compare.set,
@@ -290,8 +313,23 @@ fn goldens_check(options: &Options) -> Result<i32, String> {
     }
     if !fresh.changed.is_empty() {
         eprintln!("changed golden values since the base, by area and observation kind:");
-        for c in &fresh.changed {
-            eprintln!("  {} {}: {}", c.area, c.kind, c.count);
+        for group in &fresh.changed {
+            eprintln!("  {} {}: {}", group.area, group.kind, group.values.len());
+            for v in group.values.iter().take(SHOWN_CHANGES) {
+                eprintln!(
+                    "    {} {}: {} -> {}",
+                    v.golden,
+                    v.pointer,
+                    meguri_testkit::diff::shown(&v.before),
+                    meguri_testkit::diff::shown(&v.after)
+                );
+            }
+            if group.values.len() > SHOWN_CHANGES {
+                eprintln!(
+                    "    (+{} more; all are in the report)",
+                    group.values.len() - SHOWN_CHANGES
+                );
+            }
         }
     }
     eprintln!(
@@ -310,7 +348,17 @@ fn goldens_check(options: &Options) -> Result<i32, String> {
             "problems": fresh.problems.iter().map(|p| json!({
                 "kind": p.kind, "scenario": p.scenario, "message": p.message, "repro": p.repro,
             })).collect::<Vec<_>>(),
-            "changed": fresh.changed.iter().map(|c| json!({"area": c.area, "kind": c.kind, "count": c.count})).collect::<Vec<_>>(),
+            "changed": fresh.changed.iter().map(|c| json!({
+                "area": c.area,
+                "kind": c.kind,
+                "count": c.values.len(),
+                "values": c.values.iter().map(|v| json!({
+                    "golden": v.golden,
+                    "pointer": v.pointer,
+                    "before": meguri_testkit::diff::shown(&v.before),
+                    "after": meguri_testkit::diff::shown(&v.after),
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
             "changed_goldens": fresh.changed_goldens,
             "added_goldens": fresh.added_goldens,
             "removed_goldens": fresh.removed_goldens,
@@ -330,7 +378,11 @@ fn harvest_report(options: &Options) -> Result<i32, String> {
         .clone()
         .unwrap_or_else(|| suite.root().join("catalog/harvest.csv"));
     let catalog = Catalog::read(&catalog_path).map_err(|e| format!("{}: {e}", catalog_path.display()))?;
-    let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new());
+    let live = match &options.live_report {
+        Some(path) => live_statuses(path)?,
+        None => BTreeMap::new(),
+    };
+    let report = catalog::harvest_report(&catalog, &suite, &MeguriExecutor::new(), &live);
     for p in &report.problems {
         eprintln!("problem: {p}");
     }
@@ -351,6 +403,27 @@ fn harvest_report(options: &Options) -> Result<i32, String> {
         write_file(path, &report.render_markdown())?;
     }
     Ok(i32::from(!report.problems.is_empty()))
+}
+
+/// The statuses of a `run --live` report (T1), by scenario id.
+fn live_statuses(path: &Path) -> Result<BTreeMap<String, Status>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let report: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    if report["tier"] != "t1" {
+        return Err(format!("{} is not a run --live report", path.display()));
+    }
+    let mut statuses = BTreeMap::new();
+    for item in report["scenarios"].as_array().into_iter().flatten() {
+        let (Some(id), Some(status)) = (item["scenario"].as_str(), item["status"].as_str()) else {
+            return Err(format!("{}: a scenario without id or status", path.display()));
+        };
+        let status = Status::ALL
+            .into_iter()
+            .find(|s| s.as_str() == status)
+            .ok_or_else(|| format!("{}: unknown status {status:?}", path.display()))?;
+        statuses.insert(id.to_owned(), status);
+    }
+    Ok(statuses)
 }
 
 fn to_json(options: &Options) -> Result<i32, String> {
