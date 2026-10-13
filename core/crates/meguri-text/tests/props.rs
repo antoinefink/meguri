@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use common::{Rng, awkward_text, corpus, corpus_strings};
 use meguri_text::media_refs::{MediaTag, is_remote, media_tags, sound_tags};
 use meguri_text::{base91, field_empty, fold, html, iri, media_name, media_refs, normalize};
+use regex::Regex;
 
 const SEED: u64 = 0x6d65_6775_7269_0020;
 
@@ -175,6 +176,47 @@ fn markup_removal_leaves_no_closed_tag() {
         assert_eq!(line.trim(), line, "{text:?}");
         let line = html::text_line_keep_media(text);
         assert_eq!(line.trim(), line, "{text:?}");
+    }
+}
+
+/// Text made of H2's block openers and closers, in the spellings H1 lets
+/// match, with few `>`.
+fn block_text(rng: &mut Rng) -> String {
+    const PIECES: &[&str] = &[
+        "<!--",
+        "-->",
+        "<!-->",
+        "<style",
+        "<STYLE",
+        "<\u{17f}tyle",
+        "</style>",
+        "</StYlE>",
+        "</\u{17f}tyle>",
+        "<script",
+        "<Script",
+        "</script>",
+        "</\u{17f}cript>",
+        "<",
+        ">",
+        "-",
+        "x",
+        "\n",
+    ];
+    let n = rng.below(25);
+    (0..n).map(|_| *rng.pick(PIECES)).collect()
+}
+
+/// H2 is one leftmost-first alternation of its four forms (strip-html.md
+/// H1, H2). However `remove_markup` gets there, it removes the same text.
+#[test]
+fn markup_removal_is_the_h2_alternation() {
+    let h2 = Regex::new("(?si)<!--.*?-->|<style.*?>.*?</style>|<script.*?>.*?</script>|<.*?>").expect("H2 pattern");
+    let mut rng = Rng::new(SEED ^ 8);
+    let mut texts = corpus_strings("strip_markup");
+    texts.extend((0..30_000).map(|_| awkward_text(&mut rng, 30)));
+    texts.extend((0..30_000).map(|_| block_text(&mut rng)));
+    for text in &texts {
+        assert_eq!(html::remove_markup(text), h2.replace_all(text, ""), "{text:?}");
     }
 }
 

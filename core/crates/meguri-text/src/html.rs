@@ -3,25 +3,50 @@
 //! stored sort field, checksum and duplicate checks would drift with it.
 
 use std::borrow::Cow;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use regex::{Captures, Regex};
 
 use crate::entities;
 use crate::media_refs;
 
-/// H2's forms, tried in order at each `<` (leftmost-first alternation):
-/// comment, style block, script block, any tag. `(?s)` lets every run cross
-/// line breaks; `(?i)` matters only for the block names.
-static MARKUP: LazyLock<Regex> = LazyLock::new(|| {
-    let forms = [
-        "<!--.*?-->",
-        "<style.*?>.*?</style>",
-        "<script.*?>.*?</script>",
-        "<.*?>",
-    ];
-    Regex::new(&format!("(?si){}", forms.join("|"))).expect("H2 pattern")
+/// H2's block forms in the order they are tried (comment, style block,
+/// script block), each with the closing delimiter it ends with.
+const BLOCK_FORMS: [(&str, &str); 3] = [
+    ("<!--.*?-->", "-->"),
+    ("<style.*?>.*?</style>", "</style>"),
+    ("<script.*?>.*?</script>", "</script>"),
+];
+
+/// H2's last form: any tag.
+const TAG_FORM: &str = "<.*?>";
+
+/// How many subsets of [`BLOCK_FORMS`] there are; bit `b` of a subset stands
+/// for block form `b`.
+const BLOCK_SETS: usize = 1 << BLOCK_FORMS.len();
+
+/// Each block form's closing delimiter, case-insensitive like the form.
+static CLOSERS: LazyLock<[Regex; 3]> = LazyLock::new(|| {
+    BLOCK_FORMS.map(|(_, closer)| Regex::new(&format!("(?i){}", regex::escape(closer))).expect("H2 closer pattern"))
 });
+
+/// `MARKUP[set]`: the block forms in `set` and the tag form, in H2's order,
+/// as one leftmost-first alternation. `(?s)` lets every run cross line
+/// breaks; `(?i)` matters only for the block names. Compiled on first use.
+static MARKUP: [OnceLock<Regex>; BLOCK_SETS] = [const { OnceLock::new() }; BLOCK_SETS];
+
+fn markup(set: usize) -> &'static Regex {
+    MARKUP[set].get_or_init(|| {
+        let forms: Vec<&str> = BLOCK_FORMS
+            .iter()
+            .enumerate()
+            .filter(|&(b, _)| set & (1 << b) != 0)
+            .map(|(_, &(form, _))| form)
+            .chain([TAG_FORM])
+            .collect();
+        Regex::new(&format!("(?si){}", forms.join("|"))).expect("H2 pattern")
+    })
+}
 
 /// H6 step 1: `<br` + whitespace + optional `/` + `>`, a bare `<div>`, and LF.
 static LINE_BREAK: LazyLock<Regex> =
@@ -37,7 +62,31 @@ static LINE_SOUND: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[sound:([^\]
 /// H2: removes comments, style and script blocks and tags, scanning left to
 /// right. Entities stay. Cloze processing reuses this step (U61).
 pub fn remove_markup(text: &str) -> Cow<'_, str> {
-    MARKUP.replace_all(text, "")
+    // A block form that fails at a `<` has searched the rest of the text for
+    // its closer, so a run of unclosed blocks took quadratic time. A block
+    // form matches nowhere past the start of its last closer, so it leaves
+    // the alternation there; no match changes. Closers never overlap, so
+    // `find_iter` sees the last one.
+    let last_closers: [Option<usize>; 3] =
+        std::array::from_fn(|b| CLOSERS[b].find_iter(text).last().map(|closer| closer.start()));
+    let mut kept = String::new();
+    let mut at = 0;
+    loop {
+        let set = (0..BLOCK_FORMS.len())
+            .filter(|&b| last_closers[b].is_some_and(|start| start >= at))
+            .fold(0, |set, b| set | (1 << b));
+        // Every form ends with `>`, so a match is never empty.
+        let Some(found) = markup(set).find_at(text, at) else {
+            break;
+        };
+        kept.push_str(&text[at..found.start()]);
+        at = found.end();
+    }
+    if at == 0 {
+        return Cow::Borrowed(text);
+    }
+    kept.push_str(&text[at..]);
+    Cow::Owned(kept)
 }
 
 /// H4: [`remove_markup`], then entity decoding (H3). No trimming.
@@ -88,6 +137,8 @@ pub fn text_line_keep_media(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
 
     #[test]
@@ -117,6 +168,35 @@ mod tests {
         assert_eq!(r("<img alt=\"q>r\" src=\"s.png\">"), "r\" src=\"s.png\">");
         assert_eq!(r("<"), "<");
         assert_eq!(r("&amp;"), "&amp;");
+    }
+
+    /// A block form that fails scans to the end of the text. Repeated
+    /// unclosed blocks must not make that happen at every `<`: the time
+    /// would grow with the square of the length.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // times the stripping, never fed to it
+    fn unclosed_blocks_take_linear_time() {
+        const COPIES: usize = 2_000;
+        let unclosed = format!("<style>a</style>{}", "<style>x<script>y<!-- >z".repeat(COPIES));
+        let plain = format!("<style>a</style>{}", "<b>xxxxxx<i>yyyyyy<u>zzz".repeat(COPIES));
+        assert_eq!(unclosed.len(), plain.len());
+        let fastest = |text: &str, expected: &str| {
+            (0..5)
+                .map(|_| {
+                    let start = Instant::now();
+                    assert_eq!(remove_markup(text), expected);
+                    start.elapsed()
+                })
+                .min()
+                .expect("five runs")
+        };
+        let unclosed_time = fastest(&unclosed, &"xyz".repeat(COPIES));
+        let plain_time = fastest(&plain, &"xxxxxxyyyyyyzzz".repeat(COPIES));
+        assert!(
+            unclosed_time < plain_time * 10,
+            "{} bytes: {unclosed_time:?} unclosed, {plain_time:?} plain",
+            unclosed.len()
+        );
     }
 
     #[test]

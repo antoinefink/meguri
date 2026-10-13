@@ -388,50 +388,81 @@ mod tests {
             let html = format!("a<{tag}>hidden</{tag}>b");
             assert_eq!(sanitize_html(&html), "ab", "{tag}");
         }
-        assert_eq!(sanitize_html("a<audio src=x.mp3>fallback</audio>b"), "ab");
-        assert_eq!(sanitize_html("a<object data=x>in</object>b<embed src=y>c"), "abc");
-        assert_eq!(sanitize_html("<svg><a href=\"https://e.org\">x</a></svg>y"), "y");
+        for (input, output) in [
+            ("a<audio src=x.mp3>fallback</audio>b", "ab"),
+            ("a<object data=x>in</object>b<embed src=y>c", "abc"),
+            ("<svg><a href=\"https://e.org\">x</a></svg>y", "y"),
+            // HTML at an integration point stays inside the svg or math
+            // element, so it goes with it.
+            (
+                "a<math><annotation-xml encoding=\"text/html\"><b>hidden</b></annotation-xml></math>z",
+                "az",
+            ),
+            (
+                "a<math><annotation-xml encoding=\"application/xhtml+xml\"><b>hidden</b></annotation-xml></math>z",
+                "az",
+            ),
+            (
+                "a<math><annotation-xml encoding=\"Text/HTML\"><p>hidden</p></annotation-xml></math>z",
+                "az",
+            ),
+            ("a<math><mi><b>hidden</b></mi></math>z", "az"),
+            ("a<svg><foreignObject><b>hidden</b></foreignObject></svg>z", "az"),
+            // Without an HTML encoding, `b` leaves the math element, as it
+            // does in a browser.
+            (
+                "a<math><annotation-xml><b>shown</b></annotation-xml></math>z",
+                "a<b>shown</b>z",
+            ),
+        ] {
+            assert_eq!(sanitize_html(input), output, "{input:?}");
+        }
     }
 
     #[test]
     fn other_elements_are_unwrapped() {
-        assert_eq!(
-            sanitize_html("<fieldset><legend>L</legend><label>x</label></fieldset>"),
-            "Lx"
-        );
-        assert_eq!(sanitize_html("<my-widget>c</my-widget>"), "c");
-        assert_eq!(sanitize_html("<html><body><b>x</b></body></html>"), "<b>x</b>");
-        assert_eq!(sanitize_html("a<!-- note -->b"), "ab");
-        assert_eq!(sanitize_html("<form><form><i>n</i></form></form>"), "<i>n</i>");
+        for (input, output) in [
+            ("<fieldset><legend>L</legend><label>x</label></fieldset>", "Lx"),
+            ("<my-widget>c</my-widget>", "c"),
+            ("<html><body><b>x</b></body></html>", "<b>x</b>"),
+            ("a<!-- note -->b", "ab"),
+            ("<form><form><i>n</i></form></form>", "<i>n</i>"),
+        ] {
+            assert_eq!(sanitize_html(input), output, "{input:?}");
+        }
     }
 
     #[test]
     fn attributes_are_filtered_per_element() {
-        assert_eq!(
-            sanitize_html("<p align=center title=t class=c onmouseover=x() data-a=1>p</p>"),
-            "<p align=\"center\" title=\"t\">p</p>"
-        );
-        assert_eq!(
-            sanitize_html("<font color=red size=3 face=serif style=\"color: blue\">f</font>"),
-            "<font color=\"red\" size=\"3\" face=\"serif\" style=\"color: blue\">f</font>"
-        );
-        assert_eq!(sanitize_html("<span align=left>s</span>"), "<span>s</span>");
-        assert_eq!(
-            sanitize_html("<table><tr><td colspan=2 width=9>c</td></tr></table>"),
-            "<table><tbody><tr><td colspan=\"2\">c</td></tr></tbody></table>"
-        );
-        assert_eq!(
-            sanitize_html("<ol start=3 reversed><li value=5>i</li></ol>"),
-            "<ol start=\"3\" reversed=\"\"><li value=\"5\">i</li></ol>"
-        );
-        assert_eq!(
-            sanitize_html("<a href=\"https://e.org\" rel=\"opener\" ping=\"https://t\">x</a>"),
-            "<a href=\"https://e.org\" rel=\"noopener noreferrer\">x</a>"
-        );
-        assert_eq!(
-            sanitize_html("<img src=a.png srcset=\"b.png 2x\" alt=A width=1 height=2>"),
-            "<img src=\"a.png\" alt=\"A\" width=\"1\" height=\"2\">"
-        );
+        for (input, output) in [
+            (
+                "<p align=center title=t class=c onmouseover=x() data-a=1>p</p>",
+                "<p align=\"center\" title=\"t\">p</p>",
+            ),
+            (
+                "<font color=red size=3 face=serif style=\"color: blue\">f</font>",
+                "<font color=\"red\" size=\"3\" face=\"serif\" style=\"color: blue\">f</font>",
+            ),
+            ("<span align=left>s</span>", "<span>s</span>"),
+            (
+                "<table><tr><td colspan=2 width=9>c</td></tr></table>",
+                "<table><tbody><tr><td colspan=\"2\">c</td></tr></tbody></table>",
+            ),
+            (
+                "<ol start=3 reversed><li value=5>i</li></ol>",
+                "<ol start=\"3\" reversed=\"\"><li value=\"5\">i</li></ol>",
+            ),
+            (
+                "<a href=\"https://e.org\" rel=\"opener\" ping=\"https://t\">x</a>",
+                "<a href=\"https://e.org\" rel=\"noopener noreferrer\">x</a>",
+            ),
+            (
+                "<img src=a.png srcset=\"b.png 2x\" alt=A width=1 height=2>",
+                "<img src=\"a.png\" alt=\"A\" width=\"1\" height=\"2\">",
+            ),
+        ] {
+            assert_eq!(sanitize_html(input), output, "{input:?}");
+        }
     }
 
     #[test]

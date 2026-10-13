@@ -33,6 +33,10 @@ pub(super) struct Node {
     parent: Option<NodeId>,
     /// A `template` element's contents, kept apart from its children.
     template_contents: Option<NodeId>,
+    /// A MathML `annotation-xml` element whose `encoding` is HTML: an HTML
+    /// integration point, so HTML start tags inside it stay inside it
+    /// instead of closing the `math` element.
+    html_integration_point: bool,
 }
 
 /// A parsed fragment: the document node, an `html` element under it, and the
@@ -60,6 +64,7 @@ impl Node {
             children: Vec::new(),
             parent: None,
             template_contents: None,
+            html_integration_point: false,
         }
     }
 }
@@ -149,8 +154,13 @@ impl TreeSink for Sink {
         let template_contents = flags.template.then(|| self.push(Node::new(NodeData::Ignored)));
         self.push(Node {
             template_contents,
+            html_integration_point: flags.mathml_annotation_xml_integration_point,
             ..Node::new(NodeData::Element { name, attrs })
         })
+    }
+
+    fn is_mathml_annotation_xml_integration_point(&self, handle: &NodeId) -> bool {
+        self.nodes.borrow()[*handle].html_integration_point
     }
 
     fn create_comment(&self, _text: StrTendril) -> NodeId {

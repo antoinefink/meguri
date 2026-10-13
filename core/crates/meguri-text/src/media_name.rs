@@ -97,21 +97,30 @@ mod tests {
 
     #[test]
     fn characters_are_removed_and_spaces_replaced() {
-        assert_eq!(t("a:b?.png"), "ab.png");
-        assert_eq!(t("[x]<y>\"z\"/w*^\\|.png"), "xyzw.png");
-        assert_eq!(t("a\u{1}b\u{1f}c\u{7f}.png"), "abc.png");
-        assert_eq!(t("tab\tname.png"), "tabname.png");
-        assert_eq!(t("a\u{a0}b.png"), "a b.png");
-        assert_eq!(t("a\u{202f}b\u{3000}.png"), "a\u{202f}b\u{3000}.png");
-        assert_eq!(t("???"), "");
+        for (input, output) in [
+            ("a:b?.png", "ab.png"),
+            ("[x]<y>\"z\"/w*^\\|.png", "xyzw.png"),
+            ("a\u{1}b\u{1f}c\u{7f}.png", "abc.png"),
+            ("tab\tname.png", "tabname.png"),
+            ("a\u{a0}b.png", "a b.png"),
+            ("a\u{202f}b\u{3000}.png", "a\u{202f}b\u{3000}.png"),
+            ("???", ""),
+        ] {
+            assert_eq!(t(input), output, "{input:?}");
+        }
     }
 
     #[test]
     fn names_are_nfc_before_removal_only() {
-        assert_eq!(t("e\u{301}.png"), "\u{e9}.png");
-        assert_eq!(t("\u{1100}\u{1161}.png"), "\u{ac00}.png");
-        // Removal can leave a decomposed sequence; it is not composed again.
-        assert_eq!(t("e?\u{301}.png"), "e\u{301}.png");
+        for (input, output) in [
+            ("e\u{301}.png", "\u{e9}.png"),
+            ("\u{1100}\u{1161}.png", "\u{ac00}.png"),
+            // Removal can leave a decomposed sequence; it is not composed
+            // again.
+            ("e?\u{301}.png", "e\u{301}.png"),
+        ] {
+            assert_eq!(t(input), output, "{input:?}");
+        }
     }
 
     #[test]
