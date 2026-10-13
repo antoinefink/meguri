@@ -2,8 +2,9 @@
 #
 # Host jobs: SwiftLint runs in the `swiftlint` compose service (pinned image,
 # checkout read-only, no network) with app/.swiftlint.yml; the files to lint
-# and the allowlist come from tools/lint-ui/path-rules.sh on the host. Gates
-# that build or verify the app run `lint-ui` before anything else (AE90).
+# and the allowlist come from tools/lint-ui/path-rules.sh on the host. Jobs
+# that build or verify the app call mg_lint_ui_first before anything else
+# (AE90).
 
 mg_job lint-ui host mg_lint_ui \
   "UI lint gate (R1994): raw colours, hex literals, fixed font sizes, numeric spacing and radii, literal motion, content shadows, glass outside Chrome/, custom bars, non-SF-Symbol icons; [--root <dir>] lints a tree laid out like the repo"
@@ -116,6 +117,38 @@ mg_lint_ui() {
     mg_message "lint-ui: $n finding(s) in ${#LINT_FILES[@]} file(s)"
     mg_status fail
   fi
+}
+
+# mg_lint_ui_first: the first step of every host job that builds or verifies
+# the app (AE90), called as `mg_lint_ui_first || return 0`. Runs
+# `tools/mg lint-ui` as a run of its own and links its result. Unless lint
+# passed, copies its failures, sets this run's status (fail, or error when
+# lint could not run) and returns 1, so the job stops before it builds.
+mg_lint_ui_first() {
+  local result status f
+  echo "tools/mg: $MG_JOB runs lint-ui first" >&2
+  result="$("$MG_TOOLS/mg" lint-ui </dev/null)"
+  result="${result##*$'\n'}"
+  if [ -z "$result" ] || [ ! -f "$result" ]; then
+    mg_failure lint-ui "tools/mg lint-ui wrote no result; $MG_JOB stopped before building; see log.txt" "tools/mg lint-ui"
+    mg_message "$MG_JOB: stopped before building: lint-ui did not run"
+    mg_status error
+    return 1
+  fi
+  mg_artifact lint-ui "$result" "tools/mg lint-ui result"
+  status="$(jq -r .status "$result")"
+  case "$status" in pass | warn) return 0 ;; esac
+  mg_failure lint-ui "$(jq -r .message "$result"); $MG_JOB stopped before building" "tools/mg lint-ui"
+  while IFS= read -r f; do
+    mg_failure "$(jq -r .id <<<"$f")" "$(jq -r .message <<<"$f")" "$(jq -r .repro <<<"$f")"
+  done < <(jq -c '.failures[]' "$result")
+  mg_message "$MG_JOB: stopped before building: $(jq -r .message "$result")"
+  if [ "$status" = fail ]; then
+    mg_status fail
+  else
+    mg_status error
+  fi
+  return 1
 }
 
 # tools/mg lint-ui-selftest: each fixture case is a tree laid out like the
