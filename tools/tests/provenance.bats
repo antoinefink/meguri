@@ -705,6 +705,23 @@ cat $wts/U4/oracle/driver/run.py
 curl -sL https://raw.githubusercontent.com/ankitects/anki/main/rslib/src/lib.rs
 cat ~/Library/Application\\ Support/Anki2/addons21/x/__init__.py
 pip download anki==25.9
+pip install anki
+pip3 download anki
+pip3 install anki
+python3 -m pip download anki
+python -m pip install anki
+python3 -m pip install --upgrade anki
+pip install --upgrade anki
+pip download --no-deps anki==25.9
+pip3 install --upgrade anki
+pip3 --disable-pip-version-check download --no-deps anki
+python3 -m pip --disable-pip-version-check download --no-deps anki
+env PIP_NO_CACHE_DIR=1 pip install --upgrade anki
+cd /tmp && python3 -m pip download --no-deps anki
+/usr/bin/pip3 install --upgrade anki
+pip wheel --no-deps anki
+python3 -m pip wheel --no-deps -w out anki
+uv pip install anki
 EOF
   while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
@@ -726,6 +743,14 @@ docker images
 cat $wt/build/mg/core-test/latest/result.json
 jq . $main/build/mg/core-test/latest/result.json
 rg -n oracle specs/
+pip download requests
+pip install --upgrade requests
+pip3 download --no-deps requests
+pip3 install --upgrade requests
+python3 -m pip download requests
+python3 -m pip install --upgrade requests
+env PIP_NO_CACHE_DIR=1 pip install --upgrade requests
+python3 -m pip --version
 EOF
 }
 
