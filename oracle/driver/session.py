@@ -15,9 +15,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import sys
 import tempfile
-import traceback
 from typing import Any
 
 import anki.errors
@@ -25,7 +23,7 @@ from anki.collection import Collection
 
 from . import registry
 from .clock import Clock, parse_instant, zone
-from .errors import DriverError, invalid
+from .errors import DriverError, invalid, log_exception
 
 SCENARIO_KEYS = {"id", "description", "tags", "clock", "setup", "steps", "compare"}
 CLOCK_KEYS = {"tz", "start", "mode"}
@@ -177,17 +175,17 @@ class Session:
                 exc.fields.setdefault("step", index)
             raise
         except anki.errors.AnkiException as exc:
-            traceback.print_exc(file=sys.stderr)
-            fields = {"op": op, "exception": type(exc).__name__}
-            if index is not None:
-                fields["step"] = index
-            raise DriverError("anki_error", **fields) from exc
+            raise self._failed("anki_error", index, op, exc) from exc
         except Exception as exc:  # a driver bug: keep the worker alive, say so
-            traceback.print_exc(file=sys.stderr)
-            fields = {"op": op, "exception": type(exc).__name__}
-            if index is not None:
-                fields["step"] = index
-            raise DriverError("internal_error", **fields) from exc
+            raise self._failed("internal_error", index, op, exc) from exc
+
+    @staticmethod
+    def _failed(kind: str, index: int | None, op: str, exc: Exception) -> DriverError:
+        fields = {"op": op, "exception": type(exc).__name__}
+        if index is not None:
+            fields["step"] = index
+        log_exception(exc, f"{kind} in {op}" + (f" (step {index})" if index is not None else ""))
+        return DriverError(kind, **fields)
 
     # --- logical ids ------------------------------------------------------------
 
@@ -231,8 +229,8 @@ class Session:
         try:
             if self.col is not None:
                 self.col.close(downgrade=False)
-        except Exception:  # noqa: BLE001 - the directory goes away anyway
-            traceback.print_exc(file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - the directory goes away anyway
+            log_exception(exc, "closing the collection")
         finally:
             self.col = None
             shutil.rmtree(self.dir, ignore_errors=True)

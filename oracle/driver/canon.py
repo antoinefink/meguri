@@ -63,9 +63,13 @@ class _CoreLoader(yaml.SafeLoader):
     yaml_constructors: dict = {}
 
     def compose_node(self, parent, index):  # type: ignore[override]
-        if self.check_event(AliasEvent):
-            event = self.peek_event()
+        event = self.peek_event()
+        if isinstance(event, AliasEvent):
             raise ConstructorError(None, None, "aliases are not allowed in scenarios", event.start_mark)
+        # Every explicit tag, core ones (!!str true) and the non-specific `!`
+        # included: node.tag, checked below, no longer tells them apart.
+        if getattr(event, "tag", None) is not None:
+            raise ConstructorError(None, None, f"tag {event.tag} is not allowed in scenarios", event.start_mark)
         return super().compose_node(parent, index)
 
     def construct_object(self, node, deep=False):  # type: ignore[override]

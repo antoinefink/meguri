@@ -18,12 +18,11 @@ import json
 import os
 import sys
 import time
-import traceback
 from typing import Any, TextIO
 
 from . import meta, registry
 from .clock import Clock, zone
-from .errors import DriverError
+from .errors import DriverError, log_exception
 from .session import Session
 
 
@@ -102,7 +101,7 @@ class Worker:
             except DriverError as exc:
                 resp = {"ok": False, "error": exc.to_json()}
             except Exception as exc:  # noqa: BLE001 - never let one request kill the worker
-                traceback.print_exc(file=sys.stderr)
+                log_exception(exc, "internal_error")
                 resp = {"ok": False, "error": {"kind": "internal_error", "exception": type(exc).__name__}}
             if req_id is not None:
                 resp["id"] = req_id
@@ -130,7 +129,7 @@ def _response_line(resp: dict) -> str:
     try:
         return _dumps(resp) + "\n"
     except (TypeError, ValueError) as exc:
-        traceback.print_exc(file=sys.stderr)
+        log_exception(exc, "internal_error: the response has no JSON form")
         err: dict[str, Any] = {"ok": False, "error": {"kind": "internal_error", "exception": type(exc).__name__}}
         if "id" in resp:
             try:

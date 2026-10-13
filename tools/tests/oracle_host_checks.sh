@@ -15,6 +15,12 @@ REPO="$MG_ROOT"
 ORACLE="${MG_ORACLE_DIR:-$REPO/oracle}"
 WORK="$MG_RUN_DIR/host-checks"
 mkdir -p "$WORK"
+# Copies of oracle/ (AGPL) the checks make under this checkout's build/. Each
+# check deletes its own; this covers a cancelled run.
+EDITED="$WORK/edited-oracle"
+SPARSE="$WORK/sparse"
+trap 'rm -rf "$EDITED" "$SPARSE"' EXIT
+trap 'exit 143' TERM INT HUP
 
 # The helpers of tools/mg.d/oracle.sh, without its job registration.
 mg_job() { :; }
@@ -57,7 +63,15 @@ t_rebuilding_an_unchanged_tree_keeps_tag_and_image() {
 }
 
 t_editing_a_driver_file_changes_tag_and_driver_hash() {
-  local edited="$WORK/edited-oracle" tag rc
+  local rc
+  editing_a_driver_file "$EDITED"
+  rc=$?
+  rm -rf "$EDITED"
+  return "$rc"
+}
+
+editing_a_driver_file() {
+  local edited="$1" tag rc
   rm -rf "$edited" && mkdir -p "$edited"
   (cd "$ORACLE" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.lock "$edited/" &&
     tar -cf - --exclude __pycache__ --exclude '*.pyc' driver | tar -xf - -C "$edited")
@@ -183,7 +197,15 @@ t_no_meguri_code_refers_to_oracle() {
 # builds from the main worktree's oracle/ and compares as usual. Throwaway
 # repo: a main checkout with a copy of the tree, and a sparse linked worktree.
 t_compare_runs_in_a_worktree_without_oracle() {
-  local base="$WORK/sparse" main impl out result project rc
+  local rc
+  compare_in_a_sparse_worktree "$SPARSE"
+  rc=$?
+  rm -rf "$SPARSE"
+  return "$rc"
+}
+
+compare_in_a_sparse_worktree() {
+  local base="$1" main impl out result project rc
   main="$base/main"
   impl="$base/impl"
   rm -rf "$base" && mkdir -p "$main/oracle" || return 1
@@ -215,11 +237,23 @@ t_compare_runs_in_a_worktree_without_oracle() {
     expect "oracle/ in the sparse worktree after the run" "$([ -e "$impl/oracle" ] && echo present || echo absent)" absent
 }
 
+# Runs last. The checks above copy oracle/ into the run directory, under this
+# checkout's build/, where U2's deny rules for oracle/ do not reach.
+t_no_copy_of_oracle_files_is_left_behind() {
+  local left
+  left="$(find "$MG_RUN_DIR" \( -name '*.py' -o -name Dockerfile -o -name entrypoint.sh \) | head -n 5)"
+  if [ -n "$left" ]; then
+    echo "copies of oracle/ files are left in the run directory:"
+    echo "$left"
+    return 1
+  fi
+}
+
 TESTS="t_tag_is_content_addressed_and_stable t_rebuilding_an_unchanged_tree_keeps_tag_and_image
 t_editing_a_driver_file_changes_tag_and_driver_hash t_a_compose_worker_says_hello_in_its_zone
 t_protocol_transcript_matches_the_schema t_the_oracle_service_has_no_route_out
 t_the_network_probe_connects_when_a_route_exists t_no_meguri_code_refers_to_oracle
-t_compare_runs_in_a_worktree_without_oracle"
+t_compare_runs_in_a_worktree_without_oracle t_no_copy_of_oracle_files_is_left_behind"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 n=0

@@ -6,17 +6,22 @@ clock with zoneinfo, independently of the driver."""
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
+import shutil
 import statistics
+import subprocess
+import tempfile
 import threading
 import time
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from driver.harness import ORACLE_HOME, WorkerProcess
+from driver.harness import ENTRYPOINT, ORACLE_HOME, WorkerProcess
 from driver.numbers import to_f32
 from driver.tests.test_numbers import naive_shortest_digits, sig_digits
 
@@ -213,6 +218,32 @@ class Errors(unittest.TestCase):
             ok = w.request({"cmd": "run", "scenario": scenario("t/ok", "UTC", "2030-01-15T10:00:00", [{"add_note": quoted}])})
         self.assertEqual(ok["observations"]["steps"], [{"add_note": {"note": "#n1", "cards": ["#c1"]}}])
 
+    def test_note_type_names_templates_and_css_must_be_strings(self):
+        template = NOTETYPE["templates"][0]
+        notetypes = [
+            {**NOTETYPE, "name": None},
+            {**NOTETYPE, "name": 1},
+            {**NOTETYPE, "css": True},
+            {**NOTETYPE, "css": None},
+            {**NOTETYPE, "templates": [{**template, "name": None}]},
+            {**NOTETYPE, "templates": [{**template, "name": 1}]},
+            {**NOTETYPE, "templates": [{**template, "front": True}]},
+            {**NOTETYPE, "templates": [{**template, "front": 1.0}]},
+            {**NOTETYPE, "templates": [{**template, "back": None}]},
+            {**NOTETYPE, "templates": [{**template, "back": ["{{A}}"]}]},
+        ]
+        with WorkerProcess("UTC") as w:
+            for nt in notetypes:
+                resp = w.request({"cmd": "run", "scenario": scenario("t/nt", "UTC", "2030-01-15T10:00:00", [],
+                                                                     setup={"notetypes": [nt]})})
+                with self.subTest(notetype=nt):
+                    self.assertEqual((resp.get("error", {}).get("kind"), "step" in resp.get("error", {})),
+                                     ("invalid_scenario", False), resp)
+            quoted = {**NOTETYPE, "name": "1", "css": "true", "templates": [{"name": "1", "front": "{{Q}} 1.0", "back": "null"}]}
+            ok = w.request({"cmd": "run", "scenario": scenario("t/ok", "UTC", "2030-01-15T10:00:00", [],
+                                                               setup={"notetypes": [quoted]})})
+        self.assertTrue(ok["ok"], ok)
+
     def test_scenario_in_another_zone_is_refused(self):
         with WorkerProcess("UTC") as w:
             err = w.request({"cmd": "run", "scenario": scenario("t/tz", "Europe/Paris", "2030-01-15T10:00:00", [])})
@@ -228,6 +259,90 @@ class Errors(unittest.TestCase):
             dup = w.request({"cmd": "run", "scenario": scenario("t/y", "UTC", "2030-01-15T10:00:00", steps, notes=2)})
         self.assertEqual(err["error"]["kind"], "invalid_scenario")
         self.assertEqual(dup["error"], {"kind": "anki_error", "op": "observe", "exception": "DBError", "step": 0})
+
+
+def transcript(argv, requests=(), extra_env=None):
+    """Exit code, stdout lines and stderr of `entrypoint.sh <argv>` fed `requests`."""
+    scratch = tempfile.mkdtemp(prefix="t-", dir=os.environ.get("ORACLE_SCRATCH_ROOT") or tempfile.gettempdir())
+    try:
+        env = {k: v for k, v in os.environ.items() if k != "ORACLE_FULL_TRACEBACKS"}
+        env.update(TZ="UTC", ORACLE_SCRATCH=scratch, **(extra_env or {}))
+        proc = subprocess.run([str(ENTRYPOINT), *argv], input="".join(json.dumps(r) + "\n" for r in requests),
+                              capture_output=True, text=True, env=env, timeout=300)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    return proc.returncode, proc.stdout.splitlines(), proc.stderr
+
+
+def source_lines():
+    """Every non-trivial source line of the driver and of Anki's Python package."""
+    roots = [ORACLE_HOME / "driver", Path(importlib.util.find_spec("anki").submodule_search_locations[0])]
+    lines = set()
+    for root in roots:
+        for path in root.rglob("*.py"):
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if len(line) >= 8 and not line.startswith("#"):
+                    lines.add(line)
+    return lines
+
+
+class Logs(unittest.TestCase):
+    """Worker and harness stderr reaches tools/mg logs that implementers read
+    (R1955, R1956): an exception shows its class and driver frame locations,
+    never source text, Anki's frames or its (localized) message."""
+
+    def assert_clean(self, stderr):
+        self.assertNotIn("Traceback", stderr)
+        self.assertNotIn('File "', stderr)
+        self.assertNotIn("site-packages", stderr)
+        self.assertNotIn("UNIQUE constraint", stderr)
+        leaked = sorted({line.strip() for line in stderr.splitlines()} & source_lines())
+        self.assertEqual(leaked, [], stderr)
+
+    def failing_requests(self):
+        t = epoch("2030-01-15T10:00:00", "UTC") * 1000
+        dup = [{"observe": [{"fuzz_table": {"card": "#c2", "pairs": [[t, 1]], "intervals": [1]}}]}]
+        start = "2030-01-15T10:00:00"
+        return [
+            {"cmd": "run", "scenario": scenario("t/anki", "UTC", start, dup, notes=2)},
+            {"cmd": "run", "scenario": scenario("t/op", "UTC", start, [{"unjsonable": "no such kind"}])},
+            {"cmd": "run", "scenario": scenario("t/out", "UTC", start, [{"unjsonable": "set"}])},
+        ]
+
+    def test_worker_exceptions_log_class_and_driver_frames_only(self):
+        env = {"ORACLE_EXTRA_MODULES": "driver.tests.extra_area"}
+        rc, out, stderr = transcript(["worker"], self.failing_requests(), env)
+        kinds = [json.loads(line)["error"] for line in out]
+        self.assertEqual([(e["kind"], e["exception"]) for e in kinds],
+                         [("anki_error", "DBError"), ("internal_error", "KeyError"), ("internal_error", "TypeError")])
+        self.assertEqual(rc, 0)
+        self.assert_clean(stderr)
+        self.assertRegex(stderr, r"anki_error in observe \(step 0\): DBError at .*driver/observe/sched\.py:\d+")
+        self.assertRegex(stderr, r"internal_error in unjsonable \(step 0\): KeyError at .*driver/tests/extra_area\.py:\d+")
+        self.assertRegex(stderr, r"TypeError at driver/worker\.py:\d+")
+
+    def test_uncaught_exceptions_log_the_same_way(self):
+        rc, out, stderr = transcript(["worker"], [{"cmd": "hello"}], {"ORACLE_EXTRA_MODULES": "driver.tests.no_such_area"})
+        self.assertEqual((rc != 0, out), (True, []))
+        self.assert_clean(stderr)
+        self.assertRegex(stderr, r"ModuleNotFoundError at driver/__main__\.py:\d+")
+        with tempfile.TemporaryDirectory() as tmp:
+            old, new = Path(tmp, "old"), Path(tmp, "new")
+            old.mkdir()
+            new.mkdir()
+            (new / "broken.json").write_text("not json")
+            rc, _, stderr = transcript(["harness", "diff-report", "--old", str(old), "--new", str(new),
+                                        "--report", str(Path(tmp, "report.json"))])
+        self.assertNotEqual(rc, 0)
+        self.assert_clean(stderr)
+        self.assertRegex(stderr, r"JSONDecodeError at driver/harness\.py:\d+")
+
+    def test_a_maintainer_can_ask_for_full_tracebacks(self):
+        env = {"ORACLE_EXTRA_MODULES": "driver.tests.extra_area", "ORACLE_FULL_TRACEBACKS": "1"}
+        _, _, stderr = transcript(["worker"], self.failing_requests(), env)
+        self.assertEqual(stderr.count("Traceback (most recent call last)"), 3, stderr)
+        self.assertIn("site-packages/anki/", stderr)
 
 
 class Throughput(unittest.TestCase):

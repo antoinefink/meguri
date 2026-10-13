@@ -34,14 +34,19 @@ def notetypes(session, items):
             raise invalid("fields is a non-empty list of names")
         if not isinstance(templates, list) or not templates:
             raise invalid("templates is a non-empty list")
+        if not isinstance(item.get("css", ""), str):
+            raise invalid("css is a string")
+        for tmpl in templates:
+            if not isinstance(tmpl, dict) or set(tmpl) - TEMPLATE_KEYS or "name" not in tmpl:
+                raise invalid("a template is {name, front, back}")
+            if not all(isinstance(tmpl.get(k, ""), str) for k in TEMPLATE_KEYS):
+                raise invalid("a template's name, front and back are strings")
         nt = models.new(item["name"])
         nt["type"] = 1 if kind == "cloze" else 0
         nt["css"] = item.get("css", "")
         for name in fields:
             models.add_field(nt, models.new_field(name))
         for tmpl in templates:
-            if not isinstance(tmpl, dict) or set(tmpl) - TEMPLATE_KEYS or "name" not in tmpl:
-                raise invalid("a template is {name, front, back}")
             t = models.new_template(tmpl["name"])
             t["qfmt"] = tmpl.get("front", "")
             t["afmt"] = tmpl.get("back", "")

@@ -3,6 +3,10 @@
 
 import sys
 
-from .worker import main
+from .errors import install_excepthook
+
+install_excepthook()  # before anki is imported
+
+from .worker import main  # noqa: E402
 
 sys.exit(main())

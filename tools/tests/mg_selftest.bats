@@ -821,9 +821,18 @@ EOF
   done
 }
 
+# dockerfiles: sets `files` to docker/'s Dockerfiles, plus oracle/'s when this
+# checkout has oracle/ (implementer worktrees do not).
+dockerfiles() {
+  files=("$SB"/docker/*.Dockerfile)
+  [ ! -f "$REPO_ROOT/oracle/Dockerfile" ] || files[${#files[@]}]="$REPO_ROOT/oracle/Dockerfile"
+}
+
 @test "every Docker base image is pinned by digest and the dev image matches the Rust toolchain file" {
-  local f line image stages
-  for f in "$SB"/docker/*.Dockerfile "$REPO_ROOT/oracle/Dockerfile"; do
+  local f line image stages files
+  dockerfiles
+  for f in "${files[@]}"; do
+    [ -f "$f" ] || { echo "$f does not exist"; return 1; }
     stages=" "
     while read -r line; do
       image="$(awk '{print $2}' <<<"$line")"
@@ -841,8 +850,10 @@ EOF
 }
 
 @test "every Dockerfile's build context is an allowlist that starts by excluding everything" {
-  local f ignore first
-  for f in "$SB"/docker/*.Dockerfile "$REPO_ROOT/oracle/Dockerfile"; do
+  local f ignore first files
+  dockerfiles
+  for f in "${files[@]}"; do
+    [ -f "$f" ] || { echo "$f does not exist"; return 1; }
     ignore="$f.dockerignore"
     [ -f "$ignore" ] || { echo "$f has no $(basename "$ignore"); the repo root holds local-data/"; return 1; }
     first="$(grep -Ev '^[[:space:]]*(#|$)' "$ignore" | head -n 1)"
@@ -852,6 +863,16 @@ EOF
       return 1
     fi
   done
+}
+
+@test "the Dockerfile checks pass, and check every file, in a checkout without oracle/" {
+  # Implementer worktrees have no oracle/ (U2's sparse checkout). $SB has none
+  # either, so a nested run of the two tests from $SB checks that case.
+  [ ! -e "$SB/oracle" ]
+  run --separate-stderr bats --formatter tap --filter 'allowlist|pinned by digest' "$SB/tools/tests/mg_selftest.bats"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^ok ' <<<"$output")" -eq 2 ]
 }
 
 # --- oracle -----------------------------------------------------------------
@@ -871,4 +892,133 @@ EOF
     [[ "$stderr" != *"docker must not run"* ]]
     validate "$result"
   done
+}
+
+@test "oracle test, bump and lock refuse in a checkout without oracle/ and copy nothing" {
+  local stubs="$BATS_TEST_TMPDIR/oracle-stubs" impl="$BATS_TEST_TMPDIR/impl" args
+  mkdir -p "$stubs" "$SB/oracle/driver"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  # The main worktree ($SB) has an oracle/ tree; the linked worktree has none.
+  printf 'FROM python:3.12-slim\n' >"$SB/oracle/Dockerfile"
+  printf 'anki==26.9.3\n' >"$SB/oracle/requirements.in"
+  printf 'anki==26.9.3 \\\n' >"$SB/oracle/requirements.lock"
+  : >"$SB/oracle/Dockerfile.dockerignore"
+  : >"$SB/oracle/entrypoint.sh"
+  printf '# driver\n' >"$SB/oracle/driver/worker.py"
+  git -C "$SB" worktree add -q "$impl"
+  [ ! -e "$impl/oracle" ]
+  for args in "test" "test Logs" "bump 26.10.0" "lock"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    run --separate-stderr "$impl/tools/mg" oracle $args
+    result="${lines[${#lines[@]} - 1]:-}"
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = no-oracle-tree ]
+    [[ "$stderr" != *"docker must not run"* ]]
+    validate "$result"
+  done
+  [ -z "$(find "$impl/build" -name worker.py)" ]
+}
+
+# A docker stub for `oracle bump`: the lock resolver writes a lock, builds and
+# hello succeed, and the harness writes $STUB_RECORD and $STUB_DIFF as the
+# record and diff reports.
+bump_fixture() {
+  local stubs="$BATS_TEST_TMPDIR/bump-stubs"
+  mkdir -p "$stubs" "$SB/oracle/driver" "$SB/conformance/scenarios/smoke" "$SB/conformance/goldens/smoke"
+  printf 'FROM python:3.12-slim@sha256:%064d\n' 0 >"$SB/oracle/Dockerfile"
+  printf 'anki==26.9.3\n' >"$SB/oracle/requirements.in"
+  printf 'anki==26.9.3 \\\n    --hash=sha256:%064d\n' 0 >"$SB/oracle/requirements.lock"
+  printf '*\n' >"$SB/oracle/Dockerfile.dockerignore"
+  printf '#!/bin/sh\n' >"$SB/oracle/entrypoint.sh"
+  printf '# driver\n' >"$SB/oracle/driver/worker.py"
+  cat >"$stubs/docker" <<'STUB'
+#!/bin/bash
+out="" lock="" prev=""
+for a in "$@"; do
+  if [ "$prev" = -v ]; then
+    case "$a" in
+      *:/out) out="${a%:/out}" ;;
+      *:/lock) lock="${a%:/lock}" ;;
+    esac
+  fi
+  prev="$a"
+done
+case "$1" in
+  info | ps) exit 0 ;;
+  image) echo sha256:new; exit 0 ;;
+  run) printf 'anki==26.10.0 \\\n    --hash=sha256:%064d\n' 1 >"$lock/requirements.lock"; exit 0 ;;
+  compose) ;;
+  *) exit 97 ;;
+esac
+case " $* " in
+  *" build oracle "*) exit 0 ;;
+  *" harness record "*) printf '%s\n' "$STUB_RECORD" >"$out/record-report.json"; exit "${STUB_RECORD_RC:-0}" ;;
+  *" harness diff-report "*)
+    printf '%s\n' "$STUB_DIFF" >"$out/bump-report.json"
+    echo '# report' >"$out/bump-report.md"
+    exit 0 ;;
+  *" oracle ") cat >/dev/null; echo '{"ok":true,"protocol":1,"anki_version":"26.10.0","lock_sha256":"l","driver_sha256":"d","tz":"UTC"}'; exit 0 ;;
+esac
+exit 97
+STUB
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+}
+
+# record_report <scenario>=<status>...
+record_report() {
+  jq -nc '[$ARGS.positional[] | split("=") | {scenario: .[0], status: .[1]} + (if .[1] == "error" then {error: {kind: "anki_error"}} else {} end)]
+    | {command: "record", totals: (group_by(.status) | map({(.[0].status): length}) | add // {}), scenario_count: length, scenarios: .}' --args "$@"
+}
+
+# diff_report <golden>=<status>...
+diff_report() {
+  jq -nc '[$ARGS.positional[] | split("=") | {golden: .[0], area: "smoke", status: .[1]}]
+    | {oracle: {old: null, new: null}, totals: (group_by(.status) | map({(.[0].status): length}) | add // {}),
+       changed_observations: [], scenarios: .}' --args "$@"
+}
+
+@test "oracle bump passes only when every scenario and golden was re-recorded" {
+  bump_fixture
+  # Every scenario re-recorded, one golden changed: adopt after review.
+  STUB_RECORD="$(record_report smoke/a=recorded)" STUB_DIFF="$(diff_report smoke/a.json=changed)"
+  export STUB_RECORD STUB_DIFF STUB_RECORD_RC=0
+  mg oracle bump 26.10.0
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .summary.changed)" -eq 1 ]
+  validate "$result"
+  local run_dir
+  run_dir="$(dirname "$result")"
+  # The staged requirements stay for adoption; no copy of the driver does.
+  [ -f "$run_dir/staging/oracle/requirements.lock" ] && [ -f "$run_dir/staging/oracle/requirements.in" ]
+  [ -z "$(find "$run_dir" -name worker.py -o -name Dockerfile -o -name entrypoint.sh)" ]
+
+  # No scenario recorded: nothing proves the new oracle works.
+  STUB_RECORD="$(record_report)" STUB_DIFF="$(diff_report smoke/a.json=not_recorded)" STUB_RECORD_RC=1
+  mg oracle bump 26.10.0
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | index("no-scenarios") != null')" = true ]
+  validate "$result"
+
+  # A golden without a scenario was not re-recorded.
+  STUB_RECORD="$(record_report smoke/a=recorded)" STUB_RECORD_RC=0
+  STUB_DIFF="$(diff_report smoke/a.json=unchanged smoke/gone.json=not_recorded)"
+  mg oracle bump 26.10.0
+  [ "$status" -eq 1 ]
+  [ "$(field -c '[.failures[].id]')" = '["smoke/gone"]' ]
+  validate "$result"
+
+  # A scenario that failed to record is reported once, not again as its golden.
+  STUB_RECORD="$(record_report smoke/a=error smoke/b=recorded)" STUB_RECORD_RC=1
+  STUB_DIFF="$(diff_report smoke/a.json=not_recorded smoke/b.json=unchanged)"
+  mg oracle bump 26.10.0
+  [ "$status" -eq 1 ]
+  [ "$(field -c '[.failures[].id]')" = '["smoke/a"]' ]
+  [ "$(field .summary.failed)" -eq 1 ]
+  validate "$result"
 }

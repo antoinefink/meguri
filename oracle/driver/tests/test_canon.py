@@ -34,6 +34,27 @@ class Yaml12Core(unittest.TestCase):
                 with self.assertRaises(ScenarioFormatError):
                     load_yaml_text(text)
 
+    def test_core_schema_tags_are_rejected_too(self):
+        # Each resolves to an allowed type, but scenarios carry no tags at all.
+        for text in (
+            "a: !!str true\n",
+            "a: !!int '1'\n",
+            "a: !!float 1\n",
+            "a: !!bool true\n",
+            "a: !!null ''\n",
+            "a: !!map {b: 1}\n",
+            "a: !!seq [1]\n",
+            "!!map {a: 1}\n",
+            "a: [!!str x]\n",
+            "!!str a: 1\n",  # on a key
+            "a: ! x\n",  # the non-specific tag
+            "%TAG !e! tag:yaml.org,2002:\n---\na: !e!str x\n",
+        ):
+            with self.subTest(text=text):
+                with self.assertRaises(ScenarioFormatError):
+                    load_yaml_text(text)
+        self.assertEqual(load_yaml_text("a: 'true'\nb: \"1\"\nc: x!y\n"), {"a": "true", "b": "1", "c": "x!y"})
+
     def test_hash_ignores_comments_key_order_and_layout(self):
         a = load_yaml_text("id: x\n# a comment\nclock: {tz: UTC, start: '2030-01-01T00:00:00'}\nsteps: []\n")
         b = load_yaml_text("steps: []\nclock:\n  start: '2030-01-01T00:00:00'\n  tz: UTC\nid: x\n")

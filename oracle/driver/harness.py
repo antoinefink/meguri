@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from .canon import SCENARIO_SUFFIXES, ScenarioFormatError, golden_text, load_scenario_file, scenario_sha256
+from .errors import install_excepthook
 
 ORACLE_HOME = Path(os.environ.get("ORACLE_HOME", Path(__file__).resolve().parent.parent))
 ENTRYPOINT = ORACLE_HOME / "entrypoint.sh"
@@ -481,4 +482,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    install_excepthook()
     sys.exit(main())

@@ -5,6 +5,9 @@
 # Implementers use these commands as black boxes and never read oracle/. Their
 # worktrees have none (U2's sparse checkout), so the image is built from the
 # main worktree's oracle/ (mg_oracle__tree): tools/mg reads it, they never do.
+# test, bump and lock refuse to run there (mg_oracle__own_tree): they copy or
+# rewrite oracle/ files, and a copy under that checkout's build/ is outside
+# U2's deny rules. Copies they make are deleted when they finish.
 
 mg_job oracle host mg_oracle \
   "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | bump <version> | lock | test [pattern]"
@@ -67,6 +70,15 @@ mg_oracle__tree() {
   return 1
 }
 
+# mg_oracle__own_tree <what it does>: refuses (error) when this checkout has no
+# oracle/, so the main worktree's tree is never copied or rewritten from here.
+mg_oracle__own_tree() {
+  [ -f "$MG_ROOT/oracle/Dockerfile" ] && return 0
+  mg_failure no-oracle-tree "$1, and this checkout has no oracle/; run it in a worktree that has oracle/"
+  mg_status error
+  return 1
+}
+
 # mg_oracle__compose <tag> <context dir> compose args...
 mg_oracle__compose() {
   local tag="$1" ctx="$2"
@@ -113,7 +125,14 @@ mg_oracle__cleanup() {
   ids="$(docker ps -aq --filter "label=meguri.mg.run-id=$MG_RUN_ID" 2>/dev/null)"
   # shellcheck disable=SC2086 # one container id per word
   [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1
+  [ -z "${MG_ORACLE_STAGED:-}" ] || mg_oracle__unstage "$MG_ORACLE_STAGED"
   return 0
+}
+
+# mg_oracle__unstage <staged oracle dir>: deletes the copied image inputs (the
+# driver among them) and keeps requirements.in and requirements.lock.
+mg_oracle__unstage() {
+  rm -rf "$1/driver" "$1/Dockerfile" "$1/Dockerfile.dockerignore" "$1/entrypoint.sh"
 }
 
 # mg_oracle__hello <tag> <context> <tz> <out file>: one worker, one hello.
@@ -271,12 +290,7 @@ mg_oracle__report() {
 
 mg_oracle_lock() {
   [ "$#" -eq 0 ] || { mg_oracle__usage "lock takes no arguments"; return 0; }
-  # lock rewrites this checkout's lock file; never the main worktree's.
-  if [ ! -f "$MG_ROOT/oracle/requirements.in" ]; then
-    mg_failure no-oracle-tree "lock rewrites oracle/requirements.lock, and this checkout has no oracle/"
-    mg_status error
-    return 0
-  fi
+  mg_oracle__own_tree "lock rewrites oracle/requirements.lock" || return 0
   mg_oracle__docker_ok || return 0
   if ! mg_oracle__lock "$MG_ROOT/oracle"; then
     mg_failure lock "uv could not resolve oracle/requirements.in; see log.txt"
@@ -291,7 +305,8 @@ mg_oracle_lock() {
 # bump <version> (R1874): a staging copy of the image inputs with the new pin,
 # a fresh lock, a new image, every golden re-recorded into the run directory and
 # a behavior-diff report against the committed goldens. Nothing in the
-# repository changes; adopting the bump is one separate change.
+# repository changes; adopting the bump is one separate change. It passes only
+# when every scenario and every committed golden was re-recorded.
 mg_oracle_bump() {
   local version="${1:-}" jobs=12
   [ "$#" -gt 0 ] && shift
@@ -302,9 +317,17 @@ mg_oracle_bump() {
       *) mg_oracle__usage "bump: unexpected argument '$1'"; return 0 ;;
     esac
   done
+  mg_oracle__own_tree "bump copies oracle/ into a staging tree" || return 0
   mg_oracle__docker_ok || return 0
-  mg_oracle__tree || return 0
-  local staging="$MG_RUN_DIR/staging" old_tag
+  MG_ORACLE_DIR="$MG_ROOT/oracle"
+  MG_ORACLE_STAGED="$MG_RUN_DIR/staging/oracle"
+  mg_oracle__bump "$version" "$jobs"
+  mg_oracle__unstage "$MG_ORACLE_STAGED"
+  MG_ORACLE_STAGED=""
+}
+
+mg_oracle__bump() {
+  local version="$1" jobs="$2" staging="$MG_RUN_DIR/staging" old_tag
   mkdir -p "$staging/oracle"
   (cd "$MG_ORACLE_DIR" && cp Dockerfile Dockerfile.dockerignore entrypoint.sh requirements.in "$staging/oracle/" &&
     tar -cf - --exclude __pycache__ --exclude '*.pyc' driver | tar -xf - -C "$staging/oracle")
@@ -349,20 +372,34 @@ mg_oracle_bump() {
     --slurpfile r "$MG_RUN_DIR/bump-report.json" --slurpfile rec "$MG_RUN_DIR/record-report.json" \
     '{from: $from, to: $to, hello: ($h[0] | del(.ok)), goldens: $r[0].totals,
       changed_observations: $r[0].changed_observations, recording: $rec[0].totals}')"
-  local failed changed
+  local failed changed orphans total
   failed="$(jq '[.scenarios[] | select(.status != "recorded")] | length' "$MG_RUN_DIR/record-report.json")"
   changed="$(jq '.totals.changed // 0' "$MG_RUN_DIR/bump-report.json")"
   jq -c '.scenarios[] | select(.status != "recorded")
     | {id: .scenario, message: ("not recorded on the new oracle: " + (.error | tostring)),
        repro: ("tools/mg oracle record " + (.scenario | @sh))}' "$MG_RUN_DIR/record-report.json" >>"$MG_STATE/failures.jsonl"
-  local total
+  # A committed golden the new oracle did not re-record although its scenario
+  # did not fail (that one is reported above): it has no scenario left.
+  orphans="$(jq -c --slurpfile rec "$MG_RUN_DIR/record-report.json" --arg repro "$MG_DEFAULT_REPRO" '
+    ($rec[0].scenarios | map(.scenario + ".json")) as $ran
+    | .scenarios[] | select(.status == "not_recorded" and (.golden | IN($ran[]) | not))
+    | {id: (.golden | rtrimstr(".json")), repro: $repro,
+       message: ("golden " + .golden + " has no scenario, so the new oracle did not re-record it")}' \
+    "$MG_RUN_DIR/bump-report.json")"
+  [ -z "$orphans" ] || printf '%s\n' "$orphans" >>"$MG_STATE/failures.jsonl"
+  orphans="$(printf '%s' "$orphans" | grep -c . || true)"
   total="$(jq '.scenario_count' "$MG_RUN_DIR/record-report.json")"
   mg_count total "$total"
   mg_count passed $((total - failed))
   mg_count failed "$failed"
+  mg_count orphaned "$orphans"
   mg_count changed "$changed"
-  if [ "$failed" -gt 0 ]; then
-    mg_message "oracle bump to $version: $failed scenarios could not be recorded, $changed goldens changed; see bump-report.md"
+  if [ "$total" -eq 0 ]; then
+    mg_failure no-scenarios "no scenario was recorded on anki $version, so nothing shows how it behaves"
+    mg_message "oracle bump to $version: no scenario was recorded"
+    mg_status fail
+  elif [ "$failed" -gt 0 ] || [ "$orphans" -gt 0 ]; then
+    mg_message "oracle bump to $version: $failed of $total scenarios could not be recorded, $orphans goldens have no scenario, $changed goldens changed; see bump-report.md"
     mg_status fail
   else
     mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock and staging/goldens in one change"
@@ -374,6 +411,7 @@ mg_oracle_bump() {
 # network), then the host checks in tools/tests/oracle_host_checks.sh. One TAP
 # stream, numbered across both.
 mg_oracle_test() {
+  mg_oracle__own_tree "test copies oracle/ into its host checks" || return 0
   mg_oracle__docker_ok || return 0
   mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
   local inner="$MG_RUN_DIR/driver.tap" outer="$MG_RUN_DIR/host.tap" tap="$MG_RUN_DIR/oracle-test.tap" rc1 rc2
