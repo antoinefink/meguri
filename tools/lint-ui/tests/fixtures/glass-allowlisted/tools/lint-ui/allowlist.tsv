@@ -1,0 +1,2 @@
+# rule	path	reason
+glass-outside-chrome	app/Meguri/Shell/StudyNowButton.swift	floating control over the deck list (R1996 control layer)

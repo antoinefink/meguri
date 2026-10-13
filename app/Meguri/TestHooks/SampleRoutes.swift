@@ -2,6 +2,7 @@
 import AppModel
 import CoreBridge
 import CryptoKit
+import DesignSystem
 import SwiftUI
 #if !os(macOS)
 import UIKit
@@ -79,7 +80,7 @@ extension TestHooks {
 
         var body: some View {
             ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Spacing.xSmall) {
                     Text("Sample sheet")
                         .font(.headline)
                         .accessibilityIdentifier("sample.sheet.title")

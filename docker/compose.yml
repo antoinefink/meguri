@@ -90,6 +90,21 @@ services:
     environment:
       TMPDIR: /tmp
 
+  # UI lint gate (U9, R1994): SwiftLint's own image, pinned by digest, with
+  # the checkout read-only and no network. `tools/mg lint-ui` passes the files
+  # to lint (tools/lint-ui/path-rules.sh picks them) and filters the findings
+  # on the host; app/.swiftlint.yml holds the rules.
+  swiftlint:
+    image: ghcr.io/realm/swiftlint:0.65.1@sha256:f47e083201e47a136cda5ae847595bfe00226c444ca226fa74fa5dc648a9b057
+    pull_policy: missing
+    init: true
+    network_mode: none
+    working_dir: /work
+    volumes:
+      - ..:/work:ro
+    tmpfs:
+      - /tmp:mode=1777
+
   # Local sync server for simulator and Mac app end-to-end runs (U13): Anki's
   # own server from the oracle image (the pinned release), on the real clock,
   # with the test users of syncserver.env.example. `tools/mg sync-rig up`
