@@ -1,0 +1,19 @@
+// Debug: development builds. Test hooks and AnkiWeb on; `.dev` identifiers.
+
+#include "Base.xcconfig"
+
+MEGURI_BUNDLE_ID_SUFFIX = .dev
+MEGURI_SWIFT_CONDITIONS = DEBUG MEGURI_TEST_HOOKS ANKIWEB_ENABLED
+MEGURI_CORE_FEATURES = ankiweb,test-hooks
+// Hook builds read fixtures from the checkout on the Mac (FixtureInstaller).
+MEGURI_ENTITLEMENTS_HOOKS_SUFFIX = -Dev
+
+GCC_PREPROCESSOR_DEFINITIONS = DEBUG=1 $(inherited)
+SWIFT_OPTIMIZATION_LEVEL = -Onone
+GCC_OPTIMIZATION_LEVEL = 0
+GCC_DYNAMIC_NO_PIC = NO
+ONLY_ACTIVE_ARCH = YES
+DEBUG_INFORMATION_FORMAT = dwarf
+ENABLE_TESTABILITY = YES
+ENABLE_PREVIEWS = YES
+MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE

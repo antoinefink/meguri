@@ -1,0 +1,7 @@
+// AppStore: the App Store build. Release without AnkiWeb (R2031, R2032,
+// KTD21) and without test hooks.
+
+#include "Release.xcconfig"
+
+MEGURI_SWIFT_CONDITIONS =
+MEGURI_CORE_FEATURES =

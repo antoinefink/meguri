@@ -1,0 +1,27 @@
+// Release: personal builds Antoine studies with. AnkiWeb on, no test hooks,
+// the daily-driver identifiers. Profile and AppStore include this file, so
+// all three share everything but the lines they override.
+
+#include "Base.xcconfig"
+
+MEGURI_BUNDLE_ID_SUFFIX =
+MEGURI_SWIFT_CONDITIONS = ANKIWEB_ENABLED
+MEGURI_CORE_FEATURES = ankiweb
+MEGURI_ENTITLEMENTS_HOOKS_SUFFIX =
+
+SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_COMPILATION_MODE = wholemodule
+GCC_OPTIMIZATION_LEVEL = s
+ONLY_ACTIVE_ARCH = NO
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+ENABLE_NS_ASSERTIONS = NO
+ENABLE_TESTABILITY = NO
+ENABLE_PREVIEWS = NO
+ENABLE_DEBUG_DYLIB = NO
+MTL_ENABLE_DEBUG_INFO = NO
+VALIDATE_PRODUCT = YES
+// No debugger entitlement (get-task-allow): the Mac entitlements are exactly
+// the KTD22 set.
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO
+// Hardened runtime for direct Mac builds (KTD22).
+ENABLE_HARDENED_RUNTIME[sdk=macosx*] = YES
