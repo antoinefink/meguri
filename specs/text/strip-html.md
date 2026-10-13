@@ -71,4 +71,4 @@ Examples: `[sound:a b.mp3]c` → `c` (dropped) or `a b.mp3c` (kept); `<img src="
 
 - `strip/markup`, `strip/entities`, `strip/keep-media`, `strip/text-line`: the cases above and their neighbours.
 - `corpus/fields-01` … `corpus/fields-40`: 48,000 distinct generated field texts through H4, H5 and both H6 variants (with the other text functions).
-- Observation functions (`specs/conformance/observations.md` O8): `strip_markup` (H4), `strip_markup_keep_media` (H5), `text_line` and `text_line_keep_media` (H6).
+- Observation functions (`specs/conformance/observations.md` O9): `strip_markup` (H4), `strip_markup_keep_media` (H5), `text_line` and `text_line_keep_media` (H6).

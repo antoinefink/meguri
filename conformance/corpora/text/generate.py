@@ -7,7 +7,7 @@
 Output (dsl.md D1, generated `.json` scenarios with oracle goldens):
   fields-01.json .. fields-40.json  1,200 field-like HTML inputs each, run through
                                     every string function of the `text` kind but
-                                    media_filename (observations.md O8)
+                                    media_filename (observations.md O9)
   filenames-01.json                 2,000 media file names (media_filename)
   unicase-01.json                   2,000 string pairs (unicase_compare)
 

@@ -66,4 +66,4 @@ Deciding whether a name already on disk is in normalized form (Check Media renam
 
 - `filenames/normalize`: every step and the examples above.
 - `corpus/filenames-01`: 2,000 distinct generated names (device prefixes, removed and kept characters, multi-byte truncation).
-- Observation function (`specs/conformance/observations.md` O8): `media_filename`.
+- Observation function (`specs/conformance/observations.md` O9): `media_filename`.

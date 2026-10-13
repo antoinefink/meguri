@@ -1111,6 +1111,67 @@ dockerfiles() {
   [ -z "$(find "$impl/build" -name worker.py)" ]
 }
 
+@test "a checkout without oracle/ builds the main worktree's only when its branch has no other oracle/" {
+  local stubs="$BATS_TEST_TMPDIR/oracle-stubs" impl="$BATS_TEST_TMPDIR/impl" same="$BATS_TEST_TMPDIR/same" args
+  local git=(git -c user.name=selftest -c user.email=selftest@localhost)
+  mkdir -p "$stubs" "$SB/oracle/driver"
+  cat >"$stubs/docker" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >>"$STUB_LOG"
+case "$1" in
+  info) exit 0 ;;
+  image) echo sha256:main; exit 0 ;;
+  compose) case " $* " in *" build oracle "*) exit 0 ;; esac ;;
+esac
+exit 97
+STUB
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/docker.log"
+  printf 'FROM python:3.12-slim\n' >"$SB/oracle/Dockerfile"
+  printf 'anki==26.9.3\n' >"$SB/oracle/requirements.in"
+  printf 'anki==26.9.3 \\\n' >"$SB/oracle/requirements.lock"
+  : >"$SB/oracle/Dockerfile.dockerignore"
+  : >"$SB/oracle/entrypoint.sh"
+  printf '# driver\n' >"$SB/oracle/driver/worker.py"
+  "${git[@]}" -C "$SB" add oracle
+  "${git[@]}" -C "$SB" commit -qm "add the oracle"
+  # Two branches checked out without oracle/, like implementer worktrees: one
+  # whose spec side changed the driver, one that did not touch oracle/.
+  "${git[@]}" -C "$SB" worktree add -q -b unit/changed "$impl"
+  printf '# a new op\n' >>"$impl/oracle/driver/worker.py"
+  "${git[@]}" -C "$impl" commit -qam "change the driver"
+  rm -rf "$impl/oracle"
+  "${git[@]}" -C "$SB" worktree add -q -b unit/same "$same"
+  rm -rf "$same/oracle"
+
+  # The main worktree's driver is not the changed branch's: refuse rather
+  # than run (or record goldens) on another oracle.
+  for args in "build" "hello"; do
+    : >"$STUB_LOG"
+    # shellcheck disable=SC2086 # each case is a word list
+    run --separate-stderr "$impl/tools/mg" oracle $args
+    result="${lines[${#lines[@]} - 1]:-}"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = oracle-tree-differs ]
+    [[ "$(field '.failures[0].message')" == *"this branch changes oracle/"* ]]
+    ! grep -q -- ' build oracle' "$STUB_LOG"
+    validate "$result"
+  done
+
+  run --separate-stderr "$same/tools/mg" oracle build
+  result="${lines[${#lines[@]} - 1]:-}"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"using the main worktree's"* ]]
+  validate "$result"
+
+  # Once the main worktree has the branch's oracle/, the branch builds it.
+  "${git[@]}" -C "$SB" merge -q --no-edit unit/changed
+  run --separate-stderr "$impl/tools/mg" oracle build
+  result="${lines[${#lines[@]} - 1]:-}"
+  [ "$status" -eq 0 ]
+  validate "$result"
+}
+
 # A docker stub for `oracle bump`: the lock resolver writes a lock, builds and
 # hello succeed, and the harness writes $STUB_RECORD and $STUB_DIFF as the
 # record and diff reports.
@@ -1211,6 +1272,219 @@ diff_report() {
   [ "$status" -eq 1 ]
   [ "$(field -c '[.failures[].id]')" = '["smoke/a"]' ]
   [ "$(field .summary.failed)" -eq 1 ]
+  validate "$result"
+}
+
+# Actor scenarios (specs/conformance/sync-ops.md S8.2, S9): a docker stub that
+# logs every call to $STUB_LOG, reports every container running and healthy,
+# lets a sync-recorder container write $STUB_EXCHANGES to its recording
+# directory and answer $STUB_HEALTH, and makes the harness write $STUB_REPORT
+# as its report and exit $STUB_RC. A cargo stub stands in for meguri-cli: it
+# writes $STUB_PLAN as the T0 plan report, and `conformance to-json` answers
+# each scenario file with the value $STUB_PARSED gives its id, as the scenario
+# parser would read it; with $STUB_CARGO_RC set it prints nothing and exits
+# with that code. The tree has one actor scenario (smoke/sync/pair) and one
+# other (smoke/plain).
+actor_fixture() {
+  local stubs="$BATS_TEST_TMPDIR/actor-stubs"
+  mkdir -p "$stubs" "$SB/oracle/driver" "$SB/conformance/scenarios/smoke/sync" "$SB/conformance/goldens/smoke/sync"
+  printf 'FROM python:3.12-slim@sha256:%064d\n' 0 >"$SB/oracle/Dockerfile"
+  printf 'anki==26.9.3\n' >"$SB/oracle/requirements.in"
+  printf 'anki==26.9.3 \\\n    --hash=sha256:%064d\n' 0 >"$SB/oracle/requirements.lock"
+  printf '*\n' >"$SB/oracle/Dockerfile.dockerignore"
+  printf '#!/bin/sh\n' >"$SB/oracle/entrypoint.sh"
+  printf '# driver\n' >"$SB/oracle/driver/worker.py"
+  printf 'id: smoke/sync/pair\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\nactors: [client_a, client_c]\n' \
+    >"$SB/conformance/scenarios/smoke/sync/pair.yaml"
+  printf 'id: smoke/plain\nclock: {tz: UTC, start: "2030-01-15T10:00:00"}\n' >"$SB/conformance/scenarios/smoke/plain.yaml"
+  cat >"$stubs/docker" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >>"$STUB_LOG"
+out="" report="" prev=""
+for a in "$@"; do
+  [ "$prev" = -v ] && case "$a" in *:/out) out="${a%:/out}" ;; esac
+  [ "$prev" = --report ] && report="$a"
+  prev="$a"
+done
+case "$1" in
+  info | ps | rm) exit 0 ;;
+  image) echo sha256:new; exit 0 ;;
+  inspect) echo "true healthy"; exit 0 ;;
+  exec) printf '%s\n' "$STUB_HEALTH"; exit 0 ;;
+  compose) ;;
+  *) exit 97 ;;
+esac
+case " $* " in
+  *" build oracle "*) exit 0 ;;
+  *" up "*" sync-faults "*) exit 0 ;;
+  *" run -d "*" sync-recorder "*) printf '%s' "$STUB_EXCHANGES" >"$MEGURI_RECORD_DIR/exchanges.jsonl"; exit 0 ;;
+  *" harness "*) printf '%s\n' "$STUB_REPORT" >"$out${report#/out}"; exit "${STUB_RC:-0}" ;;
+esac
+exit 97
+STUB
+  cat >"$stubs/cargo" <<'STUB'
+#!/bin/bash
+[ -z "${STUB_CARGO_RC:-}" ] || exit "$STUB_CARGO_RC"
+prev="" files=false rc=0 rel=""
+for a in "$@"; do
+  if [ "$files" = true ]; then
+    rel="${a#*/conformance/scenarios/}"
+    jq -nc --arg p "$a" --arg id "${rel%.*}" --argjson parsed "$STUB_PARSED" \
+      'if $parsed | has($id) then {path: $p, value: $parsed[$id]} else {path: $p, error: "not parsed"} end'
+    jq -e --arg id "${rel%.*}" 'has($id)' <<<"$STUB_PARSED" >/dev/null || rc=1
+    continue
+  fi
+  [ "$a" = to-json ] && files=true
+  [ "$prev" = --report ] && printf '%s\n' "$STUB_PLAN" >"$a"
+  prev="$a"
+done
+exit "$rc"
+STUB
+  chmod +x "$stubs/docker" "$stubs/cargo"
+  export PATH="$stubs:$PATH" STUB_LOG="$BATS_TEST_TMPDIR/docker.log"
+  export STUB_PARSED='{"smoke/sync/pair": {"id": "smoke/sync/pair", "actors": ["client_a", "client_c"]},
+    "smoke/plain": {"id": "smoke/plain"}}'
+  : >"$STUB_LOG"
+}
+
+# harness_report <command> <scenario>=<status>...
+harness_report() {
+  local cmd="$1"
+  shift
+  jq -nc --arg cmd "$cmd" '[$ARGS.positional[] | split("=") | {scenario: .[0], status: .[1]}]
+    | {command: $cmd, oracle: {anki_version: "26.9.3", driver_sha256: ("d" * 64), lock_sha256: ("l" * 64)},
+       totals: (group_by(.status) | map({(.[0].status): length}) | add // {}), scenario_count: length,
+       jobs: 1, wall_s: 1, mean_worker_ms: 1, scenarios: .}' --args "$@"
+}
+
+@test "oracle record and compare start the fault proxy only for actor scenarios" {
+  actor_fixture
+  export STUB_REPORT
+  STUB_REPORT="$(harness_report record smoke/plain=recorded)"
+  mg oracle record smoke/plain
+  [ "$status" -eq 0 ]
+  ! grep -q 'sync-faults' "$STUB_LOG"
+  ! grep -q 'ORACLE_SYNC_FAULTS' "$STUB_LOG"
+  validate "$result"
+
+  : >"$STUB_LOG"
+  STUB_REPORT="$(harness_report compare smoke/sync/pair=pass)"
+  mg oracle compare smoke/sync
+  [ "$status" -eq 0 ]
+  # The checkout's toxiproxy, healthy (--wait) before the harness starts;
+  # the workers get its API, and it stays up for other runs.
+  grep -q -- "--profile oracle-sync up --detach --wait --wait-timeout 60 sync-faults" "$STUB_LOG"
+  [ "$(grep -n -- ' harness compare ' "$STUB_LOG" | cut -d: -f1)" -gt "$(grep -n -- " up --detach --wait " "$STUB_LOG" | cut -d: -f1)" ]
+  grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 .* harness compare" "$STUB_LOG"
+  ! grep -q -- "^rm " "$STUB_LOG"
+  validate "$result"
+}
+
+@test "oracle runs read actor scenarios with the scenario parser, however actors is written" {
+  actor_fixture
+  # A quoted key and a flow mapping parse to the same top-level `actors`
+  # member as `actors:`, and hash alike.
+  printf '%s\n' 'id: smoke/sync/quoted' 'clock: {tz: UTC, start: "2030-01-15T10:00:00"}' "'actors': [client_a]" \
+    >"$SB/conformance/scenarios/smoke/sync/quoted.yaml"
+  printf '%s\n' '{id: smoke/sync/flow, clock: {tz: UTC, start: "2030-01-15T10:00:00"}, actors: [client_a]}' \
+    >"$SB/conformance/scenarios/smoke/sync/flow.yaml"
+  STUB_PARSED="$(jq -c '. + {"smoke/sync/quoted": {id: "smoke/sync/quoted", actors: ["client_a"]},
+    "smoke/sync/flow": {id: "smoke/sync/flow", actors: ["client_a"]}}' <<<"$STUB_PARSED")"
+  export STUB_PARSED STUB_REPORT
+  local id
+  for id in smoke/sync/quoted smoke/sync/flow; do
+    : >"$STUB_LOG"
+    STUB_REPORT="$(harness_report compare "$id=pass")"
+    mg oracle compare "$id"
+    [ "$status" -eq 0 ]
+    grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 .* harness compare .*--filter $id" "$STUB_LOG"
+    validate "$result"
+  done
+
+  # A parser that cannot run leaves the actor scenarios unknown: an error
+  # before the image build, not a run without the fault proxy.
+  : >"$STUB_LOG"
+  export STUB_CARGO_RC=101
+  mg oracle compare smoke/sync
+  unset STUB_CARGO_RC
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = scenario-parse ]
+  ! grep -q -- ' build oracle' "$STUB_LOG"
+  ! grep -q -- ' harness ' "$STUB_LOG"
+  validate "$result"
+}
+
+@test "oracle recordings rejects bad usage and non-actor scenarios before touching Docker" {
+  actor_fixture
+  local args
+  for args in "recordings" "recordings --jobs 2 smoke/sync/pair"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg oracle $args
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    validate "$result"
+  done
+  mg oracle recordings smoke/plain
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = no-scenarios ]
+  [ ! -s "$STUB_LOG" ]
+  validate "$result"
+}
+
+@test "oracle recordings keeps a recording only when the run reproduced its golden and every exchange was recorded" {
+  actor_fixture
+  local dest="$SB/conformance/recordings/scenarios/smoke/sync/pair" sha
+  sha="$(printf 'a%.0s' $(seq 64))"
+  export STUB_PLAN STUB_REPORT STUB_HEALTH STUB_EXCHANGES STUB_RC=0
+  STUB_PLAN="$(jq -nc --arg sha "$sha" '{tier: "t0", scenarios: [{scenario: "smoke/sync/pair", status: "live", scenario_sha256: $sha}]}')"
+  STUB_REPORT="$(harness_report compare smoke/sync/pair=pass)"
+  STUB_HEALTH='{"ok": true, "written": 2, "errors": 0, "last_error": null}'
+  STUB_EXCHANGES=$'{"actor":"client_a","seq":1,"step":1}\n{"actor":"client_c","seq":2,"step":7}\n'
+  mg oracle recordings smoke/sync
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .summary.passed)" -eq 1 ]
+  validate "$result"
+  [ "$(cat "$dest/exchanges.jsonl")" = "$(printf '%s' "$STUB_EXCHANGES")" ]
+  # recording.json: sorted keys, two-space indents, a final newline (S9).
+  [ "$(cat "$dest/recording.json")" = "$(jq -nS --indent 2 --arg sha "$sha" \
+    '{oracle: {anki_version: "26.9.3", driver_sha256: ("d" * 64), lock_sha256: ("l" * 64)},
+      scenario_id: "smoke/sync/pair", scenario_sha256: $sha}')" ]
+  [ "$(tail -c 1 "$dest/recording.json" | od -An -c | tr -d ' ')" = '\n' ]
+  # The recorder was this run's and is gone; the harness compared one
+  # scenario at a time through it.
+  local run_id
+  run_id="$(field -r .run_id | tr 'A-Z' 'a-z')"
+  grep -q -- "--profile oracle-record run -d --no-deps --name mg-sync-recorder-$run_id-1 --label meguri.mg.run-id=$(field -r .run_id) sync-recorder" "$STUB_LOG"
+  grep -q -- "-e ORACLE_SYNC_FAULTS=sync-faults:8474 -e ORACLE_SYNC_RECORDER=mg-sync-recorder-$run_id-1:8080 .* harness compare .*--jobs 1 .*--filter smoke/sync/pair" "$STUB_LOG"
+  grep -q -- "^rm -f mg-sync-recorder-$run_id-1$" "$STUB_LOG"
+
+  # A recorder that missed an exchange: the old recording stays as it was.
+  STUB_HEALTH='{"ok": false, "written": 1, "errors": 1, "last_error": "no prefix"}'
+  STUB_EXCHANGES='{"seq":1}'
+  mg oracle recordings smoke/sync/pair
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = smoke/sync/pair ]
+  [[ "$(field '.failures[0].message')" == *"did not record every exchange"* ]]
+  [ "$(wc -l <"$dest/exchanges.jsonl" | tr -d ' ')" -eq 2 ]
+  validate "$result"
+
+  # A run that differs from the golden records nothing either.
+  STUB_HEALTH='{"ok": true, "written": 1, "errors": 0, "last_error": null}'
+  STUB_REPORT="$(harness_report compare smoke/sync/pair=fail)" STUB_RC=1
+  mg oracle recordings smoke/sync/pair
+  [ "$status" -eq 1 ]
+  [[ "$(field '.failures[0].message')" == *"did not reproduce the golden"* ]]
+  [ "$(wc -l <"$dest/exchanges.jsonl" | tr -d ' ')" -eq 2 ]
+  validate "$result"
+
+  # A stale golden: nothing runs.
+  : >"$STUB_LOG"
+  STUB_PLAN="$(jq -nc '{tier: "t0", scenarios: [{scenario: "smoke/sync/pair", status: "stale"}]}')"
+  mg oracle recordings smoke/sync/pair
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].repro')" = "tools/mg oracle record smoke/sync/pair" ]
+  ! grep -q ' harness ' "$STUB_LOG"
   validate "$result"
 }
 

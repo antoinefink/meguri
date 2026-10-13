@@ -12,10 +12,11 @@ use std::sync::Arc;
 
 use meguri_model::rng::SeededRandom;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
 use super::clock::ScenarioClock;
 use super::{ExecError, Executor, Handoff, Needs, SegmentExecutor, SegmentOutput, SegmentRequest};
-use crate::scenario::{LoadedScenario, ObservationRequest, Setup, Step};
+use crate::scenario::{ActorName, LoadedScenario, ObservationRequest, Setup, Step};
 
 /// What an op adapter reports (dsl.md D7.2, D7.3).
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +40,10 @@ pub type SetupFn = for<'a> fn(&mut Session<'a>, &Setup) -> Result<(), ExecError>
 /// or opens the ones handed over in it (in). The executor carries the clock
 /// and the logical ids itself.
 pub type HandoffFn = for<'a> fn(&mut Session<'a>, &Path) -> Result<(), ExecError>;
+/// The raw dump of a Meguri actor's collection (sync-ops.md S7.2): the
+/// `db_dump` value of all twelve tables without O8's normalization of random
+/// values.
+pub type RawDumpFn = for<'a> fn(&mut Session<'a>) -> Result<Value, ExecError>;
 
 #[derive(Debug, Clone, Copy)]
 struct OpAdapter {
@@ -54,6 +59,7 @@ pub struct Registry {
     ops: BTreeMap<&'static str, OpAdapter>,
     observations: BTreeMap<&'static str, ObserveFn>,
     handoff: Option<(HandoffFn, HandoffFn)>,
+    actor: Option<RawDumpFn>,
 }
 
 impl Registry {
@@ -77,8 +83,13 @@ impl Registry {
     /// dsl.md D7.2).
     pub fn op_rejecting(&mut self, name: &'static str, rejects: &'static [&'static str], f: OpFn) {
         assert!(
-            Step::NAMES.contains(&name) && !matches!(name, "observe" | "handoff"),
+            Step::NAMES.contains(&name) && !matches!(name, "observe" | "handoff" | "actor"),
             "op {name} is not in the language"
+        );
+        // The worker runs these for every actor (sync-ops.md S10.2).
+        assert!(
+            !matches!(name, "net_fault" | "converge"),
+            "op {name} runs on the oracle worker, never on Meguri"
         );
         let adapter = OpAdapter { run: f, rejects };
         assert!(self.ops.insert(name, adapter).is_none(), "op {name} registered twice");
@@ -97,11 +108,24 @@ impl Registry {
         self.handoff = Some((out, into));
     }
 
-    /// Everything registered; the handoff adapters count as the `handoff` op.
+    /// What makes Meguri an actor of actor scenarios, through the parties
+    /// executor (sync-ops.md S10.2, S10.4): each Meguri actor is a session
+    /// with a collection of its own and its seat (`Session::actor`), and
+    /// `raw_dump` gives its collection's raw dump for `converge`.
+    pub fn actor(&mut self, raw_dump: RawDumpFn) {
+        assert!(self.actor.is_none(), "actor registered twice");
+        self.actor = Some(raw_dump);
+    }
+
+    /// Everything registered; the handoff adapters count as the `handoff` op
+    /// and the actor adapter as the `actor` op.
     pub fn capabilities(&self) -> Needs {
         let mut ops: BTreeSet<String> = self.ops.keys().map(|s| (*s).to_owned()).collect();
         if self.handoff.is_some() {
             ops.insert("handoff".to_owned());
+        }
+        if self.actor.is_some() {
+            ops.insert("actor".to_owned());
         }
         Needs {
             setup: self.setup.keys().map(|s| (*s).to_owned()).collect(),
@@ -121,6 +145,28 @@ pub struct Session<'a> {
     pub random: Arc<SeededRandom>,
     pub notes: Vec<i64>,
     pub cards: Vec<i64>,
+    /// The actor this session plays in a mixed run of an actor scenario;
+    /// `None` elsewhere.
+    pub actor: Option<Seat>,
+}
+
+/// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
+/// endpoint it syncs with (the Meguri edge, S8.1; `None` while the runner
+/// has none) and the scenario's account, test credentials the worker
+/// reported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Seat {
+    pub name: ActorName,
+    pub endpoint: Option<String>,
+    pub account: SyncAccount,
+}
+
+/// The scenario's sync account (protocol.json `sync_info.account`).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncAccount {
+    pub username: String,
+    pub password: String,
 }
 
 /// The seed of a scenario's random source: the first eight bytes of its hash,
@@ -131,6 +177,16 @@ pub fn seed(scenario: &LoadedScenario) -> u64 {
         .get(..16)
         .and_then(|hex| u64::from_str_radix(hex, 16).ok())
         .unwrap_or(0)
+}
+
+/// The seed of a Meguri actor's random source (sync-ops.md S2.5): the first
+/// eight bytes, big-endian, of the SHA-256 of `<scenario_sha256>/<actor>`, so
+/// two Meguri actors never share a sequence.
+pub fn actor_seed(scenario: &LoadedScenario, actor: &str) -> u64 {
+    let digest = Sha256::digest(format!("{}/{actor}", scenario.sha256).as_bytes());
+    let mut first = [0u8; 8];
+    first.copy_from_slice(&digest[..8]);
+    u64::from_be_bytes(first)
 }
 
 #[derive(Debug)]
@@ -174,6 +230,7 @@ impl MeguriExecutor {
             random: Arc::new(SeededRandom::new(seed(loaded))),
             notes: resume.map(|h| h.notes.clone()).unwrap_or_default(),
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
+            actor: None,
         })
     }
 
@@ -251,6 +308,137 @@ impl MeguriExecutor {
     }
 }
 
+/// Real ids a step or a setup created, in creation order
+/// (protocol.json `new_ids`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewIds {
+    pub notes: Vec<i64>,
+    pub cards: Vec<i64>,
+}
+
+impl NewIds {
+    pub fn extend(&mut self, more: &NewIds) {
+        self.notes.extend_from_slice(&more.notes);
+        self.cards.extend_from_slice(&more.cards);
+    }
+}
+
+/// The Meguri actors of a mixed run (sync-ops.md S10.4): one session each,
+/// with its own random source (S2.5) and one clock they share, as every
+/// actor and the server share the scenario clock.
+pub(super) struct Actors<'a> {
+    executor: &'a MeguriExecutor,
+    raw_dump: RawDumpFn,
+    sessions: BTreeMap<ActorName, Session<'a>>,
+}
+
+impl MeguriExecutor {
+    /// Sessions for these actors of an actor scenario, at `clock.start`;
+    /// `unsupported_op` when Meguri cannot play actors.
+    pub(super) fn actors<'a>(
+        &'a self,
+        loaded: &'a LoadedScenario,
+        names: &[ActorName],
+    ) -> Result<Actors<'a>, ExecError> {
+        let raw_dump = self
+            .registry
+            .actor
+            .ok_or_else(|| ExecError::new("unsupported_op", "no adapter for op actor"))?;
+        let first = self.session(loaded, None)?;
+        let clock = Arc::clone(&first.clock);
+        let sessions = names
+            .iter()
+            .map(|name| {
+                let session = Session {
+                    scenario: loaded,
+                    clock: Arc::clone(&clock),
+                    random: Arc::new(SeededRandom::new(actor_seed(loaded, name.as_str()))),
+                    notes: Vec::new(),
+                    cards: Vec::new(),
+                    actor: None,
+                };
+                (name.clone(), session)
+            })
+            .collect();
+        Ok(Actors {
+            executor: self,
+            raw_dump,
+            sessions,
+        })
+    }
+}
+
+impl<'a> Actors<'a> {
+    fn session(&mut self, actor: &ActorName) -> Result<&mut Session<'a>, ExecError> {
+        self.sessions
+            .get_mut(actor)
+            .ok_or_else(|| ExecError::new("internal_error", format!("Meguri does not play {actor}")))
+    }
+
+    /// The actors, in name order.
+    pub(super) fn names(&self) -> Vec<ActorName> {
+        self.sessions.keys().cloned().collect()
+    }
+
+    /// Gives every actor its seat once the worker has reported the account.
+    pub(super) fn seat(&mut self, endpoint: Option<&str>, account: &SyncAccount) {
+        for (name, session) in &mut self.sessions {
+            session.actor = Some(Seat {
+                name: name.clone(),
+                endpoint: endpoint.map(str::to_owned),
+                account: account.clone(),
+            });
+        }
+    }
+
+    /// Runs the setup on this actor's new collection; the ids it created.
+    pub(super) fn setup(&mut self, actor: &ActorName) -> Result<NewIds, ExecError> {
+        let executor = self.executor;
+        let session = self.session(actor)?;
+        executor.run_setup(session)?;
+        Ok(NewIds {
+            notes: session.notes.clone(),
+            cards: session.cards.clone(),
+        })
+    }
+
+    /// Runs one step on this actor, with the scenario's id table so far (all
+    /// actors' ids, S2.4); its output and the ids it created.
+    pub(super) fn step(
+        &mut self,
+        actor: &ActorName,
+        step: &Step,
+        table: &NewIds,
+    ) -> Result<(Value, NewIds), ExecError> {
+        let executor = self.executor;
+        let session = self.session(actor)?;
+        session.notes.clone_from(&table.notes);
+        session.cards.clone_from(&table.cards);
+        let output = executor.step(session, step)?;
+        let created = NewIds {
+            notes: session.notes.get(table.notes.len()..).unwrap_or_default().to_vec(),
+            cards: session.cards.get(table.cards.len()..).unwrap_or_default().to_vec(),
+        };
+        Ok((output, created))
+    }
+
+    /// Applies `advance` or `set_clock` to the actors' shared clock.
+    pub(super) fn clock(&mut self, step: &Step) -> Result<(), ExecError> {
+        let executor = self.executor;
+        if let Some(session) = self.sessions.values_mut().next() {
+            executor.step(session, step)?;
+        }
+        Ok(())
+    }
+
+    /// This actor's raw dump (S7.2).
+    pub(super) fn raw_dump(&mut self, actor: &ActorName) -> Result<Value, ExecError> {
+        let raw_dump = self.raw_dump;
+        raw_dump(self.session(actor)?)
+    }
+}
+
 impl Default for MeguriExecutor {
     fn default() -> MeguriExecutor {
         MeguriExecutor::new()
@@ -272,6 +460,12 @@ impl Executor for MeguriExecutor {
     }
 
     fn run(&self, loaded: &LoadedScenario) -> Result<Value, ExecError> {
+        if loaded.scenario.has_actors() {
+            return Err(ExecError::new(
+                "invalid_scenario",
+                "actor scenarios run only in the parties executor (sync-ops.md S10.3; tools/mg conformance --live)",
+            ));
+        }
         let mut session = self.session(loaded, None)?;
         self.run_setup(&mut session)?;
         let outputs = self.run_steps(&mut session, 0..loaded.scenario.steps.len())?;

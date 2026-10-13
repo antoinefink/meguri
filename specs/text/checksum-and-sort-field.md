@@ -80,4 +80,4 @@ The editor's first-field checks (R807, R808; built in U191 and U27) use the comp
 - `fields/checksum` (covers AE34, checksum half): C1, C2 and C4 on the rows above.
 - `fields/sort-field`: the sort-field text for the C3 rows (the observation records the text; the stored type is C3's table).
 - `corpus/fields-*`: 48,000 distinct generated fields.
-- Observation functions (`specs/conformance/observations.md` O8): `sort_field` (C1 then C2) and `checksum` (C1 then C4), both with `normalize_note_text` on.
+- Observation functions (`specs/conformance/observations.md` O9): `sort_field` (C1 then C2) and `checksum` (C1 then C4), both with `normalize_note_text` on.

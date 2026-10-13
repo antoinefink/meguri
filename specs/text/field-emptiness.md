@@ -41,4 +41,4 @@ Card generation decides which templates produce cards (U27), the `{{#Field}}` an
 
 - `fields/empty`: the rows above and their neighbours.
 - `corpus/fields-*`: 48,000 distinct generated values, about 5% of them built only from whitespace and spacer tags.
-- Observation function (`specs/conformance/observations.md` O8): `field_empty`, which applies E2.
+- Observation function (`specs/conformance/observations.md` O9): `field_empty`, which applies E2.

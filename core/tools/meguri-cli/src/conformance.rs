@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use meguri_testkit::catalog::{self, Catalog, LiveReport};
+use meguri_testkit::exec::sync_guard::check_endpoint;
 use meguri_testkit::exec::{Executor, MeguriExecutor, OracleExecutor};
 use meguri_testkit::observe;
 use meguri_testkit::scenario::{self, ObservationKind, Setup, Step};
@@ -34,6 +35,10 @@ common options:
   --jobs N            oracle workers at once (default 12)
 
 exit status: 0 pass, 1 failures, 2 usage or setup errors";
+
+/// Why Meguri's executor alone does not run an actor scenario.
+const ACTOR_SCENARIO: &str =
+    "an actor scenario: only the parties executor runs it, in T1 (tools/mg conformance --live; sync-ops.md S10.3)";
 
 /// Changed values goldens-check prints per area and kind; the report has all.
 const SHOWN_CHANGES: usize = 20;
@@ -142,7 +147,21 @@ fn open_suite(options: &Options) -> Result<Suite, String> {
     Suite::open(&conformance_dir(options)?).map_err(|e| e.to_string())
 }
 
+/// The toxiproxy API the oracle workers get for actor scenarios
+/// (`ORACLE_SYNC_FAULTS`, which `tools/mg` also puts in the worker command),
+/// checked before any worker starts, since a worker connects to it when a
+/// session begins (sync-ops.md S8.3, R1876). Empty means none.
+fn check_sync_faults() -> Result<(), String> {
+    match std::env::var("ORACLE_SYNC_FAULTS") {
+        Ok(api) if !api.is_empty() => check_endpoint(&api)
+            .map(|_| ())
+            .map_err(|refused| format!("ORACLE_SYNC_FAULTS: {refused}")),
+        _ => Ok(()),
+    }
+}
+
 fn oracle(options: &Options) -> Result<OracleExecutor, String> {
+    check_sync_faults()?;
     let text = options
         .oracle_cmd
         .clone()
@@ -176,6 +195,7 @@ fn run(options: &Options) -> Result<i32, String> {
             oracle: &oracle,
             meguri: &meguri,
             handoff_root: options.handoff_dir.as_deref(),
+            meguri_edge: None,
         };
         let report = suite.run_live(&options.rest, &live, &lane);
         (report, oracle.hello())
@@ -214,6 +234,10 @@ fn single_scenario(options: &Options) -> Result<PathBuf, String> {
 fn exec(options: &Options) -> Result<i32, String> {
     let path = single_scenario(options)?;
     let loaded = scenario::load(&path).map_err(|e| e.to_string())?;
+    if loaded.scenario.has_actors() && !options.live {
+        eprintln!("{}: {}", loaded.scenario.id, ACTOR_SCENARIO);
+        return Ok(1);
+    }
     let result = if options.live {
         oracle(options)?.run(&loaded)
     } else {
@@ -248,6 +272,10 @@ fn diff(options: &Options) -> Result<i32, String> {
     }
     // Meguri against the live oracle, no golden involved.
     let loaded = scenario::load(&path).map_err(|e| e.to_string())?;
+    if loaded.scenario.has_actors() {
+        println!("{}: {}", loaded.scenario.id, ACTOR_SCENARIO);
+        return Ok(1);
+    }
     let missing = meguri.missing(&loaded.scenario.needs());
     if !missing.is_empty() {
         println!("{}: pending (needs {})", loaded.scenario.id, missing.summary());
