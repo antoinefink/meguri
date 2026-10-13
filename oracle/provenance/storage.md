@@ -1,0 +1,36 @@
+# Storage specs: open, schema 18, upgrade, storage ops (U22)
+
+Read at tag 26.09.3 (`refs/anki-26.09.3`) to write `specs/storage/schema-18.md`,
+`specs/storage/open-and-connections.md`, `specs/storage/schema-upgrade.md` and
+`specs/conformance/storage-ops.md`. No code was copied; the rules were
+re-derived in the spec writer's words and checked by black-box probes of the
+pinned `anki` wheel in the oracle image (new-collection objects, refusals of
+versions 10/12/13/19 with header bytes before and after, upgrade of a crafted
+schema-11 file run three times, collation order, read-only and immutable
+opens of WAL and hot-journal files, `VACUUM INTO` and `query_only`).
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| schema-18 S1, S2, S3 | `rslib/src/storage/schema11.sql`, `rslib/src/storage/upgrades/schema14_upgrade.sql`, `schema15_upgrade.sql`, `schema17_upgrade.sql`, `schema18_upgrade.sql` | table and index definitions; the stored text was taken from a probe of `sqlite_master`, normalized |
+| schema-18 S4 | `rslib/src/storage/sqlite.rs`, `Cargo.lock` (`unicase` 2.6.0) | the collation every connection registers |
+| schema-18 S5 | `rslib/src/storage/upgrades/schema15_upgrade.sql`, `rslib/src/storage/sqlite.rs` (create path, optimize) | where `ANALYZE` runs |
+| open C1, C2.2 | `rslib/src/storage/sqlite.rs`, `rslib/src/storage/upgrades/mod.rs`, `rslib/src/error/db.rs`, `rslib/src/config/mod.rs`, `pylib/anki/collection.py` | accepted and refused versions and their kinds; how the scheduler version is read and defaulted |
+| open C3 | `rslib/src/storage/sqlite.rs` | Anki sets journal mode before checking the version (probe confirmed the header change) |
+| open C4, C9 | `rslib/src/storage/sqlite.rs` | Anki's pragmas (exclusive locking, WAL, busy timeout 0, page size, cache size, statement cache) and that it never sets `fullfsync` |
+| open C7, C10 | `rslib/src/storage/sqlite.rs`, `rslib/src/collection/mod.rs`, `rslib/src/backend/collection.rs` | Anki's TRUNCATE checkpoint and its close |
+| open C2.6 | `rslib/src/collection/mod.rs`, `rslib/src/sync/collection/upload.rs`, `download.rs` | integrity checks only on full-sync staging files |
+| upgrade U1, U3 | `rslib/src/storage/upgrades/mod.rs`, `rslib/src/storage/sqlite.rs` | step order, one exclusive transaction for the whole upgrade |
+| upgrade U4 | `rslib/src/storage/deckconfig/mod.rs` (`add.sql`), `rslib/src/storage/config/mod.rs` (`add.sql`), `rslib/src/storage/tag/mod.rs`, `Cargo.lock` (`serde_json` without `preserve_order`) | presets, config and tags moved out of `col`; key taken over the inner id; insert-or-ignore of tags; compact JSON with sorted members |
+| upgrade U5, U6 | `rslib/src/storage/notetype/mod.rs`, `rslib/src/notetype/mod.rs`, `rslib/src/notetype/schema11.rs`, `rslib/src/text.rs` | id-0 replacement, NFC names, `+` and `_` suffixes, row ords from list positions, template stamps 0, member name versus inner id |
+| upgrade U7 | `rslib/src/storage/deck/mod.rs`, `rslib/src/decks/name.rs`, `rslib/src/decks/schema11.rs`, `rslib/src/decks/mod.rs` | name component normalization, modified stamp on rename, `_` suffix, insert-or-replace by id, id 0 refused |
+| upgrade U8, U13 | `rslib/src/storage/deckconfig/mod.rs`, `rslib/src/storage/card/mod.rs` (`fix_low_ease.sql`), `rslib/src/deckconfig/schema11.rs` at 26.09.3, 2.1.33 and 2.1.34 | ease ×100 at 15, ÷100 and the 1.3 reset at 16, the card factor fix by `did`/`odid`, no clamping in that read |
+| upgrade U9.1 | `rslib/src/storage/sync.rs` | client usn −1 |
+| upgrade U11 | `rslib/src/storage/notetype/mod.rs`, `rslib/src/storage/deck/mod.rs`, `rslib/src/storage/tag/mod.rs`, `rslib/src/notetype/schema11.rs`, `rslib/src/deckconfig/schema11.rs` | hash-map iteration order and hash-map `other` serialization (probe: three runs gave three different outcomes) |
+| upgrade U14, U15 | `rslib/src/storage/tag/mod.rs`, `rslib/src/tags/mod.rs`, `rslib/src/storage/upgrades/schema17_upgrade.sql`, `schema18_upgrade.sql` | tags rebuilt collapsed; graves deduplicated with insert-or-ignore |
+| upgrade U16 (releases) | `rslib/src/storage/upgrades/mod.rs` and `rslib/src/storage/sqlite.rs` at tags 2.1.24 to 2.1.50, `pylib/anki/collection.py` at 2.1.26 to 2.1.44 | which releases write which schema; `close(downgrade=False)` keeps it |
+| storage-ops P1 | `pylib/anki/collection.py` (`__init__`, `_load_scheduler`) | the Python layer's `creationOffset` write on open |
+| storage-ops P2 | `rslib/src/backend/dbproxy.rs` | how the driver's SQL reaches Anki's connection |
+
+The deck-config reserved field numbers of `proto/anki/deck_config.proto` at
+26.09.3 were compared with `proto/backend.proto` at 2.1.33 to confirm that the
+schema-16 rewrite of a schema-15 preset drops no field.

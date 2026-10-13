@@ -2,4 +2,11 @@
 # schema/deviations.schema.json). The runner applies only the transforms listed
 # here; any other difference from a golden fails. Every entry names the
 # requirement and a scenario or test that asserts Meguri's own behavior.
-deviations: []
+deviations:
+  - id: storage-v1-scheduler-refused
+    requirement: R1482
+    summary: Meguri refuses to open a collection still on the v1 scheduler (specs/storage/open-and-connections.md C2.2); Anki opens it and upgrades the scheduler in place.
+    test: core/crates/meguri-storage/tests/open_refuse.rs v1_scheduler_refused_and_untouched
+    scenarios: [storage/open/v1-scheduler]
+    pointer: /steps/*
+    transform: {replace: {open: {error: v1_scheduler}}}

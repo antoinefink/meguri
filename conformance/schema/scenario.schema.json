@@ -213,7 +213,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -222,6 +222,7 @@
           "properties": {
             "ids": { "type": "array", "items": { "type": "string", "pattern": "^#[nc][1-9][0-9]*$" } },
             "timing": { "type": "null" },
+            "schema_objects": { "description": "storage-ops.md P3.", "type": "null" },
             "card": { "$ref": "#/$defs/card_refs" },
             "revlog": { "$ref": "#/$defs/card_refs" },
             "next_states": { "$ref": "#/$defs/card_refs" },
@@ -299,6 +300,15 @@
             "card": { "$ref": "#/$defs/card_ref" },
             "rating": { "enum": ["again", "hard", "good", "easy"] },
             "time_ms": { "$ref": "#/$defs/uint" }
+          }
+        },
+        "open": {
+          "description": "Draft (storage-ops.md P1): replace the collection with a copy of conformance/fixtures/<fixture> and open it. Only in scenarios with no setup whose first step is open (checked when the scenario loads).",
+          "type": "object",
+          "required": ["fixture"],
+          "additionalProperties": false,
+          "properties": {
+            "fixture": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*\\.anki2$" }
           }
         },
         "observe": { "type": "array", "items": { "$ref": "#/$defs/observation_request" } },

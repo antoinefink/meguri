@@ -1,0 +1,11 @@
+# specs/storage/schema-upgrade.md U1; specs/storage/open-and-connections.md C2.6.
+# Control: a file already at 18 opens without any change.
+id: storage/upgrade/at-18
+description: A collection at schema 18 opens with nothing to upgrade and nothing changed.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "SELECT ver, crt, mod, scm, dty, usn, ls, conf, models, decks, dconf, tags FROM col"}
+  - db_exec: {sql: "PRAGMA journal_mode"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'meguriFixture'"}
+  - observe: [schema_objects, db_dump]

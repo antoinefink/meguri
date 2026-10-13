@@ -1,0 +1,74 @@
+# Interface names the storage specs use that are not ordinary words: the
+# collection file name, table, column and index names of schemas 11 to 18,
+# the collation, the config keys the open gate and the upgrade read, the
+# schema-11 JSON members the upgrade moves, the preset protobuf field it
+# scales, and SQLite's pragmas and objects the specs name. Short or ordinary
+# names (col, ver, notes, cards, config, kind, ...) stay unmasked.
+collection.anki2
+crt
+scm
+dty
+dconf
+guid
+mid
+flds
+sfld
+csum
+nid
+did
+odid
+odue
+ivl
+cid
+lastIvl
+revlog
+graves
+graves_old
+oid
+deck_config
+mtime_secs
+notetypes
+ntid
+ix_notes_usn
+ix_cards_usn
+ix_revlog_usn
+ix_cards_nid
+ix_cards_sched
+ix_revlog_cid
+ix_notes_csum
+idx_fields_name_ntid
+idx_templates_name_ntid
+idx_templates_usn
+idx_notetypes_name
+idx_notetypes_usn
+idx_decks_name
+idx_notes_mid
+idx_cards_odid
+idx_graves_pending
+unicase
+schedVer
+sched2021
+creationOffset
+initialFactor
+initial_ease
+tmpls
+sqlite_master
+sqlite_stat1
+sqlite_stat4
+sqlite_sequence
+sqlite_autoindex
+tbl_name
+journal_mode
+locking_mode
+busy_timeout
+page_size
+cache_size
+temp_store
+fullfsync
+checkpoint_fullfsync
+wal_autocheckpoint
+wal_checkpoint
+query_only
+integrity_check
+foreign_keys
+rowid

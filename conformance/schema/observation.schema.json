@@ -27,6 +27,45 @@
             "cards": { "type": "array", "items": { "$ref": "#/$defs/card_key" } }
           }
         },
+        "open": {
+          "description": "storage-ops.md P1.2: a successful open records {}, so this member holds only a rejection.",
+          "allOf": [
+            { "$ref": "#/$defs/rejection" },
+            { "properties": { "error": { "enum": ["file_too_old", "file_too_new", "v1_scheduler"] } } }
+          ]
+        },
+        "db_exec": {
+          "description": "storage-ops.md P2.2 and P2.3.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["rows"],
+              "additionalProperties": false,
+              "properties": { "rows": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/sql_value" } } } }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["unique_violation", "constraint_violation"] } } }
+              ]
+            }
+          ]
+        },
+        "schema_objects": {
+          "description": "storage-ops.md P3: sqlite_master rows sorted by type, then name; sql normalized.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "name", "tbl_name", "sql"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "enum": ["table", "index", "view", "trigger"] },
+              "name": { "type": "string" },
+              "tbl_name": { "type": "string" },
+              "sql": { "type": ["string", "null"] }
+            }
+          }
+        },
         "ids": {
           "type": "object",
           "propertyNames": { "pattern": "^#[nc][1-9][0-9]*$" },
@@ -85,6 +124,18 @@
           "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
         }
       }
+    },
+    "sql_value": {
+      "description": "A value by SQLite storage class (storage-ops.md P2.2): INTEGER integer, REAL number, TEXT string, NULL null, BLOB {sha256}.",
+      "anyOf": [
+        { "type": ["integer", "number", "string", "null"] },
+        {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+        }
+      ]
     },
     "rejection": {
       "description": "An op Anki refused (dsl.md D7.3). An op whose D7.2 row lists rejection kinds takes anyOf [its output, this with error restricted to those kinds]; the others record none.",
