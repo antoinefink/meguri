@@ -155,13 +155,16 @@ mg_oracle__lock() {
 }
 
 # mg_oracle__harness <tag> <context> <goldens dir> harness args...: record or compare
-# with conformance/scenarios read-only, goldens and the run directory writable.
+# with conformance/scenarios and conformance/fixtures read-only (workers find
+# fixtures at $ORACLE_FIXTURES, storage-ops.md P1.4), goldens and the run
+# directory writable.
 mg_oracle__harness() {
   local tag="$1" ctx="$2" goldens="$3"
   shift 3
-  mkdir -p "$goldens"
+  mkdir -p "$goldens" "$MG_ROOT/conformance/fixtures"
   mg_oracle__run "$tag" "$ctx" -u "$(id -u):$(id -g)" \
     -v "$MG_ROOT/conformance/scenarios:/in/scenarios:ro" \
+    -v "$MG_ROOT/conformance/fixtures:/in/fixtures:ro" -e ORACLE_FIXTURES=/in/fixtures \
     -v "$goldens:/in/goldens" \
     -v "$MG_RUN_DIR:/out" \
     oracle harness "$@" </dev/null

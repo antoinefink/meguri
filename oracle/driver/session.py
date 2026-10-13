@@ -15,6 +15,10 @@ A segment of a live chain (dsl.md D9.2) starts from a handoff instead of the
 setup: the handed session directory is copied into scratch and opened at the
 handed clock and ids. `hand_off` closes the collection and copies the session
 directory into the handoff directory for the other side.
+
+A scenario whose first step is `open` (storage-ops.md P1.3) has no setup and
+starts with no collection: the open brings it. After an open the op refused,
+no collection is open and only another open may run.
 """
 
 from __future__ import annotations
@@ -103,6 +107,19 @@ def parse_observation(spec: Any) -> tuple[str, Any]:
     raise invalid("an observation is a string or a mapping with one key")
 
 
+def _opens_first(scenario: dict) -> bool:
+    """True for a scenario that opens a fixture: it has no setup and its first
+    step is open (storage-ops.md P1.3); invalid_scenario for an open anywhere
+    else."""
+    steps = scenario.get("steps", [])
+    opens = [i for i, step in enumerate(steps) if isinstance(step, dict) and "open" in step]
+    if not opens:
+        return False
+    if opens[0] != 0 or scenario.get("setup"):
+        raise invalid("a scenario with an open step has no setup and opens first", step=opens[0])
+    return True
+
+
 def check_state(state: Any) -> dict:
     """A handoff state (protocol.json handoff_state)."""
     ints = lambda v: isinstance(v, list) and all(isinstance(x, int) and not isinstance(x, bool) for x in v)  # noqa: E731
@@ -144,6 +161,7 @@ class Session:
     ) -> None:
         check_scenario(scenario)
         _check_steps(scenario.get("steps", []))
+        opens_first = _opens_first(scenario)
         self.scenario = scenario
         self.tz = zone(scenario["clock"]["tz"])
         if self.tz.key != worker_tz:
@@ -170,7 +188,7 @@ class Session:
                 shutil.copytree(source, self.dir, dirs_exist_ok=True)
                 self.col = Collection(self.path)
                 self._names_from_collection(scenario.get("setup", {}))
-            else:
+            elif not opens_first:
                 self.col = Collection(self.path)
                 self._guard(None, "setup", lambda: self._setup(scenario.get("setup", {})))
         except BaseException:
@@ -198,6 +216,12 @@ class Session:
         for conf in col.decks.all_config():
             self.presets[conf["name"]] = conf["id"]
 
+    def close_collection(self) -> None:
+        """Close the open collection, if any, without the downgrade."""
+        col, self.col = self.col, None
+        if col is not None:
+            col.close(downgrade=False)
+
     def reopen(self) -> None:
         """Close the collection and open it again from its file (a handoff
         within one run)."""
@@ -209,6 +233,8 @@ class Session:
         """Close the collection and copy the session directory to rel under
         the handoff directory; the state the other side resumes from."""
         dest = handoff_path(root, rel)
+        if self.col is None:
+            raise invalid("no collection is open to hand over; after a refused open only another open may run")
         if os.path.exists(dest):
             raise DriverError("handoff_error", detail="the handoff directory already exists")
         try:
@@ -234,6 +260,8 @@ class Session:
         if not isinstance(step, dict) or len(step) != 1:
             raise invalid("a step is a mapping with one key", step=index)
         ((name, args),) = step.items()
+        if self.col is None and name != "open":
+            raise invalid("no collection is open; after a refused open only another open may run", step=index)
         if name == "observe":
             out = self._guard(index, "observe", lambda: self._observe(index, args))
         else:

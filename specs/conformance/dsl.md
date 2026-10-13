@@ -135,7 +135,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `set_clock` | date-time | none | stable |
 | `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
 | `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing | none | stable |
-| `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | draft (storage) |
+| `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
 | `observe` | list of observation requests (`observations.md` O2) | `{<kind>: <value>, ...}` | stable |
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field), `tags` replaces all tags | none | draft (notes) |
 | `delete_notes` | `{notes: [#nN, ...]}` | none | draft (notes) |
