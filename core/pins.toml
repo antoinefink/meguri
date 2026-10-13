@@ -47,25 +47,25 @@ why = "the rand fsrs 6.6.2 uses in the oracle's graph"
 
 [[pin]]
 crate = "regex"
-pending = true
+version = "1.11.2"
 why = "re: search syntax and case folding (R1041, R1202)"
 
 [[pin]]
 crate = "unicode-normalization"
-pending = true
+version = "0.1.24"
 why = "NFC, and NFKD for nc: searches"
 
 [[pin]]
 crate = "sha1"
-pending = true
+version = "0.10.6"
 why = "csum and media checksums"
 
 [[pin]]
 crate = "blake3"
-pending = true
+version = "1.8.2"
 why = "hint: ids (U60)"
 
 [[pin]]
 crate = "difflib"
-pending = true
+version = "0.4.0"
 why = "type-in answer diff (U64)"

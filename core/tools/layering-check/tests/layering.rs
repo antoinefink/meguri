@@ -492,6 +492,23 @@ fn a_raw_open_call_outside_host_fails_with_its_location() {
 }
 
 #[test]
+fn a_raw_identifier_spelling_of_raw_open_fails() {
+    let fx = Fixture::new();
+    fx.write(
+        "ws/crates/meguri-testkit/src/lib.rs",
+        "pub fn run(dir: &str) {\n    meguri_engine::r#open_raw(dir);\n}\n",
+    );
+    fx.write("ws/crates/meguri-engine/src/lib.rs", "pub fn open_raw(_dir: &str) {}\n");
+
+    let run = fx.run();
+    assert_eq!(run.code, 1, "{}", run.stderr);
+    assert_eq!(
+        run.rules(),
+        [("raw-open".to_owned(), "meguri-testkit:src/lib.rs:2".to_owned())]
+    );
+}
+
+#[test]
 fn human_output_names_each_violation_and_exits_non_zero() {
     let fx = Fixture::new();
     fx.depend("meguri-sched", "meguri-engine");

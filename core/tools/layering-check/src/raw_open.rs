@@ -88,11 +88,16 @@ fn ident_lines(text: &str, ident: &str) -> Vec<usize> {
 fn walk(tokens: TokenStream, ident: &str, lines: &mut Vec<usize>) {
     for token in tokens {
         match token {
-            TokenTree::Ident(i) if i == ident => lines.push(i.span().start().line),
+            TokenTree::Ident(i) if unraw(&i.to_string()) == ident => lines.push(i.span().start().line),
             TokenTree::Group(g) => walk(g.stream(), ident, lines),
             _ => {}
         }
     }
+}
+
+/// An identifier without its raw prefix: `r#open_raw` names `open_raw`.
+fn unraw(ident: &str) -> &str {
+    ident.strip_prefix("r#").unwrap_or(ident)
 }
 
 fn contains_word(line: &str, word: &str) -> bool {

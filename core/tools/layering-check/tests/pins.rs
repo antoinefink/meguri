@@ -62,18 +62,20 @@ fn add_lock_package(lock: &str, name: &str, version: &str) -> String {
     )
 }
 
+/// Adds a `pending = true` pin for `name` to pins.toml.
+fn add_pending_pin(pins: &str, name: &str) -> String {
+    format!("{pins}\n[[pin]]\ncrate = \"{name}\"\npending = true\nwhy = \"a seeded pending pin\"\n")
+}
+
 fn messages(report: &PinReport) -> String {
     report.violations.iter().map(|v| format!("{v}\n")).collect()
 }
 
 #[test]
-fn the_real_files_pass_and_list_the_pending_pins() {
+fn the_real_files_pass_with_no_pending_pins() {
     let report = Files::real().check();
     assert!(report.violations.is_empty(), "{}", messages(&report));
-    assert_eq!(
-        report.pending,
-        ["regex", "unicode-normalization", "sha1", "blake3", "difflib"]
-    );
+    assert!(report.pending.is_empty(), "{:?}", report.pending);
 }
 
 #[test]
@@ -228,32 +230,31 @@ fn a_second_unpinned_version_of_a_parity_crate_in_a_workspace_crate_fails() {
 #[test]
 fn a_pending_pin_in_the_workspace_dependencies_fails() {
     let mut files = Files::real();
-    files.manifest = files.manifest.replace(
-        "[workspace.dependencies]\n",
-        "[workspace.dependencies]\nregex = \"1\"\n",
-    );
+    files.pins = add_pending_pin(&files.pins, "csv");
+    files.manifest = files
+        .manifest
+        .replace("[workspace.dependencies]\n", "[workspace.dependencies]\ncsv = \"1\"\n");
 
     let report = files.check();
     let text = messages(&report);
     assert_eq!(report.violations.len(), 1, "{text}");
     assert_eq!(report.violations[0].rule, Rule::PendingPin);
-    assert!(text.contains("regex has no oracle version in pins.toml yet"), "{text}");
+    assert!(text.contains("csv has no oracle version in pins.toml yet"), "{text}");
+    assert_eq!(report.pending, ["csv"]);
 }
 
 #[test]
 fn a_workspace_crate_depending_on_a_pending_pin_fails() {
     let mut files = Files::real();
-    // A member that depends on sha1 directly, however it declares it.
-    files.lock = files.lock.replace(
-        "name = \"meguri-template\"\nversion = \"0.0.0\"\n",
-        "name = \"meguri-template\"\nversion = \"0.0.0\"\ndependencies = [\n \"sha1\",\n]\n",
-    );
+    files.pins = add_pending_pin(&files.pins, "csv");
+    // A member that depends on csv directly, however it declares it.
+    files.lock = add_lock_dependency(&files.lock, "meguri-template", "csv");
 
     let report = files.check();
     let text = messages(&report);
     assert_eq!(report.violations.len(), 1, "{text}");
     assert_eq!(report.violations[0].rule, Rule::PendingPin);
-    assert!(text.contains("meguri-template depends on sha1"), "{text}");
+    assert!(text.contains("meguri-template depends on csv"), "{text}");
 }
 
 #[test]

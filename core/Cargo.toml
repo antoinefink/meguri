@@ -13,10 +13,15 @@ publish = false
 # Parity pins (KTD2, R2027): exact versions from the oracle's lockfile, recorded
 # with their provenance in pins.toml. Change them only with an oracle re-pin;
 # the pin canary (tools/layering-check/tests/canary_pins.rs) fails otherwise.
+blake3 = "=1.8.2"
+difflib = "=0.4.0"
 fsrs = "=6.6.2"
 htmlescape = "=0.3.1"
 rand = "=0.9.4"
+regex = "=1.11.2"
+sha1 = "=0.10.6"
 unicase = "=2.6.0"
+unicode-normalization = "=0.1.24"
 
 # Meguri crates. The allowed edges between them are tools/layering-check/edges.toml.
 meguri-engine = { path = "crates/meguri-engine" }
