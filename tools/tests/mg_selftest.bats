@@ -786,6 +786,18 @@ EOF
     = '[{"code":"unsound","crate":"ppv-lite86","id":"RUSTSEC-2026-9001"}]' ]
 }
 
+# --- bridge ----------------------------------------------------------------
+
+@test "swift-test --package without a name stops with a usage error" {
+  # timeout exits 124 if the job is still parsing its arguments.
+  run --separate-stderr timeout 20 "$SB/tools/mg" swift-test --package
+  result="${lines[${#lines[@]} - 1]:-}"
+  [ "$status" -eq 2 ] || { echo "exit $status; stderr: $stderr"; return 1; }
+  [ "$(field .status)" = error ]
+  [ "$(failure_ids)" = usage ]
+  validate "$result"
+}
+
 # --- images ----------------------------------------------------------------
 
 @test "dev-image reports an error when image inspection fails or returns an empty ID" {

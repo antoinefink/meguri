@@ -5,7 +5,7 @@ mg_job selftest docker:dev mg_selftest \
 mg_job selftest-host host mg_selftest_host \
   "tools/mg host self-tests: macOS bash, real doctor, Docker placement, image rebuild (tools/tests/mg_host_selftest.sh)"
 mg_job selftest-xcframework host mg_selftest_xcframework \
-  "build-core-xcframework.sh self-tests in a sandbox copy: no-change skip, compare-before-replace, device pre-action and link, symbol-set check, AppStore features"
+  "build-core-xcframework.sh self-tests in a sandbox copy: no-change skip, input hashing, compare-before-replace, device pre-action and link, symbol and bindings checks, failed replace, AppStore features, concurrent runs"
 
 # mg_tap_report <tap file> <test-runner rc> <repro prefix>
 # Records counts and one failure per `not ok` line. With a repro prefix, a

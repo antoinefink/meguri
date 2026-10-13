@@ -39,13 +39,21 @@ mg_core_xcframework() {
 
 # tools/mg swift-test [--package NAME] [-- swift test args]
 mg_swift_test() {
-  local package=MeguriCore
+  local package=MeguriCore usage="usage: tools/mg swift-test [--package NAME] [-- swift test args]"
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --package) package="${2:-}" && shift 2 ;;
+      --package)
+        if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+          mg_failure usage "--package needs a package name; $usage" "tools/mg swift-test"
+          mg_status error
+          return 0
+        fi
+        package="$2"
+        shift 2
+        ;;
       --) shift && break ;;
       *)
-        mg_failure usage "unknown argument '$1'; usage: tools/mg swift-test [--package NAME] [-- swift test args]" "tools/mg swift-test"
+        mg_failure usage "unknown argument '$1'; $usage" "tools/mg swift-test"
         mg_status error
         return 0
         ;;
