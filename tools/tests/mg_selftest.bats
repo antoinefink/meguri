@@ -177,6 +177,43 @@ write_workspace() {
   printf '[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n' >"$SB/core/Cargo.toml"
 }
 
+write_file() { # write_file <path under the sandbox> <contents>
+  mkdir -p "$(dirname "$SB/$1")"
+  printf '%s\n' "$2" >"$SB/$1"
+}
+
+# copy_core: the real core/ workspace (without build output) in the sandbox,
+# with its crates.io dependencies in CARGO_HOME. Fetching is a no-op once the
+# shared cargo home has them. Builds share one target directory per file.
+copy_core() {
+  rm -rf "$SB/core"
+  (cd "$REPO_ROOT" && tar cf - --exclude=core/target core) | (cd "$SB" && tar xf -)
+  CARGO_NET_OFFLINE=false cargo fetch --locked --manifest-path "$SB/core/Cargo.toml" >&2
+  export CARGO_TARGET_DIR="$BATS_FILE_TMPDIR/core-target"
+}
+
+# vendor_crate <name> <license>: a stand-in for a crates.io crate, outside the workspace.
+vendor_crate() {
+  write_file "vendor/$1/Cargo.toml" "[package]
+name = \"$1\"
+version = \"0.1.0\"
+edition = \"2024\"
+license = \"$2\""
+  write_file "vendor/$1/src/lib.rs" ""
+}
+
+# add_dep <crate dir under core/> <dependency line>: under [dependencies].
+add_dep() {
+  local manifest="$SB/core/$1/Cargo.toml"
+  if grep -q '^\[dependencies\]$' "$manifest"; then
+    sed -i "/^\[dependencies\]\$/a $2" "$manifest"
+  else
+    printf '\n[dependencies]\n%s\n' "$2" >>"$manifest"
+  fi
+}
+
+failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
+
 # --- dispatcher ------------------------------------------------------------
 
 @test "unknown job exits non-zero with an error result listing the known jobs" {
@@ -196,7 +233,7 @@ write_workspace() {
   run "$SB/tools/mg" --list
   [ "$status" -eq 0 ]
   local listing="$output" name placement _desc expected
-  for expected in doctor core-test selftest selftest-host dev-image; do
+  for expected in doctor core-test core-lint core-deny selftest selftest-host dev-image; do
     cut -f1 <<<"$listing" | grep -qx "$expected"
   done
   local results=()
@@ -581,6 +618,110 @@ mod tests {
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [[ "$(field '.failures[0].id')" == nextest-exit-* ]]
+  validate "$result"
+}
+
+@test "core-test runs canary_* test binaries first, alone, and stops when one fails" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn unit_breaks() { panic!("unit test ran"); } }'
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_drifted() { panic!("pin drifted"); }
+#[test] fn pin_held() {}'
+  write_file core/crates/fx/tests/other.rs '#[test] fn other_breaks() { panic!("other test ran"); }'
+  mg core-test
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(failure_ids)" = 'fx::canary_pins$pin_drifted' ]
+  [[ "$(field '.failures[0].message')" == *"pin drifted"* ]]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-test -- -E 'package(fx) & test(=pin_drifted)'" ]
+  [ "$(field -c .summary)" = '{"total":2,"passed":1,"failed":1,"skipped":0}' ]
+  [[ "$(field .message)" == *canary* ]]
+  jq -e '[.artifacts[] | select(.kind == "nextest-canary-jsonl")] | length == 1' "$result"
+  validate "$result"
+}
+
+@test "core-test runs the other tests once the canaries pass, each test once" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn unit() {} }'
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  write_file core/crates/fx/tests/other.rs '#[test] fn other_breaks() { panic!("other test ran"); }'
+  mg core-test
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = 'fx::other$other_breaks' ]
+  [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
+  validate "$result"
+}
+
+# --- core-lint and core-deny on a copy of the real workspace -----------------
+
+@test "core-lint and core-deny pass without a Cargo workspace" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  mg core-lint
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  validate "$result"
+  mg core-deny
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  validate "$result"
+}
+
+@test "core-lint fails naming the forbidden edges: tokio in sched, engine in sched, stats in package" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  copy_core
+  vendor_crate tokio MIT
+  add_dep crates/meguri-sched 'tokio = { path = "../../../vendor/tokio" }'
+  add_dep crates/meguri-sched 'meguri-engine.workspace = true'
+  add_dep crates/meguri-package 'meguri-stats.workspace = true'
+  mg core-lint
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(failure_ids)" = "layering/edge/meguri-package -> meguri-stats
+layering/edge/meguri-sched -> meguri-engine
+layering/restricted/meguri-sched -> tokio" ]
+  local m
+  m="$(jq -r '.failures[] | select(.id == "layering/restricted/meguri-sched -> tokio") | .message' "$result")"
+  [[ "$m" == *"meguri-sched depends on tokio"* ]]
+  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-sched -> meguri-engine") | .message' "$result")"
+  [[ "$m" == *"edges.toml row 6"*"(row 7)"* ]]
+  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-package -> meguri-stats") | .message' "$result")"
+  [[ "$m" == *"edges.toml row 8"*"(row 8)"*siblings* ]]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-lint" ]
+  [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
+  validate "$result"
+}
+
+@test "core-lint reports SystemTime::now outside the clock module and unformatted code" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  copy_core
+  printf '%s\n' '' 'pub fn stamp() -> std::time::SystemTime {' '    std::time::SystemTime::now()' '}' \
+    >>"$SB/core/crates/meguri-text/src/lib.rs"
+  printf '%s\n' 'pub fn  spaced ( ) { }' >>"$SB/core/crates/meguri-search/src/lib.rs"
+  mg core-lint
+  [ "$status" -eq 1 ]
+  local ids
+  ids="$(failure_ids)"
+  [[ "$ids" == *"clippy/clippy::disallowed_methods/crates/meguri-text/src/lib.rs:"* ]]
+  [[ "$ids" == *"fmt/crates/meguri-search/src/lib.rs"* ]]
+  [ "$(field '.failures | length')" -eq 2 ]
+  [[ "$(jq -r '.failures[] | select(.id | startswith("clippy/")) | .message' "$result")" == *"std::time::SystemTime::now"* ]]
+  validate "$result"
+}
+
+@test "core-deny fails naming the crate and license when a GPL-3.0 crate joins the graph" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  copy_core
+  mg core-deny -- licenses
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  vendor_crate gpl-fixture GPL-3.0-only
+  add_dep crates/meguri-template 'gpl-fixture = { path = "../../../vendor/gpl-fixture" }'
+  mg core-deny -- licenses
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(failure_ids)" = "deny/rejected/gpl-fixture@0.1.0" ]
+  [[ "$(field '.failures[0].message')" == *"gpl-fixture@0.1.0"*"GPL-3.0-only"* ]]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-deny -- licenses" ]
   validate "$result"
 }
 
