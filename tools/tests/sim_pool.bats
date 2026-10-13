@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
-# Self-tests for the shared simulator pool, tools/scripts/sim-pool.sh,
-# against a fake `xcrun simctl` (sim_pool_fake_xcrun.sh).
+# Self-tests for the shared simulator pool: tools/scripts/sim-pool.sh and
+# `tools/mg sim`, against a fake `xcrun simctl` (sim_pool_fake_xcrun.sh).
 # No real simulator is involved; the pool and device directories are
 # per-test temporary directories.
 
@@ -11,6 +11,16 @@ IPHONE_TYPE=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro
 IPAD_TYPE=com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB
 RT27=com.apple.CoreSimulator.SimRuntime.iOS-27-0
 RT18=com.apple.CoreSimulator.SimRuntime.iOS-18-2
+
+setup_file() {
+  local t="$BATS_FILE_TMPDIR/template"
+  mkdir -p "$t"
+  cp -R "$REPO_ROOT/tools" "$t/tools"
+  cp "$REPO_ROOT/.gitignore" "$t/"
+  git -C "$t" init -q
+  git -C "$t" add -A
+  git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template
+}
 
 setup() {
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
@@ -338,4 +348,94 @@ assert_pool_devices_untouched() {
   [ "$(count_calls '^xcrun simctl (shutdown|delete) ')" -eq 3 ]
   [ "$(jq -r '[.devices[].name] | sort | join(",")' "$FAKE_SIM_DB")" = "Meguri-Pool-ipad-7,Meguri-Pool-iphone-1,Meguri-U7-visual3-iphone,Meguri-leased-elsewhere,iPhone 18 Pro" ]
   [ ! -e "$MEGURI_SIM_DEVICES_DIR/$check" ]
+}
+
+# --- tools/mg sim -----------------------------------------------------------
+
+mg() {
+  run --separate-stderr "$SB/tools/mg" "$@"
+  result="${lines[${#lines[@]} - 1]:-}"
+}
+field() { jq -r "$@" "$result"; }
+
+mg_sandbox() {
+  SB="$BATS_TEST_TMPDIR/repo"
+  cp -R "$BATS_FILE_TMPDIR/template" "$SB"
+}
+
+@test "tools/mg sim acquire records the UDID and lease in details; release and status work" {
+  mg_sandbox
+  mg sim acquire iphone --holder mg-test
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  local u
+  u="$(field .details.udid)"
+  [ "$(jq -r '.devices[0].udid' "$FAKE_SIM_DB")" = "$u" ]
+  [ "$(field .details.lease.holder)" = mg-test ]
+  [ "$(field .details.lease.worktree)" = "$(cd "$SB" && pwd -P)" ]
+  [ "$(field .details.device.name)" = Meguri-Pool-iphone-1 ]
+  [ "$(field .details.device.state)" = Booted ]
+  [ "$(field .status)" = pass ]
+  [[ "$(field .message)" == *"Meguri-Pool-iphone-1"* ]]
+  python3 "$SB/tools/tests/validate_result.py" "$result"
+
+  mg sim renew "$u" --ttl-min 120
+  [ "$status" -eq 0 ]
+  [ "$(field .details.lease.ttl_min)" = 120 ]
+
+  mg sim status
+  [ "$status" -eq 0 ]
+  [ "$(field '.details.devices[0].leased')" = true ]
+
+  mg sim release "$u"
+  [ "$status" -eq 0 ]
+  [ "$(field .details.udid)" = "$u" ]
+  [ "$(field .details.released)" = true ]
+  [ "$(sim __state "$u")" = Booted ]
+  python3 "$SB/tools/tests/validate_result.py" "$result"
+
+  mg sim gc --list
+  [ "$status" -eq 0 ]
+  [ "$(field .details.list_only)" = true ]
+  assert_pool_devices_untouched
+}
+
+@test "tools/mg sim acquire at the cap is an error once the wait runs out" {
+  mg_sandbox
+  export MEGURI_SIM_POOL_MAX=1
+  mg sim acquire ipad
+  [ "$status" -eq 0 ]
+  mg sim acquire ipad
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = pool-busy ]
+  [ "$(field '.details.udid')" = null ]
+}
+
+@test "tools/mg sim usage errors are errors with a usage failure" {
+  mg_sandbox
+  mg sim
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  mg sim acquire phone
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "tools/mg sim --dry-run touches no simulator and no lease" {
+  mg_sandbox
+  local u
+  u="$(sim __add Meguri-check-1-iPhone17Pro Booted)"
+  age "$u"
+  local args
+  for args in "acquire iphone" "renew $u" "release $u" "status" "gc" "gc --older-than-hours 0"; do
+    # shellcheck disable=SC2086 # one argument per word
+    mg sim $args --dry-run
+    [ "$status" -eq 0 ]
+    [ "$(field .dry_run)" = true ]
+  done
+  [ ! -s "$STUB_LOG" ]
+  [ ! -e "$MEGURI_SIM_POOL_DIR" ]
+  [ "$(jq '.devices | length' "$FAKE_SIM_DB")" -eq 1 ]
 }
