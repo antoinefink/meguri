@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/golden.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D11. Written only by tools/mg oracle record.",
+  "title": "Meguri conformance golden",
+  "type": "object",
+  "required": ["scenario_id", "scenario_sha256", "oracle", "tz", "clock", "observations"],
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": { "type": "string" },
+    "scenario_sha256": { "$ref": "#/$defs/sha256" },
+    "oracle": {
+      "type": "object",
+      "required": ["anki_version", "lock_sha256", "driver_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "anki_version": { "type": "string" },
+        "lock_sha256": { "$ref": "#/$defs/sha256" },
+        "driver_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "tz": { "type": "string" },
+    "clock": {
+      "type": "object",
+      "required": ["start", "mode"],
+      "additionalProperties": false,
+      "properties": {
+        "start": { "type": "string" },
+        "mode": { "enum": ["frozen", "step"] }
+      }
+    },
+    "observations": { "$ref": "observation.schema.json" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

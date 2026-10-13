@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/area.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D9. File: conformance/scenarios/<area>/area.yaml.",
+  "title": "Conformance area metadata",
+  "type": "object",
+  "required": ["area"],
+  "additionalProperties": false,
+  "properties": {
+    "area": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$", "description": "The directory name." },
+    "active": {
+      "description": "Scenario id patterns, relative to the area directory, that Meguri must pass.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "live": {
+      "description": "Scenario id patterns of T1-only scenarios: no golden, run only by tools/mg conformance --live.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  }
+}

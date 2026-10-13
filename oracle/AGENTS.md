@@ -9,11 +9,12 @@ Only spec writers and oracle maintainers work here. Implementers never read this
 - Time moves only through `Clock.set`/`advance` (epoch seconds in the libfaketime file, `FAKETIME_FMT=%s`, never the `@` form). Pass the frozen instant explicitly where Anki takes a timestamp argument (`answered_at_millis`). `time.monotonic`/`perf_counter` are real.
 - `ANKI_TEST_MODE` turns Anki's fuzz off and shifts its clock: the entrypoint unsets it and the worker refuses to start with it.
 - Workers need `/scratch` on tmpfs (the compose service has it). On the container overlay a scenario is ~10x slower.
-- `canon.py` defines scenario_sha256 (RFC 8785 of the YAML 1.2 core-schema parse). The Rust runner (U4) must produce the same bytes; change both together.
+- `canon.py` defines scenario_sha256 (RFC 8785 of the YAML 1.2 core-schema parse). meguri-testkit's scenario parser must produce the same bytes (its tests compare with every golden); change both together.
 - Any driver edit changes `driver_sha256` and the image tag. Goldens go stale only on scenario or lock changes; re-record with `tools/mg oracle record` when an edit changes observations, and check with `tools/mg oracle compare`.
 - In a checkout without `oracle/` (an implementer worktree), `tools/mg oracle` builds from the main worktree's `oracle/` as checked out there: a driver change reaches implementers only once the main checkout has it. `test`, `bump` and `lock` refuse there. Any copy of `oracle/` files a job makes under `build/` (outside U2's deny rules) is deleted when the job ends; the self-tests check it.
 - Scenario values reach Anki unconverted: reject a wrong JSON type with `invalid_scenario`, never `str()` it (Python's `True`/`1.0`/`None` text is not what a Meguri adapter writes).
-- Pins move only through `tools/mg oracle bump <version>` (lock via `tools/mg oracle lock`). Adopting a bump is one separate change: staged `requirements.in`, `requirements.lock` and goldens together.
+- Pins move only through `tools/mg oracle bump <version>` (lock via `tools/mg oracle lock`). Adopting a bump is one separate change: staged `requirements.in`, `requirements.lock`, `conformance/oracle.json` and goldens together, plus a re-inventory (`tools/mg harvest-inventory`, R1882).
 - Add-on oracles (another quarantined image): `FROM meguri-oracle:<tag>`, add modules, list them in `ORACLE_EXTRA_MODULES`.
 - `tools/mg oracle test` runs `driver/tests/` in the container on the internal network (the isolation test fails anywhere else) plus `tools/tests/oracle_host_checks.sh`.
-- `provenance/` holds per-section notes (Anki file + tag 26.09.3) for anything specified from Anki's source. `harvest/` is U4's.
+- `provenance/` holds per-section notes (Anki file + tag 26.09.3) for anything specified from Anki's source.
+- `harvest/inventory.py` (run by `tools/mg harvest-inventory`, stdlib only, in the dev container) writes `links.csv` and the conformance catalog. The catalog never names Anki files or tests, and the leak check reports only row, column and kind, since `tools/mg harvest-report` logs reach implementers.

@@ -1,6 +1,11 @@
 # conformance/ (MPL-2.0, shared by spec writers and implementers)
 
-- `goldens/` is written only by `tools/mg oracle record <filter>`: never edit a golden by hand or bless Meguri output into one. `tools/mg oracle compare <filter>` re-runs the live oracle against the committed goldens.
-- A golden goes stale when its scenario's parsed value or the oracle lock changes; comments, key order and layout do not change scenario_sha256. Re-record stale goldens in the same change as the scenario edit.
-- Scenarios are YAML in the JSON-compatible subset, read with the YAML 1.2 core schema (`yes` and `2030-01-15` are strings): no aliases, merge keys, tags or duplicate keys. They define their own note types and CSS and contain no Anki test code or test data text (R1881, R1959).
-- `schema/protocol.json` is the only interface to oracle workers; it also lists the driver's v0 ops and observations.
+- The format, observations, statuses and catalog are `specs/conformance/dsl.md` and `observations.md`; `schema/*.schema.json` mirror them. Change spec, schema, the testkit model (`core/crates/meguri-testkit/src/scenario/`) and, for a new op or kind, the oracle driver together. `schema/protocol.json` is the only interface to oracle workers.
+- `goldens/` is written only by `tools/mg oracle record <filter>` (or `tools/mg conformance --live`, which calls it): never edit a golden by hand or bless Meguri output into one. `tools/mg oracle compare <filter>` re-runs the live oracle against the committed goldens.
+- A golden goes stale when its scenario's parsed value or the oracle lock changes; comments, key order and layout do not change scenario_sha256. Re-record stale goldens in the same change as the scenario edit. `tools/mg goldens-check` must pass.
+- Scenarios are YAML in the JSON-compatible subset, read with the YAML 1.2 core schema (`yes` and `2030-01-15` are strings): no aliases, merge keys, tags or duplicate keys. A scenario's `id` is its path without suffix; one file per id. They define their own note types and CSS and contain no Anki test code or test data text (R1881, R1959).
+- `scenarios/<area>/area.yaml` lists `active` scenarios (T0 fails unless Meguri passes them) and `live` ones (T1 only, no golden). Mark a scenario active in the change that lands its Meguri adapter.
+- `oracle.json` is the current oracle pin; it changes only when adopting a bump, with the lock file and every golden.
+- `deviations.yaml`: one entry per deliberate difference, with its requirement and the test that asserts Meguri's behavior. Nothing else may differ from a golden.
+- `catalog/harvest.csv` never names an Anki file or test; the id → test link is `oracle/harvest/links.csv` (spec side). Spec writers regenerate both with `tools/mg harvest-inventory` and classify their area's rows; `tools/mg harvest-report` reports coverage and runs the leak check.
+- `fixtures/` (none yet): packages made by the oracle through a scenario, never by hand or by Meguri.

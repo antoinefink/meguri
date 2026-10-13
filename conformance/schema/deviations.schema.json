@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/deviations.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D13. File: conformance/deviations.yaml.",
+  "title": "Known deviations from the oracle (R1889)",
+  "type": "object",
+  "required": ["deviations"],
+  "additionalProperties": false,
+  "properties": {
+    "deviations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "requirement", "summary", "test", "scenarios", "pointer", "transform"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "requirement": { "type": "string", "pattern": "^R[0-9]+$" },
+          "summary": { "type": "string", "minLength": 1 },
+          "test": { "type": "string", "minLength": 1, "description": "Scenario or test id asserting Meguri's behavior." },
+          "scenarios": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+          "pointer": { "type": "string", "pattern": "^(/[^/]*)+$" },
+          "transform": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "replace": { "description": "The expected value becomes this value." }
+            }
+          }
+        }
+      }
+    }
+  }
+}

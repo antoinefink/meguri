@@ -1,0 +1,5 @@
+{
+  "$comment": "The current oracle pin (specs/conformance/dsl.md D11): anki version and sha256 of oracle/requirements.lock. Goldens recorded with another lock_sha256 are stale. Change it only when adopting an oracle bump, together with the lock file and every golden.",
+  "anki_version": "26.9.3",
+  "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+}

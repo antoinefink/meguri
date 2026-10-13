@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/observation.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/observations.md.",
+  "title": "Observations of one scenario run",
+  "description": "One output per scenario step, in step order (O1). Draft kinds accept any value until their area defines it.",
+  "type": "object",
+  "required": ["steps"],
+  "additionalProperties": false,
+  "properties": {
+    "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } }
+  },
+  "$defs": {
+    "card_key": { "type": "string", "pattern": "^#c[1-9][0-9]*$" },
+    "note_key": { "type": "string", "pattern": "^#n[1-9][0-9]*$" },
+    "deck_name": { "type": ["string", "null"] },
+    "f32": { "type": "number", "description": "Shortest round-trip f32 decimal (O6)." },
+    "step_output": {
+      "type": "object",
+      "properties": {
+        "add_note": {
+          "type": "object",
+          "required": ["note", "cards"],
+          "additionalProperties": false,
+          "properties": {
+            "note": { "$ref": "#/$defs/note_key" },
+            "cards": { "type": "array", "items": { "$ref": "#/$defs/card_key" } }
+          }
+        },
+        "ids": {
+          "type": "object",
+          "propertyNames": { "pattern": "^#[nc][1-9][0-9]*$" },
+          "additionalProperties": { "type": "integer" }
+        },
+        "timing": {
+          "type": "object",
+          "required": ["days_elapsed", "next_day_at", "now", "utc_offset_secs"],
+          "additionalProperties": false,
+          "properties": {
+            "days_elapsed": { "type": "integer" },
+            "next_day_at": { "type": "integer" },
+            "now": { "type": "integer" },
+            "utc_offset_secs": { "type": "integer" }
+          }
+        },
+        "card": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": { "anyOf": [{ "$ref": "#/$defs/card_row" }, { "type": "null" }] }
+        },
+        "revlog": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/revlog_row" } }
+        },
+        "next_states": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": {
+            "type": "object",
+            "required": ["current", "again", "hard", "good", "easy"],
+            "additionalProperties": false,
+            "properties": {
+              "current": { "$ref": "#/$defs/state" },
+              "again": { "$ref": "#/$defs/state" },
+              "hard": { "$ref": "#/$defs/state" },
+              "good": { "$ref": "#/$defs/state" },
+              "easy": { "$ref": "#/$defs/state" }
+            }
+          }
+        },
+        "fuzz_table": {
+          "type": "object",
+          "required": ["intervals", "rows"],
+          "additionalProperties": false,
+          "properties": {
+            "intervals": { "type": "array", "items": { "type": "integer" } },
+            "rows": { "type": "array", "items": { "type": "array", "items": { "type": "integer" }, "minItems": 2 } }
+          }
+        },
+        "net_probe": {
+          "type": "object",
+          "required": ["connected", "error"],
+          "additionalProperties": false,
+          "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
+        }
+      }
+    },
+    "card_row": {
+      "type": "object",
+      "required": ["id", "nid", "did", "ord", "mod", "usn", "type", "queue", "due", "ivl", "factor", "reps", "lapses", "left", "odue", "odid", "flags", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/card_key" },
+        "nid": { "type": "string" },
+        "did": { "$ref": "#/$defs/deck_name" },
+        "odid": { "$ref": "#/$defs/deck_name" },
+        "ord": { "type": "integer" },
+        "mod": { "type": "integer" },
+        "usn": { "type": "integer" },
+        "type": { "type": "integer" },
+        "queue": { "type": "integer" },
+        "due": { "type": "integer" },
+        "ivl": { "type": "integer" },
+        "factor": { "type": "integer" },
+        "reps": { "type": "integer" },
+        "lapses": { "type": "integer" },
+        "left": { "type": "integer" },
+        "odue": { "type": "integer" },
+        "flags": { "type": "integer" },
+        "data": { "type": ["object", "string"] }
+      }
+    },
+    "revlog_row": {
+      "type": "object",
+      "required": ["id", "cid", "usn", "ease", "ivl", "lastIvl", "factor", "time", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer" },
+        "cid": { "type": "string" },
+        "usn": { "type": "integer" },
+        "ease": { "type": "integer" },
+        "ivl": { "type": "integer" },
+        "lastIvl": { "type": "integer" },
+        "factor": { "type": "integer" },
+        "time": { "type": "integer" },
+        "type": { "type": "integer" }
+      }
+    },
+    "memory_state": {
+      "type": "object",
+      "required": ["stability", "difficulty"],
+      "additionalProperties": false,
+      "properties": { "stability": { "$ref": "#/$defs/f32" }, "difficulty": { "$ref": "#/$defs/f32" } }
+    },
+    "learning_fields": {
+      "type": "object",
+      "required": ["remaining_steps", "scheduled_secs", "elapsed_secs"],
+      "properties": {
+        "remaining_steps": { "type": "integer" },
+        "scheduled_secs": { "type": "integer" },
+        "elapsed_secs": { "type": "integer" },
+        "memory_state": { "$ref": "#/$defs/memory_state" }
+      }
+    },
+    "review_fields": {
+      "type": "object",
+      "required": ["scheduled_days", "elapsed_days", "ease_factor", "lapses", "leeched"],
+      "properties": {
+        "scheduled_days": { "type": "integer" },
+        "elapsed_days": { "type": "integer" },
+        "ease_factor": { "$ref": "#/$defs/f32" },
+        "lapses": { "type": "integer" },
+        "leeched": { "type": "boolean" },
+        "memory_state": { "$ref": "#/$defs/memory_state" }
+      }
+    },
+    "state": {
+      "description": "A flattened scheduling state (O5).",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["new", "learning", "review", "relearning", "preview", "rescheduling"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "new" } } },
+          "then": { "required": ["position"], "properties": { "position": { "type": "integer" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "learning" } } },
+          "then": { "$ref": "#/$defs/learning_fields" }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "review" } } },
+          "then": { "$ref": "#/$defs/review_fields" }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "relearning" } } },
+          "then": {
+            "required": ["learning", "review"],
+            "properties": { "learning": { "$ref": "#/$defs/learning_fields" }, "review": { "$ref": "#/$defs/review_fields" } }
+          }
+        }
+      ]
+    }
+  }
+}

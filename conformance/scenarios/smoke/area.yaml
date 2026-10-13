@@ -1,0 +1,5 @@
+# specs/conformance/dsl.md D9. Active: Meguri must pass them in T0.
+area: smoke
+active:
+  - runner-empty
+live: []

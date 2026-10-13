@@ -1,0 +1,369 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/scenario.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md. Authoritative for the scenario file format together with that spec.",
+  "title": "Meguri conformance scenario",
+  "type": "object",
+  "required": ["id", "clock"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "The file path relative to conformance/scenarios/ without its suffix (D1).",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)+$"
+    },
+    "description": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "clock": { "$ref": "#/$defs/clock" },
+    "compare": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "set": {
+          "description": "Pointer patterns of arrays compared as multisets (observations.md O3, O7).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/pointer_pattern" }
+        }
+      }
+    },
+    "setup": { "$ref": "#/$defs/setup" },
+    "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } }
+  },
+  "$defs": {
+    "pointer_pattern": { "type": "string", "pattern": "^(/[^/]*)+$" },
+    "datetime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})?$"
+    },
+    "duration": { "type": "string", "pattern": "^([0-9]+[dhms])+$" },
+    "card_ref": { "type": "string", "pattern": "^#c[1-9][0-9]*$" },
+    "note_ref": { "type": "string", "pattern": "^#n[1-9][0-9]*$" },
+    "card_refs": { "type": "array", "items": { "$ref": "#/$defs/card_ref" }, "minItems": 1 },
+    "uint": { "type": "integer", "minimum": 0 },
+    "clock": {
+      "type": "object",
+      "required": ["tz", "start"],
+      "additionalProperties": false,
+      "properties": {
+        "tz": { "type": "string", "minLength": 1, "description": "IANA zone name." },
+        "start": { "$ref": "#/$defs/datetime" },
+        "mode": { "enum": ["frozen", "step"] }
+      }
+    },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "config": { "type": "object" },
+        "presets": { "type": "array", "items": { "$ref": "#/$defs/preset" } },
+        "decks": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              { "type": "string", "minLength": 1 },
+              {
+                "type": "object",
+                "required": ["name"],
+                "additionalProperties": false,
+                "properties": { "name": { "type": "string", "minLength": 1 }, "preset": { "type": "string" } }
+              }
+            ]
+          }
+        },
+        "notetypes": { "type": "array", "items": { "$ref": "#/$defs/notetype" } },
+        "notes": { "type": "array", "items": { "$ref": "#/$defs/note" } },
+        "cards": {
+          "description": "Draft (D6.6).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["card"],
+            "additionalProperties": false,
+            "properties": {
+              "card": { "$ref": "#/$defs/card_ref" },
+              "type": { "type": "integer" },
+              "queue": { "type": "integer" },
+              "due": { "type": "integer" },
+              "ivl": { "type": "integer" },
+              "factor": { "type": "integer" },
+              "reps": { "type": "integer" },
+              "lapses": { "type": "integer" },
+              "left": { "type": "integer" },
+              "odue": { "type": "integer" },
+              "flags": { "type": "integer" },
+              "data": { "type": "object" }
+            }
+          }
+        },
+        "revlog": {
+          "description": "Draft (D6.7).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["card", "id", "ease", "ivl", "lastIvl", "factor", "time", "type"],
+            "additionalProperties": false,
+            "properties": {
+              "card": { "$ref": "#/$defs/card_ref" },
+              "id": { "type": "integer" },
+              "ease": { "type": "integer" },
+              "ivl": { "type": "integer" },
+              "lastIvl": { "type": "integer" },
+              "factor": { "type": "integer" },
+              "time": { "type": "integer" },
+              "type": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "preset_options": {
+      "learn_steps": { "type": "array", "items": { "$ref": "#/$defs/duration" } },
+      "relearn_steps": { "type": "array", "items": { "$ref": "#/$defs/duration" } },
+      "graduating_interval_days": { "type": "integer" },
+      "easy_interval_days": { "type": "integer" },
+      "new_per_day": { "type": "integer" },
+      "reviews_per_day": { "type": "integer" },
+      "max_interval_days": { "type": "integer" },
+      "min_lapse_interval_days": { "type": "integer" },
+      "starting_ease": { "type": "number" },
+      "easy_bonus": { "type": "number" },
+      "hard_interval": { "type": "number" },
+      "interval_modifier": { "type": "number" },
+      "lapse_new_interval": { "type": "number" },
+      "leech_threshold": { "type": "integer" },
+      "leech_action": { "enum": ["suspend", "tag_only"] },
+      "bury_new": { "type": "boolean" },
+      "bury_reviews": { "type": "boolean" },
+      "bury_interday_learning": { "type": "boolean" },
+      "desired_retention": { "type": "number" },
+      "fsrs_params": { "type": "array", "items": { "type": "number" } }
+    },
+    "preset": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "learn_steps": { "$ref": "#/$defs/preset_options/learn_steps" },
+        "relearn_steps": { "$ref": "#/$defs/preset_options/relearn_steps" },
+        "graduating_interval_days": { "$ref": "#/$defs/preset_options/graduating_interval_days" },
+        "easy_interval_days": { "$ref": "#/$defs/preset_options/easy_interval_days" },
+        "new_per_day": { "$ref": "#/$defs/preset_options/new_per_day" },
+        "reviews_per_day": { "$ref": "#/$defs/preset_options/reviews_per_day" },
+        "max_interval_days": { "$ref": "#/$defs/preset_options/max_interval_days" },
+        "min_lapse_interval_days": { "$ref": "#/$defs/preset_options/min_lapse_interval_days" },
+        "starting_ease": { "$ref": "#/$defs/preset_options/starting_ease" },
+        "easy_bonus": { "$ref": "#/$defs/preset_options/easy_bonus" },
+        "hard_interval": { "$ref": "#/$defs/preset_options/hard_interval" },
+        "interval_modifier": { "$ref": "#/$defs/preset_options/interval_modifier" },
+        "lapse_new_interval": { "$ref": "#/$defs/preset_options/lapse_new_interval" },
+        "leech_threshold": { "$ref": "#/$defs/preset_options/leech_threshold" },
+        "leech_action": { "$ref": "#/$defs/preset_options/leech_action" },
+        "bury_new": { "$ref": "#/$defs/preset_options/bury_new" },
+        "bury_reviews": { "$ref": "#/$defs/preset_options/bury_reviews" },
+        "bury_interday_learning": { "$ref": "#/$defs/preset_options/bury_interday_learning" },
+        "desired_retention": { "$ref": "#/$defs/preset_options/desired_retention" },
+        "fsrs_params": { "$ref": "#/$defs/preset_options/fsrs_params" }
+      }
+    },
+    "notetype": {
+      "type": "object",
+      "required": ["name", "fields", "templates"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["standard", "cloze"] },
+        "fields": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "templates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "front": { "type": "string" },
+              "back": { "type": "string" }
+            }
+          }
+        },
+        "css": { "type": "string" }
+      }
+    },
+    "fields": {
+      "anyOf": [
+        { "type": "array", "items": { "type": "string" } },
+        { "type": "object", "additionalProperties": { "type": "string" } }
+      ]
+    },
+    "note": {
+      "type": "object",
+      "required": ["notetype"],
+      "additionalProperties": false,
+      "properties": {
+        "notetype": { "type": "string" },
+        "deck": { "type": "string" },
+        "fields": { "$ref": "#/$defs/fields" },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "observation_request": {
+      "description": "observations.md O2 and O4.",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+        },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "ids": { "type": "array", "items": { "type": "string", "pattern": "^#[nc][1-9][0-9]*$" } },
+            "timing": { "type": "null" },
+            "card": { "$ref": "#/$defs/card_refs" },
+            "revlog": { "$ref": "#/$defs/card_refs" },
+            "next_states": { "$ref": "#/$defs/card_refs" },
+            "render": { "$ref": "#/$defs/card_refs" },
+            "fuzz_table": {
+              "type": "object",
+              "required": ["card", "pairs", "intervals"],
+              "additionalProperties": false,
+              "properties": {
+                "card": { "$ref": "#/$defs/card_ref" },
+                "pairs": {
+                  "type": "array",
+                  "items": { "type": "array", "prefixItems": [{ "$ref": "#/$defs/uint" }, { "$ref": "#/$defs/uint" }], "minItems": 2, "maxItems": 2 }
+                },
+                "intervals": { "type": "array", "items": { "$ref": "#/$defs/uint" }, "minItems": 1 }
+              }
+            },
+            "net_probe": {
+              "type": "object",
+              "required": ["host", "port"],
+              "additionalProperties": false,
+              "properties": {
+                "host": { "type": "string" },
+                "port": { "type": "integer" },
+                "timeout_ms": { "$ref": "#/$defs/uint" }
+              }
+            },
+            "queue": {
+              "description": "Draft.",
+              "type": ["object", "null"],
+              "properties": { "deck": { "type": "string" } }
+            },
+            "deck_tree": { "type": "null" },
+            "search": {
+              "description": "Draft.",
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": { "type": "string" },
+                "kind": { "enum": ["cards", "notes"] },
+                "order": {}
+              }
+            },
+            "db_dump": {
+              "description": "Draft.",
+              "type": ["object", "null"],
+              "properties": { "tables": { "type": "array", "items": { "type": "string" } } }
+            },
+            "stats": { "description": "Draft.", "type": ["object", "null"] },
+            "digest": { "type": "null" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "draft_args": {
+      "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
+      "type": "object"
+    },
+    "step": {
+      "description": "One op per step (dsl.md D7).",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "advance": { "$ref": "#/$defs/duration" },
+        "set_clock": { "$ref": "#/$defs/datetime" },
+        "add_note": { "$ref": "#/$defs/note" },
+        "answer": {
+          "type": "object",
+          "required": ["card", "rating"],
+          "additionalProperties": false,
+          "properties": {
+            "card": { "$ref": "#/$defs/card_ref" },
+            "rating": { "enum": ["again", "hard", "good", "easy"] },
+            "time_ms": { "$ref": "#/$defs/uint" }
+          }
+        },
+        "observe": { "type": "array", "items": { "$ref": "#/$defs/observation_request" } },
+        "edit_note": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            {
+              "required": ["note"],
+              "properties": {
+                "note": { "$ref": "#/$defs/note_ref" },
+                "fields": { "$ref": "#/$defs/fields" },
+                "tags": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          ]
+        },
+        "delete_notes": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "required": ["notes"], "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } } }
+          ]
+        },
+        "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
+        "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
+        "forget": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
+        "set_due": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "required": ["cards", "days"], "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "days": { "type": "string" } } }
+          ]
+        },
+        "reposition": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "required": ["cards", "start"], "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "start": { "type": "integer" } } }
+          ]
+        },
+        "update_preset": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"] }] },
+        "build_filtered": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "required": ["name", "search"], "properties": { "name": { "type": "string" }, "search": { "type": "string" } } }
+          ]
+        },
+        "import": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] },
+        "export": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } }
+          ]
+        },
+        "check_db": { "$ref": "#/$defs/draft_args" },
+        "db_exec": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "required": ["sql"], "properties": { "sql": { "type": "string" }, "params": { "type": "array" } } }
+          ]
+        },
+        "sync": {
+          "allOf": [
+            { "$ref": "#/$defs/draft_args" },
+            { "properties": { "kind": { "enum": ["normal", "full_upload", "full_download"] }, "client": { "type": "string" } } }
+          ]
+        }
+      }
+    }
+  }
+}

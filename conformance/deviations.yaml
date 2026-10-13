@@ -1,0 +1,5 @@
+# Known deviations from the oracle (R1889; specs/conformance/dsl.md D13,
+# schema/deviations.schema.json). The runner applies only the transforms listed
+# here; any other difference from a golden fails. Every entry names the
+# requirement and a scenario or test that asserts Meguri's own behavior.
+deviations: []

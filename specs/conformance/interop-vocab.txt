@@ -1,0 +1,34 @@
+# Interface names the conformance specs use (specs/README-format.md once U2
+# lands): card and review-log columns, scheduling-state protobuf fields and
+# collection config keys that observations and scenarios carry.
+nid
+did
+ord
+mod
+usn
+queue
+due
+ivl
+factor
+reps
+lapses
+left
+odue
+odid
+flags
+cid
+ease
+lastIvl
+remaining_steps
+scheduled_secs
+elapsed_secs
+scheduled_days
+elapsed_days
+ease_factor
+leeched
+memory_state
+stability
+difficulty
+fsrs
+loadBalancerEnabled
+rollover

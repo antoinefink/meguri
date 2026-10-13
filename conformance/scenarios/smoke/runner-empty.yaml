@@ -1,0 +1,4 @@
+# The runner end to end with nothing to run: a fresh collection, no setup and
+# no steps, so every executor can pass it.
+id: smoke/runner-empty
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
