@@ -143,12 +143,12 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
 | `reposition` | `{cards, start, step?, randomize?, shift?}` | none | draft (sched) |
 | `update_preset` | `{name, <option>: <value>, ...}` with the D6.2 options | none | draft (deckconfig) |
-| `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | draft (model) |
+| `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | stable (`model-ops.md` L2) |
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
 | `export` | `{format: apkg \| colpkg, name: <file name>, ...options}` | `{name, sha256}` of the file written | draft (package) |
 | `check_db` | `{}` | the check's counters | draft (maintenance) |
-| `db_exec` | `{sql, params?: [...]}`: raw SQL on the schema-18 tables, for corruption injection and time travel by data | `{rows: [[...], ...]}` for a query, none otherwise | draft (storage) |
+| `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `sync` | `{kind?: normal \| full_upload \| full_download, client?: <name>}` | `{result: <kind>}` | draft (sync) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
 

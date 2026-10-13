@@ -33,9 +33,9 @@ Saves a schema-11 object over an existing record, the way records arriving by sy
 - **Rejection** `{legacy_update: {error: "invalid_json"}}` when the patched object does not convert (a key `specs/model/schema11-json.md` marks "refuse"); nothing changes then (`dsl.md` D7.3). Rejection kinds: `invalid_json`.
 - **Errors.** An unknown name is a run error (`unknown_ref`). Other failures of the save (a duplicate name, a template check) are run errors; scenarios avoid them.
 
-## L3. Draft ops the model scenarios use
+## L3. Other ops the model scenarios use
 
-- **`db_exec`** (draft, storage area; its output is defined with the storage ops). Model scenarios use it:
+- **`db_exec`** (storage area, `record-ops.md` W1: a statement that returns no rows records `{rows: []}`, TEXT values are strings). Model scenarios use it:
   - to read a blob as text with SQLite's `hex()` (upper-case hex digits), and `cards.data` as stored text;
   - to write blobs with blob literals (`X'0a0408011003'`), or to append fields to a stored blob with `CAST(<column> || X'…' AS BLOB)`: SQLite's `||` gives TEXT, and a blob column holding TEXT makes the row unreadable (`specs/model/protobuf-records.md` P1). Appending works because a later occurrence of a field merges with, or replaces, the earlier one (P2);
   - to set `cards.data` text through a bound string parameter;
@@ -46,5 +46,6 @@ Saves a schema-11 object over an existing record, the way records arriving by sy
 
 ## L4. Status
 
-- The oracle driver has none of `legacy_json`, `legacy_update`, `db_exec` and `suspend` yet: the model scenarios have no goldens until it does (`dsl.md` D10 `missing`).
+- The oracle driver implements `legacy_json` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). The model scenarios have goldens.
+- The oracle reopens the collection before each `legacy_json` and `legacy_update` to read the file, which also empties Anki's undo history. Model scenarios never undo; a scenario that undoes across one of these steps is not portable.
 - Meguri's executor implements `legacy_json` and `legacy_update` with U21's codecs once the record store (U23) and the setup adapters exist; `db_exec` comes with the storage area and `suspend` with the scheduling area. Until then the scenarios are `pending`.

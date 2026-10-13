@@ -49,7 +49,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `db_dump` | none or `{tables: [...]}` | draft (storage): normalized table rows; protobuf blobs as lower-case hex bytes, decoded only for display |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
-| `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | draft (model): `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |
+| `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |
 
 ## O5. Scheduling states
 
