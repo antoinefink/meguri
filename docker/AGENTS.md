@@ -9,3 +9,4 @@
 - Pin new tool versions as `ARG`s and install them with `cargo install --locked --version`.
 - `cargo install` exits 0 when a binary's required features are off, so check each installed binary runs.
 - The `oracle` service is the exception to per-checkout tags: its image is `meguri-oracle:<anki version>-<hash of the image inputs>`, set through `MEGURI_ORACLE_TAG` by `tools/mg oracle`, so identical `oracle/` trees share one image. `pull_policy: never`: build it with `tools/mg oracle build` before starting workers. It runs only on the `oracle-internal` network (`internal: true`, R1876); anything that needs a route out (the lock resolver) is a separate `docker run`, never the oracle.
+- The `similarity` service never mounts the corpus itself: its host jobs add `refs/` read-only per run (`-v ...:/refs:ro`), because worktrees have no `refs/` and the corpus must not reach implementer environments.

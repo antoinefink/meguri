@@ -1,0 +1,28 @@
+# Interop vocabulary for the storage calibration: the collection's card and
+# note tables and their columns (file-format facts).
+cards
+notes
+id
+nid
+did
+ord
+mod
+usn
+type
+queue
+due
+ivl
+factor
+reps
+lapses
+left
+odue
+odid
+flags
+data
+guid
+mid
+tags
+flds
+sfld
+csum

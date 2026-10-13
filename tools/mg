@@ -268,7 +268,8 @@ mg__run_job() {
   fi
 }
 
-# Stop and remove the containers of a cancelled docker run. The compose client
+# Stop and remove the containers of a cancelled run: a docker job's, or those a
+# host job started with `--label meguri.mg.run-id=$MG_RUN_ID`. The compose client
 # does not do it reliably: it forwards SIGINT, which the container's shell
 # ignores while its job runs, and once the `docker` CLI wrapping the compose
 # plugin gets a signal, the plugin exits without stopping the container.
@@ -511,7 +512,8 @@ EOF
     mg_message "dry run: $job would run on ${MG_JOB_PLACEMENTS[$idx]}"
     mg_status pass
   elif [ "$placement" = host ] || [ "${MG_CONTAINER:-}" = "$service" ]; then
-    mg__run_job "$log" : mg__invoke "$fn" ${args[0]+"${args[@]}"}
+    # Host jobs may start containers themselves (labelled with the run id).
+    mg__run_job "$log" mg__remove_run_containers mg__invoke "$fn" ${args[0]+"${args[@]}"}
     rc=$MG_JOB_RC
   elif [ -n "${MG_CONTAINER:-}" ]; then
     mg_failure wrong-container "job '$job' runs in service '$service'; this is container '$MG_CONTAINER'. Run tools/mg from the host."

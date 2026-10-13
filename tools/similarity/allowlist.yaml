@@ -1,0 +1,13 @@
+# Similarity allowlist (R1957). Each entry exempts matches that are interop
+# facts (schema-18 DDL, protobuf field declarations, sync endpoint and JSON
+# field names, config keys, search keywords) in one Meguri path.
+#
+# An entry is written only from Antoine's chat approval, recorded as an
+# escalation (U19). Fields:
+#   path: glob of the Meguri file(s), e.g. core/crates/meguri-storage/src/schema.sql
+#   channels: [struct, lex, com, text]   optional; default all
+#   lines: "12-80"                       optional; default the whole file
+#   reason: why the match is an interop fact, not copied code
+#   approved_by: antoine                 required
+#   approved_on: YYYY-MM-DD              optional
+entries: []

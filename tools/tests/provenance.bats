@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Clean-room tooling (U2): role worktrees, session records, the commit-msg
-# provenance hook. Runs in the dev container
+# provenance hook and the similarity jobs' guards. Runs in the dev container
 # by `tools/mg selftest`; each test works on a throwaway copy of the repo
 # whose oracle/ holds a stand-in file.
 
@@ -269,6 +269,32 @@ commit_with() {
   commit_with $'Add parser\n\nRole: implementer\nSpec: search/grammar#G1' core/crates/meguri-search/src/parse.rs
   [ "$status" -ne 0 ]
   [[ "$stderr" == *"Session: $id"* ]]
+}
+
+@test "similarity jobs refuse to run in an implementer worktree" {
+  mg worktree new --role implementer w3
+  local job
+  for job in similarity similarity-selftest similarity-nightly; do
+    MG_AT="$BATS_TEST_TMPDIR/repo-wt/w3" MG_SIMILARITY_REFS="$SB" mg "$job"
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = implementer-worktree ]
+    validate "$result"
+  done
+}
+
+@test "similarity without an Anki corpus is an error naming refs/anki" {
+  mg similarity
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = no-corpus ]
+  [[ "$(field '.failures[0].message')" == *"refs/anki"* ]]
+  validate "$result"
+}
+
+@test "similarity rejects unknown arguments" {
+  mkdir -p "$SB/refs/anki"
+  mg similarity --frobnicate
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
 }
 
 @test "the implementer deny profile template covers every quarantined source" {

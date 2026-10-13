@@ -53,6 +53,24 @@ services:
       TMPDIR: /scratch
       ORACLE_SCRATCH_ROOT: /scratch
 
+  # Similarity scanner (U2) and JPlag. tools/mg similarity* are host jobs that
+  # start this service themselves, adding the Anki corpus (refs/ of the main
+  # checkout) as a read-only mount only for that run.
+  similarity:
+    build:
+      context: ..
+      dockerfile: docker/similarity.Dockerfile
+      target: similarity
+    pull_policy: build
+    init: true
+    working_dir: /work
+    volumes:
+      - ..:/work
+    tmpfs:
+      - /tmp:exec,mode=1777
+    environment:
+      TMPDIR: /tmp
+
 networks:
   # No route out of oracle containers: nothing in them can reach AnkiWeb or
   # any other host (R1876).

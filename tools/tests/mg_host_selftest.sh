@@ -21,11 +21,14 @@ RESULTS=""
 PROJECT="meguri-$(basename "$SB" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-')-$(printf '%s' "$SB" | cksum | cut -d' ' -f1)"
 
 setup_sandbox() {
-  mkdir -p "$SB/core"
+  mkdir -p "$SB/core" "$SB/docs/process" "$SB/oracle/driver"
   cp -R "$REPO/tools" "$SB/tools"
   cp -R "$REPO/docker" "$SB/docker"
+  cp -R "$REPO/.claude" "$SB/.claude"
+  cp -R "$REPO/docs/process/roles" "$REPO/docs/process/provenance" "$SB/docs/process/"
   cp "$REPO/core/rust-toolchain.toml" "$SB/core/"
-  cp "$REPO/.gitignore" "$SB/"
+  cp "$REPO/.gitignore" "$REPO/.gitattributes" "$SB/"
+  echo "stand-in for the AGPL driver" >"$SB/oracle/driver/run.py"
   git -C "$SB" init -q &&
     git -C "$SB" add -A &&
     git -C "$SB" -c user.name=selftest -c user.email=selftest@localhost commit -qm sandbox
@@ -50,7 +53,8 @@ remove_project_containers() {
 cleanup() {
   remove_project_containers
   sbcompose down >/dev/null 2>&1
-  docker image rm -f "$PROJECT-dev" "$PROJECT-fuzz" >/dev/null 2>&1
+  docker image rm -f "$PROJECT-dev" "$PROJECT-fuzz" "$PROJECT-similarity" >/dev/null 2>&1
+  rm -rf "$SB-wt"
   docker volume rm -f "${PROJECT}_cargo-target" >/dev/null 2>&1
 }
 trap cleanup EXIT
@@ -249,6 +253,169 @@ t_dev_image_rebuild_reuses_layers() {
     expect "dev steps cached" "$(field '.details.images.dev.cached > 0')" true
 }
 
+# A host job that starts a container labels it with the run id; cancelling the
+# run must remove that container too.
+t_cancelling_a_host_job_removes_its_container() {
+  local fixture="$SB/tools/mg.d/zz-host-sleep.sh" out="$SB/fx-host.out" err="$SB/fx-host.err" pid rc=0 gone=false
+  # shellcheck disable=SC2016 # $MG_RUN_ID expands when the fixture job runs
+  printf '%s\n' 'mg_job fx-host-sleep host fx_host_sleep "fixture: a host job running a container"' \
+    'fx_host_sleep() { echo "fx-host-sleep started" >&2; mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev sleep 120 </dev/null; mg_status pass; }' >"$fixture"
+  set -m
+  /usr/bin/perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
+    /bin/bash "$MG" fx-host-sleep >"$out" 2>"$err" &
+  pid=$!
+  set +m
+  for _ in $(seq 120); do
+    [ -n "$(project_containers)" ] && break
+    sleep 1
+  done
+  rm -f "$fixture"
+  if [ -z "$(project_containers)" ]; then
+    echo "the fx-host-sleep container did not start:"
+    cat "$err"
+    kill -TERM -- "-$pid"
+    return 1
+  fi
+  kill -TERM -- "-$pid"
+  for _ in $(seq 30); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  wait "$pid" || rc=$?
+  cat "$err" >>"$SB/stderr.log"
+  for _ in $(seq 20); do
+    [ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")" ] && gone=true && break
+    sleep 1
+  done
+  if [ "$gone" = false ]; then
+    echo "the host job's container is still there 20 s after SIGTERM"
+    remove_project_containers
+    return 1
+  fi
+  RESULT="$(tail -n 1 "$out")"
+  RESULTS="$RESULTS ${RESULT#"$SB"/}"
+  expect "exit code" "$rc" 2 &&
+    expect "placement" "$(field .placement)" host &&
+    expect "cancelled" "$(field '[.failures[].id] | index("cancelled") != null')" true
+}
+
+# Worktree creation and the commit-msg hook under macOS /bin/bash 3.2 and
+# BSD tools.
+t_implementer_worktree_and_commit_hook_on_macos() {
+  mg worktree new --role implementer hw1
+  expect "worktree exit" "$RC" 0 || { cat "$SB/stderr.log" | tail -20; return 1; }
+  local wt="$SB-wt/hw1" id
+  expect "oracle/ absent" "$([ -e "$wt/oracle" ] && echo present || echo absent)" absent &&
+    expect "tools present" "$([ -f "$wt/tools/mg" ] && echo yes || echo no)" yes &&
+    expect "deny rule for refs/" \
+      "$(jq --arg p "Read(/$SB/refs/**)" '.permissions.deny | index($p) != null' "$wt/.claude/settings.local.json")" true &&
+    expect "profile hash" "$(jq -r .deny_profile.sha256 "$(git -C "$wt" rev-parse --absolute-git-dir)/meguri-session.json")" \
+      "$(shasum -a 256 "$wt/.claude/settings.local.json" | cut -d' ' -f1)" || return 1
+  id="$(jq -r .session "$(git -C "$wt" rev-parse --absolute-git-dir)/meguri-session.json")"
+  mg hooks install
+  expect "hooks exit" "$RC" 0 || return 1
+  mkdir -p "$wt/core/crates/meguri-search/src"
+  echo "pub fn parse() {}" >"$wt/core/crates/meguri-search/src/lib.rs"
+  git -C "$wt" add core/crates/meguri-search/src/lib.rs
+  if git -C "$wt" -c user.name=t -c user.email=t@t commit -q -m "Add parser" \
+    -m "Role: implementer
+Spec: search/grammar#G3" 2>"$SB/hook.err"; then
+    echo "a commit without Session: was accepted"
+    return 1
+  fi
+  grep -q "Session: $id" "$SB/hook.err" || { cat "$SB/hook.err"; return 1; }
+  git -C "$wt" -c user.name=t -c user.email=t@t commit -q -m "Add parser" \
+    -m "Role: implementer
+Spec: search/grammar#G3
+Session: $id" || return 1
+  git -C "$SB" worktree remove --force "$wt"
+}
+
+similarity_corpus() { # a stand-in Anki repository with one release tag
+  local repo="$SB/refs/anki"
+  mkdir -p "$repo/rslib/src"
+  cat >"$repo/rslib/src/queue.rs" <<'RS'
+pub fn rebalance(queues: &mut [Vec<u64>], max_len: usize) -> usize {
+    let mut moved = 0;
+    loop {
+        let (mut longest, mut shortest) = (0, 0);
+        for (i, q) in queues.iter().enumerate() {
+            if q.len() > queues[longest].len() { longest = i; }
+            if q.len() < queues[shortest].len() { shortest = i; }
+        }
+        if queues[longest].len() <= max_len || longest == shortest { break; }
+        if let Some(item) = queues[longest].pop() {
+            queues[shortest].insert(0, item);
+            moved += 1;
+        } else {
+            break;
+        }
+    }
+    moved
+}
+RS
+  git -C "$repo" init -q &&
+    git -C "$repo" add -A &&
+    git -C "$repo" -c user.name=t -c user.email=t@t commit -qm corpus &&
+    git -C "$repo" tag 2.1.51
+}
+
+t_similarity_flags_a_copy_through_tools_mg() {
+  similarity_corpus || return 1
+  cp "$SB/refs/anki/rslib/src/queue.rs" "$SB/core/copied.rs"
+  mg similarity -- core/copied.rs
+  jq -c '{status, message, summary, failures: [.failures[].id]}' "$RESULT"
+  expect "exit code" "$RC" 1 &&
+    expect "status" "$(field .status)" fail &&
+    expect "placement" "$(field .placement)" host &&
+    expect "struct failure" "$(field '[.failures[].id] | index("similarity:core/copied.rs:struct") != null')" true &&
+    expect "failures name no corpus path" "$(field '[.failures[].message | contains("rslib")] | any')" false &&
+    expect "repro" "$(field '.failures[0].repro')" "tools/mg similarity -- 'core/copied.rs'" &&
+    expect "corpus tags" "$(field .details.corpus.tags)" 1 &&
+    expect "reviewer view names the corpus path" \
+      "$(jq '[.files[].flags[]?.regions[].anki[].path] | index("rslib/src/queue.rs") != null' "$(field '.artifacts[] | select(.kind == "similarity-reviewer-json") | .path')")" true &&
+    expect "implementer view has no corpus path" \
+      "$(grep -c rslib "$(field '.artifacts[] | select(.kind == "similarity-implementer-json") | .path')")" 0
+}
+
+t_similarity_scans_changed_files_and_commits() {
+  rm -f "$SB/core/copied.rs"
+  printf 'pub fn total(xs: &[u32]) -> u64 {\n    xs.iter().map(|&x| u64::from(x)).sum()\n}\n' >"$SB/core/own.rs"
+  mg similarity --base HEAD
+  expect "changed-files exit" "$RC" 0 &&
+    expect "changed-files status" "$(field .status)" pass &&
+    expect "changed files scanned" "$(field .summary.total)" 1 || return 1
+  git -C "$SB" add core/own.rs &&
+    git -C "$SB" -c user.name=t -c user.email=t@t -c core.hooksPath=/dev/null commit -qm own
+  rm -f "$SB/core/own.rs"
+  mg similarity --rev HEAD --base HEAD~1
+  expect "rev exit" "$RC" 0 &&
+    expect "rev files scanned" "$(field .summary.total)" 1 &&
+    expect "index reused" "$(field .details.corpus.built)" false || return 1
+  local before
+  before="$(git -C "$SB" status --porcelain)"
+  mg similarity --rev HEAD -- core/own.rs core/not-there.rs tools/similarity/meguri_similarity/scan.py
+  expect "rev paths exit" "$RC" 0 &&
+    expect "rev paths scanned" "$(field .summary.total)" 2 || return 1
+  mg similarity --rev HEAD
+  expect "full rev exit" "$RC" 0 &&
+    expect "full rev scans the scanner too" "$(field '.summary.total > 10')" true &&
+    expect "checkout untouched" "$(git -C "$SB" status --porcelain)" "$before"
+}
+
+t_similarity_nightly_runs_jplag() {
+  cp "$SB/refs/anki/rslib/src/queue.rs" "$SB/core/copied.rs"
+  mg similarity-nightly
+  rm -f "$SB/core/copied.rs"
+  jq -c '{status, message}' "$RESULT"
+  expect "exit code" "$RC" 0 &&
+    expect "status" "$(field .status)" warn &&
+    expect "tags" "$(field '.details.jplag.tags | join(" ")')" 2.1.51 &&
+    expect "rust max similarity" "$(field '.details.jplag.languages.rust.max_similarity > 0.9')" true &&
+    expect "typescript skipped" "$(field '.details.jplag.languages.typescript.skipped')" "no Meguri files in this language" &&
+    expect "report" "$([ -f "$(field '.artifacts[] | select(.kind == "jplag-report") | .path')" ] && echo yes || echo no)" yes
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -259,7 +426,9 @@ TESTS="t_unknown_job t_dry_run_every_job t_doctor_on_this_mac t_core_test_runs_i
 t_killing_mg_stops_the_docker_job_container t_interrupting_mg_stops_the_docker_job_container
 t_dev_containers_share_the_cargo_package_cache_lock
 t_every_compose_service_runs_an_init_process t_dev_image_rebuild_reuses_layers
-t_results_validate_against_schema"
+t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_hook_on_macos
+t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
+t_similarity_nightly_runs_jplag t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

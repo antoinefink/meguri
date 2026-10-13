@@ -1,0 +1,63 @@
+# Similarity scanner settings (U2, R1957). Thresholds come from the plan's
+# calibration (oracle-harness research §5); change them only with a new
+# calibration run (`tools/mg similarity-selftest`).
+version: 1
+
+corpus:
+  # Relative to the refs directory (refs/ of the main checkout).
+  anki_repo: anki
+  # Every release tag in this range (inclusive). Pre-release tags are ignored.
+  tags: {min: "2.1.50", max: "26.09.3"}
+  # .scss is added to the plan's list so Meguri CSS is also compared with
+  # Anki's stylesheet sources.
+  extensions: [.rs, .py, .ts, .svelte, .js, .css, .scss, .html, .sql, .proto, .ftl]
+  max_blob_bytes: 2000000
+  # Used when present (R1956); U135 adds the pinned AnkiConnect sources.
+  extra_sources:
+    - {name: ankiconnect, path: anki-connect}
+    - {name: migaku, path: migaku-addon}
+
+channels:
+  struct: {k: 40, w: 10, min_fingerprints: 30, threshold: 0.10, consecutive: 6, max_periodicity: 0.8}
+  lex: {k: 12, w: 10, min_fingerprints: 30, threshold: 0.15, string_stopwords: sql-keywords}
+  com: {n: 10}
+  text: {n: 8}
+
+scan:
+  # Paths never scanned: the AGPL oracle quarantine, private and reference
+  # data, build output, and prose or data written in the spec-writer role.
+  exclude:
+    - "oracle/**"
+    - "refs/**"
+    - "local-data/**"
+    - "build/**"
+    - "docs/**"
+    - "specs/**"
+    - "conformance/scenarios/**"
+    - "conformance/goldens/**"
+    - "conformance/goldens-apple/**"
+    - "conformance/fixtures/**"
+    - "conformance/recordings/**"
+    - "conformance/corpora/**"
+  # Swift has no Anki counterpart, so only the cross-language channels apply.
+  channels_by_language:
+    rust: [struct, lex, com]
+    python: [struct, lex, com]
+    js: [struct, lex, com]
+    svelte: [struct, lex, com]
+    sql: [struct, lex, com]
+    proto: [struct, lex, com]
+    swift: [lex, com]
+    html: [lex, com]
+    css: [lex, com, text]
+    scss: [lex, com, text]
+    xcstrings: [text]
+
+jplag:
+  # Nightly second opinion (tools/mg similarity-nightly).
+  tags: [latest, "2.1.66", "23.10", "24.06", "25.02", "25.09"]
+  languages:
+    rust: [.rs]
+    typescript: [.ts, .js]
+  # Warn when Meguri shares this fraction of its tokens with one tag.
+  warn_similarity: 0.10
