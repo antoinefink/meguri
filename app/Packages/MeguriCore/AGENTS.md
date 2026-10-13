@@ -1,7 +1,7 @@
 # app/Packages/MeguriCore/
 
 - `Binaries/` and `Sources/MeguriCoreBindings/` are generated and gitignored. Build them with `tools/mg core-xcframework`; `tools/mg swift-test` builds them, then runs `swift test` and fails on any compiler warning (generated bindings included).
-- The Xcode scheme pre-action (U7) runs `/bin/bash <repo>/tools/scripts/build-core-xcframework.sh --xcode` with build settings from the app target: it reads `CONFIGURATION` and `PLATFORM_NAME` and adds that platform's slice.
+- The Xcode scheme pre-action (U7) runs `env -u SDKROOT /bin/bash <repo>/tools/scripts/build-core-xcframework.sh --xcode` with build settings from the app target: it reads `CONFIGURATION` and `PLATFORM_NAME` and adds that platform's slice. The multiplatform app's `SDKROOT=auto` would break the script's xcrun lookups (nm, xcodebuild).
 - Every slice is arm64 only. A generic simulator destination also builds x86_64 and fails to link: build with `ARCHS=arm64` (the app sets it).
 - CoreBridge imports the bindings with `internal import`: no generated type in a public signature; map to CoreBridge DTOs. Generated names collide with CoreBridge's (`CancelToken`, `CoreEvent`, `JobOutcome`, `CoreBuildInfo`): write `MeguriCoreBindings.X` in CoreBridge and in tests.
 - Every FFI call runs in a lane's `call("<name>") { ... }`, which signposts it under that name (U12 owns the name registry). Never call the bindings directly from the main actor or a plain `Task`.
