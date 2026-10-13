@@ -25,5 +25,5 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 The Mac is also Antoine's workstation. Unattended runs must never take over the screen.
 - Simulators: boot with `xcrun simctl boot`; never open Simulator.app; capture with `xcrun simctl io`.
-- Never run macOS XCUITest, or anything that drives the real cursor or keyboard, unless `MEGURI_ALLOW_MAC_UI=1` is set. Mac UI-driving suites (accessibility audit, keyboard flows, UI perf) are queued for that explicit run.
+- Never run macOS XCUITest, or anything that drives the real cursor or keyboard, directly. Mac UI-driving suites (accessibility audit, keyboard flows, UI perf) run only through `tools/mg mac-ui`. It holds a global lock and refuses to start within 60 minutes of the previous run's start, so the screen is taken at most once an hour. When it refuses, record the verification as queued and continue. An hourly sweep runs the queued suites on the integration branch.
 - Check Mac screens with in-process snapshot tests, which render off-screen. When a running Mac app is unavoidable, launch it hidden and in the background (`open -g -j`), capture its window with `screencapture -l <windowid>`, and quit it afterwards.
