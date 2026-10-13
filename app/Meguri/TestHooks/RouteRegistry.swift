@@ -38,6 +38,7 @@ extension TestHooks {
         static var standard: RouteRegistry {
             var registry = RouteRegistry()
             SampleRoutes.register(in: &registry)
+            DesignSystemRoutes.register(in: &registry)
             return registry
         }
 

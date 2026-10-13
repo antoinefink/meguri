@@ -37,7 +37,7 @@ let package = Package(
         .package(path: "../MeguriCore"),
     ],
     targets: [
-        .target(name: "DesignSystem", swiftSettings: settings),
+        .target(name: "DesignSystem", resources: [.process("Resources")], swiftSettings: settings),
         .target(
             name: "AppModel",
             dependencies: [.product(name: "CoreBridge", package: "MeguriCore")],
@@ -46,6 +46,7 @@ let package = Package(
         .target(name: "CardRendering", dependencies: ["DesignSystem"], swiftSettings: settings),
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(name: "AppModelTests", dependencies: ["AppModel"], swiftSettings: settings),
+        .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
     ] + features.map { name in
         .target(
             name: name,
