@@ -1,0 +1,9 @@
+# meguri-ffi
+
+- Every export returns `Result<_, CoreError>` (a panic in a non-throwing export crashes Swift) and starts with `callback::enter("<name>")`. Object constructors too.
+- Call into Swift only through `callback::invoke`, never while holding a lock. No async foreign traits (KTD9).
+- The exported surface is identical on every slice of one configuration: gate implementations with `cfg` inside a function, never an export. `build-core-xcframework.sh` compares the `uniffi_*` symbols of all slices and fails otherwise.
+- Test-only exports go in `test_hooks.rs` (feature `test-hooks`). Never add a test-only `CoreEventKind` variant: CoreBridge switches over the enum exhaustively and must compile against AppStore bindings, which have no test hooks. Test events reuse `JobFinished` with ids from 1,000,000.
+- The event dispatcher and the job registry are process-wide. Rust tests that set the event listener must tolerate other tests' events (`cargo test` runs them in one process).
+- `jobs::start` spawns one thread per job; U24 replaces it with the engine's registry and bounded pool and keeps `JobHandle`, `JobOutcome` and `cancel_job` here.
+- Rust's objects embed LLVM bitcode newer than Xcode's: inspect libraries with `nm --no-llvm-bc`.

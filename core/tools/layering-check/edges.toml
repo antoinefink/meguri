@@ -74,7 +74,7 @@ row_dev_dependencies = ["meguri-testkit"]
 # Workspace tools: depend on no workspace crate, and no workspace crate
 # depends on them.
 [isolated]
-crates = ["layering-check"]
+crates = ["layering-check", "uniffi-bindgen-swift"]
 
 # Third-party crates allowed only in the listed workspace crates, whether a
 # crate depends on them directly or through other third-party crates.
@@ -83,6 +83,10 @@ allowed = ["meguri-sync", "meguri-servers"]
 
 [restricted.axum]
 allowed = ["meguri-servers"]
+
+# Only meguri-ffi knows UniFFI (KTD2); the bindgen binary is its build tool.
+[restricted.uniffi]
+allowed = ["meguri-ffi", "uniffi-bindgen-swift"]
 
 # Two separate clients: the sync transport and the servers' remote-media
 # fetcher (U135 fetch.rs).

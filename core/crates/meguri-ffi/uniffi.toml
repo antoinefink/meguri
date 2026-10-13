@@ -1,0 +1,9 @@
+# Swift bindings (bridge-build.md §2). The generated Swift compiles in the
+# MeguriCoreBindings target (Swift 5 mode) and imports the C module
+# MeguriCoreFFI, whose header and modulemap live in the XCFramework under
+# Headers/MeguriCoreFFI/. tools/scripts/build-core-xcframework.sh passes the
+# same module name to the modulemap step.
+[bindings.swift]
+module_name = "MeguriCoreBindings"
+ffi_module_name = "MeguriCoreFFI"
+ffi_module_filename = "MeguriCoreFFI"

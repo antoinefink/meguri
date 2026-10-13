@@ -39,6 +39,11 @@ meguri-template = { path = "crates/meguri-template" }
 meguri-testkit = { path = "crates/meguri-testkit" }
 meguri-text = { path = "crates/meguri-text" }
 
+# FFI (KTD9): the runtime crate and the in-repo bindgen binary must match
+# exactly, because the Swift bindings compare checksums with the library at
+# load time. Only meguri-ffi and tools/uniffi-bindgen-swift may use it.
+uniffi = { version = "=0.32.2", default-features = false }
+
 # Workspace tooling.
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 serde = { version = "1.0.228", features = ["derive"] }
