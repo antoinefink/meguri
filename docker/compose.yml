@@ -29,6 +29,28 @@ services:
       CARGO_TARGET_DIR: /cargo-target
       TMPDIR: /tmp
 
+  # cargo-fuzz (tools/mg core-fuzz): the dev image plus the pinned nightly and
+  # cargo-fuzz of stage `fuzz`, with the dev service's mounts. Fuzz corpora
+  # stay on the tmpfs; findings go to the run directory under build/mg/.
+  fuzz:
+    build:
+      context: ..
+      dockerfile: docker/dev.Dockerfile
+      target: fuzz
+    pull_policy: build
+    init: true
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - cargo-home:/cargo-home
+      - cargo-target:/cargo-target
+    tmpfs:
+      - /tmp:exec,mode=1777
+    environment:
+      CARGO_HOME: /cargo-home
+      CARGO_TARGET_DIR: /cargo-target
+      TMPDIR: /tmp
+
   # The Anki oracle (oracle/, AGPL quarantine). `tools/mg oracle build` sets
   # MEGURI_ORACLE_TAG (<anki version>-<hash of the image inputs>) and builds it;
   # `tools/mg oracle bump` points MEGURI_ORACLE_CONTEXT at a staging copy.

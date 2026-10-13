@@ -13,6 +13,13 @@
 # Rust build output (host builds; Docker builds use a named volume)
 /core/target/
 
+# cargo-fuzz's default output directories (tools/mg core-fuzz keeps corpora on
+# tmpfs and findings under build/)
+/core/fuzz/target/
+/core/fuzz/corpus/
+/core/fuzz/artifacts/
+/core/fuzz/coverage/
+
 # XCFramework and generated UniFFI Swift bindings (rebuilt from core/)
 /app/Packages/MeguriCore/Binaries/
 /app/Packages/MeguriCore/Sources/MeguriCoreBindings/
