@@ -486,33 +486,38 @@ sp_release() {
   return "$rc"
 }
 
+# sp_status_devices <device list> <current runtime id> <now>: one JSON line
+# per pool device. (A function: macOS bash 3.2 cannot parse a case statement
+# inside $(...).)
+sp_status_devices() {
+  local udid name state rtid avail lease
+  while IFS="$SP_TAB" read -r udid name state rtid avail; do
+    case "$name" in "$SP_PREFIX"*) ;; *) continue ;; esac
+    lease=null
+    if [ -d "$SP_LEASES/$udid" ]; then
+      lease="$(jq -c . "$SP_LEASES/$udid/lease.json" 2>/dev/null)"
+      [ -n "$lease" ] || lease='{}'
+    fi
+    jq -nc --arg udid "$udid" --arg name "$name" --arg state "$state" --arg rt "$rtid" \
+      --arg cur "$2" --argjson avail "$avail" --argjson lease "$lease" \
+      --arg prefix "$SP_PREFIX" --argjson now "$3" '{
+        udid: $udid, name: $name,
+        kind: ($name | ltrimstr($prefix) | sub("-[0-9]+$"; "")),
+        state: $state, runtime: $rt, current_runtime: ($rt == $cur), available: $avail,
+        leased: ($lease != null), lease: $lease,
+        lease_expired: (if $lease == null then false else $now >= ($lease.expires_epoch // 0) end)
+      }'
+  done <<EOF
+$1
+EOF
+}
+
 sp_status() {
   [ "$#" -eq 0 ] || sp_usage "status: unexpected argument '$1'"
-  local list rt udid name state rtid avail lease now json orphans="" d
+  local list rt json orphans="" d
   list="$(sp_devices)" || exit 1
   rt="$(sp_runtime 2>/dev/null)" || rt=""
-  now="$(sp_now)"
-  json="$(
-    while IFS="$SP_TAB" read -r udid name state rtid avail; do
-      case "$name" in "$SP_PREFIX"*) ;; *) continue ;; esac
-      lease=null
-      if [ -d "$SP_LEASES/$udid" ]; then
-        lease="$(jq -c . "$SP_LEASES/$udid/lease.json" 2>/dev/null)"
-        [ -n "$lease" ] || lease='{}'
-      fi
-      jq -nc --arg udid "$udid" --arg name "$name" --arg state "$state" --arg rt "$rtid" \
-        --arg cur "${rt%%"$SP_TAB"*}" --argjson avail "$avail" --argjson lease "$lease" \
-        --arg prefix "$SP_PREFIX" --argjson now "$now" '{
-          udid: $udid, name: $name,
-          kind: ($name | ltrimstr($prefix) | sub("-[0-9]+$"; "")),
-          state: $state, runtime: $rt, current_runtime: ($rt == $cur), available: $avail,
-          leased: ($lease != null), lease: $lease,
-          lease_expired: (if $lease == null then false else $now >= ($lease.expires_epoch // 0) end)
-        }'
-    done <<EOF
-$list
-EOF
-  )"
+  json="$(sp_status_devices "$list" "${rt%%"$SP_TAB"*}" "$(sp_now)")"
   if [ -d "$SP_LEASES" ]; then
     for d in "$SP_LEASES"/*; do
       [ -d "$d" ] || continue
