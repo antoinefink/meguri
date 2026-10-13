@@ -8,8 +8,10 @@
 all-features = true
 
 [advisories]
-# Vulnerability and unsound advisories always fail. Unmaintained crates and
-# yanked versions fail as well.
+# Vulnerability advisories always fail. Unsound and unmaintained advisories
+# fail for every crate in the graph, not only the workspace's direct
+# dependencies (cargo-deny's default scope). Yanked versions fail as well.
+unsound = "all"
 unmaintained = "all"
 yanked = "deny"
 

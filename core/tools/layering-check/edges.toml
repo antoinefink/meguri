@@ -84,8 +84,10 @@ allowed = ["meguri-sync", "meguri-servers"]
 [restricted.axum]
 allowed = ["meguri-servers"]
 
+# Two separate clients: the sync transport and the servers' remote-media
+# fetcher (U135 fetch.rs).
 [restricted.reqwest]
-allowed = ["meguri-sync"]
+allowed = ["meguri-sync", "meguri-servers"]
 
 # The engine's raw open entry point (U24). Every other crate opens a collection
 # through meguri-host's CoreHost::open, so headless runs get the same port

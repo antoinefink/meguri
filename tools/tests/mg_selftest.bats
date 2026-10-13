@@ -640,6 +640,27 @@ mod tests {
   validate "$result"
 }
 
+@test "core-test builds only the canary packages first, so a build error elsewhere cannot hide a failing canary" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx ''
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_drifted() { panic!("pin drifted"); }'
+  write_crate broken 'pub fn f() -> u32 { "not a number" }'
+  mg core-test
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = 'fx::canary_pins$pin_drifted' ]
+  [[ "$(field .message)" == *canary* ]]
+  validate "$result"
+
+  # Once the canary passes, the rest of the workspace builds and the error shows.
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  mg core-test
+  [ "$status" -eq 1 ]
+  [[ "$(failure_ids)" == nextest-exit-* ]]
+  [ "$(field .summary.passed)" = 1 ]
+  validate "$result"
+}
+
 @test "core-test runs the other tests once the canaries pass, each test once" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   write_workspace
@@ -723,6 +744,46 @@ layering/restricted/meguri-sched -> tokio" ]
   [[ "$(field '.failures[0].message')" == *"gpl-fixture@0.1.0"*"GPL-3.0-only"* ]]
   [ "$(field '.failures[0].repro')" = "tools/mg core-deny -- licenses" ]
   validate "$result"
+}
+
+@test "core/deny.toml fails an unsound advisory on a crate the workspace reaches only transitively" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  copy_core
+  # The workspace reaches ppv-lite86 only through rand -> rand_chacha.
+  grep -q '^name = "ppv-lite86"$' "$SB/core/Cargo.lock"
+  # A fixture advisory database. core-deny always fetches its databases, so
+  # this runs cargo deny --offline, which reads the database for a URL from
+  # db-path/<name>-<hash of the URL> (cargo-deny 0.20.2) without fetching.
+  local dbs="$BATS_TEST_TMPDIR/advisory-dbs" db
+  db="$dbs/advisory-db-e5f9bee2060c5996"
+  mkdir -p "$db/crates/ppv-lite86"
+  cat >"$db/crates/ppv-lite86/RUSTSEC-2026-9001.md" <<'EOF'
+```toml
+[advisory]
+id = "RUSTSEC-2026-9001"
+package = "ppv-lite86"
+date = "2026-01-01"
+informational = "unsound"
+url = "https://fixture.invalid/RUSTSEC-2026-9001"
+
+[versions]
+patched = []
+```
+
+# Fixture: unsound advisory on a transitive crate
+
+core-deny self-test fixture.
+EOF
+  git -C "$db" init -q
+  git -C "$db" add -A
+  git -C "$db" -c user.name=selftest -c user.email=selftest@localhost commit -qm fixture
+  sed -i "/^\[advisories\]\$/a db-urls = [\"https://fixture.invalid/advisory-db\"]\ndb-path = \"$dbs\"" "$SB/core/deny.toml"
+
+  run --separate-stderr bash -c "cd '$SB/core' && cargo deny --offline --format json --color never check advisories"
+  [ "$status" -eq 1 ] || { echo "$stderr"; return 1; }
+  [ "$(grep '^{' <<<"$stderr" | jq -sc '[.[] | select(.type == "diagnostic" and .fields.severity == "error")
+    | {code: .fields.code, crate: .fields.graphs[0].Krate.name, id: .fields.advisory.id}]')" \
+    = '[{"code":"unsound","crate":"ppv-lite86","id":"RUSTSEC-2026-9001"}]' ]
 }
 
 # --- images ----------------------------------------------------------------

@@ -9,12 +9,17 @@ mg_job core-deny docker:dev mg_core_deny \
 
 # Canary test binaries (tests/canary_*.rs) run first and alone in a bare
 # core-test; when one fails, the other tests do not run (AE82 ordering).
+# The canary phase builds only the packages that hold a canary, so a build
+# error elsewhere (say, code broken by a pin bump) cannot hide the pin canary.
 # nextest rejects a binary() filter that matches no binary, so the canary
-# phase runs only when a canary file exists.
+# phase runs only when a canary exists.
 MG_CORE_CANARIES='binary(/^canary_/)'
 
-mg__core_has_canaries() {
-  [ -n "$(find core \( -name target -o -name '.*' \) -prune -o -type f -path '*/tests/canary_*.rs' -print 2>/dev/null | head -n 1)" ]
+# mg__core_canary_packages: workspace packages with a canary_* test target, one per line.
+mg__core_canary_packages() {
+  (cd core && cargo metadata --no-deps --format-version 1) |
+    jq -r '.packages[] | select(any(.targets[]; any(.kind[]; . == "test") and (.name | startswith("canary_")))) | .name' |
+    sort -u
 }
 
 mg__core_environment() {
@@ -30,13 +35,14 @@ mg__core_environment() {
   )"
 }
 
-# mg__nextest <jsonl> [nextest args]: one nextest run over the workspace.
+# mg__nextest <jsonl> <package scope and nextest args>: one nextest run in
+# core/. The caller passes the scope: --workspace or -p <package>...
 mg__nextest() {
   local out="$1"
   shift
   (
     cd core &&
-      NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run --workspace \
+      NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 cargo nextest run \
         --retries 0 --no-fail-fast \
         --message-format libtest-json-plus --message-format-version 0.1 \
         ${1+"$@"} >"$out"
@@ -63,24 +69,29 @@ mg_core_test() {
   fi
 
   local main="$MG_RUN_DIR/nextest.jsonl" canary="$MG_RUN_DIR/nextest-canary.jsonl"
-  local rc stopped=false
-  local files=()
-  if [ "$#" -eq 0 ] && mg__core_has_canaries; then
-    mg__nextest "$canary" --no-tests=pass -E "$MG_CORE_CANARIES"
+  local rc stopped=false pkg
+  local files=() canaries=()
+  if [ "$#" -eq 0 ]; then
+    while IFS= read -r pkg; do
+      if [ -n "$pkg" ]; then canaries+=(-p "$pkg"); fi
+    done < <(mg__core_canary_packages)
+  fi
+  if [ "${#canaries[@]}" -gt 0 ]; then
+    mg__nextest "$canary" "${canaries[@]}" --no-tests=pass -E "$MG_CORE_CANARIES"
     rc=$?
     mg_artifact nextest-canary-jsonl "$canary"
     files=("$canary")
     if [ "$rc" -ne 0 ]; then
       stopped=true
     else
-      mg__nextest "$main" --no-tests=pass -E "not ($MG_CORE_CANARIES)"
+      mg__nextest "$main" --workspace --no-tests=pass -E "not ($MG_CORE_CANARIES)"
       rc=$?
       mg_artifact nextest-jsonl "$main"
       files=("$canary" "$main")
     fi
   else
     [ "$#" -gt 0 ] || set -- --no-tests=pass
-    mg__nextest "$main" "$@"
+    mg__nextest "$main" --workspace "$@"
     rc=$?
     mg_artifact nextest-jsonl "$main"
     files=("$main")

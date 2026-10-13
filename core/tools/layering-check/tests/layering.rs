@@ -211,12 +211,12 @@ fn tokio_reached_through_a_third_party_crate_fails_with_the_path() {
 }
 
 #[test]
-fn axum_outside_servers_and_reqwest_outside_sync_fail() {
+fn axum_outside_servers_and_reqwest_outside_sync_and_servers_fail() {
     let fx = Fixture::new();
     let axum = fx.vendor("axum", "");
     let reqwest = fx.vendor("reqwest", "");
     fx.add("meguri-sync", "dependencies", &dep_on(&axum, "axum"));
-    fx.add("meguri-servers", "dev-dependencies", &dep_on(&reqwest, "reqwest"));
+    fx.add("meguri-package", "dev-dependencies", &dep_on(&reqwest, "reqwest"));
 
     let run = fx.run();
     assert_eq!(run.code, 1, "{}", run.stderr);
@@ -225,10 +225,25 @@ fn axum_outside_servers_and_reqwest_outside_sync_fail() {
     assert_eq!(
         rules,
         [
-            ("restricted".to_owned(), "meguri-servers -> reqwest".to_owned()),
+            ("restricted".to_owned(), "meguri-package -> reqwest".to_owned()),
             ("restricted".to_owned(), "meguri-sync -> axum".to_owned()),
         ]
     );
+    let message = run.message("restricted", "meguri-package -> reqwest");
+    assert!(message.contains("only in meguri-sync, meguri-servers"), "{message}");
+}
+
+#[test]
+fn reqwest_is_allowed_in_sync_and_servers() {
+    // The sync transport (U105) and the servers' remote-media fetcher (U135,
+    // fetch.rs) are separate reqwest clients.
+    let fx = Fixture::new();
+    let reqwest = fx.vendor("reqwest", "");
+    fx.add("meguri-sync", "dependencies", &dep_on(&reqwest, "reqwest"));
+    fx.add("meguri-servers", "dependencies", &dep_on(&reqwest, "reqwest"));
+
+    let run = fx.run();
+    assert_eq!((run.code, run.rules()), (0, vec![]), "{}", run.stderr);
 }
 
 #[test]
