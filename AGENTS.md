@@ -7,6 +7,10 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 - No Anki code (AGPL) in Meguri, copied or translated. `refs/anki` is for spec writing and the test oracle only.
 - `local-data/` is private (real collection, research). Never commit it or send it anywhere.
 
+## Roles (clean room)
+
+- Every agent session has one role; read `docs/process/roles/<role>.md` first. Implementers and fixers work only in worktrees from `tools/mg worktree new` and never read `oracle/`, `refs/`, `local-data/` or any Anki source (R1955). Trailers and the similarity gate: `docs/process/provenance.md`.
+
 ## Tooling
 
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds and simulators run on the host.

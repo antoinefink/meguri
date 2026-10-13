@@ -19,3 +19,10 @@ DerivedData/
 
 # Python virtual environments (macOS-native oracle lane)
 .venv*
+
+# Per-worktree Claude Code settings (tools/mg worktree new renders the
+# implementer deny profile here)
+.claude/settings.local.json
+
+# Python bytecode (the similarity scanner)
+__pycache__/

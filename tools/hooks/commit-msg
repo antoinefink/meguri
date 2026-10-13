@@ -1,0 +1,81 @@
+#!/bin/bash
+# commit-msg hook: provenance trailers (U2, R1958). `tools/mg hooks install`
+# installs a shim that runs this file from the checkout being committed in.
+#
+# - A Role: trailer, when present, names one known role.
+# - Commits touching core/, app/ or conformance/runner/ need a Role: trailer.
+# - Implementer and fixer commits touching those paths also need Spec: (one
+#   or more spec ids, specs/README-format.md) and Session: (the session id
+#   from docs/process/provenance/sessions.jsonl).
+# Merge commits are not checked. Runs under macOS /bin/bash 3.2.
+
+set -u
+set -f # spec ids are words, never globs
+
+ROLES="spec-writer implementer fixer oracle-maintainer infra critic integrator"
+DOC="see docs/process/provenance.md"
+
+reject() {
+  echo "commit-msg: $*; $DOC" >&2
+  exit 1
+}
+
+msg="${1:?usage: commit-msg <message file>}"
+git_dir="$(git rev-parse --absolute-git-dir)" || exit 1
+[ -f "$git_dir/MERGE_HEAD" ] && exit 0
+
+trailers="$(git stripspace --strip-comments <"$msg" | git interpret-trailers --parse)"
+
+# values <key>: the values of every trailer with this key (case-insensitive).
+values() {
+  printf '%s\n' "$trailers" | awk -v key="$1" '
+    { i = index($0, ":"); if (i == 0) next
+      k = tolower(substr($0, 1, i - 1)); v = substr($0, i + 1)
+      sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+      if (k == tolower(key)) print v }'
+}
+
+roles="$(values Role)"
+role=""
+if [ -n "$roles" ]; then
+  if [ "$(printf '%s\n' "$roles" | sort -u | wc -l | tr -d ' ')" -ne 1 ]; then
+    reject "one Role: trailer per commit, found: $(printf '%s' "$roles" | tr '\n' ' ')"
+  fi
+  role="$(printf '%s\n' "$roles" | head -n 1)"
+  case " $ROLES " in
+    *" $role "*) ;;
+    *) reject "unknown Role: '$role' (one of: $ROLES)" ;;
+  esac
+fi
+
+code_paths="$(git diff --cached --name-only | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
+[ -n "$code_paths" ] || exit 0
+first_path="$(printf '%s\n' "$code_paths" | head -n 1)"
+
+[ -n "$role" ] || reject "commits touching core/, app/ or conformance/runner/ (here $first_path) need a Role: trailer"
+
+case "$role" in
+  implementer | fixer) ;;
+  *) exit 0 ;;
+esac
+
+specs="$(values Spec | tr ',' ' ')"
+[ -n "$(printf '%s' "$specs" | tr -d ' \n\t')" ] ||
+  reject "$role commits touching $first_path need a Spec: trailer with the spec ids they implement, e.g. 'Spec: search/grammar#G3'"
+for id in $specs; do
+  printf '%s' "$id" | grep -Eq '^(specs/)?[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9_-]*(\.md)?(#[A-Za-z0-9][A-Za-z0-9._-]*)?$' ||
+    reject "Spec: '$id' is not a spec id (<area>/<topic>#<section>, e.g. search/grammar#G3)"
+done
+
+sessions="$(values Session)"
+if [ -z "$sessions" ]; then
+  hint=""
+  if [ -f "$git_dir/meguri-session.json" ] && command -v jq >/dev/null 2>&1; then
+    hint=" ('Session: $(jq -r .session "$git_dir/meguri-session.json")' for this worktree)"
+  fi
+  reject "$role commits touching $first_path need a Session: trailer$hint"
+fi
+for s in $sessions; do
+  printf '%s' "$s" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._:-]{2,}$' || reject "Session: '$s' is not a session id"
+done
+exit 0

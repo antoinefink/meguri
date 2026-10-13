@@ -1,0 +1,2 @@
+# Append-only session records: branches each append lines, so a merge keeps both.
+docs/process/provenance/sessions.jsonl merge=union
