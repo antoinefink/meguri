@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme
+   LastUpgradeVersion = "2700"
+   version = "1.7">
+   <BuildAction
+      parallelizeBuildables = "YES"
+      buildImplicitDependencies = "YES"
+      buildArchitectures = "Automatic">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Build the Rust core"
+               scriptText = '# Builds the Rust core XCFramework for this configuration and platform (U6, U7).&#10;# SDKROOT is `auto` for the multiplatform target and breaks the xcrun tools&#10;# the script runs (nm, xcodebuild); the script needs only CONFIGURATION and&#10;# PLATFORM_NAME.&#10;log="${SRCROOT}/../build/xcode/core-pre-action.log"&#10;mkdir -p "$(dirname "$log")"&#10;env -u SDKROOT /bin/bash "${SRCROOT}/../tools/scripts/build-core-xcframework.sh" --xcode &gt;"$log" 2&gt;&amp;1&#10;'
+               shellToInvoke = "/bin/bash">
+               <EnvironmentBuildable>
+                <BuildableReference
+                   BuildableIdentifier = "primary"
+                   BlueprintIdentifier = "4D4547555249000000000100"
+                   BuildableName = "Meguri.app"
+                   BlueprintName = "Meguri"
+                   ReferencedContainer = "container:Meguri.xcodeproj">
+                </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
+      <BuildActionEntries>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4D4547555249000000000100"
+               BuildableName = "Meguri.app"
+               BlueprintName = "Meguri"
+               ReferencedContainer = "container:Meguri.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+      </BuildActionEntries>
+   </BuildAction>
+   <TestAction
+      buildConfiguration = "AppStore"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      shouldUseLaunchSchemeArgsEnv = "YES">
+      <TestPlans>
+         <TestPlanReference
+            reference = "container:TestPlans/UI.xctestplan"
+            default = "YES">
+         </TestPlanReference>
+      </TestPlans>
+   </TestAction>
+   <LaunchAction
+      buildConfiguration = "AppStore"
+      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      launchStyle = "0"
+      useCustomWorkingDirectory = "NO"
+      ignoresPersistentStateOnLaunch = "NO"
+      debugDocumentVersioning = "YES"
+      debugServiceExtension = "internal"
+      allowLocationSimulation = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "4D4547555249000000000100"
+            BuildableName = "Meguri.app"
+            BlueprintName = "Meguri"
+            ReferencedContainer = "container:Meguri.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </LaunchAction>
+   <ProfileAction
+      buildConfiguration = "AppStore"
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      savedToolIdentifier = ""
+      useCustomWorkingDirectory = "NO"
+      debugDocumentVersioning = "YES">
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "4D4547555249000000000100"
+            BuildableName = "Meguri.app"
+            BlueprintName = "Meguri"
+            ReferencedContainer = "container:Meguri.xcodeproj">
+         </BuildableReference>
+      </BuildableProductRunnable>
+   </ProfileAction>
+   <AnalyzeAction
+      buildConfiguration = "AppStore">
+   </AnalyzeAction>
+   <ArchiveAction
+      buildConfiguration = "AppStore"
+      revealArchiveInOrganizer = "YES">
+   </ArchiveAction>
+</Scheme>

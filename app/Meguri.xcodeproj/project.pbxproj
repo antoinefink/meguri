@@ -1,0 +1,662 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 90;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4D4547555249000000000110 /* MeguriKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000510 /* MeguriKit */; };
+		4D4547555249000000000111 /* CoreBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000511 /* CoreBridge */; };
+		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4D4547555249000000000121 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4D4547555249000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D4547555249000000000200;
+			remoteInfo = MeguriWidget;
+		};
+		4D4547555249000000000321 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4D4547555249000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D4547555249000000000100;
+			remoteInfo = Meguri;
+		};
+		4D4547555249000000000421 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4D4547555249000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D4547555249000000000100;
+			remoteInfo = Meguri;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		4D4547555249000000000105 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		4D4547555249000000000020 /* Meguri.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Meguri.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4547555249000000000021 /* MeguriWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MeguriWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4547555249000000000022 /* MeguriUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeguriUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4547555249000000000023 /* MeguriSnapshotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeguriSnapshotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4547555249000000000030 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000031 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000032 /* Profile.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Profile.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000033 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000034 /* AppStore.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppStore.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000035 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000036 /* Meguri.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Meguri.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000037 /* MeguriWidget.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MeguriWidget.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000038 /* MeguriUITests.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MeguriUITests.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000039 /* MeguriSnapshotTests.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = MeguriSnapshotTests.xcconfig; sourceTree = "<group>"; };
+		4D4547555249000000000520 /* MeguriCore */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MeguriCore; sourceTree = "<group>"; };
+		4D4547555249000000000521 /* MeguriKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = MeguriKit; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		4D4547555249000000000014 /* Exceptions for "Meguri" folder in "Meguri" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Info-iOS.plist",
+				"Info-macOS.plist",
+				"Meguri-iOS.entitlements",
+				"Meguri-macOS-AdHoc.entitlements",
+				"Meguri-macOS-Dev-AdHoc.entitlements",
+				"Meguri-macOS-Dev.entitlements",
+				"Meguri-macOS.entitlements",
+			);
+			target = 4D4547555249000000000100 /* Meguri */;
+		};
+		4D4547555249000000000015 /* Exceptions for "MeguriWidget" folder in "MeguriWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				"MeguriWidget-iOS.entitlements",
+				"MeguriWidget-macOS-AdHoc.entitlements",
+				"MeguriWidget-macOS.entitlements",
+			);
+			target = 4D4547555249000000000200 /* MeguriWidget */;
+		};
+		4D4547555249000000000016 /* Exceptions for "MeguriUITests" folder in "MeguriUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4D4547555249000000000300 /* MeguriUITests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		4D4547555249000000000010 /* Meguri */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4D4547555249000000000014 /* Exceptions for "Meguri" folder in "Meguri" target */,
+			);
+			path = Meguri;
+			sourceTree = "<group>";
+		};
+		4D4547555249000000000011 /* MeguriWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4D4547555249000000000015 /* Exceptions for "MeguriWidget" folder in "MeguriWidget" target */,
+			);
+			path = MeguriWidget;
+			sourceTree = "<group>";
+		};
+		4D4547555249000000000012 /* MeguriUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4D4547555249000000000016 /* Exceptions for "MeguriUITests" folder in "MeguriUITests" target */,
+			);
+			path = MeguriUITests;
+			sourceTree = "<group>";
+		};
+		4D4547555249000000000013 /* MeguriSnapshotTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = MeguriSnapshotTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4D4547555249000000000103 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				4D4547555249000000000110 /* MeguriKit in Frameworks */,
+				4D4547555249000000000111 /* CoreBridge in Frameworks */,
+			);
+		};
+		4D4547555249000000000203 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000303 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000403 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		4D4547555249000000000002 = {
+			isa = PBXGroup;
+			children = (
+				4D4547555249000000000004 /* Config */,
+				4D4547555249000000000005 /* Packages */,
+				4D4547555249000000000010 /* Meguri */,
+				4D4547555249000000000011 /* MeguriWidget */,
+				4D4547555249000000000012 /* MeguriUITests */,
+				4D4547555249000000000013 /* MeguriSnapshotTests */,
+				4D4547555249000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4D4547555249000000000004 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				4D4547555249000000000030 /* Base.xcconfig */,
+				4D4547555249000000000031 /* Debug.xcconfig */,
+				4D4547555249000000000032 /* Profile.xcconfig */,
+				4D4547555249000000000033 /* Release.xcconfig */,
+				4D4547555249000000000034 /* AppStore.xcconfig */,
+				4D4547555249000000000035 /* Signing.xcconfig */,
+				4D4547555249000000000036 /* Meguri.xcconfig */,
+				4D4547555249000000000037 /* MeguriWidget.xcconfig */,
+				4D4547555249000000000038 /* MeguriUITests.xcconfig */,
+				4D4547555249000000000039 /* MeguriSnapshotTests.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		4D4547555249000000000005 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				4D4547555249000000000520 /* MeguriCore */,
+				4D4547555249000000000521 /* MeguriKit */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		4D4547555249000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4D4547555249000000000020 /* Meguri.app */,
+				4D4547555249000000000021 /* MeguriWidget.appex */,
+				4D4547555249000000000022 /* MeguriUITests.xctest */,
+				4D4547555249000000000023 /* MeguriSnapshotTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4D4547555249000000000100 /* Meguri */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4547555249000000000601 /* Build configuration list for PBXNativeTarget "Meguri" */;
+			buildPhases = (
+				4D4547555249000000000101 /* Check core configuration */,
+				4D4547555249000000000102 /* Sources */,
+				4D4547555249000000000103 /* Frameworks */,
+				4D4547555249000000000104 /* Resources */,
+				4D4547555249000000000105 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4D4547555249000000000120 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4D4547555249000000000010 /* Meguri */,
+			);
+			name = Meguri;
+			packageProductDependencies = (
+				4D4547555249000000000510 /* MeguriKit */,
+				4D4547555249000000000511 /* CoreBridge */,
+			);
+			productName = Meguri;
+			productReference = 4D4547555249000000000020 /* Meguri.app */;
+			productType = "com.apple.product-type.application";
+		};
+		4D4547555249000000000200 /* MeguriWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4547555249000000000602 /* Build configuration list for PBXNativeTarget "MeguriWidget" */;
+			buildPhases = (
+				4D4547555249000000000202 /* Sources */,
+				4D4547555249000000000203 /* Frameworks */,
+				4D4547555249000000000204 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4D4547555249000000000011 /* MeguriWidget */,
+			);
+			name = MeguriWidget;
+			productName = MeguriWidget;
+			productReference = 4D4547555249000000000021 /* MeguriWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		4D4547555249000000000300 /* MeguriUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4547555249000000000603 /* Build configuration list for PBXNativeTarget "MeguriUITests" */;
+			buildPhases = (
+				4D4547555249000000000302 /* Sources */,
+				4D4547555249000000000303 /* Frameworks */,
+				4D4547555249000000000304 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4D4547555249000000000320 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4D4547555249000000000012 /* MeguriUITests */,
+			);
+			name = MeguriUITests;
+			productName = MeguriUITests;
+			productReference = 4D4547555249000000000022 /* MeguriUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		4D4547555249000000000400 /* MeguriSnapshotTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4547555249000000000604 /* Build configuration list for PBXNativeTarget "MeguriSnapshotTests" */;
+			buildPhases = (
+				4D4547555249000000000402 /* Sources */,
+				4D4547555249000000000403 /* Frameworks */,
+				4D4547555249000000000404 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4D4547555249000000000420 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4D4547555249000000000013 /* MeguriSnapshotTests */,
+			);
+			name = MeguriSnapshotTests;
+			productName = MeguriSnapshotTests;
+			productReference = 4D4547555249000000000023 /* MeguriSnapshotTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4D4547555249000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					4D4547555249000000000100 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					4D4547555249000000000200 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					4D4547555249000000000300 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 4D4547555249000000000100;
+					};
+					4D4547555249000000000400 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 4D4547555249000000000100;
+					};
+				};
+			};
+			buildConfigurationList = 4D4547555249000000000600 /* Build configuration list for PBXProject "Meguri" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 4D4547555249000000000002;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				4D4547555249000000000500 /* XCLocalSwiftPackageReference "Packages/MeguriKit" */,
+				4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */,
+			);
+			preferredProjectObjectVersion = 90;
+			productRefGroup = 4D4547555249000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4D4547555249000000000100 /* Meguri */,
+				4D4547555249000000000200 /* MeguriWidget */,
+				4D4547555249000000000300 /* MeguriUITests */,
+				4D4547555249000000000400 /* MeguriSnapshotTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4D4547555249000000000104 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000204 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000304 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000404 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		4D4547555249000000000101 /* Check core configuration */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Packages/MeguriCore/Binaries/.stamp",
+			);
+			name = "Check core configuration";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			shellPath = /bin/sh;
+			shellScript = "# The Meguri schemes' pre-action builds the core XCFramework for this\n# configuration (tools/scripts/build-core-xcframework.sh --xcode). A build\n# without it (another scheme, -target) would link whatever core is there, and\n# a core left from another configuration could put test hooks into a Release\n# or App Store build (R1967, KTD18, KTD21): check the core stamp.\nstamp=\"${SRCROOT}/Packages/MeguriCore/Binaries/.stamp\"\nfail() {\n  echo \"error: core XCFramework: $1; run tools/mg core-xcframework --configuration ${CONFIGURATION} (pre-action log: build/xcode/core-pre-action.log)\"\n  exit 1\n}\n[ -f \"$stamp\" ] || fail \"missing\"\nvalue() { sed -n \"s/^$1=//p\" \"$stamp\"; }\n[ \"$(value hash)\" != incomplete ] || fail \"an interrupted build left it incomplete\"\n[ \"$(value configuration)\" = \"${CONFIGURATION}\" ] || fail \"built for $(value configuration), not ${CONFIGURATION}\"\n[ \"$(value features)\" = \"${MEGURI_CORE_FEATURES}\" ] || fail \"features '$(value features)', expected '${MEGURI_CORE_FEATURES}'\"\ncase \"${PLATFORM_NAME}\" in\n  macosx) slice=mac ;;\n  iphonesimulator) slice=sim ;;\n  iphoneos) slice=device ;;\n  *) fail \"unsupported platform ${PLATFORM_NAME}\" ;;\nesac\ncase \",$(value slices),\" in\n  *\",$slice,\"*) ;;\n  *) fail \"no $slice slice (it has $(value slices))\" ;;\nesac\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4D4547555249000000000102 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000202 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000302 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		4D4547555249000000000402 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4D4547555249000000000120 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D4547555249000000000200 /* MeguriWidget */;
+			targetProxy = 4D4547555249000000000121 /* PBXContainerItemProxy */;
+		};
+		4D4547555249000000000320 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D4547555249000000000100 /* Meguri */;
+			targetProxy = 4D4547555249000000000321 /* PBXContainerItemProxy */;
+		};
+		4D4547555249000000000420 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D4547555249000000000100 /* Meguri */;
+			targetProxy = 4D4547555249000000000421 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		4D4547555249000000000610 /* Debug configuration for PBXProject "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000031 /* Debug.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		4D4547555249000000000611 /* Profile configuration for PBXProject "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000032 /* Profile.xcconfig */;
+			buildSettings = {
+			};
+			name = Profile;
+		};
+		4D4547555249000000000612 /* Release configuration for PBXProject "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000033 /* Release.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		4D4547555249000000000613 /* AppStore configuration for PBXProject "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000034 /* AppStore.xcconfig */;
+			buildSettings = {
+			};
+			name = AppStore;
+		};
+		4D4547555249000000000620 /* Debug configuration for PBXNativeTarget "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000036 /* Meguri.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		4D4547555249000000000621 /* Profile configuration for PBXNativeTarget "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000036 /* Meguri.xcconfig */;
+			buildSettings = {
+			};
+			name = Profile;
+		};
+		4D4547555249000000000622 /* Release configuration for PBXNativeTarget "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000036 /* Meguri.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		4D4547555249000000000623 /* AppStore configuration for PBXNativeTarget "Meguri" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000036 /* Meguri.xcconfig */;
+			buildSettings = {
+			};
+			name = AppStore;
+		};
+		4D4547555249000000000630 /* Debug configuration for PBXNativeTarget "MeguriWidget" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000037 /* MeguriWidget.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		4D4547555249000000000631 /* Profile configuration for PBXNativeTarget "MeguriWidget" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000037 /* MeguriWidget.xcconfig */;
+			buildSettings = {
+			};
+			name = Profile;
+		};
+		4D4547555249000000000632 /* Release configuration for PBXNativeTarget "MeguriWidget" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000037 /* MeguriWidget.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		4D4547555249000000000633 /* AppStore configuration for PBXNativeTarget "MeguriWidget" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000037 /* MeguriWidget.xcconfig */;
+			buildSettings = {
+			};
+			name = AppStore;
+		};
+		4D4547555249000000000640 /* Debug configuration for PBXNativeTarget "MeguriUITests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000038 /* MeguriUITests.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		4D4547555249000000000641 /* Profile configuration for PBXNativeTarget "MeguriUITests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000038 /* MeguriUITests.xcconfig */;
+			buildSettings = {
+			};
+			name = Profile;
+		};
+		4D4547555249000000000642 /* Release configuration for PBXNativeTarget "MeguriUITests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000038 /* MeguriUITests.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		4D4547555249000000000643 /* AppStore configuration for PBXNativeTarget "MeguriUITests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000038 /* MeguriUITests.xcconfig */;
+			buildSettings = {
+			};
+			name = AppStore;
+		};
+		4D4547555249000000000650 /* Debug configuration for PBXNativeTarget "MeguriSnapshotTests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000039 /* MeguriSnapshotTests.xcconfig */;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		4D4547555249000000000651 /* Profile configuration for PBXNativeTarget "MeguriSnapshotTests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000039 /* MeguriSnapshotTests.xcconfig */;
+			buildSettings = {
+			};
+			name = Profile;
+		};
+		4D4547555249000000000652 /* Release configuration for PBXNativeTarget "MeguriSnapshotTests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000039 /* MeguriSnapshotTests.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		4D4547555249000000000653 /* AppStore configuration for PBXNativeTarget "MeguriSnapshotTests" */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4547555249000000000039 /* MeguriSnapshotTests.xcconfig */;
+			buildSettings = {
+			};
+			name = AppStore;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4D4547555249000000000600 /* Build configuration list for PBXProject "Meguri" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4547555249000000000610 /* Debug configuration for PBXProject "Meguri" */,
+				4D4547555249000000000611 /* Profile configuration for PBXProject "Meguri" */,
+				4D4547555249000000000612 /* Release configuration for PBXProject "Meguri" */,
+				4D4547555249000000000613 /* AppStore configuration for PBXProject "Meguri" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		4D4547555249000000000601 /* Build configuration list for PBXNativeTarget "Meguri" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4547555249000000000620 /* Debug configuration for PBXNativeTarget "Meguri" */,
+				4D4547555249000000000621 /* Profile configuration for PBXNativeTarget "Meguri" */,
+				4D4547555249000000000622 /* Release configuration for PBXNativeTarget "Meguri" */,
+				4D4547555249000000000623 /* AppStore configuration for PBXNativeTarget "Meguri" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		4D4547555249000000000602 /* Build configuration list for PBXNativeTarget "MeguriWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4547555249000000000630 /* Debug configuration for PBXNativeTarget "MeguriWidget" */,
+				4D4547555249000000000631 /* Profile configuration for PBXNativeTarget "MeguriWidget" */,
+				4D4547555249000000000632 /* Release configuration for PBXNativeTarget "MeguriWidget" */,
+				4D4547555249000000000633 /* AppStore configuration for PBXNativeTarget "MeguriWidget" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		4D4547555249000000000603 /* Build configuration list for PBXNativeTarget "MeguriUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4547555249000000000640 /* Debug configuration for PBXNativeTarget "MeguriUITests" */,
+				4D4547555249000000000641 /* Profile configuration for PBXNativeTarget "MeguriUITests" */,
+				4D4547555249000000000642 /* Release configuration for PBXNativeTarget "MeguriUITests" */,
+				4D4547555249000000000643 /* AppStore configuration for PBXNativeTarget "MeguriUITests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		4D4547555249000000000604 /* Build configuration list for PBXNativeTarget "MeguriSnapshotTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4547555249000000000650 /* Debug configuration for PBXNativeTarget "MeguriSnapshotTests" */,
+				4D4547555249000000000651 /* Profile configuration for PBXNativeTarget "MeguriSnapshotTests" */,
+				4D4547555249000000000652 /* Release configuration for PBXNativeTarget "MeguriSnapshotTests" */,
+				4D4547555249000000000653 /* AppStore configuration for PBXNativeTarget "MeguriSnapshotTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		4D4547555249000000000500 /* XCLocalSwiftPackageReference "Packages/MeguriKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/MeguriKit;
+		};
+		4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/MeguriCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4D4547555249000000000510 /* MeguriKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D4547555249000000000500 /* XCLocalSwiftPackageReference "Packages/MeguriKit" */;
+			productName = MeguriKit;
+		};
+		4D4547555249000000000511 /* CoreBridge */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
+			productName = CoreBridge;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 4D4547555249000000000001 /* Project object */;
+}

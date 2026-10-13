@@ -798,6 +798,183 @@ EOF
   validate "$result"
 }
 
+# --- lint-ui first (AE90) ----------------------------------------------------
+
+# lint_first_sandbox: a card face that applies glass, with SwiftLint, the core
+# build and the project check stubbed. Every stubbed call is logged to
+# $STUB_LOG. SwiftLint prints the report $STUB_SWIFTLINT_REPORT names; with
+# STUB_DOCKER=0 the daemon is down. The core build and the project check fail
+# at once, so a run that gets past lint stops there.
+lint_first_sandbox() {
+  STUBS="$BATS_TEST_TMPDIR/stubs"
+  mkdir -p "$STUBS"
+  export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
+  : >"$STUB_LOG"
+  mkdir -p "$SB/app"
+  cp "$REPO_ROOT/app/.swiftlint.yml" "$SB/app/"
+  write_file app/Packages/MeguriKit/Package.swift '// swift-tools-version: 6.2'
+  write_file app/Packages/MeguriKit/Sources/CardRendering/CardFace.swift 'import SwiftUI
+
+struct CardFace: View {
+    let html: String
+
+    var body: some View {
+        Text(html).glassEffect()
+    }
+}'
+  # The report SwiftLint gives for that file (shape of SwiftLint 0.65.1).
+  echo '[{"character":19,"file":"/work/app/Packages/MeguriKit/Sources/CardRendering/CardFace.swift","line":7,"reason":"Liquid Glass and materials belong to the navigation and control layer (R1996, AE90).","rule_id":"glass-outside-chrome","severity":"Error","type":"Glass outside the control layer"}]' \
+    >"$BATS_TEST_TMPDIR/glass.json"
+  echo '[]' >"$BATS_TEST_TMPDIR/clean.json"
+  cat >"$STUBS/docker" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "docker $*" >>"$STUB_LOG"
+case " $* " in
+  " info ") [ "${STUB_DOCKER:-1}" = 1 ] || exit 1 ;;
+  *" swiftlint lint "*)
+    cat "$STUB_SWIFTLINT_REPORT"
+    # SwiftLint exits 2 when it found error-level violations.
+    [ "$(cat "$STUB_SWIFTLINT_REPORT")" = '[]' ] || exit 2 ;;
+  *) exit 97 ;;
+esac
+EOF
+  cat >"$STUBS/_stub" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$(basename "$0") $*" >>"$STUB_LOG"
+exit 97
+EOF
+  chmod +x "$STUBS/docker" "$STUBS/_stub"
+  local c s
+  for c in swift xcodebuild xcrun cargo; do
+    ln -s _stub "$STUBS/$c"
+  done
+  for s in scripts/build-core-xcframework.sh tests/xcode_project_check.sh; do
+    cat >"$SB/tools/$s" <<EOF
+printf '%s\n' "${s##*/} \$*" >>"\$STUB_LOG"
+exit 1
+EOF
+  done
+  export PATH="$STUBS:$PATH"
+}
+
+# stub_calls: the logged calls, one word each (the SwiftLint run as
+# `swiftlint`), on one line.
+stub_calls() {
+  sed -E 's/^docker .* swiftlint lint .*/swiftlint/; s/^docker info$/docker-info/; s/ .*//' "$STUB_LOG" | tr '\n' ' '
+}
+
+@test "a lint-ui finding stops swift-test and xcode-check before they build anything (AE90)" {
+  lint_first_sandbox
+  export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/glass.json"
+  local job lint
+  for job in "swift-test --package MeguriKit" "xcode-check --no-ui"; do
+    : >"$STUB_LOG"
+    # shellcheck disable=SC2086 # job name and its arguments
+    mg $job
+    [ "$status" -eq 1 ] || { echo "$job: exit $status; stderr: $stderr"; return 1; }
+    [ "$(field .status)" = fail ]
+    [ "$(failure_ids)" = "lint-ui
+lint/glass-outside-chrome" ]
+    [ "$(field '.failures[] | select(.id == "lint/glass-outside-chrome") | .repro')" = "tools/mg lint-ui" ]
+    # Lint ran, and nothing after it: no core build, no swift, no xcodebuild.
+    [ "$(stub_calls)" = "docker-info swiftlint " ] || { echo "$job: $(stub_calls)"; return 1; }
+    lint="$(field '.artifacts[] | select(.kind == "lint-ui") | .path')"
+    [ "$(jq -r '.job + " " + .status' "$lint")" = "lint-ui fail" ]
+    validate "$result" "$lint"
+  done
+}
+
+@test "with lint-ui clean, swift-test and xcode-check go on to build after it" {
+  lint_first_sandbox
+  export STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
+  local job
+  for job in "swift-test --package MeguriKit" "xcode-check --no-ui"; do
+    : >"$STUB_LOG"
+    # shellcheck disable=SC2086
+    mg $job
+    [ "$(failure_ids)" = xcframework ] || { echo "$job: $(failure_ids); stderr: $stderr"; return 1; }
+    [ "$(stub_calls)" = "docker-info swiftlint build-core-xcframework.sh " ] || { echo "$job: $(stub_calls)"; return 1; }
+    [ "$(jq -r .status "$(field '.artifacts[] | select(.kind == "lint-ui") | .path')")" = pass ]
+  done
+}
+
+@test "lint-ui that cannot run stops swift-test and xcode-check with an error" {
+  lint_first_sandbox
+  export STUB_DOCKER=0 STUB_SWIFTLINT_REPORT="$BATS_TEST_TMPDIR/clean.json"
+  local job
+  for job in "swift-test --package MeguriKit" "xcode-check --no-ui"; do
+    : >"$STUB_LOG"
+    # shellcheck disable=SC2086
+    mg $job
+    [ "$status" -eq 2 ] || { echo "$job: exit $status; stderr: $stderr"; return 1; }
+    [ "$(field .status)" = error ]
+    [ "$(failure_ids)" = "docker-unreachable
+lint-ui" ]
+    [ "$(stub_calls)" = "docker-info " ]
+  done
+}
+
+# --- design-docs -------------------------------------------------------------
+
+# design_fixture: a valid inventory, one reference pattern, and the screens.md
+# it generates.
+design_fixture() {
+  mkdir -p "$SB/docs/design/references"
+  printf '| Pattern | What |\n|---|---|\n| `list-counts` | rows with counts |\n' >"$SB/docs/design/references/index.md"
+  cat >"$SB/docs/design/screen-inventory.yaml" <<'YAML'
+version: 1
+screens:
+  - id: home.deckList
+    title: Home and deck list
+    units: [U152]
+    signature: true
+    platforms: [iphone, mac]
+    states: [empty, typical]
+    variants: full
+    references: [list-counts]
+    purpose: The deck tree with counts.
+YAML
+  python3 "$SB/tools/scripts/design-screens.py" write --root "$SB"
+}
+
+@test "design-docs passes when screens.md is generated from the inventory" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  grep -q '| Home and deck list (signature) | `home.deckList` | U152 | iphone, mac | empty, typical | full covering set | `list-counts` |' "$SB/docs/design/screens.md"
+  mg design-docs
+  [ "$status" -eq 0 ] || { echo "$stderr"; return 1; }
+  [ "$(field .status)" = pass ]
+  validate "$result"
+}
+
+@test "design-docs fails on a hand-edited screens.md and --write repairs it" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  echo "edited by hand" >>"$SB/docs/design/screens.md"
+  mg design-docs
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = design-docs/screens.md ]
+  mg design-docs --write
+  [ "$status" -eq 0 ]
+  mg design-docs
+  [ "$status" -eq 0 ]
+}
+
+@test "design-docs rejects a status, an unknown state, an unknown reference and a pairwise signature screen" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  sed -i 's/^    variants: full/    variants: pairwise\n    status: built/; s/\[empty, typical\]/[empty, glorious]/; s/\[list-counts\]/[list-counts, tab-bar]/' \
+    "$SB/docs/design/screen-inventory.yaml"
+  mg design-docs
+  [ "$status" -eq 1 ]
+  local messages
+  messages="$(field '.failures[].message')"
+  grep -qF 'home.deckList: status lives only in docs/design/screen-status.yaml' <<<"$messages"
+  grep -qF 'home.deckList: states must be a non-empty list from' <<<"$messages"
+  grep -qF "home.deckList: reference 'tab-bar' is not in docs/design/references/index.md" <<<"$messages"
+  grep -qF 'home.deckList: a signature screen uses the full covering set (R1972)' <<<"$messages"
+}
+
 # --- images ----------------------------------------------------------------
 
 @test "dev-image reports an error when image inspection fails or returns an empty ID" {
