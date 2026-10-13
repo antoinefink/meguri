@@ -46,14 +46,14 @@ extension TestHooks {
     /// spinner over a label is transient and must not be reported.
     struct SampleDefects: View {
         var body: some View {
-            VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: Spacing.xLarge) {
                 Button("Unidentified action") {}
                 ZStack(alignment: .topLeading) {
                     Text("Overlapping first")
                         .accessibilityIdentifier("sample.defects.first")
                     Text("Overlapping second")
-                        .padding(.leading, 40)
-                        .padding(.top, 8)
+                        .padding(.leading, Spacing.xLarge)
+                        .padding(.top, Spacing.xSmall)
                         .accessibilityIdentifier("sample.defects.second")
                 }
                 ZStack {

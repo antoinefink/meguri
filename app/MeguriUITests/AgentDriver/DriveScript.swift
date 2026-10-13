@@ -3,8 +3,8 @@ import Foundation
 /// An agent drive script (U8, R1965): a JSON object with a name and a list of
 /// steps, run by `AgentDriverTests` under `tools/mg drive`. The format is
 /// documented in tools/drive-scripts/AGENTS.md. Each step object holds exactly
-/// one action key, plus an optional `transition` name that marks the step for
-/// motion capture.
+/// one action key, plus an optional `transition` name (lowercase letters,
+/// digits and '-') that marks the step for motion capture.
 struct DriveScript: Equatable {
     struct Launch: Equatable {
         /// Relative to the repository root, or absolute.
@@ -128,6 +128,10 @@ struct DriveScript: Equatable {
         if let raw = stepObject["transition"] {
             guard let name = raw as? String, !name.isEmpty else {
                 throw DriveScriptError("\(at): \"transition\" must be a non-empty string")
+            }
+            // It names the step's contact sheet and clip files.
+            guard name.wholeMatch(of: /[a-z0-9][a-z0-9-]*/) != nil else {
+                throw DriveScriptError("\(at): transition names use lowercase letters, digits and '-', got '\(name)'")
             }
             transition = name
         }

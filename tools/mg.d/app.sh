@@ -8,7 +8,7 @@
 # are the daily driver's (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
-  "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] (core XCFramework, UI lint once U9 adds it, xcodebuild build-for-testing into build/app/DerivedData; Mac: Debug and Profile only)"
+  "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] (lint-ui first, core XCFramework, xcodebuild build-for-testing into build/app/DerivedData; Mac: Debug and Profile only)"
 mg_job run host mg_run \
   "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app runs hidden for N s (5) and quits"
 
@@ -23,26 +23,9 @@ mg_app_products() {
   esac
 }
 
-# mg_app__lint_ui: the UI lint gate (U9) when the lint-ui job exists.
-mg_app__lint_ui() {
-  if ! mg__job_index lint-ui >/dev/null 2>&1; then
-    mg_detail lint_ui '"not available until U9 adds tools/mg lint-ui"'
-    return 0
-  fi
-  local result
-  result="$("$MG_TOOLS/mg" lint-ui | tail -n 1)"
-  mg_detail lint_ui "$(jq -c '{status, message, result: input_filename}' "$result" 2>/dev/null || echo '"no result"')"
-  if [ "$(jq -r .status "$result" 2>/dev/null)" != pass ] && [ "$(jq -r .status "$result" 2>/dev/null)" != warn ]; then
-    mg_failure lint-ui "the UI lint gate did not pass; see $result" "tools/mg lint-ui"
-    mg_message "$MG_JOB: the UI lint gate did not pass"
-    mg_status fail
-    return 1
-  fi
-}
-
-# mg_app_build <mac|ios-sim> <config>: core XCFramework, UI lint and
-# build-for-testing of the UI plan. On failure records it (fail) and
-# returns 1.
+# mg_app_build <mac|ios-sim> <config>: UI lint first (AE90), core
+# XCFramework and build-for-testing of the UI plan. On failure records it
+# and returns 1.
 mg_app_build() {
   local platform="$1" config="$2" dest result log rc counts
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
@@ -50,13 +33,13 @@ mg_app_build() {
     mg_status error
     return 1
   fi
+  mg_lint_ui_first || return 1
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
     mg_message "$MG_JOB: building the core XCFramework failed"
     mg_status fail
     return 1
   fi
-  mg_app__lint_ui || return 1
   case "$platform" in
     mac) dest="platform=macOS,arch=arm64" ;;
     *) dest="generic/platform=iOS Simulator" ;;
@@ -92,8 +75,11 @@ mg_app_xcodebuild_test() {
   shift 4
   rm -rf "$prefix.xcresult"
   mkdir -p "$(dirname "$prefix")"
+  # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
+  # and, on the Mac, are a sysdiagnose of the user's machine.
   xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan UI -configuration "$config" \
-    -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" "$@" >"$prefix.log" 2>&1
+    -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
+    "$@" >"$prefix.log" 2>&1
   rc=$?
   mg_artifact log "$prefix.log" "xcodebuild test ($platform)"
   summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
@@ -164,6 +150,30 @@ mg_sim_check_owned() {
   fi
   mg_detail device "$(jq -c '{udid, name, kind}' <<<"$rec")"
   return 0
+}
+
+# mg_sim_check_runtime <udid>: the device runs the pinned iOS runtime and
+# build (tools/sim-devices.json, R1966), so nothing is installed, launched or
+# captured on an unapproved OS build. Every job that uses a simulator checks
+# it before touching the device. On a mismatch records it (error) and
+# returns 1.
+mg_sim_check_runtime() {
+  local pinned rid actual
+  pinned="$(jq -c .runtime tools/sim-devices.json)"
+  rid="$(xcrun simctl list devices --json 2>/dev/null |
+    jq -r --arg u "$1" 'first(.devices | to_entries[] | select(any(.value[]; .udid == $u)) | .key) // empty')"
+  actual="$(xcrun simctl list runtimes --json 2>/dev/null |
+    jq -c --arg r "$rid" 'first(.runtimes[] | select(.identifier == $r) | {identifier, version, build: .buildversion}) // null')"
+  [ -n "$actual" ] || actual=null
+  mg_detail runtime "$(jq -nc --arg u "$1" --argjson e "$pinned" --argjson a "$actual" '{device: $u, expected: $e, actual: $a}')"
+  if [ "$(jq -r '"\(.identifier) \(.build)"' <<<"$pinned")" = "$(jq -r 'if . == null then "none" else "\(.identifier) \(.build)" end' <<<"$actual")" ]; then
+    return 0
+  fi
+  mg_failure runtime-mismatch "$1 runs $(jq -r --arg r "$rid" 'if . == null then "an unknown runtime \($r)" else "iOS \(.version) (\(.build), \(.identifier))" end' <<<"$actual"); tools/sim-devices.json pins iOS $(jq -r '"\(.version) (\(.build), \(.identifier))"' <<<"$pinned"). Nothing was installed or captured: captures are pinned to that build (R1966). Install the pinned runtime, or update the pin and re-record the baselines (R1974)." \
+    "tools/mg sim-setup"
+  mg_message "$MG_JOB: runtime build mismatch on $1: expected $(jq -r .build <<<"$pinned"), found $(jq -r '.build // "none"' <<<"$actual")"
+  mg_status error
+  return 1
 }
 
 # mg_sim_prepare <udid>: the pinned status bar (R1966), after every boot and
@@ -290,12 +300,19 @@ mg_run() {
     return 0
   fi
   local udid="$MG_D_UDID" app out pid
-  [ -z "$udid" ] || mg_sim_check_owned "$udid" || return 0
+  if [ -n "$udid" ]; then
+    mg_sim_check_owned "$udid" || return 0
+    mg_sim_check_runtime "$udid" || return 0
+  fi
   mg_app_build ios-sim "$MG_D_CONFIG" || return 0
   mg_host_lease || return 0
   if [ -z "$udid" ]; then
     mg_sim_lease "$MG_D_KIND" keep || return 0
     udid="$MG_SIM_UDID"
+    if ! mg_sim_check_runtime "$udid"; then
+      "$MG_TOOLS/scripts/sim-pool.sh" release "$udid" >&2
+      return 0
+    fi
   fi
   mg_sim_prepare "$udid"
   app="$(mg_app_products ios-sim "$MG_D_CONFIG")/Meguri.app"

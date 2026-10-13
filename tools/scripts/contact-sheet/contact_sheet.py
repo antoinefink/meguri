@@ -19,12 +19,28 @@ frames that change inside it, from the still frame before the first change to
 the last change, so the tiles show the motion rather than the stillness
 around it. A window without any change is kept as it is.
 
+Two sources give each window a clip of its own, <out>/<window>.mp4, which is
+then analysed whole:
+
+- a marked window with a "crop" (a full-screen recording of the Mac): that
+  part of the screen over that time. The crop is in points of a display of
+  display_width x display_height points, scaled to the video's pixels;
+- --frame-list (the Mac agent driver's frame sampler): timestamped PNG frames
+  per window, each shown until the next one's time, the last one for the
+  median gap between them. Frames of another size are scaled to the first's.
+
 usage: contact_sheet.py <video> --out <dir> [--window <name>=<start>-<end>]...
          [--marks <marks.json>] [--fit] [--frames 12] [--columns 4]
          [--cut-threshold 10] [--stall-seconds 0.25]
-marks.json: {"windows": [{"name": "...", "start": <s>, "end": <s>}, ...]},
-times in seconds from the start of the video. Writes <out>/report.json.
-Exit code: 0 done (findings are data, not failures), 2 bad input.
+       contact_sheet.py --frame-list <frames.json> --out <dir> [--fit] [...]
+marks.json: {"windows": [{"name": "...", "start": <s>, "end": <s>,
+  "crop": {"x", "y", "width", "height", "display_width", "display_height"}
+  (optional)}, ...]}, times in seconds from the start of the video.
+frames.json: {"windows": [{"name": "...", "frames": [{"path": "...",
+  "time": <epoch s>}, ...]}, ...]}.
+Writes <out>/report.json; with clips, each window has its "video" and the
+report's jump cuts name their window. Exit code: 0 done (findings are data,
+not failures), 2 bad input.
 
 Runs in the image-tools container (ffmpeg, ffprobe, DejaVu fonts).
 """
@@ -141,35 +157,28 @@ def tile_sheet(video, picks, out_png, columns, width, height, work, step):
                     "-frames:v", "1", out_png], check=True)
 
 
-def run(video, out, windows=None, frames=12, columns=4, cut_threshold=10.0, stall_seconds=0.25, fit=False):
-    """Writes the sheets and returns the report (also written as report.json)."""
-    count = frames
-    if count < 2 or columns < 1:
-        raise InputError("need at least 2 frames per sheet and 1 column")
-    if not os.path.isfile(video):
-        raise InputError("no video at %s" % video)
+def check_name(name):
+    if not NAME.match(name):
+        raise InputError("window name '%s': use lowercase letters, digits and '-'" % name)
+
+
+def analyse(video, out, windows, count, columns, cut_threshold, stall_seconds, fit):
+    """Sheets for the windows of one video: (video info, jump cuts, window
+    entries). A window end of None is the end of the video."""
     width, height, duration = ffprobe_stream(video)
     all_frames = read_frames(video)
     last = all_frames[-1]["time"]
     duration = max(duration, last)
-    if not windows:
-        windows = [("video", 0, duration)]
+    windows = [(name, start, duration if end is None else end) for name, start, end in windows]
     for name, start, end in windows:
-        if not NAME.match(name):
-            raise InputError("window name '%s': use lowercase letters, digits and '-'" % name)
+        check_name(name)
         if not (0 <= start < end):
             raise InputError("window %s: needs 0 <= start < end, got %s-%s" % (name, start, end))
         if start > duration:
             raise InputError("window %s starts at %s s, after the video ends (%.3f s)" % (name, start, duration))
-    os.makedirs(out, exist_ok=True)
     cuts = [{"frame": f["frame"], "time": round(f["time"], 4), "score": f["score"]}
             for f in all_frames if f["frame"] > 0 and f["score"] >= cut_threshold]
-    report = {
-        "video": {"path": video, "width": width, "height": height, "duration": round(duration, 4), "frames": len(all_frames)},
-        "settings": {"frames": count, "columns": columns, "cut_threshold": cut_threshold, "stall_seconds": stall_seconds},
-        "jump_cuts": cuts,
-        "windows": [],
-    }
+    entries = []
     for name, start, end in windows:
         end = min(end, duration)
         searched = {"start": start, "end": end}
@@ -185,7 +194,7 @@ def run(video, out, windows=None, frames=12, columns=4, cut_threshold=10.0, stal
         sheet = os.path.join(out, name + ".png")
         with tempfile.TemporaryDirectory() as work:
             tile_sheet(video, picks, sheet, columns, width, height, work, step)
-        report["windows"].append({
+        entries.append({
             "name": name,
             "start": round(start, 4),
             "end": round(end, 4),
@@ -195,9 +204,148 @@ def run(video, out, windows=None, frames=12, columns=4, cut_threshold=10.0, stal
             "jump_cuts": [c for c in cuts if searched["start"] < c["time"] <= searched["end"] + TIME_EPSILON],
             "stalls": stalls(all_frames, searched["start"], searched["end"], stall_seconds),
         })
+    info = {"path": video, "width": width, "height": height, "duration": round(duration, 4), "frames": len(all_frames)}
+    return info, cuts, entries
+
+
+def settings(count, columns, cut_threshold, stall_seconds):
+    if count < 2 or columns < 1:
+        raise InputError("need at least 2 frames per sheet and 1 column")
+    return {"frames": count, "columns": columns, "cut_threshold": cut_threshold, "stall_seconds": stall_seconds}
+
+
+def write_report(out, report):
     with open(os.path.join(out, "report.json"), "w") as f:
         json.dump(report, f, indent=2)
     return report
+
+
+def run(video, out, windows=None, frames=12, columns=4, cut_threshold=10.0, stall_seconds=0.25, fit=False):
+    """Writes the sheets and returns the report (also written as report.json).
+    A window is (name, start, end) or (name, start, end, crop); with a crop,
+    every window becomes a clip of its own (see the module notes)."""
+    config = settings(frames, columns, cut_threshold, stall_seconds)
+    if not os.path.isfile(video):
+        raise InputError("no video at %s" % video)
+    windows = list(windows or [])
+    os.makedirs(out, exist_ok=True)
+    if any(len(w) > 3 and w[3] is not None for w in windows):
+        width, height, duration = ffprobe_stream(video)
+        clips, crops = [], {}
+        for w in windows:
+            name, start, end = w[0], w[1], w[2]
+            check_name(name)
+            if not (0 <= start < end) or start > duration:
+                raise InputError("window %s: needs 0 <= start < end <= the video's %.3f s, got %s-%s" % (name, duration, start, end))
+            crop = crop_pixels(w[3], width, height) if len(w) > 3 and w[3] is not None else None
+            clip = os.path.join(out, name + ".mp4")
+            cut_clip(video, start, min(end, duration), crop, clip)
+            clips.append((name, clip))
+            crops[name] = crop
+        report = run_clips(out, clips, config, fit)
+        for entry in report["windows"]:
+            entry["crop"] = crops[entry["name"]]
+        report["video"] = {"path": video, "width": width, "height": height, "duration": round(duration, 4)}
+        return write_report(out, report)
+    info, cuts, entries = analyse(video, out, [(w[0], w[1], w[2]) for w in windows] or [("video", 0, None)],
+                                  frames, columns, cut_threshold, stall_seconds, fit)
+    return write_report(out, {"video": info, "settings": config, "jump_cuts": cuts, "windows": entries})
+
+
+def run_frame_list(out, windows, frames=12, columns=4, cut_threshold=10.0, stall_seconds=0.25, fit=False):
+    """Sheets from timestamped frames: windows is [(name, [{"path", "time"}])]."""
+    config = settings(frames, columns, cut_threshold, stall_seconds)
+    os.makedirs(out, exist_ok=True)
+    clips = []
+    for name, listed in windows:
+        check_name(name)
+        clip = os.path.join(out, name + ".mp4")
+        frames_clip(name, listed, clip)
+        clips.append((name, clip))
+    report = run_clips(out, clips, config, fit)
+    report["video"] = None
+    return write_report(out, report)
+
+
+def run_clips(out, clips, config, fit):
+    """Each clip analysed whole as the window of its name."""
+    report = {"video": None, "settings": config, "jump_cuts": [], "windows": []}
+    for name, clip in clips:
+        info, cuts, entries = analyse(clip, out, [(name, 0, None)], config["frames"], config["columns"],
+                                      config["cut_threshold"], config["stall_seconds"], fit)
+        entry = entries[0]
+        entry["video"] = info
+        report["windows"].append(entry)
+        report["jump_cuts"].extend(dict(c, window=name) for c in cuts)
+    return report
+
+
+def even(n):
+    return max(2, int(n) - int(n) % 2)
+
+
+def png_size(path):
+    """(width, height) from a PNG's IHDR chunk."""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n":
+        raise InputError("%s is not a PNG" % path)
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def encode(inputs, video_filter, out_video):
+    """H.264 with every frame at its own time (millisecond time base)."""
+    result = subprocess.run(["ffmpeg", "-hide_banner", "-v", "error", "-y", *inputs, "-an", "-vf", video_filter,
+                             "-fps_mode", "passthrough", "-enc_time_base:v", "1:1000", "-video_track_timescale", "1000",
+                             "-c:v", "libx264", "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p", out_video],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        raise InputError("ffmpeg could not make %s: %s" % (out_video, result.stderr.strip()))
+
+
+def frames_clip(name, listed, out_video):
+    frames = sorted(listed, key=lambda f: float(f["time"]))
+    if len(frames) < 2:
+        raise InputError("window %s: needs at least 2 frames, got %d" % (name, len(frames)))
+    for f in frames:
+        if not os.path.isfile(f["path"]):
+            raise InputError("window %s: no frame at %s" % (name, f["path"]))
+    times = [float(f["time"]) for f in frames]
+    gaps = sorted(b - a for a, b in zip(times, times[1:]))
+    last = max(gaps[len(gaps) // 2], 0.001)
+    width, height = png_size(frames[0]["path"])
+    with tempfile.TemporaryDirectory() as work:
+        listing = os.path.join(work, "frames.ffconcat")
+        with open(listing, "w") as f:
+            f.write("ffconcat version 1.0\n")
+            # Each PNG opens as a one-frame stream; a 1000 fps rate gives it
+            # a millisecond time base (the default, 1/25, rounds the times).
+            for i, frame in enumerate(frames):
+                gap = times[i + 1] - times[i] if i + 1 < len(frames) else last
+                f.write("file '%s'\noption framerate 1000\nduration %.6f\n" % (frame["path"].replace("'", "'\\''"), gap))
+            # The concat demuxer drops the last entry's duration unless the
+            # file is listed again.
+            f.write("file '%s'\noption framerate 1000\n" % frames[-1]["path"].replace("'", "'\\''"))
+        encode(["-f", "concat", "-safe", "0", "-i", listing], "scale=%d:%d,setsar=1" % (even(width), even(height)), out_video)
+
+
+def crop_pixels(crop, width, height):
+    """A crop in display points as video pixels, inside the video, even-sized."""
+    try:
+        sx = width / float(crop["display_width"])
+        sy = height / float(crop["display_height"])
+        x, y = round(float(crop["x"]) * sx), round(float(crop["y"]) * sy)
+        w, h = round(float(crop["width"]) * sx), round(float(crop["height"]) * sy)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        raise InputError("a crop needs x, y, width, height, display_width and display_height in points, got %s" % crop)
+    x, y = min(max(x, 0), width - 2), min(max(y, 0), height - 2)
+    w, h = even(min(w, width - x)), even(min(h, height - y))
+    return {"x": x, "y": y, "width": w, "height": h}
+
+
+def cut_clip(video, start, end, crop, out_video):
+    graph = "crop=%d:%d:%d:%d" % (crop["width"], crop["height"], crop["x"], crop["y"]) if crop else "scale=trunc(iw/2)*2:trunc(ih/2)*2"
+    encode(["-ss", "%.4f" % start, "-t", "%.4f" % (end - start), "-i", video], graph, out_video)
 
 
 def parse_window(text):
@@ -212,25 +360,39 @@ def parse_window(text):
 
 def main(argv):
     parser = argparse.ArgumentParser(description="Contact sheets, jump cuts and stalls from a recording (U8).")
-    parser.add_argument("video")
+    parser.add_argument("video", nargs="?")
     parser.add_argument("--out", required=True)
     parser.add_argument("--window", action="append", default=[])
     parser.add_argument("--marks")
+    parser.add_argument("--frame-list")
     parser.add_argument("--fit", action="store_true")
     parser.add_argument("--frames", type=int, default=12)
     parser.add_argument("--columns", type=int, default=4)
     parser.add_argument("--cut-threshold", type=float, default=10.0)
     parser.add_argument("--stall-seconds", type=float, default=0.25)
     args = parser.parse_args(argv)
+    options = dict(frames=args.frames, columns=args.columns, cut_threshold=args.cut_threshold,
+                   stall_seconds=args.stall_seconds, fit=args.fit)
     try:
-        windows = [parse_window(w) for w in args.window]
-        if args.marks:
-            with open(args.marks) as f:
-                marks = json.load(f)
-            for w in marks.get("windows", []):
-                windows.append((str(w["name"]), float(w["start"]), float(w["end"])))
-        report = run(args.video, args.out, windows, frames=args.frames, columns=args.columns,
-                     cut_threshold=args.cut_threshold, stall_seconds=args.stall_seconds, fit=args.fit)
+        if args.frame_list:
+            if args.video or args.window or args.marks:
+                raise InputError("--frame-list replaces the video, --window and --marks")
+            with open(args.frame_list) as f:
+                listing = json.load(f)
+            windows = [(str(w["name"]), list(w["frames"])) for w in listing.get("windows", [])]
+            if not windows:
+                raise InputError("%s lists no window" % args.frame_list)
+            report = run_frame_list(args.out, windows, **options)
+        else:
+            if not args.video:
+                raise InputError("give a video or --frame-list")
+            windows = [parse_window(w) for w in args.window]
+            if args.marks:
+                with open(args.marks) as f:
+                    marks = json.load(f)
+                for w in marks.get("windows", []):
+                    windows.append((str(w["name"]), float(w["start"]), float(w["end"]), w.get("crop")))
+            report = run(args.video, args.out, windows, **options)
     except (InputError, OSError, ValueError, KeyError, TypeError) as error:
         print("contact-sheet: %s" % error, file=sys.stderr)
         return 2

@@ -19,7 +19,7 @@
 # MEGURI_MAC_UI_INTERVAL_MINUTES.
 
 mg_job mac-ui host mg_mac_ui \
-  "Mac UI-driving suites, at most one run an hour (root AGENTS.md): [--suite test-hooks|drive:<script>]... (default: TestHooksTests and every example drive script for the Mac); refused runs are queued (warn)"
+  "Mac UI-driving suites, at most one run an hour (root AGENTS.md): [--suite test-hooks|drive:<script>]... (default: TestHooksTests and every example drive script for the Mac; scripts that mark a transition are recorded); refused runs are queued (warn)"
 
 # ---------------------------------------------------------------------------
 # Exit actions: a job runs in its own subshell; these run once when it ends,
@@ -85,12 +85,27 @@ mg_host_session_state() {
   echo ok
 }
 
+# mg__lease_stale <lock dir> <holder JSON>: whether the holder died, or died
+# between mkdir and writing holder.json.
+mg__lease_stale() {
+  local pid
+  pid="$(jq -r '.pid // empty' <<<"$2" 2>/dev/null)"
+  { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } ||
+    { [ -z "$pid" ] && [ -n "$(find "$1" -maxdepth 0 -mmin +2 2>/dev/null)" ]; }
+}
+
 # mg_host_lease: takes the host lease, waiting while another job holds it,
 # then checks the session. Returns 0 when the job may go on (the lease is
 # released when the job ends); otherwise records the result and returns 1.
+#
+# A recording (`tools/mg record start`) keeps the lease until it stops. While
+# it holds it for this checkout, this checkout's jobs take the one nested slot
+# <lease>/inner instead, so that the recording can film them; other checkouts
+# keep queueing. A nested job still running when the recording stops inherits
+# the lease (tools/scripts/sim-record.sh).
 mg_host_lease() {
   local dir wait="${MEGURI_HOST_LEASE_WAIT_SECONDS:-3600}" poll="${MEGURI_HOST_LEASE_POLL_SECONDS:-5}"
-  local start holder pid announced=""
+  local start holder inner announced="" lock
   dir="$(mg_host_lease_dir)"
   mkdir -p "$(dirname "$dir")" || {
     mg_failure host-lease "cannot create $(dirname "$dir")"
@@ -98,16 +113,30 @@ mg_host_lease() {
     return 1
   }
   start="$(mg__epoch)"
-  until mkdir "$dir" 2>/dev/null; do
+  while :; do
+    if mkdir "$dir" 2>/dev/null; then
+      lock="$dir"
+      break
+    fi
     holder="$(cat "$dir/holder.json" 2>/dev/null)"
-    pid="$(jq -r '.pid // empty' <<<"$holder" 2>/dev/null)"
-    # A holder that died, or one that died between mkdir and writing
-    # holder.json, left a stale lease.
-    if { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } ||
-      { [ -z "$pid" ] && [ -n "$(find "$dir" -maxdepth 0 -mmin +2 2>/dev/null)" ]; }; then
+    if mg__lease_stale "$dir" "$holder"; then
       echo "host lease: removing a stale lease ($(jq -r '"\(.job) in \(.worktree), pid \(.pid)"' <<<"$holder" 2>/dev/null || echo unknown))" >&2
       rm -rf "$dir"
       continue
+    fi
+    if [ "$(jq -r '"\(.kind // "")|\(.worktree // "")"' <<<"$holder" 2>/dev/null)" = "recording|$MG_ROOT" ]; then
+      # mkdir fails when the recording released the lease meanwhile; the next
+      # round takes the lease itself.
+      if mkdir "$dir/inner" 2>/dev/null; then
+        lock="$dir/inner"
+        break
+      fi
+      inner="$(cat "$dir/inner/holder.json" 2>/dev/null)"
+      if [ -d "$dir/inner" ] && mg__lease_stale "$dir/inner" "$inner"; then
+        rm -rf "$dir/inner"
+        continue
+      fi
+      [ -z "$inner" ] || holder="$inner"
     fi
     if [ $(($(mg__epoch) - start)) -ge "$wait" ]; then
       mg_failure host-busy "the host lease stayed held for $wait s by $(jq -r '"\(.job) in \(.worktree) since \(.started_at)"' <<<"$holder" 2>/dev/null || echo "another job")" \
@@ -123,9 +152,10 @@ mg_host_lease() {
     mg_sleep "$poll"
   done
   jq -n --arg job "$MG_JOB" --arg run "${MG_RUN_ID:-}" --argjson pid "$$" --arg wt "$MG_ROOT" --arg at "$(mg__iso "$(mg__epoch)")" \
-    '{job: $job, run_id: $run, pid: $pid, worktree: $wt, started_at: $at}' >"$dir/holder.json"
-  mg_on_exit "rm -rf '$dir'"
-  mg_detail host_lease "$(jq -c --argjson waited "$(($(mg__epoch) - start))" '. + {waited_s: $waited}' "$dir/holder.json")"
+    --argjson nested "$([ "$lock" = "$dir" ] && echo false || echo true)" \
+    '{job: $job, run_id: $run, pid: $pid, worktree: $wt, started_at: $at} + (if $nested then {nested: true} else {} end)' >"$lock/holder.json"
+  mg_on_exit "mg__host_lease_release '$dir' $$"
+  mg_detail host_lease "$(jq -c --argjson waited "$(($(mg__epoch) - start))" '. + {waited_s: $waited}' "$lock/holder.json")"
   [ -z "$announced" ] || echo "host lease: taken after $(($(mg__epoch) - start)) s" >&2
 
   local state
@@ -145,6 +175,36 @@ mg_host_lease() {
     mg_on_exit "kill $! 2>/dev/null"
   fi
   return 0
+}
+
+# mg__host_lease_release <lease dir> <pid>: releases the slot <pid> holds (the
+# nested one or the lease), and nothing else: a lease handed to a recording
+# (mg_host_lease_transfer) or inherited from one stays with its holder.
+mg__host_lease_release() {
+  if [ "$(jq -r '.pid // empty' "$1/inner/holder.json" 2>/dev/null)" = "$2" ]; then
+    rm -rf "$1/inner"
+  elif [ "$(jq -r '.pid // empty' "$1/holder.json" 2>/dev/null)" = "$2" ]; then
+    rm -rf "$1"
+  fi
+}
+
+# mg_host_lease_transfer <pid> <JSON object>: hands the slot this job holds
+# (the lease, or the nested slot) to a process that outlives the job (a
+# recording worker), merging the object into its holder.json. That process
+# releases it; until then other jobs wait for it, and the slot turns stale
+# when it dies. Returns 1 when this job holds no slot.
+mg_host_lease_transfer() {
+  local dir slot
+  dir="$(mg_host_lease_dir)"
+  if [ "$(jq -r '.pid // empty' "$dir/inner/holder.json" 2>/dev/null)" = "$$" ]; then
+    slot="$dir/inner"
+  elif [ "$(jq -r '.pid // empty' "$dir/holder.json" 2>/dev/null)" = "$$" ]; then
+    slot="$dir"
+  else
+    return 1
+  fi
+  jq --argjson pid "$1" --argjson extra "$2" '. + $extra + {pid: $pid}' "$slot/holder.json" >"$slot/holder.json.tmp" &&
+    mv -f "$slot/holder.json.tmp" "$slot/holder.json"
 }
 
 # ---------------------------------------------------------------------------
@@ -265,7 +325,7 @@ mg_mac_ui() {
   mg_app_mac_guard || return 0
   mg_mac_ui_gate || return 0
 
-  local passed=0 failed=0 errors=0 name result
+  local passed=0 failed=0 errors=0 name result record
   for s in "${suites[@]}"; do
     case "$s" in
       test-hooks)
@@ -274,8 +334,11 @@ mg_mac_ui() {
         result=$?
         ;;
       drive:*)
+        # A script that marks a transition also records it (motion capture).
         name="drive-$(basename "${s#drive:}" .json)"
-        mg_drive_run "${s#drive:}" mac "" Debug no "$MG_RUN_DIR/$name"
+        record=no
+        jq -e 'any(.steps[]; has("transition"))' "${s#drive:}" >/dev/null 2>&1 && record=yes
+        mg_drive_run "${s#drive:}" mac "" Debug "$record" "$MG_RUN_DIR/$name"
         result=$?
         ;;
     esac

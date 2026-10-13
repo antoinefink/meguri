@@ -13,8 +13,10 @@
 #
 # FAKE_SIM_RT27_BUILD sets the iOS 27.0 runtime's build (default 24A434);
 # FAKE_SIM_FOLDABLE=1 adds a foldable iPhone device type. `io <udid>
-# recordVideo ... <file>` writes the file and runs until SIGINT; `io <udid>
-# screenshot <file>` writes a stand-in PNG.
+# recordVideo ... <file>` writes the file and runs until SIGINT (with
+# FAKE_SIM_RECORD_EMPTY=1 the file is empty; FAKE_SIM_RECORD_EXIT_AFTER=<s>
+# makes it fail after that long); `io <udid> screenshot <file>` writes a
+# stand-in PNG.
 
 set -u
 [ "${1:-}" = simctl ] || { echo "fake xcrun: only simctl is faked" >&2; exit 97; }
@@ -150,9 +152,14 @@ EOF
       recordVideo)
         rmdir "$DB.lock" 2>/dev/null
         trap - EXIT
-        printf 'fake video\n' >"$file"
+        if [ "${FAKE_SIM_RECORD_EMPTY:-}" = 1 ]; then : >"$file"; else printf 'fake video\n' >"$file"; fi
         trap 'echo "Recording completed" >&2; exit 0' INT
         echo "Recording started" >&2
+        if [ -n "${FAKE_SIM_RECORD_EXIT_AFTER:-}" ]; then
+          sleep "$FAKE_SIM_RECORD_EXIT_AFTER"
+          echo "Recording failed: the device went away" >&2
+          exit 1
+        fi
         while :; do sleep 0.1; done
         ;;
       *) echo "fake simctl io: unexpected $3" >&2; exit 97 ;;

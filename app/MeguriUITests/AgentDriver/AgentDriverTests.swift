@@ -19,7 +19,9 @@ final class AgentDriverTests: XCTestCase {
         guard let path = ProcessInfo.processInfo.environment["MEGURI_DRIVE_SCRIPT"], !path.isEmpty else {
             throw XCTSkip("no drive script: tools/mg drive passes it as MEGURI_DRIVE_SCRIPT")
         }
-        continueAfterFailure = false
+        // The driver stops at the first failed step itself. Stopping the test
+        // from XCTFail would unwind past the drive log's attachment.
+        continueAfterFailure = true
         let driver = AgentDriver(build: try BuildUnderTest.current(), test: self)
         driver.run(scriptAt: URL(filePath: path))
     }
@@ -33,6 +35,11 @@ final class AgentDriver {
         let screenshot: String
     }
 
+    struct FrameRecord: Encodable {
+        let file: String
+        let time: Double
+    }
+
     struct StepRecord: Encodable {
         let index: Int
         let kind: String
@@ -42,6 +49,10 @@ final class AgentDriver {
         var status = "ok"
         var message: String?
         var captures: [Capture] = []
+        /// Sampled frames (`FrameSampler`), oldest first.
+        var frames: [FrameRecord]?
+        /// Set when the step outlasted `FrameSampler.maxFrames`.
+        var framesTruncated: Bool?
     }
 
     struct Log: Encodable {
@@ -63,6 +74,8 @@ final class AgentDriver {
 
     private let build: BuildUnderTest
     private unowned let test: XCTestCase
+    /// Fixed-rate frames around marked steps (`FrameSampler`).
+    private let sampleFrames = ProcessInfo.processInfo.environment["MEGURI_DRIVE_FRAMES"] == "1"
     private var app: XCUIApplication?
     private var lastLaunch: DriveScript.Launch?
     private var tree: HierarchyExport.Tree?
@@ -104,8 +117,10 @@ final class AgentDriver {
     private func perform(_ step: DriveScript.Step, index: Int) -> Bool {
         let kind = step.action.kind
         var record = StepRecord(index: index, kind: kind, transition: step.transition, started: Date().timeIntervalSince1970)
+        let failuresBefore = test.testRun?.totalFailureCount ?? 0
         let base = String(format: "drive-%02d-%@", index, kind)
         var failed = false
+        var sampler: FrameSampler?
         do {
             switch step.action {
             case .launch, .snapshot:
@@ -113,6 +128,7 @@ final class AgentDriver {
             default:
                 record.captures.append(try capture(base, phase: "before"))
             }
+            sampler = try startSampler(for: step)
             record.started = Date().timeIntervalSince1970
             try execute(step.action)
             record.ended = Date().timeIntervalSince1970
@@ -125,6 +141,11 @@ final class AgentDriver {
             record.status = "failed"
             record.message = (error as? StepFailure)?.message ?? "\(error)"
             failed = true
+        }
+        if let sampler {
+            sampler.finish()
+            record.frames = attachFrames(sampler, base: base)
+            record.framesTruncated = sampler.truncated ? true : nil
         }
         if app != nil {
             do {
@@ -140,6 +161,12 @@ final class AgentDriver {
                     failed = true
                 }
             }
+        }
+        // A failure XCTest recorded itself (an action it could not perform).
+        if !failed, (test.testRun?.totalFailureCount ?? 0) > failuresBefore {
+            record.status = "failed"
+            record.message = "XCTest recorded a failure during the step; see drive.log"
+            failed = true
         }
         log.steps.append(record)
         if failed {
@@ -307,6 +334,33 @@ final class AgentDriver {
         let tree = try currentTree()
         let origin = try running().windows.firstMatch.coordinate(withNormalizedOffset: .zero)
         return origin.withOffset(CGVector(dx: point.x - tree.window.minX, dy: point.y - tree.window.minY))
+    }
+
+    // MARK: Frames
+
+    /// A sampler for a marked step that acts on the running app, started; nil
+    /// otherwise. Launch and resize start a new app, and a snapshot is still.
+    private func startSampler(for step: DriveScript.Step) throws -> FrameSampler? {
+        guard sampleFrames, step.transition != nil else { return nil }
+        switch step.action {
+        case .launch, .resize, .snapshot:
+            return nil
+        default:
+            let sampler = FrameSampler(window: try currentTree().window)
+            sampler.start()
+            return sampler
+        }
+    }
+
+    private func attachFrames(_ sampler: FrameSampler, base: String) -> [FrameRecord] {
+        var records: [FrameRecord] = []
+        for (offset, frame) in sampler.frames.enumerated() {
+            guard let png = FrameSampler.png(frame.image) else { continue }
+            let name = String(format: "%@-frame-%03d.png", base, offset + 1)
+            attach(png, name: name, type: "public.png")
+            records.append(FrameRecord(file: name, time: frame.time))
+        }
+        return records
     }
 
     // MARK: Captures

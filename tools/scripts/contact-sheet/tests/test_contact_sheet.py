@@ -196,6 +196,110 @@ class Detection(Fixtures):
         self.assertEqual([(round(s["start"], 4), round(s["end"], 4)) for s in stalls], [(0.3, 0.6667)])
 
 
+def frame_times(video):
+    """pts_time of every decoded frame."""
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "frame=pts_time",
+                            "-of", "json", video], check=True, capture_output=True, text=True)
+    return [float(f["pts_time"]) for f in json.loads(probe.stdout)["frames"]]
+
+
+def video_size(video):
+    probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                            "-of", "json", video], check=True, capture_output=True, text=True)
+    stream = json.loads(probe.stdout)["streams"][0]
+    return stream["width"], stream["height"]
+
+
+# Epoch seconds, as the agent driver writes them.
+EPOCH = 1894701600.0
+
+
+class FrameList(Fixtures):
+    """Clips made from timestamped frames (the Mac driver's FrameSampler)."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        d = cls.tmp.name
+        cls.gray = os.path.join(d, "gray.png")
+        cls.pattern = os.path.join(d, "pattern.png")
+        cls.wide = os.path.join(d, "wide.png")
+        ffmpeg("-f", "lavfi", "-i", "color=c=gray:s=161x121", "-frames:v", "1", cls.gray)
+        ffmpeg("-f", "lavfi", "-i", "testsrc=s=161x121", "-frames:v", "1", cls.pattern)
+        ffmpeg("-f", "lavfi", "-i", "testsrc=s=322x242", "-frames:v", "1", cls.wide)
+        # Gray at 0, 0.1, 0.2 and 0.3 s, then the pattern from 0.45 s: the
+        # picture changes abruptly at the fifth frame. Listed out of order.
+        cls.offsets = [0.0, 0.1, 0.2, 0.3, 0.45, 0.55, 0.65, 0.9]
+        paths = [cls.gray] * 4 + [cls.pattern] * 4
+        cls.frames = [{"path": p, "time": EPOCH + t} for p, t in zip(paths, cls.offsets)]
+        cls.frames = cls.frames[4:] + cls.frames[:4]
+
+    def test_frames_become_a_clip_with_their_own_timing_and_a_sheet(self):
+        out = self.out()
+        report = contact_sheet.run_frame_list(out, [("04-dismiss-sheet", self.frames)])
+        window = report["windows"][0]
+        clip = os.path.join(out, "04-dismiss-sheet.mp4")
+        self.assertEqual(window["video"]["path"], clip)
+        # Every frame at its offset from the first, then the last one again so
+        # that it lasts as long as the median gap (0.1 s).
+        times = frame_times(clip)
+        self.assertEqual(len(times), len(self.offsets) + 1)
+        for got, want in zip(times, self.offsets + [1.0]):
+            self.assertAlmostEqual(got, want, places=2)
+        # Odd sizes become even (H.264).
+        self.assertEqual(video_size(clip), (160, 120))
+        self.assertEqual(len(window["tiles"]), 12)
+        self.assertTrue(os.path.isfile(window["sheet"]))
+        self.assertIsNone(report["video"])
+
+    def test_the_abrupt_change_is_a_jump_cut_of_that_window(self):
+        report = contact_sheet.run_frame_list(self.out(), [("cut", self.frames)])
+        self.assertEqual([(c["window"], c["frame"], round(c["time"], 2)) for c in report["jump_cuts"]], [("cut", 4, 0.45)])
+        self.assertEqual([c["frame"] for c in report["windows"][0]["jump_cuts"]], [4])
+
+    def test_each_window_gets_its_own_clip_and_frames_of_another_size_are_scaled(self):
+        out = self.out()
+        later = [{"path": self.gray, "time": EPOCH + 10}, {"path": self.wide, "time": EPOCH + 10.2},
+                 {"path": self.wide, "time": EPOCH + 10.4}]
+        report = contact_sheet.run_frame_list(out, [("a", self.frames), ("b", later)])
+        self.assertEqual([w["name"] for w in report["windows"]], ["a", "b"])
+        self.assertEqual(video_size(os.path.join(out, "b.mp4")), (160, 120))
+        self.assertAlmostEqual(frame_times(os.path.join(out, "b.mp4"))[1], 0.2, places=2)
+
+    def test_fewer_than_two_frames_or_a_missing_file_is_bad_input(self):
+        with self.assertRaises(contact_sheet.InputError):
+            contact_sheet.run_frame_list(self.out(), [("one", self.frames[:1])])
+        with self.assertRaises(contact_sheet.InputError):
+            contact_sheet.run_frame_list(self.out(), [("gone", self.frames + [{"path": "/nonexistent.png", "time": EPOCH + 2}])])
+
+
+class Crop(Fixtures):
+    """Windows cut out of a full-screen recording (the Mac with Screen Recording)."""
+
+    def test_a_window_with_a_crop_becomes_a_clip_of_that_part_and_time(self):
+        out = self.out()
+        # move.mp4 is 320x120; a "display" of 160x60 points makes 2 pixels a
+        # point. The crop is the right half, the box moves from 1.0 to 1.5 s.
+        crop = {"x": 80, "y": 0, "width": 80, "height": 60, "display_width": 160, "display_height": 60}
+        report = contact_sheet.run(self.move, out, windows=[("move", 0.5, 2.0, crop)], fit=True)
+        window = report["windows"][0]
+        clip = os.path.join(out, "move.mp4")
+        self.assertEqual(window["video"]["path"], clip)
+        self.assertEqual(window["crop"], {"x": 160, "y": 0, "width": 160, "height": 120})
+        self.assertEqual(video_size(clip), (160, 120))
+        self.assertAlmostEqual(window["video"]["duration"], 1.5, places=1)
+        # The box (20 wide, x = (t - 1) * 400) first reaches x = 160 in frame
+        # 41 (1.3667 s, 0.8667 s into the clip) and stops at 1.5 s (1.0 s).
+        self.assertAlmostEqual(window["start"], 0.8667 - 1 / 60, delta=0.02)
+        self.assertAlmostEqual(window["end"], 1.0, delta=0.02)
+        self.assertEqual(report["video"]["path"], self.move)
+
+    def test_a_crop_outside_the_video_is_clamped(self):
+        crop = {"x": 120, "y": 30, "width": 100, "height": 100, "display_width": 160, "display_height": 60}
+        report = contact_sheet.run(self.move, self.out(), windows=[("edge", 0, 1, crop)])
+        self.assertEqual(report["windows"][0]["crop"], {"x": 240, "y": 60, "width": 80, "height": 60})
+
+
 class CommandLine(Fixtures):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, SCRIPT, *args], capture_output=True, text=True)
@@ -220,6 +324,31 @@ class CommandLine(Fixtures):
         for bad in ["nameless", "x=2-1", "x=4-5", "x=a-b", "../x=0-1"]:
             with self.subTest(window=bad):
                 self.assertEqual(self.run_cli(self.gradient, "--out", self.out(), "--window", bad).returncode, 2)
+
+    def test_a_frame_list_makes_clips_and_sheets(self):
+        out = self.out()
+        frames = [{"path": os.path.join(out, "f%d.png" % i), "time": EPOCH + i * 0.1} for i in range(4)]
+        for f in frames:
+            ffmpeg("-f", "lavfi", "-i", "testsrc=s=160x120", "-frames:v", "1", f["path"])
+        listing = os.path.join(out, "frames.json")
+        with open(listing, "w") as f:
+            json.dump({"windows": [{"name": "05-open", "frames": frames}]}, f)
+        result = self.run_cli("--frame-list", listing, "--out", out, "--fit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name in ["05-open.png", "05-open.mp4", "report.json"]:
+            self.assertTrue(os.path.isfile(os.path.join(out, name)), name)
+        self.assertEqual(self.run_cli(self.gradient, "--frame-list", listing, "--out", self.out()).returncode, 2)
+        self.assertEqual(self.run_cli("--out", self.out()).returncode, 2)
+
+    def test_marks_with_a_crop_make_clips(self):
+        out = self.out()
+        marks = os.path.join(out, "marks.json")
+        crop = {"x": 0, "y": 0, "width": 80, "height": 60, "display_width": 160, "display_height": 60}
+        with open(marks, "w") as f:
+            json.dump({"windows": [{"name": "left", "start": 0.5, "end": 1.5, "crop": crop}]}, f)
+        result = self.run_cli(self.move, "--out", out, "--marks", marks)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(video_size(os.path.join(out, "left.mp4")), (160, 120))
 
     def test_a_missing_video_exits_2(self):
         self.assertEqual(self.run_cli(os.path.join(self.tmp.name, "none.mp4"), "--out", self.out()).returncode, 2)

@@ -88,6 +88,89 @@ EOF
   : >"$FX_LOG"
 }
 
+# Fakes for a drive: the build, the XCUITest run and its result bundle, and
+# the image-tools container, as functions that replace the real ones (the
+# fixture file sorts after drive.sh). The fake run writes a drive log of
+# three steps: launch, a tap marked "dismiss-sheet", a snapshot; with
+# MEGURI_DRIVE_FRAMES=1 the tap gets FX_FRAMES (5) sampled frames. The fake
+# contact sheet fails with FX_SHEET=fail and leaves out the sheets with
+# FX_SHEET=missing; it copies its window list to <out>/input.json.
+add_drive_fakes() {
+  cat >"$SB/tools/mg.d/zz-drive-fakes.sh" <<'EOF'
+fx_now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
+fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) printf '%s\n' "$1" ;; esac; }
+mg_app_build() { echo "fake build $*" >>"$STUB_LOG"; }
+mg_app_xcodebuild_test() {
+  local prefix="$1" platform="$2" t0 t1 n=0
+  echo "fake xcodebuild-test $platform frames=${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-unset}" >>"$STUB_LOG"
+  rm -rf "$prefix.xcresult"
+  mkdir -p "$prefix.xcresult"
+  t0="$(fx_now)"
+  sleep "${FX_DRIVE_SECONDS:-0.6}"
+  t1="$(fx_now)"
+  [ "${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-0}" != 1 ] || n="${FX_FRAMES:-5}"
+  jq -n --argjson t0 "$t0" --argjson t1 "$t1" --argjson n "$n" --arg p "$platform" '
+    def cap($b; $ph): {phase: $ph, hierarchy: "\($b)-\($ph).json", screenshot: "\($b)-\($ph).png"};
+    {script: "fixture", path: "/fixture.json", platform: $p, error: null, steps: [
+      {index: 1, kind: "launch", transition: null, started: $t0, ended: ($t0 + 0.05), status: "ok", captures: [cap("drive-01-launch"; "after")]},
+      ({index: 2, kind: "tap", transition: "dismiss-sheet", started: ($t0 + 0.1), ended: ($t1 - 0.1), status: "ok",
+        captures: [cap("drive-02-tap"; "before"), cap("drive-02-tap"; "after")]}
+       + (if $n > 0 then {frames: [range($n) | {file: "drive-02-tap-frame-\("00\(. + 1)" | .[-3:]).png", time: ($t0 + 0.1 + . * 0.1)}]} else {} end)),
+      {index: 3, kind: "snapshot", transition: null, started: $t1, ended: $t1, status: "ok", captures: [{phase: "home", hierarchy: "drive-03-snapshot-home.json", screenshot: "drive-03-snapshot-home.png"}]}
+    ]}' >"$prefix.xcresult/drive-log.json"
+  return "${FX_DRIVE_RC:-0}"
+}
+mg_drive__export_attachments() {
+  local log="$1/drive-log.json" dir="$2" n=0 entries='[]' name
+  mkdir -p "$dir"
+  fx_add() {
+    n=$((n + 1))
+    printf '%s' "$2" >"$dir/e$n"
+    entries="$(jq -c --arg s "${1%.*}_0_0A1B2C3D-0000-4000-8000-00000000000$((n % 10)).${1##*.}" --arg e "e$n" '. + [{suggestedHumanReadableName: $s, exportedFileName: $e}]' <<<"$entries")"
+  }
+  for name in $(jq -r '.steps[].captures[] | .hierarchy, .screenshot' "$log"); do
+    case "$name" in
+      *.json) fx_add "$name" '{"schema": 1, "platform": "mac", "window": {"x": 100, "y": 50, "width": 800, "height": 600}, "root": {}}' ;;
+      *) fx_add "$name" 'png' ;;
+    esac
+  done
+  for name in $(jq -r '.steps[].frames[]?.file' "$log"); do fx_add "$name" 'frame'; done
+  fx_add drive-log.json "$(cat "$log")"
+  jq -n --argjson a "$entries" '[{attachments: $a}]' >"$dir/manifest.json"
+}
+mg_image_tools() {
+  echo "fake image-tools $*" >>"$STUB_LOG"
+  local script="$2" report="" out="" input="" files=() names
+  shift 2
+  case "$script" in
+    */hierarchy_check.py)
+      while [ "$#" -gt 0 ]; do
+        case "$1" in --report) report="$2" && shift 2 ;; *) files[${#files[@]}]="$1" && shift ;; esac
+      done
+      printf '%s\n' "${files[@]}" | jq -R . | jq -s '{files: map({path: ., issues: []}), counts: {files: length, issues: 0}}' >"$(fx_host "$report")"
+      ;;
+    */contact_sheet.py)
+      [ "${FX_SHEET:-ok}" != fail ] || { echo "contact-sheet: fake failure" >&2; return 2; }
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --out) out="$(fx_host "$2")" && shift 2 ;;
+          --marks | --frame-list) input="$(fx_host "$2")" && shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      cp "$input" "$out/input.json"
+      names="$(jq -r '.windows[].name' "$input")"
+      for name in $names; do
+        [ "${FX_SHEET:-ok}" = missing ] || printf 'sheet' >"$out/$name.png"
+      done
+      jq --arg out "$out" '{video: null, jump_cuts: [], windows: [.windows[] | {name, sheet: "\($out)/\(.name).png", jump_cuts: [], stalls: []}]}' \
+        "$input" >"$out/report.json"
+      ;;
+  esac
+}
+EOF
+}
+
 # --- sim-setup --------------------------------------------------------------
 
 @test "sim-setup creates one pool device per pinned kind and reuses them on the next run" {
@@ -369,4 +452,236 @@ EOF
   mg record stop --device "$u"
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = not-recording ]
+}
+
+# --- record: the host lease ------------------------------------------------------
+
+@test "record start checks the session under the host lease: a locked Mac blocks it before recording" {
+  local u
+  u="$(lease_in_sandbox iphone)"
+  STUB_LOCKED=1 mg record start --device "$u"
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = blocked-host ]
+  [ "$(field .details.blocked)" = host ]
+  not_called "recordVideo"
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  [ ! -e "$SB/build/mg/record/active/$u.json" ]
+}
+
+@test "a recording holds the host lease until stop: this checkout's jobs run nested, other checkouts queue" {
+  add_fixture_jobs
+  local u worker other
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  worker="$(jq -r .pid "$SB/build/mg/record/active/$u.json")"
+  kill -0 "$worker"
+  [ "$(jq -r '"\(.pid) \(.kind) \(.udid) \(.worktree)"' "$MEGURI_HOST_LEASE_DIR/holder.json")" = "$worker recording $u $SB" ]
+  called "^caffeinate -d -i -w $worker\$"
+
+  FX_HOLD=0 mg fx-lease mine
+  [ "$status" -eq 0 ]
+  [ "$(field .details.host_lease.nested)" = true ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  [ "$(jq -r .pid "$MEGURI_HOST_LEASE_DIR/holder.json")" = "$worker" ]
+
+  other="$BATS_TEST_TMPDIR/other"
+  cp -R "$SB" "$other"
+  run --separate-stderr env MEGURI_HOST_LEASE_WAIT_SECONDS=1 "$other/tools/mg" fx-lease theirs
+  [ "$(jq -r '.failures[0].id' "${lines[${#lines[@]} - 1]}")" = host-busy ]
+  [[ "$(jq -r '.failures[0].message' "${lines[${#lines[@]} - 1]}")" == *"record in $SB"* ]]
+  [ "$(grep -c '^start theirs' "$FX_LOG")" = 0 ]
+
+  mg record stop --device "$u"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.recording.reason)" = stopped ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  ! kill -0 "$worker" 2>/dev/null
+  [ -z "$(pgrep -f "simctl io $u recordVideo" || true)" ]
+}
+
+@test "a nested job still running when the recording stops inherits the lease" {
+  add_fixture_jobs
+  local u job
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  FX_HOLD=3 "$SB/tools/mg" fx-lease nested >/dev/null 2>&1 &
+  job=$!
+  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+  [ -d "$MEGURI_HOST_LEASE_DIR/inner" ]
+  mg record stop --device "$u"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .job "$MEGURI_HOST_LEASE_DIR/holder.json")" = fx-lease ]
+  [ "$(jq -r '.kind // "none"' "$MEGURI_HOST_LEASE_DIR/holder.json")" = none ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  wait "$job"
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+}
+
+@test "a recording stops itself at the limit and frees the lease; record stop then warns" {
+  local u
+  u="$(lease_in_sandbox iphone)"
+  MEGURI_RECORD_MAX_SECONDS=1 mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  for _ in $(seq 1 60); do [ -e "$MEGURI_HOST_LEASE_DIR" ] || break; sleep 0.1; done
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  mg record stop --device "$u"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [[ "$(field .message)" == *"stopped at the 1 s limit"* ]]
+  [ -n "$(field '.artifacts[] | select(.kind == "video") | .path')" ]
+}
+
+@test "a recorder that fails on its own ends the recording; record stop reports it as an error" {
+  local u
+  u="$(lease_in_sandbox iphone)"
+  FAKE_SIM_RECORD_EXIT_AFTER=0.5 mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  for _ in $(seq 1 60); do [ -e "$MEGURI_HOST_LEASE_DIR" ] || break; sleep 0.1; done
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  mg record stop --device "$u"
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = record ]
+  [[ "$(field '.failures[0].message')" == *"ended before record stop (recorder-exited)"* ]]
+}
+
+@test "a terminated recording worker stops the recorder and frees the lease" {
+  local u worker
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  worker="$(jq -r .pid "$SB/build/mg/record/active/$u.json")"
+  kill -TERM "$worker"
+  for _ in $(seq 1 60); do kill -0 "$worker" 2>/dev/null || break; sleep 0.1; done
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  [ -z "$(pgrep -f "simctl io $u recordVideo" || true)" ]
+}
+
+@test "record takes simulators only and points the Mac to drive --record" {
+  mg record start --platform mac
+  [ "$status" -eq 2 ]
+  [[ "$(field '.failures[0].message')" == *"tools/mg drive <script> --platform mac --record"* ]]
+}
+
+# --- the runtime pin -----------------------------------------------------------
+
+@test "drive, run, screenshot and record refuse a simulator on another runtime build before using it" {
+  add_drive_fakes
+  local u script="$SB/tools/drive-scripts/examples/open-sample-sheet.json"
+  u="$(lease_in_sandbox ipad)"
+  export FAKE_SIM_RT27_BUILD=24A999
+  : >"$STUB_LOG"
+  mg drive "$script" --platform ipad
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  [[ "$(field '.failures[0].message')" == *"iOS 27.0 (24A999"*"pins iOS 27.0 (24A434"* ]]
+  [ "$(field '.details.runtime | "\(.expected.build) \(.actual.build)"')" = "24A434 24A999" ]
+  mg drive "$script" --device "$u"
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  mg run --platform iphone --route sample/sheet
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  mg screenshot --device "$u"
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  mg record start --device "$u"
+  [ "$(field '.failures[0].id')" = runtime-mismatch ]
+  not_called "simctl (install|launch) |status_bar [^ ]+ override|simctl io |fake xcodebuild-test"
+  # run gives back the simulator it leased for the refused launch.
+  [ -z "$("$POOL" status 2>/dev/null | jq -r --arg w "$SB" '.devices[] | select(.kind == "iphone" and .lease.worktree == $w) | .udid')" ]
+}
+
+# --- drive: capture results ------------------------------------------------------
+
+@test "drive --record on a simulator records, makes the marked step's sheet and passes" {
+  add_drive_fakes
+  mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform iphone --record
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  called "xcrun simctl io .* recordVideo --codec h264 --force $SB/build/mg/drive/.*/video.mp4"
+  called "fake xcodebuild-test ios frames=0"
+  [ "$(field '.details.drive | "\(.capture) \(.motion.windows[0].name)"')" = "video 02-dismiss-sheet" ]
+  [ "$(field '[.artifacts[] | select(.kind == "contact-sheet")] | length')" = 1 ]
+  local dir
+  dir="$(dirname "$result")"
+  [ "$(jq -r '.windows[0] | "\(.name) \(.start >= 0) \(.end > .start)"' "$dir/motion/input.json")" = "02-dismiss-sheet true true" ]
+  [ "$(jq -r .motion.windows[0].name "$dir/manifest.json")" = 02-dismiss-sheet ]
+}
+
+@test "drive --record is an error, never a pass, when the sheet, the recording or the recorder fails" {
+  add_drive_fakes
+  local script="$SB/tools/drive-scripts/examples/sample-transition.json"
+  FX_SHEET=fail mg drive "$script" --platform iphone --record
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | index("contact-sheet") != null')" = true ]
+  [ "$(field '[.failures[].id] | index("contact-sheet/02-dismiss-sheet") != null')" = true ]
+  [[ "$(field .message)" == *"a capture or check it asked for could not be made"* ]]
+
+  FX_SHEET=missing mg drive "$script" --platform iphone --record
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = contact-sheet/02-dismiss-sheet ]
+
+  FAKE_SIM_RECORD_EMPTY=1 mg drive "$script" --platform iphone --record
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = record ]
+  [[ "$(field '.failures[0].message')" == *"the recording is empty"* ]]
+
+  FAKE_SIM_RECORD_EXIT_AFTER=0.1 mg drive "$script" --platform iphone --record
+  [ "$status" -eq 2 ]
+  [[ "$(field '.failures[0].message')" == *"stopped before the drive ended"* ]]
+}
+
+@test "failed steps keep a drive with a capture error a fail" {
+  add_drive_fakes
+  FX_DRIVE_RC=1 FX_SHEET=fail mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform iphone --record
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+}
+
+@test "drive --record on the Mac without Screen Recording makes sheets from the driver's frames and lists the user step" {
+  add_drive_fakes
+  mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac --record
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  called "fake xcodebuild-test mac frames=1"
+  called "fake image-tools .*contact_sheet.py --frame-list /work/build/mg/drive/.*/frames.json"
+  [ "$(field '.user_steps[] | select(.id == "screen-recording") | .state')" = missing ]
+  [ "$(field '.details.drive | "\(.capture) \(.steps[1].frames)"')" = "frames 5" ]
+  local dir
+  dir="$(dirname "$result")"
+  [ "$(jq -r '.windows[0].frames | length' "$dir/motion/input.json")" = 5 ]
+  [ "$(jq -r '.windows[0].frames[0].path' "$dir/motion/input.json")" = "/work/build/mg/drive/$(basename "$dir")/frames/02-tap-frame-001.png" ]
+  [ -f "$dir/frames/02-tap-frame-005.png" ]
+  [ "$(field '[.artifacts[] | select(.path | contains("/frames/"))] | length')" = 0 ]
+}
+
+@test "too few frames for a marked Mac step is an error" {
+  add_drive_fakes
+  FX_FRAMES=1 mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac --record
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = frames/02-dismiss-sheet ]
+}
+
+@test "drive --record on the Mac with Screen Recording records the display, keeps only the window's cuts and deletes the movie" {
+  add_drive_fakes
+  export MEGURI_MAC_UI_INTERVAL_MINUTES=0
+  stub osascript 'case "$*" in *CGPreflightScreenCaptureAccess*) echo true ;; *NSScreen*) echo "{\"width\": 1512, \"height\": 982}" ;; *) echo "" ;; esac'
+  stub screencapture 'echo "screencapture $*" >>"$STUB_LOG"; for f; do :; done; IFS= read -r -n 1 c; if [ "${STUB_SCREEN_EMPTY:-}" = 1 ]; then : >"$f"; else printf movie >"$f"; fi; echo "screencapture stopped by ${c:-eof}" >>"$STUB_LOG"'
+  mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac --record
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  called "^screencapture -v -x -D1 -V3600 $SB/build/mg/drive/.*/screen.mov\$"
+  called "^screencapture stopped by q\$"
+  called "fake xcodebuild-test mac frames=0"
+  local dir
+  dir="$(dirname "$result")"
+  [ "$(jq -c '.windows[0].crop' "$dir/motion/input.json")" = '{"x":100,"y":50,"width":800,"height":600,"display_width":1512,"display_height":982}' ]
+  [ ! -e "$dir/screen.mov" ]
+  [ "$(jq -r '"\(.capture) \(.video)"' "$dir/manifest.json")" = "screen null" ]
+  [ -z "$(field '.user_steps[] | select(.id == "screen-recording") | .id')" ]
+
+  STUB_SCREEN_EMPTY=1 mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac --record
+  [ "$status" -eq 2 ]
+  [[ "$(field '.failures[0].message')" == *"the recording is empty"* ]]
 }

@@ -283,6 +283,10 @@ check "test plan Performance: no coverage, no sanitizers, no screenshots, not pa
   | ($o.codeCoverage == false) and ($o.addressSanitizer.enabled == false) and ($o.threadSanitizerEnabled == false)
     and ($o.undefinedBehaviorSanitizerEnabled == false) and ($o.uiTestingScreenshotsLifetime == "keepNever")
     and (.testTargets | all(.parallelizable == false))' "$REPO/app/TestPlans/Performance.xctestplan"
+# XCTest's own failure attachments include a recording of the whole screen:
+# on the Mac, the user's desktop. UI tests attach what they need themselves.
+check "test plan UI keeps no system attachments" jq -e '.defaultOptions.uiTestingScreenshotsLifetime == "keepNever"' \
+  "$REPO/app/TestPlans/UI.xctestplan"
 check "scheme Meguri-Profile tests in Profile without a debugger" bash -c '
   f="$1/app/Meguri.xcodeproj/xcshareddata/xcschemes/Meguri-Profile.xcscheme"
   [ "$(xmllint --xpath "string(//TestAction/@buildConfiguration)" "$f")" = Profile ] &&

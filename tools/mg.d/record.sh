@@ -1,16 +1,19 @@
 # Screen recording and contact sheets (U8, R1976). Sourced by tools/mg.
 #
-# `record start --device <udid>` starts `simctl io recordVideo` on a pool
-# simulator this checkout leased and returns; `record stop --device <udid>`
-# stops it and reports the video. `drive --record` does both around a drive
-# and makes the sheets itself. `contact-sheet` runs
-# tools/scripts/contact-sheet in the image-tools container (R1952): about 12
-# frames per marked window tiled into a PNG, plus jump cuts and stalls as data
-# for the critic. Mac recording is unavailable: it needs Screen Recording, and
-# XCUITest cannot sample frames while an action runs.
+# `record start --device <udid>` records a pool simulator this checkout
+# leased: it takes the host lease, checks the device's runtime against the pin
+# and hands the lease to a recording worker (tools/scripts/sim-record.sh,
+# its own session) that keeps it, and the display awake, until `record stop
+# --device <udid>` or a limit (MEGURI_RECORD_MAX_SECONDS, 600). While it
+# records, this checkout's jobs (run, drive) run nested in its lease so it can
+# film them; other checkouts queue. `drive --record` records itself around a
+# drive. `contact-sheet` runs tools/scripts/contact-sheet in the image-tools
+# container (R1952): about 12 frames per marked window tiled into a PNG, plus
+# jump cuts and stalls as data for the critic. The Mac is recorded only
+# through `drive --platform mac --record` (drive.sh).
 
 mg_job record host mg_record \
-  "Record a simulator's screen: start --device <leased udid> | stop --device <udid> (video under build/mg/record/; then tools/mg contact-sheet)"
+  "Record a simulator's screen: start --device <leased udid> | stop --device <udid> (video under build/mg/record/; the recording holds the host lease until stop or MEGURI_RECORD_MAX_SECONDS, 600; then tools/mg contact-sheet). The Mac: tools/mg drive --platform mac --record"
 mg_job contact-sheet host mg_contact_sheet \
   "Contact sheets, jump cuts and stalls from a recording, in the image-tools container: <video> [--window <name>=<start>-<end>]... [--marks marks.json] [--fit] [--frames 12] [--columns 4]"
 
@@ -20,7 +23,8 @@ MG_RECORD_ACTIVE=build/mg/record/active
 mg__hires_now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
 
 # mg_record__wait_started <log> <pid>: waits (10 s) for simctl to say it is
-# recording; sets MG_RECORD_STARTED to that moment (epoch seconds).
+# recording while <pid> lives; sets MG_RECORD_STARTED to that moment (epoch
+# seconds).
 mg_record__wait_started() {
   local i
   for i in $(seq 1 100); do
@@ -34,73 +38,140 @@ mg_record__wait_started() {
   return 1
 }
 
+# mg_record__start_recorder <udid> <video> <log>: simctl io recordVideo in the
+# background; sets MG_RECORDER_PID. A background command starts with SIGINT
+# ignored, and simctl finishes the file on SIGINT: the default comes back.
+mg_record__start_recorder() {
+  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
+    xcrun simctl io "$1" recordVideo --codec h264 --force "$2" </dev/null >"$3" 2>&1 &
+  MG_RECORDER_PID=$!
+}
+
+# mg_record__stop_recorder <pid>: SIGINT, then SIGKILL after 15 s; returns
+# once it has exited.
+mg_record__stop_recorder() {
+  local i
+  kill -INT "$1" 2>/dev/null
+  for i in $(seq 1 150); do
+    kill -0 "$1" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -9 "$1" 2>/dev/null
+  wait "$1" 2>/dev/null
+}
+
+# Set once record start has handed the lease and the recording to the worker;
+# until then, the job's exit stops the worker (cancellation, failures).
+MG_RECORD_HANDED=""
+
 mg_record() {
   local sub="${1:-}" udid=""
   [ "$#" -gt 0 ] && shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --device) [ "$#" -ge 2 ] && udid="$2" && shift 2 || { mg_drive__usage "--device needs a UDID"; return 0; } ;;
+      --platform) mg_drive__usage "record takes simulators only (--device <udid>); record the Mac with tools/mg drive <script> --platform mac --record"; return 0 ;;
       *) mg_drive__usage "usage: tools/mg record start|stop --device <udid>"; return 0 ;;
     esac
   done
   case "$sub" in start | stop) ;; *) mg_drive__usage "usage: tools/mg record start|stop --device <udid>"; return 0 ;; esac
   [ -n "$udid" ] || { mg_drive__usage "record $sub needs --device <udid> (a pool simulator this checkout leased)"; return 0; }
-  local state="$MG_RECORD_ACTIVE/$udid.json"
   mkdir -p "$MG_RECORD_ACTIVE"
   if [ "$sub" = start ]; then
-    if [ -f "$state" ] && kill -0 "$(jq -r .pid "$state")" 2>/dev/null; then
-      mg_failure recording "$udid is already being recorded into $(jq -r .video "$state")" "tools/mg record stop --device $udid"
-      mg_status error
-      return 0
-    fi
-    mg_sim_check_owned "$udid" || return 0
-    mg_sim_prepare "$udid"
-    local video="$MG_RUN_DIR/video.mp4" log="$MG_RUN_DIR/recorder.log" pid
-    # Its own session, so it outlives this job; record stop ends it.
-    perl -e 'use POSIX qw(setsid); setsid(); exec @ARGV or die "exec: $!"' \
-      xcrun simctl io "$udid" recordVideo --codec h264 --force "$video" </dev/null >"$log" 2>&1 &
-    pid=$!
-    if ! mg_record__wait_started "$log" "$pid"; then
-      kill -INT "$pid" 2>/dev/null
-      mg_failure record "simctl io recordVideo did not start; see $log"
-      mg_status error
-      return 0
-    fi
-    jq -n --arg u "$udid" --argjson pid "$pid" --arg v "$video" --argjson t "$MG_RECORD_STARTED" --arg run "$MG_RUN_ID" \
-      '{udid: $u, pid: $pid, video: $v, started_epoch: $t, run_id: $run}' >"$state"
-    mg_detail recording "$(cat "$state")"
-    mg_message "record: recording $udid into $video; stop with tools/mg record stop --device $udid"
-    mg_status pass
+    mg_record__start "$udid"
+  else
+    mg_record__stop "$udid"
+  fi
+}
+
+mg_record__start() {
+  local udid="$1" state="$MG_RECORD_ACTIVE/$1.json"
+  if [ -f "$state" ] && kill -0 "$(jq -r .pid "$state")" 2>/dev/null; then
+    mg_failure recording "$udid is already being recorded into $(jq -r .video "$state")" "tools/mg record stop --device $udid"
+    mg_status error
     return 0
   fi
+  mg_sim_check_owned "$udid" || return 0
+  mg_sim_check_runtime "$udid" || return 0
+  mg_host_lease || return 0
+  mg_sim_prepare "$udid"
+  local video="$MG_RUN_DIR/video.mp4" log="$MG_RUN_DIR/recorder.log" status="$MG_RUN_DIR/recording-status.json"
+  local max="${MEGURI_RECORD_MAX_SECONDS:-600}" pid
+  case "$max" in "" | *[!0-9]* | 0) max=600 ;; esac
+  # Its own session, so it outlives this job; record stop ends it. No
+  # descriptor of this job: tools/mg waits for its output pipe to close.
+  perl -e 'use POSIX qw(setsid); setsid(); exec @ARGV or die "exec: $!"' \
+    /bin/bash "$MG_TOOLS/scripts/sim-record.sh" "$udid" "$video" "$log" "$(mg_host_lease_dir)" "$status" "$max" \
+    </dev/null >"$MG_RUN_DIR/worker.log" 2>&1 &
+  pid=$!
+  mg_on_exit "[ -n \"\$MG_RECORD_HANDED\" ] || kill -TERM $pid 2>/dev/null"
+  if ! mg_record__wait_started "$log" "$pid"; then
+    mg_failure record "simctl io recordVideo did not start; see $log"
+    mg_status error
+    return 0
+  fi
+  if ! mg_host_lease_transfer "$pid" "$(jq -nc --arg u "$udid" --arg v "$video" '{kind: "recording", job: "record", udid: $u, video: $v}')"; then
+    mg_failure record "could not hand the host lease to the recording worker; the recording was stopped"
+    mg_status error
+    return 0
+  fi
+  MG_RECORD_HANDED=1
+  jq -n --arg u "$udid" --argjson pid "$pid" --arg v "$video" --arg log "$log" --arg st "$status" \
+    --argjson t "$MG_RECORD_STARTED" --arg run "$MG_RUN_ID" --argjson max "$max" \
+    '{udid: $u, pid: $pid, video: $v, log: $log, status: $st, started_epoch: $t, run_id: $run, max_seconds: $max}' >"$state"
+  mg_detail recording "$(cat "$state")"
+  mg_message "record: recording $udid into $video (it holds the host lease; this checkout's jobs run inside it); stop with tools/mg record stop --device $udid (at the latest after $max s)"
+  mg_status pass
+}
 
+mg_record__stop() {
+  local udid="$1" state="$MG_RECORD_ACTIVE/$1.json"
   if [ ! -f "$state" ]; then
     mg_failure not-recording "no recording of $udid was started from this checkout" "tools/mg record start --device $udid"
     mg_status error
     return 0
   fi
-  local pid video i
+  local pid video status max i reason
   pid="$(jq -r .pid "$state")"
   video="$(jq -r .video "$state")"
-  kill -INT "$pid" 2>/dev/null
-  for i in $(seq 1 150); do
+  status="$(jq -r '.status // empty' "$state")"
+  max="$(jq -r '.max_seconds // "?"' "$state")"
+  kill -TERM "$pid" 2>/dev/null
+  for i in $(seq 1 200); do
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1
   done
   if kill -0 "$pid" 2>/dev/null; then
-    kill -9 "$pid" 2>/dev/null
-    mg_failure record "the recorder did not stop within 15 s; the video may be unusable"
+    # The worker leads its own process group: end it with the recorder.
+    kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+    mg__host_lease_release "$(mg_host_lease_dir)" "$pid"
+    mg_failure record "the recording worker did not stop within 20 s; the video may be unusable"
   fi
-  mg_detail recording "$(jq -c --arg at "$(mg__hires_now)" '. + {stopped_epoch: ($at | tonumber)}' "$state")"
+  reason="$(jq -r '.reason // empty' "$status" 2>/dev/null)"
+  mg_detail recording "$(jq -c --arg at "$(mg__hires_now)" --arg r "${reason:-unknown}" \
+    '. + {stopped_epoch: ($at | tonumber), reason: $r}' "$state")"
   rm -f "$state"
   if [ ! -s "$video" ]; then
-    mg_failure record "no video at $video"
+    mg_failure record "no video at $video (the recording ended: ${reason:-unknown})"
     mg_status error
     return 0
   fi
   mg_artifact video "$video" "recording of $udid"
-  mg_message "record: $video; make sheets with tools/mg contact-sheet $video --window <name>=<start>-<end>"
-  mg_status pass
+  case "$reason" in
+    stopped)
+      mg_message "record: $video; make sheets with tools/mg contact-sheet $video --window <name>=<start>-<end>"
+      mg_status pass
+      ;;
+    limit)
+      mg_message "record: $video stopped at the $max s limit, before record stop"
+      mg_status warn
+      ;;
+    *)
+      mg_failure record "the recording ended before record stop (${reason:-the worker died}); $video may be cut short; see $(dirname "$video")/recorder.log"
+      mg_message "record: the recording of $udid ended early (${reason:-worker died})"
+      mg_status error
+      ;;
+  esac
 }
 
 mg_contact_sheet() {

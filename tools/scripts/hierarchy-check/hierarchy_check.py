@@ -14,11 +14,13 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
   sheet and not inside a scrolling container (R1965).
 
 Ignored: system UI (keyboard, status bar, menu bar, Touch Bar), the buttons of
-system alerts (which drop identifiers; app/AGENTS.md), identifiers the system
-sets (a leading '_', BackButton, Toolbar, PopoverDismissRegion), elements with an empty frame, and transient
-elements (activity and progress indicators) with everything inside them. Wrong
-colors, broken alignment and unreadable text are judgments for the critic
-(U10), not checks here.
+system alerts (which drop identifiers, or on the Mac carry action-button-<n>;
+app/AGENTS.md), identifiers the system sets (a leading '_', BackButton,
+Toolbar, PopoverDismissRegion, the Mac back button's chevron.backward in a
+toolbar, a window's SwiftUI scene id), elements with an empty frame, and
+transient elements (activity and progress indicators) with everything inside
+them. Wrong colors, broken alignment and unreadable text are judgments for the
+critic (U10), not checks here.
 
 usage: hierarchy_check.py [--report <report.json>] <hierarchy.json>...
 Exit code: 0 no issue, 1 issues, 2 unreadable input. Issues also go to stderr.
@@ -42,6 +44,8 @@ SYSTEM_UI = {"keyboard", "statusBar", "menuBar", "touchBar"}
 SCROLLING = {"scrollView", "table", "collectionView", "outline", "browser", "webView"}
 WINDOWS = {"window", "sheet", "popover", "alert"}
 SYSTEM_IDENTIFIERS = {"BackButton", "Toolbar", "PopoverDismissRegion"}
+# The Mac's alert buttons, inside a sheet or alert.
+ALERT_BUTTON = re.compile(r"^action-button-[0-9]+$")
 
 IDENTIFIER = re.compile(r"^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*(\.[A-Za-z0-9_-]+)?$")
 # Frames that overlap by at most this much (points) in either direction only
@@ -99,17 +103,28 @@ class Element:
         return None
 
     def in_system_alert(self):
-        """Inside a system alert: an alert, or (Mac) a sheet with no identifier anywhere in it."""
+        """Inside a system alert: an alert, or (Mac) a sheet whose identifiers
+        are all the system's."""
         for a in self.ancestors:
             if a.type == "alert":
                 return True
-            if a.type == "sheet" and not any(e.identifier for e in a.walk()):
+            if a.type == "sheet" and all(is_system_identifier(e) for e in a.walk() if e.identifier):
                 return True
         return False
 
 
-def is_system_identifier(identifier):
-    return identifier.startswith("_") or identifier in SYSTEM_IDENTIFIERS
+def is_system_identifier(e):
+    """An identifier the system set, not the app."""
+    ident = e.identifier
+    if ident.startswith("_") or ident in SYSTEM_IDENTIFIERS:
+        return True
+    if e.type == "window":
+        return True
+    if ALERT_BUTTON.match(ident):
+        return e.type == "button" and any(a.type in ("sheet", "alert") for a in e.ancestors)
+    if ident == "chevron.backward":
+        return e.type == "button" and e.parent is not None and e.parent.type == "toolbar"
+    return False
 
 
 def describe(e):
@@ -131,7 +146,7 @@ def check(document):
 
     by_identifier = {}
     for e in elements:
-        if not e.identifier or is_system_identifier(e.identifier):
+        if not e.identifier or is_system_identifier(e):
             continue
         if not IDENTIFIER.match(e.identifier):
             issues.append(dict(kind="bad-identifier",

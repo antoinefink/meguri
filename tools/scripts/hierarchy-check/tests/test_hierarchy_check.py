@@ -87,6 +87,16 @@ class MissingIdentifier(unittest.TestCase):
         ])
         self.assertEqual(hierarchy_check.check(doc(alert)), [])
 
+    def test_a_mac_alert_sheet_with_only_system_identifiers_is_a_system_alert(self):
+        # As the Mac reports a SwiftUI alert: AppKit ids on the sheet and its
+        # texts, action-button-<n> on the buttons.
+        alert = el("sheet", "_NS:87", "alert", f=(100, 100, 260, 122), children=[
+            el("staticText", "_NS:74", f=(120, 120, 218, 18)),
+            el("button", "action-button-2", "Cancel", f=(115, 177, 112, 30)),
+            el("button", "action-button-1", "Try Again", f=(233, 177, 112, 30)),
+        ])
+        self.assertEqual(hierarchy_check.check(doc(alert)), [])
+
     def test_an_app_sheet_with_identifiers_still_needs_them_on_every_control(self):
         sheet = el("sheet", f=(100, 100, 400, 300), children=[
             el("button", "sample.sheet.done", "Done", f=(120, 120, 60, 24)),
@@ -137,6 +147,22 @@ class IdentifierFormat(unittest.TestCase):
         self.assertEqual(kinds(issues), ["duplicate-identifier"])
         self.assertEqual(issues[0]["identifier"], "home.list.add")
         self.assertEqual(issues[0]["frames"], [frame(0, 0, 40, 40), frame(0, 100, 40, 40), frame(0, 200, 40, 20)])
+
+    def test_mac_scene_ids_and_the_navigation_back_button_are_not_the_apps(self):
+        # A window carries its SwiftUI scene id ("main"); the Mac back button
+        # of a NavigationStack carries its symbol name.
+        tree = {
+            "schema": 1, "platform": "mac", "captured_at": 0, "window": frame(0, 30, 800, 600),
+            "screenshot": {"origin": {"x": 0, "y": 30}, "scale": 2},
+            "root": el("application", f=(0, 30, 800, 600), children=[el("window", "main", f=(0, 30, 800, 600), children=[
+                el("toolbar", f=(0, 30, 800, 52), children=[el("button", "chevron.backward", "Back", f=(92, 30, 44, 52))]),
+            ])]),
+        }
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_alert_button_ids_outside_a_sheet_and_symbol_ids_elsewhere_are_still_reported(self):
+        tree = doc(el("button", "action-button-1", "Save", f=(0, 0, 40, 40)), el("button", "chevron.backward", "Back", f=(0, 50, 40, 40)))
+        self.assertEqual(kinds(hierarchy_check.check(tree)), ["bad-identifier", "bad-identifier"])
 
 
 class TextOverlap(unittest.TestCase):
@@ -204,6 +230,11 @@ class RealExports(unittest.TestCase):
 
     def test_the_sample_sheet_on_iphone_has_no_issue(self):
         self.assertEqual(hierarchy_check.check(self.load("ios-sample-sheet.json")), [])
+
+    def test_the_sample_routes_on_the_mac_have_no_issue(self):
+        for name in ["mac-sample-screen.json", "mac-sample-sheet.json", "mac-sample-alert.json"]:
+            with self.subTest(name=name):
+                self.assertEqual(hierarchy_check.check(self.load(name)), [])
 
     def test_the_defects_route_on_iphone_reports_its_two_defects_and_not_the_spinner(self):
         issues = hierarchy_check.check(self.load("ios-sample-defects.json"))

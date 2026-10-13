@@ -16,6 +16,9 @@ import XCTest
 ///           "selected": false, "focused": false, "children": [...]}}
 /// ```
 ///
+/// The Mac menu bar is left out (system UI that lists the user's recent
+/// files).
+///
 /// `hit_point` is the centre of the part of the element's frame inside its
 /// window (a Mac sheet is a window of its own), or null when none of it is;
 /// taps go there and nowhere else.
@@ -98,7 +101,9 @@ enum HierarchyExport {
             enabled: snapshot.isEnabled,
             selected: snapshot.isSelected,
             focused: hasFocus(snapshot),
-            children: snapshot.children.map { node($0, window: window) }
+            // The menu bar is system UI, and its Apple menu lists the user's
+            // recent files: it is never exported.
+            children: snapshot.children.filter { $0.elementType != .menuBar }.map { node($0, window: window) }
         )
     }
 

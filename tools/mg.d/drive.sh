@@ -64,14 +64,116 @@ mg_drive__check_script() {
 # ---------------------------------------------------------------------------
 # The drive runner
 
+# mg_drive__export_attachments <xcresult> <dir>: the result bundle's
+# attachments and xcresulttool's manifest.json of them.
+mg_drive__export_attachments() {
+  xcrun xcresulttool export attachments --path "$1" --output-path "$2"
+}
+
+# JXA, no prompt: whether this process may capture the screen.
+mg__screen_capture_allowed() {
+  [ "$(osascript -l JavaScript -e "ObjC.import('CoreGraphics'); ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]); \$.CGPreflightScreenCaptureAccess()" 2>/dev/null)" = true ]
+}
+
+# The main display's size in points: {"width": w, "height": h}.
+mg__mac_display_points() {
+  osascript -l JavaScript -e "ObjC.import('AppKit'); var f = \$.NSScreen.screens.objectAtIndex(0).frame;
+    JSON.stringify({width: f.size.width, height: f.size.height})" 2>/dev/null
+}
+
+# mg_drive__screen_start <movie>: records the main display with screencapture
+# -v (at most an hour), which stops at a character on its stdin: a FIFO this
+# job keeps open on fd 7, read and write, so neither side blocks and a write
+# after screencapture died raises no SIGPIPE. Sets MG_SCREEN_PID. The movie
+# shows the whole screen: it is deleted when the job ends (the sheets keep
+# only the app's window). Returns 1 when screencapture did not start.
+mg_drive__screen_start() {
+  local fifo="$1.stop"
+  rm -f "$fifo" "$1"
+  mkfifo "$fifo" || return 1
+  exec 7<>"$fifo"
+  screencapture -v -x -D1 -V3600 "$1" <"$fifo" >"$1.log" 2>&1 7>&- &
+  MG_SCREEN_PID=$!
+  mg_on_exit "kill -9 $MG_SCREEN_PID 2>/dev/null; rm -f '$1' '$fifo'"
+  mg_sleep 1
+  kill -0 "$MG_SCREEN_PID" 2>/dev/null
+}
+
+# mg_drive__screen_stop: a character on its stdin, then SIGINT after 10 s,
+# then SIGKILL after 20 s. Returns 1 when screencapture had stopped already.
+mg_drive__screen_stop() {
+  local early=0 i
+  kill -0 "$MG_SCREEN_PID" 2>/dev/null || early=1
+  printf 'q\n' >&7 2>/dev/null
+  exec 7>&-
+  for i in $(seq 1 100); do
+    kill -0 "$MG_SCREEN_PID" 2>/dev/null || break
+    [ "$i" != 50 ] || kill -INT "$MG_SCREEN_PID" 2>/dev/null
+    sleep 0.2
+  done
+  kill -9 "$MG_SCREEN_PID" 2>/dev/null
+  wait "$MG_SCREEN_PID" 2>/dev/null
+  return "$early"
+}
+
+# The contact-sheet window of a marked step: <index, 2 digits>-<transition>.
+MG_DRIVE_WINDOW_NAME='def wname: "\(.index | tostring | if length < 2 then "0" + . else . end)-\(.transition)";'
+
+# mg_drive__motion_inputs <capture> <out> <rec start>: writes the contact-sheet
+# input for the steps marked with a transition: marks.json (video, screen),
+# or frames.json (sampled frames). Returns 1 when it could not.
+mg_drive__motion_inputs() {
+  local capture="$1" out="$2" t0="$3" display w
+  case "$capture" in
+    video)
+      jq --argjson t0 "$t0" "$MG_DRIVE_WINDOW_NAME"'{windows: [.steps[] | select(.transition != null)
+        | {name: wname, start: ([.started - $t0 - 0.5, 0] | max), end: (.ended - $t0 + 1.5)}]}' \
+        "$out/drive-log.json" >"$out/marks.json"
+      ;;
+    screen)
+      # The recording may start up to a second after it was launched: a
+      # wider lead keeps the action inside the window. Each window's crop is
+      # the app's window in that step's first capture.
+      display="$(mg__mac_display_points)"
+      jq -e 'type == "object" and (.width | type) == "number"' <<<"${display:-null}" >/dev/null 2>&1 || return 1
+      jq -c --argjson t0 "$t0" --arg steps "$out/steps" "$MG_DRIVE_WINDOW_NAME"'.steps[] | select(.transition != null)
+        | {name: wname, start: ([.started - $t0 - 1.0, 0] | max), end: (.ended - $t0 + 1.5),
+           hierarchy: ($steps + "/" + ((.captures | (map(select(.phase == "before")) + .))[0].hierarchy | ltrimstr("drive-")))}' \
+        "$out/drive-log.json" >"$out/marks.tmp" || return 1
+      : >"$out/marks.lines"
+      while IFS= read -r w; do
+        jq -ce --argjson w "$w" --argjson display "$display" \
+          '$w + {crop: (.window + {display_width: $display.width, display_height: $display.height})} | del(.hierarchy)' \
+          "$(jq -r .hierarchy <<<"$w")" >>"$out/marks.lines" || return 1
+      done <"$out/marks.tmp"
+      jq -s '{windows: .}' "$out/marks.lines" >"$out/marks.json" || return 1
+      rm -f "$out/marks.tmp" "$out/marks.lines"
+      ;;
+    frames)
+      jq --arg dir "$(mg_container_path "$out/frames")" "$MG_DRIVE_WINDOW_NAME"'{windows: [.steps[]
+        | select(.transition != null and ((.frames // []) | length) > 0)
+        | {name: wname, frames: [.frames[] | {path: ($dir + "/" + (.file | ltrimstr("drive-"))), time}]}]}' \
+        "$out/drive-log.json" >"$out/frames.json"
+      ;;
+  esac
+}
+
 # mg_drive_run <script> <mac|ios> <udid|""> <config> <record yes|no> <out dir>:
 # runs the script (the app and UI tests are built, the host lease and for the
 # Mac the Mac UI gate are held), exports its captures, checks them and writes
-# <out>/manifest.json. Records artifacts and failures. Returns 0 pass, 1 fail,
-# 2 error.
+# <out>/manifest.json. With record, it also captures motion and makes a
+# contact sheet for every step marked with a transition:
+#   simulators: simctl io recordVideo around the drive;
+#   the Mac with Screen Recording: screencapture -v of the main display, cut
+#     to the app's window in each marked step (the full movie is deleted);
+#   the Mac without it: the driver's FrameSampler screenshots (about 10 per
+#     second), with the screen-recording user step.
+# Records artifacts and failures. Returns 0 pass, 1 fail (failed steps or
+# hierarchy issues), 2 error (the drive, a capture or a requested sheet could
+# not be made).
 mg_drive_run() {
   local script="$1" platform="$2" udid="$3" config="$4" record="$5" out="$6"
-  local dest name abs_script rc recorder="" video="" rec_start="" rec_log
+  local dest name abs_script rc capture="" video="" rec_start="" rec_log recorder="" capture_error=0
   mkdir -p "$out"
   abs_script="$(cd "$(dirname "$script")" && pwd -P)/$(basename "$script")"
   name="$(basename "$out")"
@@ -81,38 +183,70 @@ mg_drive_run() {
     *) dest="id=$udid" ;;
   esac
   if [ "$record" = yes ]; then
-    if [ "$platform" = mac ]; then
-      echo "drive: --record is unavailable on the Mac (no Screen Recording; XCUITest cannot sample frames during an action)" >&2
-      record=unavailable
+    if [ "$platform" != mac ]; then
+      capture=video
+    elif mg__screen_capture_allowed; then
+      capture=screen
     else
+      capture=frames
+      mg_user_step screen-recording missing false "Allow Screen Recording for Mac motion capture" \
+        "System Settings > Privacy & Security > Screen Recording: allow the app that runs tools/mg. Until then, tools/mg drive --platform mac --record makes its contact sheets from XCUITest screenshots at about 10 per second instead of a screen recording."
+    fi
+  fi
+  case "$capture" in
+    video)
       video="$out/video.mp4"
       rec_log="$out/record.log"
-      xcrun simctl io "$udid" recordVideo --codec h264 --force "$video" </dev/null >"$rec_log" 2>&1 &
-      recorder=$!
-      mg_on_exit "kill -INT $recorder 2>/dev/null"
+      mg_record__start_recorder "$udid" "$video" "$rec_log"
+      recorder="$MG_RECORDER_PID"
+      mg_on_exit "kill -9 $recorder 2>/dev/null"
       if ! mg_record__wait_started "$rec_log" "$recorder"; then
         mg_failure record "simctl io recordVideo did not start; see $rec_log"
         return 2
       fi
       rec_start="$MG_RECORD_STARTED"
-    fi
-  fi
+      ;;
+    screen)
+      video="$out/screen.mov"
+      rec_log="$video.log"
+      if ! mg_drive__screen_start "$video"; then
+        mg_failure record "screencapture -v did not start; see $rec_log"
+        return 2
+      fi
+      rec_start="$(mg__hires_now)"
+      ;;
+  esac
 
-  echo "drive: running $script on $([ "$platform" = mac ] && echo the Mac || echo "$udid") ($config)" >&2
-  TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$abs_script" \
+  echo "drive: running $script on $([ "$platform" = mac ] && echo the Mac || echo "$udid") ($config)${capture:+, capturing motion: $capture}" >&2
+  TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$abs_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
     mg_app_xcodebuild_test "$out/drive" "$platform" "$dest" "$config" -only-testing:MeguriUITests/AgentDriverTests/testDriveScript
   rc=$?
-  if [ -n "$recorder" ]; then
-    kill -INT "$recorder" 2>/dev/null
-    wait "$recorder" 2>/dev/null
-    [ -s "$video" ] && mg_artifact video "$video" "screen recording" || mg_failure record "the recording is empty; see $rec_log"
+  case "$capture" in
+    video)
+      if ! kill -0 "$recorder" 2>/dev/null; then
+        mg_failure record "simctl io recordVideo stopped before the drive ended; see $rec_log"
+        capture_error=1
+      fi
+      mg_record__stop_recorder "$recorder"
+      ;;
+    screen)
+      if ! mg_drive__screen_stop; then
+        mg_failure record "screencapture -v stopped before the drive ended; see $rec_log"
+        capture_error=1
+      fi
+      ;;
+  esac
+  if [ -n "$video" ] && [ ! -s "$video" ]; then
+    mg_failure record "the recording is empty; see $rec_log"
+    capture_error=1
   fi
   [ "$rc" -ne 2 ] || return 2
 
-  # Attachments: XCTest names each export <name>_<n>_<UUID>.<ext>.
+  # Attachments: XCTest names each export <name>_<n>_<UUID>.<ext>. Sampled
+  # frames go to frames/, the step captures to steps/.
   local raw="$out/attachments" log
   rm -rf "$raw"
-  if ! xcrun xcresulttool export attachments --path "$out/drive.xcresult" --output-path "$raw" >/dev/null 2>"$out/export.log"; then
+  if ! mg_drive__export_attachments "$out/drive.xcresult" "$raw" >/dev/null 2>"$out/export.log"; then
     mg_failure export "xcresulttool could not export the attachments; see $out/export.log"
     return 2
   fi
@@ -124,10 +258,12 @@ mg_drive_run() {
     return 2
   fi
   mkdir -p "$out/steps"
-  local f src
+  local f src dir
   for f in $(jq -r 'keys[] | select(startswith("drive-") and . != "drive-log.json")' <<<"$map"); do
     src="$(jq -r --arg f "$f" '.[$f]' <<<"$map")"
-    mv -f "$raw/$src" "$out/steps/${f#drive-}"
+    case "$f" in *-frame-[0-9]*.png) dir="$out/frames" ;; *) dir="$out/steps" ;; esac
+    mkdir -p "$dir"
+    mv -f "$raw/$src" "$dir/${f#drive-}"
   done
   mv -f "$raw/$log" "$out/drive-log.json"
   rm -rf "$raw"
@@ -148,19 +284,54 @@ mg_drive_run() {
     fi
   fi
 
-  # Motion: a window around each step marked with a transition, narrowed to
-  # the frames that change in it (--fit).
-  if [ -n "$rec_start" ]; then
-    jq --argjson t0 "$rec_start" '{windows: [.steps[] | select(.transition != null)
-      | {name: "\(.index | tostring | if length < 2 then "0" + . else . end)-\(.transition)",
-         start: ([.started - $t0 - 0.5, 0] | max), end: (.ended - $t0 + 1.5)}]}' "$out/drive-log.json" >"$out/marks.json"
-    if [ "$(jq '.windows | length' "$out/marks.json")" -gt 0 ]; then
-      mkdir -p "$out/motion"
-      if ! mg_image_tools python3 tools/scripts/contact-sheet/contact_sheet.py "$(mg_container_path "$video")" \
-        --out "$(mg_container_path "$out/motion")" --marks "$(mg_container_path "$out/marks.json")" --fit >&2; then
-        mg_failure contact-sheet "contact-sheet failed; see log.txt"
-      fi
+  # Motion: a contact sheet for every marked step. Each one asked for must
+  # exist; a missing recording, frames or sheet is an error, never a pass.
+  # Sampled frames cover only actions on the running app: a marked launch,
+  # resize or snapshot step is listed as unsampled instead.
+  local expected="" unsampled="" short sheet_args=()
+  if [ -n "$capture" ]; then
+    expected="$(jq -r --arg c "$capture" "$MG_DRIVE_WINDOW_NAME"'
+      .steps[] | select(.transition != null)
+      | select($c != "frames" or ([.kind] | inside(["launch", "resize", "snapshot"]) | not)) | wname' "$out/drive-log.json")"
+    [ "$capture" != frames ] || unsampled="$(jq -r "$MG_DRIVE_WINDOW_NAME"'
+      [.steps[] | select(.transition != null and ([.kind] | inside(["launch", "resize", "snapshot"]))) | wname] | join(" ")' "$out/drive-log.json")"
+  fi
+  if [ -n "$expected" ] && [ "$capture_error" -eq 0 ]; then
+    if [ "$capture" = frames ]; then
+      short="$(jq -r "$MG_DRIVE_WINDOW_NAME"'
+        .steps[] | select(.transition != null and ([.kind] | inside(["launch", "resize", "snapshot"]) | not))
+        | select((.frames // []) | length < 2) | wname' "$out/drive-log.json")"
+      for f in $short; do
+        mg_failure "frames/$f" "the driver sampled fewer than 2 frames for the marked step $f; see $out/drive.log"
+        capture_error=1
+      done
+      sheet_args=(--frame-list "$(mg_container_path "$out/frames.json")")
+    else
+      sheet_args=("$(mg_container_path "$video")" --marks "$(mg_container_path "$out/marks.json")")
     fi
+    if [ "$capture_error" -eq 0 ]; then
+      rm -rf "$out/motion"
+      mkdir -p "$out/motion"
+      if ! mg_drive__motion_inputs "$capture" "$out" "${rec_start:-0}"; then
+        mg_failure motion-input "could not list the marked steps for the contact sheets; see log.txt"
+        capture_error=1
+      elif ! mg_image_tools python3 tools/scripts/contact-sheet/contact_sheet.py "${sheet_args[@]}" \
+        --out "$(mg_container_path "$out/motion")" --fit >&2; then
+        mg_failure contact-sheet "contact-sheet failed; see log.txt"
+        capture_error=1
+      fi
+      for f in $expected; do
+        if [ ! -s "$out/motion/$f.png" ] || ! jq -e --arg n "$f" 'any(.windows[]; .name == $n)' "$out/motion/report.json" >/dev/null 2>&1; then
+          mg_failure "contact-sheet/$f" "no contact sheet for the marked step $f"
+          capture_error=1
+        fi
+      done
+    fi
+  fi
+  # The full-screen movie shows more than the app: only its cuts are kept.
+  if [ "$capture" = screen ]; then
+    rm -f "$video"
+    video=""
   fi
 
   # Manifest: the drive log with absolute paths and each capture's issues.
@@ -172,16 +343,20 @@ mg_drive_run() {
   [ ! -f "$out/motion/report.json" ] || motion="$(jq -c --arg root "/work/" --arg host "$MG_ROOT/" \
     'walk(if type == "string" and startswith($root) then $host + ltrimstr($root) else . end)' "$out/motion/report.json")"
   jq --arg dir "$out/steps" --argjson issues "$issues" --arg platform "$platform" --arg udid "$udid" --arg config "$config" \
-    --arg video "$video" --argjson motion "$motion" --arg record "$record" --argjson checked "$checked" '
+    --arg video "$video" --argjson motion "$motion" --arg record "$record" --arg capture "$capture" --argjson checked "$checked" \
+    --arg frames "$out/frames" --arg unsampled "$unsampled" '
     def file($n): $dir + "/" + ($n | ltrimstr("drive-"));
     {
       script: .script, script_path: .path, platform: $platform, device: (if $udid == "" then null else $udid end),
       config: $config, error: .error,
       steps: [.steps[] | . + {captures: [.captures[] | {phase, hierarchy: file(.hierarchy), screenshot: file(.screenshot)}
-        | . + {issues: ($issues[.hierarchy] // [])}]}],
+        | . + {issues: ($issues[.hierarchy] // [])}]}
+        | if .frames == null then . else .frames |= map(.file |= ($frames + "/" + ltrimstr("drive-"))) end],
       hierarchy_checked: $checked,
       issues: ([$issues[] | length] | add // 0),
-      record: $record, video: (if $video == "" then null else $video end), motion: $motion
+      record: $record, capture: (if $capture == "" then null else $capture end),
+      video: (if $video == "" then null else $video end), motion: $motion,
+      unsampled_transitions: ($unsampled | split(" ") | map(select(. != "")))
     }' "$out/drive-log.json" >"$out/manifest.json"
   mg_artifact manifest "$out/manifest.json" "drive manifest"
   local png
@@ -194,6 +369,7 @@ mg_drive_run() {
   for png in "$out"/motion/*.png; do
     [ -f "$png" ] && mg_artifact contact-sheet "$png" "$name: $(basename "$png" .png)"
   done
+  [ -z "$video" ] || [ ! -s "$video" ] || mg_artifact video "$video" "$name: screen recording"
 
   # Failures: failed steps, then each distinct issue once.
   jq -c '.steps[] | select(.status == "failed") | {id: "step-\(.index)-\(.kind)", message: (.message // "failed")}' \
@@ -211,7 +387,7 @@ mg_drive_run() {
   if [ "$rc" -ne 0 ] || [ "$(jq '.issues' "$out/manifest.json")" -gt 0 ]; then
     return 1
   fi
-  if [ "${#files[@]}" -gt 0 ] && [ "$checked" = false ]; then
+  if [ "$capture_error" -ne 0 ] || { [ "${#files[@]}" -gt 0 ] && [ "$checked" = false ]; }; then
     return 2
   fi
   return 0
@@ -236,19 +412,23 @@ mg_drive__job() {
     mg_mac_ui_gate || return 0
   else
     platform=ios
-    [ -z "$udid" ] || mg_sim_check_owned "$udid" || return 0
+    if [ -n "$udid" ]; then
+      mg_sim_check_owned "$udid" || return 0
+      mg_sim_check_runtime "$udid" || return 0
+    fi
     mg_app_build ios-sim "$config" || return 0
     mg_host_lease || return 0
     if [ -z "$udid" ]; then
       mg_sim_lease "$kind" release || return 0
       udid="$MG_SIM_UDID"
+      mg_sim_check_runtime "$udid" || return 0
     fi
     mg_sim_prepare "$udid"
   fi
   mg_drive_run "$script" "$platform" "$udid" "$config" "$record" "$MG_RUN_DIR"
   local rc=$? manifest="$MG_RUN_DIR/manifest.json"
   if [ -f "$manifest" ]; then
-    mg_detail drive "$(jq -c '{script, platform, device, config, issues, hierarchy_checked, video, steps: [.steps[] | {index, kind, status, transition, message}], motion: (if .motion == null then null else {jump_cuts: .motion.jump_cuts, windows: [.motion.windows[] | {name, sheet, jump_cuts, stalls}]} end)}' "$manifest")"
+    mg_detail drive "$(jq -c '{script, platform, device, config, issues, hierarchy_checked, record, capture, video, unsampled_transitions, steps: [.steps[] | {index, kind, status, transition, message} + (if .frames == null then {} else {frames: (.frames | length)} end)], motion: (if .motion == null then null else {jump_cuts: .motion.jump_cuts, windows: [.motion.windows[] | {name, sheet, jump_cuts, stalls}]} end)}' "$manifest")"
     mg_count total "$(jq '.steps | length' "$manifest")"
     mg_count passed "$(jq '[.steps[] | select(.status == "ok")] | length' "$manifest")"
     mg_count failed "$(jq '[.steps[] | select(.status == "failed")] | length' "$manifest")"
@@ -265,7 +445,11 @@ mg_drive__job() {
       mg_status fail
       ;;
     *)
-      mg_message "$MG_JOB: the drive could not run; see log.txt"
+      if [ -f "$manifest" ]; then
+        mg_message "$MG_JOB: the drive ran, but a capture or check it asked for could not be made; see the failures and log.txt"
+      else
+        mg_message "$MG_JOB: the drive could not run; see log.txt"
+      fi
       mg_status error
       ;;
   esac
@@ -353,8 +537,9 @@ mg_screenshot() {
 # The screen of a simulator the caller leased, as it is.
 mg_screenshot__device() {
   local udid="$1" png="$MG_RUN_DIR/screen.png"
-  mg_host_lease || return 0
   mg_sim_check_owned "$udid" || return 0
+  mg_sim_check_runtime "$udid" || return 0
+  mg_host_lease || return 0
   mg_sim_prepare "$udid"
   if ! xcrun simctl io "$udid" screenshot "$png" >&2 || [ ! -s "$png" ]; then
     mg_failure screenshot "simctl io screenshot failed"
@@ -364,11 +549,6 @@ mg_screenshot__device() {
   mg_artifact png "$png" "screen of $udid"
   mg_message "screenshot: $png"
   mg_status pass
-}
-
-# JXA, no prompt: whether this process may capture the screen.
-mg__screen_capture_allowed() {
-  [ "$(osascript -l JavaScript -e "ObjC.import('CoreGraphics'); ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]); \$.CGPreflightScreenCaptureAccess()" 2>/dev/null)" = true ]
 }
 
 # mg__mac_window_id <pid>: the id of the process's largest normal window.

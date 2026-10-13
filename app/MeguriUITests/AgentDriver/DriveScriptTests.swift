@@ -93,6 +93,8 @@ final class DriveScriptTests: XCTestCase {
             ("{\"name\": \"x\", \"steps\": [\(launch), {\"snapshot\": \"Sheet Open\"}]}", "step 2: snapshot names use lowercase letters"),
             ("{\"name\": \"x\", \"steps\": [\(launch), {\"resize\": \"huge\"}]}", "step 2: resize takes minimum, default, large or <width>x<height>, got 'huge'"),
             ("{\"name\": \"x\", \"steps\": [\(launch), {\"tap\": \"a.b.c\", \"transition\": \"\"}]}", "step 2: \"transition\" must be a non-empty string"),
+            ("{\"name\": \"x\", \"steps\": [\(launch), {\"tap\": \"a.b.c\", \"transition\": \"Dismiss Sheet\"}]}",
+             "step 2: transition names use lowercase letters, digits and '-', got 'Dismiss Sheet'"),
             ("{\"name\": \"x\", \"steps\": [\(launch), {\"type\": {\"id\": \"a.b.c\"}}]}", "step 2: type needs text"),
         ]
         for (json, expected) in cases {
