@@ -18,12 +18,12 @@ setup:
 steps:
   - answer: {card: "#c1", rating: good}
   - handoff: meguri
-  - db_exec: {sql: "PRAGMA integrity_check"}
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
   - db_exec: {sql: "UPDATE cards SET flags = 1"}
   - observe: [schema_objects]
   - handoff: oracle
-  - db_exec: {sql: "PRAGMA integrity_check"}
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
   - db_exec: {sql: "SELECT ver FROM col"}
-  - db_exec: {sql: "PRAGMA journal_mode"}
+  - db_exec: {sql: "SELECT * FROM pragma_journal_mode"}
   - answer: {card: "#c2", rating: good}
   - observe: [schema_objects, db_dump, "card(#c1, #c2)", "revlog(#c1, #c2)"]

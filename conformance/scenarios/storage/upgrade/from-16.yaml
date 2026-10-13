@@ -6,7 +6,7 @@ clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 steps:
   - open: {fixture: storage/schema-16.anki2}
   - db_exec: {sql: "SELECT ver, crt, mod, scm, dty, usn, ls, conf, models, decks, dconf, tags FROM col"}
-  - db_exec: {sql: "PRAGMA journal_mode"}
+  - db_exec: {sql: "SELECT * FROM pragma_journal_mode"}
   - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'meguriFixture'"}
   - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY oid, type"}
   - db_exec: {sql: "SELECT id, factor, usn, mod FROM cards WHERE factor = 1400 ORDER BY id"}

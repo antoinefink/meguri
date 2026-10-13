@@ -5,7 +5,7 @@ Requirements: R1449, R1478, R1479, R1482, R2016
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/
 
-The scenario vocabulary the storage area needs (U22): the op `open`, which replaces the scenario's collection with a copy of a fixture file and opens it, the final form of the draft op `db_exec` (`dsl.md` D7.2), and the observation `schema_objects`. Scenarios also use `db_dump` (`observations.md`, the `db_dump` section of the sync harness change, U13). The behavior these observe is `specs/storage/`.
+The scenario vocabulary the storage area needs (U22): the op `open`, which replaces the scenario's collection with a copy of a fixture file and opens it, how executors reach fixture files, and the observation `schema_objects`. Scenarios also use the op `db_exec`, whose definition is `record-ops.md` W1 (U23's spec side; P2 restates what the storage scenarios rely on), and the observation `db_dump` (`observations.md` O8, U13's spec side). The behavior these observe is `specs/storage/`.
 
 ## P1. `open`
 
@@ -40,21 +40,30 @@ The scenario vocabulary the storage area needs (U22): the op `open`, which repla
 - Logical ids (`#nN`, `#cN`) are assigned only to notes and cards the scenario creates; a fixture's notes and cards have none. Scenarios read them by real id through `db_exec` and `db_dump`.
 - A handoff after an `open` hands over the opened collection as usual (`dsl.md` D9.2), with any other file in the session directory (Meguri's pre-upgrade copy).
 
+### P1.4 Where executors find fixture files
+
+- Fixtures are read-only inputs: an executor reads a fixture's bytes to copy them, and never opens the file under `conformance/fixtures/` with SQLite, writes it or locks it.
+- Meguri's executor reads them from the checkout's `conformance/fixtures/`.
+- An oracle worker reads them from the directory named by the environment variable `ORACLE_FIXTURES`: the checkout's `conformance/fixtures/`, mounted read-only into the worker. Every tool that starts workers for scenario runs mounts it and sets the variable: `tools/mg oracle record` and `compare`, and the workers of `tools/mg conformance --live`.
+- A worker without `ORACLE_FIXTURES`, or one in which `<ORACLE_FIXTURES>/<fixture>` is not a regular file, fails the `open` step with the protocol error kind `fixture_error` (`conformance/schema/protocol.json`), a run error. The session directory is left as it was before the step.
+- The `fixture` path is resolved below that directory only: the scenario schema allows no `..`, no leading `/` and no empty segment.
+
 ## P2. `db_exec`
 
-The draft row of `dsl.md` D7.2, fixed here. When the oracle driver gains the op, the D7.2 row becomes stable with this argument, output and rejection list, and the schemas follow.
+The definition is `record-ops.md` W1 (U23's spec side). This section restates the parts the storage scenarios rely on, and must never say anything W1 does not; when the two differ, W1 holds and this section is corrected.
 
 ### P2.1 Argument
 
 `db_exec: {sql: <text>, params?: [<value>, ...]}`.
 
-- `sql` is exactly one SQL statement (a trailing `;` is allowed). Two statements, or SQL that does not prepare, is `invalid_scenario`.
-- `params` binds positional parameters (`?`) in order: an integer as INTEGER, a number written with a fraction or exponent as REAL, a string as TEXT, null as NULL. Booleans, arrays and objects are `invalid_scenario`. A blob is written in the SQL as a literal (`x'0a1b'`).
-- It runs on the collection's read-write connection (Anki's own connection on the oracle, so the `unicase` collation and Anki's SQL functions are there; Meguri's writer with its registered functions, `storage/open-and-connections` C5), as one transaction of its own, committed when the step ends. Writes bypass every usn, mtime and `col.mod` rule: they are raw. On the oracle that means running the statement outside the database proxy's transaction wrapper: when a wrapped transaction that wrote (any statement not starting with `SELECT`, pragmas included) commits, Anki stamps `col.mod` with the current time, which Meguri's raw write never does.
+- `sql` is exactly one SQL statement (a trailing `;` is allowed).
+- `params` binds positional parameters (`?`) in order: a string as TEXT, an integer as INTEGER, any other number as REAL, null as NULL. Booleans, arrays and objects are `invalid_scenario`.
+- It runs between operations, outside any of them, on the collection's own read-write connection (on the oracle, Anki's connection with its `unicase` collation and SQL functions; on Meguri, the writer of `storage/open-and-connections` C4 with C5's registrations), and commits at once. It stamps nothing: no usn, modification time or `col.mod` changes except what the statement itself writes. On the oracle this rules out Anki's database proxy transaction, which stamps `col.mod` when a transaction in which a statement other than a `SELECT` ran commits.
+- After a statement whose text does not begin with `select` (ignoring leading white space and letter case), the executor forgets every cached view of the collection and clears the undo history (W1).
 
 ### P2.2 Output
 
-`{"db_exec": {"rows": [[<value>, ...], ...]}}`: the rows the statement returns, in the order SQLite returns them, each a list of its column values. A statement that returns none (an `UPDATE`, an `INSERT` without `RETURNING`) gives `{"rows": []}`. Values by the SQLite storage class of each value, as `db_dump` writes them:
+`{"db_exec": {"rows": [[<value>, ...], ...]}}`: the rows the statement returns, in the order SQLite returns them, each a list of its column values; `{"rows": []}` when it returns none. Values by the SQLite storage class of each value, as `db_dump` writes them:
 
 | Storage class | Value |
 |---|---|
@@ -64,18 +73,11 @@ The draft row of `dsl.md` D7.2, fixed here. When the oracle driver gains the op,
 | BLOB | `{"sha256": "<lower-case hex SHA-256 of the bytes>"}` |
 | NULL | `null` |
 
-Pragmas are statements too: `PRAGMA integrity_check` gives `{"rows": [["ok"]]}` on a sound file, `PRAGMA journal_mode` `{"rows": [["wal"]]}`. Use `ORDER BY` whenever more than one row comes back: without it the order is SQLite's and may differ between the oracle and Meguri.
+Scenarios read pragma values through SQLite's table-valued pragma functions, which are queries: `SELECT * FROM pragma_integrity_check` gives `{"rows": [["ok"]]}` on a sound file, `SELECT * FROM pragma_journal_mode` `{"rows": [["wal"]]}` on a WAL-mode file. Use `ORDER BY` whenever more than one row comes back: without it the order is SQLite's and may differ between the oracle and Meguri. Read text whose bytes matter with `hex(...)`.
 
-### P2.3 Rejections
+### P2.3 Removed
 
-`{"db_exec": {"error": <kind>}}`, the statement having changed nothing:
-
-| Kind | SQLite result |
-|---|---|
-| `unique_violation` | a `UNIQUE` or `PRIMARY KEY` constraint failed (extended codes 2067 and 1555) |
-| `constraint_violation` | any other constraint failed (`NOT NULL`, `CHECK`, foreign key) |
-
-Every other failure is a run error.
+`db_exec` records no rejection: any SQL error, a failed constraint included, is a run error (`anki_error` on the oracle, an executor error on Meguri), as W1 says. Scenarios that show a constraint at work use `INSERT OR IGNORE` and read back what was stored (`storage/open/collation`); Meguri's own tests assert SQLite's error codes.
 
 ## P3. `schema_objects`
 

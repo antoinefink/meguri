@@ -37,8 +37,6 @@ tbl_name
 file_too_old
 file_too_new
 v1_scheduler
-unique_violation
-constraint_violation
 # Collection config keys.
 fsrs
 loadBalancerEnabled

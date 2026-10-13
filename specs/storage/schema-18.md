@@ -62,7 +62,7 @@ Notes for implementers:
 | `idx_cards_odid` | `cards` | `CREATE INDEX idx_cards_odid ON cards (odid) WHERE odid != 0` |
 | `idx_graves_pending` | `graves` | `CREATE INDEX idx_graves_pending ON graves (usn)` |
 
-The unique indexes on `name` take the column's `unicase` collation, so two deck, note type, field (per note type) or template (per note type) names that are equal under S4 cannot both be stored; neither can two such tags (the `tags` primary key). An insert that would break one fails with SQLite's unique-constraint error (extended code 2067) and stores nothing (scenario `storage/open/collation`).
+The unique indexes on `name` take the column's `unicase` collation, so two deck, note type, field (per note type) or template (per note type) names that are equal under S4 cannot both be stored; neither can two such tags (the `tags` primary key). An insert that would break one fails with SQLite's constraint error (extended code 2067 for a unique index, 1555 for the `tags` primary key) and stores nothing (`tests/collation_order.rs`); with `INSERT OR IGNORE` it stores nothing and reports no error (scenario `storage/open/collation`, which shows the rows the indexes kept).
 
 ## S4. Collation
 

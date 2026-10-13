@@ -170,7 +170,8 @@ After a clean close, `collection.anki2` alone holds the whole collection, no `-w
 | Anki-made collection opened and closed by Meguri, then `integrity_check` `ok` in Anki (T1 live) | `storage/open/oracle-made-reopen` |
 | Versions 10, 12, 13 and 19 refused, WAL-mode and rollback-journal files | `storage/open/refuse-versions` (kinds only, C3) |
 | v1-scheduler collections at 18 and 11 refused | `storage/open/v1-scheduler` (deviation `storage-v1-scheduler-refused`) |
-| Collation order and a unique-index collision | `storage/open/collation` |
+| Collation order and a unique-index collision (`INSERT OR IGNORE`, rows kept) | `storage/open/collation` |
+| A plain insert of a name equal under folding to a stored one fails with extended code 2067 (1555 for a tag) and stores nothing, for decks, note types, fields and templates (per note type) and tags; presets have no unique index on `name` | `tests/collation_order.rs` |
 | Refused file unchanged: SHA-256 and directory listing | `tests/open_refuse.rs` (Meguri only) |
 | Reader keeps its snapshot during a writer commit; no `SQLITE_BUSY` on readers | `tests/connections.rs` |
 | `VACUUM INTO` succeeds on the sync and maintenance readers; a write fails on every reader role | `tests/connections.rs` |
