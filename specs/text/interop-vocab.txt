@@ -1,0 +1,32 @@
+# Interface names the text specs use: note columns, config keys, the SQLite
+# collation, field markup Anki stores (media tags and attributes, sound and
+# type-answer markers, entity names) and deck description keys.
+notes
+flds
+sfld
+csum
+guid
+normalize_note_text
+sort_field_idx
+unicase
+collate
+img
+audio
+video
+object
+source
+src
+data
+sound
+type
+br
+div
+style
+script
+amp
+lt
+gt
+quot
+nbsp
+desc
+md

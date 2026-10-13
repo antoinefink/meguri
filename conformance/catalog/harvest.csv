@@ -317,8 +317,8 @@ h8a1d70115eae,python,tag,media,unclassified,,,open
 h026e05052d5b,rust,tag,media,unclassified,,,open
 h02ee289c8351,rust,tag,media,unclassified,,,open
 h0688e35c67d3,rust,tag,media,unclassified,,,open
-h2751253863a4,rust,tag,media,unclassified,,,open
-h2df882b13f13,rust,tag,media,unclassified,,,open
+h2751253863a4,rust,tag,media,in-scope,the 120-byte media file name limit,text/filenames/normalize text/corpus/filenames-01,done
+h2df882b13f13,rust,tag,media,in-scope,the media file name transform,text/filenames/normalize text/corpus/filenames-01,done
 h448a4c3e64ba,rust,tag,media,unclassified,,,open
 h487c9a31bd1f,rust,tag,media,unclassified,,,open
 h4b933596f69b,rust,tag,media,unclassified,,,open
@@ -1085,20 +1085,20 @@ hca878bd8d66c,rust,tag,tags,unclassified,,,open
 hcd7b5a34f3ac,rust,tag,tags,unclassified,,,open
 hd8d86a3d37b3,rust,tag,tags,unclassified,,,open
 he58668dea421,rust,tag,tags,unclassified,,,open
-h26e80efa4ec6,python,tag,text,unclassified,,,open
-ha04d63efb2f8,python,tag,text,unclassified,,,open
-hf0908a412138,python,tag,text,unclassified,,,open
-h1865ada81cd2,rust,tag,text,unclassified,,,open
-h4b8f37d073df,rust,tag,text,unclassified,,,open
-h627109a11e69,rust,tag,text,unclassified,,,open
-h795f93e05e42,rust,tag,text,unclassified,,,open
-h951f9a33c9e8,rust,tag,text,unclassified,,,open
-h9928c48fa7e7,rust,tag,text,unclassified,,,open
-hc107d6243a3c,rust,tag,text,unclassified,,,open
-h2c27a9391685,typescript,tag,text,unclassified,,,open
-h7d47d968bfb6,typescript,tag,text,unclassified,,,open
-hd903a0575683,typescript,tag,text,unclassified,,,open
-he2a197504da2,typescript,tag,text,unclassified,,,open
+h26e80efa4ec6,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
+ha04d63efb2f8,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
+hf0908a412138,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
+h1865ada81cd2,rust,tag,text,in-scope,renaming media references in imported notes; specified with package import (U120),,deferred
+h4b8f37d073df,rust,tag,text,in-scope,plain stripping and stripping that keeps media names,text/strip/markup text/strip/keep-media,done
+h627109a11e69,rust,tag,text,in-scope,display percent-encoding of local media names,text/refs/iri,done
+h795f93e05e42,rust,tag,text,in-scope,accent folding for nc: searches; specified with search text matching (U81),,deferred
+h951f9a33c9e8,rust,tag,text,in-scope,underscore-prefixed files named by note type templates and CSS; specified with package export (U122),,deferred
+h9928c48fa7e7,rust,tag,text,in-scope,byte-length cuts on a character boundary; covered through the media file name limit,text/filenames/normalize,done
+hc107d6243a3c,rust,tag,text,in-scope,"wildcard and escape handling of search text; specified with search (U80, U81)",,deferred
+h2c27a9391685,typescript,tag,text,not-applicable,question-mark direction in the desktop web UI translation helper; Meguri strings come from its own catalog,,done
+h7d47d968bfb6,typescript,tag,text,in-scope,unit choice for time spans shown in charts and options; decided with the stats chart labels (U226),,deferred
+hd903a0575683,typescript,tag,text,in-scope,unit choice for time spans shown in charts and options; decided with the stats chart labels (U226),,deferred
+he2a197504da2,typescript,tag,text,not-applicable,question-mark direction in the desktop web UI translation helper; Meguri strings come from its own catalog,,done
 h0c2f18667cee,python,tag,tooling,not-applicable,Anki's documentation and release tooling,,done
 h0eb764531bfb,python,tag,tooling,not-applicable,Anki's documentation and release tooling,,done
 h115d3b6864af,python,tag,tooling,not-applicable,Anki's documentation and release tooling,,done

@@ -271,7 +271,39 @@
               "properties": { "tables": { "type": "array", "items": { "type": "string" } } }
             },
             "stats": { "description": "Draft.", "type": ["object", "null"] },
-            "digest": { "type": "null" }
+            "digest": { "type": "null" },
+            "text": {
+              "description": "observations.md O4 text: pure text functions over a list of inputs; pairs for unicase_compare, which shares a request with no other function.",
+              "type": "object",
+              "required": ["fns", "inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "fns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "enum": [
+                      "strip_markup", "strip_markup_keep_media", "text_line", "text_line_keep_media", "media_refs",
+                      "iri_encode", "iri_decode", "media_filename", "sort_field", "checksum", "field_empty",
+                      "unicase_compare"
+                    ]
+                  }
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      { "type": "string" },
+                      { "type": "array", "prefixItems": [{ "type": "string" }, { "type": "string" }], "minItems": 2, "maxItems": 2 }
+                    ]
+                  }
+                }
+              },
+              "if": { "properties": { "fns": { "contains": { "const": "unicase_compare" } } } },
+              "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "array" } } } },
+              "else": { "properties": { "inputs": { "items": { "type": "string" } } } }
+            }
           },
           "additionalProperties": false
         }

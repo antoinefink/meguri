@@ -83,9 +83,30 @@
           "required": ["connected", "error"],
           "additionalProperties": false,
           "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
+        },
+        "text": {
+          "description": "O4 text: one array per requested function, one output per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "strip_markup": { "$ref": "#/$defs/text_strings" },
+            "strip_markup_keep_media": { "$ref": "#/$defs/text_strings" },
+            "text_line": { "$ref": "#/$defs/text_strings" },
+            "text_line_keep_media": { "$ref": "#/$defs/text_strings" },
+            "media_refs": { "type": "array", "items": { "$ref": "#/$defs/text_strings" } },
+            "iri_encode": { "$ref": "#/$defs/text_strings" },
+            "iri_decode": { "$ref": "#/$defs/text_strings" },
+            "media_filename": { "$ref": "#/$defs/text_strings" },
+            "sort_field": { "$ref": "#/$defs/text_strings" },
+            "checksum": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+            "field_empty": { "type": "array", "items": { "type": "boolean" } },
+            "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
+          }
         }
       }
     },
+    "text_strings": { "type": "array", "items": { "type": "string" } },
     "rejection": {
       "description": "An op Anki refused (dsl.md D7.3). An op whose D7.2 row lists rejection kinds takes anyOf [its output, this with error restricted to those kinds]; the others record none.",
       "type": "object",

@@ -1,0 +1,23 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "sort_field": ["123", "007", " 12 ", "1.5", "1.0", "1e3", "3.0e+5", "-4", "+4", "0x10", "9223372036854775807", "9223372036854775808", "1e400", "Inf", "NaN", "12abc", "1,5", "\t5\n", "12", "42", " 7.png "]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/fields/sort-field",
+  "scenario_sha256": "2f117012aaf5aa32263a4ee15ca3456beb699654d63c7f30d6d4f2b0bc5b7942",
+  "tz": "UTC"
+}

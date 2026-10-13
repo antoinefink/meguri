@@ -3,6 +3,7 @@
 Only spec writers and oracle maintainers work here. Implementers never read this tree (R1956); they run it through `tools/mg oracle ...` as a black box. Nothing outside `oracle/` imports, copies or ships its code (R1869, R1873).
 
 - Add an area's ops and observations as a module under `driver/ops/` or `driver/observe/` with the `registry` decorators; `worker.py`, `session.py` and `harness.py` stay area-free. Write each vocabulary entry's meaning in `conformance/` (protocol.json now, the U4 specs later), never only here.
+- `observe/text.py` (pure text functions) works on one scratch collection per worker process, never the scenario's: whatever a function does there must not change a later output (it removes the media files it writes).
 - Never put Anki's message text in a response or observation (it is localized, R1887). Errors carry a kind, the step and the exception class name.
 - A refusal that is Anki's behavior (duplicate, invalid input) is an output, not an error: declare its kinds with `@op(name, rejects=(...))` (the op's list in dsl.md D7.2) and raise `errors.Rejected(kind)` only when nothing changed.
 - `run` with `steps`/`resume`/`handoff` is one segment of a live chain (dsl.md D9.2): the worker reads and writes the handoff directory at `$ORACLE_HANDOFF` (`tools/mg conformance --live` mounts it at /handoff). A resumed session runs no setup; ops find note types, decks and presets by the scenario's names. Areas that keep state outside the session directory (the sync server) add it to what `Session.hand_off` copies.
