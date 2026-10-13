@@ -120,11 +120,12 @@ mg_conformance() {
   fi
   trap 'mg_conf__cleanup; exit 143' TERM
   MG_CONF_LANES=""
-  local failed=false rc
+  local failed=false rc actors
 
   if [ "$live" = true ]; then
     # Actor scenarios' workers need this run's fault proxy (sync-ops.md S8.2).
-    if [ -n "$(mg_oracle__actor_scenarios ${filters[0]+"${filters[@]}"})" ]; then
+    actors="$(mg_oracle__actor_scenarios ${filters[0]+"${filters[@]}"})" || return 0
+    if [ -n "$actors" ]; then
       mg_oracle__sync_faults || return 0
     fi
     mg_conf__record_stale ${filters[0]+"${filters[@]}"} || failed=true
