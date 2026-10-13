@@ -1106,6 +1106,24 @@ diff_report() {
   validate "$result"
 }
 
+@test "sync-rig up takes an empty exchanges.jsonl, which the recorder creates at start, as no recording" {
+  local stubs="$BATS_TEST_TMPDIR/sync-stubs" dir="$SB/conformance/recordings/sync"
+  mkdir -p "$stubs" "$dir/unused" "$dir/other"
+  printf '#!/bin/sh\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  : >"$dir/unused/exchanges.jsonl"
+  mg sync-rig up --record unused
+  # Past the recording check, the job asks Docker, which this stub refuses.
+  [ "$(field -c '[.failures[].id]')" = '["docker-unreachable"]' ]
+  validate "$result"
+  # Any other file is a recording.
+  : >"$dir/other/notes.txt"
+  mg sync-rig up --record other
+  [ "$(field '.failures[0].id')" = recording-exists ]
+  validate "$result"
+}
+
 @test "sync-rig status reports a stopped rig as down, and down removes only the rig's services" {
   local stubs="$BATS_TEST_TMPDIR/sync-stubs"
   mkdir -p "$stubs"

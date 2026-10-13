@@ -20,11 +20,20 @@ that passes through the reverse proxy becomes one JSON line in
 
 Timestamps, session keys and host keys are recorded as they were; consumers
 compare semantically and ignore them.
+
+`exchanges.jsonl` is created, empty, when the proxy starts; if it cannot be,
+mitmdump stops, so `tools/mg sync-rig up --record` fails instead of proxying
+without recording. `<record_health>` reports the recorder's state as
+`{"ok", "recording", "written", "errors", "last_error"}`: `ok` turns false for
+good at the first exchange that could not be recorded (its `seq` is then
+missing from the file). The service's health check and `tools/mg sync-rig`
+read it.
 """
 
 import hashlib
 import io
 import json
+import logging
 import os
 import threading
 
@@ -100,20 +109,52 @@ class RecordSync:
         self.lock = threading.Lock()
         self.seq = 0
         self.path = None
+        self.health = {"ok": False, "written": 0, "errors": 0, "last_error": None}
 
     def load(self, loader):
         loader.add_option("record_dir", str, "/recordings", "directory that receives exchanges.jsonl")
+        loader.add_option(
+            "record_health", str, "/tmp/record-sync-health.json", "file that reports the recorder's state"
+        )
+
+    def report(self):
+        path = ctx.options.record_health
+        with open(path + ".tmp", "w", encoding="utf-8") as out:
+            json.dump(dict(self.health, recording=self.path), out, sort_keys=True)
+        os.replace(path + ".tmp", path)
+
+    def fail(self, message):
+        self.health["ok"] = False
+        self.health["last_error"] = message
+        logging.error("record_sync: %s", message)
+        self.report()
 
     def running(self):
-        os.makedirs(ctx.options.record_dir, exist_ok=True)
         self.path = os.path.join(ctx.options.record_dir, "exchanges.jsonl")
+        try:
+            os.makedirs(ctx.options.record_dir, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8"):
+                pass
+        except OSError as err:
+            self.fail(f"cannot write {self.path}: {err}")
+            ctx.master.shutdown()
+            return
+        self.health["ok"] = True
+        self.report()
 
     def write(self, flow):
         with self.lock:
             self.seq += 1
-            line = json.dumps(exchange(self.seq, flow), sort_keys=True, ensure_ascii=False)
-            with open(self.path, "a", encoding="utf-8") as out:
-                out.write(line + "\n")
+            try:
+                line = json.dumps(exchange(self.seq, flow), sort_keys=True, ensure_ascii=False)
+                with open(self.path, "a", encoding="utf-8") as out:
+                    out.write(line + "\n")
+            except Exception as err:  # a gap in the recording, whatever the cause
+                self.health["errors"] += 1
+                self.fail(f"exchange {self.seq} ({flow.request.method} {flow.request.path}) not recorded: {err!r}")
+                return
+            self.health["written"] += 1
+            self.report()
 
     def response(self, flow):
         self.write(flow)

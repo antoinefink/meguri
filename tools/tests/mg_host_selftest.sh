@@ -477,8 +477,10 @@ t_similarity_nightly_runs_jplag() {
 }
 
 # The sandbox has no oracle/, so sync-rig builds a stand-in oracle image: the
-# dev image plus a stand-in for Anki's sync server that answers every request.
-# Everything else is the real rig: compose, networks, toxiproxy, sync-edge.
+# dev image plus a stand-in for Anki's sync server that answers a GET with 404,
+# echoes a POST's body back, and closes the connection without a reply to
+# POST /abort. Everything else is the real rig: compose, networks, toxiproxy,
+# mitmdump, sync-edge.
 standin_oracle_tree() {
   local o="$SB/oracle"
   mkdir -p "$o/driver/anki"
@@ -499,6 +501,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(404)
         self.end_headers()
+
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("content-length") or 0))
+        if self.path == "/abort":
+            self.close_connection = True
+            return
+        self.send_response(200)
+        self.send_header("content-type", "application/octet-stream")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 http.server.ThreadingHTTPServer((os.environ["SYNC_HOST"], int(os.environ["SYNC_PORT"])), Handler).serve_forever()
@@ -542,6 +555,132 @@ t_sync_rig_publishes_on_loopback_only_and_down_removes_it() {
     expect "rig networks left" "$(docker network ls -q --filter "name=^${PROJECT}_sync-rig" | wc -l | tr -d ' ')" 0
 }
 
+# A proxy in the environment never answers the rig's probes. With http_proxy
+# and the other proxy variables pointing at a loopback proxy that answers every
+# request with 200 and a Date of 2001, status still gets the stand-in server's
+# 404 and Date, finds nothing on the LAN address, and leaves the rig running.
+t_sync_rig_probes_ignore_proxy_variables() {
+  local pid port lan v
+  mg sync-rig up
+  expect "up status" "$(field .status)" pass || return 1
+  : >"$SB/proxy.port"
+  /usr/bin/perl -MIO::Socket::INET -e '
+    my $s = IO::Socket::INET->new(LocalAddr => "127.0.0.1", LocalPort => 0, Listen => 16, ReuseAddr => 1) or die "listen: $!";
+    print $s->sockport, "\n"; STDOUT->flush;
+    while (my $c = $s->accept) {
+      while (defined(my $l = <$c>)) { last if $l eq "\r\n" }
+      print $c "HTTP/1.1 200 OK\r\nDate: Mon, 01 Jan 2001 00:00:00 GMT\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+      close $c;
+    }' >"$SB/proxy.port" 2>>"$SB/stderr.log" &
+  pid=$!
+  for _ in $(seq 50); do
+    [ -s "$SB/proxy.port" ] && break
+    sleep 0.1
+  done
+  port="$(cat "$SB/proxy.port")"
+  [ -n "$port" ] || {
+    echo "the stand-in proxy did not start"
+    kill "$pid"
+    wait "$pid" 2>/dev/null
+    return 1
+  }
+  for v in http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY; do
+    export "$v=http://127.0.0.1:$port"
+  done
+  mg sync-rig status
+  unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  jq -c '{status, message, failures: [.failures[].id], probes: .details.probes, clock: .details.clock}' "$RESULT"
+  expect "status exit" "$RC" 0 &&
+    expect "status" "$(field .status)" pass &&
+    expect "the server, not the proxy, answered" "$(field .details.probes.endpoints.syncserver.loopback_http)" 404 &&
+    expect "the server's clock, not the proxy's" "$(field '.details.clock.skew_secs | (if . < 0 then -. else . end) <= 300')" true || return 1
+  lan="$(field -r '.details.probes.lan_address // empty')"
+  if [ -n "$lan" ]; then
+    expect "every endpoint refused on the LAN address $lan" \
+      "$(field '[.details.probes.endpoints[].lan_curl_exit | IN(7, 28)] | (length == 3 and all)')" true || return 1
+  fi
+  expect "rig still running" "$(sbcompose --profile sync-rig ps -q --status running syncserver sync-edge | wc -l | tr -d ' ')" 2 || return 1
+  mg sync-rig down
+  expect "down status" "$(field .status)" pass
+}
+
+# tools/mg sync-rig up --record: the recorder writes one decoded line per
+# exchange (a zstd JSON body, the anki-sync header parsed, the reply decoded)
+# and a line without a response for a flow that fails, but none for the job's
+# own probes. A line it cannot write makes status fail.
+t_sync_rig_records_decoded_exchanges() {
+  local rec="$SB/conformance/recordings/sync/selftest" url code
+  mg sync-rig up --record selftest
+  jq -c '{status, message, failures: [.failures[].id], recorder: .details.recorder}' "$RESULT"
+  expect "up exit" "$RC" 0 &&
+    expect "recording" "$(field -r .details.recording)" conformance/recordings/sync/selftest/exchanges.jsonl &&
+    expect "recorder health" "$(field -c '.details.recorder | {ok, written, errors}')" '{"ok":true,"written":0,"errors":0}' || return 1
+  url="$(field -r .details.endpoints.recorder)"
+  sbcompose --profile spec-record exec -T mitmdump python3 -c \
+    'import sys, zstandard; sys.stdout.buffer.write(zstandard.ZstdCompressor().compress(b"{\"v\":11}"))' \
+    >"$SB/meta.zst" </dev/null || return 1
+  code="$(curl --noproxy '*' -s -o "$SB/meta.reply" -w '%{http_code}' --max-time 10 \
+    -H 'content-type: application/octet-stream' -H 'anki-sync: {"v":11,"k":"","c":"selftest","s":"s1"}' \
+    --data-binary @"$SB/meta.zst" "${url}sync/meta")"
+  expect "reply through the recorder" "$code" 200 &&
+    expect "reply body" "$(cmp -s "$SB/meta.zst" "$SB/meta.reply" && echo echoed)" echoed &&
+    expect "lines after one exchange" "$(wc -l <"$rec/exchanges.jsonl" | tr -d ' ')" 1 &&
+    expect "exchange" "$(jq -cS '{seq, method, path, error,
+        request: {sync: .request.headers["anki-sync"], body: .request.body},
+        response: {status: .response.status, body: .response.body}}' "$rec/exchanges.jsonl")" \
+      '{"error":null,"method":"POST","path":"/sync/meta","request":{"body":{"json":{"v":11},"zstd":true},"sync":{"c":"selftest","k":"","s":"s1","v":11}},"response":{"body":{"json":{"v":11},"zstd":true},"status":200},"seq":1}' ||
+    return 1
+  code="$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 10 --data-binary x "${url}abort")"
+  expect "reply to the aborted exchange" "$code" 502 &&
+    expect "lines after the aborted exchange" "$(wc -l <"$rec/exchanges.jsonl" | tr -d ' ')" 2 &&
+    expect "aborted exchange" "$(tail -n 1 "$rec/exchanges.jsonl" | jq -c '{seq, response, error: (.error | type)}')" \
+      '{"seq":2,"response":null,"error":"string"}' || return 1
+  mg sync-rig status
+  expect "status" "$(field .status)" pass &&
+    expect "recorder health" "$(field -c '.details.recorder | {ok, written, errors}')" '{"ok":true,"written":2,"errors":0}' &&
+    expect "lines after status" "$(wc -l <"$rec/exchanges.jsonl" | tr -d ' ')" 2 || return 1
+  # The recording becomes a directory, so the next exchange cannot be written.
+  mv "$rec/exchanges.jsonl" "$rec/exchanges.done" && mkdir "$rec/exchanges.jsonl" || return 1
+  curl --noproxy '*' -s -o /dev/null --max-time 10 --data-binary @"$SB/meta.zst" "${url}sync/meta"
+  mg sync-rig status
+  jq -c '{status, failures, recorder: .details.recorder}' "$RESULT"
+  expect "status exit" "$RC" 1 &&
+    expect "status" "$(field .status)" fail &&
+    expect "recorder failure" "$(field '[.failures[].id] | index("recorder-unhealthy") != null')" true &&
+    expect "recorder health" "$(field -c '.details.recorder | {ok, written, errors}')" '{"ok":false,"written":2,"errors":1}' || return 1
+  mg sync-rig down
+  expect "down status" "$(field .status)" pass
+}
+
+# A recorder that cannot write its recording fails up, and status afterwards,
+# instead of proxying without recording. Here the recording is mounted
+# read-only.
+t_sync_rig_up_fails_when_the_recording_is_unwritable() {
+  local compose="$SB/docker/compose.yml"
+  cp "$compose" "$SB/compose.yml.orig" || return 1
+  sed -i '' 's|:/recordings$|:/recordings:ro|' "$compose"
+  if ! grep -q ':/recordings:ro$' "$compose"; then
+    cp "$SB/compose.yml.orig" "$compose"
+    echo "compose.yml has no recordings mount to make read-only"
+    return 1
+  fi
+  mg sync-rig up --record readonly
+  cp "$SB/compose.yml.orig" "$compose"
+  jq -c '{status, failures}' "$RESULT"
+  expect "up exit" "$RC" 2 &&
+    expect "up status" "$(field .status)" error &&
+    expect "recorder failure names the cause" \
+      "$(field '[.failures[] | select(.id == "recorder-unhealthy") | .message | test("[Rr]ead-only file system")] | any')" true || return 1
+  mg sync-rig status
+  jq -c '{status, failures}' "$RESULT"
+  expect "status exit" "$RC" 1 &&
+    expect "stopped recorder" "$(field '[.failures[].id] | index("recorder-stopped") != null')" true || return 1
+  mg sync-rig down
+  expect "down status" "$(field .status)" pass
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -555,7 +694,8 @@ t_every_compose_service_runs_an_init_process t_dev_image_rebuild_reuses_layers
 t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_hook_on_macos
 t_parallel_session_records_on_macos t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
 t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_removes_it
-t_results_validate_against_schema"
+t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
+t_sync_rig_up_fails_when_the_recording_is_unwritable t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

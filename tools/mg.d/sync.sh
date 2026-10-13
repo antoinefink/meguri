@@ -7,9 +7,10 @@
 # `sync-edge`, a forwarder with fixed routes, publishes their ports on
 # 127.0.0.1 only, at ports Docker picks (fixed ones through MEGURI_SYNC_PORT,
 # MEGURI_SYNC_PROXY_PORT, MEGURI_TOXIPROXY_API_PORT, MEGURI_SYNC_RECORD_PORT);
-# `up` and `status` report them in details.endpoints. The rig stays up after
-# `up` until `down`. Conformance runs do not use it (their server is a child of
-# the oracle worker, KTD23).
+# `up` and `status` report them in details.endpoints, and the recorder's own
+# report of what it wrote in details.recorder. The rig stays up after `up`
+# until `down`. Conformance runs do not use it (their server is a child of the
+# oracle worker, KTD23).
 
 mg_job sync-rig host mg_sync_rig \
   "Local Anki sync server on 127.0.0.1 with toxiproxy: up [--record <name>] | down | status"
@@ -59,7 +60,9 @@ mg_sync_rig_up() {
       return 0
     fi
     record_dir="$MG_ROOT/conformance/recordings/sync/$record"
-    if [ -n "$(ls -A "$record_dir" 2>/dev/null)" ]; then
+    # The recorder creates exchanges.jsonl at start; left empty, it is no
+    # recording.
+    if [ -n "$(find "$record_dir" -mindepth 1 ! \( -name exchanges.jsonl -type f -empty \) 2>/dev/null | head -n 1)" ]; then
       mg_failure recording-exists "conformance/recordings/sync/$record already holds a recording; remove it or pick another name"
       mg_status error
       return 0
@@ -75,6 +78,11 @@ mg_sync_rig_up() {
   if ! MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_RECORD_DIR="${record_dir:-$MG_ROOT/build/sync-rig/recording}" \
     mg_sync_rig__compose up --detach --wait --wait-timeout 120 $services >&2; then
     mg_failure compose-up "the rig did not start or become healthy; see log.txt" "tools/mg sync-rig up"
+    if [ -n "$record_dir" ]; then
+      local reason
+      reason="$(mg_sync_rig__compose logs --no-color mitmdump 2>/dev/null | sed -n 's/.*record_sync: //p' | tail -n 1)"
+      [ -z "$reason" ] || mg_failure recorder-unhealthy "the recorder cannot record: $reason"
+    fi
     mg_sync_rig__logs
     mg_status error
     return 0
@@ -125,6 +133,12 @@ mg_sync_rig__port() {
   mg_sync_rig__compose port sync-edge "$1" 2>/dev/null | head -n 1
 }
 
+# Every probe goes straight to its address: a proxy from http_proxy or
+# ALL_PROXY would answer for the rig, and an answer on the LAN address stops it.
+mg_sync_rig__curl() {
+  curl --noproxy '*' "$@"
+}
+
 mg_sync_rig__logs() {
   local log="$MG_RUN_DIR/rig.log"
   # shellcheck disable=SC2086 # one service per word
@@ -156,15 +170,17 @@ mg_sync_rig__users() {
 }
 
 # mg_sync_rig__check <up|status>: endpoints, publish addresses, loopback and LAN
-# reachability, and the server's clock. Records details and the status.
+# reachability, the recorder's health and the server's clock. Records details
+# and the status.
 mg_sync_rig__check() {
   local verb="$1" failed=0 checks=0
-  local server proxy api recorder
+  local server proxy api recorder recorder_id
   server="$(mg_sync_rig__port 8080)"
   proxy="$(mg_sync_rig__port 8081)"
   api="$(mg_sync_rig__port 8474)"
   recorder=""
-  [ -z "$(mg_sync_rig__running mitmdump)" ] || recorder="$(mg_sync_rig__port 8082)"
+  recorder_id="$(mg_sync_rig__running mitmdump)"
+  [ -z "$recorder_id" ] || recorder="$(mg_sync_rig__port 8082)"
   mg_detail running true
   mg_detail endpoints "$(jq -nc --arg s "$server" --arg p "$proxy" --arg a "$api" --arg r "$recorder" '
     def url: if . == "" then null else "http://\(.)/" end;
@@ -212,7 +228,7 @@ mg_sync_rig__check() {
       probes="$(jq -c --arg n "$name" --argjson ok "$([ "$code" = tcp ] && echo true || echo false)" \
         '. + {($n): {loopback_tcp: $ok}}' <<<"$probes")"
     else
-      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$ep/" 2>/dev/null)"
+      code="$(mg_sync_rig__curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$ep/" 2>/dev/null)"
       probes="$(jq -c --arg n "$name" --arg c "$code" '. + {($n): {loopback_http: ($c | tonumber? // 0)}}' <<<"$probes")"
     fi
     if [ -z "$code" ] || [ "$code" = 000 ]; then
@@ -235,7 +251,7 @@ mg_sync_rig__check() {
       port="${ep##*:}"
       [ -n "$ep" ] && [ -n "$port" ] || continue
       checks=$((checks + 1))
-      curl -s -o /dev/null --max-time 3 "http://$lan:$port/" 2>/dev/null
+      mg_sync_rig__curl -s -o /dev/null --max-time 3 "http://$lan:$port/" 2>/dev/null
       rc=$?
       probes="$(jq -c --arg n "$name" --argjson rc "$rc" '.[$n] += {lan_curl_exit: $rc}' <<<"$probes")"
       # curl exits 7 when the connection is refused and 28 on a timeout; 0 and
@@ -252,9 +268,31 @@ mg_sync_rig__check() {
   fi
   mg_detail probes "$(jq -c --arg lan "$lan" '{lan_address: (if $lan == "" then null else $lan end), endpoints: .}' <<<"$probes")"
 
+  # A recorder records every exchange: its addon reports what it wrote and the
+  # first exchange it could not (docker/mitm/record_sync.py). One that stopped
+  # records nothing.
+  local health
+  if [ -n "$recorder_id" ]; then
+    checks=$((checks + 1))
+    health="$(mg_sync_rig__compose exec -T mitmdump cat /tmp/record-sync-health.json </dev/null 2>/dev/null)"
+    jq -e 'type == "object"' <<<"$health" >/dev/null 2>&1 || health='{}'
+    mg_detail recorder "$(jq -c . <<<"$health")"
+    if [ "$(jq -r '.ok == true' <<<"$health")" != true ]; then
+      failed=$((failed + 1))
+      mg_failure recorder-unhealthy "the recording misses exchanges: $(jq -r '"\(.last_error // "the recorder reports no health") (\(.errors // 0) not recorded)"' <<<"$health")"
+    fi
+  elif [ -n "$(mg_sync_rig__compose ps --all --quiet mitmdump 2>/dev/null)" ]; then
+    checks=$((checks + 1))
+    failed=$((failed + 1))
+    mg_detail recorder '{"running": false}'
+    mg_failure recorder-stopped "the recorder (mitmdump) is not running, so nothing is recorded; its log is in rig.log"
+  else
+    mg_detail recorder null
+  fi
+
   # The server is on the real clock: its Date header is within the skew limit.
   local date_header server_secs now skew
-  date_header="$(curl -s -D - -o /dev/null --max-time 5 "http://$server/" 2>/dev/null |
+  date_header="$(mg_sync_rig__curl -s -D - -o /dev/null --max-time 5 "http://$server/" 2>/dev/null |
     tr -d '\r' | sed -n 's/^[Dd]ate: //p' | head -n 1)"
   checks=$((checks + 1))
   if [ -n "$date_header" ] && server_secs="$(LC_ALL=C date -j -u -f '%a, %d %b %Y %H:%M:%S GMT' "$date_header" +%s 2>/dev/null)"; then

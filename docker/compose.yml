@@ -132,7 +132,9 @@ services:
   # Exchange recorder (spec-record profile, spec side, R1933): a reverse proxy
   # to the sync server that writes every exchange, bodies zstd-decoded, to
   # $MEGURI_RECORD_DIR/exchanges.jsonl (mitm/record_sync.py). Started by
-  # `tools/mg sync-rig up --record <name>`.
+  # `tools/mg sync-rig up --record <name>`. Healthy only while the addon
+  # reports that it has recorded every exchange; it stops mitmdump when it
+  # cannot create the recording.
   mitmdump:
     image: mitmproxy/mitmproxy:12.2.1@sha256:743b6cdc817211d64bc269f5defacca8d14e76e647fc474e5c7244dbcb645141
     profiles: [spec-record]
@@ -155,6 +157,11 @@ services:
     depends_on:
       syncserver:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json, sys; sys.exit(0 if json.load(open('/tmp/record-sync-health.json'))['ok'] is True else 1)"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
 
   # The rig's only published container (sync-rig profile): a TCP forwarder
   # (sync-edge/forward.py) on the internal `sync-rig` network and on
