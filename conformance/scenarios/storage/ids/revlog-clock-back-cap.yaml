@@ -1,0 +1,25 @@
+# Review-log ids after the clock goes back two days: the answer instant is
+# free once, then taken, and Anki's largest-plus-one lies two days ahead.
+# Meguri applies the one-day cap (R1470; ids-usn-mtime I3; deviation
+# ids-future-cap-revlog).
+id: storage/ids/revlog-clock-back-cap
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: false, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [sun, sol]}
+    - {notetype: Single, deck: Inbox, fields: [moon, luna]}
+    - {notetype: Single, deck: Inbox, fields: [star, estrella]}
+steps:
+  - advance: 3d
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - set_clock: "2030-01-16T10:00:00"
+  - answer: {card: "#c2", rating: good, time_ms: 3000}
+  - answer: {card: "#c3", rating: good, time_ms: 4000}
+  - observe: ["revlog(#c1, #c2)"]
+  - observe: ["revlog(#c3)"]

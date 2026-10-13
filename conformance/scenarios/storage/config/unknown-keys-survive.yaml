@@ -1,0 +1,37 @@
+# Config keys Meguri does not use, stored by another client with its own byte
+# layout, survive reviews, edits, additions, deletions and a day rollover byte
+# for byte, with their usn and mtime_secs (R323, R1466; config-table C2, C7).
+# Needs db_exec, edit_note and delete_notes (specs/conformance/record-ops.md
+# W1-W3).
+id: storage/config/unknown-keys-survive
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: false, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [sun, sol]}
+    - {notetype: Single, deck: Inbox, fields: [moon, luna]}
+steps:
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, CAST(? AS BLOB)), (?, 4, 1700000500, CAST(? AS BLOB)), (?, -1, 1700000900, CAST(? AS BLOB))"
+      params:
+        - onigiri_sidebar_collapsed
+        - '{"collapsed": true,  "width":220 }'
+        - _nt_123_lastDeck
+        - "  1650000000000"
+        - cardStateCustomizer
+        - '"if (states.current.normal) { customData.again.v = 1; }"'
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('onigiri_sidebar_collapsed', '_nt_123_lastDeck', 'cardStateCustomizer') ORDER BY KEY"}
+  - advance: 1h
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - edit_note: {note: "#n1", fields: [sun, sole], tags: [sky]}
+  - add_note: {notetype: Single, deck: Inbox, fields: [star, estrella]}
+  - delete_notes: {notes: ["#n2"]}
+  - advance: 1d
+  - answer: {card: "#c1", rating: good, time_ms: 2500}
+  - answer: {card: "#c3", rating: again, time_ms: 6000}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('onigiri_sidebar_collapsed', '_nt_123_lastDeck', 'cardStateCustomizer') ORDER BY KEY"}

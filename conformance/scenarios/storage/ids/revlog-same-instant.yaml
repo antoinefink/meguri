@@ -1,0 +1,19 @@
+# A review-log id is the answer instant in milliseconds; a second answer in
+# the same millisecond takes the table's largest id plus one
+# (ids-usn-mtime I2).
+id: storage/ids/revlog-same-instant
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: false, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [sun, sol]}
+    - {notetype: Single, deck: Inbox, fields: [moon, luna]}
+steps:
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - answer: {card: "#c2", rating: good, time_ms: 3000}
+  - observe: ["revlog(#c1, #c2)"]

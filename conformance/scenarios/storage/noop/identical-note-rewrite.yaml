@@ -1,0 +1,25 @@
+# Saving a note whose fields and tags equal the stored ones writes nothing:
+# its mod and usn stay, and col.mod does not move (R776, R1472). A real edit
+# then stamps usn -1, mod now and col.mod now (R1471). The note's usn is set
+# to a server value first, as after a sync (ids-usn-mtime S2, S4, S5).
+# Needs db_exec and edit_note (specs/conformance/record-ops.md W1, W2).
+id: storage/noop/identical-note-rewrite
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [cat, gato], tags: [animal]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: [cat, gato], tags: [animal]}
+  - db_exec: {sql: "SELECT notes.mod, notes.usn, notes.flds, notes.tags, col.mod FROM notes, col"}
+  - observe: ["card(#c1)"]
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: [cat, gata]}
+  - db_exec: {sql: "SELECT notes.mod, notes.usn, notes.flds, notes.tags, col.mod FROM notes, col"}
+  - observe: ["card(#c1)"]

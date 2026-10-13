@@ -1,0 +1,18 @@
+# Changing the current deck is a change for sync (R1474;
+# specs/storage/config-table.md C4): curDeck gets usn -1 and mtime_secs now,
+# and col.mod moves to now. Writing the value it already holds writes
+# nothing. The new value is the id the setup's Inbox deck gets at the frozen
+# instant (specs/storage/ids-usn-mtime.md I2). Needs db_exec and set_config
+# (specs/conformance/record-ops.md W1, W4).
+id: storage/config/current-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Inbox]
+steps:
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}
+  - advance: 1h
+  - set_config: {key: curDeck, value: 1}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}
+  - set_config: {key: curDeck, value: 1894701600000}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'curDeck'"}
+  - db_exec: {sql: "SELECT id FROM decks WHERE name = 'Inbox'"}

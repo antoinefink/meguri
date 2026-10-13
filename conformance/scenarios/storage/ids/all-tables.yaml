@@ -1,0 +1,23 @@
+# The allocation rule for deck presets, decks and note types that the setup
+# creates at one frozen instant (ids-usn-mtime I1, I2). The new collection
+# already holds the default preset and deck (id 1) and its stock note types,
+# made at the same instant. Needs db_exec (specs/conformance/record-ops.md W1).
+id: storage/ids/all-tables
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Slow}, {name: Fast}]
+  decks: [Inbox, Verbs, Nouns]
+  notetypes:
+    - name: Alpha
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Beta
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Gamma
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+steps:
+  - db_exec: {sql: "SELECT id, name FROM deck_config WHERE name IN ('Slow', 'Fast') ORDER BY id"}
+  - db_exec: {sql: "SELECT id, name FROM decks WHERE name IN ('Inbox', 'Verbs', 'Nouns') ORDER BY id"}
+  - db_exec: {sql: "SELECT id, name FROM notetypes WHERE name IN ('Alpha', 'Beta', 'Gamma') ORDER BY id"}

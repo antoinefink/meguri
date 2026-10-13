@@ -1,0 +1,50 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 3,
+              "factor": 0,
+              "id": 1894701600000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 2000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 3,
+              "factor": 0,
+              "id": 1894701600001,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 3000,
+              "type": 0,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "bc73d957035514ea998733480681c6b7af51c6b2028d5322bf1444dbd0d8307c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/ids/revlog-same-instant",
+  "scenario_sha256": "7c5071d04fe9722e7f027f4fde71c08973f5f678b02c6bbd5090109687aeed63",
+  "tz": "UTC"
+}

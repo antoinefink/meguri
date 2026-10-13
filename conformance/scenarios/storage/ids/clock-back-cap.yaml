@@ -1,0 +1,20 @@
+# The clock goes back two days after a write: the clock's value is free once,
+# then taken. Anki then takes the largest id plus one, two days ahead; Meguri
+# never goes past one day ahead (R1470) and takes the smallest free id above
+# now (ids-usn-mtime I3; deviation ids-future-cap-notes).
+id: storage/ids/clock-back-cap
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+steps:
+  - advance: 3d
+  - add_note: {notetype: Single, deck: Inbox, fields: [later, tarde]}
+  - set_clock: "2030-01-16T10:00:00"
+  - add_note: {notetype: Single, deck: Inbox, fields: [first, primero]}
+  - observe: [ids]
+  - add_note: {notetype: Single, deck: Inbox, fields: [second, segundo]}
+  - observe: ["ids(#n3, #c3)"]

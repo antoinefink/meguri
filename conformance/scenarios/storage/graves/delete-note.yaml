@@ -1,0 +1,34 @@
+# Deleting a note with three cards adds four graves with usn -1: one per card
+# (type 0) and one for the note (type 1). A grave that already exists is kept
+# as it is, usn included. Deleting the same note again adds nothing and does
+# not move col.mod (graves G2, G3; ids-usn-mtime S4, S5). Needs db_exec and
+# delete_notes (specs/conformance/record-ops.md W1, W3).
+id: storage/graves/delete-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Triple
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Two, front: "{{Back}}", back: "{{Front}}"}
+        - {name: Three, front: "{{Front}}<hr>{{Back}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Triple, deck: Inbox, fields: [river, rio]}
+steps:
+  - observe: [ids]
+  # A grave for #c2 (id 1894701600001, the second card made at the frozen
+  # instant) already exists with a server usn.
+  - db_exec:
+      sql: "INSERT INTO graves (oid, type, usn) VALUES (?, 0, 5)"
+      params: [1894701600001]
+  - advance: 1h
+  - delete_notes: {notes: ["#n1"]}
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY type, oid"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - delete_notes: {notes: ["#n1"]}
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY type, oid"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - observe: ["card(#c1, #c2, #c3)"]

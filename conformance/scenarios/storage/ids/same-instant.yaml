@@ -1,0 +1,23 @@
+# Ids at one frozen instant (specs/storage/ids-usn-mtime.md I2): the first
+# new row of a table takes the clock in milliseconds, each later one the
+# table's largest id plus one. Notes and cards count separately, and a
+# note's cards follow template order.
+id: storage/ids/same-instant
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Triple
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Two, front: "{{Back}}", back: "{{Front}}"}
+        - {name: Three, front: "{{Front}}<hr>{{Back}}", back: "{{Back}}"}
+  decks: [Inbox]
+steps:
+  - add_note: {notetype: Single, deck: Inbox, fields: [alpha, beta]}
+  - add_note: {notetype: Single, deck: Inbox, fields: [gamma, delta]}
+  - add_note: {notetype: Triple, deck: Inbox, fields: [epsilon, zeta]}
+  - observe: [ids]

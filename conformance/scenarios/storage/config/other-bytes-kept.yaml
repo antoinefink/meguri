@@ -1,0 +1,24 @@
+# A config value another client stored with its own spacing (the deck a note
+# type was last added to, written as " <deck id> ") holds the same value that
+# adding a note to that deck writes again. Anki compares bytes and rewrites
+# it in compact form with usn -1 and mtime_secs now; Meguri keeps the row
+# (specs/storage/config-table.md C4; deviation config-same-value-other-bytes).
+# The observed row is usn, mtime_secs and whether the bytes are still the
+# spaced text, so no real id appears. Needs db_exec
+# (specs/conformance/record-ops.md W1).
+id: storage/config/other-bytes-kept
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+steps:
+  - db_exec: {sql: "UPDATE config SET usn = 3, mtime_secs = 1700000000, val = CAST(' ' || CAST(val AS TEXT) || ' ' AS BLOB) WHERE substr(KEY, 1, 4) = '_nt_' AND substr(KEY, -9) = '_lastDeck'"}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT) = ' ' || (SELECT id FROM decks WHERE name = 'Inbox') || ' ' FROM config WHERE substr(KEY, 1, 4) = '_nt_' AND substr(KEY, -9) = '_lastDeck'"}
+  - advance: 1h
+  - add_note: {notetype: Single, deck: Inbox, fields: [two, dos]}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT) = ' ' || (SELECT id FROM decks WHERE name = 'Inbox') || ' ' FROM config WHERE substr(KEY, 1, 4) = '_nt_' AND substr(KEY, -9) = '_lastDeck'"}

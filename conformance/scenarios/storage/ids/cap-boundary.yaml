@@ -1,0 +1,19 @@
+# An id exactly one day ahead exists: on a collision Anki's largest-plus-one
+# lands one millisecond past the cap, so Meguri takes the smallest free id
+# above now (ids-usn-mtime I3; deviation ids-future-cap-boundary).
+id: storage/ids/cap-boundary
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+steps:
+  - advance: 1d
+  - add_note: {notetype: Single, deck: Inbox, fields: [later, tarde]}
+  - set_clock: "2030-01-15T10:00:00"
+  - add_note: {notetype: Single, deck: Inbox, fields: [first, primero]}
+  - observe: ["ids(#n1, #c1, #n2, #c2)"]
+  - add_note: {notetype: Single, deck: Inbox, fields: [second, segundo]}
+  - observe: ["ids(#n3, #c3)"]

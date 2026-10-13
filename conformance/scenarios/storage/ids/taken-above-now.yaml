@@ -1,0 +1,18 @@
+# The clock's value is taken and a larger id lies one second short of a day
+# ahead: the new id is the largest id plus one, inside the one-day cap, so
+# Meguri allocates what Anki does (ids-usn-mtime I2, I3).
+id: storage/ids/taken-above-now
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+steps:
+  - advance: 23h59m59s
+  - add_note: {notetype: Single, deck: Inbox, fields: [later, tarde]}
+  - set_clock: "2030-01-15T10:00:00"
+  - add_note: {notetype: Single, deck: Inbox, fields: [first, primero]}
+  - add_note: {notetype: Single, deck: Inbox, fields: [second, segundo]}
+  - observe: [ids]

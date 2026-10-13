@@ -1,0 +1,48 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3", "#c4", "#c5"],
+          "note": "#n3"
+        }
+      },
+      {
+        "ids": {
+          "#c1": 1894701600000,
+          "#c2": 1894701600001,
+          "#c3": 1894701600002,
+          "#c4": 1894701600003,
+          "#c5": 1894701600004,
+          "#n1": 1894701600000,
+          "#n2": 1894701600001,
+          "#n3": 1894701600002
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "bc73d957035514ea998733480681c6b7af51c6b2028d5322bf1444dbd0d8307c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/ids/same-instant",
+  "scenario_sha256": "b2bdd16d8732ef654cd81da5aef31fe4f1509ae27c24df92b35ac5a55d73c777",
+  "tz": "UTC"
+}

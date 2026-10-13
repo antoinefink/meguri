@@ -1,0 +1,46 @@
+# Writing a config key through the config API (specs/storage/config-table.md
+# C4, C5). Another client stored `heatmap` with its own spacing and member
+# order. Writing the same value again: Anki rewrites it in compact form with
+# usn -1 and moves col.mod; Meguri keeps the row and col.mod (R323, R1472;
+# deviation config-same-value-other-bytes). A changed value is written in
+# compact form with members sorted by name; writing it again with the members
+# in another order writes nothing. A last key shows the compact form of
+# floats, escapes and nested values. Needs db_exec and set_config
+# (specs/conformance/record-ops.md W1, W4).
+id: storage/config/rewrite-same-value
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+steps:
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('heatmap', 0, 1700000000, CAST(? AS BLOB))"
+      params: ['{"weeks": 52, "mode":"year" , "streak":true}']
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'heatmap'"}
+  - advance: 1h
+  - set_config: {key: heatmap, value: {mode: year, streak: true, weeks: 52}}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'heatmap'"}
+  - advance: 1h
+  - set_config: {key: heatmap, value: {weeks: 26, mode: year, streak: true}}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'heatmap'"}
+  - advance: 1h
+  - set_config: {key: heatmap, value: {streak: true, weeks: 26, mode: year}}
+  - db_exec: {sql: "SELECT usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY = 'heatmap'"}
+  - set_config:
+      key: encodingProbe
+      value:
+        zeta: [1, 2.5, "Été", {b: [], a: {}}]
+        Upper: 1.0
+        small: 0.000001
+        tiny: 0.00001
+        large: 1.0e16
+        below: 1.0e15
+        negative: -0.0
+        text: "a/b\u0001\u001b\"\\\n\t é"
+        none: null
+        flags: [true, false]
+        count: -42
+  - db_exec: {sql: "SELECT usn, CAST(val AS TEXT), typeof(val) FROM config WHERE KEY = 'encodingProbe'"}

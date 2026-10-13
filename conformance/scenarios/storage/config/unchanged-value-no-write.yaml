@@ -1,0 +1,24 @@
+# Adding a note records the note type and deck last used in config keys
+# (curModel, _nt_<notetype id>_lastDeck, _deck_<deck id>_lastNotetype).
+# Rewriting a key with the value it already holds writes nothing: its usn
+# and mtime_secs stay, although col.mod moves for the note itself. A key whose
+# value changes gets usn -1 and mtime_secs now (config-table C4, R1472).
+# Needs db_exec (specs/conformance/record-ops.md W1).
+id: storage/config/unchanged-value-no-write
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox, Other]
+steps:
+  - add_note: {notetype: Single, deck: Inbox, fields: [one, uno]}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'curModel' OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - advance: 1h
+  - add_note: {notetype: Single, deck: Inbox, fields: [two, dos]}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'curModel' OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - add_note: {notetype: Single, deck: Other, fields: [three, tres]}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'curModel' OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}

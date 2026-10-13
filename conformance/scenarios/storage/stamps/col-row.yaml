@@ -1,0 +1,17 @@
+# The col row (specs/storage/ids-usn-mtime.md S6): id 1, ver 18, dty 0, usn 0
+# and ls 0 before any sync, empty legacy columns. mod follows the last change
+# in milliseconds; scm stays when a note is added. Needs db_exec
+# (specs/conformance/record-ops.md W1).
+id: storage/stamps/col-row
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+steps:
+  - db_exec: {sql: "SELECT id, crt, mod, scm, ver, dty, usn, ls, conf, models, decks, dconf, tags FROM col"}
+  - advance: 1h
+  - add_note: {notetype: Single, deck: Inbox, fields: [sun, sol]}
+  - db_exec: {sql: "SELECT id, crt, mod, scm, ver, dty, usn, ls, conf, models, decks, dconf, tags FROM col"}

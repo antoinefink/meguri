@@ -2,4 +2,45 @@
 # schema/deviations.schema.json). The runner applies only the transforms listed
 # here; any other difference from a golden fails. Every entry names the
 # requirement and a scenario or test that asserts Meguri's own behavior.
-deviations: []
+deviations:
+  # specs/storage/ids-usn-mtime.md I3: no id more than one day ahead. Where
+  # Anki's largest-plus-one passes now + 1 day, Meguri takes the smallest free
+  # id above now.
+  - id: ids-future-cap-notes
+    requirement: R1470
+    summary: After the clock moves back two days, the third note and its card take now + 1 ms instead of Anki's largest id + 1, two days ahead.
+    test: storage/ids/clock-back-cap
+    scenarios: [storage/ids/clock-back-cap]
+    pointer: /steps/6/ids
+    transform: {replace: {"#c3": 1894788000001, "#n3": 1894788000001}}
+  - id: ids-future-cap-boundary
+    requirement: R1470
+    summary: When Anki's largest id + 1 lies one millisecond past now + 1 day, the note and its card take now + 1 ms.
+    test: storage/ids/cap-boundary
+    scenarios: [storage/ids/cap-boundary]
+    pointer: /steps/6/ids
+    transform: {replace: {"#c3": 1894701600001, "#n3": 1894701600001}}
+  - id: ids-future-cap-revlog
+    requirement: R1470
+    summary: After the clock moves back two days, the third review-log row takes now + 1 ms instead of Anki's largest id + 1, two days ahead.
+    test: storage/ids/revlog-clock-back-cap
+    scenarios: [storage/ids/revlog-clock-back-cap]
+    pointer: "/steps/6/revlog/#c3/0/id"
+    transform: {replace: 1894788000001}
+  # specs/storage/config-table.md C4: writing the value a key already holds
+  # writes nothing, even when the stored bytes have another layout; Anki
+  # rewrites them in compact form, stamps the row and moves col.mod.
+  - id: config-same-value-other-bytes
+    requirement: R1472
+    summary: Writing heatmap's stored value again through the config API keeps the other client's bytes, usn, mtime_secs and col.mod.
+    test: storage/config/rewrite-same-value
+    scenarios: [storage/config/rewrite-same-value]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [[0, 1700000000, '{"weeks": 52, "mode":"year" , "streak":true}', 1894701600000]]}
+  - id: config-same-value-other-bytes-add-note
+    requirement: R1472
+    summary: Adding a note writes the note type's last deck again with the value already stored in another layout; the row keeps its bytes, usn and mtime_secs.
+    test: storage/config/other-bytes-kept
+    scenarios: [storage/config/other-bytes-kept]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [[3, 1700000000, 1]]}

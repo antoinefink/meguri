@@ -1,0 +1,51 @@
+# Interface names the storage specs use (README-format.md): schema-18 table
+# and column names, the graves index, and collection config keys.
+# Tables
+revlog
+graves
+deck_config
+notetypes
+templates
+# Columns
+crt
+scm
+ver
+dty
+usn
+ls
+dconf
+mod
+nid
+did
+ord
+guid
+mid
+flds
+sfld
+csum
+oid
+ntid
+mtime_secs
+val
+cid
+ease
+ivl
+lastIvl
+factor
+collapsed
+idx_graves_pending
+# Config keys
+curDeck
+curModel
+activeDecks
+lastUnburied
+nextPos
+creationOffset
+lastDeck
+lastNotetype
+heatmap
+onigiri_sidebar_collapsed
+cardStateCustomizer
+lastFsrsOptimize
+fsrs
+loadBalancerEnabled

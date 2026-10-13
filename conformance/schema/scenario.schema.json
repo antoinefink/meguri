@@ -303,6 +303,7 @@
         },
         "observe": { "type": "array", "items": { "$ref": "#/$defs/observation_request" } },
         "edit_note": {
+          "description": "Draft (no driver support yet); full shape in specs/conformance/record-ops.md W2.",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             {
@@ -316,10 +317,18 @@
           ]
         },
         "delete_notes": {
+          "description": "Draft (no driver support yet); full shape in record-ops.md W3.",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             { "required": ["notes"], "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } } }
           ]
+        },
+        "set_config": {
+          "description": "Draft (no driver support yet), with its final shape: record-ops.md W4, one collection config key and its JSON value (null included).",
+          "type": "object",
+          "required": ["key", "value"],
+          "additionalProperties": false,
+          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true }
         },
         "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
         "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
@@ -354,9 +363,16 @@
         },
         "check_db": { "$ref": "#/$defs/draft_args" },
         "db_exec": {
+          "description": "Draft (no driver support yet); full shape in record-ops.md W1: one SQL statement; params bind to positional ? placeholders (string TEXT, integer INTEGER, other number REAL, null NULL).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
-            { "required": ["sql"], "properties": { "sql": { "type": "string" }, "params": { "type": "array" } } }
+            {
+              "required": ["sql"],
+              "properties": {
+                "sql": { "type": "string", "minLength": 1 },
+                "params": { "type": "array", "items": { "type": ["string", "number", "null"] } }
+              }
+            }
           ]
         },
         "sync": {

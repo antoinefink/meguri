@@ -1,0 +1,24 @@
+# Answering a card is a local change (specs/storage/ids-usn-mtime.md S2, S5):
+# the card gets usn -1 and mod now in seconds, its new review-log row usn -1,
+# and col.mod moves to now in milliseconds. The card's usn is set to a server
+# value first, as after a sync; the other card stays as it is. Needs db_exec
+# (specs/conformance/record-ops.md W1).
+id: storage/stamps/answer
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: false, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [sun, sol]}
+    - {notetype: Single, deck: Inbox, fields: [moon, luna]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET usn = 7"}
+  - db_exec: {sql: "SELECT mod, usn FROM col"}
+  - advance: 1h
+  - answer: {card: "#c1", rating: good, time_ms: 2000}
+  - observe: ["card(#c1, #c2)", "revlog(#c1)"]
+  - db_exec: {sql: "SELECT mod, usn FROM col"}

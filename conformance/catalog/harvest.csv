@@ -968,7 +968,7 @@ h0c40b44b59b9,rust,supplementary,storage,unclassified,,,open
 h0ee1aefb70dc,rust,supplementary,storage,unclassified,,,open
 h0f974b774542,rust,tag,storage,unclassified,,,open
 h1586af627542,rust,supplementary,storage,unclassified,,,open
-h16db5ee73722,rust,supplementary,storage,unclassified,,,open
+h16db5ee73722,rust,supplementary,storage,in-scope,A review-log row whose id is taken gets the largest id plus one when the caller asks for a new id,storage/ids/revlog-same-instant,done
 h1dc4ce816f33,rust,supplementary,storage,unclassified,,,open
 h209248bdfb33,rust,supplementary,storage,unclassified,,,open
 h26a287aeabf4,rust,supplementary,storage,unclassified,,,open
@@ -986,16 +986,16 @@ h51930b326444,rust,supplementary,storage,unclassified,,,open
 h589819e41760,rust,tag,storage,unclassified,,,open
 h5a31d6105048,rust,supplementary,storage,unclassified,,,open
 h6b2af222819b,rust,tag,storage,unclassified,,,open
-h6c9e358dc5b8,rust,tag,storage,unclassified,,,open
+h6c9e358dc5b8,rust,tag,storage,in-scope,A second card added at the same instant gets a different id: next id after the largest,storage/ids/same-instant,done
 h6efeaad807ac,rust,supplementary,storage,unclassified,,,open
 h802f402a566b,rust,supplementary,storage,unclassified,,,open
 h8deea0884574,rust,tag,storage,unclassified,,,open
-h945f75ebb7a8,rust,tag,storage,unclassified,,,open
+h945f75ebb7a8,rust,tag,storage,not-applicable,Formats id lists for SQL text inside Anki's storage layer; nothing observable,,done
 h94c7daf74c2e,rust,supplementary,storage,unclassified,,,open
 ha74ff67e3c1f,rust,tag,storage,unclassified,,,open
 hb30e802d8f2f,rust,supplementary,storage,unclassified,,,open
 hc0fc7c23426d,rust,supplementary,storage,unclassified,,,open
-hc4d781660d05,rust,supplementary,storage,unclassified,,,open
+hc4d781660d05,rust,supplementary,storage,in-scope,Adding a review-log row with a free id keeps that id,storage/ids/revlog-same-instant,done
 hc4e797f560a0,rust,supplementary,storage,unclassified,,,open
 he559261b12d3,rust,tag,storage,unclassified,,,open
 he69093b72b82,rust,supplementary,storage,unclassified,,,open
@@ -1004,7 +1004,7 @@ heba033e5deec,rust,supplementary,storage,unclassified,,,open
 hebd3170b0ca5,rust,tag,storage,unclassified,,,open
 hf00ddf9dbca8,rust,supplementary,storage,unclassified,,,open
 hf613c9b636bd,rust,supplementary,storage,unclassified,,,open
-hf7664c5a108b,rust,supplementary,storage,unclassified,,,open
+hf7664c5a108b,rust,supplementary,storage,in-scope,A review-log row arriving with a taken id from sync or import or undo is not inserted; scenarios come with those ops,,deferred
 hfb0061ec0b9b,rust,supplementary,storage,unclassified,,,open
 h39fa0055ea4c,python,tag,sync,unclassified,,,open
 h51a52fc54a83,python,tag,sync,unclassified,,,open
