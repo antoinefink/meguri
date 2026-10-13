@@ -1,0 +1,30 @@
+# A synthetic add-on block in the Default preset's other (R1464, R1486;
+# schema11-json S3, S10.5), written for this scenario in the style of a
+# scheduling add-on's legacy keys: flat keys, nested objects and arrays, zeros,
+# false, null, a fraction, a non-ASCII string, and extra keys inside new and
+# lapse. Record -> object puts every member at the top level (new and lapse
+# extras inside those objects). Saving the object back (object -> record) and
+# reading it again keeps them all; so does a later save that changes only
+# fsrsParams6, which also leaves fsrsWeights and fsrsParams5 as they were.
+# Only legacy_json is observed: Anki writes several top-level members of other
+# in no set order, so the stored bytes are not deterministic.
+id: model/schema11/preset-addon-roundtrip
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec:
+      sql: "UPDATE deck_config SET config = CAST(config || X'fa0f9b027b226164646f6e5f62616c616e6365223a7b22656e61626c6564223a66616c73652c227765656b223a5b302c302c302c302c302c302c305d7d2c226164646f6e5f6c6162656c223a22e697a5e69cace8aa9e20e29c93222c226164646f6e5f6e6f7465223a6e756c6c2c226164646f6e5f70726f6d6f74696f6e223a7b22656e61626c6564223a66616c73652c22726174696f223a302e352c227468726573686f6c645f64617973223a307d2c226164646f6e5f7265746972655f6166746572223a302c226164646f6e5f7469657273223a5b5b312c2d325d2c5b5d5d2c226e6577223a7b226164646f6e5f6e65775f636170223a307d2c226c61707365223a7b226164646f6e5f6c617073655f6d6f6465223a226f6666227d7d' AS BLOB) WHERE name = 'Default'"
+  - observe:
+      - legacy_json: {presets: [Default]}
+  - legacy_update:
+      preset: Default
+      patch:
+        fsrsWeights: [0.4, 0.6, 2.4, 5.8]
+        fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105]
+  - observe:
+      - legacy_json: {presets: [Default]}
+  - legacy_update:
+      preset: Default
+      patch:
+        fsrsParams6: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542]
+  - observe:
+      - legacy_json: {presets: [Default]}

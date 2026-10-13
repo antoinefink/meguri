@@ -292,6 +292,8 @@ Input:
 
 Example (oracle): `other` = `{"maxTaken":5,"new":{"perDay":3,"keep":1},"keep2":2}` gives an object whose `maxTaken` and `new.perDay` come from the record, with `"keep":1` added at the end of `new` and `"keep2":2` at the end of the object. Unknown members `zz_new` in `new` and `zz_top` at the top give `other` = `{"zz_top":…,"new":{"zz_new":…}}` (Anki writes the same members in no particular order).
 
+An add-on's legacy keys, like those a scheduling add-on leaves in a user's Default preset, are such members. They survive both directions and every later save, including one that changes only `fsrsParams6` (R1464, R1486). The scenario `schema11/preset-addon-roundtrip` carries a synthetic block of this kind through output, input and a second save.
+
 ## S11. Deck names
 
 Deck names are stored in native form: the components of the hierarchy joined by U+001F. Their human form joins the components with `::` (R1465). Note type and preset names have no hierarchy and are not converted.
@@ -353,3 +355,19 @@ A field and a template of a note type (shape only):
 ```
 
 Anki applies range checks to preset values when it reads a preset (the scheduling area's preset spec, U42), so an object Anki writes from a preset with an out-of-range value already holds the replacement. The conversion in this file has no range checks.
+
+## S14. Goldens as conversion pairs
+
+The model goldens hold Anki's own conversion in both directions, so tests can use them as input-output pairs without an executor. A step that reads blobs with `db_exec` (`hex()` of the blob columns, with the row columns beside them) followed by a `legacy_json` observation of the same records gives a record and the object Anki converts it to. A `legacy_update` step followed by such a read gives an object (what `legacy_json` reports just before the step, with the patch applied, `specs/conformance/model-ops.md` L2) and the record Anki converts it to.
+
+| Record | Scenarios with blob reads and objects |
+|---|---|
+| note type, field, template | `proto/notetype-bytes`, `schema11/notetype-values`, `schema11/notetype-other-reserved` |
+| deck (normal and filtered) | `proto/deck-normal-bytes`, `proto/deck-filtered-bytes`, `schema11/deck-values`, `schema11/deck-other-flatten`, `schema11/deck-other-roundtrip`, `schema11/deck-names` |
+| deck config | `proto/preset-bytes`, `schema11/preset-values`, `schema11/preset-other`, `schema11/preset-addon-roundtrip` (objects only) |
+| refused objects | `schema11/notetype-rejections`, `schema11/deck-rejections`, `schema11/preset-rejections` |
+
+- Compare objects as parsed JSON values, as the runner does (`specs/conformance/observations.md` O7).
+- Compare an `other` field whose JSON object has more than one top-level member as a parsed value too: Anki writes those members in no set order (S3), so its bytes are not a fixed expected value. Every other byte of a golden blob is.
+- A record read after `legacy_update` also shows what the save added to the conversion (`specs/conformance/model-ops.md` L2): a note type's `reqs` are the ones Anki recomputed, not the object's `req` (the conversion carries `req` as given, S4.1), and a preset has `usn` -1 and `mtime_secs` of the clock's second instead of the object's `usn` and `mod`.
+- Legacy packages carry these same objects in their `col` columns (S12). The package units (U120, U123) test that path end to end with their own scenarios.
