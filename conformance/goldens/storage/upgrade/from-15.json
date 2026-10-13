@@ -1,0 +1,1307 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [18, 1788235200, 1788681600042, 1788249602127, 0, 0, 0, "", "", "", "", ""]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["wal"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["meguriFixture", 0, 1788681600, "{\"b\": 1, \"a\": 2.50, \"c\": [1.0, 2, 1E2, -0, 0.000001, 1e16, 12345678901234567890, 123456789012345678901], \"d\": \"a/b\\u00e9\\u0001\\\"\"}"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1788249602189, 1, -1],
+            [1788249602191, 2, -1],
+            [1788249602193, 0, -1],
+            [1788249602194, 0, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1788249602185, 1400, -1, 1788681600]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Mixed_Case", -1, 1, null],
+            ["vocab", -1, 1, null],
+            ["vocab::verbs", -1, 1, null]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1788249602175": {
+              "data": "",
+              "did": 1788249602193,
+              "due": -100000,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602175,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249602,
+              "nid": 1788249602168,
+              "odid": 1788249602138,
+              "odue": 1,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602183": {
+              "data": "",
+              "did": 1788249602138,
+              "due": 22,
+              "factor": 2650,
+              "flags": 0,
+              "id": 1788249602183,
+              "ivl": 17,
+              "lapses": 0,
+              "left": 2002,
+              "mod": 1788681600,
+              "nid": 1788249602180,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 2,
+              "type": 2,
+              "usn": -1
+            },
+            "1788249602184": {
+              "data": "",
+              "did": 1788249602138,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602184,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249602,
+              "nid": 1788249602180,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602185": {
+              "data": "",
+              "did": 1788249602138,
+              "due": 1788682200,
+              "factor": 1400,
+              "flags": 0,
+              "id": 1788249602185,
+              "ivl": 1,
+              "lapses": 1,
+              "left": 1001,
+              "mod": 1788681600,
+              "nid": 1788249602185,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 2,
+              "type": 3,
+              "usn": -1
+            },
+            "1788249602186": {
+              "data": "",
+              "did": 1788249602138,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602186,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249602,
+              "nid": 1788249602185,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602187": {
+              "data": "",
+              "did": 1788249602138,
+              "due": 1788681669,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602187,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 2002,
+              "mod": 1788681600,
+              "nid": 1788249602186,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249602188": {
+              "data": "",
+              "did": 1788249602138,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602188,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249602,
+              "nid": 1788249602186,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602189": {
+              "data": "",
+              "did": 1788249602140,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602189,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249602187,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": -1,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602190": {
+              "data": "",
+              "did": 1788249602140,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602190,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788249602187,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": -3,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602191": {
+              "data": "",
+              "did": 1788249602140,
+              "due": 1788682573,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602191,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 1001,
+              "mod": 1788681600,
+              "nid": 1788249602188,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249602192": {
+              "data": "",
+              "did": 1788249602140,
+              "due": 6,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788249602192,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788249602,
+              "nid": 1788249602188,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600028": {
+              "data": "",
+              "did": 1788681600025,
+              "due": 8,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788681600028,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600028,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600029": {
+              "data": "",
+              "did": 1788681600025,
+              "due": 8,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788681600029,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600028,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600030": {
+              "data": "",
+              "did": 1788681600025,
+              "due": 9,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788681600030,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600029,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600031": {
+              "data": "",
+              "did": 1788681600025,
+              "due": 9,
+              "factor": 2001,
+              "flags": 0,
+              "id": 1788681600031,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600029,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600032": {
+              "data": "",
+              "did": 1788681600025,
+              "due": 10,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788681600032,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600030,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600033": {
+              "data": "",
+              "did": 1788681600034,
+              "due": -100000,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788681600033,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600030,
+              "odid": 1788681600025,
+              "odue": 10,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600034": {
+              "data": "",
+              "did": 1788681600026,
+              "due": 11,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1788681600034,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600031,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600035": {
+              "data": "",
+              "did": 1788681600026,
+              "due": 11,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788681600035,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600031,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600036": {
+              "data": "",
+              "did": 1788681600027,
+              "due": 12,
+              "factor": 1500,
+              "flags": 0,
+              "id": 1788681600036,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600032,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600037": {
+              "data": "",
+              "did": 1788681600027,
+              "due": 12,
+              "factor": 0,
+              "flags": 0,
+              "id": 1788681600037,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1788681600,
+              "nid": 1788681600032,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1788235200,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1788681600042,
+              "models": "",
+              "scm": 1788249602127,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "config": {
+            "activeDecks": {
+              "key": "activeDecks",
+              "mtime_secs": 1788681600,
+              "usn": -1,
+              "val": {
+                "sha256": "faf2739a1fb4f07b8ea7cbd2262b49b23fa2ea357b7ce484f84086400a7d46ab"
+              }
+            },
+            "addToCur": {
+              "key": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "collapseTime": {
+              "key": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "curDeck": {
+              "key": "curDeck",
+              "mtime_secs": 1788681600,
+              "usn": -1,
+              "val": {
+                "sha256": "15197e3348d55641635937400ba554f5830c6094e751d30b2eeb0a0fe9a70f30"
+              }
+            },
+            "curModel": {
+              "key": "curModel",
+              "mtime_secs": 1788249602,
+              "usn": -1,
+              "val": {
+                "sha256": "d3a7d9704541f8ecba30252974ffa4a3cb3d284ee9bffd08f1ddf1bbd688cd4b"
+              }
+            },
+            "dayLearnFirst": {
+              "key": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "key": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "key": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "lastUnburied": {
+              "key": "lastUnburied",
+              "mtime_secs": 1788681600,
+              "usn": -1,
+              "val": {
+                "sha256": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d"
+              }
+            },
+            "meguriFixture": {
+              "key": "meguriFixture",
+              "mtime_secs": 1788681600,
+              "usn": 0,
+              "val": {
+                "sha256": "241399751c39cc872fc2ade0d23dd37ae426649594e336609f58a0d95d0774c6"
+              }
+            },
+            "newSpread": {
+              "key": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "key": "nextPos",
+              "mtime_secs": 1788681600,
+              "usn": -1,
+              "val": {
+                "sha256": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278"
+              }
+            },
+            "schedVer": {
+              "key": "schedVer",
+              "mtime_secs": 1788249602,
+              "usn": -1,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "sortBackwards": {
+              "key": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "key": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "key": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "a9287da027deb5de288ebdadf87169a171ab10409f22c0c6da2e30554b99c7a8"
+              },
+              "id": 1,
+              "mtime_secs": 1788249602,
+              "name": "Default",
+              "usn": -1
+            },
+            "1788249602141": {
+              "config": {
+                "sha256": "63b222d4ba43518f135b1e354b8d9a969c37f5cafaa016b7a465a0f37b7858e5"
+              },
+              "id": 1788249602141,
+              "mtime_secs": 1788249602,
+              "name": "Slow",
+              "usn": -1
+            },
+            "1788681600021": {
+              "config": {
+                "sha256": "9ef55070b8d33179be899acb77f4b7a357758d02d6598cf8d04ae2f9835081b4"
+              },
+              "id": 1788681600021,
+              "mtime_secs": 1788681600,
+              "name": "Fresh",
+              "usn": -1
+            },
+            "1788681600022": {
+              "config": {
+                "sha256": "9ef55070b8d33179be899acb77f4b7a357758d02d6598cf8d04ae2f9835081b4"
+              },
+              "id": 1788681600022,
+              "mtime_secs": 1788681600,
+              "name": "Edge",
+              "usn": -1
+            },
+            "1788681600023": {
+              "config": {
+                "sha256": "76e558a85426054b8900d3f1427b4c887c9d7e57aeb1863b375e01c531c74225"
+              },
+              "id": 1788681600023,
+              "mtime_secs": 1788681600,
+              "name": "Above",
+              "usn": -1
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1788249602138": {
+              "common": {
+                "sha256": "2308cdae473242bb8dd67c0ec7603a184faa6a1671f0bb5c88eb051fc1bd9b8d"
+              },
+              "id": 1788249602138,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 1788681600,
+              "name": "Lang",
+              "usn": -1
+            },
+            "1788249602140": {
+              "common": {
+                "sha256": "2ee0530a0e45073c16a64e5b570bfcd345bba53d68cfdf4efc44999062e3e08a"
+              },
+              "id": 1788249602140,
+              "kind": {
+                "sha256": "d5a4b2221e8e085510493620b67c8219f2b443efef590070fb492182dcd00833"
+              },
+              "mtime_secs": 1788681600,
+              "name": "Lang\u001fVerbs",
+              "usn": -1
+            },
+            "1788249602193": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1788249602193,
+              "kind": {
+                "sha256": "8ca0e0aaacb919643c81bf5dfd3349e243e3a02aa3e68a0166c3e1f3c11d20f3"
+              },
+              "mtime_secs": 1788249602,
+              "name": "Cram",
+              "usn": -1
+            },
+            "1788681600025": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1788681600025,
+              "kind": {
+                "sha256": "e2af1448efa80bf2da41f739134a9e0cadbd0a357ef0c5ea2c5911fdd1ddcf3c"
+              },
+              "mtime_secs": 1788681600,
+              "name": "EaseLow",
+              "usn": -1
+            },
+            "1788681600026": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1788681600026,
+              "kind": {
+                "sha256": "344d576a523e5690e52c61f331f57e65699b76173deaf57fed085a28c54931eb"
+              },
+              "mtime_secs": 1788681600,
+              "name": "EaseEdge",
+              "usn": -1
+            },
+            "1788681600027": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1788681600027,
+              "kind": {
+                "sha256": "159175d92f2f15b96e362d79e436b337dc97511cc7f165ad90668ba0f5a3aa1b"
+              },
+              "mtime_secs": 1788681600,
+              "name": "EaseAbove",
+              "usn": -1
+            },
+            "1788681600034": {
+              "common": {
+                "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "id": 1788681600034,
+              "kind": {
+                "sha256": "a08bc3681db68c920af03c3c31ee5fc19ee2d1bd2de74f2e8d2e3e6a2c1a0c9d"
+              },
+              "mtime_secs": 1788681600,
+              "name": "EaseCram",
+              "usn": -1
+            }
+          },
+          "fields": {
+            "1788249602119,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Front",
+              "ntid": 1788249602119,
+              "ord": 0
+            },
+            "1788249602119,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Back",
+              "ntid": 1788249602119,
+              "ord": 1
+            },
+            "1788249602122,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Text",
+              "ntid": 1788249602122,
+              "ord": 0
+            },
+            "1788249602122,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Extra",
+              "ntid": 1788249602122,
+              "ord": 1
+            }
+          },
+          "graves": {
+            "1788249602189,1": {
+              "oid": 1788249602189,
+              "type": 1,
+              "usn": -1
+            },
+            "1788249602191,2": {
+              "oid": 1788249602191,
+              "type": 2,
+              "usn": -1
+            },
+            "1788249602193,0": {
+              "oid": 1788249602193,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249602194,0": {
+              "oid": 1788249602194,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "notes": {
+            "1788249602168": {
+              "csum": 424129645,
+              "data": "",
+              "flags": 0,
+              "flds": "Water boils at {{c1::one hundred}} degrees.\u001fat sea level",
+              "guid": "#random",
+              "id": 1788249602168,
+              "mid": 1788249602122,
+              "mod": 1788249602,
+              "sfld": "Water boils at {{c1::one hundred}} degrees.",
+              "tags": "",
+              "usn": -1
+            },
+            "1788249602180": {
+              "csum": 150726050,
+              "data": "",
+              "flags": 0,
+              "flds": "river\u001frio",
+              "guid": "#random",
+              "id": 1788249602180,
+              "mid": 1788249602119,
+              "mod": 1788249602,
+              "sfld": "river",
+              "tags": " vocab ",
+              "usn": -1
+            },
+            "1788249602185": {
+              "csum": 799119387,
+              "data": "",
+              "flags": 0,
+              "flds": "bridge\u001fpuente",
+              "guid": "#random",
+              "id": 1788249602185,
+              "mid": 1788249602119,
+              "mod": 1788249602,
+              "sfld": "bridge",
+              "tags": " Mixed_Case vocab ",
+              "usn": -1
+            },
+            "1788249602186": {
+              "csum": 3477142104,
+              "data": "",
+              "flags": 0,
+              "flds": "{{c1::Rain}} falls and {{c2::snow}} drifts.\u001fweather",
+              "guid": "#random",
+              "id": 1788249602186,
+              "mid": 1788249602122,
+              "mod": 1788249602,
+              "sfld": "{{c1::Rain}} falls and {{c2::snow}} drifts.",
+              "tags": " Mixed_Case ",
+              "usn": -1
+            },
+            "1788249602187": {
+              "csum": 2134748564,
+              "data": "",
+              "flags": 0,
+              "flds": "to walk\u001fandar",
+              "guid": "#random",
+              "id": 1788249602187,
+              "mid": 1788249602119,
+              "mod": 1788249602,
+              "sfld": "to walk",
+              "tags": " vocab::verbs ",
+              "usn": -1
+            },
+            "1788249602188": {
+              "csum": 1028815596,
+              "data": "",
+              "flags": 0,
+              "flds": "to read\u001fleer",
+              "guid": "#random",
+              "id": 1788249602188,
+              "mid": 1788249602119,
+              "mod": 1788249602,
+              "sfld": "to read",
+              "tags": " Mixed_Case vocab::verbs ",
+              "usn": -1
+            },
+            "1788681600028": {
+              "csum": 4240209632,
+              "data": "",
+              "flags": 0,
+              "flds": "ease low one\u001funo",
+              "guid": "#random",
+              "id": 1788681600028,
+              "mid": 1788249602119,
+              "mod": 1788681600,
+              "sfld": "ease low one",
+              "tags": "",
+              "usn": -1
+            },
+            "1788681600029": {
+              "csum": 13610968,
+              "data": "",
+              "flags": 0,
+              "flds": "ease low two\u001fdos",
+              "guid": "#random",
+              "id": 1788681600029,
+              "mid": 1788249602119,
+              "mod": 1788681600,
+              "sfld": "ease low two",
+              "tags": "",
+              "usn": -1
+            },
+            "1788681600030": {
+              "csum": 3245011209,
+              "data": "",
+              "flags": 0,
+              "flds": "ease low three\u001ftres",
+              "guid": "#random",
+              "id": 1788681600030,
+              "mid": 1788249602119,
+              "mod": 1788681600,
+              "sfld": "ease low three",
+              "tags": "",
+              "usn": -1
+            },
+            "1788681600031": {
+              "csum": 2700265114,
+              "data": "",
+              "flags": 0,
+              "flds": "edge\u001fborde",
+              "guid": "#random",
+              "id": 1788681600031,
+              "mid": 1788249602119,
+              "mod": 1788681600,
+              "sfld": "edge",
+              "tags": "",
+              "usn": -1
+            },
+            "1788681600032": {
+              "csum": 2679847284,
+              "data": "",
+              "flags": 0,
+              "flds": "above\u001farriba",
+              "guid": "#random",
+              "id": 1788681600032,
+              "mid": 1788249602119,
+              "mod": 1788681600,
+              "sfld": "above",
+              "tags": "",
+              "usn": -1
+            }
+          },
+          "notetypes": {
+            "1788249602119": {
+              "config": {
+                "sha256": "f0ff90364a01c824655958869a854ff7aefcde8f607da04a8220391488f62851"
+              },
+              "id": 1788249602119,
+              "mtime_secs": 1788249602,
+              "name": "Pair",
+              "usn": -1
+            },
+            "1788249602122": {
+              "config": {
+                "sha256": "aa0c448b0742b4df368a814ec1dcc19acca39600debd2155cc25303cd716bddb"
+              },
+              "id": 1788249602122,
+              "mtime_secs": 1788249602,
+              "name": "Gap",
+              "usn": -1
+            }
+          },
+          "revlog": {
+            "1788249660012": {
+              "cid": 1788249602183,
+              "ease": 4,
+              "factor": 2500,
+              "id": 1788249660012,
+              "ivl": 5,
+              "lastIvl": -60,
+              "time": 3,
+              "type": 0,
+              "usn": -1
+            },
+            "1788249660017": {
+              "cid": 1788249602185,
+              "ease": 4,
+              "factor": 2500,
+              "id": 1788249660017,
+              "ivl": 5,
+              "lastIvl": -60,
+              "time": 1,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600004": {
+              "cid": 1788249602183,
+              "ease": 4,
+              "factor": 2650,
+              "id": 1788681600004,
+              "ivl": 17,
+              "lastIvl": 5,
+              "time": 1,
+              "type": 1,
+              "usn": -1
+            },
+            "1788681600008": {
+              "cid": 1788249602185,
+              "ease": 1,
+              "factor": 2300,
+              "id": 1788681600008,
+              "ivl": -600,
+              "lastIvl": 5,
+              "time": 2,
+              "type": 1,
+              "usn": -1
+            },
+            "1788681600011": {
+              "cid": 1788249602187,
+              "ease": 1,
+              "factor": 0,
+              "id": 1788681600011,
+              "ivl": -60,
+              "lastIvl": -60,
+              "time": 2,
+              "type": 0,
+              "usn": -1
+            },
+            "1788681600014": {
+              "cid": 1788249602191,
+              "ease": 3,
+              "factor": 0,
+              "id": 1788681600014,
+              "ivl": -900,
+              "lastIvl": -120,
+              "time": 1,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "tags": {
+            "Mixed_Case": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Mixed_Case",
+              "usn": -1
+            },
+            "vocab": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "vocab",
+              "usn": -1
+            },
+            "vocab::verbs": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "vocab::verbs",
+              "usn": -1
+            }
+          },
+          "templates": {
+            "1788249602119,0": {
+              "config": {
+                "sha256": "abae9d6381e851c0cf683d36509fa2743f5d4c464d7254c04cab17b486a63fe6"
+              },
+              "mtime_secs": 0,
+              "name": "Forward",
+              "ntid": 1788249602119,
+              "ord": 0,
+              "usn": 0
+            },
+            "1788249602119,1": {
+              "config": {
+                "sha256": "0792625ba2a222ce5b1ed47a7054427ac84c2069680de06f7ecf7468aa35195c"
+              },
+              "mtime_secs": 0,
+              "name": "Reverse",
+              "ntid": 1788249602119,
+              "ord": 1,
+              "usn": 0
+            },
+            "1788249602122,0": {
+              "config": {
+                "sha256": "367d461984fc1e36c9d2f2b0c0bee2dbc9990fb304a9140e308dd3d7ac8b59a3"
+              },
+              "mtime_secs": 0,
+              "name": "Gap",
+              "ntid": 1788249602122,
+              "ord": 0,
+              "usn": 0
+            }
+          }
+        },
+        "schema_objects": [
+          {
+            "name": "idx_cards_odid",
+            "sql": "CREATE INDEX idx_cards_odid on cards (odid) where odid != 0",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "idx_decks_name",
+            "sql": "CREATE UNIQUE INDEX idx_decks_name on decks (name)",
+            "tbl_name": "decks",
+            "type": "index"
+          },
+          {
+            "name": "idx_fields_name_ntid",
+            "sql": "CREATE UNIQUE INDEX idx_fields_name_ntid on fields (name, ntid)",
+            "tbl_name": "fields",
+            "type": "index"
+          },
+          {
+            "name": "idx_graves_pending",
+            "sql": "CREATE INDEX idx_graves_pending ON graves (usn)",
+            "tbl_name": "graves",
+            "type": "index"
+          },
+          {
+            "name": "idx_notes_mid",
+            "sql": "CREATE INDEX idx_notes_mid on notes (mid)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "idx_notetypes_name",
+            "sql": "CREATE UNIQUE INDEX idx_notetypes_name on notetypes (name)",
+            "tbl_name": "notetypes",
+            "type": "index"
+          },
+          {
+            "name": "idx_notetypes_usn",
+            "sql": "CREATE INDEX idx_notetypes_usn on notetypes (usn)",
+            "tbl_name": "notetypes",
+            "type": "index"
+          },
+          {
+            "name": "idx_templates_name_ntid",
+            "sql": "CREATE UNIQUE INDEX idx_templates_name_ntid on templates (name, ntid)",
+            "tbl_name": "templates",
+            "type": "index"
+          },
+          {
+            "name": "idx_templates_usn",
+            "sql": "CREATE INDEX idx_templates_usn on templates (usn)",
+            "tbl_name": "templates",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_nid",
+            "sql": "CREATE INDEX ix_cards_nid on cards (nid)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_sched",
+            "sql": "CREATE INDEX ix_cards_sched on cards (did, queue, due)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_cards_usn",
+            "sql": "CREATE INDEX ix_cards_usn on cards (usn)",
+            "tbl_name": "cards",
+            "type": "index"
+          },
+          {
+            "name": "ix_notes_csum",
+            "sql": "CREATE INDEX ix_notes_csum on notes (csum)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "ix_notes_usn",
+            "sql": "CREATE INDEX ix_notes_usn on notes (usn)",
+            "tbl_name": "notes",
+            "type": "index"
+          },
+          {
+            "name": "ix_revlog_cid",
+            "sql": "CREATE INDEX ix_revlog_cid on revlog (cid)",
+            "tbl_name": "revlog",
+            "type": "index"
+          },
+          {
+            "name": "ix_revlog_usn",
+            "sql": "CREATE INDEX ix_revlog_usn on revlog (usn)",
+            "tbl_name": "revlog",
+            "type": "index"
+          },
+          {
+            "name": "cards",
+            "sql": "CREATE TABLE cards ( id integer primary key, nid integer not null, did integer not null, ord integer not null, mod integer not null, usn integer not null, type integer not null, queue integer not null, due integer not null, ivl integer not null, factor integer not null, reps integer not null, lapses integer not null, left integer not null, odue integer not null, odid integer not null, flags integer not null, data text not null )",
+            "tbl_name": "cards",
+            "type": "table"
+          },
+          {
+            "name": "col",
+            "sql": "CREATE TABLE col ( id integer primary key, crt integer not null, mod integer not null, scm integer not null, ver integer not null, dty integer not null, usn integer not null, ls integer not null, conf text not null, models text not null, decks text not null, dconf text not null, tags text not null )",
+            "tbl_name": "col",
+            "type": "table"
+          },
+          {
+            "name": "config",
+            "sql": "CREATE TABLE config ( key text not null primary key, usn integer not null, mtime_secs integer not null, val blob not null ) without rowid",
+            "tbl_name": "config",
+            "type": "table"
+          },
+          {
+            "name": "deck_config",
+            "sql": "CREATE TABLE deck_config ( id integer primary key not null, name text not null collate unicase, mtime_secs integer not null, usn integer not null, config blob not null )",
+            "tbl_name": "deck_config",
+            "type": "table"
+          },
+          {
+            "name": "decks",
+            "sql": "CREATE TABLE decks ( id integer primary key not null, name text not null collate unicase, mtime_secs integer not null, usn integer not null, common blob not null, kind blob not null )",
+            "tbl_name": "decks",
+            "type": "table"
+          },
+          {
+            "name": "fields",
+            "sql": "CREATE TABLE fields ( ntid integer not null, ord integer not null, name text not null collate unicase, config blob not null, primary key (ntid, ord) ) without rowid",
+            "tbl_name": "fields",
+            "type": "table"
+          },
+          {
+            "name": "graves",
+            "sql": "CREATE TABLE graves ( oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type) ) WITHOUT ROWID",
+            "tbl_name": "graves",
+            "type": "table"
+          },
+          {
+            "name": "notes",
+            "sql": "CREATE TABLE notes ( id integer primary key, guid text not null, mid integer not null, mod integer not null, usn integer not null, tags text not null, flds text not null, sfld integer not null, csum integer not null, flags integer not null, data text not null )",
+            "tbl_name": "notes",
+            "type": "table"
+          },
+          {
+            "name": "notetypes",
+            "sql": "CREATE TABLE notetypes ( id integer not null primary key, name text not null collate unicase, mtime_secs integer not null, usn integer not null, config blob not null )",
+            "tbl_name": "notetypes",
+            "type": "table"
+          },
+          {
+            "name": "revlog",
+            "sql": "CREATE TABLE revlog ( id integer primary key, cid integer not null, usn integer not null, ease integer not null, ivl integer not null, lastIvl integer not null, factor integer not null, time integer not null, type integer not null )",
+            "tbl_name": "revlog",
+            "type": "table"
+          },
+          {
+            "name": "sqlite_stat1",
+            "sql": "CREATE TABLE sqlite_stat1(tbl,idx,stat)",
+            "tbl_name": "sqlite_stat1",
+            "type": "table"
+          },
+          {
+            "name": "sqlite_stat4",
+            "sql": "CREATE TABLE sqlite_stat4(tbl,idx,neq,nlt,ndlt,sample)",
+            "tbl_name": "sqlite_stat4",
+            "type": "table"
+          },
+          {
+            "name": "tags",
+            "sql": "CREATE TABLE tags ( tag text NOT NULL PRIMARY KEY COLLATE unicase, usn integer NOT NULL, collapsed boolean NOT NULL, config blob NULL ) without rowid",
+            "tbl_name": "tags",
+            "type": "table"
+          },
+          {
+            "name": "templates",
+            "sql": "CREATE TABLE templates ( ntid integer not null, ord integer not null, name text not null collate unicase, mtime_secs integer not null, usn integer not null, config blob not null, primary key (ntid, ord) ) without rowid",
+            "tbl_name": "templates",
+            "type": "table"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "aa38b479e052e75b40bbe6ac498681631fbf77aadea554966696df3cb7ac2cac",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/upgrade/from-15",
+  "scenario_sha256": "8d53ba7fcff96695affb832ab63cda451e5a4799c2c92629111d107d4350a1c2",
+  "tz": "UTC"
+}
