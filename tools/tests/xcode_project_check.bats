@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 # Control flow of tools/tests/xcode_project_check.sh (tools/mg xcode-check),
-# run by `tools/mg selftest` with the host tools stubbed: which simulators it
-# creates and deletes, and which test runs it starts. The checks themselves
-# run on the host, through `tools/mg xcode-check`.
+# run by `tools/mg selftest` with the host tools and the simulator pool
+# stubbed: which simulators it leases and releases, and which test runs it
+# starts. The checks themselves run on the host, through `tools/mg xcode-check`.
 
 bats_require_minimum_version 1.5.0
 
@@ -10,12 +10,25 @@ REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
 setup() {
   SB="$BATS_TEST_TMPDIR/repo"
-  mkdir -p "$SB/tools/tests" "$SB/app/Meguri/App"
+  mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App"
   cp "$REPO_ROOT/tools/tests/xcode_project_check.sh" "$SB/tools/tests/"
   STUBS="$BATS_TEST_TMPDIR/stubs"
   mkdir -p "$STUBS"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
   : >"$STUB_LOG"
+  # The pool leases POOL-<kind>; with STUB_POOL_BUSY=<kind>, every device of
+  # that kind stays leased (exit 3, as sim-pool.sh does).
+  cat >"$SB/tools/scripts/sim-pool.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "sim-pool.sh $*" >>"$STUB_LOG"
+if [ "$1" = acquire ]; then
+  [ "$2" != "${STUB_POOL_BUSY:-}" ] || { echo "sim-pool: every $2 device stayed leased" >&2 && exit 3; }
+  echo "POOL-$2"
+fi
+exit 0
+EOF
+  chmod +x "$SB/tools/scripts/sim-pool.sh"
+  unset STUB_POOL_BUSY
   # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
   # product check runs; test runs pass. A launched app stays up, except on the
   # route stub/quits.
@@ -24,7 +37,6 @@ setup() {
 name="$(basename "$0")"
 printf '%s\n' "$name $*" >>"$STUB_LOG"
 case "$name $*" in
-  "xcrun simctl create "*) echo "UDID-$3" ;;
   "xcrun xcresulttool get build-results "*) echo '{"errorCount":0,"warningCount":0,"warnings":[]}' ;;
   "xcrun xcresulttool get "*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
   "xcodebuild build "*) [ "${STUB_BUILD_OK:-}" = 1 ] || exit 65 ;;
@@ -50,20 +62,47 @@ called() { grep -qE "$1" "$STUB_LOG" || { echo "no call matches: $1" && cat "$ST
 not_called() { ! grep -E "$1" "$STUB_LOG"; }
 tap_line() { grep -qxE "$1" <<<"$output" || { echo "no TAP line matches: $1" && echo "$output" && return 1; }; }
 
-@test "xcode-check deletes the simulators it created, at exit" {
-  check_project --no-ui
-  called '^xcrun simctl create Meguri-check-[0-9]+-iPhone17Pro com\.apple\.CoreSimulator\.SimDeviceType\.iPhone-17-Pro '
-  called '^xcrun simctl create Meguri-check-[0-9]+-iPadPro13 '
-  local name
-  for name in $(sed -n 's/^xcrun simctl create \([^ ]*\) .*/\1/p' "$STUB_LOG"); do
-    called "^xcrun simctl delete UDID-$name\$"
+@test "xcode-check leases its simulators from the pool and releases them at exit" {
+  check_project
+  called '^sim-pool\.sh acquire iphone --holder xcode-check$'
+  called '^sim-pool\.sh acquire ipad --holder xcode-check$'
+  called '^xcodebuild build .* -destination id=POOL-iphone '
+  called '^xcodebuild build .* -destination id=POOL-ipad '
+  called '^xcodebuild test .* -destination id=POOL-iphone .*'
+  called '^xcodebuild test .* -destination id=POOL-ipad .*'
+  [ "$(grep -c '^sim-pool\.sh acquire ' "$STUB_LOG")" -eq 2 ]
+  [ "$(grep -c '^sim-pool\.sh release ' "$STUB_LOG")" -eq 2 ]
+  # Both are leased after the Mac configuration builds, and each is released
+  # once, after the last run that uses it.
+  local first_lease mac_appstore kind last released
+  first_lease="$(grep -n '^sim-pool\.sh acquire ' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  mac_appstore="$(grep -n '^xcodebuild build .* -configuration AppStore -destination platform=macOS' "$STUB_LOG" | cut -d: -f1)"
+  [ -n "$mac_appstore" ]
+  [ "$first_lease" -gt "$mac_appstore" ]
+  for kind in iphone ipad; do
+    last="$(grep -n "id=POOL-$kind" "$STUB_LOG" | tail -n 1 | cut -d: -f1)"
+    released="$(grep -nx "sim-pool.sh release POOL-$kind" "$STUB_LOG" | cut -d: -f1)"
+    [ -n "$released" ]
+    [ "$released" -gt "$last" ]
   done
-  [ "$(grep -c '^xcrun simctl delete ' "$STUB_LOG")" -eq 2 ]
+  not_called '^xcrun simctl (create|boot|shutdown|erase|delete) '
 }
 
-@test "xcode-check never creates or deletes the simulators it is given" {
+@test "xcode-check reports a pool that stays busy and builds without that simulator" {
+  STUB_POOL_BUSY=iphone check_project --no-ui
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ lease an iPhone simulator from the pool'
+  tap_line '# sim-pool: every iphone device stayed leased'
+  not_called 'id=POOL-iphone'
+  called '^xcodebuild build .* -destination id=POOL-ipad '
+  called '^sim-pool\.sh release POOL-ipad$'
+  [ "$(grep -c '^sim-pool\.sh release ' "$STUB_LOG")" -eq 1 ]
+}
+
+@test "xcode-check never leases, creates or deletes a simulator it is given" {
   check_project --no-ui --iphone PHONE-1 --ipad PAD-1
-  not_called '^xcrun simctl (create|delete|shutdown) '
+  not_called '^sim-pool\.sh '
+  not_called '^xcrun simctl (create|boot|shutdown|erase|delete) '
   called '^xcodebuild build .* -destination id=PHONE-1 '
   called '^xcodebuild build .* -destination id=PAD-1 '
 }

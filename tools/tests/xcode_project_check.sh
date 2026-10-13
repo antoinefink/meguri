@@ -11,9 +11,11 @@
 # and the test plans, launches the Mac Debug app hidden on Home and on every
 # test-hook route and checks it stays up, then runs the Unit plan, the
 # app-hosted tests and TestHooksTests (into <work dir>/DerivedData-tests).
-# Without --iphone/--ipad it creates throwaway simulators and deletes them at
-# exit. Release and AppStore builds are launched on simulators only: on the
-# Mac they would replace the daily-driver app; their Mac builds are
+# Without --iphone/--ipad it leases the simulators from the shared pool
+# (tools/scripts/sim-pool.sh) after the Mac configuration builds, and releases
+# them at exit; it never creates, shuts down or deletes a simulator (root
+# AGENTS.md). Release and AppStore builds are launched on simulators only: on
+# the Mac they would replace the daily-driver app; their Mac builds are
 # unregistered from LaunchServices and deleted once checked. TestHooksTests run
 # on the Mac only with MEGURI_ALLOW_MAC_UI=1 (`tools/mg mac-ui`) and are
 # reported as queued otherwise. --no-ui skips the test runs.
@@ -50,7 +52,7 @@ rm -rf "$WORK"/settings-*.txt "$DD/Build/Products"
 PROJECT="$REPO/app/Meguri.xcodeproj"
 STAMP="$REPO/app/Packages/MeguriCore/Binaries/.stamp"
 CONFIGS="Debug Profile Release AppStore"
-RUNTIME=com.apple.CoreSimulator.SimRuntime.iOS-27-0
+POOL="$REPO/tools/scripts/sim-pool.sh"
 
 N=0
 FAILED=0
@@ -105,12 +107,11 @@ quit_running() {
   kill -9 $(running "$1") 2>/dev/null
 }
 
-CREATED=()
+LEASED=()
 cleanup() {
   local udid
-  for udid in ${CREATED[@]+"${CREATED[@]}"}; do
-    xcrun simctl shutdown "$udid" >/dev/null 2>&1
-    xcrun simctl delete "$udid" >/dev/null 2>&1
+  for udid in ${LEASED[@]+"${LEASED[@]}"}; do
+    "$POOL" release "$udid" >&2
   done
   quit_running "$DD/Build/Products/Debug/Meguri.app/Contents/MacOS/Meguri"
   forget_mac_app Release
@@ -120,15 +121,21 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-simulator() { # simulator <name> <device type>: creates a throwaway device and prints its UDID
-  xcrun simctl create "Meguri-check-$$-$1" "$2" "$RUNTIME"
+# lease <kind> <name>: leases a pool device of <kind> (sim-pool.sh) and sets
+# LEASE to its UDID, or reports the failure and sets LEASE to "". Called
+# directly, not in a command substitution: LEASED must outlive it.
+lease() {
+  local log="$LOGS/sim-pool-$1.log" rc
+  LEASE="$("$POOL" acquire "$1" --holder xcode-check 2>"$log")"
+  rc=$?
+  if [ "$rc" -eq 0 ] && [ -n "$LEASE" ]; then
+    LEASED+=("$LEASE")
+    return 0
+  fi
+  not_ok "lease an $2 simulator from the pool" "$(tail -n 1 "$log")" "sim-pool.sh acquire $1 exit $rc; log: $log"
+  LEASE=""
+  return 1
 }
-# CREATED is appended here, not in `simulator`: a command substitution runs
-# in a subshell, which would append to its own copy.
-[ -n "$IPHONE" ] || { IPHONE="$(simulator iPhone17Pro com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro)" && CREATED+=("$IPHONE"); } ||
-  not_ok "create an iPhone 17 Pro simulator" "simctl create failed"
-[ -n "$IPAD" ] || { IPAD="$(simulator iPadPro13 com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB)" && CREATED+=("$IPAD"); } ||
-  not_ok "create an iPad Pro 13-inch (M5) simulator" "simctl create failed"
 
 # setting <config> <sdk> <name>: one resolved build setting of the Meguri target.
 settings_cache() { echo "$WORK/settings-$1-$2.txt"; }
@@ -403,6 +410,10 @@ not_registered() {
 check "mac Release and AppStore apps are deleted and unregistered (LaunchServices, PlugInKit)" \
   not_registered "$DD/Build/Products/Release/Meguri.app" "$DD/Build/Products/AppStore/Meguri.app"
 
+# Pool devices are leased only now, after the Mac configuration builds, so
+# that other agents can use them meanwhile.
+[ -n "$IPHONE" ] || { lease iphone iPhone && IPHONE="$LEASE"; }
+[ -n "$IPAD" ] || { lease ipad iPad && IPAD="$LEASE"; }
 if [ -n "$IPHONE" ] && build "iphone-Debug" Debug "id=$IPHONE"; then
   check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
   check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
