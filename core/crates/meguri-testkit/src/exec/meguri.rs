@@ -148,6 +148,7 @@ impl MeguriExecutor {
     pub fn core_registry() -> Registry {
         let mut registry = Registry::default();
         super::clock::register(&mut registry);
+        super::text::register(&mut registry);
         registry
     }
 

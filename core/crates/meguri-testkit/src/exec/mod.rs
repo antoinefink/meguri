@@ -8,6 +8,7 @@ pub mod live;
 mod meguri;
 mod oracle;
 pub mod sync_guard;
+mod text;
 
 use std::fmt;
 use std::ops::Range;

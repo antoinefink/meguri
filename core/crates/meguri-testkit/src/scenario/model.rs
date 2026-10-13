@@ -665,6 +665,7 @@ pub enum ObservationKind {
     DbDump,
     Stats,
     Digest,
+    Text,
 }
 
 /// How a kind takes arguments.
@@ -683,7 +684,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 14] = [
+    pub const ALL: [ObservationKind; 15] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -698,6 +699,7 @@ impl ObservationKind {
         ObservationKind::DbDump,
         ObservationKind::Stats,
         ObservationKind::Digest,
+        ObservationKind::Text,
     ];
 
     pub fn name(self) -> &'static str {
@@ -716,6 +718,7 @@ impl ObservationKind {
             ObservationKind::DbDump => "db_dump",
             ObservationKind::Stats => "stats",
             ObservationKind::Digest => "digest",
+            ObservationKind::Text => "text",
         }
     }
 
@@ -730,7 +733,10 @@ impl ObservationKind {
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }
-            ObservationKind::FuzzTable | ObservationKind::NetProbe | ObservationKind::Search => ArgShape::Mapping,
+            ObservationKind::FuzzTable
+            | ObservationKind::NetProbe
+            | ObservationKind::Search
+            | ObservationKind::Text => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
         }
     }
@@ -837,6 +843,124 @@ impl ObservationRequest {
 
 fn unknown_kind(name: &str) -> FormatError {
     FormatError::new(format!("unknown observation kind {name:?}"))
+}
+
+/// The functions of the `text` kind (observations.md O8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TextFunction {
+    StripMarkup,
+    StripMarkupKeepMedia,
+    TextLine,
+    TextLineKeepMedia,
+    MediaRefs,
+    IriEncode,
+    IriDecode,
+    MediaFilename,
+    SortField,
+    Checksum,
+    FieldEmpty,
+    UnicaseCompare,
+}
+
+impl TextFunction {
+    pub const ALL: [TextFunction; 12] = [
+        TextFunction::StripMarkup,
+        TextFunction::StripMarkupKeepMedia,
+        TextFunction::TextLine,
+        TextFunction::TextLineKeepMedia,
+        TextFunction::MediaRefs,
+        TextFunction::IriEncode,
+        TextFunction::IriDecode,
+        TextFunction::MediaFilename,
+        TextFunction::SortField,
+        TextFunction::Checksum,
+        TextFunction::FieldEmpty,
+        TextFunction::UnicaseCompare,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            TextFunction::StripMarkup => "strip_markup",
+            TextFunction::StripMarkupKeepMedia => "strip_markup_keep_media",
+            TextFunction::TextLine => "text_line",
+            TextFunction::TextLineKeepMedia => "text_line_keep_media",
+            TextFunction::MediaRefs => "media_refs",
+            TextFunction::IriEncode => "iri_encode",
+            TextFunction::IriDecode => "iri_decode",
+            TextFunction::MediaFilename => "media_filename",
+            TextFunction::SortField => "sort_field",
+            TextFunction::Checksum => "checksum",
+            TextFunction::FieldEmpty => "field_empty",
+            TextFunction::UnicaseCompare => "unicase_compare",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<TextFunction> {
+        TextFunction::ALL.into_iter().find(|f| f.name() == name)
+    }
+}
+
+/// The inputs of a `text` request: strings, or `[a, b]` pairs for
+/// `unicase_compare`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextInputs {
+    Strings(Vec<String>),
+    Pairs(Vec<(String, String)>),
+}
+
+/// A `text` observation request: `{fns, inputs}` (observations.md O4, O8).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextRequest {
+    pub fns: Vec<TextFunction>,
+    pub inputs: TextInputs,
+}
+
+impl TextRequest {
+    /// Reads the request with scenario.schema.json's rules: exactly `fns` and
+    /// `inputs`; distinct known functions, at least one; `unicase_compare`
+    /// alone, on pairs of strings; every other function on strings.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<TextRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation text: {why}"));
+        if map.len() != 2 || !map.contains_key("fns") || !map.contains_key("inputs") {
+            return Err(bad("takes exactly {fns, inputs}"));
+        }
+        let names = map["fns"]
+            .as_array()
+            .ok_or_else(|| bad("fns is a list of function names"))?;
+        if names.is_empty() {
+            return Err(bad("fns names at least one function"));
+        }
+        let mut fns = Vec::with_capacity(names.len());
+        for name in names {
+            let f = name
+                .as_str()
+                .and_then(TextFunction::from_name)
+                .ok_or_else(|| bad(&format!("{name} is not a text function")))?;
+            if fns.contains(&f) {
+                return Err(bad(&format!("{} appears twice in fns", f.name())));
+            }
+            fns.push(f);
+        }
+        let items = map["inputs"].as_array().ok_or_else(|| bad("inputs is a list"))?;
+        let inputs = if fns.contains(&TextFunction::UnicaseCompare) {
+            if fns.len() > 1 {
+                return Err(bad("unicase_compare shares a request with no other function"));
+            }
+            let pair = |item: &Value| match item.as_array().map(Vec::as_slice) {
+                Some([Value::String(a), Value::String(b)]) => Some((a.clone(), b.clone())),
+                _ => None,
+            };
+            let pairs = items.iter().map(pair).collect::<Option<Vec<_>>>();
+            TextInputs::Pairs(pairs.ok_or_else(|| bad("unicase_compare inputs are [a, b] pairs of strings"))?)
+        } else {
+            let strings = items
+                .iter()
+                .map(|v| v.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>();
+            TextInputs::Strings(strings.ok_or_else(|| bad("inputs are strings"))?)
+        };
+        Ok(TextRequest { fns, inputs })
+    }
 }
 
 impl<'de> Deserialize<'de> for ObservationRequest {
