@@ -16,6 +16,7 @@ use meguri_model::rng::RandomSource;
 use rusqlite::Connection;
 
 use crate::error::{OpenError, UpgradeStage};
+use crate::schema::expected_objects::SchemaObject;
 use crate::schema::refuse;
 
 /// What the steps need from the caller.
@@ -138,5 +139,43 @@ pub(super) fn col_text(conn: &Connection, column: &str) -> Result<String, StepEr
 /// Sets one `col` JSON column to the empty string.
 pub(super) fn clear_col(conn: &Connection, column: &str) -> StepResult {
     conn.execute(&format!("UPDATE col SET {column} = ''"), [])?;
+    Ok(())
+}
+
+/// The foreign indexes and triggers of `table` (`storage/schema-18` S6), as
+/// the statements stored for them, in the order they were created. Dropping
+/// the table drops them, so a step that rebuilds it creates them again with
+/// [`restore`] once the rows are back (U12: foreign objects are kept). Views
+/// need nothing: a dropped table leaves the views that read it as they are.
+pub(super) fn foreign_dependents(conn: &Connection, table: &str) -> Result<Vec<String>, StepError> {
+    let mut select = conn.prepare(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master
+         WHERE type IN ('index', 'trigger') AND tbl_name = ?1 COLLATE NOCASE AND sql IS NOT NULL
+         ORDER BY rowid",
+    )?;
+    let objects = select.query_map([table], |row| {
+        Ok(SchemaObject {
+            kind: row.get(0)?,
+            name: row.get(1)?,
+            tbl_name: row.get(2)?,
+            sql: row.get(3)?,
+        })
+    })?;
+    let mut statements = Vec::new();
+    for object in objects {
+        let object = object?;
+        if !object.is_required() && !object.is_sqlite_own() {
+            statements.extend(object.sql);
+        }
+    }
+    Ok(statements)
+}
+
+/// Runs the statements [`foreign_dependents`] returned, unchanged. One that
+/// fails fails the step (U10).
+pub(super) fn restore(conn: &Connection, statements: &[String]) -> StepResult {
+    for statement in statements {
+        conn.execute_batch(statement)?;
+    }
     Ok(())
 }

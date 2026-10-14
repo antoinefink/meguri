@@ -67,7 +67,7 @@ impl SchemaObject {
         ) || (self.kind == "index" && name.starts_with("sqlite_autoindex_"))
     }
 
-    fn is_required(&self) -> bool {
+    pub(crate) fn is_required(&self) -> bool {
         match self.kind.as_str() {
             "table" => REQUIRED_TABLES.iter().any(|t| self.name.eq_ignore_ascii_case(t)),
             "index" => REQUIRED_INDEXES

@@ -10,7 +10,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::process::Command;
 
-use common::{copy_fixture, exec, int, listing, open, sha256, text};
+use common::{copy_fixture, exec, int, listing, open, plain, sha256, text};
 use meguri_model::faultpoint::{self, Fault};
 use meguri_model::rng::SeededRandom;
 use meguri_storage::{OpenError, OpenEvent, OpenOptions, UpgradeStage, open_collection};
@@ -195,4 +195,100 @@ fn an_original_killed_before_the_writer_opened_is_byte_for_byte_intact() {
     );
     assert_eq!(sha256(&path), original);
     assert!(dir.path().join("collection.anki2.pre-upgrade-v11").exists());
+}
+
+/// Foreign objects (`storage/schema-18` S6) on the tables that steps 17 and
+/// 18 rebuild: indexes and triggers on them, views that read them, and the
+/// add-on table the triggers write to.
+const FOREIGN_ON_GRAVES: [&str; 4] = [
+    "CREATE TABLE addon_log (what text)",
+    "CREATE INDEX addon_graves_oid ON graves (oid)",
+    "CREATE TRIGGER addon_grave_deleted AFTER DELETE ON graves BEGIN INSERT INTO addon_log VALUES ('grave'); END",
+    "CREATE VIEW addon_graves AS SELECT oid, type FROM graves",
+];
+const FOREIGN_ON_TAGS: [&str; 3] = [
+    "CREATE INDEX addon_tags_usn ON tags (usn)",
+    "CREATE TRIGGER addon_tag_added AFTER INSERT ON tags BEGIN INSERT INTO addon_log VALUES (new.tag); END",
+    "CREATE VIEW addon_tags AS SELECT tag FROM tags",
+];
+
+/// `(type, name, tbl_name, sql)` of the `addon_*` objects, as stored.
+type Stored = Vec<(String, String, String, Option<String>)>;
+
+fn addon_objects(conn: &meguri_storage::rusqlite::Connection) -> Stored {
+    let mut statement = conn
+        .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name LIKE 'addon%' ORDER BY name")
+        .unwrap();
+    statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
+#[test]
+fn foreign_objects_on_the_rebuilt_tables_are_kept() {
+    // U12: the upgrade keeps foreign objects, including those that depend on
+    // `tags` (rebuilt by step 17) and `graves` (rebuilt by step 18).
+    for version in [11, 14, 15, 16, 17] {
+        let (_dir, path) = copy_fixture(&format!("schema-{version}.anki2"));
+        let before = {
+            let conn = plain(&path);
+            // An index on `tags` holds its key, which `unicase` orders.
+            conn.create_collation("unicase", meguri_text::fold::compare_folded)
+                .unwrap();
+            let tags = if version >= 14 { &FOREIGN_ON_TAGS[..] } else { &[] };
+            for sql in FOREIGN_ON_GRAVES.iter().chain(tags) {
+                conn.execute_batch(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
+            }
+            addon_objects(&conn)
+        };
+        let opened = open(&path).unwrap_or_else(|e| panic!("from {version}: {e}"));
+        let w = opened.writer();
+        let mut after: Stored = w
+            .schema_objects()
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.name.starts_with("addon"))
+            .map(|o| (o.kind, o.name, o.tbl_name, o.sql))
+            .collect();
+        after.sort_by(|a, b| a.1.cmp(&b.1));
+        assert_eq!(after, before, "from {version}: foreign objects changed");
+        assert_eq!(text(&exec(w, "SELECT * FROM pragma_integrity_check")), "ok");
+        // The upgrade's own copies of the rows are no add-on's business.
+        assert_eq!(int(&exec(w, "SELECT count(*) FROM addon_log")), 0, "from {version}");
+
+        // The views read the rebuilt tables, and the triggers fire on them.
+        assert_eq!(
+            int(&exec(w, "SELECT count(*) FROM addon_graves")),
+            int(&exec(w, "SELECT count(*) FROM graves")),
+            "from {version}"
+        );
+        exec(
+            w,
+            "DELETE FROM graves WHERE (oid, type) = (SELECT oid, type FROM graves ORDER BY oid, type LIMIT 1)",
+        );
+        assert_eq!(
+            int(&exec(w, "SELECT count(*) FROM addon_log WHERE what = 'grave'")),
+            1,
+            "from {version}"
+        );
+        if version >= 14 {
+            assert_eq!(
+                int(&exec(w, "SELECT count(*) FROM addon_tags")),
+                int(&exec(w, "SELECT count(*) FROM tags")),
+                "from {version}"
+            );
+            exec(
+                w,
+                "INSERT INTO tags (tag, usn, collapsed) VALUES ('addon-check', -1, 0)",
+            );
+            assert_eq!(
+                int(&exec(w, "SELECT count(*) FROM addon_log WHERE what = 'addon-check'")),
+                1,
+                "from {version}"
+            );
+        }
+        opened.close().unwrap();
+    }
 }
