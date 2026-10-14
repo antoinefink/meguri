@@ -10,7 +10,7 @@ fn card_type_and_queue_take_the_low_byte() {
     assert_eq!(CardType::from_stored(258), Some(CardType::Review));
     assert_eq!(CardType::from_stored(7), None);
     assert_eq!(CardType::from_stored(-1), None);
-    assert_eq!(CardQueue::from_stored(-3), Some(CardQueue::UserBuried));
+    assert_eq!(CardQueue::from_stored(-3), Some(CardQueue::BuriedByUser));
     assert_eq!(CardQueue::from_stored(255), Some(CardQueue::Suspended));
     assert_eq!(CardQueue::from_stored(256 + 4), Some(CardQueue::Preview));
     assert_eq!(CardQueue::from_stored(9), None);
@@ -27,8 +27,8 @@ fn out_of_range_numbers_read_as_zero() {
     assert_eq!(Note::checksum_from_stored(4_294_967_295), u32::MAX);
     assert_eq!(Note::checksum_from_stored(4_294_967_296), 0);
     assert_eq!(Note::checksum_from_stored(-1), 0);
-    assert_eq!(RevlogEntry::taken_millis_from_stored(-1), 0);
-    assert_eq!(RevlogEntry::taken_millis_from_stored(60_000), 60_000);
+    assert_eq!(RevlogEntry::answer_millis_from_stored(-1), 0);
+    assert_eq!(RevlogEntry::answer_millis_from_stored(60_000), 60_000);
 }
 
 #[test]

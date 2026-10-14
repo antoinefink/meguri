@@ -51,13 +51,13 @@ pub struct RevlogEntry {
     /// `factor`: ease in permille, or the FSRS difficulty mapped to 100-1100.
     pub ease_factor: u32,
     /// `time`: answer time in milliseconds.
-    pub taken_millis: u32,
+    pub answer_millis: u32,
     pub kind: RevlogKind,
 }
 
 impl RevlogEntry {
     /// R5: a stored `time` outside the `u32` range reads as 0.
-    pub fn taken_millis_from_stored(stored: i64) -> u32 {
+    pub fn answer_millis_from_stored(stored: i64) -> u32 {
         u32::try_from(stored).unwrap_or(0)
     }
 }

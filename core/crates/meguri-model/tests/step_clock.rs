@@ -2,7 +2,7 @@
 //! test hook steps or sets it.
 
 use meguri_model::clock::{Clock, StepClock, UtcOffset};
-use meguri_model::time::{TimestampMillis, TimestampSecs};
+use meguri_model::time::{EpochMillis, EpochSecs};
 
 /// 2030-01-15T10:00:00Z in milliseconds.
 const START_MS: i64 = 1_894_701_600_000;
@@ -19,11 +19,11 @@ fn it_moves_only_when_stepped_or_set() {
 
     clock.step_ms(1_500);
     assert_eq!(seam.now_ms(), START_MS + 1_500);
-    assert_eq!(TimestampSecs::now(seam), TimestampSecs(1_894_701_601));
+    assert_eq!(EpochSecs::from_clock(seam), EpochSecs(1_894_701_601));
     clock.step_ms(-86_400_000);
     assert_eq!(
-        TimestampMillis::now(seam),
-        TimestampMillis(START_MS + 1_500 - 86_400_000)
+        EpochMillis::from_clock(seam),
+        EpochMillis(START_MS + 1_500 - 86_400_000)
     );
 
     clock.set_now_ms(0);

@@ -2,7 +2,7 @@
 
 use crate::card_data::CardData;
 use crate::ids::{CardId, DeckId, NoteId};
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 /// `cards.type`.
@@ -41,10 +41,8 @@ pub enum CardQueue {
     InterdayLearning = 3,
     Preview = 4,
     Suspended = -1,
-    /// Buried by the scheduler.
-    SchedBuried = -2,
-    /// Buried by the user.
-    UserBuried = -3,
+    BuriedByScheduler = -2,
+    BuriedByUser = -3,
 }
 
 impl CardQueue {
@@ -58,8 +56,8 @@ impl CardQueue {
             3 => Some(CardQueue::InterdayLearning),
             4 => Some(CardQueue::Preview),
             -1 => Some(CardQueue::Suspended),
-            -2 => Some(CardQueue::SchedBuried),
-            -3 => Some(CardQueue::UserBuried),
+            -2 => Some(CardQueue::BuriedByScheduler),
+            -3 => Some(CardQueue::BuriedByUser),
             _ => None,
         }
     }
@@ -79,7 +77,7 @@ pub struct Card {
     /// Template ordinal (cloze number - 1 for cloze note types).
     pub ord: u16,
     /// `mod`, epoch seconds.
-    pub mtime: TimestampSecs,
+    pub mtime: EpochSecs,
     pub usn: Usn,
     pub card_type: CardType,
     pub queue: CardQueue,

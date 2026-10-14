@@ -3,7 +3,7 @@
 use crate::ids::DeckConfigId;
 use crate::proto::ProtoBlob;
 use crate::proto::deck_config::DeckConfigMessage;
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 /// A `deck_config` row with its blob.
@@ -11,7 +11,7 @@ use crate::usn::Usn;
 pub struct DeckConfig {
     pub id: DeckConfigId,
     pub name: String,
-    pub mtime: TimestampSecs,
+    pub mtime: EpochSecs,
     pub usn: Usn,
     pub config: ProtoBlob<DeckConfigMessage>,
 }

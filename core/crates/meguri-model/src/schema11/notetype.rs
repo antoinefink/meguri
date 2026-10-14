@@ -9,7 +9,7 @@ use crate::json::{self, ObjectWriter};
 use crate::notetype::{Notetype, NotetypeField, NotetypeTemplate};
 use crate::proto::ProtoBlob;
 use crate::proto::notetype::{CardRequirement, FieldConfig, NotetypeConfig, TemplateConfig};
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 const ITEM: Schema11Item = Schema11Item::Notetype;
@@ -245,7 +245,7 @@ pub(crate) fn notetype_from_raw(raw: &RawValue) -> Result<Notetype> {
     Ok(Notetype {
         id: NotetypeId(id),
         name,
-        mtime: TimestampSecs(mtime),
+        mtime: EpochSecs(mtime),
         usn: Usn(usn),
         config: ProtoBlob::new(config),
         fields,
@@ -338,7 +338,7 @@ fn template_from_raw(raw: &RawValue, ord: usize) -> Result<NotetypeTemplate> {
     Ok(NotetypeTemplate {
         ord: ord as u32,
         name,
-        mtime: TimestampSecs(0),
+        mtime: EpochSecs(0),
         usn: Usn(0),
         config: ProtoBlob::new(TemplateConfig {
             q_format,

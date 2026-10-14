@@ -7,7 +7,7 @@ use crate::ids::DeckId;
 use crate::note::FIELD_SEPARATOR;
 use crate::proto::ProtoBlob;
 use crate::proto::deck::{DeckCommon, DeckKindMessage};
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 /// A `decks` row with its two blobs.
@@ -16,7 +16,7 @@ pub struct Deck {
     pub id: DeckId,
     /// Native form: components joined by U+001F.
     pub name: String,
-    pub mtime: TimestampSecs,
+    pub mtime: EpochSecs,
     pub usn: Usn,
     pub common: ProtoBlob<DeckCommon>,
     pub kind: ProtoBlob<DeckKindMessage>,

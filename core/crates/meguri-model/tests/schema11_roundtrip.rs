@@ -16,7 +16,7 @@ use meguri_model::schema11::col;
 use meguri_model::schema11::{
     deck_config_from_json, deck_config_to_json, deck_from_json, deck_to_json, notetype_from_json, notetype_to_json,
 };
-use meguri_model::time::TimestampSecs;
+use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 use meguri_model::{ModelError, Schema11Item};
 use serde_json::Value;
@@ -70,7 +70,7 @@ fn deck(id: i64, native: &str, mtime: i64, usn: i64, common: &[u8], kind: &[u8])
     Deck {
         id: DeckId(id),
         name: native.to_owned(),
-        mtime: TimestampSecs(mtime),
+        mtime: EpochSecs(mtime),
         usn: Usn(usn as i32),
         common: ProtoBlob::decode(common).unwrap(),
         kind: ProtoBlob::decode(kind).unwrap(),
@@ -81,7 +81,7 @@ fn preset(id: i64, name: &str, mtime: i64, usn: i64, config: &[u8]) -> DeckConfi
     DeckConfig {
         id: DeckConfigId(id),
         name: name.to_owned(),
-        mtime: TimestampSecs(mtime),
+        mtime: EpochSecs(mtime),
         usn: Usn(usn as i32),
         config: ProtoBlob::decode(config).unwrap(),
     }
@@ -93,7 +93,7 @@ fn notetype(object: &Value, config: &[u8], fields: &[(&str, Vec<u8>)], templates
     Notetype {
         id: NotetypeId(int(&object["id"])),
         name: text(&object["name"]).to_owned(),
-        mtime: TimestampSecs(int(&object["mod"])),
+        mtime: EpochSecs(int(&object["mod"])),
         usn: Usn(int(&object["usn"]) as i32),
         config: ProtoBlob::decode(config).unwrap(),
         fields: fields
@@ -112,7 +112,7 @@ fn notetype(object: &Value, config: &[u8], fields: &[(&str, Vec<u8>)], templates
             .map(|(ord, (name, config))| NotetypeTemplate {
                 ord: ord as u32,
                 name: (*name).to_owned(),
-                mtime: TimestampSecs(0),
+                mtime: EpochSecs(0),
                 usn: Usn(0),
                 config: ProtoBlob::decode(config).unwrap(),
                 prior_ord: None,
@@ -167,7 +167,7 @@ fn assert_refused(result: Result<impl std::fmt::Debug, ModelError>, item: Schema
 fn saved_preset(object_text: &str) -> DeckConfig {
     let mut preset = deck_config_from_json(object_text).unwrap();
     preset.usn = Usn::PENDING;
-    preset.mtime = TimestampSecs(CLOCK_SECS);
+    preset.mtime = EpochSecs(CLOCK_SECS);
     preset
 }
 

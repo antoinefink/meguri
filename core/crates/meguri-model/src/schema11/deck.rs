@@ -9,7 +9,7 @@ use crate::ids::DeckId;
 use crate::json::{self, ObjectWriter};
 use crate::proto::ProtoBlob;
 use crate::proto::deck::{DayLimit, DeckCommon, DeckKind, DeckKindMessage, FilteredDeck, NormalDeck, SearchTerm};
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 const ITEM: Schema11Item = Schema11Item::Deck;
@@ -234,7 +234,7 @@ pub(crate) fn deck_from_raw(raw: &RawValue) -> Result<Deck> {
     Ok(Deck {
         id: DeckId(id),
         name: native_name(&name),
-        mtime: TimestampSecs(mtime),
+        mtime: EpochSecs(mtime),
         usn: Usn(usn),
         common: ProtoBlob::new(common),
         kind: ProtoBlob::new(DeckKindMessage::new(kind)),

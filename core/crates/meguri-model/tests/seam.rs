@@ -32,10 +32,10 @@ fn the_host_names_the_time_zone() {
 
 #[test]
 fn seconds_round_down_also_before_1970() {
-    use meguri_model::time::{TimestampMillis, TimestampSecs};
+    use meguri_model::time::{EpochMillis, EpochSecs};
     let clock: &dyn Clock = &FixedClock::new(-1, UtcOffset::UTC);
-    assert_eq!(TimestampSecs::now(clock), TimestampSecs(-1));
-    assert_eq!(TimestampMillis(1_999).as_secs(), TimestampSecs(1));
+    assert_eq!(EpochSecs::from_clock(clock), EpochSecs(-1));
+    assert_eq!(EpochMillis(1_999).whole_secs(), EpochSecs(1));
 }
 
 #[test]

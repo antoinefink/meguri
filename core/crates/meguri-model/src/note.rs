@@ -1,7 +1,7 @@
 //! The `notes` row (`specs/model/row-records.md` R3).
 
 use crate::ids::{NoteId, NotetypeId};
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 /// U+001F, which joins the field values in `flds` and deck name components.
@@ -15,7 +15,7 @@ pub struct Note {
     /// `mid`.
     pub notetype_id: NotetypeId,
     /// `mod`, epoch seconds.
-    pub mtime: TimestampSecs,
+    pub mtime: EpochSecs,
     pub usn: Usn,
     /// Space-separated with a leading and a trailing space, or empty.
     pub tags: String,

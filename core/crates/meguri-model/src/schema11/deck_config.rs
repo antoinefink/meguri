@@ -9,7 +9,7 @@ use crate::ids::DeckConfigId;
 use crate::json::{self, Member, ObjectWriter};
 use crate::proto::ProtoBlob;
 use crate::proto::deck_config::DeckConfigMessage;
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 const ITEM: Schema11Item = Schema11Item::DeckConfig;
@@ -260,7 +260,7 @@ pub(crate) fn deck_config_from_raw(raw: &RawValue) -> Result<DeckConfig> {
     Ok(DeckConfig {
         id: DeckConfigId(id),
         name,
-        mtime: TimestampSecs(mtime),
+        mtime: EpochSecs(mtime),
         usn: Usn(usn),
         config: ProtoBlob::new(config),
     })

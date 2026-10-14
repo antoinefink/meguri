@@ -4,14 +4,14 @@
 use crate::ids::NotetypeId;
 use crate::proto::ProtoBlob;
 use crate::proto::notetype::{FieldConfig, NotetypeConfig, TemplateConfig};
-use crate::time::TimestampSecs;
+use crate::time::EpochSecs;
 use crate::usn::Usn;
 
 #[derive(Clone, Debug)]
 pub struct Notetype {
     pub id: NotetypeId,
     pub name: String,
-    pub mtime: TimestampSecs,
+    pub mtime: EpochSecs,
     pub usn: Usn,
     pub config: ProtoBlob<NotetypeConfig>,
     /// In `ord` order, from 0 without gaps.
@@ -40,7 +40,7 @@ pub struct NotetypeTemplate {
     pub ord: u32,
     pub name: String,
     /// Anki keeps it 0.
-    pub mtime: TimestampSecs,
+    pub mtime: EpochSecs,
     /// Anki keeps it 0.
     pub usn: Usn,
     pub config: ProtoBlob<TemplateConfig>,
