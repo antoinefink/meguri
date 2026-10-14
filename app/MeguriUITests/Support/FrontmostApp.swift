@@ -10,12 +10,12 @@ extension XCUIApplication {
     /// before a click, key press or drag is synthesized. Does nothing on iOS.
     ///
     /// Another app (the terminal running the tests) is usually in front on
-    /// the Mac that runs them. XCUITest then activates the app and clicks at
-    /// once, before the window is key: the click only activates the window
-    /// and a button ignores it. So this activates the app and waits until it
-    /// is active and no other app's window covers its window, then lets the
-    /// window settle into key state. Throws when that does not happen within
-    /// `timeout`.
+    /// the Mac that runs them. XCUITest then reports its windows as
+    /// interruptions, activates the app and clicks at once, before the
+    /// window is key, where AppKit may take the click for activation only.
+    /// So this activates the app and waits until it is active and no other
+    /// app's window covers its window, then lets the window settle into key
+    /// state. Throws when that does not happen within `timeout`.
     @MainActor
     func bringToFront(bundleIdentifier: String, timeout: TimeInterval = 10) throws {
         #if os(macOS)

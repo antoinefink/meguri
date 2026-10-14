@@ -97,6 +97,31 @@ mg_app_xcodebuild_test() {
   return 2
 }
 
+# mg_app_log_now: the local time, as `log show --start` takes it.
+mg_app_log_now() { date '+%Y-%m-%d %H:%M:%S'; }
+
+# mg_app_mac_input_refused <since>: whether macOS dropped input that XCUITest
+# synthesized since then. On macOS 27.0.1 (26A434) WindowServer refuses
+# testmanagerd's virtual input service ("missing the
+# 'com.apple.private.hid.client.event-dispatch' entitlement"), testmanagerd
+# times out on its "Recap playback", and no click, key press or drag reaches
+# the app: a Mac UI run with input then tests nothing it acts on. Records the
+# run as blocked (user step mac-input, once per job) and returns 0; returns 1
+# when the unified log shows no such drop, or cannot be read.
+mg_app_mac_input_refused() {
+  command -v log >/dev/null 2>&1 || return 1
+  log show --style compact --start "$1" --predicate 'process == "testmanagerd" AND eventMessage CONTAINS "Recap playback"' 2>/dev/null |
+    grep -q 'Timed out after waiting' || return 1
+  [ -z "${MG_MAC_INPUT_REFUSED:-}" ] || return 0
+  MG_MAC_INPUT_REFUSED=1
+  mg_user_step mac-input missing true "Use a macOS and Xcode pair whose Mac UI tests can click and type" \
+    "macOS drops the input XCUITest synthesizes on this Mac (on 27.0.1, WindowServer refuses testmanagerd's input service), so taps, typing and drags never reach the app. Update macOS or Xcode (docs/process/one-time-setup.md)."
+  mg_failure blocked-mac-input "blocked: macOS dropped the input XCUITest synthesized (testmanagerd's Recap playback timed out); no tap, key press or drag of this run reached the app" \
+    "log show --start '$1' --predicate 'process == \"testmanagerd\" AND eventMessage CONTAINS \"Recap playback\"'"
+  mg_detail blocked '"mac-input"'
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Simulators from the pool
 

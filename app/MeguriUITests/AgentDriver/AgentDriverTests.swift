@@ -183,10 +183,9 @@ final class AgentDriver {
         return true
     }
 
-    /// Mac: a click, key press or drag on a window that is not key only
-    /// activates it, and another app is usually in front. The app comes to
-    /// the front before the step's 'before' capture, so that capture shows
-    /// the window the action reaches.
+    /// Mac: another app is usually in front, and input must reach a key
+    /// window (`bringToFront`). The app comes to the front before the step's
+    /// 'before' capture, so that capture shows the window the action reaches.
     private func prepareInput(_ action: DriveScript.Action) throws {
         #if os(macOS)
         switch action {

@@ -368,13 +368,15 @@ mg_mac_ui() {
   mg_app_mac_guard || return 0
   mg_mac_ui_gate || return 0
 
-  local passed=0 failed=0 errors=0 name result record
+  local passed=0 failed=0 errors=0 name result record since
   for s in "${suites[@]}"; do
     case "$s" in
       test-hooks)
         name=test-hooks
+        since="$(mg_app_log_now)"
         mg_app_xcodebuild_test "$MG_RUN_DIR/$name" mac "platform=macOS,arch=arm64" Debug -only-testing:MeguriUITests/TestHooksTests
         result=$?
+        ! mg_app_mac_input_refused "$since" || result=2
         ;;
       drive:*)
         # A script that marks a transition also records it (motion capture).
@@ -399,7 +401,11 @@ mg_mac_ui() {
     mg_message "mac-ui: $failed of ${#suites[@]} suite(s) failed"
     mg_status fail
   elif [ "$errors" -gt 0 ]; then
-    mg_message "mac-ui: $errors of ${#suites[@]} suite(s) could not run"
+    if [ -n "${MG_MAC_INPUT_REFUSED:-}" ]; then
+      mg_message "mac-ui: blocked: macOS dropped the input XCUITest synthesized (user step mac-input); $errors of ${#suites[@]} suite(s) did not test the app"
+    else
+      mg_message "mac-ui: $errors of ${#suites[@]} suite(s) could not run"
+    fi
     mg_status error
   else
     mg_message "mac-ui: ${#suites[@]} suite(s) passed"

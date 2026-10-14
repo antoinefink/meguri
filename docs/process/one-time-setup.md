@@ -33,6 +33,10 @@ Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Set
 
 Let the Xcode UI-test runner control the Mac. On the first macOS UI-test run, macOS asks; allow it in System Settings › Privacy & Security › Accessibility and Automation. Doctor cannot verify this.
 
+### `mac-input`
+
+Use a macOS and Xcode pair whose Mac UI tests can click and type. On macOS 27.0.1 (26A434) with Xcode 27.0, WindowServer refuses the input service of `testmanagerd` (log: "missing the 'com.apple.private.hid.client.event-dispatch' entitlement"). The tests start, but no tap, key press or drag reaches the app. No permission fixes this: update macOS or Xcode. Until then, `tools/mg mac-ui` and `tools/mg drive --platform mac` report `blocked: mac-input` (status error) when the unified log shows the dropped input. Mac suites without input still pass. Doctor cannot verify this.
+
 ## Optional or later
 
 ### `device-developer-mode`

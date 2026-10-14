@@ -920,6 +920,32 @@ EOF
   [ "$(field '[.artifacts[] | select(.path | contains("/frames/"))] | length')" = 0 ]
 }
 
+@test "a Mac drive or mac-ui run whose synthesized input macOS dropped is blocked (error), not fail" {
+  add_drive_fakes
+  export MEGURI_MAC_UI_INTERVAL_MINUTES=0
+  # The unified log of testmanagerd when WindowServer refuses its input.
+  stub log 'echo "log $*" >>"$STUB_LOG"; [ -z "${STUB_INPUT_DROPPED:-}" ] || echo "2026-10-14 08:21:19.336 E  testmanagerd[21945:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."'
+  STUB_INPUT_DROPPED=1 FX_STEP2_STATUS=failed mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = blocked-mac-input ]
+  [ "$(field .details.blocked)" = mac-input ]
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+  [[ "$(field .message)" == *"blocked: macOS dropped the input"* ]]
+  [ -f "$(dirname "$result")/manifest.json" ]
+  called "^log show --style compact --start [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} --predicate process == \"testmanagerd\" AND eventMessage CONTAINS \"Recap playback\"\$"
+
+  # The same failed step with the input delivered is a failure of the app.
+  FX_STEP2_STATUS=failed mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac
+  [ "$status" -eq 1 ]
+  [ -z "$(field '.user_steps[] | select(.id == "mac-input") | .id')" ]
+
+  STUB_INPUT_DROPPED=1 mg mac-ui --suite test-hooks
+  [ "$status" -eq 2 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "blocked-mac-input suite/test-hooks" ]
+  [[ "$(field .message)" == *"mac-ui: blocked: macOS dropped the input"* ]]
+}
+
 @test "too few frames for a marked Mac step is an error" {
   add_drive_fakes
   FX_FRAMES=1 mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac --record

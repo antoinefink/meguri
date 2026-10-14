@@ -170,7 +170,7 @@ mg_drive__motion_inputs() {
 #     second), with the screen-recording user step.
 # Records artifacts and failures. Returns 0 pass, 1 fail (failed steps or
 # hierarchy issues), 2 error (the drive, a capture or a requested sheet could
-# not be made).
+# not be made, or macOS dropped the input the drive synthesized).
 mg_drive_run() {
   local script="$1" platform="$2" udid="$3" config="$4" record="$5" out="$6"
   local dest name abs_script rc capture="" video="" rec_start="" rec_log recorder="" capture_error=0
@@ -218,9 +218,16 @@ mg_drive_run() {
   esac
 
   echo "drive: running $script on $([ "$platform" = mac ] && echo the Mac || echo "$udid") ($config)${capture:+, capturing motion: $capture}" >&2
+  local since refused=0
+  since="$(mg_app_log_now)"
   TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$abs_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
     mg_app_xcodebuild_test "$out/drive" "$platform" "$dest" "$config" -only-testing:MeguriUITests/AgentDriverTests/testDriveScript
   rc=$?
+  # A Mac drive whose input macOS dropped ran, but proves nothing about the
+  # app: its captures are kept, and it ends blocked (error), not fail.
+  if [ "$platform" = mac ] && mg_app_mac_input_refused "$since"; then
+    refused=1
+  fi
   case "$capture" in
     video)
       if ! kill -0 "$recorder" 2>/dev/null; then
@@ -384,6 +391,7 @@ mg_drive_run() {
       "$(jq -r '.message + " at " + ((.frame // .frames[0]) | "\(.x),\(.y) \(.width)x\(.height)")' <<<"$line")" "tools/mg drive $script"
   done
 
+  [ "$refused" -eq 0 ] || return 2
   # The driver reports failed steps in its log, not as test failures.
   if [ "$rc" -ne 0 ] || [ "$(jq '.issues' "$out/manifest.json")" -gt 0 ] ||
     jq -e '.error != null or any(.steps[]; .status == "failed")' "$out/manifest.json" >/dev/null; then
@@ -447,7 +455,9 @@ mg_drive__job() {
       mg_status fail
       ;;
     *)
-      if [ -f "$manifest" ]; then
+      if [ -n "${MG_MAC_INPUT_REFUSED:-}" ]; then
+        mg_message "$MG_JOB: blocked: macOS dropped the input the drive synthesized (user step mac-input); its steps did not test the app"
+      elif [ -f "$manifest" ]; then
         mg_message "$MG_JOB: the drive ran, but a capture or check it asked for could not be made; see the failures and log.txt"
       else
         mg_message "$MG_JOB: the drive could not run; see log.txt"
