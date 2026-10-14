@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if os(macOS)
+import AppKit
+#endif
 
 /// Runs one agent drive script (U8, R1961, R1965). `tools/mg drive` passes the
 /// script's path as `MEGURI_DRIVE_SCRIPT` through the test-runner environment
@@ -30,6 +33,79 @@ final class AgentDriverTests: XCTestCase {
         let driver = AgentDriver(build: try BuildUnderTest.current(), test: self)
         driver.run(scriptAt: URL(filePath: path))
     }
+
+    /// Mac: a resize step resizes the window of the app that is running. The
+    /// app is not relaunched, so it keeps its state: the same process, the
+    /// sheet its route presented. The sizes are the launch sizes (R1962):
+    /// 800 points wide at `minimum` (800x560, taller only when the content
+    /// needs it), the visible frame of the window's display at `large`, and
+    /// 1180x780 at `default`. Runs only through `tools/mg mac-ui`.
+    func testResizeKeepsTheRunningAppAndItsState() throws {
+        #if os(macOS)
+        let build = try BuildUnderTest.current()
+        guard build.hasHooks else { throw XCTSkip("resize needs a hook build (Debug or Profile)") }
+        let id = try build.bundleIdentifier
+        let driver = AgentDriver(build: build, test: self)
+        var options = DriveScript.Launch()
+        options.route = "sample/sheet"
+        options.animations = false
+        options.windowSize = "default"
+        driver.run(DriveScript(name: "launch", steps: [DriveScript.Step(action: .launch(options))]))
+        XCTAssertEqual(driver.log.steps.map(\.status), ["ok"])
+        let app = XCUIApplication()
+        XCTAssert(app.staticTexts["sample.sheet.title"].waitForExistence(timeout: 15), "the sample sheet is not on screen")
+        let pid = try XCTUnwrap(Self.processIdentifier(id))
+        let window = app.windows.firstMatch
+        Self.assertSize(window.frame, CGSize(width: 1180, height: 780), "after the launch")
+
+        func resize(_ size: String) {
+            driver.run(DriveScript(name: "resize-\(size)", steps: [DriveScript.Step(action: .resize(size: size))]))
+            XCTAssertEqual(driver.log.steps.map(\.status), ["ok"], "resize \(size): \(driver.log.steps.first?.message ?? "")")
+            XCTAssertEqual(Self.processIdentifier(id), pid, "resize \(size) relaunched the app")
+            XCTAssert(app.staticTexts["sample.sheet.title"].exists, "the sheet is gone after resize \(size)")
+        }
+
+        resize("minimum")
+        XCTAssertEqual(window.frame.width, 800, accuracy: 0.5)
+        XCTAssert((560..<780).contains(window.frame.height), "minimum: height \(window.frame.height)")
+
+        resize("large")
+        let visible = try XCTUnwrap(Self.visibleFrame(around: window.frame), "no display holds the window")
+        XCTAssertEqual(window.frame.minX, visible.minX, accuracy: 0.5)
+        XCTAssertEqual(window.frame.minY, visible.minY, accuracy: 0.5)
+        Self.assertSize(window.frame, visible.size, "large")
+
+        resize("default")
+        Self.assertSize(window.frame, CGSize(width: 1180, height: 780), "default")
+        #else
+        throw XCTSkip("resizing a window is Mac only; on simulators the step is reported unavailable")
+        #endif
+    }
+
+    #if os(macOS)
+    private static func processIdentifier(_ bundleIdentifier: String) -> pid_t? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first { !$0.isTerminated }?.processIdentifier
+    }
+
+    /// The visible frame of the display that holds most of `frame`, both in
+    /// XCUITest's screen points (top-left origin on the main display).
+    private static func visibleFrame(around frame: CGRect) -> CGRect? {
+        guard let height = NSScreen.screens.first?.frame.height else { return nil }
+        func flipped(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX, y: height - rect.maxY, width: rect.width, height: rect.height)
+        }
+        func area(_ rect: CGRect) -> CGFloat { rect.isNull ? 0 : rect.width * rect.height }
+        return NSScreen.screens
+            .max { area(flipped($0.frame).intersection(frame)) < area(flipped($1.frame).intersection(frame)) }
+            .map { flipped($0.visibleFrame) }
+    }
+
+    private static func assertSize(_ frame: CGRect, _ size: CGSize, _ when: String, line: UInt = #line) {
+        XCTAssertEqual(frame.width, size.width, accuracy: 0.5, "\(when): width", line: line)
+        XCTAssertEqual(frame.height, size.height, accuracy: 0.5, "\(when): height", line: line)
+    }
+    #endif
 }
 
 @MainActor
@@ -82,9 +158,8 @@ final class AgentDriver {
     /// Fixed-rate frames around marked steps (`FrameSampler`).
     private let sampleFrames = ProcessInfo.processInfo.environment["MEGURI_DRIVE_FRAMES"] == "1"
     private var app: XCUIApplication?
-    private var lastLaunch: DriveScript.Launch?
     private var tree: HierarchyExport.Tree?
-    private var log: Log
+    private(set) var log: Log
 
     static var platform: String {
         #if os(macOS)
@@ -101,16 +176,23 @@ final class AgentDriver {
     }
 
     func run(scriptAt url: URL) {
-        log.path = url.path(percentEncoded: false)
-        defer { attachLog() }
+        let path = url.path(percentEncoded: false)
         let script: DriveScript
         do {
             script = try DriveScript(contentsOf: url)
         } catch {
-            log.error = error.message
+            log = Log(script: "", path: path, platform: Self.platform, error: error.message)
+            attachLog()
             return
         }
-        log.script = script.name
+        run(script, path: path)
+    }
+
+    /// Runs the steps with a fresh log. The app the driver launched stays
+    /// with it from one run to the next.
+    func run(_ script: DriveScript, path: String = "") {
+        log = Log(script: script.name, path: path, platform: Self.platform)
+        defer { attachLog() }
         for (offset, step) in script.steps.enumerated() {
             guard perform(step, index: offset + 1) else { return }
         }
@@ -244,7 +326,6 @@ final class AgentDriver {
             throw StepFailure(message: "the app is not running in the foreground 30 s after launch")
         }
         self.app = app
-        lastLaunch = options
         test.addTeardownBlock { @MainActor in app.terminate() }
     }
 
@@ -261,16 +342,27 @@ final class AgentDriver {
         ).arguments
     }
 
-    /// Mac: relaunches with the last launch options at the new window size
-    /// (the window size is a launch option, R1962). Simulators have no
-    /// resizable iPhone window in this toolchain.
+    /// Mac: resizes the running app's window, as the `windowSize` launch
+    /// option would (R1962), without a relaunch: the app keeps its state.
+    /// The hook build does it on a distributed notification and answers
+    /// (`TestHooks.AppearanceOverrides.WindowHookView`, app/AGENTS.md).
+    /// Simulators have no resizable iPhone window in this toolchain.
     private func resize(_ size: String) throws {
         #if os(macOS)
-        guard var options = lastLaunch else {
-            throw StepFailure(message: "resize needs a launch step first")
+        _ = try running()
+        let id = try build.bundleIdentifier
+        let center = DistributedNotificationCenter.default()
+        let resized = XCTNSNotificationExpectation(
+            name: Notification.Name("\(id).testhooks.windowResized"), object: nil, notificationCenter: center
+        )
+        // Delivered at once: the app is usually not the active app.
+        center.postNotificationName(
+            Notification.Name("\(id).testhooks.resizeWindow"), object: size, userInfo: nil, deliverImmediately: true
+        )
+        guard XCTWaiter().wait(for: [resized], timeout: 10) == .completed else {
+            throw StepFailure(message: "the app did not resize its window to \(size) within 10 s")
         }
-        options.windowSize = size
-        try launch(options)
+        tree = nil
         #else
         throw Unavailable(reason: "resizable iPhone windows: devicectl appResize is not confirmed on simulators with this toolchain")
         #endif
@@ -360,7 +452,8 @@ final class AgentDriver {
     // MARK: Frames
 
     /// A sampler for a marked step that acts on the running app, started; nil
-    /// otherwise. Launch and resize start a new app, and a snapshot is still.
+    /// otherwise. A launch starts a new app, a resize moves the window the
+    /// sampler crops to, and a snapshot is still.
     private func startSampler(for step: DriveScript.Step) throws -> FrameSampler? {
         guard sampleFrames, step.transition != nil else { return nil }
         switch step.action {

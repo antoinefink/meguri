@@ -151,7 +151,7 @@ fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) pri
 mg_app_build() { echo "fake build $*" >>"$STUB_LOG"; }
 mg_app_xcodebuild_test() {
   local prefix="$1" platform="$2" t0 t1 n=0
-  echo "fake xcodebuild-test $platform frames=${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-unset}" >>"$STUB_LOG"
+  echo "fake xcodebuild-test $platform frames=${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-unset} ${*:5}" >>"$STUB_LOG"
   rm -rf "$prefix.xcresult"
   mkdir -p "$prefix.xcresult"
   t0="$(fx_now)"
@@ -570,7 +570,7 @@ EOF
   [ "$(field .details.queued)" = true ]
   mg mac-ui
   [ "$(field .status)" = warn ]
-  [ "$(field '.details.suites | index("test-hooks") != null')" = true ]
+  [ "$(field '.details.suites | index("test-hooks") != null and index("agent-driver") != null')" = true ]
   [ "$(field '[.details.suites[] | select(startswith("drive:"))] | length')" -ge 1 ]
   not_called "xcodebuild"
 }
@@ -1082,6 +1082,17 @@ EOF
   [ "$status" -eq 2 ]
   [ "$(field '[.failures[].id] | join(" ")')" = "blocked-mac-input suite/test-hooks" ]
   [[ "$(field .message)" == *"mac-ui: blocked: macOS dropped the input"* ]]
+}
+
+@test "mac-ui runs the agent driver's resize test as a suite of its own" {
+  add_drive_fakes
+  mg mac-ui --suite agent-driver
+  [ "$status" -eq 0 ]
+  [ "$(field '.summary | "\(.total) \(.passed)"')" = "1 1" ]
+  called "^fake xcodebuild-test mac frames=unset -only-testing:MeguriUITests/AgentDriverTests/testResizeKeepsTheRunningAppAndItsState\$"
+  mg mac-ui --suite resize
+  [ "$status" -eq 2 ]
+  [[ "$(field '.failures[0].message')" == *"(test-hooks, agent-driver, drive:<script>)"* ]]
 }
 
 @test "too few frames for a marked Mac step is an error" {

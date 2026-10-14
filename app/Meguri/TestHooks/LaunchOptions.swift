@@ -159,7 +159,9 @@ extension TestHooks {
             return port
         }
 
-        private static func windowSize(_ value: String) throws(TestHookError) -> WindowSize {
+        /// A `-MeguriWindowSize` value, or a window resize request's
+        /// (`AppearanceOverrides.WindowHookView`).
+        static func windowSize(_ value: String) throws(TestHookError) -> WindowSize {
             switch value {
             case "minimum": return .minimum
             case "default": return .standard

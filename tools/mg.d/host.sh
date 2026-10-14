@@ -19,7 +19,7 @@
 # MEGURI_MAC_UI_INTERVAL_MINUTES.
 
 mg_job mac-ui host mg_mac_ui \
-  "Mac UI-driving suites, at most one run an hour (root AGENTS.md): [--suite test-hooks|drive:<script>]... (default: TestHooksTests and every example drive script for the Mac; scripts that mark a transition are recorded); refused runs are queued (warn)"
+  "Mac UI-driving suites, at most one run an hour (root AGENTS.md): [--suite test-hooks|agent-driver|drive:<script>]... (default: TestHooksTests, the agent driver's resize test and every example drive script for the Mac; scripts that mark a transition are recorded); refused runs are queued (warn)"
 
 # ---------------------------------------------------------------------------
 # Exit actions: a job runs in its own subshell; these run once when it ends,
@@ -344,18 +344,18 @@ mg_mac_ui() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --suite)
-        [ "$#" -ge 2 ] || { mg_failure usage "--suite needs test-hooks or drive:<script>"; mg_status error; return 0; }
+        [ "$#" -ge 2 ] || { mg_failure usage "--suite needs test-hooks, agent-driver or drive:<script>"; mg_status error; return 0; }
         case "$2" in
-          test-hooks | drive:?*) suites[${#suites[@]}]="$2" ;;
-          *) mg_failure usage "unknown suite '$2' (test-hooks, drive:<script>)"; mg_status error; return 0 ;;
+          test-hooks | agent-driver | drive:?*) suites[${#suites[@]}]="$2" ;;
+          *) mg_failure usage "unknown suite '$2' (test-hooks, agent-driver, drive:<script>)"; mg_status error; return 0 ;;
         esac
         shift 2
         ;;
-      *) mg_failure usage "usage: tools/mg mac-ui [--suite test-hooks|drive:<script>]..."; mg_status error; return 0 ;;
+      *) mg_failure usage "usage: tools/mg mac-ui [--suite test-hooks|agent-driver|drive:<script>]..."; mg_status error; return 0 ;;
     esac
   done
   if [ "${#suites[@]}" -eq 0 ]; then
-    suites=(test-hooks)
+    suites=(test-hooks agent-driver)
     for s in tools/drive-scripts/examples/*.json; do
       [ -f "$s" ] || continue
       jq -e '(.platforms // ["ios", "mac"]) | index("mac")' "$s" >/dev/null 2>&1 && suites[${#suites[@]}]="drive:$s"
@@ -374,10 +374,11 @@ mg_mac_ui() {
   local passed=0 failed=0 errors=0 name result record since
   for s in "${suites[@]}"; do
     case "$s" in
-      test-hooks)
-        name=test-hooks
+      test-hooks | agent-driver)
+        name="$s"
         since="$(mg_app_log_now)"
-        mg_app_xcodebuild_test "$MG_RUN_DIR/$name" mac "platform=macOS,arch=arm64" Debug -only-testing:MeguriUITests/TestHooksTests
+        mg_app_xcodebuild_test "$MG_RUN_DIR/$name" mac "platform=macOS,arch=arm64" Debug \
+          "-only-testing:MeguriUITests/$([ "$s" = test-hooks ] && echo TestHooksTests || echo AgentDriverTests/testResizeKeepsTheRunningAppAndItsState)"
         result=$?
         ! mg_app_mac_input_refused "$since" || result=2
         ;;
