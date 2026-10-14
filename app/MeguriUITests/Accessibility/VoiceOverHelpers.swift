@@ -24,6 +24,15 @@ enum VoiceOver {
     struct Reading {
         let source: Source
         let utterances: [String]
+        /// False when the reading stopped at the step limit: the screen may
+        /// go on (`traverse`).
+        var complete = true
+    }
+
+    /// A forward reading and whether it reached the end.
+    struct Traversal: Equatable {
+        let utterances: [String]
+        let complete: Bool
     }
 
     /// Reads the current screen from its first element forward, until
@@ -43,7 +52,7 @@ enum VoiceOver {
         }
         defer { try? service.disable() }
         var failure: (any Error)?
-        let utterances = traverse(first: try? service.currentSpeech().utterance, limit: limit) {
+        let reading = traverse(first: try? service.currentSpeech().utterance, limit: limit) {
             do {
                 return try service.moveForward().utterance
             } catch {
@@ -51,32 +60,29 @@ enum VoiceOver {
                 return nil
             }
         }
-        if utterances.isEmpty {
+        if reading.utterances.isEmpty {
             return Reading(source: .hierarchy(reason: "the VoiceOver service spoke nothing: \(failure.map { "\($0)" } ?? "no speech")"), utterances: try hierarchyOrder(app))
         }
-        return Reading(source: .voiceOverService, utterances: utterances)
+        return Reading(source: .voiceOverService, utterances: reading.utterances, complete: reading.complete)
         #endif
     }
 
     /// A forward reading: `first`, then what each `next()` speaks, until it
-    /// speaks nothing (VoiceOver did not move: the last element) or after
-    /// `limit` steps. Repeated utterances are kept: two elements may say the
-    /// same thing (two Delete buttons). Only a reading that ran to the limit
-    /// is checked for VoiceOver having wrapped around to the start: when the
-    /// whole reading repeats one sequence from its first utterance, that
-    /// sequence is the screen.
+    /// speaks nothing (VoiceOver did not move: the last element; complete)
+    /// or after `limit` steps (not complete). Every utterance is kept,
+    /// repeated ones too: many elements may say the same thing (a row of
+    /// Delete buttons), and the service tells neither which element spoke
+    /// nor that it wrapped around (its output is the utterance alone), so a
+    /// repeat proves no wrap-around and a reading is never cut on one.
     @MainActor
-    static func traverse(first: String?, limit: Int, next: () -> String?) -> [String] {
+    static func traverse(first: String?, limit: Int, next: () -> String?) -> Traversal {
         var utterances: [String] = []
         if let first, !first.isEmpty { utterances.append(first) }
         for _ in 0..<limit {
-            guard let spoken = next(), !spoken.isEmpty else { return utterances }
+            guard let spoken = next(), !spoken.isEmpty else { return Traversal(utterances: utterances, complete: true) }
             utterances.append(spoken)
         }
-        for period in 1..<max(utterances.count, 1) where utterances.indices.dropFirst(period).allSatisfy({ utterances[$0] == utterances[$0 - period] }) {
-            return Array(utterances.prefix(period))
-        }
-        return utterances
+        return Traversal(utterances: utterances, complete: false)
     }
 
     /// Accessibility elements in hierarchy order: leaves with a label, and

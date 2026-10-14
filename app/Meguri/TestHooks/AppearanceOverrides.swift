@@ -10,14 +10,18 @@ extension TestHooks {
     /// The launch overrides that live in the view tree: Reduce Motion and
     /// Reduce Transparency mapped onto SwiftUI's underscored environment
     /// values (no simulator switch exists for them), animations off, and the
-    /// Mac window size.
+    /// Mac window size; the Mac appearance is process-wide.
     struct AppearanceOverrides: ViewModifier {
         let options: LaunchOptions
 
         /// Overrides that are process-wide rather than per view; called once
         /// before the first scene.
         static func applyProcessWide(_ options: LaunchOptions) {
-            #if !os(macOS)
+            #if os(macOS)
+            if let appearance = options.appearance {
+                NSApplication.shared.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
+            }
+            #else
             if let enabled = options.animationsEnabled {
                 UIView.setAnimationsEnabled(enabled)
             }

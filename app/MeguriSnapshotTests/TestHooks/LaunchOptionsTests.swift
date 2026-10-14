@@ -20,6 +20,7 @@ import Testing
             "-MeguriReduceMotion", "on",
             "-MeguriReduceTransparency", "off",
             "-MeguriWindowSize", "1000x700",
+            "-MeguriAppearance", "dark",
             "-MeguriAnkiConnectPort", "18765",
             "-MeguriMigakuPort", "54432",
             "-MeguriRoute", "review/answer",
@@ -33,6 +34,7 @@ import Testing
         #expect(options.reduceMotion == true)
         #expect(options.reduceTransparency == false)
         #expect(options.windowSize == .explicit(width: 1000, height: 700))
+        #expect(options.appearance == .dark)
         #expect(options.ankiConnectPort == 18765)
         #expect(options.migakuPort == 54432)
         #expect(options.route?.path == "review/answer")
@@ -57,6 +59,20 @@ import Testing
         #expect(try Options(arguments: ["-MeguriWindowSize", "minimum"]).windowSize == .minimum)
         #expect(try Options(arguments: ["-MeguriWindowSize", "default"]).windowSize == .standard)
         #expect(try Options(arguments: ["-MeguriWindowSize", "large"]).windowSize == .large)
+    }
+
+    @Test func theAppearanceIsMacOnly() throws {
+        let options = try Options(arguments: ["-MeguriAppearance", "light"])
+        #expect(options.appearance == .light)
+        var configuration = LaunchConfiguration()
+        let apply = {
+            try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "x.dev"), routes: .standard)
+        }
+        #if os(macOS)
+        try apply()
+        #else
+        #expect(throws: TestHookError("-MeguriAppearance applies to the Mac only"), performing: apply)
+        #endif
     }
 
     @Test func theWindowSizeIsMacOnly() throws {
@@ -88,6 +104,7 @@ import Testing
         (["-MeguriMigakuPort", "70000"], "-MeguriMigakuPort takes a port from 1 to 65535"),
         (["-MeguriWindowSize", "1000x"], "-MeguriWindowSize takes minimum, default, large or <width>x<height>"),
         (["-MeguriWindowSize", "0x700"], "-MeguriWindowSize takes"),
+        (["-MeguriAppearance", "Dark"], "-MeguriAppearance takes light or dark, got 'Dark'"),
         (["-MeguriRoute", "sample"], "is not a route"),
         (["-MeguriRoute", "Sample/Sheet"], "is not a route"),
         (["-MeguriRoute", "sample//sheet"], "is not a route"),

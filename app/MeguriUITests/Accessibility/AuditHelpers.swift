@@ -116,6 +116,12 @@ struct AuditFinding: Equatable, CustomStringConvertible {
     let auditType: String
     let detail: String
     let suppressed: Bool
+    /// Why the finding is the window's and not the app's (the Mac only;
+    /// `AccessibilityAudit.systemElement`): listed in the report, not failed.
+    var excluded: String? = nil
+
+    /// Whether the finding fails the audit.
+    var counts: Bool { !suppressed && excluded == nil }
 
     var description: String {
         let name = identifier.isEmpty ? "an element without identifier (\"\(label)\", \(element))" : identifier
@@ -142,12 +148,14 @@ enum AccessibilityAudit {
             #endif
         }
 
-        /// Launch arguments: on the Mac the appearance, named either way, so
-        /// a light run never inherits a dark workstation's; on iOS the text
-        /// size (the appearance is set on the device, see `apply`).
+        /// Launch arguments: on the Mac the app's own appearance
+        /// (`-MeguriAppearance`, NSApp.appearance), so a light run never
+        /// inherits a dark workstation's (with `-AppleInterfaceStyle Light`
+        /// the app showed its dark background on a Mac in dark mode); on iOS the text size (the appearance is set
+        /// on the device, see `apply`).
         var launchArguments: [String] {
             #if os(macOS)
-            ["-AppleInterfaceStyle", dark ? "Dark" : "Light"]
+            ["-MeguriAppearance", dark ? "dark" : "light"]
             #else
             largestText ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []
             #endif
@@ -161,8 +169,27 @@ enum AccessibilityAudit {
         }
     }
 
+    /// Why an element the audit reports belongs to the window rather than
+    /// the app, if it does. On the Mac the audit also covers the window's
+    /// own elements: its close, minimize and full-screen buttons (`_XCUI:`
+    /// identifiers) and title bar and toolbar elements that carry neither an
+    /// identifier nor a label (the first Mac runs found
+    /// sufficientElementDescription and contrast issues only on those). The
+    /// app's elements carry an identifier or a label (R1964) and are audited;
+    /// the others are listed with their type and frame, not failed, until
+    /// U253's sweep decides how the Mac audit treats them. iOS audits every
+    /// element.
+    static func systemElement(identifier: String, label: String) -> String? {
+        #if os(macOS)
+        if identifier.hasPrefix("_XCUI:") { return "the window's own control" }
+        if identifier.isEmpty && label.isEmpty { return "a window element with neither identifier nor label, not the app's (U253's sweep)" }
+        #endif
+        return nil
+    }
+
     /// Runs the audit; every issue comes back as a finding, suppressed when
-    /// a suppression names its element and its type exactly.
+    /// a suppression names its element and its type exactly, excluded when
+    /// it is the window's (`systemElement`).
     @MainActor
     static func run(
         _ app: XCUIApplication, variant: String, types: XCUIAccessibilityAuditType = .all, suppressions: [AuditSuppression]
@@ -174,10 +201,20 @@ enum AccessibilityAudit {
             let type = AuditSuppressions.name(of: issue.auditType)
             let suppressed = !identifier.isEmpty && suppressions.contains { $0.identifier == identifier && $0.auditType == type }
             let element = snapshot.map { "type \($0.elementType.rawValue) at \(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))×\(Int($0.frame.height))" } ?? "no element"
-            findings.append(AuditFinding(
-                variant: variant, identifier: identifier, label: snapshot?.label ?? "", element: element, auditType: type,
-                detail: issue.compactDescription, suppressed: suppressed
-            ))
+            let label = snapshot?.label ?? ""
+            let finding = AuditFinding(
+                variant: variant, identifier: identifier, label: label, element: element, auditType: type,
+                detail: "\(issue.compactDescription) (\(issue.detailedDescription))", suppressed: suppressed,
+                excluded: systemElement(identifier: identifier, label: label)
+            )
+            findings.append(finding)
+            if finding.counts {
+                // What the audit saw: the window, kept with the result.
+                let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+                shot.name = "a11y-finding \(variant) \(type) \(element).png"
+                shot.lifetime = .keepAlways
+                XCTContext.runActivity(named: "accessibility finding: \(finding)") { $0.add(shot) }
+            }
             // Handled here: unsuppressed findings fail through `assertClean`,
             // with the identifier and type in the message.
             return true
@@ -191,7 +228,7 @@ enum AccessibilityAudit {
         let findings: [AuditFinding]
         let touchTargets: [TouchTargetViolation]
 
-        var passed: Bool { findings.allSatisfy(\.suppressed) && touchTargets.isEmpty }
+        var passed: Bool { !findings.contains(where: \.counts) && touchTargets.isEmpty }
     }
 
     /// Launches `launch` once per variant, checks that the variant's
@@ -276,8 +313,12 @@ enum AccessibilityAudit {
     static func screenReportData(_ screen: String, states: [StateResult]) -> Data {
         func findingsJSON(_ result: StateResult) -> [[String: Any]] {
             result.findings.map {
-                ["state": result.state, "variant": $0.variant, "identifier": $0.identifier, "label": $0.label, "element": $0.element,
-                 "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed]
+                var finding: [String: Any] = [
+                    "state": result.state, "variant": $0.variant, "identifier": $0.identifier, "label": $0.label, "element": $0.element,
+                    "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed,
+                ]
+                if let excluded = $0.excluded { finding["excluded"] = excluded }
+                return finding
             }
         }
         let report: [String: Any] = [
@@ -297,9 +338,10 @@ enum AccessibilityAudit {
         return (try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])) ?? Data()
     }
 
-    /// Fails once per unsuppressed finding.
+    /// Fails once per finding that counts (neither suppressed nor the
+    /// window's).
     static func assertClean(_ findings: [AuditFinding], file: StaticString = #filePath, line: UInt = #line) {
-        for finding in findings where !finding.suppressed {
+        for finding in findings where finding.counts {
             XCTFail("accessibility audit: \(finding)", file: file, line: line)
         }
     }

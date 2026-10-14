@@ -104,13 +104,10 @@ final class AccessibilityHelperTests: XCTestCase {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("\(build.configuration.rawValue) has no test hooks") }
         #if os(macOS)
-        // The first Mac UI sweep found sufficientElementDescription and
-        // contrast issues on elements with no identifier and no label,
-        // outside the sample's own (identified) elements; the findings now
-        // carry each element's type and frame, and U253's sweep decides how
-        // the Mac audit treats them.
-        throw XCTSkip("Mac audit findings on unidentified elements are left to U253's sweep")
-        #else
+        guard try build.bundleIdentifier.hasSuffix(".dev") else {
+            throw XCTSkip("never launch \(try build.bundleIdentifier) on the Mac: it would replace the daily-driver app")
+        }
+        #endif
         let suppressions = try AuditSuppressions.bundled()
         let states = try ["empty", "typical", "overflow", "error", "loading"].map { state in
             try AccessibilityAudit.runAllVariants(
@@ -123,7 +120,6 @@ final class AccessibilityHelperTests: XCTestCase {
             AccessibilityAudit.assertClean(state.findings)
             TouchTargets.assertMet(state.touchTargets)
         }
-        #endif
     }
 
     /// The report fails a screen when one state fails, and names the state.
@@ -139,6 +135,35 @@ final class AccessibilityHelperTests: XCTestCase {
         XCTAssertEqual(states["typical"]?["status"] as? String, "pass")
         XCTAssertEqual(states["error"]?["status"] as? String, "fail")
         XCTAssertEqual(json["touchTargets"] as? [String], ["error: sample.deckOverview.retry is 64×18 pt; the minimum here is 44×44 pt (R1980)"])
+    }
+
+    /// On the Mac, findings on the window's own elements (no identifier and
+    /// no label, or `_XCUI:` controls) are listed, not failed; an element
+    /// with an identifier or a label is the app's and fails. iOS fails every
+    /// finding.
+    func testOnlyTheWindowsOwnElementsAreLeftOutOfTheMacAudit() throws {
+        #if os(macOS)
+        XCTAssertNotNil(AccessibilityAudit.systemElement(identifier: "", label: ""))
+        XCTAssertNotNil(AccessibilityAudit.systemElement(identifier: "_XCUI:CloseWindow", label: "close button"))
+        #else
+        XCTAssertNil(AccessibilityAudit.systemElement(identifier: "", label: ""))
+        #endif
+        XCTAssertNil(AccessibilityAudit.systemElement(identifier: "", label: "No Cards"))
+        XCTAssertNil(AccessibilityAudit.systemElement(identifier: "sample.deckOverview.retry", label: ""))
+        func finding(label: String) -> AuditFinding {
+            AuditFinding(variant: "empty, light", identifier: "", label: label, element: "type 48 at 0,0 10×10", auditType: "contrast",
+                         detail: "Contrast failed", suppressed: false, excluded: AccessibilityAudit.systemElement(identifier: "", label: label))
+        }
+        func status(_ findings: [AuditFinding]) throws -> String? {
+            let data = AccessibilityAudit.screenReportData("sample.deckOverview", states: [.init(state: "empty", findings: findings, touchTargets: [])])
+            return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])["status"] as? String
+        }
+        #if os(macOS)
+        XCTAssertEqual(try status([finding(label: "")]), "pass")
+        #else
+        XCTAssertEqual(try status([finding(label: "")]), "fail")
+        #endif
+        XCTAssertEqual(try status([finding(label: "No Cards")]), "fail")
     }
 
     /// The appearance check reads a dark screen as dark and a light one as light.
@@ -166,7 +191,7 @@ final class AccessibilityHelperTests: XCTestCase {
         let app = try launch("sample/deck-overview/typical")
         XCTAssert(app.buttons["sample.deckOverview.study"].waitForExistence(timeout: 15))
         let reading = try VoiceOver.read(app)
-        let report = XCTAttachment(string: "source: \(reading.source)\n" + reading.utterances.joined(separator: "\n"))
+        let report = XCTAttachment(string: "source: \(reading.source)\(reading.complete ? "" : " (stopped at the step limit)")\n" + reading.utterances.joined(separator: "\n"))
         report.name = "voiceover-reading"
         report.lifetime = .keepAlways
         add(report)
@@ -178,25 +203,30 @@ final class AccessibilityHelperTests: XCTestCase {
     func testVoiceOverKeepsRepeatedLabels() {
         var script = ["Delete, Button", "Delete, Button", "Delete, Button", "Done, Button"][...]
         let reading = VoiceOver.traverse(first: "Spanish, Heading", limit: 60) { script.popFirst() }
-        XCTAssertEqual(reading, ["Spanish, Heading", "Delete, Button", "Delete, Button", "Delete, Button", "Done, Button"])
+        XCTAssertEqual(reading, VoiceOver.Traversal(utterances: ["Spanish, Heading", "Delete, Button", "Delete, Button", "Delete, Button", "Done, Button"], complete: true))
     }
 
-    /// A reading that runs to the limit because VoiceOver wrapped around to
-    /// the start is cut where it starts over; one that does not repeat stops
-    /// at the limit.
-    func testVoiceOverEndsAtTheLimitAndCutsAWrapAround() {
+    /// A reading that runs to the limit keeps every utterance and says it
+    /// stopped there: 61 elements that all say "Delete, Button" are 61
+    /// utterances, not one, and a repeating sequence is not taken for a
+    /// wrap-around (the service names no element).
+    func testVoiceOverKeepsAReadingThatRunsToTheLimit() {
+        let same = VoiceOver.traverse(first: "Delete, Button", limit: 60) { "Delete, Button" }
+        XCTAssertEqual(same.utterances.count, 61)
+        XCTAssertTrue(same.utterances.allSatisfy { $0 == "Delete, Button" })
+        XCTAssertFalse(same.complete)
         let cycle = ["Spanish, Heading", "Delete, Button", "Delete, Button", "Done, Button"]
         var step = 0
-        let wrapped = VoiceOver.traverse(first: cycle[0], limit: 20) {
+        let repeating = VoiceOver.traverse(first: cycle[0], limit: 11) {
             step += 1
             return cycle[step % cycle.count]
         }
-        XCTAssertEqual(wrapped, cycle)
+        XCTAssertEqual(repeating, VoiceOver.Traversal(utterances: cycle + cycle + cycle, complete: false))
         var count = 0
         let long = VoiceOver.traverse(first: "Row 0", limit: 5) {
             count += 1
             return "Row \(count)"
         }
-        XCTAssertEqual(long, ["Row 0", "Row 1", "Row 2", "Row 3", "Row 4", "Row 5"])
+        XCTAssertEqual(long, VoiceOver.Traversal(utterances: ["Row 0", "Row 1", "Row 2", "Row 3", "Row 4", "Row 5"], complete: false))
     }
 }
