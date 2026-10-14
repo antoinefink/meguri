@@ -71,4 +71,5 @@ wal_checkpoint
 query_only
 integrity_check
 foreign_keys
+legacy_alter_table
 rowid

@@ -172,7 +172,10 @@ Two other values are unstable in Anki for the same reason and are kept out of go
 - `col.crt`, `col.mod`, `col.scm`, `col.dty`, `col.usn` and `col.ls` keep their values: an upgrade is not a change that needs syncing, and it never forces a full sync.
 - `notes` and `revlog` are not touched; `cards` only by U13. Rows keep their `usn` and `mtime_secs` except where a step says otherwise.
 - The upgrade is not an op: no undo entry, no change notification of its own (the opened collection is new to the engine anyway), no `col.mod` bump (U23's rule applies to ops only).
-- Foreign objects (`storage/schema-18#S6`) are kept.
+- Foreign objects (`storage/schema-18#S6`) are kept, each with its stored definition (`tbl_name` and `sql`) unchanged (`storage/schema-18#S6.2`). That includes the objects that depend on `tags` and `graves`, which steps 17 and 18 rebuild:
+  - Dropping a table drops the indexes and triggers defined on it. Before step 17 drops `tags` and before step 18 drops `graves`, keep the stored `sql` of every foreign index and trigger whose `tbl_name` is that table (case-insensitively), in their `sqlite_master` order. After the rebuilt table has its rows back, run each of those texts again, unchanged and in that order. The triggers therefore do not fire on the upgrade's own row copies, and the indexes are built over the final rows. A text that fails to run fails the upgrade (U10).
+  - Views, and triggers on other tables, that read `tags` or `graves` name the table in their stored text. Dropping the table leaves them as they are, and once the table exists again they read the rebuilt one. Never rename a collection table during the upgrade: SQLite (with `legacy_alter_table` off, the library's default and the bundled build's) rewrites the stored text of every view and trigger that names a renamed table so that it names the new name, and they would then read the old table, which the step drops.
+  - Anki 26.09.3 does not keep these objects: its step 17 loses the foreign indexes and triggers of `tags`, and its step 18 loses those of `graves` and leaves the views and triggers that read `graves` naming a table that no longer exists. Meguri keeps them (R2016). This is a deviation from Anki that no golden can see, because no fixture holds a foreign object; `tests/upgrade.rs` asserts it.
 
 ## U13. Step 16
 
@@ -192,19 +195,23 @@ The rewrite encodes the preset again (U21 canonical encoding). Protobuf fields M
 
 ## U14. Step 17
 
-Read every `tags` row (`tag`, `usn`), drop the table, create
+Read every `tags` row (`tag`, `usn`) and keep the stored text of the foreign indexes and triggers of `tags` (U12). Drop the table, create
 
 `CREATE TABLE tags ( tag text NOT NULL PRIMARY KEY COLLATE unicase, usn integer NOT NULL, collapsed boolean NOT NULL, config blob NULL ) without rowid`
 
-and insert every tag again with its name and usn, `collapsed` 1 and `config` NULL. Set `col.ver` to 17.
+and insert every tag again with its name and usn, `collapsed` 1 and `config` NULL. Then create the kept foreign indexes and triggers again from their stored text (U12). Set `col.ver` to 17.
 
 ## U15. Step 18
 
-Rename `graves` to `graves_old`, create
+The state after step 18:
 
-`CREATE TABLE graves ( oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type) ) WITHOUT ROWID`
+- `graves` is defined by `CREATE TABLE graves ( oid integer NOT NULL, type integer NOT NULL, usn integer NOT NULL, PRIMARY KEY (oid, type) ) WITHOUT ROWID`.
+- It holds one row (`oid`, `type`, `usn`) for each `(oid, type)` found in the old `graves`: the one that comes first in the old table's rowid order. Nothing else. (Before schema 18 nothing stopped a client from writing the same grave twice; the first one written wins.)
+- The index `CREATE INDEX idx_graves_pending ON graves (usn)` exists.
+- The foreign indexes and triggers of the old `graves` exist again with their stored text, created after the rows were back, and the views and triggers that read `graves` read the new table (U12).
+- `col.ver` is 18.
 
-copy the rows over in the old table's rowid order, keeping only the first row for each `(oid, type)`, drop `graves_old`, create `CREATE INDEX idx_graves_pending ON graves (usn)` and set `col.ver` to 18. (Before schema 18 nothing stopped a client from writing the same grave twice; the first one written wins.)
+Do not reach this state by renaming the old table (U12: SQLite would rewrite every view and trigger that names `graves`). Meguri keeps the old rows in a TEMP table, in SQLite's temp schema and never in the file, while it drops `graves`, creates it again and copies the rows back; the step adds no object to the file's `sqlite_master` besides the new `graves` and its index.
 
 ## U16. Fixtures
 
@@ -283,4 +290,5 @@ No fixture may come from `local-data/` or contain anything from the user's colle
 | Card factor 1400 survives (preset not reset) | `storage/upgrade/from-11` |
 | Duplicate graves: first row kept | `storage/upgrade/from-*` (dump of `graves`) |
 | Pre-upgrade copy written first; killed mid-transaction → original intact, copy present, next open upgrades | `tests/upgrade.rs` (Meguri only) |
+| A foreign table, an index, a trigger and a view on `graves` (and on `tags` from 14 on), added to each fixture from 11 to 17, keep their stored definitions through the upgrade; the triggers did not fire on the upgrade's row copies, the views read the rebuilt tables, the triggers fire on them, `integrity_check` is `ok` | `tests/upgrade.rs` (Meguri only, U12) |
 | Expected objects after each upgrade, then after ten open/close cycles and 1,000 ops | scenarios (`schema_objects`) and `tests/schema_objects.rs` |

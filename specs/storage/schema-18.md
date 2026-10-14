@@ -87,17 +87,24 @@ A function of the open gate (`storage/open-and-connections` C2.5) that reads `sq
 
 - `missing_tables`: required tables that are absent. Not empty: the file is refused with `NotACollection`.
 - `missing_indexes`: required indexes that are absent. The open still succeeds (Anki never checks its indexes and opens such a file); the list goes to the diagnostics that Check Database reports (U128). Meguri does not recreate them on open.
-- `foreign`: the foreign objects. They are kept as they are: Meguri never drops, renames or rewrites them. Their presence never refuses a file.
+- `foreign`: the foreign objects. They are kept as they are: Meguri never drops, renames or rewrites them. Their presence never refuses a file. (Steps 17 and 18 of the upgrade drop the foreign indexes and triggers of the table they rebuild together with it, and create them again from their stored text, so their definitions end unchanged: `storage/schema-upgrade#U12`.)
 
-Objects are compared by type and name (and table, for indexes), never by their SQL text, because older clients stored other spacing and letter case.
+Objects are compared with the required set by type and name (and table, for indexes), never by their SQL text, because older clients stored other spacing and letter case.
 
 ### S6.2 The guard
 
-After any Meguri operation on a collection (open, upgrade, close, any op, sync, import, maintenance), the set of `(type, name)` in `sqlite_master` equals the set before the operation, plus only:
+An object of `sqlite_master` is its `(type, name)`; its definition is its `tbl_name` and its `sql` exactly as stored (byte for byte, no normalization; NULL for the automatic indexes). After any Meguri operation on a collection (open, upgrade, close, any op, sync, import, maintenance), `sqlite_master` holds the objects it held before the operation, each with the same definition, plus only:
 
-- the objects that an upgrade step of `storage/schema-upgrade` creates (and minus those it drops: the old `graves` and `tags` tables);
+- the objects that an upgrade step of `storage/schema-upgrade` creates, and the new definitions of `tags` (step 17) and `graves` (step 18), which it rebuilds. The foreign objects keep their definitions through an upgrade, those on or reading `tags` and `graves` included (`storage/schema-upgrade#U12`);
 - `sqlite_stat1` and `sqlite_stat4`, when the operation is one of the `ANALYZE` points of S5.
 
-For a file that Anki or Meguri created, the set is exactly the required set plus `sqlite_stat1` and `sqlite_stat4`. Meguri's own temporary objects (TEMP tables of the writer, U23) live in SQLite's temp schema, never in `sqlite_master` of the file. The conformance runner asserts the guard after every scenario (U4), and `tests/schema_objects.rs` asserts it after ten open/close cycles, an upgrade and a 1,000-operation run.
+The guard compares definitions as well as the `(type, name)` set: a column added to a table, or an index dropped and created again under the same name with other columns, adds to the collection as much as a new object does, and breaks the guard (R2016). This compares a file's objects with the same file's objects before the operation, so text that older clients stored with other spacing or letter case is no problem; S6.1's rule against comparing stored text with the required set still holds.
+
+For a file that Anki or Meguri created, the objects are exactly the required set plus `sqlite_stat1` and `sqlite_stat4`. Meguri's own temporary objects (TEMP tables of the writer, U23, and of the upgrade's step 18) live in SQLite's temp schema, never in `sqlite_master` of the file.
+
+Where it is asserted:
+
+- The conformance runner asserts the guard after every Meguri operation of a scenario (U4). Its baseline is `sqlite_master` after each open (an upgrade included) and after each `db_exec` step, since a scenario's own statements may add or change objects (an add-on's table, say); every later operation must leave that baseline as it is.
+- `tests/schema_objects.rs` asserts the objects after ten open/close cycles and after each upgrade, and the objects with their definitions across a 1,000-operation run and the reopen after it. The upgrade scenarios' `schema_objects` goldens show the definitions an upgrade leaves, and `tests/upgrade.rs` shows that foreign objects keep theirs (`storage/schema-upgrade#U12`).
 
 Scenarios: every storage scenario that ends with an open collection observes `schema_objects` (`specs/conformance/storage-ops.md` P3) after its last change; the refusal scenarios end with none.

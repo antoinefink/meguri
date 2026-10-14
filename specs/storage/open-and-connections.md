@@ -25,7 +25,7 @@ How Meguri decides whether it may open a file, opens it without touching files i
 
 ## C2. The open gate
 
-One function, callable on any file path (the live collection, and U124's staging copies before a swap). It runs these phases in order and stops at the first refusal. Before phase 4 nothing has written to the file or created a file next to it (C3).
+One function, callable on any file path (the live collection, and U124's staging copies before a swap). It runs these phases in order and stops at the first refusal. Before phase 4 nothing has written to the file or created a file next to it, with one exception: C3's in-place rollback of a hot journal, which happens only after a rolled-back copy of the file has passed phases 1 and 2.
 
 ### C2.1 Phase 1: probe
 
@@ -54,7 +54,7 @@ A read-only connection, opened with a `file:` URI:
 
 ### C2.3 Phase 3: pre-upgrade copy
 
-Only when `ver` is 11, 14, 15, 16 or 17: `storage/schema-upgrade#U2` (R1480). Nothing is written to the original before the copy is complete.
+Only when `ver` is 11, 14, 15, 16 or 17: `storage/schema-upgrade#U2` (R1480). Nothing is written to the original before the copy is complete, except C3's rollback of a hot journal, which restores the last committed state that the copy then holds.
 
 ### C2.4 Phase 4: read-write open
 
@@ -70,14 +70,21 @@ Run `storage/schema-18#S6.1` on the writer. `missing_tables` refuses with `NotAC
 ### C2.6 What an open never does
 
 - No table scans: the whole gate, for a file at 18, reads the `col` row, at most one `config` row and `sqlite_master`. A warm open of `realistic-150k` takes at most 150 ms (R1823, measured by U12 and U241).
+- Host measurement so far (not the device numbers, which U12 owns and records here): `tests/open_budget.rs` grows `schema-18.anki2` to 100,000 notes, 150,000 cards and 450,000 review entries (a 60 MB file), closes it, opens it once to warm the cache, then times 40 opens through the whole gate (probe, refusals, writer with its settings, expected-object check) and fails when the p95 is above 150 ms. In the Linux development container on arm64 (Apple silicon host) with the bundled SQLite, four runs gave p50 0.20–0.23 ms, p95 0.23–0.41 ms and a maximum of 0.60 ms.
 - No integrity check on a normal open (Anki does not either). Callers that need one run `PRAGMA integrity_check` after the gate (U124 on staging copies, U128).
-- No write to the file other than the journal-mode switch and an upgrade. In particular, `col.mod` and `col.scm` do not change on open.
+- No write to the file other than the journal-mode switch, an upgrade and C3's rollback of a hot journal. In particular, `col.mod` and `col.scm` do not change on open.
 
 ## C3. Files Meguri refuses stay untouched
 
-- A refused file (C1, C2.2) keeps its exact bytes (same SHA-256) and the directory gains no file: no `-wal`, no `-shm`, no `-journal`. The one exception: when a `-wal` file was already there, a `-shm` may appear next to it (C2.1). Pre-upgrade copies are made only after the refusals (C2.3).
-- Anki does not keep this guarantee: it switches a rollback-journal file to WAL mode before it checks the version, so a refused file comes back with a changed header. Goldens therefore record only the refusal kind; `tests/open_refuse.rs` asserts the bytes and the directory listing, for WAL-mode and rollback-journal fixtures.
-- Hot rollback journal: when a non-empty `-journal` file lies next to a rollback-journal file (an old client crashed in the middle of a write), the `mode=ro` probe fails with SQLite's read-only rollback error (`SQLITE_READONLY_ROLLBACK`, extended code 776). The gate then opens the file read-write without changing its journal mode, reads `col.ver` so that SQLite rolls the journal back (which restores the last committed state, as any SQLite client does on first read), closes, and runs phases 1 and 2 again. This is the only case in which the gate writes to a file it may then refuse. If the second probe meets the error again, the gate fails with `Io`.
+- A refused file (C1, C2.2) keeps its exact bytes (same SHA-256) and the directory gains no file: no `-wal`, no `-shm`, no `-journal`. A `-journal` file that was already there keeps its bytes too. The one exception: when a `-wal` file was already there, a `-shm` may appear next to it (C2.1). Pre-upgrade copies are made only after the refusals (C2.3).
+- Anki does not keep this guarantee: it switches a rollback-journal file to WAL mode before it checks the version, so a refused file comes back with a changed header. Goldens therefore record only the refusal kind; `tests/open_refuse.rs` asserts the bytes and the directory listing, for WAL-mode and rollback-journal fixtures and for a file behind a hot journal.
+- Hot rollback journal: a non-empty `-journal` file next to a rollback-journal file means a client crashed in the middle of a write. The main file may hold half-written pages, and only a rollback shows the last committed `col.ver`. The `mode=ro` probe fails with SQLite's read-only rollback error (`SQLITE_READONLY_ROLLBACK`, extended code 776). The gate then decides on a copy, so that a file it refuses keeps its bytes and its journal (R1479):
+  1. Copy the file and its `-journal` into a new temporary directory outside the collection's directory, as one name and that name plus `-journal`, so that SQLite pairs them. If the copy cannot be made, the open fails with `Io`.
+  2. Roll the copy back there: open it read-write (registering `unicase`, C5), read `col.ver`, close. SQLite rolls the journal back on that first read and removes it.
+  3. Run phases 1 and 2 on the copy. A refusal ends the open: the original's bytes, its journal and its directory stay unchanged. The temporary directory is removed whatever the outcome.
+  4. Only when the copy passes: open the original read-write without changing its journal mode, read `col.ver` so that SQLite rolls it back (restoring the last committed state, as any SQLite client does on first read, and removing the journal), close, and run phases 1 and 2 again on the original. Phases 3 to 5 follow as usual.
+
+  If a probe after a rollback, of the copy or of the original, meets the read-only rollback error again, the gate fails with `Io`.
 
 ## C4. The writer connection
 
@@ -173,8 +180,11 @@ After a clean close, `collection.anki2` alone holds the whole collection, no `-w
 | Collation order and a unique-index collision (`INSERT OR IGNORE`, rows kept) | `storage/open/collation` |
 | A plain insert of a name equal under folding to a stored one fails with extended code 2067 (1555 for a tag) and stores nothing, for decks, note types, fields and templates (per note type) and tags; presets have no unique index on `name` | `tests/collation_order.rs` |
 | Refused file unchanged: SHA-256 and directory listing | `tests/open_refuse.rs` (Meguri only) |
+| Hot journal, file refused: the refusal is the one for the rolled-back version (a file at 10 whose crashed transaction had written 18 is `TooOld` 10); the file's SHA-256, the journal's SHA-256 and the directory listing are unchanged | `tests/open_refuse.rs` (Meguri only) |
+| Hot journal, file accepted: the file is rolled back in place and opens at its last committed version (a file at 18 whose crashed transaction had written 10 opens at 18 with no upgrade); the crashed transaction's objects are gone, `integrity_check` is `ok`, and the journal is gone | `tests/open_refuse.rs` (Meguri only) |
 | Reader keeps its snapshot during a writer commit; no `SQLITE_BUSY` on readers | `tests/connections.rs` |
 | `VACUUM INTO` succeeds on the sync and maintenance readers; a write fails on every reader role | `tests/connections.rs` |
 | Collation registration failure fails the open | `tests/connections.rs` |
 | No `-wal`/`-shm` after close; the main file alone holds the data | `tests/connections.rs` |
 | Warm open of `realistic-150k` within 150 ms, no full scan in the query plans | U12 benchmark (R1823) |
+| Warm open of a 150,000-card schema-18 file within 150 ms at p95, on the host (C2.6) | `tests/open_budget.rs` |
