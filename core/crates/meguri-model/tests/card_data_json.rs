@@ -262,3 +262,25 @@ fn an_unpaired_surrogate_makes_the_whole_text_invalid() {
     let paired = r#"{"zz":"😀 é"}"#;
     assert_eq!(CardData::parse(paired).to_text(), paired);
 }
+
+#[test]
+fn deeply_nested_values_read_in_one_pass() {
+    // C3 rule 7: an unknown key's value is kept as its exact text however deep
+    // it nests, and C4 writes it after the known keys.
+    let deep = common::deeply_nested("[1,\"x\"]");
+    let data = CardData::parse(&format!(r#"{{"zz":{deep},"pos":5}}"#));
+    assert!(
+        data.to_text() == format!(r#"{{"pos":5,"zz":{deep}}}"#),
+        "deep value kept as read"
+    );
+
+    // C3 rule 1: a number beyond the float range inside a known key's value,
+    // and N9: an unpaired surrogate escape anywhere, at the bottom of the
+    // nesting still make the whole text read as no keys.
+    let out_of_range = common::deeply_nested("1e400");
+    let data = CardData::parse(&format!(r#"{{"pos":5,"cd":{out_of_range}}}"#));
+    assert_eq!(data.to_text(), "{}");
+    let unpaired = common::deeply_nested(r#""\ud800""#);
+    let data = CardData::parse(&format!(r#"{{"pos":5,"zz":{unpaired}}}"#));
+    assert_eq!(data.to_text(), "{}");
+}

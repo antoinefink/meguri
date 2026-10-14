@@ -225,14 +225,21 @@ fn normal_deck_blobs_and_objects_convert_both_ways() {
     }
 }
 
-#[test]
-fn spec_example_default_deck_object() {
-    // specs/model/schema11-json.md S13, the new collection's Default deck.
+/// specs/model/schema11-json.md S13, the new collection's Default deck.
+const DEFAULT_DECK_OBJECT: &str = r#"{"id":1,"mod":0,"name":"Default","usn":0,"lrnToday":[0,0],"revToday":[0,0],"newToday":[0,0],"timeToday":[0,0],"collapsed":true,"browserCollapsed":true,"desc":"","dyn":0,"conf":1,"extendNew":0,"extendRev":0,"reviewLimit":null,"newLimit":null,"reviewLimitToday":null,"newLimitToday":null,"desiredRetention":null}"#;
+
+/// The Default deck's `common` and `kind` blobs in a new oracle collection.
+fn default_deck_blobs() -> (Vec<u8>, Vec<u8>) {
     let g = golden("model/proto/deck-normal-bytes");
     let row = rows(&g, 1).iter().find(|row| row[1] == "Default").unwrap();
-    let record = deck(1, "Default", 0, 0, &blob(&row[4]), &blob(&row[5]));
-    let expected = r#"{"id":1,"mod":0,"name":"Default","usn":0,"lrnToday":[0,0],"revToday":[0,0],"newToday":[0,0],"timeToday":[0,0],"collapsed":true,"browserCollapsed":true,"desc":"","dyn":0,"conf":1,"extendNew":0,"extendRev":0,"reviewLimit":null,"newLimit":null,"reviewLimitToday":null,"newLimitToday":null,"desiredRetention":null}"#;
-    assert_eq!(deck_to_json(&record), expected);
+    (blob(&row[4]), blob(&row[5]))
+}
+
+#[test]
+fn spec_example_default_deck_object() {
+    let (common_bytes, kind) = default_deck_blobs();
+    let record = deck(1, "Default", 0, 0, &common_bytes, &kind);
+    assert_eq!(deck_to_json(&record), DEFAULT_DECK_OBJECT);
 }
 
 #[test]
@@ -448,6 +455,81 @@ fn deck_other_round_trips() {
         object(&g, 4, "decks", "Words"),
         "after the save",
     );
+}
+
+/// Field 255, `other` (specs/model/protobuf-records.md P7), as bytes to append
+/// to a deck common blob: a later occurrence replaces the earlier one (P2).
+fn other_field(other: &[u8]) -> Vec<u8> {
+    let mut field = vec![0xfa, 0x0f];
+    let mut len = other.len();
+    while len >= 0x80 {
+        field.push((len & 0x7f) as u8 | 0x80);
+        len >>= 7;
+    }
+    field.push(len as u8);
+    field.extend_from_slice(other);
+    field
+}
+
+/// The Default deck whose `common.other` holds `other`.
+fn default_deck_with_other(other: &str) -> Deck {
+    let (mut common_bytes, kind) = default_deck_blobs();
+    common_bytes.extend(other_field(other.as_bytes()));
+    deck(1, "Default", 0, 0, &common_bytes, &kind)
+}
+
+/// The Default deck's object with `members` as its `other` members: after the
+/// S7 keys, before the S8 keys.
+fn default_deck_object_with(members: &str) -> String {
+    DEFAULT_DECK_OBJECT.replacen(r#""dyn":0,"#, &format!(r#""dyn":0,{members},"#), 1)
+}
+
+#[test]
+fn deck_other_without_reserved_keys_round_trips_byte_identical() {
+    // S3 round trip: an `other` object with no reserved key and no key the
+    // object writes comes back with the same bytes, its nested key order and
+    // number text included (json-numbers N7). The collision-free counterpart
+    // of the S3 example, whose reserved extendNew is dropped.
+    let members = r#""browser_collapsed":true,"x_addon":[1,{"b":2,"a":1.10}]"#;
+    let other = format!("{{{members}}}");
+    let record = default_deck_with_other(&other);
+    assert_eq!(record.common.other(), other.as_bytes());
+    let object = deck_to_json(&record);
+    assert_eq!(object, default_deck_object_with(members));
+    let back = deck_from_json(&object).unwrap();
+    assert_eq!(back.common.other(), other.as_bytes());
+}
+
+#[test]
+fn deeply_nested_other_members_convert_in_one_pass() {
+    // S3 in both directions with an `other` member nested 100,000 deep: its
+    // text is kept exactly. At the bottom of the same nesting, a number
+    // beyond the float range (json-numbers N10) or an unpaired surrogate
+    // escape (N9) still makes the text invalid: output adds nothing and input
+    // refuses the object.
+    let members = format!(r#""x_deep":{}"#, common::deeply_nested("[1,\"x\"]"));
+    let other = format!("{{{members}}}");
+    let object = deck_to_json(&default_deck_with_other(&other));
+    assert!(
+        object == default_deck_object_with(&members),
+        "deep member written as stored"
+    );
+    let back = deck_from_json(&object).unwrap();
+    assert!(back.common.other() == other.as_bytes(), "deep member kept as read");
+
+    for innermost in ["1e400", r#""\ud800""#] {
+        let members = format!(r#""x_deep":{}"#, common::deeply_nested(innermost));
+        let other = format!("{{{members}}}");
+        assert!(
+            deck_to_json(&default_deck_with_other(&other)) == DEFAULT_DECK_OBJECT,
+            "{innermost}: other adds nothing"
+        );
+        assert_refused(
+            deck_from_json(&default_deck_object_with(&members)),
+            Schema11Item::Deck,
+            innermost,
+        );
+    }
 }
 
 #[test]

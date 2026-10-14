@@ -79,30 +79,71 @@ pub(crate) fn parse_value(text: &str) -> Option<&RawValue> {
 /// skips the values of unknown keys without reading them (N10). The caller
 /// checks every value it reads with [`in_range`].
 pub(crate) fn parse_skipping_range(text: &str) -> Option<&RawValue> {
+    // serde_json captures raw text iteratively and without a nesting limit;
+    // the check below is one pass over that text as well, so no nesting depth
+    // can exhaust the stack or cost more than linear time.
     let raw = serde_json::from_str::<&RawValue>(text).ok()?;
-    all_scalars(raw, &|_| true).then_some(raw)
+    scan_tokens(raw, false).then_some(raw)
 }
 
 /// N10: whether every number in the value is within the 64-bit float range.
 pub(crate) fn in_range(raw: &RawValue) -> bool {
-    all_scalars(raw, &|scalar| {
-        kind(scalar) != Kind::Number || number_in_range(scalar.get())
-    })
+    scan_tokens(raw, true)
 }
 
-/// Whether every string in the value, object keys included, decodes, and
-/// `check` holds for every scalar. serde_json checks the syntax when it
-/// captures raw text but not escapes, and N9 makes an unpaired surrogate
-/// escape anywhere invalid. serde_json's recursion limit bounds the depth.
-fn all_scalars(raw: &RawValue, check: &dyn Fn(&RawValue) -> bool) -> bool {
-    match kind(raw) {
-        Kind::String => serde_json::from_str::<String>(raw.get()).is_ok() && check(raw),
-        Kind::Array => serde_json::from_str::<Vec<&RawValue>>(raw.get())
-            .is_ok_and(|items| items.into_iter().all(|item| all_scalars(item, check))),
-        // Keys are decoded as the members are read.
-        Kind::Object => parse_members(raw.get())
-            .is_some_and(|members| members.into_iter().all(|(_, value)| all_scalars(value, check))),
-        Kind::Number | Kind::Bool | Kind::Null => check(raw),
+/// One pass over the tokens of valid JSON text: whether every string, object
+/// keys included, decodes, and, with `numbers_in_range`, whether every number
+/// is within the 64-bit float range. serde_json checks the syntax, control
+/// characters and escape letters when it captures raw text, but not how
+/// escapes pair up, and N9 makes an unpaired surrogate escape anywhere
+/// invalid.
+fn scan_tokens(raw: &RawValue, numbers_in_range: bool) -> bool {
+    let text = raw.get();
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    while let Some(&byte) = bytes.get(at) {
+        match byte {
+            b'"' => {
+                let (end, escaped) = string_token_end(bytes, at);
+                // A string token without escapes is its own valid text.
+                if escaped && serde_json::from_str::<String>(&text[at..end]).is_err() {
+                    return false;
+                }
+                at = end;
+            }
+            b'-' | b'0'..=b'9' => {
+                let end = bytes[at..]
+                    .iter()
+                    .position(|b| !matches!(b, b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E'))
+                    .map_or(bytes.len(), |len| at + len);
+                if numbers_in_range && !number_in_range(&text[at..end]) {
+                    return false;
+                }
+                at = end;
+            }
+            // Brackets, commas, colons, whitespace and the letters of `true`,
+            // `false` and `null`.
+            _ => at += 1,
+        }
+    }
+    true
+}
+
+/// Where the string token opening at `start` ends (just past its closing
+/// quote), and whether it holds an escape. The text is valid JSON, so the
+/// token is closed.
+fn string_token_end(bytes: &[u8], start: usize) -> (usize, bool) {
+    let mut escaped = false;
+    let mut at = start + 1;
+    loop {
+        match bytes[at] {
+            b'"' => return (at + 1, escaped),
+            b'\\' => {
+                escaped = true;
+                at += 2;
+            }
+            _ => at += 1,
+        }
     }
 }
 

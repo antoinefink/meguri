@@ -66,6 +66,15 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
 }
 
+/// Nesting depth past any per-level recursion's stack: 100,000 levels of
+/// `[{"k":` around `innermost`. Never parse it with `serde_json::Value`,
+/// whose recursion limit refuses it.
+pub const DEEP: usize = 100_000;
+
+pub fn deeply_nested(innermost: &str) -> String {
+    format!("{}{innermost}{}", r#"[{"k":"#.repeat(DEEP), "}]".repeat(DEEP))
+}
+
 /// RFC 7396 JSON merge patch (specs/conformance/model-ops.md L2).
 pub fn merge_patch(target: &mut Value, patch: &Value) {
     let Value::Object(patch) = patch else {
