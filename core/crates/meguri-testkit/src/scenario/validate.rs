@@ -12,8 +12,8 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, DUMP_TABLES, DraftArgs, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step, SyncKind,
-    TextRequest,
+    ActorName, DUMP_TABLES, DraftArgs, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step,
+    SyncKind, TextRequest,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -113,6 +113,12 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         let at = |e: FormatError| FormatError::new(format!("step {index} ({}): {e}", step.name()));
         if let Some(args) = step.draft_args() {
             draft(step.name(), args).map_err(at)?;
+        }
+        if let Step::LegacyUpdate(update) = step {
+            legacy_update(update).map_err(at)?;
+        }
+        if let Step::Export(args) = step {
+            legacy_export(args).map_err(at)?;
         }
         if let Step::Handoff(to) = step {
             if side == Some(*to) {
@@ -240,6 +246,61 @@ fn check(shape: Arg, value: &Value) -> Result<(), String> {
     }
 }
 
+/// model-ops.md L2: exactly one non-empty record name.
+fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
+    let names = [&update.notetype, &update.deck, &update.preset];
+    let given: Vec<&String> = names.iter().filter_map(|name| name.as_ref()).collect();
+    if given.len() != 1 {
+        return Err(FormatError::new(
+            "legacy_update names exactly one of notetype, deck and preset",
+        ));
+    }
+    if given[0].is_empty() {
+        return Err(FormatError::new("legacy_update needs a non-empty name"));
+    }
+    Ok(())
+}
+
+/// model-ops.md L6: an export with `legacy` is exactly
+/// `{format: apkg, name: <package file name>, legacy: true}`. Other forms stay
+/// draft (D7.2).
+fn legacy_export(args: &DraftArgs) -> Result<(), FormatError> {
+    if !args.0.contains_key("legacy") {
+        return Ok(());
+    }
+    let exact = args.0.len() == 3
+        && args.0.get("format").and_then(Value::as_str) == Some("apkg")
+        && args.0.get("name").is_some_and(Value::is_string)
+        && args.0.get("legacy") == Some(&Value::Bool(true));
+    if !exact {
+        return Err(FormatError::new(
+            "a legacy export is exactly {format: apkg, name, legacy: true}",
+        ));
+    }
+    package_name(&args.0["name"])
+}
+
+/// model-ops.md L6: a file in the session directory, `^[A-Za-z0-9][A-Za-z0-9._-]*\.apkg$`.
+fn package_name(value: &Value) -> Result<(), FormatError> {
+    let stem = value.as_str().and_then(|name| name.strip_suffix(".apkg"));
+    let ok = stem.is_some_and(|stem| {
+        stem.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && stem
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    });
+    if ok {
+        Ok(())
+    } else {
+        Err(FormatError::new(format!(
+            "{value} is not a package file name (letters, digits, '.', '_' and '-', starting with a letter or digit, ending in .apkg)"
+        )))
+    }
+}
+
+/// The `col` columns `package_col` reads (model-ops.md L7).
+const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "tags"];
+
 /// The schema's rules for the mapping form of an observation request.
 pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value>) -> Result<(), FormatError> {
     let name = kind.name();
@@ -293,6 +354,38 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         ObservationKind::Queue => {
             if map.get("deck").is_some_and(|d| !d.is_string()) {
                 return bad("deck is a deck name");
+            }
+        }
+        // model-ops.md L1 and L4.
+        ObservationKind::LegacyJson | ObservationKind::BlobDecode => {
+            let lists_ok = map.iter().all(|(key, names)| {
+                matches!(key.as_str(), "notetypes" | "decks" | "presets")
+                    && names.as_array().is_some_and(|names| {
+                        !names.is_empty() && names.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty()))
+                    })
+            });
+            if map.is_empty() || !lists_ok {
+                return bad("takes {notetypes?, decks?, presets?}, each a non-empty list of names");
+            }
+        }
+        // model-ops.md L7.
+        ObservationKind::PackageCol => {
+            if !only(&["name", "columns"]) || !map.contains_key("name") {
+                return bad("takes {name, columns}");
+            }
+            package_name(&map["name"]).map_err(|e| FormatError::new(format!("observation {name}: {e}")))?;
+            let Some(columns) = map.get("columns").and_then(Value::as_array).filter(|c| !c.is_empty()) else {
+                return bad("columns is a non-empty list of col columns");
+            };
+            let mut seen = BTreeSet::new();
+            for column in columns {
+                let column = column.as_str().unwrap_or_default();
+                if !PACKAGE_COLUMNS.contains(&column) {
+                    return bad(&format!("columns are among {}", PACKAGE_COLUMNS.join(", ")));
+                }
+                if !seen.insert(column) {
+                    return bad(&format!("column {column} is listed twice"));
+                }
             }
         }
         ObservationKind::Text => {

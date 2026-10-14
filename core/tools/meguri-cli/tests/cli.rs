@@ -28,9 +28,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["supports"]["ops"], serde_json::json!(["advance", "set_clock"]));
     assert_eq!(json["supports"]["observations"], serde_json::json!(["text"]));
-    // dsl.md D7.2: 23 ops besides observe, the actor ops of sync-ops.md
-    // among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 23);
+    // dsl.md D7.2: 24 ops besides observe, the actor ops of sync-ops.md and
+    // the model ops of model-ops.md among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 24);
     for op in ["actor", "sync", "net_fault", "converge", "reopen"] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
@@ -45,12 +45,38 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .any(|o| o == "handoff")
     );
     assert!(
+        json["language"]["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o == "legacy_update")
+    );
+    assert!(
         json["language"]["observations"]
             .as_array()
             .unwrap()
             .iter()
             .any(|k| k == "next_states")
     );
+    assert!(
+        json["language"]["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "legacy_json")
+    );
+    // observations.md O4: blob_decode and package_col are kinds of the
+    // language, which Meguri's executor does not run yet (model-ops.md L5).
+    for kind in ["blob_decode", "package_col"] {
+        assert!(
+            json["language"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == kind),
+            "{kind}"
+        );
+    }
 }
 
 #[test]

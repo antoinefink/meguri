@@ -1,0 +1,118 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["2A05252070726532062520706F7374420510011A01004801507BFA0F0B7B2276657273223A5B5D7D"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Front", "080110011A05417269616C20145007FA0F0C7B226D65646961223A5B5D7D"],
+            [1, "Back", "1A094E6F746F2053616E73201248EA07"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Forward", "0A097B7B46726F6E747D7D40D10FFA0F0F7B227A7A5F746D706C223A226B227D"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Pair": {
+              "css": "",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": null,
+                  "media": [],
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": true,
+                  "size": 20,
+                  "sticky": true,
+                  "tag": 7
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Noto Sans",
+                  "id": 1002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 18,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "% post",
+              "latexPre": "% pre",
+              "latexsvg": false,
+              "mod": 1894701600,
+              "name": "Pair",
+              "originalId": 123,
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2001,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}",
+                  "zz_tmpl": "k"
+                }
+              ],
+              "type": 0,
+              "usn": -1,
+              "vers": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/schema11/notetype-values",
+  "scenario_sha256": "7af325ca5b8d747b54f8c9e0c69de4ded84252f7b8f8a7673a9518e0a1ebf1d9",
+  "tz": "UTC"
+}

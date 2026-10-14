@@ -146,11 +146,12 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
 | `reposition` | `{cards, start, step?, randomize?, shift?}` | none | draft (sched) |
 | `update_preset` | `{name, <option>: <value>, ...}` with the D6.2 options | none | draft (deckconfig) |
+| `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | stable (`model-ops.md` L2) |
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
-| `export` | `{format: apkg \| colpkg, name: <file name>, ...options}` | `{name, sha256}` of the file written | draft (package) |
+| `export` | `{format: apkg \| colpkg, name: <file name>, ...options}`; the legacy package form is exactly `{format: apkg, name, legacy: true}` (`model-ops.md` L6) | legacy form: `{notes: <count>}`; other forms: `{name, sha256}` of the file written | draft (package); the legacy form is stable (`model-ops.md` L6) |
 | `check_db` | `{}` | the check's counters | draft (maintenance) |
-| `db_exec` | `{sql, params?: [...]}`: raw SQL on the schema-18 tables, for corruption injection and time travel by data | `{rows: [[...], ...]}` for a query, none otherwise | draft (storage) |
+| `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |
 | `sync` | `{kind: login \| normal \| full_upload \| full_download}` | `{result: <result>}`: `ok`, or for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`; rejections `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |

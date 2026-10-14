@@ -335,6 +335,43 @@
             },
             "stats": { "description": "Draft.", "type": ["object", "null"] },
             "digest": { "type": "null" },
+            "legacy_json": {
+              "description": "model-ops.md L1: schema-11 objects of the named records.",
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "notetypes": { "$ref": "#/$defs/names" },
+                "decks": { "$ref": "#/$defs/names" },
+                "presets": { "$ref": "#/$defs/names" }
+              }
+            },
+            "blob_decode": {
+              "description": "model-ops.md L4: whether the named records' protobuf blobs decode.",
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "notetypes": { "$ref": "#/$defs/names" },
+                "decks": { "$ref": "#/$defs/names" },
+                "presets": { "$ref": "#/$defs/names" }
+              }
+            },
+            "package_col": {
+              "description": "model-ops.md L7: col columns of the legacy package an export step wrote.",
+              "type": "object",
+              "required": ["name", "columns"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/package_name" },
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["ver", "conf", "models", "decks", "dconf", "tags"] }
+                }
+              }
+            },
             "text": {
               "description": "observations.md O4 text: pure text functions over a list of inputs; pairs for unicase_compare, which shares a request with no other function.",
               "type": "object",
@@ -375,6 +412,12 @@
     "draft_args": {
       "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
       "type": "object"
+    },
+    "names": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "package_name": {
+      "description": "model-ops.md L6: a package file in the session directory.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.apkg$"
     },
     "step": {
       "description": "One op per step (dsl.md D7).",
@@ -434,6 +477,19 @@
         "update_preset": {
           "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"], "properties": { "name": { "type": "string" } } }]
         },
+        "legacy_update": {
+          "description": "model-ops.md L2: merge patch into a record's schema-11 object and save it.",
+          "type": "object",
+          "required": ["patch"],
+          "additionalProperties": false,
+          "properties": {
+            "notetype": { "type": "string", "minLength": 1 },
+            "deck": { "type": "string", "minLength": 1 },
+            "preset": { "type": "string", "minLength": 1 },
+            "patch": { "type": "object" }
+          },
+          "oneOf": [{ "required": ["notetype"] }, { "required": ["deck"] }, { "required": ["preset"] }]
+        },
         "build_filtered": {
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
@@ -442,9 +498,22 @@
         },
         "import": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] },
         "export": {
+          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
-            { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } }
+            { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } },
+            {
+              "if": { "required": ["legacy"] },
+              "then": {
+                "required": ["format", "name", "legacy"],
+                "additionalProperties": false,
+                "properties": {
+                  "format": { "const": "apkg" },
+                  "name": { "$ref": "#/$defs/package_name" },
+                  "legacy": { "const": true }
+                }
+              }
+            }
           ]
         },
         "check_db": { "$ref": "#/$defs/draft_args" },

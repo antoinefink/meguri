@@ -1,0 +1,187 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Gap", 1894701600, -1, "08011A162E63617264207B20636F6C6F723A206E6176793B207D2A0C2520636C6F7A65207072650A320C2520636C6F7A6520706F7374420510011A01004801"],
+            ["Pair", 1894701600, -1, "10011A142E63617264207B206D617267696E3A20303B207D20012A0625207072650A32062520706F73743801420510011A0100480150CB89EC8FF723"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Gap", 0, "Text", "1A05417269616C201448CD08"],
+            ["Gap", 1, "Extra", "1A05417269616C201448CE08"],
+            ["Pair", 0, "Front", "08011A05417269616C20142A0874686520776F7264380148E907"],
+            ["Pair", 1, "Back", "10011A094E6F746F2053616E7320123001400148EA0750035801"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Gap", 0, "Cloze", 0, 0, "0A0E7B7B636C6F7A653A546578747D7D121B7B7B636C6F7A653A546578747D7D3C62723E7B7B45787472617D7D40B510"],
+            ["Pair", 0, "Forward", 0, 0, "0A097B7B46726F6E747D7D12087B7B4261636B7D7D1A137B7B46726F6E747D7D202862726F777365722922127B7B4261636B7D7D202862726F777365722928013205417269616C380C40D10F"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Gap": {
+              "css": ".card { color: navy; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1101,
+                  "name": "Text",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1102,
+                  "name": "Extra",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600007,
+              "latexPost": "% cloze post",
+              "latexPre": "% cloze pre\n",
+              "latexsvg": false,
+              "mod": 1894701600,
+              "name": "Gap",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{cloze:Text}}<br>{{Extra}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2101,
+                  "name": "Cloze",
+                  "ord": 0,
+                  "qfmt": "{{cloze:Text}}"
+                }
+              ],
+              "type": 1,
+              "usn": -1
+            },
+            "Pair": {
+              "css": ".card { margin: 0; }",
+              "did": 1,
+              "flds": [
+                {
+                  "collapsed": true,
+                  "description": "the word",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1001,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": true,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": true,
+                  "font": "Noto Sans",
+                  "id": 1002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": true,
+                  "preventDeletion": true,
+                  "rtl": true,
+                  "size": 18,
+                  "sticky": false,
+                  "tag": 3
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "% post",
+              "latexPre": "% pre\n",
+              "latexsvg": true,
+              "mod": 1894701600,
+              "name": "Pair",
+              "originalId": 1234567890123,
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 1,
+              "tmpls": [
+                {
+                  "afmt": "{{Back}}",
+                  "bafmt": "{{Back}} (browser)",
+                  "bfont": "Arial",
+                  "bqfmt": "{{Front}} (browser)",
+                  "bsize": 12,
+                  "did": 1,
+                  "id": 2001,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}"
+                }
+              ],
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/proto/notetype-bytes",
+  "scenario_sha256": "a2d8417490cc2cd2e43f63c1e6494910a4bf91732c25b0dd98bab2e694bd6505",
+  "tz": "UTC"
+}

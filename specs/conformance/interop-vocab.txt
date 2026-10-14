@@ -56,3 +56,7 @@ SYNC_BASE
 SYNC_HOST
 SYNC_PORT
 SYNC_USER1
+# Legacy package entries (model-ops.md L6, L7).
+apkg
+collection.anki21
+collection.anki2

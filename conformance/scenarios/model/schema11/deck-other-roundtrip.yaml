@@ -1,0 +1,17 @@
+# Record -> object -> record for a deck whose other holds a reserved key and one
+# add-on key with a nested value (schema11-json S3): the reserved extendNew
+# member is dropped, x_addon survives with its value. One surviving key keeps
+# the bytes deterministic (Anki writes several top-level keys in no set order).
+id: model/schema11/deck-other-roundtrip
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+steps:
+  - db_exec:
+      sql: "UPDATE decks SET common = CAST(common || X'fa0f297b22657874656e644e6577223a31302c22785f6164646f6e223a5b312c7b2261223a747275657d5d7d' AS BLOB) WHERE name = 'Words'"
+  - observe:
+      - legacy_json: {decks: [Words]}
+  - legacy_update: {deck: Words, patch: {}}
+  - db_exec: {sql: "SELECT hex(common), hex(kind) FROM decks WHERE name = 'Words'"}
+  - observe:
+      - legacy_json: {decks: [Words]}

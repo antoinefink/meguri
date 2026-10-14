@@ -84,6 +84,49 @@
           "additionalProperties": false,
           "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
         },
+        "legacy_json": {
+          "description": "model-ops.md L1: schema-11 objects keyed by record name.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notetypes": { "type": "object", "additionalProperties": { "type": "object" } },
+            "decks": { "type": "object", "additionalProperties": { "type": "object" } },
+            "presets": { "type": "object", "additionalProperties": { "type": "object" } }
+          }
+        },
+        "legacy_update": {
+          "description": "model-ops.md L2: the op has no output, so only a rejection appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
+        },
+        "blob_decode": {
+          "description": "model-ops.md L4: per record, ok or invalid_blob.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notetypes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } },
+            "decks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } },
+            "presets": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } }
+          }
+        },
+        "export": {
+          "description": "dsl.md D7.2: the legacy package form outputs {notes} (model-ops.md L6); the other forms are draft (package).",
+          "type": "object",
+          "properties": { "notes": { "type": "integer", "minimum": 0 } }
+        },
+        "package_col": {
+          "description": "model-ops.md L7: the requested col columns of a legacy package's collection; ver an integer, the JSON columns parsed.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "ver": { "type": "integer" },
+            "conf": { "type": "object" },
+            "models": { "$ref": "#/$defs/objects_by_id" },
+            "decks": { "$ref": "#/$defs/objects_by_id" },
+            "dconf": { "$ref": "#/$defs/objects_by_id" },
+            "tags": { "type": "object", "additionalProperties": { "type": "integer" } }
+          }
+        },
         "text": {
           "description": "O4 text: one array per requested function, one output per input in input order.",
           "type": "object",
@@ -143,6 +186,13 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "decode_status": { "enum": ["ok", "invalid_blob"] },
+    "objects_by_id": {
+      "description": "schema11-json S12: decimal id -> schema-11 object.",
+      "type": "object",
+      "propertyNames": { "pattern": "^-?[0-9]+$" },
+      "additionalProperties": { "type": "object" }
+    },
     "actor_name": { "type": "string", "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$" },
     "db_dump": {
       "description": "observations.md O8: table -> primary key text -> column -> value.",

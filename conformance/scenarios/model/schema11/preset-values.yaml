@@ -1,0 +1,43 @@
+# Schema-11 preset values into the record (schema11-json S10): the swapped
+# meaning of new.order, two- and four-element ints, defaults for missing keys,
+# lenient enums, sub-objects that fall back to their defaults as a whole, the
+# three FSRS lists and an unknown later list (fsrsParams7) kept in other.
+# Values stay inside Anki's preset ranges, which Anki applies when it reads.
+id: model/schema11/preset-values
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Daily, new_per_day: 15, leech_action: suspend}]
+steps:
+  - legacy_update:
+      preset: Daily
+      patch:
+        new: {ints: [3, 9], order: 0, perDay: 33, zz_new: 1}
+        rev: {hardFactor: null, perDay: 120}
+        lapse: {leechAction: 7, leechFails: 5}
+        timer: 2
+        replayq: null
+        waitForAudio: null
+        dyn: "x"
+  - db_exec: {sql: "SELECT mtime_secs, usn, hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - legacy_update:
+      preset: Daily
+      patch:
+        new: {ints: [2, 5, 7, 9], zz_new: null}
+        fsrsWeights: [1.0, 2.0]
+        fsrsParams5: [0.5]
+        fsrsParams6: [0.212, 1.2931]
+        fsrsParams7: [0.1, 0.2]
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - legacy_update: {preset: Daily, patch: {new: {ints: [-5, 4, 3], delays: "x"}}}
+  - legacy_update: {preset: Daily, patch: {rev: {ease4: "1.3"}}}
+  - legacy_update: {preset: Daily, patch: {lapse: {mult: null}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - legacy_update: {preset: Daily, patch: {new: {initialFactor: null}}}
+  - observe:
+      - legacy_json: {presets: [Daily]}
