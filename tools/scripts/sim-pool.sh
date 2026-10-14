@@ -13,6 +13,8 @@
 #   sim-pool.sh release <udid>
 #       Reset the device (user apps, privacy, keychain, UI options, status
 #       bar), leave it booted, drop the lease.
+#   sim-pool.sh reset <udid>
+#       Reset a leased device the same way and keep the lease.
 #   sim-pool.sh status
 #       JSON on stdout, a table on stderr.
 #   sim-pool.sh gc [--older-than-hours N] [--list]
@@ -21,7 +23,9 @@
 #       than N hours (default 6). --list prints the targets and deletes nothing.
 #
 # Pool devices are Meguri-Pool-<kind>-<n> on the newest installed iOS runtime,
-# at most MEGURI_SIM_POOL_MAX (3) per kind. Leases live in
+# at most MEGURI_SIM_POOL_MAX (3) per kind. Kinds and their device types come
+# from tools/sim-devices.json; kind `foldable` exists once Xcode has an iPhone
+# device type matching its pattern (until then acquire exits 4). Leases live in
 # ~/Library/Caches/meguri/sim-pool/leases/<udid>/lease.json, shared by every
 # worktree; each lease is a mkdir lock. Claiming, creating, taking over,
 # renewing and dropping leases hold the pool lock (pool.lock, mkdir). A lease
@@ -29,20 +33,21 @@
 # device is reset first. The lease's pid is informational.
 #
 # Exit codes: 0 ok, 1 failed, 2 usage, 3 every device stayed leased until
-# the wait ran out. Output other than results goes to stderr.
+# the wait ran out, 4 the kind's device type is unavailable in this toolchain.
+# Output other than results goes to stderr.
 #
 # Overrides (self-tests): MEGURI_SIM_POOL_DIR, MEGURI_SIM_POOL_MAX,
 # MEGURI_SIM_POOL_WAIT_SECONDS (1200), MEGURI_SIM_POOL_POLL_SECONDS (10),
-# MEGURI_SIM_POOL_SETTLE_SECONDS (30), MEGURI_SIM_DEVICES_DIR.
+# MEGURI_SIM_POOL_SETTLE_SECONDS (30), MEGURI_SIM_DEVICES_DIR,
+# MEGURI_SIM_DEVICES_JSON (tools/sim-devices.json).
 #
 # Runs under macOS /bin/bash 3.2 with BSD tools, and with GNU tools in the
 # dev container (self-tests).
 
 set -u
 
-# Kinds: <kind>|<device type name>, one per line. Add a line to add a kind.
-SP_KINDS='iphone|iPhone 17 Pro
-ipad|iPad Pro 13-inch (M5)'
+SP_DEVICES_JSON="${MEGURI_SIM_DEVICES_JSON:-$(cd "$(dirname "$0")/.." && pwd -P)/sim-devices.json}"
+SP_KINDS="" # set from SP_DEVICES_JSON before any command runs
 
 SP_PREFIX=Meguri-Pool-
 SP_DIR="${MEGURI_SIM_POOL_DIR:-$HOME/Library/Caches/meguri/sim-pool}"
@@ -67,6 +72,7 @@ sp_usage() {
 usage: sim-pool.sh acquire <$(sp_kind_names | tr ' ' '|')> [--holder <label>] [--ttl-min N]
        sim-pool.sh renew <udid> [--ttl-min N]
        sim-pool.sh release <udid>
+       sim-pool.sh reset <udid>
        sim-pool.sh status
        sim-pool.sh gc [--older-than-hours N] [--list]
 EOF
@@ -77,6 +83,13 @@ sp_now() { date -u +%s; }
 
 sp_is_uint() { case "$1" in "" | *[!0-9]*) return 1 ;; esac; }
 
+# Kinds, one per line: <kind>|<device type id>, from tools/sim-devices.json.
+# The foldable kind has no fixed type (sp_foldable_type finds it).
+sp_kinds() {
+  jq -r '(.devices[] | "\(.kind)|\(.device_type)"), "\(.foldable.kind)|"' "$SP_DEVICES_JSON"
+}
+
+# sp_kind_type <kind>: the kind's device type id (empty for the foldable kind).
 sp_kind_type() {
   local line
   while IFS= read -r line; do
@@ -190,10 +203,21 @@ sp_runtime() {
     | [.identifier, .version] | @tsv' <<<"$json"
 }
 
-sp_devicetype_id() {
+# sp_devicetype_known <id>: prints the id when Xcode has that device type.
+sp_devicetype_known() {
   local json
   json="$(xcrun simctl list devicetypes --json)" || return 1
-  jq -r --arg n "$1" 'first(.devicetypes[] | select(.name == $n) | .identifier) // empty' <<<"$json"
+  jq -r --arg i "$1" 'first(.devicetypes[] | select(.identifier == $i) | .identifier) // empty' <<<"$json"
+}
+
+# sp_foldable_type: the first iPhone device type whose name matches the
+# foldable pattern of tools/sim-devices.json, if any.
+sp_foldable_type() {
+  local json pattern
+  pattern="$(jq -r '.foldable.device_type_name_pattern' "$SP_DEVICES_JSON")" || return 1
+  json="$(xcrun simctl list devicetypes --json)" || return 1
+  jq -r --arg p "$pattern" 'first(.devicetypes[] | select((.productFamily // "") == "iPhone" and (.name | test($p; "i")))
+    | .identifier) // empty' <<<"$json"
 }
 
 # sp_device <udid>: that device's line from sp_devices, if any.
@@ -347,7 +371,7 @@ EOF
 }
 
 sp_acquire() {
-  local kind="" holder="" ttl="$SP_DEFAULT_TTL" type_name type rt rt_id deadline rc waiting=""
+  local kind="" holder="" ttl="$SP_DEFAULT_TTL" pinned type rt rt_id deadline rc waiting=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --holder)
@@ -369,13 +393,18 @@ sp_acquire() {
     esac
   done
   [ -n "$kind" ] || sp_usage "acquire: missing kind"
-  type_name="$(sp_kind_type "$kind")" || sp_usage "acquire: unknown kind '$kind' (kinds: $(sp_kind_names))"
+  pinned="$(sp_kind_type "$kind")" || sp_usage "acquire: unknown kind '$kind' (kinds: $(sp_kind_names))"
   [ -n "$holder" ] || holder="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)")"
   rt="$(sp_runtime)" || { sp_log "simctl list runtimes failed"; exit 1; }
   [ -n "$rt" ] || { sp_log "no iOS simulator runtime is installed"; exit 1; }
   rt_id="${rt%%"$SP_TAB"*}"
-  type="$(sp_devicetype_id "$type_name")" || { sp_log "simctl list devicetypes failed"; exit 1; }
-  [ -n "$type" ] || { sp_log "Xcode has no '$type_name' device type"; exit 1; }
+  if [ -n "$pinned" ]; then
+    type="$(sp_devicetype_known "$pinned")" || { sp_log "simctl list devicetypes failed"; exit 1; }
+    [ -n "$type" ] || { sp_log "Xcode has no device type $pinned (tools/sim-devices.json)"; exit 1; }
+  else
+    type="$(sp_foldable_type)" || { sp_log "simctl list devicetypes failed"; exit 1; }
+    [ -n "$type" ] || { sp_log "unavailable: toolchain: Xcode has no foldable iPhone device type"; exit 4; }
+  fi
 
   deadline=$(($(sp_now) + SP_WAIT))
   while :; do
@@ -462,6 +491,16 @@ sp_renew() {
   sp_log "renewed $SP_NAME ($udid) for $ttl min"
 }
 
+sp_reset_leased() {
+  local udid="${1:-}"
+  [ "$#" -le 1 ] || sp_usage "reset: unexpected argument '$2'"
+  sp_pool_device "$udid"
+  [ -d "$SP_LEASES/$udid" ] || { sp_log "$SP_NAME ($udid) is not leased; lease it before resetting it"; exit 1; }
+  [ "$SP_STATE" = Booted ] || { sp_log "$SP_NAME is $SP_STATE, not booted"; exit 1; }
+  sp_reset "$udid" || exit 1
+  sp_log "reset $SP_NAME ($udid); still booted and leased"
+}
+
 sp_release() {
   local udid="${1:-}" rc=0
   [ "$#" -le 1 ] || sp_usage "release: unexpected argument '$2'"
@@ -529,7 +568,8 @@ sp_status() {
       pool_dir: $dir,
       runtime: (if $rt == "" then null else ($rt | split("\t") | {identifier: .[0], version: .[1]}) end),
       max_per_kind: $max,
-      kinds: [$kinds | split("\n")[] | select(. != "") | split("|") | {kind: .[0], device_type: .[1]}],
+      kinds: [$kinds | split("\n")[] | select(. != "") | split("|")
+        | {kind: .[0], device_type: (if .[1] == "" then null else .[1] end)}],
       devices: [.[] | select(. != null)] | sort_by(.name),
       orphan_leases: [$orphans | split(" ")[] | select(. != "")]
     }')" || exit 1
@@ -616,6 +656,7 @@ fi
 for v in "$SP_MAX" "$SP_WAIT" "$SP_POLL" "$SP_SETTLE"; do
   sp_is_uint "$v" || sp_usage "MEGURI_SIM_POOL_* overrides must be whole numbers"
 done
+SP_KINDS="$(sp_kinds)" && [ -n "$SP_KINDS" ] || { sp_log "cannot read the kinds from $SP_DEVICES_JSON"; exit 1; }
 
 cmd="${1:-}"
 [ "$#" -gt 0 ] && shift
@@ -623,6 +664,7 @@ case "$cmd" in
   acquire) sp_acquire "$@" ;;
   renew) sp_renew "$@" ;;
   release) sp_release "$@" ;;
+  reset) sp_reset_leased "$@" ;;
   status) sp_status "$@" ;;
   gc) sp_gc "$@" ;;
   "") sp_usage "missing command" ;;

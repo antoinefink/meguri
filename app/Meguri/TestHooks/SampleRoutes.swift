@@ -12,6 +12,8 @@ extension TestHooks {
     /// Three sample routes, one per presentation kind (U7): a screen, a sheet
     /// and an error state. The sheet shows what the launch overrides did, read
     /// back from the app rather than from the options, so tests can check them.
+    /// A fourth, `sample/defects`, holds deliberate defects for the agent
+    /// loop's hierarchy check (U8).
     enum SampleRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.register("sample/screen") { _ in
@@ -25,12 +27,44 @@ extension TestHooks {
                     SampleSheet(configuration: context.configuration)
                 }
             }
+            registry.register("sample/defects") { _ in
+                .screen {
+                    SampleDefects()
+                }
+            }
             registry.register("sample/alert") { _ in
                 .alert(title: "Sample error", message: "The sample error state.") {
                     Button("Try Again") {}
                     Button("Cancel", role: .cancel) {}
                 }
             }
+        }
+    }
+
+    /// Deliberate defects that `hierarchy-check` must find (U8, R1964,
+    /// R1965): a button without an identifier and two overlapping labels. A
+    /// spinner over a label is transient and must not be reported.
+    struct SampleDefects: View {
+        var body: some View {
+            VStack(alignment: .leading, spacing: Spacing.xLarge) {
+                Button("Unidentified action") {}
+                ZStack(alignment: .topLeading) {
+                    Text("Overlapping first")
+                        .accessibilityIdentifier("sample.defects.first")
+                    Text("Overlapping second")
+                        .padding(.leading, Spacing.xLarge)
+                        .padding(.top, Spacing.xSmall)
+                        .accessibilityIdentifier("sample.defects.second")
+                }
+                ZStack {
+                    Text("Behind the spinner")
+                        .accessibilityIdentifier("sample.defects.spinnerLabel")
+                    ProgressView()
+                        .accessibilityIdentifier("sample.defects.spinner")
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 

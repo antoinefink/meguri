@@ -60,7 +60,15 @@ extension TestHooks {
         func updateNSView(_ view: WindowHookView, context: Context) {}
     }
 
+    /// Also resizes the running window on request (U8, R1962): `AgentDriver`'s
+    /// resize step posts the distributed notification `resizeRequest` with a
+    /// `-MeguriWindowSize` value as its object. The window takes that size as
+    /// a launch with the option would, without a relaunch, so the app keeps
+    /// its state; then the app posts `resized`.
     final class WindowHookView: NSView {
+        static let resizeRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "").testhooks.resizeWindow")
+        static let resized = Notification.Name("\(Bundle.main.bundleIdentifier ?? "").testhooks.windowResized")
+
         private let size: LaunchOptions.WindowSize?
         private let animationsEnabled: Bool?
         private var applied = false
@@ -78,25 +86,49 @@ extension TestHooks {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            guard let window, !applied else { return }
+            let center = DistributedNotificationCenter.default()
+            center.removeObserver(self, name: Self.resizeRequest, object: nil)
+            guard let window else { return }
+            // Delivered while the app is inactive too: the driver's runner
+            // is usually the active app.
+            center.addObserver(
+                self, selector: #selector(resizeRequested(_:)), name: Self.resizeRequest, object: nil,
+                suspensionBehavior: .deliverImmediately
+            )
+            guard !applied else { return }
             applied = true
             if animationsEnabled == false {
                 window.animationBehavior = .none
             }
             guard let size else { return }
             Task { @MainActor in
-                switch size {
-                case .minimum:
-                    window.setContentSize(WindowMetrics.minimum)
-                case .standard:
-                    window.setContentSize(WindowMetrics.standard)
-                case .large:
-                    if let frame = window.screen?.visibleFrame {
-                        window.setFrame(frame, display: true)
-                    }
-                case let .explicit(width, height):
-                    window.setContentSize(CGSize(width: width, height: height))
+                Self.resize(window, to: size)
+            }
+        }
+
+        @objc private func resizeRequested(_ notification: Notification) {
+            guard let window, let value = notification.object as? String,
+                  let size = try? LaunchOptions.windowSize(value)
+            else { return }
+            Self.resize(window, to: size)
+            window.contentView?.layoutSubtreeIfNeeded()
+            DistributedNotificationCenter.default().postNotificationName(
+                Self.resized, object: nil, userInfo: nil, deliverImmediately: true
+            )
+        }
+
+        private static func resize(_ window: NSWindow, to size: LaunchOptions.WindowSize) {
+            switch size {
+            case .minimum:
+                window.setContentSize(WindowMetrics.minimum)
+            case .standard:
+                window.setContentSize(WindowMetrics.standard)
+            case .large:
+                if let frame = window.screen?.visibleFrame {
+                    window.setFrame(frame, display: true)
                 }
+            case let .explicit(width, height):
+                window.setContentSize(CGSize(width: width, height: height))
             }
         }
     }

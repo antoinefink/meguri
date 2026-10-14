@@ -91,6 +91,8 @@ final class TestHooksTests: XCTestCase {
         XCTAssert(alert.waitForExistence(timeout: 15), "the sample error alert is not on screen")
         XCTAssert(alert.staticTexts["The sample error state."].exists, "the alert lacks the sample message")
         XCTAssertEqual(Set(alert.buttons.allElementsBoundByIndex.map(\.label)), ["Try Again", "Cancel"])
+        // On the Mac a click on a window that is not key only activates it.
+        try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
         alert.buttons["Cancel"].tap()
         XCTAssert(alert.waitForNonExistence(timeout: 5), "Cancel did not dismiss the alert")
     }
@@ -98,7 +100,7 @@ final class TestHooksTests: XCTestCase {
     func testBadLaunchOptionsReplaceTheAppWithTheHookError() throws {
         let build = try requireHooks()
         let cases: [(MeguriLaunch, String)] = [
-            (MeguriLaunch(route: "nope/missing"), "no route 'nope/missing'; registered: designsystem/gallery, sample/alert, sample/screen, sample/sheet"),
+            (MeguriLaunch(route: "nope/missing"), "no route 'nope/missing'; registered: designsystem/gallery, sample/alert, sample/defects, sample/screen, sample/sheet"),
             (MeguriLaunch(extra: ["-MeguriBogus", "1"]), "unknown launch option -MeguriBogus"),
             (MeguriLaunch(now: "2030-02-30T10:00:00Z"), "-MeguriNow takes YYYY-MM-DDTHH:MM:SS"),
             (MeguriLaunch(timeZone: "Mars/Olympus"), "unknown time zone 'Mars/Olympus'"),
