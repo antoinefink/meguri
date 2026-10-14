@@ -28,24 +28,27 @@ extension TestHooks {
         #endif
 
         var body: some View {
-            VStack(spacing: 0) {
-                scrollingContent
+            scrollingContent
                 // The primary action stays in reach whatever the title's
-                // length: below the scrolling content, not over it. It fills
+                // length, in a bar the content scrolls under: the system's
+                // scroll edge effect shows that the content goes on (a hard
+                // cut above a pinned button read as cut-off text). It fills
                 // an iPhone's width and keeps a button's width in an iPad or
-                // Mac window, centred under the content column.
-                if case .deck = content {
-                    Button {} label: { Text(verbatim: "Study Now").frame(maxWidth: .infinity) }
-                        .buttonStyle(.bordered)
-                        .tint(ColorToken.textPrimary.color)
-                        .controlSize(.large)
-                        .frame(maxWidth: regularWidth ? ContentWidth.primaryAction : .infinity)
-                        .padding(Spacing.medium)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier("sample.deckOverview.study")
+                // Mac window, on the content column's leading edge.
+                .safeAreaBar(edge: .bottom) {
+                    if case .deck = content {
+                        Button {} label: { Text(verbatim: "Study Now").frame(maxWidth: .infinity) }
+                            .buttonStyle(.bordered)
+                            .tint(ColorToken.textPrimary.color)
+                            .controlSize(.large)
+                            .frame(maxWidth: regularWidth ? ContentWidth.primaryAction : .infinity)
+                            .padding(Spacing.medium)
+                            .frame(maxWidth: ContentWidth.readable, alignment: .leading)
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("sample.deckOverview.study")
+                    }
                 }
-            }
-            .background(.token(.backgroundPrimary))
+                .background(.token(.backgroundPrimary))
         }
 
         private var scrollingContent: some View {
