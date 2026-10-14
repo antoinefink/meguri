@@ -234,6 +234,61 @@ services:
       timeout: 3s
       retries: 30
 
+  # The fault proxy of actor scenarios (specs/conformance/sync-ops.md S5,
+  # S8.2): toxiproxy, pinned like the rig's, its API on 8474 and no proxy at
+  # start. A worker creates one proxy per run, named for the run, in front of
+  # its child sync server and deletes it when the session ends, so runs share
+  # the service. `tools/mg` starts it (`up`) for oracle runs that select actor
+  # scenarios, leaves it up and gives the workers ORACLE_SYNC_FAULTS=
+  # sync-faults:8474. Only on oracle-internal and nothing published, so no
+  # upstream the API is given leads out (R1876).
+  sync-faults:
+    image: ghcr.io/shopify/toxiproxy:2.12.0@sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e
+    profiles: [oracle-sync]
+    init: true
+    command: ["-host=0.0.0.0", "-port=8474"]
+    networks:
+      - oracle-internal
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  # The recorder of oracle-client exchanges in actor scenarios (sync-ops.md
+  # S9, R1933): mitmdump, pinned like the rig's, as a forward proxy with
+  # mitm/record_sync.py, which strips each request's /<actor>/<step index>
+  # prefix and records actor and step. Only `tools/mg oracle recordings`
+  # starts it, one container per scenario, writing to $MEGURI_RECORD_DIR, and
+  # gives the workers its address as ORACLE_SYNC_RECORDER. Only on
+  # oracle-internal; healthy while the addon reports every exchange recorded.
+  sync-recorder:
+    image: mitmproxy/mitmproxy:12.2.1@sha256:743b6cdc817211d64bc269f5defacca8d14e76e647fc474e5c7244dbcb645141
+    profiles: [oracle-record]
+    init: true
+    command:
+      - mitmdump
+      - --mode
+      - regular@8080
+      - --scripts
+      - /opt/mitm/record_sync.py
+      - --set
+      - record_dir=/recordings
+      - --set
+      - record_actor_steps=true
+      - --set
+      - flow_detail=0
+    volumes:
+      - ./mitm:/opt/mitm:ro
+      - ${MEGURI_RECORD_DIR:-../build/sync-recorder/recording}:/recordings
+    networks:
+      - oracle-internal
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json, sys; sys.exit(0 if json.load(open('/tmp/record-sync-health.json'))['ok'] is True else 1)"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
 networks:
   # No route out of oracle containers: nothing in them can reach AnkiWeb or
   # any other host (R1876).

@@ -56,7 +56,7 @@ remove_project_containers() {
 cleanup() {
   remove_project_containers
   sbcompose down >/dev/null 2>&1
-  sbcompose --profile sync-rig --profile spec-record down >/dev/null 2>&1
+  sbcompose --profile sync-rig --profile spec-record --profile oracle-sync --profile oracle-record down >/dev/null 2>&1
   [ -z "$RIG_IMAGE" ] || docker image rm -f "$RIG_IMAGE" >/dev/null 2>&1
   docker image rm -f "$PROJECT-dev" "$PROJECT-fuzz" "$PROJECT-similarity" >/dev/null 2>&1
   rm -rf "$SB-wt"
@@ -681,6 +681,30 @@ t_sync_rig_up_fails_when_the_recording_is_unwritable() {
   expect "down status" "$(field .status)" pass
 }
 
+# The fault proxy and the recorder of actor scenarios (sync-ops.md S8.2): only
+# on the internal oracle-internal network, nothing published, pinned by the
+# rig's digests, never started by a plain `compose up`.
+t_actor_scenario_proxies_are_internal_only() {
+  local cfg
+  cfg="$(sbcompose --profile '*' config --format json)" || return 1
+  expect "networks" "$(jq -c '[.services["sync-faults", "sync-recorder"] | .networks | keys] | unique' <<<"$cfg")" \
+    '[["oracle-internal"]]' &&
+    expect "oracle-internal is internal" "$(jq '.networks["oracle-internal"].internal' <<<"$cfg")" true &&
+    expect "published ports" "$(jq '[.services["sync-faults", "sync-recorder"] | .ports // [] | length] | add' <<<"$cfg")" 0 &&
+    expect "toxiproxy pin" "$(jq -r '.services["sync-faults"].image == .services.toxiproxy.image' <<<"$cfg")" true &&
+    expect "mitmdump pin" "$(jq -r '.services["sync-recorder"].image == .services.mitmdump.image' <<<"$cfg")" true &&
+    expect "profiles" "$(jq -c '[.services["sync-faults", "sync-recorder"] | .profiles]' <<<"$cfg")" \
+      '[["oracle-sync"],["oracle-record"]]'
+}
+
+# record_sync.py's actor and step attribution (sync-ops.md S9): its unit tests
+# (docker/mitm/tests) with mitmproxy's own test helpers, in the sync-recorder
+# image.
+t_recorder_attributes_exchanges_to_actors_and_steps() {
+  sbcompose --profile oracle-record run --rm -T --no-deps --entrypoint python3 -e PYTHONDONTWRITEBYTECODE=1 \
+    sync-recorder -B -m unittest discover -v -s /opt/mitm/tests </dev/null
+}
+
 # The simulator pool under macOS /bin/bash 3.2 and BSD tools, against the fake
 # `xcrun simctl` (sim_pool_fake_xcrun.sh): no real simulator is touched.
 t_sim_pool_on_macos_bash() {
@@ -789,7 +813,8 @@ t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_
 t_parallel_session_records_on_macos t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
 t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_removes_it
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
-t_sync_rig_up_fails_when_the_recording_is_unwritable t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
+t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
+t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
 t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
