@@ -68,27 +68,116 @@ impl<'de> Deserialize<'de> for ObjectMembers<'de> {
     }
 }
 
-/// Any JSON text: `None` when it is not valid JSON. Every other reader works
-/// on values this one returned.
+/// Any JSON text: `None` when it is not valid JSON (N9) or holds a number
+/// beyond the 64-bit float range anywhere (N10). Every other reader works on
+/// values this one or [`parse_skipping_range`] returned.
 pub(crate) fn parse_value(text: &str) -> Option<&RawValue> {
-    let raw = serde_json::from_str::<&RawValue>(text).ok()?;
-    strings_decode(raw).then_some(raw)
+    parse_skipping_range(text).filter(|raw| in_range(raw))
 }
 
-/// Whether every string in the value, object keys included, decodes. serde_json
-/// checks the syntax when it captures raw text but not escapes, and N9 makes
-/// an unpaired surrogate escape anywhere invalid.
-fn strings_decode(raw: &RawValue) -> bool {
+/// As [`parse_value`] without the range check, for card data, where Anki
+/// skips the values of unknown keys without reading them (N10). The caller
+/// checks every value it reads with [`in_range`].
+pub(crate) fn parse_skipping_range(text: &str) -> Option<&RawValue> {
+    let raw = serde_json::from_str::<&RawValue>(text).ok()?;
+    all_scalars(raw, &|_| true).then_some(raw)
+}
+
+/// N10: whether every number in the value is within the 64-bit float range.
+pub(crate) fn in_range(raw: &RawValue) -> bool {
+    all_scalars(raw, &|scalar| {
+        kind(scalar) != Kind::Number || number_in_range(scalar.get())
+    })
+}
+
+/// Whether every string in the value, object keys included, decodes, and
+/// `check` holds for every scalar. serde_json checks the syntax when it
+/// captures raw text but not escapes, and N9 makes an unpaired surrogate
+/// escape anywhere invalid. serde_json's recursion limit bounds the depth.
+fn all_scalars(raw: &RawValue, check: &dyn Fn(&RawValue) -> bool) -> bool {
     match kind(raw) {
-        Kind::String => serde_json::from_str::<String>(raw.get()).is_ok(),
-        Kind::Array => {
-            serde_json::from_str::<Vec<&RawValue>>(raw.get()).is_ok_and(|items| items.into_iter().all(strings_decode))
-        }
+        Kind::String => serde_json::from_str::<String>(raw.get()).is_ok() && check(raw),
+        Kind::Array => serde_json::from_str::<Vec<&RawValue>>(raw.get())
+            .is_ok_and(|items| items.into_iter().all(|item| all_scalars(item, check))),
         // Keys are decoded as the members are read.
-        Kind::Object => {
-            parse_members(raw.get()).is_some_and(|members| members.into_iter().all(|(_, v)| strings_decode(v)))
+        Kind::Object => parse_members(raw.get())
+            .is_some_and(|members| members.into_iter().all(|(_, value)| all_scalars(value, check))),
+        Kind::Number | Kind::Bool | Kind::Null => check(raw),
+    }
+}
+
+/// N10, a number literal of valid JSON: Anki's fast decimal conversion, which
+/// is not always exact near the largest 64-bit float, decides the range.
+fn number_in_range(literal: &str) -> bool {
+    let text = literal.strip_prefix('-').unwrap_or(literal).as_bytes();
+    let (mantissa, exponent_text) = match text.iter().position(|b| matches!(b, b'e' | b'E')) {
+        Some(at) => (&text[..at], Some(&text[at + 1..])),
+        None => (text, None),
+    };
+    let (integer, fraction) = match mantissa.iter().position(|b| *b == b'.') {
+        Some(at) => (&mantissa[..at], &mantissa[at + 1..]),
+        None => (mantissa, &[][..]),
+    };
+    // Step 1: digits into S while S × 10 + d fits in a u64. The first integer
+    // digit that does not fit drops the rest of the integer part; taking
+    // starts again in the fraction and stops at its first digit that does
+    // not fit.
+    let take = |s: u64, digit: u8| s.checked_mul(10)?.checked_add(u64::from(digit - b'0'));
+    let mut s = 0u64;
+    let mut dropped = 0i64;
+    for (i, digit) in integer.iter().enumerate() {
+        match take(s, *digit) {
+            Some(next) => s = next,
+            None => {
+                dropped = (integer.len() - i) as i64;
+                break;
+            }
         }
-        Kind::Number | Kind::Bool | Kind::Null => true,
+    }
+    let mut taken = 0i64;
+    for digit in fraction {
+        match take(s, *digit) {
+            Some(next) => {
+                s = next;
+                taken += 1;
+            }
+            None => break,
+        }
+    }
+    // Step 4: a number whose digits are all 0 is 0.
+    if s == 0 {
+        return true;
+    }
+    // Step 2, with step 3's rule for a positive exponent beyond 32 bits.
+    let exponent = match exponent_text {
+        None => 0,
+        Some(digits) => {
+            let (negative, digits) = match digits.first() {
+                Some(b'-') => (true, &digits[1..]),
+                Some(b'+') => (false, &digits[1..]),
+                _ => (false, digits),
+            };
+            let value = digits
+                .iter()
+                .fold(0i64, |v, d| v.saturating_mul(10).saturating_add(i64::from(d - b'0')));
+            if negative {
+                -value
+            } else if value > i64::from(i32::MAX) {
+                return false;
+            } else {
+                value
+            }
+        }
+    };
+    let e = exponent.saturating_add(dropped).saturating_sub(taken);
+    // Steps 3 and 4. Below 10^289, S × 10^E stays under 1.9e307.
+    match e {
+        ..=288 => true,
+        309.. => false,
+        _ => {
+            let power: f64 = format!("1e{e}").parse().unwrap_or(f64::INFINITY);
+            (s as f64 * power).is_finite()
+        }
     }
 }
 

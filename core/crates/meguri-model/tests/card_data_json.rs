@@ -58,24 +58,97 @@ fn values_that_do_not_fit_read_as_absent_as_in_the_oracle() {
     assert_rewrites(id, &rewritten_texts(&golden(id)));
 }
 
-#[test]
-fn unknown_keys_survive_rewrite() {
-    let id = "model/card-data/unknown-keys";
+/// The rows a deviation entry of `conformance/deviations.yaml` puts in place
+/// of the golden's, after checking where it applies.
+fn deviation_rows(id: &str, pointer: &str) -> Vec<String> {
     let deviations = common::yaml_file("deviations.yaml");
     let entry = deviations["deviations"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|d| d["id"] == "card-data-unknown-keys")
+        .find(|d| d["id"] == id)
         .expect("the deviation entry");
-    assert_eq!(entry["pointer"], "/steps/7/db_exec/rows");
-    let expected: Vec<String> = entry["transform"]["replace"]
+    assert_eq!(entry["pointer"], pointer);
+    entry["transform"]["replace"]
         .as_array()
         .unwrap()
         .iter()
         .map(|row| row[0].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn unknown_keys_survive_rewrite() {
+    let id = "model/card-data/unknown-keys";
+    assert_rewrites(id, &deviation_rows("card-data-unknown-keys", "/steps/7/db_exec/rows"));
+}
+
+#[test]
+fn numbers_beyond_the_float_range_read_as_the_oracle_reads_them() {
+    // json-numbers N10 and C3 rule 1: the first 21 cards, which the
+    // golden's step 25 reads back; the last three are the deviation below.
+    let id = "model/card-data/out-of-range";
+    let g = golden(id);
+    let expected: Vec<String> = common::rows(&g, 25)
+        .iter()
+        .map(|row| row[0].as_str().unwrap().to_owned())
         .collect();
-    assert_rewrites(id, &expected);
+    let stored = stored_texts(id);
+    assert_eq!((stored.len(), expected.len()), (24, 21));
+    for (i, (input, want)) in stored.iter().zip(&expected).enumerate() {
+        assert_eq!(&rewrite(input), want, "{id} card {}: input {input:?}", i + 1);
+    }
+}
+
+/// Deviation `card-data-unknown-keys-range`: the values of unknown keys are
+/// kept as their text without a range check (C3 rule 7, N10).
+#[test]
+fn unknown_keys_skip_range_check() {
+    let id = "model/card-data/out-of-range";
+    let expected = deviation_rows("card-data-unknown-keys-range", "/steps/26/db_exec/rows");
+    let stored = stored_texts(id);
+    assert_eq!(expected.len(), 3);
+    for (i, (input, want)) in stored[21..].iter().zip(&expected).enumerate() {
+        assert_eq!(&rewrite(input), want, "{id} card {}: input {input:?}", i + 22);
+    }
+    let data = CardData::parse(r#"{"pos":5,"zz":-1e400}"#);
+    assert_eq!(data.original_position, Some(5));
+    assert_eq!(data.unknown_keys().collect::<Vec<_>>(), [("zz", "-1e400")]);
+}
+
+/// specs/model/json-numbers.md N10 table, through the `s` key: a number in
+/// range keeps the memory state, one out of range empties the whole text.
+#[test]
+fn spec_range_table() {
+    let ones = |zeros: usize| format!("1{}", "0".repeat(zeros));
+    let cases = [
+        ("1e400".to_owned(), false),
+        ("0.1e310".to_owned(), false),
+        ("1e99999999999".to_owned(), false),
+        (ones(309), false),
+        (ones(308), true),
+        ("1.7976931348623157e308".to_owned(), true),
+        ("1.7976931348623158e308".to_owned(), false),
+        ("17976931348623157081e289".to_owned(), false),
+        ("1797693134862315e293".to_owned(), true),
+        ("1e-400".to_owned(), true),
+        ("0e400".to_owned(), true),
+        // The sign, an explicit exponent sign and a capital E change nothing.
+        ("-1e400".to_owned(), false),
+        ("1e+400".to_owned(), false),
+        ("1E400".to_owned(), false),
+        ("-0.0e400".to_owned(), true),
+        ("1e-99999999999".to_owned(), true),
+        // Fraction digits count against the exponent, leading zeros included.
+        ("0.0001e312".to_owned(), true),
+        ("0.0001e313".to_owned(), false),
+    ];
+    for (literal, in_range) in cases {
+        let text = format!(r#"{{"s":{literal},"d":1}}"#);
+        let data = CardData::parse(&text);
+        assert_eq!(data.memory_state.is_some(), in_range, "{literal}");
+        assert_eq!(data.to_text() == "{}", !in_range, "{literal}");
+    }
 }
 
 /// specs/model/card-data-json.md C5, input and Meguri's output.
@@ -114,6 +187,15 @@ fn spec_examples() {
             r#"{"pos":1,"zz":{"b":1,"a":[1, 2]}}"#,
         ),
         (r#"{"s":1.5,"zz":null}"#, r#"{"zz":null}"#),
+        (r#"{"s":1e400,"d":1}"#, "{}"),
+        (r#"{"pos":5,"cd":[1e400]}"#, "{}"),
+        (r#"{"pos":5,"s":1,"d":1.7976931348623158e308}"#, "{}"),
+        (r#"{"pos":5,"s":1e-400,"d":2}"#, r#"{"pos":5,"s":0.0,"d":2.0}"#),
+        (
+            r#"{"pos":5,"zz":1e400,"s":1.5,"d":2}"#,
+            r#"{"pos":5,"s":1.5,"d":2.0,"zz":1e400}"#,
+        ),
+        ("[1,null,null,1e400]", "{}"),
     ];
     for (input, want) in cases {
         assert_eq!(CardData::parse(input).to_text(), want, "input {input}");

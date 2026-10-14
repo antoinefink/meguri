@@ -626,6 +626,131 @@ fn addon_preset_keys_survive_every_save() {
 }
 
 #[test]
+fn preset_parts_that_take_their_defaults_drop_their_extras() {
+    // S10.1 to S10.3 and S10.5 input rule 1: each part first keeps an extra
+    // member in other, then takes its defaults and keeps nothing; a top-level
+    // extra saved with a failing part stays.
+    let id = "model/schema11/preset-part-defaults";
+    let (s, g) = (scenario(id), golden(id));
+    let first = object(&g, 4, "presets", "Daily");
+    let record = preset(int(&first["id"]), "Daily", 0, 0, &daily_preset_blob());
+    let mut current = json_of(&deck_config_to_json(&record));
+    // Each legacy_update, with the step reading its blob back and the step
+    // observing the object, when there is one.
+    let saves = [
+        (0, Some(1), None),
+        (2, Some(3), Some(4)),
+        (5, Some(6), None),
+        (7, Some(8), Some(9)),
+        (10, Some(11), None),
+        (12, Some(13), Some(14)),
+        (15, None, None),
+        (16, Some(17), Some(18)),
+    ];
+    for (update, read, observed) in saves {
+        let saved = saved_preset(&patched(&current, patch(&s, update)));
+        if let Some(read) = read {
+            assert_eq!(
+                common::hex(&saved.config.to_bytes()),
+                text(&rows(&g, read)[0][0]),
+                "step {update}"
+            );
+        }
+        current = json_of(&deck_config_to_json(&saved));
+        if let Some(observed) = observed {
+            assert_same_json(
+                &current,
+                object(&g, observed, "presets", "Daily"),
+                &format!("step {observed}"),
+            );
+        }
+    }
+    // The spec example: an invalid `new` keeps nothing of its members.
+    let saved = saved_preset(&patched(
+        &current,
+        &serde_json::json!({"new": {"initialFactor": 70000, "keepNew": 1, "keepNew2": 2}}),
+    ));
+    let object_after = json_of(&deck_config_to_json(&saved));
+    assert_eq!(object_after["new"]["perDay"], 20);
+    assert!(object_after["new"].get("keepNew").is_none());
+}
+
+#[test]
+fn other_with_a_number_beyond_the_float_range_adds_nothing() {
+    // json-numbers N10, S3 output rule 1: the whole other is invalid JSON.
+    let id = "model/schema11/other-out-of-range";
+    let (s, g) = (scenario(id), golden(id));
+    let default_blob = blob(
+        &rows(&golden("model/proto/preset-bytes"), 1)
+            .iter()
+            .find(|row| row[1] == "Default")
+            .unwrap()[4],
+    );
+    for (step, name) in [(0, "Over"), (1, "Nested"), (2, "Edge"), (3, "Under"), (4, "Max")] {
+        let observed = object(&g, 7, "presets", name);
+        let bytes = appended(&default_blob, &sql(&s, step));
+        let record = preset(int(&observed["id"]), name, int(&observed["mod"]), -1, &bytes);
+        assert_same_json(&json_of(&deck_config_to_json(&record)), observed, name);
+    }
+    let kind = blob(&rows(&golden("model/schema11/deck-rejections"), 11)[0][3]);
+    for (step, name) in [(5, "Words"), (6, "Kept")] {
+        let observed = object(&g, 7, "decks", name);
+        let common_bytes = appended(&new_deck_common(), &sql(&s, step));
+        let record = deck(
+            int(&observed["id"]),
+            name,
+            int(&observed["mod"]),
+            -1,
+            &common_bytes,
+            &kind,
+        );
+        assert_same_json(&json_of(&deck_to_json(&record)), observed, name);
+    }
+}
+
+#[test]
+fn objects_with_a_number_beyond_the_float_range_are_refused() {
+    // json-numbers N10: in a schema-11 object or a col column, such a number
+    // makes the whole text invalid JSON, wherever it is.
+    let with_member = |object: &Value, member: &str| {
+        let text = object.to_string();
+        format!("{},{member}}}", &text[..text.len() - 1])
+    };
+    let presets = golden("model/proto/preset-bytes");
+    let preset_object = object(&presets, 2, "presets", "Default");
+    for member in [
+        r#""zz":1e400"#,
+        r#""zz":{"a":[-1e400]}"#,
+        r#""zz":1.7976931348623158e308"#,
+    ] {
+        let result = deck_config_from_json(&with_member(preset_object, member));
+        assert_refused(result, Schema11Item::DeckConfig, member);
+    }
+    let text = with_member(preset_object, r#""zz":1.7976931348623157e308"#);
+    assert!(deck_config_from_json(&text).is_ok());
+    let text = with_member(preset_object, r#""zz":1e-400"#);
+    assert!(deck_config_from_json(&text).is_ok());
+
+    let decks = golden("model/schema11/deck-rejections");
+    let deck_object = object(&decks, 12, "decks", "Words");
+    assert_refused(
+        deck_from_json(&with_member(deck_object, r#""zz":[1e400]"#)),
+        Schema11Item::Deck,
+        "deck",
+    );
+    let notetypes = golden("model/proto/notetype-bytes");
+    let notetype_object = object(&notetypes, 5, "notetypes", "Pair");
+    assert_refused(
+        notetype_from_json(&with_member(notetype_object, r#""zz":1e400"#)),
+        Schema11Item::Notetype,
+        "notetype",
+    );
+    assert!(col::tags_from_json(r#"{"a":-1,"b":1e400}"#).is_err());
+    assert!(col::conf_from_json(r#"{"nextPos":1e400}"#).is_err());
+    assert!(col::conf_from_json(r#"{"nextPos":1e308}"#).is_ok());
+}
+
+#[test]
 fn refused_preset_objects() {
     let id = "model/schema11/preset-rejections";
     let (s, g) = (scenario(id), golden(id));

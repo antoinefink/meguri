@@ -34,14 +34,16 @@ pub struct CardData {
 
 impl CardData {
     /// C3: text that is empty, not JSON, or JSON other than an object or an
-    /// array reads as no keys at all.
+    /// array reads as no keys at all. So does a number beyond the 64-bit
+    /// float range anywhere but in the value of an unknown key, which Anki
+    /// skips without reading (rule 1, `model/json-numbers` N10).
     pub fn parse(text: &str) -> CardData {
-        let Some(raw) = json::parse_value(text) else {
+        let Some(raw) = json::parse_skipping_range(text) else {
             return CardData::default();
         };
         match json::kind(raw) {
             Kind::Object => CardData::from_object(raw),
-            Kind::Array => CardData::from_array(raw),
+            Kind::Array if json::in_range(raw) => CardData::from_array(raw),
             _ => CardData::default(),
         }
     }
@@ -50,10 +52,13 @@ impl CardData {
         let Some(members) = json::parse_members(raw.get()) else {
             return CardData::default();
         };
-        // C3 rule 2: a known key twice means no keys at all.
+        // C3 rule 2: a known key twice means no keys at all. Rule 1: so does
+        // a known key's value holding a number out of range.
+        let known = |key: &str| KNOWN_KEYS.contains(&key);
         if KNOWN_KEYS
             .iter()
             .any(|known| members.iter().filter(|(key, _)| key == known).count() > 1)
+            || members.iter().any(|(key, value)| known(key) && !json::in_range(value))
         {
             return CardData::default();
         }
@@ -68,10 +73,7 @@ impl CardData {
             value("cd"),
         );
         // C3 rule 7: unknown keys kept, a repeated one at its last place.
-        let unknown: Vec<json::Member<'_>> = members
-            .into_iter()
-            .filter(|(key, _)| !KNOWN_KEYS.contains(&key.as_str()))
-            .collect();
+        let unknown: Vec<json::Member<'_>> = members.into_iter().filter(|(key, _)| !known(key)).collect();
         data.unknown = json::last_wins(unknown)
             .into_iter()
             .map(|(key, raw)| (key, raw.get().to_owned()))
