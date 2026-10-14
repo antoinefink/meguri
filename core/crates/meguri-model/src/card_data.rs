@@ -19,7 +19,7 @@ pub struct MemoryState {
 #[derive(Clone, Debug, Default)]
 pub struct CardData {
     /// `pos`: the card's position while it was new.
-    pub original_position: Option<u32>,
+    pub new_position: Option<u32>,
     /// `s` and `d`.
     pub memory_state: Option<MemoryState>,
     /// `dr`: the desired retention the card was last scheduled with.
@@ -107,7 +107,7 @@ impl CardData {
         let stability = s.and_then(json::f32_value);
         let difficulty = d.and_then(json::f32_value);
         CardData {
-            original_position: pos.and_then(json::u32_value),
+            new_position: pos.and_then(json::u32_value),
             memory_state: stability
                 .zip(difficulty)
                 .map(|(stability, difficulty)| MemoryState { stability, difficulty }),
@@ -137,7 +137,7 @@ impl CardData {
     /// ones; `{}` when there is none.
     pub fn to_text(&self) -> String {
         let mut out = ObjectWriter::new();
-        if let Some(pos) = self.original_position {
+        if let Some(pos) = self.new_position {
             out.int("pos", pos);
         }
         if let Some(memory) = self.memory_state {

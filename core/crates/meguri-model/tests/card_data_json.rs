@@ -112,7 +112,7 @@ fn unknown_keys_skip_range_check() {
         assert_eq!(&rewrite(input), want, "{id} card {}: input {input:?}", i + 22);
     }
     let data = CardData::parse(r#"{"pos":5,"zz":-1e400}"#);
-    assert_eq!(data.original_position, Some(5));
+    assert_eq!(data.new_position, Some(5));
     assert_eq!(data.unknown_keys().collect::<Vec<_>>(), [("zz", "-1e400")]);
 }
 
@@ -206,7 +206,7 @@ fn spec_examples() {
 fn values_read_with_their_declared_types() {
     let data =
         CardData::parse(r#"{"pos":3,"s":0.212,"d":5,"dr":0.9,"decay":0.1542,"lrt":-5,"cd":"{\"x\":1}","q":[1]}"#);
-    assert_eq!(data.original_position, Some(3));
+    assert_eq!(data.new_position, Some(3));
     let memory = data.memory_state.unwrap();
     // The f32 nearest to 0.212, not a widened or rounded value.
     assert_eq!(memory.stability.to_bits(), 0.212f32.to_bits());
