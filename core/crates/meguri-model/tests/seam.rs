@@ -18,6 +18,24 @@ fn fixed_clock_returns_the_injected_instant_and_offset() {
     assert_eq!(clock.now_ms(), JAN_15_2030_10H_UTC_MS, "a fixed clock never advances");
     assert_eq!(clock.utc_offset_at(clock.now_ms()).seconds(), PLUS_05_45_SECS);
     assert_eq!(clock.utc_offset_at(0).seconds(), PLUS_05_45_SECS);
+    assert_eq!(clock.utc_offset().seconds(), PLUS_05_45_SECS);
+    assert_eq!(clock.zone_id(), "UTC");
+}
+
+#[test]
+fn the_host_names_the_time_zone() {
+    let offset = UtcOffset::from_seconds(PLUS_05_45_SECS).unwrap();
+    let clock: &dyn Clock = &FixedClock::new(JAN_15_2030_10H_UTC_MS, offset).in_zone("Asia/Kathmandu");
+    assert_eq!(clock.zone_id(), "Asia/Kathmandu");
+    assert_eq!(clock.now_ms(), JAN_15_2030_10H_UTC_MS);
+}
+
+#[test]
+fn seconds_round_down_also_before_1970() {
+    use meguri_model::time::{TimestampMillis, TimestampSecs};
+    let clock: &dyn Clock = &FixedClock::new(-1, UtcOffset::UTC);
+    assert_eq!(TimestampSecs::now(clock), TimestampSecs(-1));
+    assert_eq!(TimestampMillis(1_999).as_secs(), TimestampSecs(1));
 }
 
 #[test]

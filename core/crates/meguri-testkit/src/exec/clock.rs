@@ -86,6 +86,10 @@ impl Clock for ScenarioClock {
             .unwrap_or(0);
         UtcOffset::from_seconds(offset).unwrap_or(UtcOffset::UTC)
     }
+
+    fn zone_id(&self) -> String {
+        self.zone.iana_name().unwrap_or("UTC").to_owned()
+    }
 }
 
 /// Registers `advance` and `set_clock`.
