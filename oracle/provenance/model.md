@@ -32,6 +32,7 @@ leniency, refusals).
 | json-numbers N10, card-data-json C3 rules 1 and 7, schema11-json S3 output rule 1 | `rslib/src/serde.rs` (`default_on_invalid` reads a known key into a JSON value first), `rslib/src/storage/card/data.rs` (unknown keys are skipped), `Cargo.lock` (serde_json 1.0.143 without `float_roundtrip`: the fast decimal conversion and its out-of-range error) | a number beyond the f64 range fails the whole read wherever a value is read; unknown card-data keys are skipped unread; boundary cases from oracle experiments, recorded as `model/card-data/out-of-range` and `model/schema11/other-out-of-range` |
 | schema11-json S10.1-S10.3, S10.5 input rule 1 | `rslib/src/deckconfig/schema11.rs` (`new`, `rev`, `lapse` read with `default_on_invalid`) | a part that does not read is replaced whole by its default, its extra members included; recorded as `model/schema11/preset-part-defaults` |
 | model-ops L4 | `rslib/src/error/mod.rs` (a prost decode error becomes the protobuf error kind), `rslib/src/storage/deck/mod.rs` (a kind with no member is a database error) | which read failures `blob_decode` maps to `invalid_blob` |
+| model-ops L6, L7; schema11-json S12 (package bullet), S14.1 | `rslib/src/import_export/package/apkg/export.rs`, `rslib/src/import_export/gather.rs`, `rslib/src/import_export/insert.rs`, `rslib/src/import_export/package/meta.rs`, `rslib/src/import_export/package/colpkg/export.rs`, `rslib/src/storage/upgrades/mod.rs` (downgrade to 11), `rslib/src/storage/notetype/mod.rs` (`models` written from every note type), `rslib/src/notetype/service.rs` (the legacy getter uses the same conversion), `proto/anki/import_export.proto` | a legacy export is `meta` version 2, `collection.anki21` at schema 11, a placeholder `collection.anki2` and `media`; only the note types of exported notes, inserted unchanged into a fresh collection that is then downgraded; entry choice by `meta` version or entry presence. A black-box probe in the oracle image (pylib export, then SQLite on the extracted entry) showed a standard and a cloze note type's `models` members equal to their `legacy_json` objects as parsed values, nested `other` keys sorted on both sides, `1.5e3` stored as `1500.0`, `ver` 11, and zip entry times from the clock |
 
 Driver hints for the oracle maintainer (model ops):
 
@@ -51,3 +52,23 @@ Driver hints for the oracle maintainer (model ops):
   error kind is `invalid_blob`; anything else stays an `anki_error`. The
   oracle experiments behind `model/proto/decode-limits` expect every
   refused blob there to fail with that kind.
+- `export` (legacy form, model-ops L6): validate the argument exactly
+  (`format` "apkg", `legacy` true, `name` matching the schema's
+  `package_name`), then call `col.export_anki_package(out_path=<session
+  dir>/<name>, options=ExportAnkiPackageOptions(with_scheduling=True,
+  with_deck_configs=True, with_media=False, legacy=True), limit=None)` and
+  return `{"notes": <its return value>}`. The file lives in the session
+  directory so a handoff carries it (`Session.hand_off` copies that
+  directory). `limit=None` is the whole collection.
+- `package_col` (model-ops L7): find `<session dir>/<name>` (missing:
+  `unknown_ref`), open it with `zipfile`, decode `meta` when present (field 1
+  varint; protobuf bytes `08 02` for version 2) and pick the entry per L7
+  (version 3 or other: `invalid_scenario`). Extract that entry to scratch and
+  read `SELECT ver, conf, models, decks, dconf, tags FROM col` with Python's
+  `sqlite3`, never `anki.collection.Collection` (opening upgrades it to 18
+  and empties the columns). Parse each requested JSON column like
+  `legacy_json` does (`json.loads` with the duplicate-key guard), so ints
+  stay ints and floats stay floats.
+- Record `model/schema11/apkg-notetypes` with
+  `tools/mg oracle record model/schema11/apkg-notetypes`, then update
+  model-ops L5 (the golden now exists).

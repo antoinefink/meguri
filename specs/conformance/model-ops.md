@@ -5,7 +5,7 @@ Requirements: R1883, R1463, R1464, R1460, R1461
 Anki: 26.09.3
 Scenarios: conformance/scenarios/model/
 
-Two observation kinds and one op that the model scenarios need, plus how they use two draft ops. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The conversions they exercise are `specs/model/schema11-json.md`, `specs/model/protobuf-records.md` and `specs/model/card-data-json.md`.
+The observation kinds and ops that the model scenarios need, plus how they use two draft ops and fix one form of a third. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The conversions they exercise are `specs/model/schema11-json.md`, `specs/model/protobuf-records.md` and `specs/model/card-data-json.md`.
 
 ## L1. `legacy_json` (observation kind)
 
@@ -57,6 +57,31 @@ Whether the collection can decode the protobuf blobs of named records (`specs/mo
 
 ## L5. Status
 
-- The oracle driver implements `legacy_json`, `blob_decode` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). Every model scenario has a golden, `model/proto/decode-limits` included.
+- The oracle driver implements `legacy_json`, `blob_decode` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). Every model scenario has a golden, `model/proto/decode-limits` included, except `model/schema11/apkg-notetypes`: the driver does not have the legacy `export` form (L6) and `package_col` (L7) yet, and that golden is recorded once it does.
 - The oracle reopens the collection before each `legacy_json`, `legacy_update` and `blob_decode` to read the file, which also empties Anki's undo history. Model scenarios never undo; a scenario that undoes across one of these steps is not portable.
-- Meguri's executor implements `legacy_json`, `legacy_update` and `blob_decode` with U21's codecs once the record store (U23) and the setup adapters exist; `db_exec` comes with the storage area and `suspend` with the scheduling area. Until then the scenarios are `pending`.
+- Meguri's executor implements `legacy_json`, `legacy_update` and `blob_decode` with U21's codecs once the record store (U23) and the setup adapters exist; `db_exec` comes with the storage area and `suspend` with the scheduling area. The legacy `export` form comes with the legacy package writer (U123) and `package_col` with the package reader (U120). Until then the scenarios are `pending`, and U21 uses their goldens as conversion pairs (`specs/model/schema11-json.md` S14).
+
+## L6. `export`, legacy package form (op)
+
+`export` belongs to the package area and is draft (`dsl.md` D7.2). The model scenarios need one form of it, a legacy package, so this section fixes that form. The package area adds the other forms and keeps this one as written; an option it adds later must default to the behavior below.
+
+- **Argument** `{format: apkg, name: <file name>, legacy: true}`, with no other keys. `name` is a file name of letters, digits, `.`, `_` and `-` that starts with a letter or digit and ends in `.apkg`.
+- **Effect.** Writes the whole collection as a legacy package to the file `name` in the session directory, replacing a file of that name. Scheduling information and presets are included; media files are not. A note type is in the package only when an exported note uses it, so a scenario gives each note type it observes a note. The collection does not change.
+- **The package.** A zip archive. Anki 26.9.3 writes a `meta` entry naming package version 2 (L7), the exported collection at schema 11 as `collection.anki21`, a placeholder collection for older clients as `collection.anki2`, and a `media` entry. The package format is the package area's (U120, U123); the model scenarios rely only on L7 finding the exported collection, with its `col` row in the schema-11 form (`specs/model/schema11-json.md` S12).
+- **Output** `{notes: <count>}`: the number of notes in the package.
+- **Not observable.** The package's bytes: entry times, the compression and the placeholder collection's random values differ from run to run and between executors. Observe the content with L7.
+- **Errors.** A malformed argument is `invalid_scenario`. An export that Anki refuses is a run error; scenarios avoid it. No rejection kinds.
+- In a live chain the package crosses a handoff with the session directory (`dsl.md` D9.2).
+
+## L7. `package_col` (observation kind)
+
+The `col` row of the collection inside a legacy package that an `export` step wrote (L6).
+
+- **Request** `{package_col: {name: <file name>, columns: [<column>, ...]}}`: `name` as in L6, the file of an earlier `export` step of the scenario (one before a handoff included); `columns` a non-empty list, without repeats, of `ver`, `conf`, `models`, `decks`, `dconf` and `tags`.
+- **What is read.** The package's collection entry. The `meta` entry, when the archive has one, holds a protobuf message whose field 1 (varint) is the package version: version 1 means `collection.anki2` and version 2 `collection.anki21`. Without `meta`, the entry is `collection.anki21` when the archive has it, else `collection.anki2`. The entry is read as the SQLite file it is, never opened as a collection: opening converts it to schema 18, which empties the JSON columns.
+- **Value** `{<column>: <value>, ...}`, one member per requested column. `ver` is the stored integer. Each other column is its stored text parsed as JSON, numbers as in L1: integers stay integers and numbers written with a fraction or an exponent stay non-integers. So `models` is `{"<note type id>": <note type object>, ...}` as `specs/model/schema11-json.md` S12 lays it out.
+- **Comparison** as any value (`observations.md` O7): objects compare member by member, so the order in which Anki writes the members of a column and of its objects (S3, S12) never counts.
+- **Errors.** A package version other than 1 or 2 is `invalid_scenario` (the current format holds a schema-18 collection, whose JSON columns are empty). A `name` with no such file in the session directory is a run error (`unknown_ref`). An archive that does not read, a missing entry and a column whose text is not JSON are run errors as well; scenarios avoid them.
+- Nothing in the collection or the package changes.
+- **Oracle.** It opens the archive and reads the entry with SQLite directly, never through Anki.
+- **Meguri.** Its executor finds the entry with the package reader (U120) and reads it the same way.
