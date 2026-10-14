@@ -1,10 +1,11 @@
-//! Protobuf blob decoding never panics, on any input, and every record that
-//! decodes re-encodes to bytes that decode to the same record
-//! (specs/model/protobuf-records.md P2 to P4, P9).
+//! Protobuf blob decoding never panics, on any input: every input gives a
+//! record or a P9 error. Every record that decodes re-encodes (P3, P4) to
+//! bytes that decode to an equal record, and encoding that record again gives
+//! the same bytes (specs/model/protobuf-records.md P9).
 //!
-//! "The same" is `BlobMessage::equivalent`: floats bit for bit, except that
-//! -0.0 in an implicit float comes back as 0.0 (P3), and unknown fields
-//! compared in field-number order, the order P4 writes them in.
+//! "Equal" is `BlobMessage::equivalent`: P4 equality (known values bit for
+//! bit, unknown fields per field number in read order), except that -0.0 in
+//! an implicit float comes back as 0.0 (P3).
 
 #![no_main]
 

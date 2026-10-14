@@ -891,20 +891,222 @@ fn reason<M: BlobMessage + std::fmt::Debug>(hex_text: &str) -> BlobError {
 #[test]
 fn spec_decode_error_examples() {
     use BlobError::*;
+    // specs/model/protobuf-records.md P9 table; whole deck-config blobs
+    // unless named otherwise.
     for (blob, expected) in [
         ("0a05", Truncated),
         ("ff", Truncated),
         ("0a020000", Truncated),
+        ("3b", Truncated),
+        ("38ffffffffffffffffff02", BadVarint),
+        ("808080801000", BadVarint),
+        ("0000", BadFieldNumber),
         ("0800", BadWireType),
         ("0f", BadWireType),
         ("0c", BadWireType),
+        ("3b44", BadGroup),
     ] {
         assert_eq!(reason::<DeckConfigMessage>(blob), expected, "{blob}");
     }
+    let groups_101 = format!("{}{}", "3b".repeat(101), "3c".repeat(101));
+    assert_eq!(reason::<DeckConfigMessage>(&groups_101), TooDeep);
+    assert_eq!(reason::<DeckKindMessage>("0a015b"), Truncated);
+    assert_eq!(reason::<DeckKindMessage>("0a015b5c"), Truncated);
     let preset = DeckConfigMessage::decode(&unhex("38ffffffffffffffffff01")).unwrap();
     assert_eq!(preset.unknown_fields().iter().next().unwrap().number(), 7);
     let preset = DeckConfigMessage::decode(&unhex("fa0f02ffff")).unwrap();
     assert_eq!(preset.other(), [0xff, 0xff]);
+}
+
+/// The blobs of model/proto/decode-limits by list and record name: a
+/// preset's config, or a deck's common and kind.
+fn decode_limit_blobs() -> Vec<(&'static str, String, Vec<Vec<u8>>)> {
+    let scenario = common::scenario("model/proto/decode-limits");
+    let quoted = |sql: &str, after: &str| -> String {
+        let rest = &sql[sql.find(after).unwrap() + after.len()..];
+        let rest = &rest[rest.find('\'').unwrap() + 1..];
+        rest[..rest.find('\'').unwrap()].to_owned()
+    };
+    let literals = |sql: &str| -> Vec<Vec<u8>> {
+        sql.split("X'")
+            .skip(1)
+            .map(|rest| unhex(&rest[..rest.find('\'').unwrap()]))
+            .collect()
+    };
+    let mut blobs = Vec::new();
+    for step in scenario["steps"].as_array().unwrap() {
+        let Some(sql) = step["db_exec"]["sql"].as_str() else {
+            continue;
+        };
+        if sql.starts_with("UPDATE deck_config") {
+            blobs.push(("presets", quoted(sql, "WHERE name ="), literals(sql)));
+        } else if sql.starts_with("INSERT INTO decks") {
+            blobs.push(("decks", quoted(sql, "VALUES"), literals(sql)));
+        } else {
+            panic!("unexpected step {sql}");
+        }
+    }
+    blobs
+}
+
+/// specs/conformance/model-ops.md L4: `ok` when every blob of the record
+/// decodes, `invalid_blob` for any P9 error but `no deck kind`.
+fn decode_status<M: BlobMessage>(bytes: &[u8]) -> &'static str {
+    match M::decode(bytes) {
+        Ok(_) => "ok",
+        Err(ModelError::Blob { reason, .. }) => {
+            assert_ne!(reason, BlobError::NoDeckKind, "a run error, which scenarios avoid");
+            "invalid_blob"
+        }
+        Err(other) => panic!("{other}"),
+    }
+}
+
+#[test]
+fn decode_limits_match_the_oracle() {
+    let g = golden("model/proto/decode-limits");
+    let observed = &g["observations"]["steps"].as_array().unwrap().last().unwrap()["blob_decode"];
+    let blobs = decode_limit_blobs();
+    let mut checked = 0;
+    for (list, name, bytes) in &blobs {
+        let status = match *list {
+            "presets" => {
+                assert_eq!(bytes.len(), 1, "{name}");
+                decode_status::<DeckConfigMessage>(&bytes[0])
+            }
+            _ => {
+                let [common, kind] = bytes.as_slice() else {
+                    panic!("{name}: common and kind")
+                };
+                match (
+                    decode_status::<DeckCommon>(common),
+                    decode_status::<DeckKindMessage>(kind),
+                ) {
+                    ("ok", "ok") => "ok",
+                    _ => "invalid_blob",
+                }
+            }
+        };
+        assert_eq!(observed[*list][name.as_str()], status, "{list} {name}");
+        checked += 1;
+    }
+    let golden_count: usize = ["presets", "decks"]
+        .iter()
+        .map(|list| observed[*list].as_object().unwrap().len())
+        .sum();
+    assert_eq!(checked, golden_count, "every observed record has its blob");
+    assert_eq!(checked, 32);
+}
+
+#[test]
+fn when_several_reasons_apply_the_first_problem_met_decides() {
+    use BlobError::*;
+    let open = |n: usize| "3b".repeat(n);
+    let groups = |n: usize, inner: &str| format!("{}{inner}{}", "3b".repeat(n), "3c".repeat(n));
+    // P2 depth: 100 nested groups decode; the 101st start is at depth 100.
+    assert!(DeckConfigMessage::decode(&unhex(&groups(100, ""))).is_ok());
+    assert!(DeckConfigMessage::decode(&unhex(&groups(99, "0800"))).is_ok());
+    assert_eq!(reason::<DeckConfigMessage>(&groups(100, "0800")), TooDeep);
+    // The too-deep key comes before the end of the blob and before its own
+    // short payload.
+    assert_eq!(reason::<DeckConfigMessage>(&open(101)), TooDeep);
+    assert_eq!(reason::<DeckConfigMessage>(&format!("{}0a05", open(100))), TooDeep);
+    // A group-end key is not a field: at depth 100 it closes its group or
+    // is a bad group.
+    assert!(DeckConfigMessage::decode(&unhex(&groups(100, ""))).is_ok());
+    assert_eq!(reason::<DeckConfigMessage>(&format!("{}44", open(100))), BadGroup);
+    // The key's own checks come first: varint, field number, wire type.
+    assert_eq!(
+        reason::<DeckConfigMessage>(&format!("{}ffffffffffffffffff02", open(100))),
+        BadVarint
+    );
+    assert_eq!(
+        reason::<DeckConfigMessage>(&format!("{}0000", open(100))),
+        BadFieldNumber
+    );
+    assert_eq!(reason::<DeckConfigMessage>(&format!("{}0f", open(100))), BadWireType);
+    assert_eq!(reason::<DeckConfigMessage>("07"), BadFieldNumber);
+    // A declared number's group end is a bad wire type; inside a group no
+    // field is declared, so the same keys are an unknown varint and a bad
+    // group.
+    assert_eq!(reason::<DeckConfigMessage>("0c"), BadWireType);
+    assert!(DeckConfigMessage::decode(&unhex("3b08003c")).is_ok());
+    assert_eq!(reason::<DeckConfigMessage>("3b0c"), BadGroup);
+    // In reading order: a bad wire type before a truncation, and the reverse.
+    assert_eq!(reason::<DeckConfigMessage>("08000a05"), BadWireType);
+    assert_eq!(reason::<DeckConfigMessage>("0a050800"), Truncated);
+    // Nested messages count: the normal deck's fields are at depth 1 and its
+    // day limit's at depth 2, so 98 groups fit in a day limit and 99 do not.
+    let limit = |n: usize| {
+        let inner = groups(n, "").replace("3b", "5b").replace("3c", "5c");
+        let mut limit = Vec::new();
+        put_len(&mut limit, 8, &unhex(&inner));
+        let mut kind = Vec::new();
+        put_len(&mut kind, 1, &limit);
+        hex(&kind)
+    };
+    assert!(DeckKindMessage::decode(&unhex(&limit(98))).is_ok());
+    assert_eq!(reason::<DeckKindMessage>(&limit(99)), TooDeep);
+}
+
+#[test]
+fn the_tenth_varint_byte_limit_holds_for_every_varint() {
+    use BlobError::*;
+    // P2: a tenth byte of 00 or 01 only, for keys, lengths and values.
+    let ten = |last: &str| format!("ffffffffffffffffff{last}");
+    // A declared uint32 and an unknown varint value.
+    assert_eq!(reason::<DeckCommon>(&format!("18{}", ten("02"))), BadVarint);
+    assert!(DeckCommon::decode(&unhex(&format!("18{}", ten("01")))).is_ok());
+    assert_eq!(reason::<DeckCommon>(&format!("40{}", ten("7f"))), BadVarint);
+    // A length: refused as a varint before the payload is looked at.
+    assert_eq!(reason::<FieldConfig>(&format!("1a{}", ten("02"))), BadVarint);
+    assert_eq!(reason::<FieldConfig>(&format!("1a{}", ten("01"))), Truncated);
+    // A packed varint inside a card requirement.
+    assert_eq!(reason::<NotetypeConfig>(&format!("420c1a0a{}", ten("02"))), BadVarint);
+    // An unknown varint inside a group, and a key of 2^63 or more.
+    assert_eq!(reason::<DeckCommon>(&format!("5b08{}5c", ten("02"))), BadVarint);
+    assert_eq!(reason::<DeckCommon>(&format!("{}00", ten("01"))), BadVarint);
+}
+
+#[test]
+fn unknown_fields_are_written_in_field_number_order() {
+    // specs/model/protobuf-records.md P4 example: unknown 8 then 7, before
+    // new_per_day.
+    let stored = unhex("42003a004814");
+    let mut preset = ProtoBlob::<DeckConfigMessage>::decode(&stored).unwrap();
+    assert_eq!(
+        &*preset.to_bytes(),
+        stored.as_slice(),
+        "unchanged content keeps the read bytes"
+    );
+    preset.new_per_day = 25;
+    assert_eq!(hex(&preset.to_bytes()), "3A0042004819");
+
+    // Unknown fields read in any order equal the same fields in number order
+    // (P4 equality) and encode in number order; those sharing a number keep
+    // their read order.
+    let mut generator = Gen::new(11);
+    for case in 0..2000 {
+        let mut fields: Vec<(u32, Vec<u8>)> = (0..1 + generator.below(6))
+            .map(|_| {
+                // Numbers deck config does not declare.
+                let number = [7, 8, 39, 47, 300][generator.below(5) as usize];
+                (number, generator.unknown(number, 0))
+            })
+            .collect();
+        let read: Vec<u8> = fields.iter().flat_map(|(_, bytes)| bytes.clone()).collect();
+        fields.sort_by_key(|(number, _)| *number);
+        let sorted: Vec<u8> = fields.iter().flat_map(|(_, bytes)| bytes.clone()).collect();
+        let as_read = DeckConfigMessage::decode(&read).unwrap();
+        let in_order = DeckConfigMessage::decode(&sorted).unwrap();
+        assert!(as_read.same_content(&in_order), "case {case}: {}", hex(&read));
+        assert_eq!(hex(&as_read.encode()), hex(&sorted), "case {case}");
+    }
+    // Fields that share a number in another order are another record.
+    let first = DeckConfigMessage::decode(&unhex("3a003a0101")).unwrap();
+    let second = DeckConfigMessage::decode(&unhex("3a01013a00")).unwrap();
+    assert!(!first.same_content(&second));
+    assert!(!first.equivalent(&second));
 }
 
 #[test]
@@ -918,11 +1120,12 @@ fn decode_errors_name_their_reason() {
     assert_eq!(reason::<DeckCommon>("0e"), BadWireType);
     assert_eq!(reason::<TemplateConfig>("0805"), BadWireType);
     assert_eq!(reason::<DeckCommon>("0d00000000"), BadWireType);
-    // Groups: an end with no start, an end of another number, a group left
-    // open inside a nested message, and one left open at the end of the blob.
+    // Groups: an end with no start and an end of another number are bad
+    // groups; a group left open at the end of a nested message's payload, or
+    // of the blob, is truncated.
     assert_eq!(reason::<DeckCommon>("44"), BadGroup);
     assert_eq!(reason::<DeckCommon>("434c"), BadGroup);
-    assert_eq!(reason::<DeckKindMessage>("0a015b"), BadGroup);
+    assert_eq!(reason::<DeckKindMessage>("0a015b"), Truncated);
     assert_eq!(reason::<DeckCommon>("5b0801"), Truncated);
     // Truncated fixed values and payloads.
     assert_eq!(reason::<DeckCommon>("490000"), Truncated);

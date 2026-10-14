@@ -44,19 +44,23 @@ impl WireType {
     }
 }
 
+/// A field at this depth or deeper makes the blob invalid (P2).
+const MAX_DEPTH: usize = 100;
+
 /// Reads one message's bytes: the whole blob, or the payload of a nested
-/// message.
+/// message, which is a buffer of its own (P2): nothing in it continues past
+/// its end.
 pub(crate) struct Reader<'a> {
     buf: &'a [u8],
     pos: usize,
-    /// A nested payload: a group still open at its end is a bad group; at the
-    /// end of the whole blob it is a truncation (P9).
-    nested: bool,
+    /// The depth of this message's fields: 0 for the column's message, one
+    /// more inside each nested message (P2).
+    depth: usize,
 }
 
 impl<'a> Reader<'a> {
-    fn new(buf: &'a [u8], nested: bool) -> Reader<'a> {
-        Reader { buf, pos: 0, nested }
+    fn new(buf: &'a [u8], depth: usize) -> Reader<'a> {
+        Reader { buf, pos: 0, depth }
     }
 
     fn done(&self) -> bool {
@@ -72,12 +76,16 @@ impl<'a> Reader<'a> {
         Ok(&rest[..n])
     }
 
-    /// At most 10 bytes; bits beyond 64 are dropped.
+    /// At most 10 bytes, and a value of at most 64 bits: the tenth byte may
+    /// only be `00` or `01` (P2).
     fn varint(&mut self) -> Result<u64> {
         let mut value = 0u64;
         for i in 0..10 {
             let byte = *self.buf.get(self.pos).ok_or(BlobError::Truncated)?;
             self.pos += 1;
+            if i == 9 && byte > 1 {
+                return Err(BlobError::BadVarint);
+            }
             value |= u64::from(byte & 0x7f) << (7 * i);
             if byte & 0x80 == 0 {
                 return Ok(value);
@@ -86,9 +94,15 @@ impl<'a> Reader<'a> {
         Err(BlobError::BadVarint)
     }
 
+    /// The key's own checks, in P9's order: its varint, its field number,
+    /// then wire types 6 and 7.
     fn key(&mut self) -> Result<(u32, WireType)> {
         let key = self.varint()?;
         let key = u32::try_from(key).map_err(|_| BlobError::BadVarint)?;
+        let field = key >> 3;
+        if field == 0 {
+            return Err(BlobError::BadFieldNumber);
+        }
         let wire = match key & 7 {
             0 => WireType::Varint,
             1 => WireType::Fixed64,
@@ -98,10 +112,6 @@ impl<'a> Reader<'a> {
             5 => WireType::Fixed32,
             _ => return Err(BlobError::BadWireType),
         };
-        let field = key >> 3;
-        if field == 0 {
-            return Err(BlobError::BadFieldNumber);
-        }
         Ok((field, wire))
     }
 
@@ -111,38 +121,49 @@ impl<'a> Reader<'a> {
         self.take(len)
     }
 
-    /// Skips the value of an undeclared field.
-    fn skip(&mut self, field: u32, wire: WireType) -> Result<()> {
+    /// Skips the value of an undeclared field at `depth`, whose key has just
+    /// been read. P9's order: a group end is checked against the open groups
+    /// (none here), any other key against the depth limit.
+    fn skip(&mut self, field: u32, wire: WireType, depth: usize) -> Result<()> {
+        if wire == WireType::EndGroup {
+            return Err(BlobError::BadGroup);
+        }
+        if depth >= MAX_DEPTH {
+            return Err(BlobError::TooDeep);
+        }
         match wire {
             WireType::Varint => self.varint().map(drop),
             WireType::Fixed64 => self.take(8).map(drop),
             WireType::Len => self.payload().map(drop),
             WireType::Fixed32 => self.take(4).map(drop),
-            WireType::StartGroup => self.skip_group(field),
-            WireType::EndGroup => Err(BlobError::BadGroup),
+            WireType::StartGroup => self.skip_group(field, depth),
+            WireType::EndGroup => unreachable!("checked above"),
         }
     }
 
-    /// Through the group-end key matching `field`, nested groups included,
-    /// without recursion.
-    fn skip_group(&mut self, field: u32) -> Result<()> {
+    /// Through the group-end key matching `field`, whose start key was at
+    /// `depth`, nested groups included, without recursion. Every key inside
+    /// belongs to an unknown field.
+    fn skip_group(&mut self, field: u32, depth: usize) -> Result<()> {
         let mut open = vec![field];
         while let Some(&current) = open.last() {
+            // The end of this reader's buffer: of the blob, or of the nested
+            // message's payload (P2).
             if self.done() {
-                return Err(if self.nested {
-                    BlobError::BadGroup
-                } else {
-                    BlobError::Truncated
-                });
+                return Err(BlobError::Truncated);
             }
             let (field, wire) = self.key()?;
             match wire {
                 WireType::EndGroup if field == current => {
                     open.pop();
                 }
-                WireType::EndGroup => return Err(BlobError::BadGroup),
-                WireType::StartGroup => open.push(field),
-                other => self.skip(field, other)?,
+                WireType::StartGroup => {
+                    if depth + open.len() >= MAX_DEPTH {
+                        return Err(BlobError::TooDeep);
+                    }
+                    open.push(field);
+                }
+                other => self.skip(field, other, depth + open.len())?,
             }
         }
         Ok(())
@@ -208,7 +229,7 @@ impl<'a> Reader<'a> {
         match wire {
             WireType::Fixed32 => out.push(self.fixed32()?),
             WireType::Len => {
-                let mut packed = Reader::new(self.payload()?, true);
+                let mut packed = Reader::new(self.payload()?, self.depth + 1);
                 while !packed.done() {
                     out.push(packed.fixed32()?);
                 }
@@ -223,7 +244,7 @@ impl<'a> Reader<'a> {
         match wire {
             WireType::Varint => out.push(self.varint()? as u32),
             WireType::Len => {
-                let mut packed = Reader::new(self.payload()?, true);
+                let mut packed = Reader::new(self.payload()?, self.depth + 1);
                 while !packed.done() {
                     out.push(packed.varint()? as u32);
                 }
@@ -233,10 +254,11 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
-    /// A nested message, merged into `message` (P2).
+    /// A nested message, merged into `message` (P2). Its fields are one level
+    /// deeper than this one's.
     pub(crate) fn message<M: Decode>(&mut self, wire: WireType, message: &mut M) -> Result<()> {
         Self::expect(wire, WireType::Len)?;
-        let mut nested = Reader::new(self.payload()?, true);
+        let mut nested = Reader::new(self.payload()?, self.depth + 1);
         merge(message, &mut nested)
     }
 }
@@ -258,13 +280,15 @@ pub(crate) trait Encode {
     fn unknown(&self) -> &UnknownFields;
 }
 
-/// Reads fields until the reader's end, merging them into `message`.
+/// Reads fields until the reader's end, merging them into `message`. A
+/// declared field checks its wire type first (P9); an undeclared one is kept
+/// as an unknown field (P4).
 pub(crate) fn merge<M: Decode>(message: &mut M, r: &mut Reader<'_>) -> Result<()> {
     while !r.done() {
         let start = r.pos;
         let (field, wire) = r.key()?;
         if !message.merge_field(field, wire, r)? {
-            r.skip(field, wire)?;
+            r.skip(field, wire, r.depth)?;
             let bytes = &r.buf[start..r.pos];
             message.unknown_mut().push(field, bytes);
         }
@@ -274,7 +298,7 @@ pub(crate) fn merge<M: Decode>(message: &mut M, r: &mut Reader<'_>) -> Result<()
 
 pub(crate) fn decode_message<M: Decode>(bytes: &[u8]) -> Result<M> {
     let mut message = M::default();
-    merge(&mut message, &mut Reader::new(bytes, false))?;
+    merge(&mut message, &mut Reader::new(bytes, 0))?;
     Ok(message)
 }
 
@@ -284,10 +308,11 @@ pub(crate) enum Mode {
     /// P3 and P4: what Meguri stores.
     Canonical,
     /// Every implicit field written even at its default, floats bit for bit,
-    /// unknown fields last in read order: equal bytes mean equal content (P5).
+    /// unknown fields last, sorted by number with those that share one in
+    /// read order: equal bytes mean equal records (P4, P5).
     Exact,
-    /// As `Exact`, with what `Canonical` normalizes made equal: -0.0 in
-    /// implicit floats reads as 0.0, and unknown fields sorted by number.
+    /// As `Exact`, with -0.0 in implicit floats written as 0.0, which
+    /// `Canonical` leaves out like 0.0 (P3).
     Normalized,
 }
 
@@ -299,15 +324,12 @@ pub(crate) struct Writer<'u> {
 }
 
 impl<'u> Writer<'u> {
+    /// Unknown fields go out in number order in every mode (P4).
     fn new(unknown: &'u UnknownFields, mode: Mode) -> Writer<'u> {
-        let unknown = match mode {
-            Mode::Canonical | Mode::Normalized => unknown.by_number(),
-            Mode::Exact => unknown.iter().collect(),
-        };
         Writer {
             out: Vec::new(),
             mode,
-            unknown,
+            unknown: unknown.by_number(),
             next: 0,
         }
     }
@@ -468,16 +490,16 @@ pub trait BlobMessage: Sized + Clone {
     /// P2: the whole blob, or the reason it is invalid (P9).
     fn decode(bytes: &[u8]) -> std::result::Result<Self, ModelError>;
 
-    /// P3 and P4: the bytes Anki would give this content, unknown fields
-    /// placed by number.
+    /// P3 and P4: every field, known or unknown, in field-number order;
+    /// unknown fields that share a number in read order.
     fn encode(&self) -> Vec<u8>;
 
-    /// P5: known values (floats bit for bit) and unknown fields (in read
-    /// order) all equal.
+    /// P4 equality, which P5 uses: known values equal (floats bit for bit)
+    /// and, for each field number, the same unknown fields in the same order.
     fn same_content(&self, other: &Self) -> bool;
 
     /// Equal once encoded: `same_content` except that -0.0 in an implicit
-    /// float equals 0.0 and unknown fields compare sorted by number (P3, P4).
+    /// float equals 0.0 (P3).
     fn equivalent(&self, other: &Self) -> bool;
 }
 

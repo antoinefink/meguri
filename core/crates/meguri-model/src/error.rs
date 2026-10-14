@@ -40,16 +40,19 @@ pub enum BlobError {
     /// The blob ends inside a key, varint, fixed value, length-delimited
     /// payload or group.
     Truncated,
-    /// A varint longer than 10 bytes, or a key above 32 bits.
+    /// A varint longer than 10 bytes or with a tenth byte above `01`, or a key
+    /// above 32 bits.
     BadVarint,
     /// Field number 0.
     BadFieldNumber,
     /// Wire type 6 or 7, or a declared field with a wire type it does not
     /// accept.
     BadWireType,
-    /// A group end with no matching start, or a group left open at the end of
-    /// a nested message.
+    /// A group-end key with no open group, or whose field number differs from
+    /// the innermost open group's.
     BadGroup,
+    /// A field at nesting depth 100 or more (P2).
+    TooDeep,
     /// A `string` field that is not UTF-8.
     BadUtf8,
     /// A deck kind blob with neither member.
