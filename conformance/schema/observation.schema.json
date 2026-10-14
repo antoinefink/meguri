@@ -98,6 +98,16 @@
           "description": "model-ops.md L2: the op has no output, so only a rejection appears.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
         },
+        "blob_decode": {
+          "description": "model-ops.md L4: per record, ok or invalid_blob.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notetypes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } },
+            "decks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } },
+            "presets": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } }
+          }
+        },
         "text": {
           "description": "O4 text: one array per requested function, one output per input in input order.",
           "type": "object",
@@ -157,6 +167,7 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "decode_status": { "enum": ["ok", "invalid_blob"] },
     "actor_name": { "type": "string", "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$" },
     "db_dump": {
       "description": "observations.md O8: table -> primary key text -> column -> value.",

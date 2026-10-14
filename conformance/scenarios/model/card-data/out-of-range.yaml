@@ -1,0 +1,71 @@
+# Card data holding numbers beyond the 64-bit float range
+# (specs/model/json-numbers.md N10, card-data-json.md C3). Such a number as
+# the value of a known key, or anywhere inside one, makes the whole text read
+# as no keys; where it is only beyond the f32 range it reads as an infinity
+# (written null), and below the 64-bit range it reads as 0.0. The boundary near
+# the largest 64-bit float follows Anki's fast decimal conversion (N10), which
+# also refuses 1.7976931348623158e308 and 17976931348623157081e289. Values of
+# unknown keys are skipped without a range check (the last three cards, read in
+# the second db_exec): Anki keeps the known keys and drops the unknown one;
+# Meguri keeps both (deviation card-data-unknown-keys-range).
+id: model/card-data/out-of-range
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [card01, back]}
+    - {notetype: Pair, fields: [card02, back]}
+    - {notetype: Pair, fields: [card03, back]}
+    - {notetype: Pair, fields: [card04, back]}
+    - {notetype: Pair, fields: [card05, back]}
+    - {notetype: Pair, fields: [card06, back]}
+    - {notetype: Pair, fields: [card07, back]}
+    - {notetype: Pair, fields: [card08, back]}
+    - {notetype: Pair, fields: [card09, back]}
+    - {notetype: Pair, fields: [card10, back]}
+    - {notetype: Pair, fields: [card11, back]}
+    - {notetype: Pair, fields: [card12, back]}
+    - {notetype: Pair, fields: [card13, back]}
+    - {notetype: Pair, fields: [card14, back]}
+    - {notetype: Pair, fields: [card15, back]}
+    - {notetype: Pair, fields: [card16, back]}
+    - {notetype: Pair, fields: [card17, back]}
+    - {notetype: Pair, fields: [card18, back]}
+    - {notetype: Pair, fields: [card19, back]}
+    - {notetype: Pair, fields: [card20, back]}
+    - {notetype: Pair, fields: [card21, back]}
+    - {notetype: Pair, fields: [card22, back]}
+    - {notetype: Pair, fields: [card23, back]}
+    - {notetype: Pair, fields: [card24, back]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)", params: ["{\"s\":1e400,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)", params: ["{\"pos\":5,\"s\":-1e400,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)", params: ["{\"pos\":5,\"lrt\":1e400}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)", params: ["{\"pos\":5,\"cd\":1e400}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)", params: ["{\"pos\":1e400,\"lrt\":5}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)", params: ["{\"pos\":5,\"cd\":[1e400]}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)", params: ["{\"pos\":5,\"s\":{\"a\":1e400},\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)", params: ["[1,null,null,1e400]"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)", params: ["[1,[1e400],3]"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)", params: ["{\"pos\":5,\"s\":0.1e310,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)", params: ["{\"pos\":5,\"s\":1e99999999999,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 11)", params: ["{\"pos\":5,\"lrt\":1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12)", params: ["{\"pos\":5,\"lrt\":100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 13)", params: ["{\"pos\":5,\"s\":1e-400,\"d\":2}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 14)", params: ["{\"pos\":5,\"s\":0e400,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 15)", params: ["{\"pos\":5,\"s\":1e-99999999999,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 16)", params: ["{\"pos\":5,\"s\":1.7976931348623157e308,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 17)", params: ["{\"pos\":5,\"s\":-1.7976931348623157e308,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 18)", params: ["{\"pos\":5,\"s\":1797693134862315e293,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 19)", params: ["{\"pos\":5,\"s\":1,\"d\":1.7976931348623158e308}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 20)", params: ["{\"pos\":5,\"s\":17976931348623157081e289,\"d\":1}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 21)", params: ["{\"pos\":5,\"zz\":1e400}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 22)", params: ["{\"pos\":5,\"zz\":1e400,\"s\":1.5,\"d\":2}"]}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 23)", params: ["{\"pos\":5,\"zz\":[1,{\"b\":-1e400}],\"s\":1,\"d\":2}"]}
+  - suspend: {cards: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7", "#c8", "#c9", "#c10", "#c11", "#c12", "#c13", "#c14", "#c15", "#c16", "#c17", "#c18", "#c19", "#c20", "#c21", "#c22", "#c23", "#c24"]}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id LIMIT 21"}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id LIMIT -1 OFFSET 21"}

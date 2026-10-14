@@ -1,0 +1,36 @@
+# A preset part (new, rev, lapse) that falls back to its defaults keeps none
+# of its unknown members (specs/model/schema11-json.md S10.1 to S10.3, S10.5):
+# each part first saves an extra member, which other keeps, then saves a value
+# its reader refuses (initialFactor 70000, maxIvl -1, minInt "x", a new part
+# that is not an object), after which the part holds its defaults and other
+# holds nothing of it. A top-level extra saved with a failing part survives.
+# Each save leaves at most one top-level member in other, so the blob bytes
+# are deterministic.
+id: model/schema11/preset-part-defaults
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Daily, new_per_day: 15}]
+steps:
+  - legacy_update: {preset: Daily, patch: {new: {perDay: 7, keepNew: 1}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - legacy_update: {preset: Daily, patch: {new: {initialFactor: 70000, keepNew2: 2}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - legacy_update: {preset: Daily, patch: {rev: {perDay: 70, keepRev: 3}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - legacy_update: {preset: Daily, patch: {rev: {maxIvl: -1, keepRev2: 4}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - legacy_update: {preset: Daily, patch: {lapse: {minInt: 2, keepLapse: 5}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - legacy_update: {preset: Daily, patch: {lapse: {minInt: "x", keepLapse2: 6}}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - legacy_update: {preset: Daily, patch: {new: {perDay: 9, keepNew3: 7}}}
+  - legacy_update: {preset: Daily, patch: {keepTop: 8, new: [1, 2]}}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}

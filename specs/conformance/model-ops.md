@@ -5,7 +5,7 @@ Requirements: R1883, R1463, R1464, R1460, R1461
 Anki: 26.09.3
 Scenarios: conformance/scenarios/model/
 
-One observation kind and one op that the model scenarios need, plus how they use two draft ops. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The conversions they exercise are `specs/model/schema11-json.md`, `specs/model/protobuf-records.md` and `specs/model/card-data-json.md`.
+Two observation kinds and one op that the model scenarios need, plus how they use two draft ops. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The conversions they exercise are `specs/model/schema11-json.md`, `specs/model/protobuf-records.md` and `specs/model/card-data-json.md`.
 
 ## L1. `legacy_json` (observation kind)
 
@@ -44,8 +44,19 @@ Saves a schema-11 object over an existing record, the way records arriving by sy
   Scenarios cannot name real ids, so they address rows by name, by their note type's name, or by position in `ORDER BY id` (cards are created in logical-id order, so `ORDER BY id LIMIT 1 OFFSET k` is `#c(k+1)`).
 - **`suspend`** (draft, scheduling area): `{cards: [#cN, ...]}`, no output. Suspends the listed cards with Anki's suspend operation; a card already suspended is left as is. Each suspended card's row is written again, so its `data` is rebuilt (`specs/model/card-data-json.md` C4). It is the simplest operation that rewrites a card row without changing any value stored in `data`.
 
-## L4. Status
+## L4. `blob_decode` (observation kind)
 
-- The oracle driver implements `legacy_json` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). The model scenarios have goldens.
-- The oracle reopens the collection before each `legacy_json` and `legacy_update` to read the file, which also empties Anki's undo history. Model scenarios never undo; a scenario that undoes across one of these steps is not portable.
-- Meguri's executor implements `legacy_json` and `legacy_update` with U21's codecs once the record store (U23) and the setup adapters exist; `db_exec` comes with the storage area and `suspend` with the scheduling area. Until then the scenarios are `pending`.
+Whether the collection can decode the protobuf blobs of named records (`specs/model/protobuf-records.md` P2, P9). It shows the blobs Anki refuses, which `legacy_json` cannot: a record Anki cannot read makes `legacy_json` a run error.
+
+- **Request** `{blob_decode: {notetypes?: [<name>, ...], decks?: [<name>, ...], presets?: [<name>, ...]}}`: at least one list, each with at least one name, named as in L1. A record is found by its name column, without decoding any blob.
+- **Value** `{notetypes?: {<name>: <status>}, decks?: {<name>: <status>}, presets?: {<name>: <status>}}`, with a member for each requested list. `<status>` is `"ok"` when every blob of the record decodes, and `"invalid_blob"` when one does not, for any reason of P9 except `no deck kind`. The blobs of a record: for a note type, `notetypes.config` and the `config` of each of its `fields` and `templates` rows; for a deck, `common` and `kind`; for a preset, `config`.
+- **Oracle.** It reads each record the way `legacy_json` does, after reopening the collection, and reports `invalid_blob` when the read fails with Anki's protobuf decode error, `ok` when the read succeeds.
+- **Meguri.** Its executor decodes each blob of the record with the codecs of `specs/model/protobuf-records.md` and reports `invalid_blob` for a P9 error other than `no deck kind`, `ok` when every blob decodes.
+- **Errors.** A name that matches no record is a run error (`unknown_ref`). Any other failure to read the record, on either side, is a run error too (a deck kind with no member, a blob column holding TEXT or NULL); scenarios avoid them.
+- Nothing in the collection changes.
+
+## L5. Status
+
+- The oracle driver implements `legacy_json` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). The model scenarios have goldens, except `model/proto/decode-limits`: it waits for the driver's `blob_decode` (L4), whose `observations.md` row is draft until then.
+- The oracle reopens the collection before each `legacy_json`, `legacy_update` and `blob_decode` to read the file, which also empties Anki's undo history. Model scenarios never undo; a scenario that undoes across one of these steps is not portable.
+- Meguri's executor implements `legacy_json`, `legacy_update` and `blob_decode` with U21's codecs once the record store (U23) and the setup adapters exist; `db_exec` comes with the storage area and `suspend` with the scheduling area. Until then the scenarios are `pending`.

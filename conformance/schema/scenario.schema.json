@@ -346,6 +346,17 @@
                 "presets": { "$ref": "#/$defs/names" }
               }
             },
+            "blob_decode": {
+              "description": "model-ops.md L4: whether the named records' protobuf blobs decode.",
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": false,
+              "properties": {
+                "notetypes": { "$ref": "#/$defs/names" },
+                "decks": { "$ref": "#/$defs/names" },
+                "presets": { "$ref": "#/$defs/names" }
+              }
+            },
             "text": {
               "description": "observations.md O4 text: pure text functions over a list of inputs; pairs for unicase_compare, which shares a request with no other function.",
               "type": "object",

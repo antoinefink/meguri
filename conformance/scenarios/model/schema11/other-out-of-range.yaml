@@ -1,0 +1,21 @@
+# other holding a number beyond the 64-bit float range
+# (specs/model/json-numbers.md N10, schema11-json.md S3 output rule 1): the
+# whole other is invalid JSON and adds nothing, so keep disappears too, for
+# a preset and for a deck. A number that only underflows reads as 0.0, and the
+# largest 64-bit float stays as it is. 1.7976931348623158e308 is out of range
+# by Anki's fast decimal conversion (N10).
+id: model/schema11/other-out-of-range
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Over}, {name: Nested}, {name: Edge}, {name: Under}, {name: Max}]
+  decks: [Words, Kept]
+steps:
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'fa0f157b226b656570223a312c227a7a223a31653430307d' AS BLOB) WHERE name = 'Over'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'fa0f1e7b226b656570223a312c227a7a223a7b2261223a5b2d31653430305d7d7d' AS BLOB) WHERE name = 'Nested'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'fa0f267b226b656570223a312c227a7a223a312e37393736393331333438363233313538653330387d' AS BLOB) WHERE name = 'Edge'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'fa0f167b226b656570223a312c227a7a223a31652d3430307d' AS BLOB) WHERE name = 'Under'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'fa0f267b226b656570223a312c227a7a223a312e37393736393331333438363233313537653330387d' AS BLOB) WHERE name = 'Max'"}
+  - db_exec: {sql: "UPDATE decks SET common = CAST(common || X'fa0f177b226b656570223a312c227a7a223a5b31653430305d7d' AS BLOB) WHERE name = 'Words'"}
+  - db_exec: {sql: "UPDATE decks SET common = CAST(common || X'fa0f177b226b656570223a312c227a7a223a5b31653330385d7d' AS BLOB) WHERE name = 'Kept'"}
+  - observe:
+      - legacy_json: {presets: [Over, Nested, Edge, Under, Max], decks: [Words, Kept]}
