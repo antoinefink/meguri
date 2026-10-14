@@ -130,6 +130,7 @@ final class AgentDriver {
             case .launch, .snapshot:
                 break
             default:
+                try prepareInput(step.action)
                 record.captures.append(try capture(base, phase: "before"))
             }
             sampler = try startSampler(for: step)
@@ -180,6 +181,21 @@ final class AgentDriver {
             return false
         }
         return true
+    }
+
+    /// Mac: a click, key press or drag on a window that is not key only
+    /// activates it, and another app is usually in front. The app comes to
+    /// the front before the step's 'before' capture, so that capture shows
+    /// the window the action reaches.
+    private func prepareInput(_ action: DriveScript.Action) throws {
+        #if os(macOS)
+        switch action {
+        case .tap, .type, .swipe, .scroll:
+            try running().bringToFront(bundleIdentifier: try build.bundleIdentifier)
+        default:
+            break
+        }
+        #endif
     }
 
     private func execute(_ action: DriveScript.Action) throws {

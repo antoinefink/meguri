@@ -91,6 +91,8 @@ final class TestHooksTests: XCTestCase {
         XCTAssert(alert.waitForExistence(timeout: 15), "the sample error alert is not on screen")
         XCTAssert(alert.staticTexts["The sample error state."].exists, "the alert lacks the sample message")
         XCTAssertEqual(Set(alert.buttons.allElementsBoundByIndex.map(\.label)), ["Try Again", "Cancel"])
+        // On the Mac a click on a window that is not key only activates it.
+        try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
         alert.buttons["Cancel"].tap()
         XCTAssert(alert.waitForNonExistence(timeout: 5), "Cancel did not dismiss the alert")
     }
