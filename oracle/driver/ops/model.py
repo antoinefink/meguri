@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Schema-11 JSON of note types, decks and presets (model-ops.md L1, L2).
+"""Schema-11 JSON of note types, decks and presets, and whether their blobs
+decode (model-ops.md L1, L2, L4).
 
 legacy_json (observation): {notetypes?, decks?, presets?: [name, ...]}
     -> {notetypes?: {name: object}, decks?: {...}, presets?: {...}}
 legacy_update (op): {notetype | deck | preset: name, patch: object} -> none;
     rejection invalid_json
+blob_decode (observation): {notetypes?, decks?, presets?: [name, ...]}
+    -> {notetypes?: {name: "ok" | "invalid_blob"}, decks?: {...}, presets?: {...}}
 
 Anki keeps note types and decks cached and raw SQL (db_exec) does not clear
 those caches, so both reopen the collection before reading: the objects are
@@ -20,6 +23,12 @@ add_or_update_deck_legacy(preserve_usn_and_mtime), presets with
 add_or_update_deck_config_legacy (stamped as a local change). Only a backend
 JsonError is the rejection; pylib raises it as a plain BackendError, as it
 does other kinds, so the kind is read from the backend's error message.
+
+blob_decode finds each record by its name column (no blob decoded), reopens,
+and reads the record with the same legacy getters: a backend ProtoError (any
+protobuf decode failure of one of the record's blobs) is "invalid_blob", a
+read that succeeds is "ok", and any other failure (a deck kind with no member,
+a TEXT blob) stays a run error.
 """
 
 from __future__ import annotations
@@ -40,10 +49,19 @@ UPDATE_KEYS = {"notetype": "notetypes", "deck": "decks", "preset": "presets"}
 NATIVE_SEPARATOR = "\x1f"
 
 
-def _name_list(section: str, names: Any) -> list[str]:
+def _name_list(kind: str, section: str, names: Any) -> list[str]:
     if not isinstance(names, list) or not names or not all(isinstance(n, str) and n for n in names):
-        raise invalid(f"legacy_json {section} is a non-empty list of names")
+        raise invalid(f"{kind} {section} is a non-empty list of names")
     return names
+
+
+def _requested(kind: str, args: Any) -> dict[str, list[str]]:
+    if not isinstance(args, dict) or not args:
+        raise invalid(f"{kind} takes {{notetypes?, decks?, presets?}} with at least one list")
+    unknown = sorted(set(args) - set(SECTIONS))
+    if unknown:
+        raise invalid(f"unknown {kind} keys: {', '.join(unknown)}")
+    return {section: _name_list(kind, section, args[section]) for section in SECTIONS if section in args}
 
 
 def _record_id(session, section: str, name: str) -> int:
@@ -74,14 +92,34 @@ def _read(session, section: str, name: str) -> dict:
 
 @observation("legacy_json")
 def legacy_json(session, args):
-    if not isinstance(args, dict) or not args:
-        raise invalid("legacy_json takes {notetypes?, decks?, presets?} with at least one list")
-    unknown = sorted(set(args) - set(SECTIONS))
-    if unknown:
-        raise invalid(f"unknown legacy_json keys: {', '.join(unknown)}")
-    requested = {section: _name_list(section, args[section]) for section in SECTIONS if section in args}
+    requested = _requested("legacy_json", args)
     session.reopen()
     return {section: {name: _read(session, section, name) for name in names} for section, names in requested.items()}
+
+
+class _InvalidBlob(Exception):
+    pass
+
+
+def _decode_status(session, section: str, name: str) -> str:
+    rid = _record_id(session, section, name)
+    backend = session.col._backend
+    probe = _KindProbe(backend, backend_pb2.BackendError.PROTO_ERROR, _InvalidBlob)
+    try:
+        getattr(type(backend), GETTERS[section])(probe, rid)
+    except _InvalidBlob:
+        return "invalid_blob"
+    return "ok"
+
+
+@observation("blob_decode")
+def blob_decode(session, args):
+    requested = _requested("blob_decode", args)
+    session.reopen()
+    return {
+        section: {name: _decode_status(session, section, name) for name in names}
+        for section, names in requested.items()
+    }
 
 
 def merge_patch(target: Any, patch: Any) -> Any:
@@ -98,13 +136,15 @@ def merge_patch(target: Any, patch: Any) -> Any:
     return result
 
 
-class _JsonErrorProbe:
+class _KindProbe:
     """Stands in for the RustBackend in one generated backend call: a backend
-    JsonError becomes Rejected("invalid_json"), any other error the exception
-    pylib would raise."""
+    error of `kind` raises `raises()`, any other error the exception pylib
+    would raise."""
 
-    def __init__(self, backend) -> None:
+    def __init__(self, backend, kind: int, raises) -> None:
         self._rust = backend._backend
+        self._kind = kind
+        self._raises = raises
 
     def _run_command(self, service: int, method: int, data: bytes) -> bytes:
         try:
@@ -113,14 +153,14 @@ class _JsonErrorProbe:
             error_bytes = bytes(error.args[0])
         err = backend_pb2.BackendError()
         err.ParseFromString(error_bytes)
-        if err.kind == backend_pb2.BackendError.JSON_ERROR:
-            raise Rejected("invalid_json")
+        if err.kind == self._kind:
+            raise self._raises()
         raise backend_exception_to_pylib(err)
 
 
 def _save(session, section: str, obj: dict) -> None:
     backend = session.col._backend
-    probe = _JsonErrorProbe(backend)
+    probe = _KindProbe(backend, backend_pb2.BackendError.JSON_ERROR, lambda: Rejected("invalid_json"))
     data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     generated = type(backend)
     if section == "notetypes":

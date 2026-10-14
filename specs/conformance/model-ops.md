@@ -57,6 +57,6 @@ Whether the collection can decode the protobuf blobs of named records (`specs/mo
 
 ## L5. Status
 
-- The oracle driver implements `legacy_json` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). The model scenarios have goldens, except `model/proto/decode-limits`: it waits for the driver's `blob_decode` (L4), whose `observations.md` row is draft until then.
+- The oracle driver implements `legacy_json`, `blob_decode` and `legacy_update` (stable in `observations.md` O4 and `dsl.md` D7.2), `db_exec` as `record-ops.md` W1 defines it, and `suspend` with the arguments above (its `dsl.md` row stays draft until the scheduling area fixes it). Every model scenario has a golden, `model/proto/decode-limits` included.
 - The oracle reopens the collection before each `legacy_json`, `legacy_update` and `blob_decode` to read the file, which also empties Anki's undo history. Model scenarios never undo; a scenario that undoes across one of these steps is not portable.
 - Meguri's executor implements `legacy_json`, `legacy_update` and `blob_decode` with U21's codecs once the record store (U23) and the setup adapters exist; `db_exec` comes with the storage area and `suspend` with the scheduling area. Until then the scenarios are `pending`.
