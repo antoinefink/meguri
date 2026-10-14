@@ -80,8 +80,35 @@ class MissingIdentifier(unittest.TestCase):
         ])
         self.assertEqual(hierarchy_check.check(doc(alert)), [])
 
-    def test_a_mac_alert_sheet_without_any_identifier_is_a_system_alert(self):
-        alert = el("sheet", f=(100, 100, 260, 160), children=[
+    def test_an_app_sheet_without_any_identifier_is_not_a_system_alert(self):
+        # No identifier at all is no evidence of a system alert: an app sheet
+        # whose controls and rows all lack identifiers reports each of them.
+        sheet = el("sheet", f=(100, 100, 400, 300), children=[
+            el("staticText", label="Pick a deck", f=(120, 120, 200, 20)),
+            el("button", f=(120, 340, 100, 24)),
+            el("outline", f=(120, 150, 360, 180), children=[
+                el("outlineRow", f=(120, 150, 360, 24)),
+                el("outlineRow", f=(120, 174, 360, 24)),
+            ]),
+        ])
+        issues = hierarchy_check.check(doc(sheet, window=(0, 0, 800, 600)))
+        self.assertEqual([(i["kind"], i["type"], i["frame"]) for i in issues], [
+            ("missing-identifier", "button", frame(120, 340, 100, 24)),
+            ("missing-identifier", "outlineRow", frame(120, 150, 360, 24)),
+            ("missing-identifier", "outlineRow", frame(120, 174, 360, 24)),
+        ])
+
+    def test_an_app_sheet_whose_only_identifier_is_an_appkit_one_is_not_a_system_alert(self):
+        sheet = el("sheet", f=(100, 100, 400, 300), children=[
+            el("textField", "_NS:12", f=(120, 120, 200, 22)),
+            el("button", label="Add", f=(120, 340, 100, 24)),
+        ])
+        issues = hierarchy_check.check(doc(sheet, window=(0, 0, 800, 600)))
+        self.assertEqual([(i["kind"], i["label"]) for i in issues], [("missing-identifier", "Add")])
+
+    def test_a_mac_alert_sheet_whose_buttons_dropped_their_identifiers_is_a_system_alert(self):
+        # AppKit's id on the sheet itself marks the alert (app/AGENTS.md).
+        alert = el("sheet", "_NS:87", "alert", f=(100, 100, 260, 160), children=[
             el("staticText", label="Sample error", f=(120, 120, 200, 20)),
             el("button", label="Try Again", f=(120, 220, 100, 24)),
         ])

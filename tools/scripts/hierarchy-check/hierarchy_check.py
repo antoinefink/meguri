@@ -15,12 +15,13 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
 
 Ignored: system UI (keyboard, status bar, menu bar, Touch Bar), the buttons of
 system alerts (which drop identifiers, or on the Mac carry action-button-<n>;
-app/AGENTS.md), identifiers the system sets (a leading '_', BackButton,
-Toolbar, PopoverDismissRegion, the Mac back button's chevron.backward in a
-toolbar, a window's SwiftUI scene id), elements with an empty frame, and
-transient elements (activity and progress indicators) with everything inside
-them. Wrong colors, broken alignment and unreadable text are judgments for the
-critic (U10), not checks here.
+app/AGENTS.md; a Mac alert sheet is told by AppKit's id on the sheet or an
+action-button-<n>, never by a lack of identifiers), identifiers the system
+sets (a leading '_', BackButton, Toolbar, PopoverDismissRegion, the Mac back
+button's chevron.backward in a toolbar, a window's SwiftUI scene id),
+elements with an empty frame, and transient elements (activity and progress
+indicators) with everything inside them. Wrong colors, broken alignment and
+unreadable text are judgments for the critic (U10), not checks here.
 
 usage: hierarchy_check.py [--report <report.json>] <hierarchy.json>...
 Exit code: 0 no issue, 1 issues, 2 unreadable input. Issues also go to stderr.
@@ -103,14 +104,18 @@ class Element:
         return None
 
     def in_system_alert(self):
-        """Inside a system alert: an alert, or (Mac) a sheet whose identifiers
-        are all the system's."""
-        for a in self.ancestors:
-            if a.type == "alert":
-                return True
-            if a.type == "sheet" and all(is_system_identifier(e) for e in a.walk() if e.identifier):
-                return True
-        return False
+        """Inside a system alert: an alert, or (Mac) an alert sheet."""
+        return any(a.type == "alert" or (a.type == "sheet" and is_alert_sheet(a)) for a in self.ancestors)
+
+
+def is_alert_sheet(sheet):
+    """A Mac system alert shown as a sheet: positive evidence (AppKit's id on
+    the sheet itself, or an action-button-<n> button) and no identifier the
+    app set. An app sheet has neither mark, even when none of its elements
+    has an identifier."""
+    marked = (sheet.identifier and is_system_identifier(sheet)) or any(
+        e.type == "button" and ALERT_BUTTON.match(e.identifier) for e in sheet.walk())
+    return bool(marked) and all(is_system_identifier(e) for e in sheet.walk() if e.identifier)
 
 
 def is_system_identifier(e):
