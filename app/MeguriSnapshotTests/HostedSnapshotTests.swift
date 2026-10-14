@@ -12,7 +12,8 @@ import Testing
 @MainActor
 @Suite(
     .serialized,
-    .enabled(if: SnapshotRun.current.mode != .plan && SnapshotRun.current.group == MatrixCell(device: SnapshotMatrix.referenceDevice(.current)).systemGroup)
+    .enabled(if: SnapshotRun.current.mode != .plan && SnapshotRun.current.group == MatrixCell(device: SnapshotMatrix.referenceDevice(.current)).systemGroup
+        && SnapshotMatrix.referenceDevice(.current).target == SnapshotRun.current.target)
 ) struct HostedSnapshotTests {
     /// A swatch drawn in one colour token, the way a component draws it.
     struct Swatch: View {

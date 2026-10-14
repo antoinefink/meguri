@@ -26,10 +26,10 @@ enum VoiceOver {
         let utterances: [String]
     }
 
-    /// Reads the current screen from its first element forward, at most
-    /// `limit` steps, stopping when VoiceOver comes back to an element it
-    /// already read. On the Mac VoiceOver is never turned on: it would speak
-    /// on the user's machine and take over its screen; the hierarchy is used.
+    /// Reads the current screen from its first element forward, until
+    /// VoiceOver stops moving or after `limit` steps (`traverse`). On the Mac
+    /// VoiceOver is never turned on: it would speak on the user's machine and
+    /// take over its screen; the hierarchy is used.
     @MainActor
     static func read(_ app: XCUIApplication, limit: Int = 60) throws -> Reading {
         #if os(macOS)
@@ -42,23 +42,41 @@ enum VoiceOver {
             return Reading(source: .hierarchy(reason: "the VoiceOver service did not start: \(error)"), utterances: try hierarchyOrder(app))
         }
         defer { try? service.disable() }
-        var utterances: [String] = []
-        do {
-            if let first = try? service.currentSpeech(), !first.utterance.isEmpty {
-                utterances.append(first.utterance)
+        var failure: (any Error)?
+        let utterances = traverse(first: try? service.currentSpeech().utterance, limit: limit) {
+            do {
+                return try service.moveForward().utterance
+            } catch {
+                failure = error
+                return nil
             }
-            for _ in 0..<limit {
-                let output = try service.moveForward()
-                guard !output.utterance.isEmpty, !utterances.contains(output.utterance) else { break }
-                utterances.append(output.utterance)
-            }
-        } catch {
-            if utterances.isEmpty {
-                return Reading(source: .hierarchy(reason: "the VoiceOver service spoke nothing: \(error)"), utterances: try hierarchyOrder(app))
-            }
+        }
+        if utterances.isEmpty {
+            return Reading(source: .hierarchy(reason: "the VoiceOver service spoke nothing: \(failure.map { "\($0)" } ?? "no speech")"), utterances: try hierarchyOrder(app))
         }
         return Reading(source: .voiceOverService, utterances: utterances)
         #endif
+    }
+
+    /// A forward reading: `first`, then what each `next()` speaks, until it
+    /// speaks nothing (VoiceOver did not move: the last element) or after
+    /// `limit` steps. Repeated utterances are kept: two elements may say the
+    /// same thing (two Delete buttons). Only a reading that ran to the limit
+    /// is checked for VoiceOver having wrapped around to the start: when the
+    /// whole reading repeats one sequence from its first utterance, that
+    /// sequence is the screen.
+    @MainActor
+    static func traverse(first: String?, limit: Int, next: () -> String?) -> [String] {
+        var utterances: [String] = []
+        if let first, !first.isEmpty { utterances.append(first) }
+        for _ in 0..<limit {
+            guard let spoken = next(), !spoken.isEmpty else { return utterances }
+            utterances.append(spoken)
+        }
+        for period in 1..<max(utterances.count, 1) where utterances.indices.dropFirst(period).allSatisfy({ utterances[$0] == utterances[$0 - period] }) {
+            return Array(utterances.prefix(period))
+        }
+        return utterances
     }
 
     /// Accessibility elements in hierarchy order: leaves with a label, and

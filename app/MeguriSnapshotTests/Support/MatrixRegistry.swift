@@ -85,5 +85,21 @@ enum MatrixRegistry {
             }
         }
     }
+
+    /// The cases a test process on `target` renders: its platform's cells
+    /// whose device class renders there.
+    static func componentCases(for target: SnapshotTarget) -> [SnapshotCase] {
+        componentCases(on: target.platform).filter { $0.cell.device.target == target }
+    }
+
+    static func screenCases(for target: SnapshotTarget) -> [SnapshotCase] {
+        screenCases(on: target.platform).filter { $0.cell.device.target == target }
+    }
+
+    /// The platforms a screen is registered on: those where one of its
+    /// states has cells (`tools/mg critic` grades it on all of them).
+    static func platforms(of screen: ScreenRegistration) -> [SnapshotPlatform] {
+        SnapshotPlatform.allCases.filter { platform in screen.type.previewStates.contains { screen.set(platform, $0) != nil } }
+    }
 }
 #endif

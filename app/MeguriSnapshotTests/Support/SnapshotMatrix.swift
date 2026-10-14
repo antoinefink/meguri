@@ -8,17 +8,59 @@ import Foundation
 // simulator by `tools/mg snapshots` before a test run (one run per settings
 // group), device-only values are deferred to the monthly device session.
 
-/// Where a snapshot is rendered: the simulator kind it needs, or the Mac.
+/// A platform of the matrix: its axis values and cell sets. Its device
+/// classes render on one or more `SnapshotTarget`s.
 enum SnapshotPlatform: String, CaseIterable, Codable, Sendable {
     case iphone, ipad, mac
 
     /// The platform this test process renders.
-    static var current: SnapshotPlatform {
+    static var current: SnapshotPlatform { SnapshotTarget.current.platform }
+}
+
+/// Where a device class renders: a pool simulator kind (tools/sim-devices.json)
+/// whose screen is the class's, or the Mac. A screen takes its window's safe
+/// area, so a class rendered on a larger simulator would get that
+/// simulator's insets, not its own.
+enum SnapshotTarget: String, CaseIterable, Codable, Sendable {
+    case iphone
+    case iphoneSmall = "iphone-small"
+    case ipad
+    case mac
+
+    /// The target this test process renders: `tools/mg snapshots` names it
+    /// (`MEGURI_SNAPSHOT_TARGET`, the kind it leased); outside the job an
+    /// iPhone simulator is the iphone kind.
+    static let current = SnapshotTarget(environment: ProcessInfo.processInfo.environment)
+
+    init(environment: [String: String]) {
         #if os(macOS)
-        .mac
+        self = .mac
         #else
-        ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"]?.hasPrefix("iPad") == true ? .ipad : .iphone
+        if let named = environment["MEGURI_SNAPSHOT_TARGET"].flatMap(SnapshotTarget.init(rawValue:)), named != .mac {
+            self = named
+        } else {
+            self = environment["SIMULATOR_MODEL_IDENTIFIER"]?.hasPrefix("iPad") == true ? .ipad : .iphone
+        }
         #endif
+    }
+
+    var platform: SnapshotPlatform {
+        switch self {
+        case .iphone, .iphoneSmall: .iphone
+        case .ipad: .ipad
+        case .mac: .mac
+        }
+    }
+
+    /// The device class this target's own checks render in (the settings
+    /// probe).
+    var referenceDevice: DeviceClass {
+        switch self {
+        case .iphone: .iphoneLarge
+        case .iphoneSmall: .iphoneSmall
+        case .ipad: .ipadRegular
+        case .mac: .macDefault
+        }
     }
 }
 
@@ -46,7 +88,9 @@ enum Transparency: String, CaseIterable, Codable, Sendable {
 
 /// Device classes (R1971). Foldable cells stay deferred until a foldable
 /// simulator exists (U252); the other iOS classes render on the pool's
-/// simulator of their kind, at their size, with their size classes.
+/// simulator of their kind (`target`), at their size, with their size
+/// classes. The small iPhone class is the iPhone 17e's screen, so its cells
+/// get that screen's safe area.
 enum DeviceClass: String, CaseIterable, Codable, Sendable {
     case iphoneSmall, iphoneLarge, iphoneResizable, foldableOuter, foldableInner
     case ipadCompact, ipadRegular
@@ -55,6 +99,16 @@ enum DeviceClass: String, CaseIterable, Codable, Sendable {
     var platform: SnapshotPlatform {
         switch self {
         case .iphoneSmall, .iphoneLarge, .iphoneResizable, .foldableOuter, .foldableInner: .iphone
+        case .ipadCompact, .ipadRegular: .ipad
+        case .macMinimum, .macDefault, .macLarge: .mac
+        }
+    }
+
+    /// The simulator kind (or the Mac) the class renders on.
+    var target: SnapshotTarget {
+        switch self {
+        case .iphoneSmall: .iphoneSmall
+        case .iphoneLarge, .iphoneResizable, .foldableOuter, .foldableInner: .iphone
         case .ipadCompact, .ipadRegular: .ipad
         case .macMinimum, .macDefault, .macLarge: .mac
         }
@@ -146,7 +200,8 @@ struct MatrixCell: Hashable, Codable, Sendable {
     var deferredReason: String? {
         if let reason = device.deferredReason { return reason }
         for axis in MatrixAxis.allCases where SnapshotMatrix.application(of: axis, in: self) == .deviceOnly {
-            return "\(axis.rawValue) \(value(of: axis)) cannot be set on a simulator (spike S5); captured at the device session"
+            let place = device.platform == .mac ? "in the Mac's off-screen renders (its own settings are never changed)" : "on a simulator"
+            return "\(axis.rawValue) \(value(of: axis)) cannot be set \(place) (spike S5); captured at the device session"
         }
         return nil
     }
@@ -203,9 +258,12 @@ enum SnapshotMatrix {
         case .appearance, .textSize, .increaseContrast:
             return .inProcess
         case .reduceTransparency, .reduceMotion:
-            // On the Mac the user's own settings are never changed: the
-            // SwiftUI environment carries these, and system chrome ignores it.
-            return platform == .mac ? .inProcess : .systemSetting
+            // On the Mac the user's own settings are never changed, and
+            // system chrome ignores a SwiftUI environment override: a cell
+            // with either setting on is captured at the device session.
+            guard platform == .mac else { return .systemSetting }
+            let on = axis == .reduceTransparency ? cell.reduceTransparency : cell.reduceMotion
+            return on ? .deviceOnly : .inProcess
         case .glassLook:
             // Simulators offer one look only (S5); the default renders as is.
             return cell.glassLook == .clear ? .inProcess : .deviceOnly

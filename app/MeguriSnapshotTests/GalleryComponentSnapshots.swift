@@ -5,7 +5,7 @@ import Testing
 /// iPhone and the Mac (R1970).
 @MainActor
 @Suite(.serialized) struct GalleryComponentSnapshots {
-    @Test(.enabled { await !MatrixRegistry.componentCases(on: .current).isEmpty }, arguments: await MatrixRegistry.componentCases(on: .current))
+    @Test(.enabled { await !MatrixRegistry.componentCases(for: .current).isEmpty }, arguments: await MatrixRegistry.componentCases(for: .current))
     func component(_ snapshot: SnapshotCase) async {
         await snapshot.assert()
     }
@@ -14,7 +14,7 @@ import Testing
 /// Every registered screen state (`MatrixRegistry.screens`) in its cells.
 @MainActor
 @Suite(.serialized) struct ScreenSnapshots {
-    @Test(.enabled { await !MatrixRegistry.screenCases(on: .current).isEmpty }, arguments: await MatrixRegistry.screenCases(on: .current))
+    @Test(.enabled { await !MatrixRegistry.screenCases(for: .current).isEmpty }, arguments: await MatrixRegistry.screenCases(for: .current))
     func screen(_ snapshot: SnapshotCase) async {
         await snapshot.assert()
     }

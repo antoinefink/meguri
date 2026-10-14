@@ -347,7 +347,8 @@ mg_snapshots__probe() {
     kind="$(basename "$dir")"
     [ "$kind" != mac ] && [ -d "$dir/plan" ] || continue
     reference="" others="" missing=""
-    for group in $(cd "$dir" && ls -d rt* 2>/dev/null); do
+    # Group directories only: the runs' logs and result bundles sit beside them.
+    for group in $(cd "$dir" && ls 2>/dev/null | grep -E '^rt[01]-rm[01]-t[0-9]+$'); do
       probe="$(jq -r --arg d "$dir/$group/" 'select(.subject == "matrix.probe" and ((.actual // "") | startswith($d))) | .actual' "$results" | head -n 1)"
       if [ -z "$probe" ] || [ ! -f "$probe" ]; then
         missing="$missing $group"

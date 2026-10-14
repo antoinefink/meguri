@@ -2,7 +2,8 @@ import SwiftUI
 
 /// What a screen or section shows when it has nothing to list: the system
 /// `ContentUnavailableView` (R1995) with an SF Symbol, a title, a description
-/// and an optional action.
+/// and an optional action, drawn as a full touch target (`stateViewActions`).
+/// Give each action button its accessibility identifier (R1964).
 public struct EmptyStateView<Actions: View>: View {
     private let title: Text
     private let systemImage: String
@@ -18,11 +19,13 @@ public struct EmptyStateView<Actions: View>: View {
 
     public var body: some View {
         ContentUnavailableView {
-            Label { title } icon: { Image(systemName: systemImage) }
+            // The symbol in a text token: the system's default grey fails
+            // the contrast audit at the largest text sizes.
+            Label { title } icon: { Image(systemName: systemImage).foregroundStyle(.token(.textSecondary)) }
         } description: {
             description
         } actions: {
-            actions
+            actions.stateViewActions()
         }
     }
 }

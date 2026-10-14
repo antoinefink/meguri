@@ -6,7 +6,8 @@ import Testing
 /// layout. The page is Meguri's own sample, not a card template; the
 /// rendering corpus comes with the rendering units (U66, U67).
 @MainActor
-@Suite(.serialized, .enabled(if: SnapshotRun.current.group == MatrixCell(device: SnapshotMatrix.referenceDevice(.current)).systemGroup))
+@Suite(.serialized, .enabled(if: SnapshotRun.current.group == MatrixCell(device: SnapshotMatrix.referenceDevice(.current)).systemGroup
+        && SnapshotMatrix.referenceDevice(.current).target == SnapshotRun.current.target))
 struct CardFaceSnapshotTests {
     static let sample = """
         <!doctype html>

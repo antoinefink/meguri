@@ -8,8 +8,9 @@ import UIKit
 /// snapshots` sets Reduce Transparency, Reduce Motion and the Liquid Glass
 /// opacity with devicectl before the run and passes the group. These tests
 /// check that the simulator really has those settings, and render the probe
-/// (system glass over content) in every group; the job then compares the
-/// probes and fails when a setting leaves the rendered chrome unchanged.
+/// (system glass over content) in every group of every simulator kind; the
+/// job then compares the probes and fails when one is missing or a setting
+/// leaves the rendered chrome unchanged.
 @MainActor
 @Suite(.serialized, .enabled(if: SnapshotRun.current.mode != .plan)) struct SystemSettingsTests {
     struct Group: Equatable {
@@ -53,13 +54,21 @@ import UIKit
         #expect(UIAccessibility.isReduceMotionEnabled == group.reduceMotion, "Reduce Motion is not as the group says: devicectl did not apply it")
     }
 
+    /// Rendered in every group of every simulator kind, whatever the run's
+    /// filter: outside it the probe is captured, never compared or recorded,
+    /// and the job still checks it.
     @Test func probe() async throws {
-        let group = try #require(Group(SnapshotRun.current.group))
+        let run = SnapshotRun.current
+        let group = try #require(Group(run.group))
         let cell = MatrixCell(
             reduceTransparency: group.reduceTransparency, reduceMotion: group.reduceMotion, transparency: group.transparency,
-            device: SnapshotMatrix.referenceDevice(.current)
+            device: run.target.referenceDevice
         )
-        await assertSnapshot(subject: "matrix.probe", state: "glass", cell: cell, layout: .component, keepActual: true) { Probe() }
+        let status = await assertSnapshot(
+            subject: "matrix.probe", state: "glass", cell: cell, layout: .component, run: run.capturing("matrix.probe/glass/\(cell.name)"),
+            keepActual: true
+        ) { Probe() }
+        #expect(status != nil, "the probe did not render in group \(run.group) on \(run.target)")
     }
 }
 #endif

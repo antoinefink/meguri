@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -74,7 +75,36 @@ import Testing
         #expect(iphone.contains { $0.transparency == .maximum && $0.deferredReason == nil }, "transparency is a simulator setting (S5)")
         let mac = SnapshotMatrix.cells(.pairwise, on: .mac)
         #expect(mac.filter { $0.transparency != .standard }.allSatisfy { $0.deferredReason != nil }, "the Mac's own settings are never changed")
-        #expect(mac.contains { $0.reduceTransparency && $0.deferredReason == nil })
+        // System chrome ignores a SwiftUI environment override (spike S5):
+        // the Mac's Reduce Transparency and Reduce Motion cells are deferred,
+        // still listed for the device session, never rendered.
+        #expect(mac.contains { $0.reduceTransparency } && mac.contains { $0.reduceMotion })
+        #expect(mac.filter { $0.reduceTransparency || $0.reduceMotion }.allSatisfy { $0.deferredReason?.contains("device session") == true })
+        #expect(mac.contains { $0.deferredReason == nil })
+        #expect(iphone.contains { $0.reduceTransparency && $0.reduceMotion && $0.deferredReason == nil }, "a simulator setting on iOS (S5)")
+    }
+
+    /// A screen takes its window's safe area: each device class renders on
+    /// the simulator whose screen it is, the small iPhone on the iPhone 17e
+    /// (390×844 pt), never inside a larger simulator's screen.
+    @Test func eachDeviceClassRendersOnTheSimulatorWhoseScreenItIs() {
+        #expect(DeviceClass.iphoneSmall.target == .iphoneSmall)
+        #expect(SnapshotTarget.iphoneSmall.rawValue == "iphone-small", "the pool kind in tools/sim-devices.json")
+        #expect(DeviceClass.iphoneSmall.size == CGSize(width: 390, height: 844))
+        #expect([DeviceClass.iphoneLarge, .iphoneResizable, .foldableOuter, .foldableInner].allSatisfy { $0.target == .iphone })
+        for device in DeviceClass.allCases {
+            #expect(device.target.platform == device.platform)
+        }
+        for target in SnapshotTarget.allCases {
+            #expect(target.referenceDevice.target == target)
+        }
+        #if os(macOS)
+        #expect(SnapshotTarget(environment: ["MEGURI_SNAPSHOT_TARGET": "iphone-small"]) == .mac)
+        #else
+        #expect(SnapshotTarget(environment: ["MEGURI_SNAPSHOT_TARGET": "iphone-small"]) == .iphoneSmall)
+        #expect(SnapshotTarget(environment: ["SIMULATOR_MODEL_IDENTIFIER": "iPad17,4"]) == .ipad)
+        #expect(SnapshotTarget(environment: ["SIMULATOR_MODEL_IDENTIFIER": "iPhone18,1"]) == .iphone)
+        #endif
     }
 
     @Test func cellNamesAreUniqueAndReadable() {

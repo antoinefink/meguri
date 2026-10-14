@@ -126,7 +126,8 @@ mg_snapshots__xcodebuild() {
     esac
   done
   echo "fake snapshot run mode=$mode dest=$dest suites=$suites target=$target group=$group" >>"$STUB_LOG"
-  mkdir -p "$dir"
+  mkdir -p "$dir" "$out.xcresult"
+  echo "xcodebuild log" >"$out.log"
   if [ "$mode" = plan ]; then
     [ -z "${FX_PLAN:-}" ] || cp "$FX_PLAN" "$dir/plan.jsonl"
     return 0

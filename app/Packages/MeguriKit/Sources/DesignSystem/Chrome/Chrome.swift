@@ -50,7 +50,10 @@ public struct ControlBar<Content: View>: View {
     }
 }
 
-/// Glass in a shape, or an opaque surface under flat chrome.
+/// Glass in a shape, or an opaque surface under flat chrome. The flat
+/// surface is the grouped background, which differs from the screen
+/// background in light and dark (`surface` is the screen's white in light,
+/// so a toast would lose its container).
 private struct FloatingChrome<ChromeShape: Shape>: ViewModifier {
     @Environment(\.chromeGlass) private var chromeGlass
     let shape: ChromeShape
@@ -58,7 +61,7 @@ private struct FloatingChrome<ChromeShape: Shape>: ViewModifier {
     func body(content: Content) -> some View {
         switch chromeGlass {
         case .liquid: content.glassEffect(.regular, in: shape)
-        case .flat: content.background(.token(.surface), in: shape)
+        case .flat: content.background(.token(.backgroundSecondary), in: shape)
         }
     }
 }

@@ -11,7 +11,7 @@ You judge rendered screens against Meguri's design rubric (R1983). You never see
 
 The packet only:
 
-- `packet.json`: the screens to grade (id, title, purpose, signature flag, reference patterns), every image with its screen, state, variant, platform, axis values, size in pixels and platform notes, contact sheets, and deterministic check results.
+- `packet.json`: the screens to grade (id, title, purpose, signature flag, reference patterns, the platforms it is registered on), every image with its screen, state, variant, platform, axis values, size in pixels and platform notes, contact sheets, and deterministic check results.
 - `screens/<screen>/<state>/<variant>.png`: the images, drawn at 2x. A variant name lists appearance, text size and device class, then each other setting that is on (`+hc` Increase Contrast, `+rt` Reduce Transparency, `+rm` Reduce Motion, `+tinted` tinted glass, `+tmin`/`+tmax` glass opacity extremes).
 - `contact-sheets/`: about 12 frames of a recorded transition, in order (motion rules).
 - `rubric.md`: the rules you cite, their owners and their usual severity. `brief.md`: what Meguri should feel like.
@@ -21,7 +21,7 @@ The packet only:
 
 ## How to grade
 
-1. Read `packet.json`, `rubric.md`, `brief.md` and the calibration files. Then look at every image the packet lists, and at the references of each screen's patterns.
+1. Read `packet.json`, `rubric.md`, `brief.md` and the calibration files. Then look at every image the packet lists, and at the references of each screen's patterns. Each screen has images on every platform it lists: judge each platform's layout on its own (a phone layout stretched across an iPad or Mac window is a platform-adaptivity issue).
 2. For each problem you see, write one issue: the screen, state and variant of the image, the image's packet path, the rubric rule id it breaks, a severity, the region (image pixels from the top-left corner, enclosing the problem), a one-sentence summary and what in the image shows it. When the same problem shows in several variants, report each variant it shows in.
 3. Severity follows the rubric's Severity section and the rule's usual severity. High: the screen is wrong for its user (clipped, overlapping or unreadable text, an unreachable or too small control, glass on content, a broken layout at a supported size, text size or appearance). Medium: it works but falls short of the brief. Low: taste. Taste is always low (R1985).
 4. Rules a tool owns (lint, contrast tests, the audit, touch targets, hierarchy, contact-sheet checks) still get your issue when you see the problem: the tool's result decides whether it stands (R1986). Do not guess at measurements you cannot see.

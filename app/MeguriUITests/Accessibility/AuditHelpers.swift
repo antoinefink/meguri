@@ -1,5 +1,13 @@
+import CoreGraphics
 import Foundation
 import XCTest
+#if os(macOS)
+import AppKit
+typealias PlatformScreenshotImage = NSImage
+#else
+import UIKit
+typealias PlatformScreenshotImage = UIImage
+#endif
 
 /// One suppressed system-audit issue (R1977): exactly one element
 /// identifier, one audit type, and the reason it is not a defect. The only
@@ -11,6 +19,12 @@ struct AuditSuppression: Decodable, Equatable {
 }
 
 struct SuppressionError: Error, CustomStringConvertible, Equatable {
+    let description: String
+}
+
+/// The audit could not run as asked (a screen that never appeared, an
+/// appearance that did not apply).
+struct AuditError: Error, CustomStringConvertible, Equatable {
     let description: String
 }
 
@@ -128,11 +142,12 @@ enum AccessibilityAudit {
             #endif
         }
 
-        /// Launch arguments for the text size (the appearance is set on the
-        /// device, see `apply`).
+        /// Launch arguments: on the Mac the appearance, named either way, so
+        /// a light run never inherits a dark workstation's; on iOS the text
+        /// size (the appearance is set on the device, see `apply`).
         var launchArguments: [String] {
             #if os(macOS)
-            dark ? ["-AppleInterfaceStyle", "Dark"] : []
+            ["-AppleInterfaceStyle", dark ? "Dark" : "Light"]
             #else
             largestText ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : []
             #endif
@@ -170,17 +185,28 @@ enum AccessibilityAudit {
         return findings
     }
 
-    /// Launches `launch` once per variant and audits the screen it opens.
-    /// The device appearance is restored afterwards.
+    /// One state of a screen, audited in every variant.
+    struct StateResult {
+        let state: String
+        let findings: [AuditFinding]
+        let touchTargets: [TouchTargetViolation]
+
+        var passed: Bool { findings.allSatisfy(\.suppressed) && touchTargets.isEmpty }
+    }
+
+    /// Launches `launch` once per variant, checks that the variant's
+    /// appearance is the one the app shows, and audits the screen it opens
+    /// and its touch targets. The device appearance is restored afterwards.
     @MainActor
     static func runAllVariants(
-        launch: MeguriLaunch, waitFor identifier: String, suppressions: [AuditSuppression]
-    ) throws -> [AuditFinding] {
+        state: String, launch: MeguriLaunch, waitFor identifier: String, suppressions: [AuditSuppression]
+    ) throws -> StateResult {
         #if !os(macOS)
         let appearance = XCUIDevice.shared.appearance
         defer { XCUIDevice.shared.appearance = appearance }
         #endif
         var findings: [AuditFinding] = []
+        var touchTargets: [TouchTargetViolation] = []
         for variant in Variant.all {
             variant.apply()
             let app = XCUIApplication()
@@ -191,32 +217,84 @@ enum AccessibilityAudit {
             defer { app.terminate() }
             let anchor = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
             guard anchor.waitForExistence(timeout: 15) else {
-                throw SuppressionError(description: "\(identifier) did not appear (\(variant))")
+                throw AuditError(description: "\(identifier) did not appear (\(state), \(variant))")
             }
-            findings += try run(app, variant: variant.description, suppressions: suppressions)
+            let shown = try Appearance.shown(by: app)
+            guard shown.dark == variant.dark else {
+                throw AuditError(description: "\(state), \(variant): the app shows a \(shown.dark ? "dark" : "light") screen (median luminance \(String(format: "%.2f", shown.luminance))); the variant's appearance did not apply")
+            }
+            findings += try run(app, variant: "\(state), \(variant)", suppressions: suppressions)
+            for violation in try TouchTargets.violations(in: app) where !touchTargets.contains(violation) {
+                touchTargets.append(violation)
+            }
         }
-        return findings
+        return StateResult(state: state, findings: findings, touchTargets: touchTargets)
     }
 
-    /// The screen's result as a JSON attachment `a11y-screen.<screen id>.json`;
-    /// `tools/mg a11y` lists these as per-screen evidence (the critic's
-    /// `--a11y`, the status ledger).
-    static func screenReport(_ screen: String, findings: [AuditFinding], touchTargets: [TouchTargetViolation]) -> XCTAttachment {
-        let unsuppressed = findings.filter { !$0.suppressed }
-        let report: [String: Any] = [
-            "screen": screen,
-            "status": unsuppressed.isEmpty && touchTargets.isEmpty ? "pass" : "fail",
-            "variants": Variant.all.map(\.description),
-            "findings": findings.map {
-                ["variant": $0.variant, "identifier": $0.identifier, "label": $0.label, "element": $0.element, "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed]
-            },
-            "touchTargets": touchTargets.map(\.description),
-        ]
-        let data = (try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])) ?? Data()
-        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+    /// The appearance an app's window shows: dark when most of it is dark.
+    enum Appearance {
+        @MainActor
+        static func shown(by app: XCUIApplication) throws -> (dark: Bool, luminance: Double) {
+            let luminance = try medianLuminance(app.windows.firstMatch.screenshot().image)
+            return (luminance < 0.5, luminance)
+        }
+
+        /// The median relative luminance (0 black, 1 white) of the image,
+        /// sampled on a 64×64 grid.
+        static func medianLuminance(_ image: PlatformScreenshotImage) throws -> Double {
+            #if os(macOS)
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { throw AuditError(description: "the screenshot has no bitmap") }
+            #else
+            guard let cgImage = image.cgImage else { throw AuditError(description: "the screenshot has no bitmap") }
+            #endif
+            let side = 64
+            var bytes = [UInt8](repeating: 0, count: side * side * 4)
+            guard let context = CGContext(
+                data: &bytes, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { throw AuditError(description: "could not sample the screenshot") }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
+            let values = stride(from: 0, to: bytes.count, by: 4).map { index in
+                (0.2126 * Double(bytes[index]) + 0.7152 * Double(bytes[index + 1]) + 0.0722 * Double(bytes[index + 2])) / 255
+            }.sorted()
+            return values[values.count / 2]
+        }
+    }
+
+    /// The screen's result as a JSON attachment `a11y-screen.<screen id>.json`,
+    /// with a result per state; `tools/mg a11y` lists these as per-screen
+    /// evidence (the critic's `--a11y`, the status ledger). The screen passes
+    /// only when every state does.
+    static func screenReport(_ screen: String, states: [StateResult]) -> XCTAttachment {
+        let attachment = XCTAttachment(data: screenReportData(screen, states: states), uniformTypeIdentifier: "public.json")
         attachment.name = "a11y-screen.\(screen).json"
         attachment.lifetime = .keepAlways
         return attachment
+    }
+
+    /// The report's JSON.
+    static func screenReportData(_ screen: String, states: [StateResult]) -> Data {
+        func findingsJSON(_ result: StateResult) -> [[String: Any]] {
+            result.findings.map {
+                ["state": result.state, "variant": $0.variant, "identifier": $0.identifier, "label": $0.label, "element": $0.element,
+                 "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed]
+            }
+        }
+        let report: [String: Any] = [
+            "screen": screen,
+            "status": states.allSatisfy(\.passed) && !states.isEmpty ? "pass" : "fail",
+            "variants": Variant.all.map(\.description),
+            "states": Dictionary(uniqueKeysWithValues: states.map { result in
+                (result.state, [
+                    "status": result.passed ? "pass" : "fail",
+                    "findings": findingsJSON(result),
+                    "touchTargets": result.touchTargets.map(\.description),
+                ] as [String: Any])
+            }),
+            "findings": states.flatMap(findingsJSON),
+            "touchTargets": states.flatMap { result in result.touchTargets.map { "\(result.state): \($0)" } },
+        ]
+        return (try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys, .prettyPrinted])) ?? Data()
     }
 
     /// Fails once per unsuppressed finding.

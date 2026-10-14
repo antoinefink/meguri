@@ -35,7 +35,8 @@ enum SnapshotLayout: String, Codable, Sendable {
     /// needs, on the primary background, with no safe area.
     case component
     /// A whole screen at the device class's size, in the safe area of the
-    /// simulator's own window.
+    /// simulator's own window: the class renders on the simulator whose
+    /// screen it is (`DeviceClass.target`), so the insets are its own.
     case screen
 }
 
@@ -50,6 +51,10 @@ struct SnapshotRun: Sendable {
         case record
         /// List every snapshot (name, cell, group) without rendering.
         case plan
+        /// Render and hand the image over, with no baseline and no outcome:
+        /// the settings probe outside the run's filter (the job compares the
+        /// groups' probes, whatever the filter).
+        case capture
     }
 
     let mode: Mode
@@ -58,6 +63,9 @@ struct SnapshotRun: Sendable {
     /// The simulator settings group this run has (`rt0-rm0-t50`); the Mac's
     /// is `mac`.
     let group: String
+    /// The simulator kind (or the Mac) this run renders on: only device
+    /// classes of this target render.
+    let target: SnapshotTarget
     let output: URL
     let baselines: URL
     /// `<model>-<os build>`: baselines are pinned per model and build (R1966).
@@ -76,10 +84,14 @@ struct SnapshotRun: Sendable {
 
     static var baselineRoot: URL { repositoryRoot.appending(path: "app/Snapshots", directoryHint: .isDirectory) }
 
-    init(mode: Mode, filters: [String] = [], group: String, output: URL, baselines: URL, key: String, inventory: URL? = nil) {
+    init(
+        mode: Mode, filters: [String] = [], group: String, target: SnapshotTarget = .current, output: URL, baselines: URL, key: String,
+        inventory: URL? = nil
+    ) {
         self.mode = mode
         self.filters = filters
         self.group = group
+        self.target = target
         self.output = output
         self.baselines = baselines
         self.key = key
@@ -95,6 +107,7 @@ struct SnapshotRun: Sendable {
         #else
         group = environment["MEGURI_SNAPSHOT_GROUP"] ?? MatrixCell(device: .iphoneLarge).systemGroup
         #endif
+        target = SnapshotTarget(environment: environment)
         if let path = environment["MEGURI_SNAPSHOT_OUT"], !path.isEmpty {
             output = URL(filePath: path, directoryHint: .isDirectory)
         } else {
@@ -128,6 +141,17 @@ struct SnapshotRun: Sendable {
 
     func selects(_ name: String) -> Bool {
         filters.isEmpty || filters.contains { fnmatch($0, name, 0) == 0 }
+    }
+
+    /// This run for `name`, or, when its filter leaves the name out, a
+    /// capture of it: the image is still handed over, but never compared or
+    /// recorded.
+    func capturing(_ name: String) -> SnapshotRun {
+        guard !selects(name) else { return self }
+        return SnapshotRun(
+            mode: mode == .plan ? .plan : .capture, group: group, target: target, output: output, baselines: baselines, key: key,
+            inventory: inventory
+        )
     }
 }
 
@@ -168,7 +192,7 @@ enum SnapshotLog {
 
 /// The outcome of one snapshot.
 enum SnapshotStatus: String {
-    case pass, fail, new, recorded, deferred
+    case pass, fail, new, recorded, deferred, captured
 }
 
 /// Renders `view` in `cell`, compares it with its baseline and reports it.
@@ -200,7 +224,7 @@ func assertSnapshot(
 private func prepare(
     _ name: String, subject: String, state: String, cell: MatrixCell, layout: SnapshotLayout, run: SnapshotRun
 ) -> (entry: [String: Any]?, skipped: SnapshotStatus?) {
-    guard run.selects(name), cell.device.platform == SnapshotPlatform.current else { return (nil, nil) }
+    guard run.selects(name), cell.device.target == run.target else { return (nil, nil) }
     var entry: [String: Any] = [
         "name": name, "subject": subject, "state": state, "cell": cell.name, "layout": layout.rawValue,
         "group": cell.systemGroup, "platform": cell.device.platform.rawValue, "key": run.key,
@@ -266,7 +290,9 @@ func assertImageSnapshot(
     let (prepared, skipped) = prepare(name, subject: subject, state: state, cell: cell, layout: layout, run: run)
     guard var entry = prepared else { return skipped }
     let baseline = run.baselines.appending(path: "\(name).png")
-    entry["baseline"] = repositoryPath(baseline)
+    if run.mode != .capture {
+        entry["baseline"] = repositoryPath(baseline)
+    }
     let image: PlatformImage
     do {
         image = try await render()
@@ -278,6 +304,12 @@ func assertImageSnapshot(
         return .fail
     }
     let diffing = PlatformImage.snapshotDiffing
+    if run.mode == .capture {
+        entry["status"] = SnapshotStatus.captured.rawValue
+        entry["actual"] = SnapshotLog.write(diffing.toData(image), as: "actual/\(name).png", run: run)?.path
+        SnapshotLog.append(entry, to: "results.jsonl", run: run)
+        return .captured
+    }
     let status: SnapshotStatus
     var message = ""
     if let reference = try? Data(contentsOf: baseline) {
@@ -363,10 +395,11 @@ struct RenderError: Error, CustomStringConvertible {
     let description: String
 }
 
-/// The cell's appearance, text size, contrast and accessibility settings as
-/// SwiftUI environment values. On iOS the traits carry them too (system
-/// chrome and asset colours read traits); Reduce Transparency and Reduce
-/// Motion come from the simulator's settings there.
+/// The cell's appearance, text size and contrast as SwiftUI environment
+/// values. On iOS the traits carry them too (system chrome and asset colours
+/// read traits); Reduce Transparency and Reduce Motion come from the
+/// simulator's settings there, and Mac cells with either on are deferred
+/// (system chrome would ignore an environment override).
 struct CellEnvironment: ViewModifier {
     let cell: MatrixCell
 
@@ -380,8 +413,6 @@ struct CellEnvironment: ViewModifier {
             .environment(\.dynamicTypeSize, cell.textSize.dynamicTypeSize)
             .environment(\._colorSchemeContrast, cell.increaseContrast ? .increased : .standard)
             #if os(macOS)
-            .environment(\._accessibilityReduceTransparency, cell.reduceTransparency)
-            .environment(\._accessibilityReduceMotion, cell.reduceMotion)
             // Off-screen Mac renders draw no Liquid Glass (no backdrop):
             // chrome is drawn flat so its controls keep their labels.
             .environment(\.chromeGlass, .flat)
@@ -538,8 +569,10 @@ enum HostedRenderer {
     /// safe-area workaround (issue #1125 shifted renders by the window's
     /// insets): a component takes no safe area at all; a screen takes the
     /// window's own, which is the simulator screen's where the window
-    /// overlaps it. Never pad a screen with other insets: UIKit (scroll edge
-    /// effects) keeps reading the window's, and the two would disagree.
+    /// overlaps it, so a device class renders on the simulator whose screen
+    /// it is (`DeviceClass.target`). Never pad a screen with other insets:
+    /// UIKit (scroll edge effects) keeps reading the window's, and the two
+    /// would disagree.
     @MainActor
     final class Host {
         private let window: UIWindow

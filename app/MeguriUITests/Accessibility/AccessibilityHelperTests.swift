@@ -1,5 +1,10 @@
 import Foundation
 import XCTest
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// The accessibility helpers (R1977, R1978, R1980) on the sample routes.
 /// Screen suites (AE88 and the sweep) belong to their UI units and U253.
@@ -92,7 +97,10 @@ final class AccessibilityHelperTests: XCTestCase {
         #endif
     }
 
-    func testTheSampleScreenPassesTheAuditAtEveryTextSizeAndAppearance() throws {
+    /// Every state of the sample screen (`sample/deck-overview/<state>`, one
+    /// route per PreviewState) passes the audit and the touch-target check
+    /// in every variant; the report lists each state.
+    func testEveryStateOfTheSampleScreenPassesTheAuditAtEveryTextSizeAndAppearance() throws {
         let build = try BuildUnderTest.current()
         guard build.hasHooks else { throw XCTSkip("\(build.configuration.rawValue) has no test hooks") }
         #if os(macOS)
@@ -103,21 +111,53 @@ final class AccessibilityHelperTests: XCTestCase {
         // the Mac audit treats them.
         throw XCTSkip("Mac audit findings on unidentified elements are left to U253's sweep")
         #else
-        let findings = try AccessibilityAudit.runAllVariants(
-            launch: MeguriLaunch(locale: "en_US", animations: false, route: "sample/deck-overview/typical"),
-            waitFor: "sample.deckOverview.title",
-            suppressions: try AuditSuppressions.bundled()
-        )
-        let app = XCUIApplication()
-        app.launchArguments = MeguriLaunch(locale: "en_US", animations: false, route: "sample/deck-overview/typical").arguments
-        app.launch()
-        defer { app.terminate() }
-        XCTAssert(app.buttons["sample.deckOverview.study"].waitForExistence(timeout: 15))
-        let touchTargets = try TouchTargets.violations(in: app)
-        add(AccessibilityAudit.screenReport("sample.deckOverview", findings: findings, touchTargets: touchTargets))
-        AccessibilityAudit.assertClean(findings)
-        TouchTargets.assertMet(touchTargets)
+        let suppressions = try AuditSuppressions.bundled()
+        let states = try ["empty", "typical", "overflow", "error", "loading"].map { state in
+            try AccessibilityAudit.runAllVariants(
+                state: state, launch: MeguriLaunch(locale: "en_US", animations: false, route: "sample/deck-overview/\(state)"),
+                waitFor: "sample.deckOverview.screen", suppressions: suppressions
+            )
+        }
+        add(AccessibilityAudit.screenReport("sample.deckOverview", states: states))
+        for state in states {
+            AccessibilityAudit.assertClean(state.findings)
+            TouchTargets.assertMet(state.touchTargets)
+        }
         #endif
+    }
+
+    /// The report fails a screen when one state fails, and names the state.
+    func testTheScreenReportFailsAScreenWithOneFailingState() throws {
+        let small = TouchTargetViolation(identifier: "sample.deckOverview.retry", label: "Try Again", size: CGSize(width: 64, height: 18), minimum: CGSize(width: 44, height: 44))
+        let data = AccessibilityAudit.screenReportData("sample.deckOverview", states: [
+            .init(state: "typical", findings: [], touchTargets: []),
+            .init(state: "error", findings: [], touchTargets: [small]),
+        ])
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["status"] as? String, "fail")
+        let states = try XCTUnwrap(json["states"] as? [String: [String: Any]])
+        XCTAssertEqual(states["typical"]?["status"] as? String, "pass")
+        XCTAssertEqual(states["error"]?["status"] as? String, "fail")
+        XCTAssertEqual(json["touchTargets"] as? [String], ["error: sample.deckOverview.retry is 64×18 pt; the minimum here is 44×44 pt (R1980)"])
+    }
+
+    /// The appearance check reads a dark screen as dark and a light one as light.
+    func testTheAppearanceCheckTellsDarkFromLight() throws {
+        for (white, dark) in [(CGFloat(0.05), true), (CGFloat(0.97), false)] {
+            #if os(macOS)
+            let image = NSImage(size: CGSize(width: 40, height: 40), flipped: false) { rect in
+                NSColor(white: white, alpha: 1).setFill()
+                NSBezierPath(rect: rect).fill()
+                return true
+            }
+            #else
+            let image = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { context in
+                UIColor(white: white, alpha: 1).setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 40, height: 40))
+            }
+            #endif
+            XCTAssertEqual(try AccessibilityAudit.Appearance.medianLuminance(image) < 0.5, dark)
+        }
     }
 
     // MARK: VoiceOver
@@ -131,5 +171,32 @@ final class AccessibilityHelperTests: XCTestCase {
         report.lifetime = .keepAlways
         add(report)
         VoiceOver.assertOrder(reading, contains: ["Spanish", "Study Now"])
+    }
+
+    /// Elements that say the same thing are all read: a repeated label does
+    /// not end the reading.
+    func testVoiceOverKeepsRepeatedLabels() {
+        var script = ["Delete, Button", "Delete, Button", "Delete, Button", "Done, Button"][...]
+        let reading = VoiceOver.traverse(first: "Spanish, Heading", limit: 60) { script.popFirst() }
+        XCTAssertEqual(reading, ["Spanish, Heading", "Delete, Button", "Delete, Button", "Delete, Button", "Done, Button"])
+    }
+
+    /// A reading that runs to the limit because VoiceOver wrapped around to
+    /// the start is cut where it starts over; one that does not repeat stops
+    /// at the limit.
+    func testVoiceOverEndsAtTheLimitAndCutsAWrapAround() {
+        let cycle = ["Spanish, Heading", "Delete, Button", "Delete, Button", "Done, Button"]
+        var step = 0
+        let wrapped = VoiceOver.traverse(first: cycle[0], limit: 20) {
+            step += 1
+            return cycle[step % cycle.count]
+        }
+        XCTAssertEqual(wrapped, cycle)
+        var count = 0
+        let long = VoiceOver.traverse(first: "Row 0", limit: 5) {
+            count += 1
+            return "Row \(count)"
+        }
+        XCTAssertEqual(long, ["Row 0", "Row 1", "Row 2", "Row 3", "Row 4", "Row 5"])
     }
 }

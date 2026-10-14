@@ -1,4 +1,10 @@
 {
   "version": 1,
-  "suppressions": []
+  "suppressions": [
+    {
+      "identifier": "sample.deckOverview.counts",
+      "auditType": "contrast",
+      "reason": "At the largest text sizes in the overflow state the counts line continues below the scroll view's visible edge, and the audit measures its whole frame, which reaches under the Study Now button (sample/deck-overview/overflow, 2026-10-14: counts frame y 640-827, scroll view ends at y 715). The count colours are token pairings ContrastTests checks (R1979)."
+    }
+  ]
 }

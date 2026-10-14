@@ -63,6 +63,7 @@ extension TestHooks {
                         ErrorStateView(
                             Text(verbatim: "Couldn’t Load the Deck"),
                             message: Text(verbatim: "The collection is busy. Try again in a moment."),
+                            retryIdentifier: "sample.deckOverview.retry",
                             retry: {}
                         )
                     case .loading:

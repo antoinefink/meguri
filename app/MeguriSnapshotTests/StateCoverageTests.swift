@@ -59,8 +59,12 @@ enum StateCoverage {
         let problems = StateCoverage.problems(registered: registered, inventory: inventory)
         #expect(problems.isEmpty, "\(problems.joined(separator: "; "))")
         // tools/mg snapshots requires this file: a skipped check is no check.
+        // It also lists where each screen is registered (registry.json):
+        // tools/mg critic grades a screen on all those platforms.
         let report = try JSONSerialization.data(withJSONObject: [
-            "screens": registered.map { ["id": $0.id, "states": $0.states.map(\.rawValue)] },
+            "screens": MatrixRegistry.screens.map {
+                ["id": $0.id, "states": $0.type.previewStates.map(\.rawValue), "platforms": MatrixRegistry.platforms(of: $0).map(\.rawValue)]
+            },
             "problems": problems,
         ], options: [.sortedKeys])
         _ = SnapshotLog.write(report, as: "state-coverage.json", run: run)
@@ -85,6 +89,11 @@ enum StateCoverage {
     @Test func aRegisteredScreenOutsideTheInventoryIsNamed() {
         let problems = StateCoverage.problems(registered: [(id: "home.unknown", states: [.typical])], inventory: [:])
         #expect(problems == ["home.unknown is registered for snapshots but has no screen-inventory.yaml entry"])
+    }
+
+    @Test func theSampleScreenIsRegisteredOnEveryPlatform() throws {
+        let sample = try #require(MatrixRegistry.screens.first { $0.id == "sample.deckOverview" })
+        #expect(MatrixRegistry.platforms(of: sample) == [.iphone, .ipad, .mac])
     }
 
     @Test func aSampleScreenNeedsAllFiveStates() {
