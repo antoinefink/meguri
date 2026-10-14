@@ -294,6 +294,20 @@ pub struct RevlogRow {
     pub kind: i64,
 }
 
+/// `legacy_update` (model-ops.md L2): merge `patch` into the schema-11 object
+/// of exactly one named note type, deck or preset and save it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LegacyUpdate {
+    #[serde(default, deserialize_with = "present")]
+    pub notetype: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub deck: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub preset: Option<String>,
+    pub patch: Map<String, Value>,
+}
+
 /// One step: a mapping with one key, the op name (D7).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -311,6 +325,8 @@ pub enum Step {
     SetDue(DraftArgs),
     Reposition(DraftArgs),
     UpdatePreset(DraftArgs),
+    /// model-ops.md L2.
+    LegacyUpdate(LegacyUpdate),
     BuildFiltered(DraftArgs),
     Import(DraftArgs),
     Export(DraftArgs),
@@ -323,7 +339,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 20] = [
+    pub const NAMES: [&'static str; 21] = [
         "advance",
         "set_clock",
         "add_note",
@@ -337,6 +353,7 @@ impl Step {
         "set_due",
         "reposition",
         "update_preset",
+        "legacy_update",
         "build_filtered",
         "import",
         "export",
@@ -362,6 +379,7 @@ impl Step {
             Step::SetDue(_) => "set_due",
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
+            Step::LegacyUpdate(_) => "legacy_update",
             Step::BuildFiltered(_) => "build_filtered",
             Step::Import(_) => "import",
             Step::Export(_) => "export",
@@ -665,6 +683,7 @@ pub enum ObservationKind {
     DbDump,
     Stats,
     Digest,
+    LegacyJson,
 }
 
 /// How a kind takes arguments.
@@ -683,7 +702,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 14] = [
+    pub const ALL: [ObservationKind; 15] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -698,6 +717,7 @@ impl ObservationKind {
         ObservationKind::DbDump,
         ObservationKind::Stats,
         ObservationKind::Digest,
+        ObservationKind::LegacyJson,
     ];
 
     pub fn name(self) -> &'static str {
@@ -716,6 +736,7 @@ impl ObservationKind {
             ObservationKind::DbDump => "db_dump",
             ObservationKind::Stats => "stats",
             ObservationKind::Digest => "digest",
+            ObservationKind::LegacyJson => "legacy_json",
         }
     }
 
@@ -730,7 +751,10 @@ impl ObservationKind {
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }
-            ObservationKind::FuzzTable | ObservationKind::NetProbe | ObservationKind::Search => ArgShape::Mapping,
+            ObservationKind::FuzzTable
+            | ObservationKind::NetProbe
+            | ObservationKind::Search
+            | ObservationKind::LegacyJson => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
         }
     }

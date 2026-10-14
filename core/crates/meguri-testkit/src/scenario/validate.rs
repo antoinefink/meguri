@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 
 use super::FormatError;
-use super::model::{DraftArgs, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step};
+use super::model::{DraftArgs, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step};
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
 #[derive(Debug, Clone, Copy)]
@@ -116,6 +116,9 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Some(args) = step.draft_args() {
             draft(step.name(), args).map_err(at)?;
         }
+        if let Step::LegacyUpdate(update) = step {
+            legacy_update(update).map_err(at)?;
+        }
         if let Step::Handoff(to) = step {
             if side == Some(*to) {
                 return Err(at(FormatError::new(format!(
@@ -193,6 +196,21 @@ fn check(shape: Arg, value: &Value) -> Result<(), String> {
     }
 }
 
+/// model-ops.md L2: exactly one non-empty record name.
+fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
+    let names = [&update.notetype, &update.deck, &update.preset];
+    let given: Vec<&String> = names.iter().filter_map(|name| name.as_ref()).collect();
+    if given.len() != 1 {
+        return Err(FormatError::new(
+            "legacy_update names exactly one of notetype, deck and preset",
+        ));
+    }
+    if given[0].is_empty() {
+        return Err(FormatError::new("legacy_update needs a non-empty name"));
+    }
+    Ok(())
+}
+
 /// The schema's rules for the mapping form of an observation request.
 pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value>) -> Result<(), FormatError> {
     let name = kind.name();
@@ -246,6 +264,17 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         ObservationKind::Queue => {
             if map.get("deck").is_some_and(|d| !d.is_string()) {
                 return bad("deck is a deck name");
+            }
+        }
+        ObservationKind::LegacyJson => {
+            let lists_ok = map.iter().all(|(key, names)| {
+                matches!(key.as_str(), "notetypes" | "decks" | "presets")
+                    && names.as_array().is_some_and(|names| {
+                        !names.is_empty() && names.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty()))
+                    })
+            });
+            if map.is_empty() || !lists_ok {
+                return bad("takes {notetypes?, decks?, presets?}, each a non-empty list of names");
             }
         }
         ObservationKind::DbDump

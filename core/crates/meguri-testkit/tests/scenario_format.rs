@@ -400,6 +400,20 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
         ("steps: [{handoff: elsewhere}]", "unknown variant"),
         ("steps: [{handoff: oracle}, {handoff: oracle}]", "alternate"),
+        (
+            "steps: [{legacy_update: {deck: A, notetype: B, patch: {}}}]",
+            "exactly one",
+        ),
+        ("steps: [{legacy_update: {patch: {}}}]", "exactly one"),
+        ("steps: [{legacy_update: {deck: \"\", patch: {}}}]", "non-empty name"),
+        ("steps: [{legacy_update: {deck: A}}]", "patch"),
+        ("steps: [{legacy_update: {deck: A, patch: 5}}]", "invalid type"),
+        ("steps: [{legacy_update: {deck: A, patch: {}, x: 1}}]", "unknown field"),
+        ("steps: [{observe: [{legacy_json: {}}]}]", "legacy_json"),
+        ("steps: [{observe: [{legacy_json: {decks: []}}]}]", "legacy_json"),
+        ("steps: [{observe: [{legacy_json: {decks: [\"\"]}}]}]", "legacy_json"),
+        ("steps: [{observe: [{legacy_json: {tags: [a]}}]}]", "legacy_json"),
+        ("steps: [{observe: [legacy_json]}]", "does not take"),
     ] {
         let text = format!("id: area/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{bad}\n");
         let value = scenario::parse_yaml(&text).unwrap();
@@ -409,6 +423,11 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     // Null where the schema allows it, and an empty id list (every id).
     let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{observe: [{timing: null}, {queue: null}, {ids: []}]}]\n";
     assert!(scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).is_ok());
+    // model-ops.md L1 and L2.
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{legacy_update: {preset: P, patch: {a: null, new: {b: [1]}}}}, {observe: [{legacy_json: {decks: [\"A::B\"], presets: [P]}}]}]\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("legacy_update") && needs.observations.contains("legacy_json"));
 }
 
 #[test]

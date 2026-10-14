@@ -27,7 +27,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert!(out.status.success());
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["supports"]["ops"], serde_json::json!(["advance", "set_clock"]));
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 19);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 20);
     assert!(
         json["language"]["ops"]
             .as_array()
@@ -36,11 +36,25 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .any(|o| o == "handoff")
     );
     assert!(
+        json["language"]["ops"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o == "legacy_update")
+    );
+    assert!(
         json["language"]["observations"]
             .as_array()
             .unwrap()
             .iter()
             .any(|k| k == "next_states")
+    );
+    assert!(
+        json["language"]["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "legacy_json")
     );
 }
 
