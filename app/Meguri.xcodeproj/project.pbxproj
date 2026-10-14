@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		4D4547555249000000000110 /* MeguriKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000510 /* MeguriKit */; };
 		4D4547555249000000000111 /* CoreBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000511 /* CoreBridge */; };
+		4D4547555249000000000410 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000512 /* SnapshotTesting */; };
 		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -153,6 +154,7 @@
 		4D4547555249000000000403 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				4D4547555249000000000410 /* SnapshotTesting in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -296,6 +298,9 @@
 				4D4547555249000000000013 /* MeguriSnapshotTests */,
 			);
 			name = MeguriSnapshotTests;
+			packageProductDependencies = (
+				4D4547555249000000000512 /* SnapshotTesting */,
+			);
 			productName = MeguriSnapshotTests;
 			productReference = 4D4547555249000000000023 /* MeguriSnapshotTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -338,6 +343,7 @@
 			packageReferences = (
 				4D4547555249000000000500 /* XCLocalSwiftPackageReference "Packages/MeguriKit" */,
 				4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */,
+				4D4547555249000000000502 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 4D4547555249000000000003 /* Products */;
@@ -645,6 +651,17 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		4D4547555249000000000502 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
+			requirement = {
+				kind = exactVersion;
+				version = 1.19.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		4D4547555249000000000510 /* MeguriKit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -655,6 +672,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
 			productName = CoreBridge;
+		};
+		4D4547555249000000000512 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D4547555249000000000502 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

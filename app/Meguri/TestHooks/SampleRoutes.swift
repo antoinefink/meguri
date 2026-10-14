@@ -13,7 +13,8 @@ extension TestHooks {
     /// and an error state. The sheet shows what the launch overrides did, read
     /// back from the app rather than from the options, so tests can check them.
     /// A fourth, `sample/defects`, holds deliberate defects for the agent
-    /// loop's hierarchy check (U8).
+    /// loop's hierarchy check (U8). `sample/deck-overview/<state>` and
+    /// `sample/touch-targets` serve the verification tooling (U10).
     enum SampleRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.register("sample/screen") { _ in
@@ -32,6 +33,12 @@ extension TestHooks {
                     SampleDefects()
                 }
             }
+            registry.register("sample/deck-overview/empty") { _ in .screen { SampleDeckOverview.preview(.empty) } }
+            registry.register("sample/deck-overview/typical") { _ in .screen { SampleDeckOverview.preview(.typical) } }
+            registry.register("sample/deck-overview/overflow") { _ in .screen { SampleDeckOverview.preview(.overflow) } }
+            registry.register("sample/deck-overview/error") { _ in .screen { SampleDeckOverview.preview(.error) } }
+            registry.register("sample/deck-overview/loading") { _ in .screen { SampleDeckOverview.preview(.loading) } }
+            registry.register("sample/touch-targets") { _ in .screen { SampleTouchTargets() } }
             registry.register("sample/alert") { _ in
                 .alert(title: "Sample error", message: "The sample error state.") {
                     Button("Try Again") {}

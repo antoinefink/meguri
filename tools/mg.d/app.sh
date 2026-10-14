@@ -23,11 +23,11 @@ mg_app_products() {
   esac
 }
 
-# mg_app_build <mac|ios-sim> <config>: UI lint first (AE90), core
-# XCFramework and build-for-testing of the UI plan. On failure records it
-# and returns 1.
+# mg_app_build <mac|ios-sim> <config> [plan]: UI lint first (AE90), core
+# XCFramework and build-for-testing of the plan (UI by default; snapshots
+# build Snapshot). On failure records it and returns 1.
 mg_app_build() {
-  local platform="$1" config="$2" dest result log rc counts
+  local platform="$1" config="$2" plan="${3:-UI}" dest result log rc counts
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
@@ -44,14 +44,14 @@ mg_app_build() {
     mac) dest="platform=macOS,arch=arm64" ;;
     *) dest="generic/platform=iOS Simulator" ;;
   esac
-  result="$MG_RUN_DIR/build-$platform-$config.xcresult"
-  log="$MG_RUN_DIR/build-$platform-$config.log"
+  result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
+  log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
   rm -rf "$result"
-  echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config)" >&2
-  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme Meguri -testPlan UI -configuration "$config" \
+  echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config, $plan plan)" >&2
+  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme Meguri -testPlan "$plan" -configuration "$config" \
     -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" >"$log" 2>&1
   rc=$?
-  mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config)"
+  mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config, $plan plan)"
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -c '{errors: .errorCount, warnings: .warningCount, messages: [(.errors[]?, .warnings[]?) | .message] | .[:10]}')" || counts=null
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \

@@ -10,7 +10,7 @@ import Testing
 @MainActor
 @Suite struct RouteRegistryTests {
     @Test func theStandardRegistryHasTheSampleAndGalleryRoutes() {
-        #expect(TestHooks.RouteRegistry.standard.routes.map(\.path) == ["designsystem/gallery", "sample/alert", "sample/defects", "sample/screen", "sample/sheet"])
+        #expect(TestHooks.RouteRegistry.standard.routes.map(\.path) == ["designsystem/gallery", "sample/alert", "sample/deck-overview/empty", "sample/deck-overview/error", "sample/deck-overview/loading", "sample/deck-overview/overflow", "sample/deck-overview/typical", "sample/defects", "sample/screen", "sample/sheet", "sample/touch-targets"])
     }
 
     @Test(arguments: [
@@ -19,6 +19,8 @@ import Testing
         ("sample/sheet", .sheet),
         ("sample/alert", .alert),
         ("designsystem/gallery", .screen),
+        ("sample/deck-overview/typical", .screen),
+        ("sample/touch-targets", .screen),
     ])
     func eachRouteHasItsPresentation(path: String, style: InitialPresentation.Style) throws {
         let presentation = try TestHooks.RouteRegistry.standard.presentation(for: TestHooks.Route(path), configuration: LaunchConfiguration())
@@ -27,7 +29,7 @@ import Testing
 
     @Test func anUnknownRouteNamesTheRegisteredOnes() throws {
         let route = try TestHooks.Route("review/answer")
-        #expect(throws: TestHookError("-MeguriRoute: no route 'review/answer'; registered: designsystem/gallery, sample/alert, sample/defects, sample/screen, sample/sheet")) {
+        #expect(throws: TestHookError("-MeguriRoute: no route 'review/answer'; registered: designsystem/gallery, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets")) {
             try TestHooks.RouteRegistry.standard.presentation(for: route, configuration: LaunchConfiguration())
         }
     }
