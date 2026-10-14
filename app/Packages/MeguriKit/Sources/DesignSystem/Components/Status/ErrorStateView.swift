@@ -33,13 +33,14 @@ public struct ErrorStateView: View {
     public var body: some View {
         ContentUnavailableView {
             Label {
-                title
+                // Text tokens: the system's greys fall below 4.5:1 on white.
+                title.foregroundStyle(.token(.textPrimary))
             } icon: {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(.token(.statusError))
             }
         } description: {
-            message
+            message.foregroundStyle(.token(.textSecondary))
         } actions: {
             if let retry {
                 Button(action: retry.action) {
@@ -49,6 +50,9 @@ public struct ErrorStateView: View {
                 .stateViewActions()
             }
         }
+        // The Mac sizes the view to its content: centred in its container
+        // on every platform.
+        .frame(maxWidth: .infinity)
     }
 }
 

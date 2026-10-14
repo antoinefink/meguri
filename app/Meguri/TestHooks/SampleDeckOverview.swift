@@ -20,17 +20,28 @@ extension TestHooks {
 
         let content: Content
 
+        #if os(macOS)
+        private let regularWidth = true
+        #else
+        @Environment(\.horizontalSizeClass) private var sizeClass
+        private var regularWidth: Bool { sizeClass == .regular }
+        #endif
+
         var body: some View {
             VStack(spacing: 0) {
                 scrollingContent
                 // The primary action stays in reach whatever the title's
-                // length: below the scrolling content, not over it.
+                // length: below the scrolling content, not over it. It fills
+                // an iPhone's width and keeps a button's width in an iPad or
+                // Mac window, centred under the content column.
                 if case .deck = content {
                     Button {} label: { Text(verbatim: "Study Now").frame(maxWidth: .infinity) }
                         .buttonStyle(.bordered)
                         .tint(ColorToken.textPrimary.color)
                         .controlSize(.large)
+                        .frame(maxWidth: regularWidth ? ContentWidth.primaryAction : .infinity)
                         .padding(Spacing.medium)
+                        .frame(maxWidth: .infinity)
                         .accessibilityIdentifier("sample.deckOverview.study")
                 }
             }
@@ -71,7 +82,10 @@ extension TestHooks {
                     }
                 }
                 .padding(Spacing.medium)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // A readable column, centred in a wide window: never a
+                // phone layout stretched across an iPad or a Mac.
+                .frame(maxWidth: ContentWidth.readable, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
             .accessibilityIdentifier("sample.deckOverview.screen")
         }
