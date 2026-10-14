@@ -1,0 +1,23 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "unicase_compare": [-1, 1, 0, -1, 1, 1, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, -1, -1, 1]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/fold/unicase",
+  "scenario_sha256": "199567c7b5e0fb30d41e93ffe8b95a46f317e611a03aed50568b30bb709471e7",
+  "tz": "UTC"
+}

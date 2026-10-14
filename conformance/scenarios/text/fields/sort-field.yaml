@@ -1,0 +1,31 @@
+# Sort-field text for values that look like numbers (specs/text/
+# checksum-and-sort-field.md C2-C3). The text is what Meguri binds; the column's
+# affinity decides the stored type.
+id: text/fields/sort-field
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [sort_field]
+          inputs:
+            - "123"
+            - "007"
+            - " 12 "
+            - "1.5"
+            - "1.0"
+            - "1e3"
+            - "3.0e+5"
+            - "-4"
+            - "+4"
+            - "0x10"
+            - "9223372036854775807"
+            - "9223372036854775808"
+            - "1e400"
+            - "Inf"
+            - "NaN"
+            - "12abc"
+            - "1,5"
+            - "\t5\n"
+            - "&#49;&#50;"
+            - "<b>42</b>"
+            - "<img src=\"7.png\">"

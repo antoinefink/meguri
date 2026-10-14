@@ -1,0 +1,43 @@
+# Field emptiness as saved (specs/text/field-emptiness.md E1-E2): only ASCII
+# whitespace and bare <br>/<div> spacer tags are empty.
+id: text/fields/empty
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [field_empty]
+          inputs:
+            - "&nbsp;"
+            - "<span></span>"
+            - "<br/> <div></div>\n"
+            - "<DIV>"
+            - "<Br >"
+            - ""
+            - " "
+            - "\t\n"
+            - "\x0B\x0C\r"
+            - "\u00A0"
+            - "\u3000"
+            - "<br  >"
+            - "<br\t>"
+            - "<br\n>"
+            - "</br />"
+            - "<div />"
+            - "<div/>"
+            - "</div>"
+            - "<div class=\"x\"></div>"
+            - "<p></p>"
+            - "<!-- -->"
+            - "<b\rr>"
+            - "<div>x</div>"
+            - "x"
+            - "<br>\x01"
+            - "\x01"
+            - "<BR><bR/><Br />"
+            - "<dIV></DIV>"
+            - "&#32;"
+            - "<br>&nbsp;"
+            - "<br /><br />"
+            - "< br>"
+            - "<br/ >"
+            - "<br //>"

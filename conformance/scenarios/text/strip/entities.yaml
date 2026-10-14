@@ -1,0 +1,48 @@
+# Entity decoding inside stripping (specs/text/strip-html.md H3): every entity
+# valid or nothing decoded, the HTML 4 name set, decimal and lower-case-x hex
+# forms, and U+00A0 becoming a space only after a successful decode.
+id: text/strip/entities
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [strip_markup, text_line]
+          inputs:
+            - "salt &amp; pepper"
+            - "&lt;b&gt;not a tag&lt;/b&gt;"
+            - "<i>&lt;</i>tag<i>&gt;</i>"
+            - "&quot;quoted&quot;"
+            - "caf&eacute; &Eacute;t&eacute;"
+            - "&EAcute;"
+            - "&#65;&#x42;&#x63;"
+            - "&#X41;"
+            - "&#;"
+            - "&#x;"
+            - "&#0;z"
+            - "&#55296;"
+            - "&#xD800;"
+            - "&#1114111;"
+            - "&#1114112;"
+            - "&#x110000;"
+            - "&#99999999999;"
+            - "&#00065;"
+            - "&#x1F600; &#128512;"
+            - "&apos;"
+            - "&#39;s"
+            - "rock & roll"
+            - "rock &amp roll"
+            - "rock &amp; roll &"
+            - "ok &amp; then &unknown; later"
+            - "&nbsp;"
+            - "a&nbsp;b&#160;c&#xa0;d"
+            - "raw\u00A0nbsp"
+            - "raw\u00A0nbsp &amp; entity"
+            - "raw\u00A0nbsp &bogus; entity"
+            - "&amp;nbsp;"
+            - "&amp;amp;"
+            - "&ensp;&emsp;&thinsp;"
+            - "&euro;&hellip;&trade;"
+            - "&AMP;"
+            - "& amp;"
+            - "&\u3000;"
+            - "<b>&</b>"

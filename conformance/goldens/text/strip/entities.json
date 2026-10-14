@@ -1,0 +1,24 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "strip_markup": ["salt & pepper", "<b>not a tag</b>", "<tag>", "\"quoted\"", "café Été", "&EAcute;", "ABc", "&#X41;", "&#;", "&#x;", "\u0000z", "&#55296;", "&#xD800;", "􏿿", "&#1114112;", "&#x110000;", "&#99999999999;", "A", "😀 😀", "&apos;", "'s", "rock & roll", "rock &amp roll", "rock &amp; roll &", "ok &amp; then &unknown; later", " ", "a b c d", "raw nbsp", "raw nbsp & entity", "raw nbsp &bogus; entity", "&nbsp;", "&amp;", "   ", "€…™", "&AMP;", "& amp;", "&　;", "&"],
+          "text_line": ["salt & pepper", "<b>not a tag</b>", "<tag>", "\"quoted\"", "café Été", "&EAcute;", "ABc", "&#X41;", "&#;", "&#x;", "\u0000z", "&#55296;", "&#xD800;", "􏿿", "&#1114112;", "&#x110000;", "&#99999999999;", "A", "😀 😀", "&apos;", "'s", "rock & roll", "rock &amp roll", "rock &amp; roll &", "ok &amp; then &unknown; later", "", "a b c d", "raw nbsp", "raw nbsp & entity", "raw nbsp &bogus; entity", "&nbsp;", "&amp;", "", "€…™", "&AMP;", "& amp;", "&　;", "&"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/strip/entities",
+  "scenario_sha256": "41f475ac2d610e9eeeb1dfe8820567d2b08999431660405ab1ce59df4a50281c",
+  "tz": "UTC"
+}

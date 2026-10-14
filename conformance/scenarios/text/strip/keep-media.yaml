@@ -1,0 +1,28 @@
+# Stripping that keeps media file names (specs/text/strip-html.md H5): each media
+# tag becomes its raw name between two spaces before plain stripping; sound tags
+# stay as text.
+id: text/strip/keep-media
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [strip_markup_keep_media, strip_markup]
+          inputs:
+            - "<img src=\"a b.jpg\">text"
+            - "<img src='single.png'><i>x</i>"
+            - "<audio src=bare.mp3>"
+            - "<img src=\"a&amp;b.jpg\">"
+            - "<img src=\"a<b>.jpg\">"
+            - "<img src=\"\">"
+            - "<img alt=\"src=x.png\" src=\"y.png\">"
+            - "[sound:voice.mp3] stays"
+            - "<img src=\"one.png\"><img src=\"two.png\">"
+            - "pre<img src=\"mid.png\">post"
+            - "<video src=\"clip.mp4\" controls></video>"
+            - "<object data=\"vector.svg\"></object>"
+            - "<img src=\"tab\tname.png\">"
+            - "<img src=\"a&amp;b.png\"> &bogus;"
+            - "<img src=\"\u00A0lead.png\">"
+            - "<img src=\"&nbsp;lead.png\">"
+            - "<IMG SRC=\"UPPER.PNG\">"
+            - "<img alt=\"q>r\" src=\"s.png\">"

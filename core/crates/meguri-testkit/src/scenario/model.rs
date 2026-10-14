@@ -25,8 +25,225 @@ pub struct Scenario {
     pub compare: CompareSpec,
     #[serde(default)]
     pub setup: Setup,
+    /// The clients of an actor scenario (sync-ops.md S2.1); the first runs
+    /// the setup.
+    #[serde(default, deserialize_with = "present")]
+    pub actors: Option<Vec<ActorName>>,
+    /// The scenario's sync server (sync-ops.md S3.2); only with actors.
+    #[serde(default, deserialize_with = "present")]
+    pub server: Option<ServerSpec>,
     #[serde(default)]
     pub steps: Vec<Step>,
+}
+
+/// An actor of an actor scenario (sync-ops.md S2.1): a Meguri actor
+/// (`meguri`, `meguri_2`, ...) or an oracle actor (`client_a` to `client_z`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct ActorName(String);
+
+impl ActorName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// In T1, Meguri's executor plays it; the oracle plays every other actor.
+    pub fn is_meguri(&self) -> bool {
+        self.0.starts_with("meguri")
+    }
+}
+
+impl fmt::Display for ActorName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for ActorName {
+    type Err = FormatError;
+
+    fn from_str(name: &str) -> Result<ActorName, FormatError> {
+        let numbered =
+            |n: &str| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) && !n.starts_with('0') && n != "1";
+        let letter = |c: &str| c.len() == 1 && c.bytes().all(|b| b.is_ascii_lowercase());
+        let ok = name == "meguri"
+            || name.strip_prefix("meguri_").is_some_and(numbered)
+            || name.strip_prefix("client_").is_some_and(letter);
+        if ok {
+            Ok(ActorName(name.to_owned()))
+        } else {
+            Err(FormatError::new(format!(
+                "actor name {name:?} must be meguri, meguri_<n> with n >= 2, or client_a to client_z"
+            )))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ActorName {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<ActorName, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        text.parse().map_err(de::Error::custom)
+    }
+}
+
+/// `server` (sync-ops.md S3.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerSpec {
+    /// Seconds the server's clock runs ahead of the scenario clock (behind
+    /// when negative).
+    pub clock_offset_secs: i64,
+}
+
+impl ServerSpec {
+    pub const MAX_OFFSET_SECS: i64 = 86_400;
+}
+
+impl<'de> Deserialize<'de> for ServerSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<ServerSpec, D::Error> {
+        let map = mapping(deserializer, "server")?;
+        let mut spec = ServerSpec::default();
+        for (key, value) in map {
+            if key != "clock_offset_secs" {
+                return Err(de::Error::custom(format!(
+                    "server: unknown key {key:?}, expected clock_offset_secs"
+                )));
+            }
+            spec.clock_offset_secs = value
+                .as_i64()
+                .filter(|v| v.abs() <= ServerSpec::MAX_OFFSET_SECS)
+                .ok_or_else(|| {
+                    de::Error::custom(format!(
+                        "server.clock_offset_secs must be an integer from -86400 to 86400, found {value}"
+                    ))
+                })?;
+        }
+        Ok(spec)
+    }
+}
+
+/// The value of an op that takes a mapping, as the mapping: serde's derived
+/// structs would also accept a list of their fields, which the schema
+/// forbids.
+fn mapping<'de, D: Deserializer<'de>>(deserializer: D, what: &str) -> Result<Map<String, Value>, D::Error> {
+    match Value::deserialize(deserializer)? {
+        Value::Object(map) => Ok(map),
+        other => Err(de::Error::custom(format!("{what} takes a mapping, found {other}"))),
+    }
+}
+
+/// The argument `{}` of `reopen` and `converge`: a mapping with no keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoArgs;
+
+impl<'de> Deserialize<'de> for NoArgs {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<NoArgs, D::Error> {
+        let map = mapping(deserializer, "this op")?;
+        match map.keys().next() {
+            None => Ok(NoArgs),
+            Some(key) => Err(de::Error::custom(format!("unknown key {key:?}: the op takes {{}}"))),
+        }
+    }
+}
+
+/// `sync: {kind}` (sync-ops.md S4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncSpec {
+    pub kind: SyncKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncKind {
+    Login,
+    Normal,
+    FullUpload,
+    FullDownload,
+}
+
+impl SyncKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SyncKind::Login => "login",
+            SyncKind::Normal => "normal",
+            SyncKind::FullUpload => "full_upload",
+            SyncKind::FullDownload => "full_download",
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SyncSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<SyncSpec, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            kind: SyncKind,
+        }
+        let map = mapping(deserializer, "sync")?;
+        let raw: Raw = serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)?;
+        Ok(SyncSpec { kind: raw.kind })
+    }
+}
+
+/// `net_fault` (sync-ops.md S5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetFault {
+    /// `reset_peer` on the data flowing in this direction.
+    Reset(Direction),
+    /// Removes every fault.
+    Clear,
+}
+
+/// Which way the data a fault hits flows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    ToClient,
+    ToServer,
+}
+
+impl<'de> Deserialize<'de> for NetFault {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<NetFault, D::Error> {
+        let map = mapping(deserializer, "net_fault")?;
+        let text = |key: &str| {
+            map.get(key)
+                .map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string()))
+        };
+        let fault = match text("kind").as_deref() {
+            Some("reset") => {
+                let direction = match text("direction").as_deref() {
+                    Some("to_client") => Direction::ToClient,
+                    Some("to_server") => Direction::ToServer,
+                    Some(other) => {
+                        return Err(de::Error::custom(format!(
+                            "net_fault direction {other:?} is not to_client or to_server"
+                        )));
+                    }
+                    None => {
+                        return Err(de::Error::custom(
+                            "net_fault reset needs a direction: to_client or to_server",
+                        ));
+                    }
+                };
+                NetFault::Reset(direction)
+            }
+            Some("clear") => NetFault::Clear,
+            Some(other) => {
+                return Err(de::Error::custom(format!(
+                    "net_fault kind {other:?} is not reset or clear"
+                )));
+            }
+            None => return Err(de::Error::custom("net_fault needs a kind: reset or clear")),
+        };
+        let allowed: &[&str] = match fault {
+            NetFault::Reset(_) => &["kind", "direction"],
+            NetFault::Clear => &["kind"],
+        };
+        if let Some(key) = map.keys().find(|k| !allowed.contains(&k.as_str())) {
+            return Err(de::Error::custom(format!(
+                "net_fault {} takes no {key:?}",
+                text("kind").unwrap_or_default()
+            )));
+        }
+        Ok(fault)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -316,14 +533,23 @@ pub enum Step {
     Export(DraftArgs),
     CheckDb(DraftArgs),
     DbExec(DraftArgs),
-    Sync(DraftArgs),
+    /// Closes the collection and opens it again (sync-ops.md S6).
+    Reopen(NoArgs),
+    /// Actor scenarios (sync-ops.md S2.3): the actor that runs the next steps.
+    Actor(ActorName),
+    /// Actor scenarios (sync-ops.md S4).
+    Sync(SyncSpec),
+    /// Actor scenarios (sync-ops.md S5).
+    NetFault(NetFault),
+    /// Actor scenarios (sync-ops.md S7).
+    Converge(NoArgs),
     /// Live scenarios only (D9): the collection moves to this side.
     Handoff(Side),
 }
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 20] = [
+    pub const NAMES: [&'static str; 24] = [
         "advance",
         "set_clock",
         "add_note",
@@ -342,9 +568,16 @@ impl Step {
         "export",
         "check_db",
         "db_exec",
+        "reopen",
+        "actor",
         "sync",
+        "net_fault",
+        "converge",
         "handoff",
     ];
+
+    /// The ops only actor scenarios have (sync-ops.md S1).
+    pub const ACTOR_OPS: [&'static str; 4] = ["actor", "sync", "net_fault", "converge"];
 
     /// The op name as written in scenarios.
     pub fn name(&self) -> &'static str {
@@ -367,9 +600,24 @@ impl Step {
             Step::Export(_) => "export",
             Step::CheckDb(_) => "check_db",
             Step::DbExec(_) => "db_exec",
+            Step::Reopen(_) => "reopen",
+            Step::Actor(_) => "actor",
             Step::Sync(_) => "sync",
+            Step::NetFault(_) => "net_fault",
+            Step::Converge(_) => "converge",
             Step::Handoff(_) => "handoff",
         }
+    }
+
+    /// A step that runs whatever the current actor of an actor scenario
+    /// (sync-ops.md S2.3): it moves the shared clock, changes every actor's
+    /// network path, reads every actor or picks the current one. The current
+    /// actor runs every other step.
+    pub fn is_global(&self) -> bool {
+        matches!(
+            self,
+            Step::Advance(_) | Step::SetClock(_) | Step::NetFault(_) | Step::Converge(_) | Step::Actor(_)
+        )
     }
 
     /// The arguments of a draft op.
@@ -387,8 +635,7 @@ impl Step {
             | Step::Import(a)
             | Step::Export(a)
             | Step::CheckDb(a)
-            | Step::DbExec(a)
-            | Step::Sync(a) => Some(a),
+            | Step::DbExec(a) => Some(a),
             _ => None,
         }
     }
@@ -648,6 +895,23 @@ impl<'de> Deserialize<'de> for CardRef {
     }
 }
 
+/// The tables of a schema-18 collection file that `db_dump` reports
+/// (observations.md O8).
+pub const DUMP_TABLES: [&str; 12] = [
+    "col",
+    "notes",
+    "cards",
+    "revlog",
+    "graves",
+    "decks",
+    "deck_config",
+    "notetypes",
+    "fields",
+    "templates",
+    "tags",
+    "config",
+];
+
 /// Observation kinds (observations.md O4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationKind {
@@ -665,6 +929,7 @@ pub enum ObservationKind {
     DbDump,
     Stats,
     Digest,
+    Text,
 }
 
 /// How a kind takes arguments.
@@ -683,7 +948,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 14] = [
+    pub const ALL: [ObservationKind; 15] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -698,6 +963,7 @@ impl ObservationKind {
         ObservationKind::DbDump,
         ObservationKind::Stats,
         ObservationKind::Digest,
+        ObservationKind::Text,
     ];
 
     pub fn name(self) -> &'static str {
@@ -716,6 +982,7 @@ impl ObservationKind {
             ObservationKind::DbDump => "db_dump",
             ObservationKind::Stats => "stats",
             ObservationKind::Digest => "digest",
+            ObservationKind::Text => "text",
         }
     }
 
@@ -730,7 +997,10 @@ impl ObservationKind {
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }
-            ObservationKind::FuzzTable | ObservationKind::NetProbe | ObservationKind::Search => ArgShape::Mapping,
+            ObservationKind::FuzzTable
+            | ObservationKind::NetProbe
+            | ObservationKind::Search
+            | ObservationKind::Text => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
         }
     }
@@ -839,6 +1109,124 @@ fn unknown_kind(name: &str) -> FormatError {
     FormatError::new(format!("unknown observation kind {name:?}"))
 }
 
+/// The functions of the `text` kind (observations.md O9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TextFunction {
+    StripMarkup,
+    StripMarkupKeepMedia,
+    TextLine,
+    TextLineKeepMedia,
+    MediaRefs,
+    IriEncode,
+    IriDecode,
+    MediaFilename,
+    SortField,
+    Checksum,
+    FieldEmpty,
+    UnicaseCompare,
+}
+
+impl TextFunction {
+    pub const ALL: [TextFunction; 12] = [
+        TextFunction::StripMarkup,
+        TextFunction::StripMarkupKeepMedia,
+        TextFunction::TextLine,
+        TextFunction::TextLineKeepMedia,
+        TextFunction::MediaRefs,
+        TextFunction::IriEncode,
+        TextFunction::IriDecode,
+        TextFunction::MediaFilename,
+        TextFunction::SortField,
+        TextFunction::Checksum,
+        TextFunction::FieldEmpty,
+        TextFunction::UnicaseCompare,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            TextFunction::StripMarkup => "strip_markup",
+            TextFunction::StripMarkupKeepMedia => "strip_markup_keep_media",
+            TextFunction::TextLine => "text_line",
+            TextFunction::TextLineKeepMedia => "text_line_keep_media",
+            TextFunction::MediaRefs => "media_refs",
+            TextFunction::IriEncode => "iri_encode",
+            TextFunction::IriDecode => "iri_decode",
+            TextFunction::MediaFilename => "media_filename",
+            TextFunction::SortField => "sort_field",
+            TextFunction::Checksum => "checksum",
+            TextFunction::FieldEmpty => "field_empty",
+            TextFunction::UnicaseCompare => "unicase_compare",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<TextFunction> {
+        TextFunction::ALL.into_iter().find(|f| f.name() == name)
+    }
+}
+
+/// The inputs of a `text` request: strings, or `[a, b]` pairs for
+/// `unicase_compare`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextInputs {
+    Strings(Vec<String>),
+    Pairs(Vec<(String, String)>),
+}
+
+/// A `text` observation request: `{fns, inputs}` (observations.md O4, O9).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextRequest {
+    pub fns: Vec<TextFunction>,
+    pub inputs: TextInputs,
+}
+
+impl TextRequest {
+    /// Reads the request with scenario.schema.json's rules: exactly `fns` and
+    /// `inputs`; distinct known functions, at least one; `unicase_compare`
+    /// alone, on pairs of strings; every other function on strings.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<TextRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation text: {why}"));
+        if map.len() != 2 || !map.contains_key("fns") || !map.contains_key("inputs") {
+            return Err(bad("takes exactly {fns, inputs}"));
+        }
+        let names = map["fns"]
+            .as_array()
+            .ok_or_else(|| bad("fns is a list of function names"))?;
+        if names.is_empty() {
+            return Err(bad("fns names at least one function"));
+        }
+        let mut fns = Vec::with_capacity(names.len());
+        for name in names {
+            let f = name
+                .as_str()
+                .and_then(TextFunction::from_name)
+                .ok_or_else(|| bad(&format!("{name} is not a text function")))?;
+            if fns.contains(&f) {
+                return Err(bad(&format!("{} appears twice in fns", f.name())));
+            }
+            fns.push(f);
+        }
+        let items = map["inputs"].as_array().ok_or_else(|| bad("inputs is a list"))?;
+        let inputs = if fns.contains(&TextFunction::UnicaseCompare) {
+            if fns.len() > 1 {
+                return Err(bad("unicase_compare shares a request with no other function"));
+            }
+            let pair = |item: &Value| match item.as_array().map(Vec::as_slice) {
+                Some([Value::String(a), Value::String(b)]) => Some((a.clone(), b.clone())),
+                _ => None,
+            };
+            let pairs = items.iter().map(pair).collect::<Option<Vec<_>>>();
+            TextInputs::Pairs(pairs.ok_or_else(|| bad("unicase_compare inputs are [a, b] pairs of strings"))?)
+        } else {
+            let strings = items
+                .iter()
+                .map(|v| v.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>();
+            TextInputs::Strings(strings.ok_or_else(|| bad("inputs are strings"))?)
+        };
+        Ok(TextRequest { fns, inputs })
+    }
+}
+
 impl<'de> Deserialize<'de> for ObservationRequest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<ObservationRequest, D::Error> {
         match Value::deserialize(deserializer)? {
@@ -895,9 +1283,65 @@ impl Scenario {
         needs
     }
 
-    /// A live scenario has handoff steps (D9).
+    /// A live scenario has handoff steps (D9.2) or actors (D9.3): only T1
+    /// runs it.
     pub fn is_live(&self) -> bool {
-        self.steps.iter().any(|s| matches!(s, Step::Handoff(_)))
+        self.has_actors() || self.has_handoffs()
+    }
+
+    /// An actor scenario (sync-ops.md S1).
+    pub fn has_actors(&self) -> bool {
+        self.actors.is_some()
+    }
+
+    /// The declared actors, in order; none outside actor scenarios.
+    pub fn actors(&self) -> &[ActorName] {
+        self.actors.as_deref().unwrap_or_default()
+    }
+
+    /// For each step, the actor that runs it (sync-ops.md S2.3): the current
+    /// actor, which is the first actor until an `actor` step names another;
+    /// `None` for global steps and in scenarios without actors.
+    pub fn step_actors(&self) -> Vec<Option<&ActorName>> {
+        let mut current = self.actors().first();
+        self.steps
+            .iter()
+            .map(|step| {
+                if let Step::Actor(name) = step {
+                    current = self.actors().iter().find(|a| *a == name).or(current);
+                }
+                if step.is_global() { None } else { current }
+            })
+            .collect()
+    }
+
+    /// What Meguri needs to play the Meguri actors of an actor scenario
+    /// (sync-ops.md S10.2): the op `actor`; the setup sections when the first
+    /// actor is a Meguri actor; the ops and observation kinds of the steps
+    /// Meguri actors run; `advance` and `set_clock` when the scenario uses
+    /// them; `db_dump` for `converge`. Nothing without a Meguri actor.
+    pub fn needs_of_meguri_actors(&self) -> Needs {
+        let mut needs = Needs::default();
+        if !self.actors().iter().any(ActorName::is_meguri) {
+            return needs;
+        }
+        needs.ops.insert("actor".to_owned());
+        if self.actors()[0].is_meguri() {
+            needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
+        }
+        for (step, by) in self.steps.iter().zip(self.step_actors()) {
+            match step {
+                Step::Advance(_) | Step::SetClock(_) => {
+                    needs.ops.insert(step.name().to_owned());
+                }
+                Step::Converge(_) => {
+                    needs.observations.insert(ObservationKind::DbDump.name().to_owned());
+                }
+                _ if by.is_some_and(ActorName::is_meguri) => add_step_needs(&mut needs, std::slice::from_ref(step)),
+                _ => {}
+            }
+        }
+        needs
     }
 
     /// The segments of the scenario, split at its handoff steps; one segment
@@ -944,10 +1388,15 @@ impl Scenario {
             }
             add_step_needs(&mut needs, &self.steps[segment.steps.clone()]);
         }
-        if self.is_live() {
+        if self.has_handoffs() {
             needs.ops.insert("handoff".to_owned());
         }
         needs
+    }
+
+    /// A live chain: handoff steps split it into segments (D9.2).
+    pub fn has_handoffs(&self) -> bool {
+        self.steps.iter().any(|s| matches!(s, Step::Handoff(_)))
     }
 }
 

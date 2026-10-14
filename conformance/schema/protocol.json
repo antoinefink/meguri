@@ -3,7 +3,7 @@
   "$id": "https://meguri.local/conformance/schema/protocol.json",
   "$comment": "SPDX-License-Identifier: MPL-2.0. Meguri-owned protocol between Meguri tooling and oracle workers.",
   "title": "Meguri oracle worker protocol, version 1",
-  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, whose result.json gives the image as details.image.tag (meguri-oracle:<tag>), then `MEGURI_ORACLE_TAG=<tag> docker compose -f docker/compose.yml run --rm -T --no-deps -e TZ=<zone> oracle`. A checkout without oracle/ (an implementer worktree) works the same way: tools/mg builds the image from the main worktree's oracle/, and the run needs only the built image. Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats.",
+  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, whose result.json gives the image as details.image.tag (meguri-oracle:<tag>), then `MEGURI_ORACLE_TAG=<tag> docker compose -f docker/compose.yml run --rm -T --no-deps -e TZ=<zone> oracle`. A checkout without oracle/ (an implementer worktree) works the same way: tools/mg builds the image from the main worktree's oracle/, and the run needs only the built image. Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats. Actor scenarios (specs/conformance/sync-ops.md) also read ORACLE_SYNC_FAULTS (host:port of the toxiproxy API on oracle-internal; needed for runs with a fault proxy) and ORACLE_SYNC_RECORDER (host:port of the recorder, an HTTP forward proxy; set only for recording runs). The worker removes http_proxy, https_proxy, all_proxy and no_proxy (any case) from its environment at start.",
   "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/response" }],
   "$defs": {
     "id": {
@@ -25,7 +25,7 @@
       "additionalProperties": false
     },
     "run_request": {
-      "description": "Batch mode: run one scenario on a fresh collection and return every step's output; a handoff step only closes and reopens the collection there. With steps, resume or handoff it runs one segment of a live chain (dsl.md D9.2) instead: needs a worker started with ORACLE_HANDOFF (the handoff directory it shares with the runner).",
+      "description": "Batch mode: run one scenario on a fresh collection and return every step's output; a handoff step only closes and reopens the collection there. With steps, resume or handoff it runs one segment of a live chain (dsl.md D9.2) instead: needs a worker started with ORACLE_HANDOFF (the handoff directory it shares with the runner). An actor scenario (specs/conformance/sync-ops.md) runs whole, the oracle playing every actor, with its sync server and, when the scenario has a net_fault step, its fault proxy (needs ORACLE_SYNC_FAULTS); steps, resume or handoff with an actor scenario is invalid_scenario.",
       "type": "object",
       "required": ["cmd", "scenario"],
       "properties": {
@@ -48,24 +48,58 @@
       "additionalProperties": false
     },
     "begin_request": {
-      "description": "Interactive mode: set up the scenario (clock, collection, setup) without running its steps.",
+      "description": "Interactive mode: set up the scenario (clock, collection, setup) without running its steps. For an actor scenario (sync-ops.md S10.4): create the collections of the actors the worker plays, run the setup when it plays the first actor, start the sync server and, when the run needs one, the fault proxy; connect nothing before the first step request.",
       "type": "object",
       "required": ["cmd", "scenario"],
       "properties": {
         "cmd": { "const": "begin" },
         "id": { "$ref": "#/$defs/id" },
-        "scenario": { "$ref": "#/$defs/scenario" }
+        "scenario": { "$ref": "#/$defs/scenario" },
+        "caller_actors": {
+          "description": "Actor scenarios: the Meguri actors the caller plays (none when missing). The worker makes no collection for them; their steps come as step requests with done. A run with caller actors always has a fault proxy.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/actor_name" }
+        },
+        "ids": {
+          "description": "Actor scenarios whose first actor the caller plays: the real ids the caller's setup created, in creation order.",
+          "$ref": "#/$defs/new_ids"
+        }
       },
       "additionalProperties": false
     },
     "step_request": {
-      "description": "Interactive mode: without step, run the scenario's next step (no_more_steps after the last; a failed step stays next); with step, run that ad-hoc step, which does not move the scenario's next step.",
+      "description": "Interactive mode: without step, run the scenario's next step (no_more_steps after the last; a failed step stays next); with step, run that ad-hoc step, which does not move the scenario's next step. Actor scenarios (sync-ops.md S10.4): with done, the next step belongs to a caller-played actor and the caller ran it; with dumps, the next step is converge and these are the caller-played actors' raw dumps. protocol_error when a step the worker runs comes with done, a caller-played step comes without it, or dumps does not name exactly the caller-played actors.",
       "type": "object",
       "required": ["cmd"],
       "properties": {
         "cmd": { "const": "step" },
         "id": { "$ref": "#/$defs/id" },
-        "step": { "$ref": "#/$defs/step" }
+        "step": { "$ref": "#/$defs/step" },
+        "done": {
+          "description": "The output of a step a caller-played actor ran, and the real ids it created, in creation order; the worker records them as that step's.",
+          "type": "object",
+          "required": ["output", "notes", "cards"],
+          "properties": {
+            "output": { "$ref": "#/$defs/step_output" },
+            "notes": { "type": "array", "items": { "type": "integer" } },
+            "cards": { "type": "array", "items": { "type": "integer" } }
+          },
+          "additionalProperties": false
+        },
+        "dumps": {
+          "description": "converge with caller-played actors: each one's raw dump (sync-ops.md S7.2).",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/actor_name" },
+          "additionalProperties": { "$ref": "#/$defs/raw_dump" }
+        }
+      },
+      "not": {
+        "anyOf": [
+          { "required": ["step", "done"] },
+          { "required": ["step", "dumps"] },
+          { "required": ["done", "dumps"] }
+        ]
       },
       "additionalProperties": false
     },
@@ -140,7 +174,12 @@
         "ok": { "const": true },
         "id": { "$ref": "#/$defs/id" },
         "scenario_id": { "type": "string" },
-        "steps": { "type": "integer", "minimum": 0, "description": "Number of steps in the scenario." }
+        "steps": { "type": "integer", "minimum": 0, "description": "Number of steps in the scenario." },
+        "ids": {
+          "description": "Actor scenarios: the real ids the worker's setup created (empty when the caller ran the setup).",
+          "$ref": "#/$defs/new_ids"
+        },
+        "sync": { "$ref": "#/$defs/sync_info" }
       },
       "additionalProperties": false
     },
@@ -151,9 +190,53 @@
         "ok": { "const": true },
         "id": { "$ref": "#/$defs/id" },
         "index": { "type": "integer", "minimum": 0, "description": "The step's position in the output that end returns, ad-hoc steps included; a failed step request reports the same position as error.step." },
-        "observation": { "$ref": "#/$defs/step_output" }
+        "observation": { "$ref": "#/$defs/step_output" },
+        "ids": {
+          "description": "Actor scenarios: the real ids this step created, in creation order (those of done included).",
+          "$ref": "#/$defs/new_ids"
+        }
       },
       "additionalProperties": false
+    },
+    "new_ids": {
+      "description": "Real ids appended to the logical tables, in creation order: notes become the next #nN, cards the next #cN.",
+      "type": "object",
+      "required": ["notes", "cards"],
+      "properties": {
+        "notes": { "type": "array", "items": { "type": "integer" } },
+        "cards": { "type": "array", "items": { "type": "integer" } }
+      },
+      "additionalProperties": false
+    },
+    "sync_info": {
+      "description": "Actor scenarios (sync-ops.md S8.3, S10.4): the run's endpoints, which the caller checks with check_endpoint before the first step, and the scenario's account, with which caller-played actors log in. Test credentials only.",
+      "type": "object",
+      "required": ["endpoints", "account"],
+      "properties": {
+        "endpoints": {
+          "type": "object",
+          "required": ["actors", "converge", "upstream", "recorder"],
+          "properties": {
+            "actors": { "type": "string", "description": "Base URL the oracle actors sync with: the fault proxy when the run has one, else the server directly." },
+            "converge": { "type": "string", "description": "Base URL of the converge client: the server directly, on loopback." },
+            "upstream": { "type": ["string", "null"], "description": "host:port of the server on oracle-internal, the fault proxy's upstream; null without a fault proxy." },
+            "recorder": { "type": ["string", "null"], "description": "host:port of the recorder in a recording run, else null." }
+          },
+          "additionalProperties": false
+        },
+        "account": {
+          "type": "object",
+          "required": ["username", "password"],
+          "properties": { "username": { "type": "string" }, "password": { "type": "string" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "actor_name": { "type": "string", "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$" },
+    "raw_dump": {
+      "description": "A collection's raw dump (sync-ops.md S7.2): the db_dump value of all twelve tables (observations.md O8) without its normalization of random values.",
+      "type": "object"
     },
     "end_response": {
       "type": "object",
@@ -196,9 +279,10 @@
             "session_open",
             "no_session",
             "no_more_steps",
-            "handoff_error"
+            "handoff_error",
+            "sync_unavailable"
           ],
-          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); protocol_error: the line is not a JSON request (NaN and Infinity are not JSON), or a run request's segment fields are malformed; anki_error: Anki raised outside an op's rejection kinds (exception names its class; a refusal in the op's list is an output, dsl.md D7.3); handoff_error: no ORACLE_HANDOFF, or a handoff directory that is missing, already there or outside it; internal_error: a driver bug, including a response JSON cannot carry (then id is echoed only if it can be)."
+          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); protocol_error: the line is not a JSON request (NaN and Infinity are not JSON), or a run request's segment fields are malformed, or a step request's done or dumps do not fit the next step (sync-ops.md S10.4); anki_error: Anki raised outside an op's rejection kinds (exception names its class; a refusal in the op's list is an output, dsl.md D7.3); handoff_error: no ORACLE_HANDOFF, or a handoff directory that is missing, already there or outside it; sync_unavailable: an actor scenario's sync server did not start or accept connections within 10 s, or its fault proxy could not be created (no ORACLE_SYNC_FAULTS, API unreachable or refusing; sync-ops.md S10.5); internal_error: a driver bug, including a response JSON cannot carry (then id is echoed only if it can be)."
         },
         "step": { "type": "integer", "minimum": 0, "description": "Index of the failing step." },
         "op": { "type": "string" },
@@ -227,7 +311,7 @@
       "additionalProperties": true
     },
     "scenario": {
-      "description": "Driver vocabulary v0; scenario.schema.json (U4) is authoritative for the file format. Logical ids: notes #n1, #n2... and cards #c1, #c2... in creation order (a note's cards in template order). Setup sections run in this order: config, presets, decks, notetypes, notes.",
+      "description": "Driver vocabulary v0; scenario.schema.json (U4) is authoritative for the file format. Logical ids: notes #n1, #n2... and cards #c1, #c2... in creation order (a note's cards in template order), across all actors of an actor scenario. Setup sections run in this order: config, presets, decks, notetypes, notes.",
       "type": "object",
       "required": ["id", "clock"],
       "properties": {
@@ -272,12 +356,23 @@
           },
           "additionalProperties": false
         },
+        "actors": {
+          "type": "array",
+          "description": "Actor scenarios (sync-ops.md S2): the clients, each with its own collection; the first runs the setup. Meguri actors meguri, meguri_2...; oracle actors client_a ... client_z. The worker plays every actor except the begin request's caller_actors.",
+          "items": { "$ref": "#/$defs/actor_name" }
+        },
+        "server": {
+          "type": "object",
+          "description": "The scenario's sync server (sync-ops.md S3): clock_offset_secs, the server clock's offset from the scenario clock (default 0).",
+          "properties": { "clock_offset_secs": { "type": "integer" } },
+          "additionalProperties": false
+        },
         "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } }
       },
       "additionalProperties": false
     },
     "step": {
-      "description": "One key. Ops v0: advance <duration: 20m, 1d, 23h40m; a day is 86400 s>; set_clock <date-time as clock.start>; add_note <note, as setup.notes; output {note, cards}>; answer {card, rating: again|hard|good|easy, time_ms?}; handoff <meguri|oracle> (live scenarios; in a whole run it closes and reopens the collection). observe [<kind> | '<kind>(#ref, ...)' | {<kind>: args}]: ids, timing {days_elapsed, next_day_at, now, utc_offset_secs}, card (cards row: nid as #nN, did/odid as deck names, data parsed), revlog (rows by id, cid as #cN), next_states ({current, again, hard, good, easy}: {kind, ...fields, memory_state?}), fuzz_table {card, pairs: [[card_id, reps]], intervals} -> {intervals, rows: [[card_id, reps, delta...]]} (fuzz when answering a card with that id and review count), net_probe {host, port, timeout_ms?} -> {connected, error}. Model ops (specs/conformance/model-ops.md): observe legacy_json {notetypes?, decks?, presets?: [name]} -> {<list>: {<name>: schema-11 object}}, read from the collection file; legacy_update {notetype|deck|preset: name, patch} merge-patches (RFC 7396) that object and saves it, rejection invalid_json; suspend {cards} with Anki's suspend operation; db_exec {sql, params?} -> {rows: [[value...]]} as record-ops.md W1.",
+      "description": "One key. Ops v0: advance <duration: 20m, 1d, 23h40m; a day is 86400 s>; set_clock <date-time as clock.start>; add_note <note, as setup.notes; output {note, cards}>; answer {card, rating: again|hard|good|easy, time_ms?}; handoff <meguri|oracle> (live scenarios; in a whole run it closes and reopens the collection). observe [<kind> | '<kind>(#ref, ...)' | {<kind>: args}]: ids, timing {days_elapsed, next_day_at, now, utc_offset_secs}, card (cards row: nid as #nN, did/odid as deck names, data parsed), revlog (rows by id, cid as #cN), next_states ({current, again, hard, good, easy}: {kind, ...fields, memory_state?}), fuzz_table {card, pairs: [[card_id, reps]], intervals} -> {intervals, rows: [[card_id, reps, delta...]]} (fuzz when answering a card with that id and review count), net_probe {host, port, timeout_ms?} -> {connected, error}, text {fns, inputs} -> {fn: [output per input]} (pure text functions, observations.md O9; never touches the scenario's collection), db_dump [{tables}] -> {table: {key: {column: value}}} (observations.md O8). reopen {} (close and reopen the collection). Actor scenarios (specs/conformance/sync-ops.md): actor <name> (the actor that runs the next steps); sync {kind: login|normal|full_upload|full_download} -> {result} or {error: clock_incorrect|network}; net_fault {kind: reset, direction: to_client|to_server} | {kind: clear}; converge {} -> {differences, dump}. Model ops (specs/conformance/model-ops.md): observe legacy_json {notetypes?, decks?, presets?: [name]} -> {<list>: {<name>: schema-11 object}}, read from the collection file; legacy_update {notetype|deck|preset: name, patch} merge-patches (RFC 7396) that object and saves it, rejection invalid_json; suspend {cards} with Anki's suspend operation; db_exec {sql, params?} -> {rows: [[value...]]} as record-ops.md W1.",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1

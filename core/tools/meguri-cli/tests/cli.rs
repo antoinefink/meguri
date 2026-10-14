@@ -27,7 +27,16 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert!(out.status.success());
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["supports"]["ops"], serde_json::json!(["advance", "set_clock"]));
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 19);
+    assert_eq!(json["supports"]["observations"], serde_json::json!(["text"]));
+    // dsl.md D7.2: 23 ops besides observe, the actor ops of sync-ops.md
+    // among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 23);
+    for op in ["actor", "sync", "net_fault", "converge", "reopen"] {
+        assert!(
+            json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
+            "{op}"
+        );
+    }
     assert!(
         json["language"]["ops"]
             .as_array()
@@ -89,8 +98,21 @@ fn diff_and_run_compare_with_the_goldens() {
     let json: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(json["tier"], "t0");
     assert_eq!(json["failed"], 0);
-    assert_eq!(json["totals"]["pass"], 1);
-    assert!(json["scenarios"].as_array().unwrap().len() >= 8);
+    let scenarios = json["scenarios"].as_array().unwrap();
+    assert!(scenarios.len() >= 8);
+    let passing: Vec<&str> = scenarios
+        .iter()
+        .filter(|s| s["status"] == "pass")
+        .map(|s| s["scenario"].as_str().unwrap())
+        .collect();
+    assert_eq!(json["totals"]["pass"], passing.len());
+    // The scenarios Meguri has adapters for: the empty runner and the text
+    // area (meguri-text, U20), all of whose 53 scenarios are active.
+    assert!(passing.contains(&"smoke/runner-empty"), "{passing:?}");
+    assert!(
+        passing.iter().filter(|id| id.starts_with("text/")).count() >= 53,
+        "{passing:?}"
+    );
 
     // A filter that matches nothing is a failure, not a silent pass.
     let out = cli(&[
@@ -118,6 +140,45 @@ fn to_json_prints_parsed_values_and_flags_bad_files() {
         .collect();
     assert_eq!(lines[0]["value"], serde_json::json!({"a": 17, "b": "yes"}));
     assert!(lines[1]["error"].as_str().unwrap().contains("alias"));
+}
+
+#[test]
+fn to_json_reads_quoted_keys_and_flow_mappings_as_the_same_members() {
+    // tools/mg finds actor scenarios by the top-level `actors` member that
+    // to-json prints (sync-ops.md S2.1), so every spelling of the key must
+    // come out as that member.
+    let dir = tempfile::tempdir().unwrap();
+    let texts = [
+        "id: smoke/sync/x\nactors: [client_a, client_c]\n",
+        "id: smoke/sync/x\n'actors': [client_a, client_c]\n",
+        "id: smoke/sync/x\n\"actors\": [client_a, client_c]\n",
+        "{id: smoke/sync/x, actors: [client_a, client_c]}\n",
+        "{\"id\": \"smoke/sync/x\", 'actors': [client_a, client_c]}\n",
+    ];
+    let paths: Vec<String> = texts
+        .iter()
+        .enumerate()
+        .map(|(i, text)| {
+            let path = dir.path().join(format!("s{i}.yaml"));
+            std::fs::write(&path, text).unwrap();
+            path.to_str().unwrap().to_owned()
+        })
+        .collect();
+    let mut args = vec!["conformance", "to-json"];
+    args.extend(paths.iter().map(String::as_str));
+    let out = cli(&args);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let values: Vec<Value> = text(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap()["value"].clone())
+        .collect();
+    assert_eq!(values.len(), texts.len());
+    for value in values {
+        assert_eq!(
+            value,
+            serde_json::json!({"id": "smoke/sync/x", "actors": ["client_a", "client_c"]})
+        );
+    }
 }
 
 #[test]
@@ -317,4 +378,74 @@ fn harvest_report_refuses_a_live_report_from_another_oracle_pin() {
     let out = report(LOCK);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     assert!(text(&out.stderr).contains("in-scope: 1 rows"), "{}", text(&out.stderr));
+}
+
+#[test]
+fn run_live_checks_the_fault_proxy_api_before_any_worker_starts() {
+    use meguri_testkit::exec::sync_guard::ANKIWEB_HOST;
+
+    let dir = tree();
+    let root = dir.path();
+    let golden: Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("goldens/smoke/timing-tz-utc.json")).unwrap()).unwrap();
+    let recorded = serde_json::to_string(&golden["observations"]).unwrap();
+    // A worker that leaves a mark when it starts.
+    let started = root.join("worker-started");
+    let script = root.join("marking.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "touch '{}'\nexec sh '{}'\n",
+            started.display(),
+            root.join("worker.sh").display()
+        ),
+    )
+    .unwrap();
+    let _ = worker(root, &recorded, LOCK);
+    let cmd = serde_json::to_string(&["env", "TZ={tz}", "sh", script.to_str().unwrap()]).unwrap();
+    let run = |api: &str| {
+        Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+            .args([
+                "conformance",
+                "run",
+                "--live",
+                "--conformance",
+                root.to_str().unwrap(),
+                "--oracle-cmd",
+                &cmd,
+            ])
+            .env("ORACLE_SYNC_FAULTS", api)
+            .output()
+            .unwrap()
+    };
+
+    // sync-ops.md S8.3: an API the guard refuses stops the run first.
+    for api in [format!("api.{ANKIWEB_HOST}:8474"), "203.0.113.5:8474".to_owned()] {
+        let out = run(&api);
+        assert_eq!(out.status.code(), Some(2), "{api}: {}", text(&out.stderr));
+        let stderr = text(&out.stderr);
+        assert!(
+            stderr.contains("ORACLE_SYNC_FAULTS") && stderr.contains("refused"),
+            "{stderr}"
+        );
+        assert!(!started.exists(), "{api}: a worker started");
+    }
+    // The compose service passes, and empty means no fault proxy.
+    for api in ["sync-faults:8474", ""] {
+        let out = run(api);
+        assert_eq!(out.status.code(), Some(0), "{api:?}: {}", text(&out.stderr));
+        assert!(started.exists());
+    }
+}
+
+#[test]
+fn exec_sends_actor_scenarios_to_the_parties_executor() {
+    let downloads = conformance().join("scenarios/smoke/sync/meguri-downloads.yaml");
+    let out = cli(&["conformance", "exec", downloads.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        text(&out.stderr).contains("smoke/sync/meguri-downloads: an actor scenario"),
+        "{}",
+        text(&out.stderr)
+    );
 }

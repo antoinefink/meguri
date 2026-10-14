@@ -83,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
             [args.cli, "conformance", "to-json", *[str(p) for _, p in files]],
             capture_output=True, text=True, check=False,
         )
-        parsed = [json.loads(line) for line in out.stdout.splitlines() if line.strip()]
+        # One JSON value per "\n"-terminated line. Not splitlines(): it also
+        # breaks at U+2028, U+0085 and other characters JSON strings carry raw.
+        parsed = [json.loads(line) for line in out.stdout.split("\n") if line.strip()]
         if len(parsed) != len(files):
             errors.append({"file": "to-json", "message": f"meguri-cli parsed {len(parsed)} of {len(files)} files: {out.stderr[-2000:]}"})
         validators = {name: validator(schemas, name) for name in SCHEMAS}

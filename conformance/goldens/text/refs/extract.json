@@ -1,0 +1,77 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "media_refs": [
+            ["x.png"],
+            ["y.mp3"],
+            ["z.mp3"],
+            ["a&b.ogg"],
+            ["https://e.com/a.png"],
+            ["lazy.png"],
+            [],
+            [],
+            ["nbsp.png"],
+            [],
+            [],
+            [],
+            [],
+            ["e.png"],
+            ["f.mp3"],
+            ["v.mp4"],
+            ["o.svg"],
+            ["g.png"],
+            ["s.png"],
+            [],
+            ["w.png"],
+            ["a"],
+            [],
+            ["unq.png/"],
+            ["unq.png"],
+            ["a.png\nalt=x"],
+            ["a\tb.png"],
+            ["one two.png"],
+            ["y.png"],
+            ["1.png", "2.png", "4.png", "3.mp3"],
+            ["6.png", "5.mp3"],
+            ["[sound:7.mp3]", "7.mp3"],
+            ["a"],
+            ["\nx"],
+            [],
+            [],
+            ["]"],
+            ["&.mp3"],
+            ["a&b.png"],
+            ["a&amp;b&c.png"],
+            [" n.png"],
+            ["http://x.org/a.png"],
+            ["data:image/png;base64,iVBORw0K"],
+            ["voice.mp3", "voice.ogg"],
+            ["y.gif"],
+            ["\"\""],
+            ["''"],
+            ["x.png", "y.png"],
+            ["x"],
+            [],
+            ["a>b.png", "https://e.org/p.png"],
+            ["https://e.org/p.png"]
+          ],
+          "strip_markup_keep_media": [" x.png ", " y.mp3 ", "[sound:z.mp3]", " a&b.ogg ", " https://e.com/a.png ", " lazy.png ", "", "", " nbsp.png ", "", "", "", "", " e.png ", " f.mp3 ", " v.mp4 ", " o.svg ", " g.png ", " s.png ", " src='u.png'>", " w.png ", " a ", "<img src=\"never closed.png\"", " unq.png/ ", " unq.png ", " a.png\nalt=x ", " a\tb.png ", " one two.png ", " y.png ", " 1.png  2.png [sound:3.mp3] 4.png ", "[sound:5.mp3] 6.png ", " [sound:7.mp3] ", "[sound:a]b]", "[sound:\nx]", "[Sound:no.mp3]", "[sound:]", "[sound:]]", "[sound:&.mp3]", " a&b.png ", " a&amp;b&c.png ", "  n.png ", " http://x.org/a.png ", " data:image/png;base64,iVBORw0K ", " voice.mp3  voice.ogg ", " y.gif ", " \"\" ", " '' ", " x.png  y.png ", " x ", "", "x a>b.png   https://e.org/p.png ", " https://e.org/p.png "]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/refs/extract",
+  "scenario_sha256": "47bd6217dbcc393932dfcd6c3ac0cb68eea5994419acb9ebc6bff6d398877cf7",
+  "tz": "UTC"
+}

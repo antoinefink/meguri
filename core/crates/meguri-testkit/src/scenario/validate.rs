@@ -1,6 +1,7 @@
 //! What `conformance/schema/scenario.schema.json` requires beyond the types the
-//! model reads: required draft-op arguments, lengths, unique items, patterns
-//! and the order of handoffs (dsl.md D4-D9). T0 loads every scenario through
+//! model reads: required draft-op arguments, lengths, unique items, patterns,
+//! the order of handoffs (dsl.md D4-D9) and the actor rules the schema cannot
+//! express (sync-ops.md S1, S2.3, S4.2). T0 loads every scenario through
 //! these checks, so a schema violation is `invalid` there too, not only in
 //! `tools/mg goldens-check`. Change both together; `tests/scenario_format.rs`
 //! reads the schema's required draft arguments and checks this table.
@@ -10,7 +11,10 @@ use std::collections::BTreeSet;
 use serde_json::{Map, Value};
 
 use super::FormatError;
-use super::model::{DraftArgs, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step};
+use super::model::{
+    ActorName, DUMP_TABLES, DraftArgs, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step, SyncKind,
+    TextRequest,
+};
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +35,7 @@ type ArgSpec = (&'static str, bool, Arg);
 
 /// (op, its arguments): the schema's draft-op arguments. Other keys are
 /// allowed: the owning area fixes the full shape (D7.2).
-const DRAFT_ARGS: [(&str, &[ArgSpec]); 14] = [
+const DRAFT_ARGS: [(&str, &[ArgSpec]); 13] = [
     (
         "edit_note",
         &[
@@ -64,13 +68,6 @@ const DRAFT_ARGS: [(&str, &[ArgSpec]); 14] = [
     ),
     ("check_db", &[]),
     ("db_exec", &[("sql", true, Arg::Str), ("params", false, Arg::Array)]),
-    (
-        "sync",
-        &[
-            ("kind", false, Arg::OneOf(&["normal", "full_upload", "full_download"])),
-            ("client", false, Arg::Str),
-        ],
-    ),
 ];
 
 pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
@@ -110,6 +107,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
             return Err(empty(&format!("note type {:?}'s template list", notetype.name)));
         }
     }
+    actors(s)?;
     let mut side: Option<Side> = None;
     for (index, step) in s.steps.iter().enumerate() {
         let at = |e: FormatError| FormatError::new(format!("step {index} ({}): {e}", step.name()));
@@ -124,6 +122,55 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
                 ))));
             }
             side = Some(*to);
+        }
+    }
+    Ok(())
+}
+
+/// The actor rules (sync-ops.md S1, S2.1, S2.3, S4.2).
+fn actors(s: &Scenario) -> Result<(), FormatError> {
+    let Some(actors) = &s.actors else {
+        if s.server.is_some() {
+            return Err(FormatError::new("server needs actors (sync-ops.md S3.2)"));
+        }
+        if let Some((index, step)) = s
+            .steps
+            .iter()
+            .enumerate()
+            .find(|(_, step)| Step::ACTOR_OPS.contains(&step.name()))
+        {
+            return Err(FormatError::new(format!(
+                "step {index} ({}): only actor scenarios have this op; declare actors (sync-ops.md S1)",
+                step.name()
+            )));
+        }
+        return Ok(());
+    };
+    if actors.is_empty() {
+        return Err(FormatError::new("actors must not be empty"));
+    }
+    let mut seen = BTreeSet::new();
+    if let Some(name) = actors.iter().find(|a| !seen.insert(a.as_str())) {
+        return Err(FormatError::new(format!("actor {name} appears twice in actors")));
+    }
+    let mut logged_in: BTreeSet<&ActorName> = BTreeSet::new();
+    for ((index, step), by) in s.steps.iter().enumerate().zip(s.step_actors()) {
+        let at = |why: String| Err(FormatError::new(format!("step {index} ({}): {why}", step.name())));
+        match step {
+            Step::Handoff(_) => return at("an actor scenario has no handoff step (sync-ops.md S1)".to_owned()),
+            Step::Actor(name) if !actors.contains(name) => {
+                return at(format!("actor {name} is not declared in actors (sync-ops.md S2.3)"));
+            }
+            Step::Sync(sync) => {
+                let Some(actor) = by else { continue };
+                if logged_in.insert(actor) && sync.kind != SyncKind::Login {
+                    return at(format!(
+                        "{actor}'s first sync step is {}; it must be a login (sync-ops.md S4.2)",
+                        sync.kind.as_str()
+                    ));
+                }
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -248,12 +295,28 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                 return bad("deck is a deck name");
             }
         }
-        ObservationKind::DbDump
-            if map
-                .get("tables")
-                .is_some_and(|t| !t.as_array().is_some_and(|a| a.iter().all(Value::is_string))) =>
-        {
-            return bad("tables is a list of table names");
+        ObservationKind::Text => {
+            TextRequest::from_mapping(map)?;
+        }
+        ObservationKind::DbDump => {
+            if let Some(key) = map.keys().find(|k| k.as_str() != "tables") {
+                return bad(&format!("takes {{tables}}, not {key:?}"));
+            }
+            if let Some(tables) = map.get("tables") {
+                let Some(tables) = tables.as_array().filter(|t| !t.is_empty()) else {
+                    return bad("tables is a non-empty list of table names");
+                };
+                let mut seen = BTreeSet::new();
+                for table in tables {
+                    let name = table.as_str().unwrap_or_default();
+                    if !DUMP_TABLES.contains(&name) {
+                        return bad(&format!("{table} is not one of {}", DUMP_TABLES.join(", ")));
+                    }
+                    if !seen.insert(name) {
+                        return bad(&format!("table {name} is listed twice"));
+                    }
+                }
+            }
         }
         _ => {}
     }
