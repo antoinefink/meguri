@@ -1,0 +1,33 @@
+# A connection reset in the middle of a sync (R1932,
+# specs/conformance/sync-ops.md S5): client_c's full download reaches the
+# server, but the response is reset, so client_c gets a network error. Its
+# collection then reopens unchanged, and after the fault is cleared the
+# download succeeds and both actors converge.
+id: smoke/sync/reset-during-download
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - advance: 1m
+  - actor: client_c
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - observe: [db_dump]
+  - net_fault: {kind: reset, direction: to_client}
+  - sync: {kind: full_download}
+  - reopen: {}
+  - observe: [db_dump]
+  - net_fault: {kind: clear}
+  - sync: {kind: full_download}
+  - observe: ["card(#c1)"]
+  - converge: {}

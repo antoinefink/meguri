@@ -7,8 +7,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+html5ever.workspace = true
 htmlescape.workspace = true
+pulldown-cmark.workspace = true
 regex.workspace = true
 sha1.workspace = true
 unicase.workspace = true
 unicode-normalization.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

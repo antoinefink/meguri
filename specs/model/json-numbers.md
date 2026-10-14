@@ -26,7 +26,8 @@ How Meguri reads and writes the JSON it shares with Anki: card `data` (`model/ca
 - `f32` takes any JSON number, integer or not:
   - an integer literal becomes the nearest `f32` (ties to even);
   - a literal with a fraction or an exponent becomes the nearest 64-bit float first, then that value becomes the nearest `f32` (ties to even). The two steps are Anki's and give the same result as one step for every input Anki itself writes;
-  - a magnitude beyond the `f32` range becomes an infinity (`1e40` reads as +∞).
+  - a magnitude beyond the `f32` range but inside the 64-bit float range becomes an infinity (`1e40` and `1.7976931348623157e308` read as +∞).
+- A number beyond the 64-bit float range never reaches a key: it makes the whole JSON text invalid (N10).
 - A value that does not fit is handled by the rule of the key (refuse the object, or take the default); the record specs say which.
 
 ## N3. Writing integers
@@ -77,7 +78,7 @@ Some schema-11 keys accept more than N2. The schema-11 tables name the reader of
 
 ## N7. Untyped values
 
-Values Meguri has no type for (unknown keys of card `data`, unknown keys of schema-11 objects, the members of `other`) are kept as the exact text they were read with, from their first to their last character without surrounding whitespace, and written back as that text.
+Values Meguri has no type for (unknown keys of card `data`, unknown keys of schema-11 objects, the members of `other`) are kept as the exact text they were read with, from their first to their last character without surrounding whitespace, and written back as that text. Only card `data` can keep a value holding a number beyond the 64-bit float range; in schema-11 objects and `other` such a number makes the whole text invalid (N10).
 
 - Anki parses such values and writes them again: numbers in their shortest form (`1.10` becomes `1.1`, `1e2` becomes `100.0`), whitespace removed, the members of nested objects in sorted key order, and the top-level members of `other` in no particular order. Meguri's output can therefore differ from Anki's in text but not in JSON value, for every value Anki itself can write.
 - Conformance compares parsed JSON values (`specs/conformance/observations.md` O7), so key order and number spelling inside untyped values never count. Scenarios that look at raw bytes of such values use values Anki writes in compact form with sorted keys.
@@ -93,3 +94,39 @@ Values Meguri has no type for (unknown keys of card `data`, unknown keys of sche
 - JSON text is read per RFC 8259, with whitespace allowed between tokens.
 - `\uXXXX` escapes combine into surrogate pairs. An unpaired surrogate escape makes the text invalid.
 - Duplicate keys: card `data` follows `model/card-data-json` C3 (as Anki does). Elsewhere, when an object repeats a key, the last occurrence counts; for known keys Anki sometimes refuses such an object instead, so Meguri can accept an object Anki would refuse, never the reverse.
+- A number beyond the 64-bit float range makes the text invalid, except in a value that is skipped (N10).
+
+## N10. Numbers beyond the 64-bit float range
+
+Anki's JSON reader turns every number it reads into a value: an integer when the literal has no fraction and no exponent and fits a 64-bit integer (unsigned when positive, signed when negative), otherwise a 64-bit float. When that float would be infinite, the read fails, and the whole JSON text is invalid, not only the key that holds the number. Meguri reads the same texts as invalid:
+
+- card `data`: the text reads as no keys at all (`model/card-data-json` C3 rule 1);
+- `other`: nothing is added (`model/schema11-json` S3 output rule 1);
+- a schema-11 object, and the JSON of a `col` column: the text is not valid JSON.
+
+Where Anki skips a value instead of reading it, the range is not checked. That happens only to the values of unknown keys of card `data` (C3 rule 7): `{"pos":5,"zz":1e400}` reads as `pos` 5 with the unknown key `zz` kept as the text `1e400` (Anki drops `zz`). Every other value is read, nested values included: the values of known card-data keys (`{"pos":5,"cd":[1e400]}` reads as no keys), and every member of `other` and of a schema-11 object, known or not (`other` = `{"keep":1,"zz":{"a":[-1e400]}}` adds nothing).
+
+Which numbers are out of range. Anki converts decimal text with a fast method that is not always exact near the largest 64-bit float (about 1.7976931348623157e308). Meguri decides the range with the same method, so both draw the boundary in the same place:
+
+1. Take the literal's digits into an unsigned 64-bit accumulator S, starting at 0, each digit d making S × 10 + d, as long as that does not exceed 18 446 744 073 709 551 615. In the integer part, the first digit that does not fit and the rest of the integer part are dropped. Then, in the fraction part, digits are again taken while they fit, and the first one that does not fit and all after it are dropped.
+2. Let E be the literal's exponent (0 without one), plus the number of integer-part digits dropped, minus the number of fraction digits taken.
+3. The number is out of range when S is not 0, E ≥ 0, and either E > 308, or S rounded to the nearest 64-bit float, times the 64-bit float nearest to 10^E, rounded to the nearest 64-bit float, is infinite. A positive exponent too large for a 32-bit signed integer counts as E > 308.
+4. Every other number is in range. A negative E never puts a number out of range: it may become 0.0 or a subnormal, with its sign (`1e-400` reads as 0.0, `1e-99999999999` too). A number whose digits are all 0 is 0 (`0e400`).
+
+Examples (oracle, `conformance/scenarios/model/card-data/out-of-range.yaml` and `conformance/scenarios/model/schema11/other-out-of-range.yaml`):
+
+| Literal | S, E | Range |
+|---|---|---|
+| `1e400` | 1, 400 | out |
+| `0.1e310` | 1, 309 | out |
+| `1e99999999999` | 1, exponent above 32 bits | out |
+| `1` followed by 309 zeros | 10000000000000000000, 290 | out |
+| `1` followed by 308 zeros | 10000000000000000000, 289 | in (1e308) |
+| `1.7976931348623157e308` | 17976931348623157, 292 | in (the largest 64-bit float) |
+| `1.7976931348623158e308` | 17976931348623158, 292 | out, although its nearest 64-bit float is the largest finite one |
+| `17976931348623157081e289` | 17976931348623157081, 289 | out, although its value is just below the largest 64-bit float |
+| `1797693134862315e293` | 1797693134862315, 293 | in |
+| `1e-400` | 1, -400 | in (0.0) |
+| `0e400` | 0, 400 | in (0) |
+
+For a number in range, N2 still gives the value: the nearest 64-bit float, then the nearest `f32` where the key is an `f32`.

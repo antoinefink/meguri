@@ -30,7 +30,7 @@ def add(session, spec) -> dict:
         raise invalid(f"unknown note keys: {', '.join(unknown)}")
     name = spec.get("notetype")
     if name not in session.notetypes:
-        raise invalid(f"note type {name!r} is not in setup.notetypes")
+        raise invalid(f"note type {name!r} is not in setup.notetypes or not in the current collection")
     col = session.col
     note = col.new_note(col.models.get(session.notetypes[name]))
     fields = spec.get("fields", [])

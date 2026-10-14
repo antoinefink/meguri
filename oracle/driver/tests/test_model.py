@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Model ops (specs/conformance/model-ops.md L1-L3) through real workers:
-the legacy_json observation, the legacy_update op, suspend, and the db_exec
-uses the model scenarios rely on. Expected values come from the scenario (its
+"""Model ops (specs/conformance/model-ops.md L1-L4) through real workers:
+the legacy_json and blob_decode observations, the legacy_update op, suspend,
+and the db_exec uses the model scenarios rely on. Expected values come from the scenario (its
 clock, patches and SQL), SQLite's own functions and the spec texts, never from
 the driver."""
 
@@ -190,6 +190,92 @@ class LegacyUpdate(unittest.TestCase):
                     self.assertEqual(resp["error"], {"kind": "unknown_ref", "ref": "Nope", "step": 1}, resp)
             for args in bad:
                 resp = run(w, [{"observe": ["ids"]}, {"legacy_update": args}])
+                with self.subTest(args=args):
+                    self.assertEqual((resp["error"]["kind"], resp["error"].get("step")), ("invalid_scenario", 1), resp)
+
+
+class BlobDecode(unittest.TestCase):
+    # Blobs and their outcomes from specs/model/protobuf-records.md P9's table.
+    ALL = {"notetypes": ["QA"], "decks": ["A", "X::Y"], "presets": ["P"]}
+    SETUP = {"decks": [{"name": "A", "preset": "P"}, "X::Y"]}
+
+    def test_each_blob_of_a_record_counts_and_reads_come_from_the_file(self):
+        field_a = "ntid = (SELECT id FROM notetypes WHERE name = 'QA') AND ord = 1"
+        steps = [
+            {"observe": [{"blob_decode": self.ALL}]},
+            {"db_exec": {"sql": "UPDATE deck_config SET config = X'0f' WHERE name = 'P'"}},
+            {"db_exec": {"sql": "UPDATE decks SET kind = X'0a05' WHERE name = 'X' || char(31) || 'Y'"}},
+            {"db_exec": {"sql": f"UPDATE fields SET config = X'ff' WHERE {field_a}"}},
+            {"observe": [{"blob_decode": self.ALL}]},
+        ]
+        ok = {"notetypes": {"QA": "ok"}, "decks": {"A": "ok", "X::Y": "ok"}, "presets": {"P": "ok"}}
+        with WorkerProcess("UTC") as w:
+            out = run_ok(self, w, scenario("t/model", "UTC", START, steps, setup=self.SETUP))
+        self.assertEqual(out[0], {"blob_decode": ok})
+        self.assertEqual(out[4], {"blob_decode": {
+            "notetypes": {"QA": "invalid_blob"}, "decks": {"A": "ok", "X::Y": "invalid_blob"},
+            "presets": {"P": "invalid_blob"}}})
+
+    def test_note_type_config_and_template_blobs_and_decodable_odd_blobs(self):
+        cases = [
+            # A note type's own config and its template's config.
+            ("notetypes", "UPDATE notetypes SET config = X'0000' WHERE name = 'QA'", "invalid_blob"),
+            ("notetypes", "UPDATE templates SET config = X'3b' WHERE ntid = (SELECT id FROM notetypes WHERE name = 'QA')",
+             "invalid_blob"),
+            # A deck's common blob.
+            ("decks", "UPDATE decks SET common = X'0c' WHERE name = 'A'", "invalid_blob"),
+            # P9's two blobs that decode: a 10-byte varint for unknown field 7,
+            # and other holding bytes that are not UTF-8.
+            ("presets", "UPDATE deck_config SET config = X'38ffffffffffffffffff01' WHERE name = 'P'", "ok"),
+            ("presets", "UPDATE deck_config SET config = X'fa0f02ffff' WHERE name = 'P'", "ok"),
+            ("presets", "UPDATE deck_config SET config = X'38ffffffffffffffffff02' WHERE name = 'P'", "invalid_blob"),
+        ]
+        names = {"notetypes": "QA", "decks": "A", "presets": "P"}
+        with WorkerProcess("UTC") as w:
+            for section, sql, status in cases:
+                steps = [{"db_exec": {"sql": sql}}, {"observe": [{"blob_decode": {section: [names[section]]}}]}]
+                out = run_ok(self, w, scenario("t/model", "UTC", START, steps))
+                with self.subTest(sql=sql):
+                    self.assertEqual(out[1], {"blob_decode": {section: {names[section]: status}}})
+
+    def test_other_read_failures_are_run_errors(self):
+        # model-ops.md L4: a deck kind with no member, a blob column holding
+        # TEXT (the schema keeps NULL out of these columns).
+        cases = [
+            ("decks", "UPDATE decks SET kind = X'' WHERE name = 'A'"),
+            ("presets", "UPDATE deck_config SET config = 'text' WHERE name = 'P'"),
+            ("notetypes", "UPDATE fields SET config = 'text' WHERE ord = 0"),
+        ]
+        names = {"notetypes": "QA", "decks": "A", "presets": "P"}
+        with WorkerProcess("UTC") as w:
+            for section, sql in cases:
+                resp = run(w, [{"db_exec": {"sql": sql}}, {"observe": [{"blob_decode": {section: [names[section]]}}]}])
+                with self.subTest(sql=sql):
+                    self.assertEqual((resp["error"]["kind"], resp["error"].get("step")), ("anki_error", 1), resp)
+
+    def test_observing_changes_no_stored_row(self):
+        tables = ["col", "notetypes", "fields", "templates", "decks", "deck_config", "config"]
+        dump = [{"db_exec": {"sql": f"SELECT * FROM {t} ORDER BY 1"}} for t in tables]
+        steps = ([{"db_exec": {"sql": "UPDATE deck_config SET config = X'0f' WHERE name = 'P'"}}] + dump
+                 + [{"observe": [{"blob_decode": self.ALL}]}] + dump)
+        with WorkerProcess("UTC") as w:
+            out = run_ok(self, w, scenario("t/model", "UTC", START, steps, setup=self.SETUP))
+        n = len(tables)
+        self.assertEqual(out[n + 1]["blob_decode"]["presets"], {"P": "invalid_blob"})
+        self.assertEqual(out[1:n + 1], out[n + 2:])
+
+    def test_unknown_names_and_malformed_requests(self):
+        unknown = (("notetypes", "Nope"), ("decks", "a"), ("presets", "p"), ("decks", "x::y"))
+        bad = [None, "decks", ["A"], {}, {"decks": []}, {"decks": "A"}, {"decks": [""]}, {"decks": [1]},
+               {"cards": ["A"]}, {"decks": ["A"], "notes": ["A"]}]
+        with WorkerProcess("UTC") as w:
+            for kind, name in unknown:
+                resp = run(w, [{"observe": ["ids"]}, {"observe": [{"blob_decode": {"decks": ["X::Y"], kind: [name]}}]}],
+                           setup=self.SETUP)
+                with self.subTest(kind=kind, name=name):
+                    self.assertEqual(resp["error"], {"kind": "unknown_ref", "ref": name, "step": 1}, resp)
+            for args in bad:
+                resp = run(w, [{"observe": ["ids"]}, {"observe": [{"blob_decode": args}]}])
                 with self.subTest(args=args):
                     self.assertEqual((resp["error"]["kind"], resp["error"].get("step")), ("invalid_scenario", 1), resp)
 

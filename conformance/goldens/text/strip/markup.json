@@ -1,0 +1,24 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "strip_markup": ["plain words", "katana", "onetwo", "inout", "keepthis", "a", "c", " tail", "<!-- never closed at all", "xy", "xy", "xy", "xno end tag", "xd", "xy", "xy", "xc", "xnever closed", "z", "ſtyle stays shown", "shown", "a  c", "a < b", "ad", ">", "xy", "xy", "line oneline two\nline three", "tab\there", "bold italic under", "link", "5 > 3 and 2 ", "caption", "<", ">", ""],
+          "strip_markup_keep_media": ["plain words", "katana", "onetwo", "inout", "keepthis", "a", "c", " tail", "<!-- never closed at all", "xy", "xy", "xy", "xno end tag", "xd", "xy", "xy", "xc", "xnever closed", "z", "ſtyle stays shown", "shown", "a  c", "a < b", "ad", ">", "xy", "xy", "line oneline two\nline three", "tab\there", "bold italic under", "link", "5 > 3 and 2 ", " pic one.png caption", "<", ">", ""]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/strip/markup",
+  "scenario_sha256": "83bd3e96882323b614f5981d732734f13aaa93f892b83a553d4c8675a707218c",
+  "tz": "UTC"
+}

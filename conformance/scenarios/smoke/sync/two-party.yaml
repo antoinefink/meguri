@@ -1,0 +1,28 @@
+# Two oracle clients and the scenario's sync server
+# (specs/conformance/sync-ops.md): client_a uploads a collection with one note,
+# client_c downloads it, and both converge with a fresh client's download.
+# The clock advances before each actor's syncs (sync-ops.md S4.3).
+id: smoke/sync/two-party
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, client_c]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - advance: 1m
+  - actor: client_c
+  - observe: ["card(#c1)"]
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - sync: {kind: normal}
+  - observe: ["card(#c1)"]
+  - converge: {}

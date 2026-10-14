@@ -27,6 +27,11 @@ leniency, refusals).
 | model-ops L2 | `rslib/src/notetype/service.rs`, `rslib/src/notetype/mod.rs`, `rslib/src/decks/service.rs`, `rslib/src/decks/addupdate.rs`, `rslib/src/deckconfig/service.rs`, `rslib/src/deckconfig/mod.rs`, `rslib/src/sync/collection/changes.rs` | which save path matches sync's merge: notetypes `add_or_update_notetype(json, preserve_usn_and_mtime=true, skip_checks=true)`, decks `add_or_update_deck_legacy(deck, preserve_usn_and_mtime=true)`, presets `add_or_update_deck_config_legacy(json)` (stamps usn and mtime) |
 | model-ops L1 | `rslib/src/collection/mod.rs`, `rslib/src/backend/dbproxy.rs` | note type and deck caches are not cleared by raw SQL writes, so the driver must reopen the collection before reading legacy JSON |
 | model-ops L3 | `rslib/src/scheduler/bury_and_suspend.rs`, `rslib/src/card/mod.rs` | suspending rewrites the whole card row through the card update path |
+| protobuf-records P2, P9 (tenth varint byte, nested payload as the buffer of its fields, depth limit, reason order) | `Cargo.lock` (prost 0.13.5 with default features, so the decode recursion limit of 100 applies), `rslib/src/storage/{deck,deckconfig,notetype}/mod.rs`, `rslib/src/error/mod.rs` | every decode failure is one protobuf error to Anki; the boundaries (tenth byte `01`, 100 nested groups, a field at depth 100, groups and strings that end after a nested payload) come from oracle experiments, recorded as `model/proto/decode-limits`; the P9 reason names and their order are Meguri's own |
+| protobuf-records P4 (unknown field order) | none | Meguri-only: Anki drops unknown fields, so their order is a spec decision |
+| json-numbers N10, card-data-json C3 rules 1 and 7, schema11-json S3 output rule 1 | `rslib/src/serde.rs` (`default_on_invalid` reads a known key into a JSON value first), `rslib/src/storage/card/data.rs` (unknown keys are skipped), `Cargo.lock` (serde_json 1.0.143 without `float_roundtrip`: the fast decimal conversion and its out-of-range error) | a number beyond the f64 range fails the whole read wherever a value is read; unknown card-data keys are skipped unread; boundary cases from oracle experiments, recorded as `model/card-data/out-of-range` and `model/schema11/other-out-of-range` |
+| schema11-json S10.1-S10.3, S10.5 input rule 1 | `rslib/src/deckconfig/schema11.rs` (`new`, `rev`, `lapse` read with `default_on_invalid`) | a part that does not read is replaced whole by its default, its extra members included; recorded as `model/schema11/preset-part-defaults` |
+| model-ops L4 | `rslib/src/error/mod.rs` (a prost decode error becomes the protobuf error kind), `rslib/src/storage/deck/mod.rs` (a kind with no member is a database error) | which read failures `blob_decode` maps to `invalid_blob` |
 
 Driver hints for the oracle maintainer (model ops):
 
@@ -39,3 +44,10 @@ Driver hints for the oracle maintainer (model ops):
 - `db_exec` blob literals and `CAST(... || X'..' AS BLOB)` need no driver
   support; a statement that writes must be followed by a reopen before any
   read through Anki's caches.
+- `blob_decode`: find each record's id from its name column without
+  decoding (`notetypes.name`, `deck_config.name`, `decks.name` with `::`
+  turned into `\x1f`), reopen the collection, then read the record with the
+  same backend getters as `legacy_json`. A backend error of the protobuf
+  error kind is `invalid_blob`; anything else stays an `anki_error`. The
+  oracle experiments behind `model/proto/decode-limits` expect every
+  refused blob there to fail with that kind.

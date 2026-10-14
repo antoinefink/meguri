@@ -26,9 +26,9 @@ The text format of the `cards.data` column: how Meguri reads it into card values
 
 ## C3. Reading
 
-1. The text is parsed as JSON (RFC 8259; whitespace allowed). Text that is empty, is not valid JSON, or is valid JSON other than an object or an array, reads as no keys at all: every known key absent and no unknown keys.
+1. The text is parsed as JSON (RFC 8259; whitespace allowed). Text that is empty, is not valid JSON, or is valid JSON other than an object or an array, reads as no keys at all: every known key absent and no unknown keys. A number beyond the 64-bit float range (`model/json-numbers` N10) anywhere in the text makes it read as no keys too, except inside the value of an unknown key of an object (rule 7): `{"s":1e400,"d":1}`, `{"pos":5,"cd":[1e400]}` and `[1,null,null,1e400]` read as no keys, while `{"pos":5,"zz":1e400}` reads as `pos` 5.
 2. An object with the same known key twice reads as no keys at all (as in rule 1). Repeated unknown keys do not matter for the known keys.
-3. Each known key is present when its value fits its type and absent otherwise (a wrong JSON type, a number out of range, a fraction for an integer type, `null`):
+3. Each known key is present when its value fits its type and absent otherwise (a wrong JSON type, a number outside the type's range, a fraction for an integer type, `null`):
    - `pos`: an integer from 0 to 4294967295 (`3.0`, `-1` and `4294967296` do not fit);
    - `lrt`: an integer in the `i64` range (`1.5` and `9223372036854775808` do not fit);
    - `s`, `d`, `dr`, `decay`: any number, read as `f32` (`model/json-numbers` N2), so `5` reads as 5.0 and `1e40` as +∞; a string such as `"1.5"` does not fit;
@@ -36,7 +36,7 @@ The text format of the `cards.data` column: how Meguri reads it into card values
 4. `s` and `d` are one memory state: when either is absent, both are absent (`{"s":1.5}` reads as neither).
 5. `cd` that is the empty string or exactly `{}` counts as absent.
 6. An array is read by position: element 1 is `pos`, then `s`, `d`, `dr`, `decay`, `lrt`, `cd`, each by rule 3, with `null` meaning absent. An array with more than 7 elements reads as no keys at all. An array has no unknown keys. (`[1,2,3]` reads as `pos` 1, `s` 2.0, `d` 3.0.)
-7. Unknown keys (Meguri, R1461): every member of an object whose key is not one of the seven is kept, in order, with its value as exact text (`model/json-numbers` N7). When an unknown key repeats, only its last occurrence is kept, at that occurrence's place. Anki drops unknown keys; this is the deviation `card-data-unknown-keys` in `conformance/deviations.yaml`.
+7. Unknown keys (Meguri, R1461): every member of an object whose key is not one of the seven is kept, in order, with its value as exact text (`model/json-numbers` N7), even a value holding a number beyond the 64-bit float range, which Anki skips without reading (`{"pos":5,"zz":1e400}` keeps `zz` as `1e400`). When an unknown key repeats, only its last occurrence is kept, at that occurrence's place. Anki drops unknown keys; this is the deviation `card-data-unknown-keys` in `conformance/deviations.yaml` (`card-data-unknown-keys-range` for the scenario `out-of-range`).
 
 ## C4. Writing
 
@@ -66,6 +66,9 @@ Anki's output after rewriting a card whose `data` held the input (oracle). Megur
 | `{"s":1e-7,"d":1e10}` | `{"s":0.0,"d":10000000000.0}` |
 | `{"s":12345678.9,"d":1}` | `{"s":12345679.0,"d":1.0}` |
 | `{"s":1e40,"d":1}` | `{"s":null,"d":1.0}` |
+| `{"s":1e400,"d":1}`, `{"pos":5,"cd":[1e400]}`, `{"pos":5,"s":1,"d":1.7976931348623158e308}` | `{}` |
+| `{"pos":5,"s":1e-400,"d":2}` | `{"pos":5,"s":0.0,"d":2.0}` |
+| `{"pos":5,"zz":1e400,"s":1.5,"d":2}` | `{"pos":5,"s":1.5,"d":2.0}` (Meguri: `…,"d":2.0,"zz":1e400}`) |
 | `{"s":-0.00004,"d":-0.0004}` | `{"s":-0.0,"d":-0.0}` |
 | `{"s": 1 , "d" : 2}` | `{"s":1.0,"d":2.0}` |
 | `{"dr":1,"decay":1}` | `{"dr":1.0,"decay":1.0}` |
@@ -85,4 +88,4 @@ Anki's output after rewriting a card whose `data` held the input (oracle). Megur
 | `[1,2,3,4,5,6,"{\"a\":1}"]` | `{"pos":1,"s":2.0,"d":3.0,"dr":4.0,"decay":5.0,"lrt":6,"cd":"{\"a\":1}"}` |
 | `[1,2,3,4,5,6,"x",8]` | `{}` |
 
-The scenarios under `conformance/scenarios/model/card-data/` hold these inputs and a few more (`rewrite`, `lenient`, and `unknown-keys` for C3 rule 7); their goldens are the authority. `unknown-keys` also covers a nested unknown value with inner whitespace (`{"zz":{"b":1,"a":[1, 2]},"pos":1}` becomes `{"pos":1,"zz":{"b":1,"a":[1, 2]}}` in Meguri) and an unknown key whose value is `null`, which Meguri keeps (`{"s":1.5,"zz":null}` becomes `{"zz":null}`).
+The scenarios under `conformance/scenarios/model/card-data/` hold these inputs and a few more (`rewrite`, `lenient`, `unknown-keys` for C3 rule 7, and `out-of-range` for numbers beyond the 64-bit float range); their goldens are the authority. `unknown-keys` also covers a nested unknown value with inner whitespace (`{"zz":{"b":1,"a":[1, 2]},"pos":1}` becomes `{"pos":1,"zz":{"b":1,"a":[1, 2]}}` in Meguri) and an unknown key whose value is `null`, which Meguri keeps (`{"s":1.5,"zz":null}` becomes `{"zz":null}`).

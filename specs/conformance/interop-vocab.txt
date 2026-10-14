@@ -32,3 +32,27 @@ difficulty
 fsrs
 loadBalancerEnabled
 rollover
+# db_dump (observations.md O8): tables and columns of the schema-18
+# collection file that are not ordinary words (short ones such as col, ls
+# and ver stay unmasked).
+revlog
+graves
+deck_config
+notetypes
+crt
+scm
+dty
+dconf
+guid
+mid
+flds
+sfld
+csum
+oid
+ntid
+mtime_secs
+# The sync server's configuration (sync-ops.md S3.1).
+SYNC_BASE
+SYNC_HOST
+SYNC_PORT
+SYNC_USER1

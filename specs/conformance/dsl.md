@@ -5,7 +5,7 @@ Requirements: R1874, R1877, R1878, R1879, R1880, R1881, R1882, R1883, R1884, R18
 Anki: 26.09.3
 Scenarios: conformance/scenarios/smoke/
 
-This file defines the scenario language that both the oracle driver and Meguri's executor implement, the golden files the oracle writes, how the runner decides a scenario's status, the known-deviations list and the harvest catalog. Observation values and comparison rules are in `observations.md`. The machine-checkable forms are `conformance/schema/scenario.schema.json`, `golden.schema.json`, `observation.schema.json`, `area.schema.json` and `deviations.schema.json`; when this text and a schema disagree, fix both in one change.
+This file defines the scenario language that both the oracle driver and Meguri's executor implement, the golden files the oracle writes, how the runner decides a scenario's status, the known-deviations list and the harvest catalog. Observation values and comparison rules are in `observations.md`. Scenarios with several syncing clients (actors) are in `sync-ops.md`. The machine-checkable forms are `conformance/schema/scenario.schema.json`, `golden.schema.json`, `observation.schema.json`, `area.schema.json` and `deviations.schema.json`; when this text and a schema disagree, fix both in one change.
 
 ## D1. Files and ids
 
@@ -55,6 +55,8 @@ The `compare` section (D5) is part of the value, so changing a comparison hint m
 | `clock` | yes | D5 |
 | `compare` | no | D5 |
 | `setup` | no | D6 |
+| `actors` | no | the clients of a multi-party scenario (`sync-ops.md` S2); they make the scenario live (D9.3) |
+| `server` | no | the scenario's sync server (`sync-ops.md` S3.2); only with `actors` |
 | `steps` | no | D7; missing means none; `handoff` steps make the scenario live (D9.2) |
 
 No other key is allowed.
@@ -65,12 +67,13 @@ No other key is allowed.
 - `clock.start`: ISO 8601 date-time in whole seconds, `YYYY-MM-DDTHH:MM:SS`, optionally followed by `Z` or `±HH:MM`. Without an offset it is wall time in `clock.tz`: a wall time inside a DST gap is invalid, and a repeated wall time means its first (earlier) occurrence.
 - `clock.mode`: `frozen` (default) or `step`. In both modes the clock stands still; only `advance` and `set_clock` move it. The mode is recorded in the golden.
 - Every instant an op records (note and card ids, review times, modification times) is the clock's current instant.
-- Randomness that is not seeded from collection data comes from a generator seeded with the first eight bytes of `scenario_sha256` read as a big-endian unsigned integer (Meguri's executor; the oracle has no such source to control).
+- Randomness that is not seeded from collection data comes from a generator seeded with the first eight bytes of `scenario_sha256` read as a big-endian unsigned integer (Meguri's executor; the oracle has no such source to control). Each Meguri actor of an actor scenario has its own seed (`sync-ops.md` S2.5).
+- In an actor scenario, every actor and the sync server share the clock; the server may run at a fixed offset from it (`sync-ops.md` S3.2).
 - `compare.set`: a list of pointer patterns (`observations.md` O3). An array at a matching pointer is compared as a multiset. Use it only where the order is SQLite's unspecified row order.
 
 ## D6. Setup
 
-Setup runs on a fresh, empty collection created at `clock.start`, in this section order whatever the key order: `config`, `presets`, `decks`, `notetypes`, `notes`, `cards`, `revlog`.
+Setup runs on a fresh, empty collection created at `clock.start`, in this section order whatever the key order: `config`, `presets`, `decks`, `notetypes`, `notes`, `cards`, `revlog`. In an actor scenario it runs on the first actor's collection only (`sync-ops.md` S2.2).
 
 ### D6.1 config
 
@@ -120,7 +123,7 @@ A step is a mapping with exactly one key, the op name. Steps run in order. Each 
 
 ### D7.1 Values used by several ops
 
-- **Logical ids.** `#nN` is the N-th note and `#cN` the N-th card created in the scenario, from 1, by setup or by ops, in creation order; a note's cards are numbered in template order (R1884). A reference to a note or card that does not exist yet is an `unknown_ref` error.
+- **Logical ids.** `#nN` is the N-th note and `#cN` the N-th card created in the scenario, from 1, by setup or by ops, in creation order; a note's cards are numbered in template order (R1884). A reference to a note or card that does not exist yet is an `unknown_ref` error. In an actor scenario the numbering spans all actors (`sync-ops.md` S2.4).
 - **Duration.** One or more `<digits><unit>` parts, unit `d` (86 400 s), `h`, `m` or `s`: `20m`, `1d`, `23h40m`, `90s`. A day is always 86 400 seconds, also across a DST change. In steps (`learn_steps`) a duration is converted to minutes.
 - **Date-time.** As `clock.start`.
 - **Rating.** `again`, `hard`, `good` or `easy`.
@@ -149,7 +152,11 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `export` | `{format: apkg \| colpkg, name: <file name>, ...options}` | `{name, sha256}` of the file written | draft (package) |
 | `check_db` | `{}` | the check's counters | draft (maintenance) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
-| `sync` | `{kind?: normal \| full_upload \| full_download, client?: <name>}` | `{result: <kind>}` | draft (sync) |
+| `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
+| `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |
+| `sync` | `{kind: login \| normal \| full_upload \| full_download}` | `{result: <result>}`: `ok`, or for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`; rejections `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
+| `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |
+| `converge` | `{}` | `{differences, dump}` (`sync-ops.md` S7.5) | stable (actor scenarios, `sync-ops.md` S7) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
@@ -164,7 +171,7 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 
 - An executor runs a scenario and returns its observations or an error. The oracle executor is a pool of oracle workers (`conformance/schema/protocol.json`), keyed by time zone. Meguri's executor runs the core in-process, with a scenario clock (D5) and the seeded random source, through the time and randomness seams (R1875).
 - Each executor declares capabilities: the setup sections, ops and observation kinds it implements. Before running, the runner compares the scenario's needs with them. A scenario that needs anything missing is `pending` (D10) and is not run.
-- Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op.
+- Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op. The ability to play an actor of an actor scenario, through the parties executor, counts as the `actor` op (`sync-ops.md` S10.2).
 
 ## D9. Area metadata and live scenarios
 
@@ -183,14 +190,23 @@ active: [runner-empty]   # Meguri must pass these
 
 ### D9.2 Live scenarios
 
-A scenario with `handoff` steps is live: Meguri's output is the oracle's input (export then import, Check Database on a Meguri-written collection, sync through Meguri and back, KTD23 T1).
+A scenario with `handoff` steps is live: Meguri's output is the oracle's input (export then import, Check Database on a Meguri-written collection, KTD23 T1). Sync between Meguri and Anki clients uses actors instead (D9.3).
 
 - **Segments.** Handoff steps split the steps into segments. Each `handoff: <side>` ends a segment and names the side that runs the next one; handoffs alternate, so the first segment runs on the side the first handoff leaves (`handoff: meguri` first means the oracle runs the setup and the first steps). Handing over to the side that already has the collection is invalid.
-- **What crosses.** At a handoff the side closes its collection and copies its session directory (the collection file `collection.anki2`, its media and every file an op wrote, such as an `export`'s package) to `<handoff dir>/<scenario id>@<handoff step index>/` (`@` is outside the id alphabet, so one scenario's handoff directories never lie inside another's, such as `smoke/rt` and `smoke/rt/1`, which T1 runs at the same time), together with the clock (epoch seconds) and the real ids behind `#nN` and `#cN` (protocol.json `handoff_state`). The next side copies that directory, opens the collection at the same clock and keeps numbering logical ids after the handed ones. It runs no setup. The handoff directory is one directory both see: the runner's on the host, mounted into oracle workers (`ORACLE_HANDOFF`). Areas add files to the session directory (the sync area: the server's state) with the driver.
+- **What crosses.** At a handoff the side closes its collection and copies its session directory (the collection file `collection.anki2`, its media and every file an op wrote, such as an `export`'s package) to `<handoff dir>/<scenario id>@<handoff step index>/` (`@` is outside the id alphabet, so one scenario's handoff directories never lie inside another's, such as `smoke/rt` and `smoke/rt/1`, which T1 runs at the same time), together with the clock (epoch seconds) and the real ids behind `#nN` and `#cN` (protocol.json `handoff_state`). The next side copies that directory, opens the collection at the same clock and keeps numbering logical ids after the handed ones. It runs no setup. The handoff directory is one directory both see: the runner's on the host, mounted into oracle workers (`ORACLE_HANDOFF`). Areas add files to the session directory with the driver. Clients that sync with each other are actors (D9.3), not handoffs.
 - **Golden.** A live scenario has a golden like any other, recorded by `tools/mg oracle record`: the oracle runs every segment itself, and each handoff only closes and reopens its collection. So the golden is what the oracle observes of its own output.
 - **Pass.** T1 runs the segments on their sides (the chain) and compares the chain's observations, the oracle's observations of Meguri's output included, with the golden by the usual rules and deviations (`observations.md` O7). A handoff step records `{}`.
 - **Capabilities.** Meguri needs `handoff`, the setup sections when it runs the first segment, and the ops and observation kinds of its own segments. Without them the scenario is `pending`.
 - Meguri's executor alone, and T0, never run a live scenario.
+
+### D9.3 Actor scenarios
+
+A scenario with `actors` is live: several clients, each with its own collection, sync with a sync server that the oracle worker runs for the scenario (`sync-ops.md`).
+
+- It has no `handoff` step. The ops `actor`, `sync`, `net_fault` and `converge` and the key `server` need `actors`.
+- **Golden.** The oracle plays every actor, Meguri actors included (`sync-ops.md` S10.1).
+- **Runs.** The parties executor runs it in T1: first the oracle plays every actor (the replay), then Meguri plays the Meguri actors (the mixed run), each compared with the golden (`sync-ops.md` S10.3).
+- **Capabilities.** What the Meguri actors use (`sync-ops.md` S10.2); nothing when it has no Meguri actor.
 
 ## D10. Status of a scenario
 
@@ -201,7 +217,7 @@ The runner gives each scenario exactly one status, checking in this order:
 | `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), or its id does not match its path | always | always |
 | `missing` | no golden | if active | always |
 | `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`) | if active | always |
-| `pending` | Meguri lacks a setup section, op or observation kind the scenario uses (for a live scenario: what its own segments use, D9.2) | if active | if active |
+| `pending` | Meguri lacks a setup section, op or observation kind the scenario uses (for a live scenario: what its own segments use, D9.2, or what its Meguri actors use, D9.3) | if active | if active |
 | `live` | T0 only: a live scenario Meguri could join; T0 does not run it | never | (not in T1) |
 | `error` | an executor failed while running it (a panic in an adapter included) | if active | always |
 | `fail` | observations differ from the golden after comparison rules and deviations | if active | always |
@@ -209,7 +225,7 @@ The runner gives each scenario exactly one status, checking in this order:
 
 - **T0** (`tools/mg conformance`, and the `conformance` test binary under `tools/mg core-test`) runs every scenario that is not live against its golden with Meguri's executor, natively on macOS and in the Linux dev container. It fails when any scenario is `invalid` or any active scenario is neither `pass` nor `live`. Other statuses are listed in the report.
 - **Freshness** (`tools/mg goldens-check`) fails when any scenario is `invalid`, `missing` or `stale`, when a golden has no scenario, when an `area.yaml` entry matches nothing, or when the pin in `conformance/oracle.json` differs from the oracle's lock file (checked where `oracle/` is present). With a base revision it also lists every golden value that changed since that revision (golden, pointer, value before and after), grouped by area and observation kind (the review step of an oracle bump, R1874); the text shows the first 20 per group and the `--report` JSON all of them.
-- **T1** (`tools/mg conformance --live`) first re-records missing and stale goldens through `tools/mg oracle record` (the only writer of goldens), then runs T0, then runs every selected scenario on live oracle workers: the oracle replays it against its golden with no deviation applied (deviations describe Meguri, D13), and a live scenario whose replay passes then runs as a chain (D9.2) and is compared with the same golden, deviations applied. Workers must answer the pinned `anki_version` and `lock_sha256` and all run the same driver, or the run is an `error`. Any scenario that is not `pass`, active or not, fails T1, except a `pending` one that is not active: an oracle that no longer reproduces its golden is drift to fix before anything else.
+- **T1** (`tools/mg conformance --live`) first re-records missing and stale goldens through `tools/mg oracle record` (the only writer of goldens), then runs T0, then runs every selected scenario on live oracle workers: the oracle replays it against its golden with no deviation applied (deviations describe Meguri, D13), and a live scenario whose replay passes then runs as a chain (D9.2), or as a mixed run of an actor scenario (D9.3), and is compared with the same golden, deviations applied. Workers must answer the pinned `anki_version` and `lock_sha256` and all run the same driver, or the run is an `error`. Any scenario that is not `pass`, active or not, fails T1, except a `pending` one that is not active: an oracle that no longer reproduces its golden is drift to fix before anything else.
 
 ## D11. Goldens
 

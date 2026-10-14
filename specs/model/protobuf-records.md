@@ -27,11 +27,14 @@ Six columns of a schema-18 collection hold protobuf messages. This file gives ea
 Standard protocol buffers (proto3) binary encoding:
 
 - A field is a key followed by a payload. The key is a varint whose value is `(field_number << 3) | wire_type`.
-- Varints are little-endian groups of 7 bits, high bit set on every byte but the last, at most 10 bytes. A varint whose tenth byte still has the high bit set is invalid. A key whose value does not fit in 32 bits is invalid.
+- Varints are little-endian groups of 7 bits, high bit set on every byte but the last, at most 10 bytes. A value has at most 64 bits, so the tenth byte may only be `00` or `01`: a tenth byte from `02` to `7f`, or one with the high bit set, makes the varint invalid. This holds for every varint: keys, lengths and values. A key whose value does not fit in 32 bits is invalid.
 - Field numbers run from 1 to 536 870 911. Field number 0 is invalid.
 - Wire types: 0 varint, 1 fixed 64-bit (8 bytes, little-endian), 2 length-delimited (a varint length, then that many bytes), 3 group start, 4 group end, 5 fixed 32-bit (4 bytes, little-endian). Wire types 6 and 7 are invalid.
-- A group runs from a group-start key to the group-end key with the same field number, and may contain other fields and nested groups. A group-end key with no open group, a group-end with another field number, or a group still open at the end of the buffer is invalid.
-- A buffer that ends inside a key, a varint, a fixed value, a length-delimited payload or a group is truncated and invalid.
+- A group runs from a group-start key to the group-end key with the same field number, and may contain other fields and nested groups. A group-end key with no open group, or with another field number than the innermost open group's, is invalid.
+- A buffer that ends inside a key, a varint, a fixed value, a length-delimited payload or a group is truncated and invalid. The payload of a nested message is the buffer of that message's fields: a group still open, or a length-delimited payload not finished, at the end of that payload is truncated, even when the bytes that follow in the outer message would complete it. A group still open at the end of the whole blob is truncated too.
+- Nesting depth: the fields of the column's message are at depth 0; the fields inside a group, or inside the payload of a nested message, are one deeper than the group-start key or the message field around them. A field at depth 100 or more makes the blob invalid; a group-start key counts as a field, a group-end key does not. So at most 100 groups and nested messages are open at once, and the innermost of 100 holds nothing. Known fields reach depth 2 at most (a day limit's fields), so in practice the limit stops deeply nested unknown groups.
+
+Examples (oracle, `conformance/scenarios/model/proto/decode-limits.yaml`), each a whole `deck_config.config` value unless named otherwise: `38ffffffffffffffffff01` decodes (unknown field 7, a 10-byte varint); `38ffffffffffffffffff02`, `38ffffffffffffffffff7f` and the 11-byte `38ffffffffffffffffff8001` do not. `3b` (a group of field 7 never closed) does not decode, `3b3c` does. One hundred nested groups `3b…3b 3c…3c` decode, 101 do not; 99 nested groups around `0800` (field 1, a varint, at depth 99) decode, 100 do not. As `decks.kind`: `0a025b5c` (a normal deck holding an empty unknown group 11) decodes; `0a015b` (the group still open at the end of the normal deck's payload), `0a015b5c` (its group end after that payload) and `0a032202414242` (a description of 2 bytes with only 1 left in the payload) do not.
 
 How a payload becomes a value of a field the message declares (P6):
 
@@ -54,7 +57,7 @@ How a payload becomes a value of a field the message declares (P6):
 - One-of (P6.5): an occurrence of a member replaces whatever member was set before; a second occurrence of the same message member merges into it.
 - Fields the message does not declare, reserved numbers included, are unknown fields (P4).
 
-Decoding is all or nothing: an invalid blob yields a typed error (P8) and no record. Meguri never panics on any input.
+Decoding is all or nothing: an invalid blob yields a typed error (P9) and no record. Meguri never panics on any input.
 
 ## P3. Encoding (what Anki writes)
 
@@ -76,8 +79,9 @@ Anki drops every field it does not declare when it rewrites a blob. Meguri keeps
 
 - Capture happens at every message level: the six blob messages and every nested message (card requirement, normal and filtered deck, search term, day limit).
 - An unknown field is kept as its exact bytes: from the first byte of its key to the last byte of its payload (for a group, through its group-end key). Unknown fields of one message are kept in the order they were read.
-- On encoding, unknown fields are merged into the known ones by field number: each unknown field is written just before the first known field with a greater number, after every known field with a smaller number. Unknown fields that share a number keep their read order. So a blob written by a later Anki in ascending order comes back in the same layout after Meguri changes one known field.
+- On encoding, every field of a message, known or unknown, is written in ascending field-number order (P3). Unknown fields with different numbers are written in number order whatever order they were read in, also when no known field lies between them; unknown fields that share a number keep their read order. So a blob written by a later Anki (ascending order) comes back in the same layout after Meguri changes one known field, and a blob read out of order comes back sorted once Meguri re-encodes it (P5).
 - A known field is never written from captured bytes. If the same unknown number appears in several places of the read blob, all occurrences are kept.
+- Two records are equal when their known values are equal (floats bit for bit) and, for each field number, they hold the same unknown fields in the same order. The order between unknown fields of different numbers does not count, since encoding never keeps it.
 
 Example (deck config, P6.6). Stored blob, with field 7 unknown to Meguri (a packed float list `[4.0]`):
 
@@ -97,10 +101,20 @@ After Meguri sets `fsrs_params_6` to `[0.5, 1.5]` and nothing else, the blob is:
 
 Every byte outside field 6 is unchanged (R1486).
 
+Example of the order rule. Stored deck config blob, unknown fields 8 and 7 in that order before a known field:
+
+```
+42 00                 field 8 (unknown), empty
+3a 00                 field 7 (unknown), empty
+48 14                 new_per_day = 20
+```
+
+After Meguri sets `new_per_day` to 25 and nothing else, the blob is `3a 00  42 00  48 19`.
+
 ## P5. When Meguri re-encodes
 
 - A record keeps the exact bytes it was read with.
-- When a record is written, Meguri compares its decoded content (known values and captured unknown fields) with the content decoded from the bytes it was read with, floats bit for bit. If they are equal, the original bytes are written unchanged, even when they are not in Anki's canonical form (P3). If they differ, the message is encoded per P3 and P4.
+- When a record is written, Meguri compares it with the record decoded from the bytes it was read with (equality as in P4: known values, floats bit for bit, and captured unknown fields). If they are equal, the original bytes are written unchanged, even when they are not in Anki's canonical form (P3). If they differ, the message is encoded per P3 and P4.
 - A record Meguri creates has no original bytes and is encoded per P3.
 - This decides bytes only. Whether a write happens at all, and how `usn` and modification times move, is the storage area's rule (an unchanged record is not written, R1472).
 - Anki itself re-encodes every blob it writes and so drops unknown fields; Meguri's output equals Anki's whenever the read blob had no unknown fields and was in canonical form.
@@ -329,14 +343,36 @@ A blob that breaks P2 is refused with a typed error naming the column and the re
 
 | Reason | When |
 |---|---|
-| truncated | the buffer ends inside a key, varint, fixed value, length-delimited payload or group |
-| bad varint | a varint longer than 10 bytes, or a key above 32 bits |
+| truncated | the buffer ends inside a key, varint, fixed value, length-delimited payload or group; for the fields of a nested message, the buffer is that message's payload (P2) |
+| bad varint | a varint longer than 10 bytes or with a tenth byte above `01`, or a key above 32 bits |
 | bad field number | field number 0 |
 | bad wire type | wire type 6 or 7, or a declared field with a wire type P2 does not accept |
-| bad group | a group end with no matching start, or a group not closed |
+| bad group | a group-end key with no open group, or whose field number differs from the innermost open group's |
+| too deep | a field at depth 100 or more (P2) |
 | bad UTF-8 | a `string` field that is not valid UTF-8 |
 | no deck kind | a deck kind blob with neither member (P6.5) |
 
-Examples, each a whole `deck_config.config` value (Anki refuses all of the first six): `0a05` truncated; `ff` truncated (a key varint that never ends); `0a020000` truncated (packed floats need 4 bytes each); `0800` bad wire type (varint for a float list); `0f` bad wire type (7); `0c` bad wire type (a group end for field 1, a float list). These blobs decode without error: `38ffffffffffffffffff01` (unknown field 7, a 10-byte varint) and `fa0f02ffff` (`other` holding bytes that are not UTF-8: `other` is `bytes`).
+When several reasons apply, the first problem met reading from the start decides. At one key, the key's varint, field number and wire type 6 or 7 are checked first. Then a key of a field the message declares is checked against the wire types P2 accepts (a group-end key of a declared number is a bad wire type, as `0c` below); a group-end key of any other number is checked against the open groups (bad group); any other key is checked against the depth limit (too deep). Inside a group every key is part of an unknown field, so no field there counts as declared.
 
-The fuzz target `core/fuzz/fuzz_targets/proto_blobs.rs` feeds arbitrary bytes to every decoder: every input gives a record or one of these errors, and every record that decodes re-encodes (P3, P4) to bytes that decode to the same record (floats compared bit for bit, except that a singular float field holding -0.0 comes back as +0.0, P3).
+Examples, each a whole `deck_config.config` value unless named otherwise; Anki refuses every one that has a reason here and decodes the last two (`conformance/scenarios/model/proto/decode-limits.yaml`):
+
+| Blob | Reason |
+|---|---|
+| `0a05` | truncated |
+| `ff` | truncated (a key varint that never ends) |
+| `0a020000` | truncated (packed floats need 4 bytes each) |
+| `3b` | truncated (a group never closed) |
+| `0a015b` as `decks.kind` | truncated (the group is still open at the end of the normal deck's payload) |
+| `0a015b5c` as `decks.kind` | truncated (the same group; its end lies after the payload) |
+| `38ffffffffffffffffff02` | bad varint (tenth byte `02`) |
+| `808080801000` | bad varint (a key of 2^32) |
+| `0000` | bad field number |
+| `0800` | bad wire type (a varint for a float list) |
+| `0f` | bad wire type (7) |
+| `0c` | bad wire type (a group end for field 1, a float list) |
+| `3b44` | bad group (field 8 ends while group 7 is open) |
+| 101 × `3b`, then 101 × `3c` | too deep (the 101st group start is at depth 100) |
+| `38ffffffffffffffffff01` | none: unknown field 7, a 10-byte varint |
+| `fa0f02ffff` | none: `other` holding bytes that are not UTF-8 (`other` is `bytes`) |
+
+The fuzz target `core/fuzz/fuzz_targets/proto_blobs.rs` feeds arbitrary bytes to every decoder: every input gives a record or one of these errors, every record that decodes re-encodes (P3, P4) to bytes that decode to an equal record (P4: known values bit for bit, unknown fields per field number in order; the one exception is a singular float field holding -0.0, which comes back as +0.0, P3), and encoding that record again gives the same bytes.

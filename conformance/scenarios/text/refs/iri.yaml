@@ -1,0 +1,55 @@
+# Display encoding of local media names and its inverse (specs/text/
+# media-references.md M5-M8): which bytes are percent-encoded, remote names left
+# alone, every copy of the name inside the tag replaced, lossy decoding, and
+# texts whose encoding does not decode back (M8).
+id: text/refs/iri
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [iri_encode, iri_decode]
+          inputs:
+            - "<img src=\"a b#c.jpg\">"
+            - "<img src=\"日本.png\">"
+            - "<img src=\"100%.jpg\">"
+            - "<img src=\"a%20b.jpg\">"
+            - "<img src=\"x\x7Fy`z'w.png\">"
+            - "<img src='q\"r.png'>"
+            - "<img src=\"HTTPS://e.com/a b.png\">"
+            - "<img src=\" https://e.com/a b.png\">"
+            - "<img src=\"//cdn.example/a b.png\">"
+            - "<img title=\"a b\" src=\"a b\">"
+            - "[sound:a b.mp3]"
+            - "<img src=\"a%2.png\">"
+            - "<img src=\"%e6%97%a5.png\">"
+            - "<img src=\"%ff.png\">"
+            - "<img src=\"%E6%97.png\">"
+            - "<img src=\"a%2Fb.png\">"
+            - "<img src=\"a+b.png\">"
+            - "<img src=\"tab\tname.png\">"
+            - "<img src=\"new\nline.png\">"
+            - "<img src=\"&amp; and.png\">"
+            - "<img src=\"http&#58;//x.org/a b.png\">"
+            - "<img src=a b.png>"
+            - "<img src=\"a<b>.png\">"
+            - "<img src=\"\">"
+            - "<audio src=\"voice clip.mp3\"></audio> and <img src=\"pic 1.png\">"
+            - "<img src=\"?q=1&r=2.png\">"
+            - "<object data=\"vec tor.svg\"></object>"
+            - "<img src=\"\u00A0nb.png\">"
+            - "<img src=\"%20lead.png\">"
+            - "<img src=\"a%00b.png\">"
+            - "<img src=\"%C3%A9t%C3%A9.png\">"
+            - "<img src=\"%7Etilde.png\">"
+            - "plain text, a b#c"
+            # M8 condition 2: the encoded name already occurs in the tag; then
+            # the text its encoding gives.
+            - "<img title=\"a%20b\" src=\"a b\">"
+            - "<img title=\"a%20b\" src=\"a%20b\">"
+            # M8 condition 3: the raw name also occurs in the tag's own syntax.
+            - "<img src=\"<\">"
+            - "%3Cimg src=\"%3C\">"
+            # M8 condition 4: encoding lets the video tag's match run on to the
+            # remote audio name.
+            - "<video title=\"a\">x<img src=\"a>b.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">"
+            - "<video title=\"a\">x<img src=\"a%3Eb.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">"

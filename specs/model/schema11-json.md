@@ -31,7 +31,7 @@ Five messages carry an `other` field (`model/protobuf-records` P7): notetype con
 
 Output (record → object):
 
-1. If `other` is empty, is not valid JSON, or is JSON but not an object, nothing is added.
+1. If `other` is empty, is not valid JSON, or is JSON but not an object, nothing is added. A number beyond the 64-bit float range anywhere in `other`, inside any member, makes it invalid JSON (`model/json-numbers` N10): `{"keep":1,"zz":1e400}` adds nothing, not even `keep` (oracle, `schema11/other-out-of-range`).
 2. Members whose key is in the object's reserved list (below) are dropped.
 3. Members whose key the object has already written are dropped as well. (Anki writes such a key twice; Meguri never writes duplicate keys. Keys left out by an "only when …" rule are not written, so an `other` member of that name does appear, as in Anki.)
 4. The remaining members follow the known keys, in the order they are stored, each with its value as stored text (`model/json-numbers` N7).
@@ -239,7 +239,7 @@ There is no key for a later FSRS parameter list. One that arrives as a key (`fsr
 
 ### S10.1 `new`
 
-The value must be an object whose keys all fit their readers; when it is not (not an object, a required key missing, a strict key with a wrong value), the whole `new` part takes the defaults in the last column. Output order is the table order, then the `new` extras of S10.5.
+The value must be an object whose keys all fit their readers; when it is not (not an object, a required key missing, a strict key with a wrong value), the whole `new` part takes the defaults in the last column, and its members that the part does not read are dropped: none of them reaches `other` (S10.5). Output order is the table order, then the `new` extras of S10.5.
 
 | Key | Output | Input reader | Missing | Input result | Default |
 |---|---|---|---|---|---|
@@ -252,7 +252,7 @@ The value must be an object whose keys all fit their readers; when it is not (no
 
 ### S10.2 `rev`
 
-Same rule; defaults in the last column.
+Same rule, unknown members dropped with an invalid part included; defaults in the last column.
 
 | Key | Output | Input reader | Missing | Input result | Default |
 |---|---|---|---|---|---|
@@ -264,6 +264,8 @@ Same rule; defaults in the last column.
 | `hardFactor` | `hard_multiplier` | strict `f32` | 1.2 | `hard_multiplier` | 1.2 |
 
 ### S10.3 `lapse`
+
+Same rule as `new`, unknown members dropped with an invalid part included.
 
 | Key | Output | Input reader | Missing | Input result | Default |
 |---|---|---|---|---|---|
@@ -287,8 +289,10 @@ Output:
 
 Input:
 
-1. Members of `new`, `rev` and `lapse` that the part does not read are kept per part, in input order.
+1. Members of `new`, `rev` and `lapse` that the part does not read are kept per part, in input order, when the part is valid. A part that takes its defaults (S10.1) keeps nothing; the unknown top-level members are kept all the same.
 2. `other` becomes an object of the unknown top-level members in input order, followed by `"new"`, `"rev"` and `"lapse"`, each present only when its part had unknown members and holding an object of them. Empty means zero bytes.
+
+Example (oracle, `schema11/preset-part-defaults`): saving `new` = `{…,"perDay":7,"keepNew":1}` gives `other` = `{"new":{"keepNew":1}}`. Saving `new` = `{…,"initialFactor":70000,"keepNew":1,"keepNew2":2}` next gives the default `new` part (`perDay` 20) and an empty `other`. Saving `{"keepTop":8,"new":[1,2]}` gives the default `new` part and `other` = `{"keepTop":8}`.
 
 Example (oracle): `other` = `{"maxTaken":5,"new":{"perDay":3,"keep":1},"keep2":2}` gives an object whose `maxTaken` and `new.perDay` come from the record, with `"keep":1` added at the end of `new` and `"keep2":2` at the end of the object. Unknown members `zz_new` in `new` and `zz_top` at the top give `other` = `{"zz_top":…,"new":{"zz_new":…}}` (Anki writes the same members in no particular order).
 
