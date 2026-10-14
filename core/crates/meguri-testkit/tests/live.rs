@@ -173,8 +173,9 @@ fn advance_twice(session: &mut Session<'_>, step: &Step) -> Result<OpResult, Exe
     Ok(OpResult::Done)
 }
 
+/// Meguri without the storage area, whose handoff the stand-ins replace.
 fn meguri_with(out: meguri_testkit::exec::HandoffFn) -> MeguriExecutor {
-    let mut registry = MeguriExecutor::core_registry();
+    let mut registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.handoff(out, open_from_oracle);
     MeguriExecutor::with(registry)
 }
@@ -307,7 +308,8 @@ fn a_chain_meguri_cannot_join_yet_is_pending_and_fails_only_when_active() {
     for active in [false, true] {
         let dir = tree(active);
         let oracle = oracle(dir.path(), handoff.path());
-        let meguri = MeguriExecutor::new();
+        // Without the storage area, Meguri has no handoff adapters.
+        let meguri = MeguriExecutor::with(MeguriExecutor::area_registry(&["clock", "text"]));
         let live = LiveRun {
             oracle: &oracle,
             meguri: &meguri,

@@ -333,9 +333,10 @@ fn dump_diverged(_: &mut Session<'_>) -> Result<Value, ExecError> {
     Ok(json!({"col": "diverged"}))
 }
 
-/// Meguri's executor with the adapters MIXED's Meguri actor needs.
+/// Meguri's executor with the adapters MIXED's Meguri actor needs, stand-ins
+/// for the storage area's among them.
 fn meguri_actor(sync_op: meguri_testkit::exec::OpFn, raw_dump: meguri_testkit::exec::RawDumpFn) -> MeguriExecutor {
-    let mut registry: Registry = MeguriExecutor::core_registry();
+    let mut registry: Registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.actor(raw_dump);
     registry.op_rejecting("sync", &["clock_incorrect", "network"], sync_op);
     registry.op("add_note", add_note);

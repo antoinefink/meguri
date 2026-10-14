@@ -525,6 +525,71 @@ pub struct LegacyUpdate {
     pub patch: Map<String, Value>,
 }
 
+/// `open: {fixture}` (storage-ops.md P1.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenSpec {
+    /// A path relative to `conformance/fixtures/`, ending in `.anki2`.
+    pub fixture: FixturePath,
+}
+
+impl<'de> Deserialize<'de> for OpenSpec {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<OpenSpec, D::Error> {
+        let map = mapping(deserializer, "open")?;
+        let mut fixture = None;
+        for (key, value) in map {
+            match (key.as_str(), value) {
+                ("fixture", Value::String(path)) => fixture = Some(path.parse().map_err(de::Error::custom)?),
+                ("fixture", other) => {
+                    return Err(de::Error::custom(format!("open.fixture is a path, found {other}")));
+                }
+                (other, _) => {
+                    return Err(de::Error::custom(format!(
+                        "open: unknown key {other:?}, expected fixture"
+                    )));
+                }
+            }
+        }
+        let fixture = fixture.ok_or_else(|| de::Error::custom("open needs a fixture"))?;
+        Ok(OpenSpec { fixture })
+    }
+}
+
+/// A fixture file below `conformance/fixtures/` (scenario.schema.json
+/// `open.fixture`): `/`-separated segments of `[a-z0-9._-]` that start with
+/// a letter or digit, ending in `.anki2`, so no `..`, leading `/` or empty
+/// segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixturePath(String);
+
+impl FixturePath {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for FixturePath {
+    type Err = FormatError;
+
+    fn from_str(text: &str) -> Result<FixturePath, FormatError> {
+        let segment_ok = |segment: &str| {
+            segment
+                .bytes()
+                .next()
+                .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+                && segment
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-'))
+        };
+        if text.ends_with(".anki2") && text.split('/').all(segment_ok) {
+            Ok(FixturePath(text.to_owned()))
+        } else {
+            Err(FormatError::new(format!(
+                "fixture {text:?} must be a path below conformance/fixtures/ ending in .anki2 (segments of a-z, 0-9, '.', '_' and '-')"
+            )))
+        }
+    }
+}
+
 /// One step: a mapping with one key, the op name (D7).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -551,6 +616,9 @@ pub enum Step {
     DbExec(DraftArgs),
     /// Closes the collection and opens it again (sync-ops.md S6).
     Reopen(NoArgs),
+    /// storage-ops.md P1: replaces the collection with a copy of a fixture
+    /// file and opens it.
+    Open(OpenSpec),
     /// Actor scenarios (sync-ops.md S2.3): the actor that runs the next steps.
     Actor(ActorName),
     /// Actor scenarios (sync-ops.md S4).
@@ -565,7 +633,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 25] = [
+    pub const NAMES: [&'static str; 26] = [
         "advance",
         "set_clock",
         "add_note",
@@ -586,6 +654,7 @@ impl Step {
         "check_db",
         "db_exec",
         "reopen",
+        "open",
         "actor",
         "sync",
         "net_fault",
@@ -619,6 +688,7 @@ impl Step {
             Step::CheckDb(_) => "check_db",
             Step::DbExec(_) => "db_exec",
             Step::Reopen(_) => "reopen",
+            Step::Open(_) => "open",
             Step::Actor(_) => "actor",
             Step::Sync(_) => "sync",
             Step::NetFault(_) => "net_fault",
@@ -945,6 +1015,8 @@ pub enum ObservationKind {
     Render,
     Search,
     DbDump,
+    /// storage-ops.md P3.
+    SchemaObjects,
     Stats,
     Digest,
     LegacyJson,
@@ -969,7 +1041,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 18] = [
+    pub const ALL: [ObservationKind; 19] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -982,6 +1054,7 @@ impl ObservationKind {
         ObservationKind::Render,
         ObservationKind::Search,
         ObservationKind::DbDump,
+        ObservationKind::SchemaObjects,
         ObservationKind::Stats,
         ObservationKind::Digest,
         ObservationKind::LegacyJson,
@@ -1004,6 +1077,7 @@ impl ObservationKind {
             ObservationKind::Render => "render",
             ObservationKind::Search => "search",
             ObservationKind::DbDump => "db_dump",
+            ObservationKind::SchemaObjects => "schema_objects",
             ObservationKind::Stats => "stats",
             ObservationKind::Digest => "digest",
             ObservationKind::LegacyJson => "legacy_json",
@@ -1020,7 +1094,10 @@ impl ObservationKind {
     pub(super) fn shape(self) -> ArgShape {
         match self {
             ObservationKind::Ids => ArgShape::AnyRefs,
-            ObservationKind::Timing | ObservationKind::DeckTree | ObservationKind::Digest => ArgShape::None,
+            ObservationKind::Timing
+            | ObservationKind::DeckTree
+            | ObservationKind::Digest
+            | ObservationKind::SchemaObjects => ArgShape::None,
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }
@@ -1422,6 +1499,12 @@ impl Scenario {
             needs.ops.insert("handoff".to_owned());
         }
         needs
+    }
+
+    /// Whether a step opens a fixture (storage-ops.md P1.3): the scenario
+    /// then has no setup and starts with no collection.
+    pub fn opens_fixtures(&self) -> bool {
+        self.steps.iter().any(|s| matches!(s, Step::Open(_)))
     }
 
     /// A live chain: handoff steps split it into segments (D9.2).

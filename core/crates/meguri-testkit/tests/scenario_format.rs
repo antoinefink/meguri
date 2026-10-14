@@ -922,3 +922,41 @@ fn sha2_hex(text: &str) -> String {
         .unwrap()
         .to_owned()
 }
+
+#[test]
+fn open_scenarios_are_checked_when_they_load() {
+    let load = |body: &str| {
+        let text = format!("id: storage/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{body}");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).map_err(|e| e.to_string())
+    };
+    let ok = load(
+        "steps:\n  - open: {fixture: storage/schema-11.anki2}\n  - open: {fixture: a/b-c_d.e.anki2}\n  - observe: [schema_objects, {schema_objects: null}]\n  - handoff: oracle\n",
+    )
+    .unwrap();
+    assert!(ok.opens_fixtures());
+    assert!(matches!(&ok.steps[1], Step::Open(spec) if spec.fixture.as_str() == "a/b-c_d.e.anki2"));
+    let needs = ok.needs();
+    assert!(needs.ops.contains("open") && needs.observations.contains("schema_objects"));
+
+    for bad in [
+        // P1.3: no setup, open first, no actors.
+        "setup: {decks: [A]}\nsteps: [{open: {fixture: storage/schema-18.anki2}}]",
+        "steps: [{advance: 1d}, {open: {fixture: storage/schema-18.anki2}}]",
+        "actors: [client_a]\nsteps: [{open: {fixture: storage/schema-18.anki2}}]",
+        // The fixture path stays below conformance/fixtures/.
+        "steps: [{open: {fixture: ../storage/schema-18.anki2}}]",
+        "steps: [{open: {fixture: /storage/schema-18.anki2}}]",
+        "steps: [{open: {fixture: storage//schema-18.anki2}}]",
+        "steps: [{open: {fixture: storage/Schema-18.anki2}}]",
+        "steps: [{open: {fixture: storage/schema-18.apkg}}]",
+        "steps: [{open: {fixture: storage/schema-18.anki2, mode: ro}}]",
+        "steps: [{open: {}}]",
+        "steps: [{open: {fixture: 1}}]",
+        "steps: [{open: storage/schema-18.anki2}]",
+        // schema_objects takes no arguments.
+        "steps: [{open: {fixture: s.anki2}}, {observe: [\"schema_objects(#c1)\"]}]",
+        "steps: [{open: {fixture: s.anki2}}, {observe: [{schema_objects: {}}]}]",
+    ] {
+        assert!(load(bad).is_err(), "accepted {bad}");
+    }
+}
