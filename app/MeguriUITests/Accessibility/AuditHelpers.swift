@@ -96,13 +96,16 @@ struct AuditFinding: Equatable, CustomStringConvertible {
     let variant: String
     let identifier: String
     let label: String
+    /// The element's type and frame, for findings on elements without an
+    /// identifier (often the system's own chrome).
+    let element: String
     let auditType: String
     let detail: String
     let suppressed: Bool
 
     var description: String {
-        let element = identifier.isEmpty ? "an element without identifier (\"\(label)\")" : identifier
-        return "\(variant): \(auditType) on \(element): \(detail)"
+        let name = identifier.isEmpty ? "an element without identifier (\"\(label)\", \(element))" : identifier
+        return "\(variant): \(auditType) on \(name): \(detail)"
     }
 }
 
@@ -151,11 +154,13 @@ enum AccessibilityAudit {
     ) throws -> [AuditFinding] {
         var findings: [AuditFinding] = []
         try app.performAccessibilityAudit(for: types) { issue in
-            let identifier = issue.element?.identifier ?? ""
+            let snapshot = try? issue.element?.snapshot()
+            let identifier = snapshot?.identifier ?? ""
             let type = AuditSuppressions.name(of: issue.auditType)
             let suppressed = !identifier.isEmpty && suppressions.contains { $0.identifier == identifier && $0.auditType == type }
+            let element = snapshot.map { "type \($0.elementType.rawValue) at \(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))×\(Int($0.frame.height))" } ?? "no element"
             findings.append(AuditFinding(
-                variant: variant, identifier: identifier, label: issue.element?.label ?? "", auditType: type,
+                variant: variant, identifier: identifier, label: snapshot?.label ?? "", element: element, auditType: type,
                 detail: issue.compactDescription, suppressed: suppressed
             ))
             // Handled here: unsuppressed findings fail through `assertClean`,
@@ -203,7 +208,7 @@ enum AccessibilityAudit {
             "status": unsuppressed.isEmpty && touchTargets.isEmpty ? "pass" : "fail",
             "variants": Variant.all.map(\.description),
             "findings": findings.map {
-                ["variant": $0.variant, "identifier": $0.identifier, "label": $0.label, "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed]
+                ["variant": $0.variant, "identifier": $0.identifier, "label": $0.label, "element": $0.element, "auditType": $0.auditType, "detail": $0.detail, "suppressed": $0.suppressed]
             },
             "touchTargets": touchTargets.map(\.description),
         ]

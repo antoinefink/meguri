@@ -47,10 +47,13 @@ enum TouchTargets {
 
     /// Interactive elements of the hierarchy, in hierarchy order, that lie
     /// in `visible` (elements scrolled away are measured when on screen).
+    /// The Mac window's own close, minimize and full-screen buttons
+    /// (`_XCUI:` identifiers) are the system's, not the app's.
     static func elements(of snapshot: any XCUIElementSnapshot, visible: CGRect) -> [Element] {
         var result: [Element] = []
         func walk(_ node: any XCUIElementSnapshot) {
-            if interactiveTypes.contains(node.elementType), node.frame.intersects(visible), !node.frame.isEmpty {
+            if interactiveTypes.contains(node.elementType), node.frame.intersects(visible), !node.frame.isEmpty,
+               !node.identifier.hasPrefix("_XCUI:") {
                 result.append(Element(identifier: node.identifier, label: node.label, type: node.elementType, frame: node.frame))
             }
             node.children.forEach(walk)
