@@ -1,0 +1,24 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "iri_decode": ["<img src=\"a b#c.jpg\">", "<img src=\"日本.png\">", "<img src=\"100%.jpg\">", "<img src=\"a b.jpg\">", "<img src=\"xy`z'w.png\">", "<img src='q\"r.png'>", "<img src=\"HTTPS://e.com/a b.png\">", "<img src=\" https://e.com/a b.png\">", "<img src=\"//cdn.example/a b.png\">", "<img title=\"a b\" src=\"a b\">", "[sound:a b.mp3]", "<img src=\"a%2.png\">", "<img src=\"日.png\">", "<img src=\"�.png\">", "<img src=\"�.png\">", "<img src=\"a/b.png\">", "<img src=\"a+b.png\">", "<img src=\"tab\tname.png\">", "<img src=\"new\nline.png\">", "<img src=\"&amp; and.png\">", "<img src=\"http&#58;//x.org/a b.png\">", "<img src=a b.png>", "<img src=\"a<b>.png\">", "<img src=\"\">", "<audio src=\"voice clip.mp3\"></audio> and <img src=\"pic 1.png\">", "<img src=\"?q=1&r=2.png\">", "<object data=\"vec tor.svg\"></object>", "<img src=\" nb.png\">", "<img src=\" lead.png\">", "<img src=\"a\u0000b.png\">", "<img src=\"été.png\">", "<img src=\"~tilde.png\">", "plain text, a b#c", "<img title=\"a%20b\" src=\"a b\">", "<img title=\"a b\" src=\"a b\">", "<img src=\"<\">", "%3Cimg src=\"%3C\">", "<video title=\"a\">x<img src=\"a>b.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">", "<video title=\"a\">x<img src=\"a%3Eb.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">"],
+          "iri_encode": ["<img src=\"a%20b%23c.jpg\">", "<img src=\"日本.png\">", "<img src=\"100%.jpg\">", "<img src=\"a%20b.jpg\">", "<img src=\"x%7Fy%60z'w.png\">", "<img src='q%22r.png'>", "<img src=\"HTTPS://e.com/a b.png\">", "<img src=\"%20https://e.com/a%20b.png\">", "<img src=\"//cdn.example/a%20b.png\">", "<img title=\"a%20b\" src=\"a%20b\">", "[sound:a b.mp3]", "<img src=\"a%2.png\">", "<img src=\"%e6%97%a5.png\">", "<img src=\"%ff.png\">", "<img src=\"%E6%97.png\">", "<img src=\"a%2Fb.png\">", "<img src=\"a+b.png\">", "<img src=\"tab%09name.png\">", "<img src=\"new%0Aline.png\">", "<img src=\"&amp;%20and.png\">", "<img src=\"http&%2358;//x.org/a%20b.png\">", "<img src=a b.png>", "<img src=\"a%3Cb%3E.png\">", "<img src=%22%22>", "<audio src=\"voice%20clip.mp3\"></audio> and <img src=\"pic%201.png\">", "<img src=\"?q=1&r=2.png\">", "<object data=\"vec%20tor.svg\"></object>", "<img src=\" nb.png\">", "<img src=\"%20lead.png\">", "<img src=\"a%00b.png\">", "<img src=\"%C3%A9t%C3%A9.png\">", "<img src=\"%7Etilde.png\">", "plain text, a b#c", "<img title=\"a%20b\" src=\"a%20b\">", "<img title=\"a%20b\" src=\"a%20b\">", "%3Cimg src=\"%3C\">", "%3Cimg src=\"%3C\">", "<video title=\"a\">x<img src=\"a%3Eb.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">", "<video title=\"a\">x<img src=\"a%3Eb.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/refs/iri",
+  "scenario_sha256": "e44d657d47a3e02b2f1cef529c5be8b4b7e7f19b9f20d5a6e45bfd51d70226f6",
+  "tz": "UTC"
+}

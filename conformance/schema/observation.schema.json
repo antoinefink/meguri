@@ -84,6 +84,26 @@
           "additionalProperties": false,
           "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
         },
+        "text": {
+          "description": "O4 text: one array per requested function, one output per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "strip_markup": { "$ref": "#/$defs/text_strings" },
+            "strip_markup_keep_media": { "$ref": "#/$defs/text_strings" },
+            "text_line": { "$ref": "#/$defs/text_strings" },
+            "text_line_keep_media": { "$ref": "#/$defs/text_strings" },
+            "media_refs": { "type": "array", "items": { "$ref": "#/$defs/text_strings" } },
+            "iri_encode": { "$ref": "#/$defs/text_strings" },
+            "iri_decode": { "$ref": "#/$defs/text_strings" },
+            "media_filename": { "$ref": "#/$defs/text_strings" },
+            "sort_field": { "$ref": "#/$defs/text_strings" },
+            "checksum": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+            "field_empty": { "type": "array", "items": { "type": "boolean" } },
+            "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
+          }
+        },
         "db_dump": { "$ref": "#/$defs/db_dump" },
         "sync": {
           "description": "specs/conformance/sync-ops.md S4: a result, or a rejection of the op's closed list.",
@@ -122,6 +142,7 @@
         }
       }
     },
+    "text_strings": { "type": "array", "items": { "type": "string" } },
     "actor_name": { "type": "string", "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$" },
     "db_dump": {
       "description": "observations.md O8: table -> primary key text -> column -> value.",

@@ -50,6 +50,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
+| `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
 
 ## O5. Scheduling states
 
@@ -116,3 +117,29 @@ The runner compares the golden's observations (expected) with the executor's (ac
 
   `converge` compares the raw values instead (`sync-ops.md` S7.2), so actors that disagree on a random value still differ there.
 - Real ids appear as stored. Meguri allocates ids as Anki does (U23), so a Meguri collection's dump has the same ids as the oracle's.
+
+## O9. Text functions
+
+The `text` kind evaluates pure text functions of the text area on a list of inputs. It never reads or changes the scenario's collection, so it may appear in any observe step, with or without setup.
+
+- `fns` is a non-empty list of distinct function names from the table; `inputs` is a list (possibly empty). Every function runs on every input. The value has one member per function, an array with one output per input, in input order.
+- `unicase_compare` takes `[a, b]` pairs of strings and shares a request with no other function; every other function takes strings. A step may hold several `text` requests when their functions differ (the values merge, O2).
+- "As saved" means: the input is a field value given to a note save in a collection with the default settings (note text normalization on), and the output is what that save stores or decides (`specs/text/checksum-and-sort-field.md` C1).
+
+| Function | Input | Output | Defined in |
+|---|---|---|---|
+| `strip_markup` | string | string | `text/strip-html#H4` |
+| `strip_markup_keep_media` | string | string | `text/strip-html#H5` |
+| `text_line` | string | string | `text/strip-html#H6`, media names dropped |
+| `text_line_keep_media` | string | string | `text/strip-html#H6`, media names kept |
+| `media_refs` | string | list of strings | `text/media-references#M4` |
+| `iri_encode` | string | string | `text/media-references#M6` |
+| `iri_decode` | string | string | `text/media-references#M7` |
+| `media_filename` | string that lowercasing does not change | string | `text/media-filenames#F1` |
+| `sort_field` | string | string: the sort-field text as saved, before the column's affinity applies | `text/checksum-and-sort-field#C2` |
+| `checksum` | string | integer 0 to 4294967295: the checksum as saved | `text/checksum-and-sort-field#C4` |
+| `field_empty` | string | boolean: whether the field as saved counts as empty | `text/field-emptiness#E2` |
+| `unicase_compare` | `[a, b]` | -1, 0 or 1: `a` before, equal to or after `b` | `text/unicode-primitives#U2` |
+
+- An input to `media_filename` that lowercasing (the Unicode default lowercase mapping) would change is `invalid_scenario`: the oracle observes the name transform through the media store, which also lowercases new names (`text/media-filenames#F4`). An input whose transformed name is empty is a run error on the oracle; use the spec's examples for that case.
+- Errors: a malformed request is `invalid_scenario`. No function refuses a valid input.

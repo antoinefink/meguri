@@ -444,6 +444,74 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
 }
 
 #[test]
+fn text_requests_follow_the_schema() {
+    let parse = |request: &str| {
+        let text = format!(
+            "id: text/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    for (bad, why) in [
+        ("text", "does not take these arguments"),
+        ("{text: null}", "cannot take null"),
+        ("{text: {fns: [checksum]}}", "exactly {fns, inputs}"),
+        (
+            "{text: {fns: [checksum], inputs: [], extra: 1}}",
+            "exactly {fns, inputs}",
+        ),
+        ("{text: {fns: [], inputs: []}}", "at least one function"),
+        ("{text: {fns: checksum, inputs: []}}", "list of function names"),
+        ("{text: {fns: [strip_html], inputs: []}}", "not a text function"),
+        ("{text: {fns: [checksum, checksum], inputs: []}}", "appears twice"),
+        ("{text: {fns: [checksum], inputs: x}}", "inputs is a list"),
+        ("{text: {fns: [checksum], inputs: [[a, b]]}}", "inputs are strings"),
+        ("{text: {fns: [checksum], inputs: [1]}}", "inputs are strings"),
+        (
+            "{text: {fns: [unicase_compare, checksum], inputs: []}}",
+            "shares a request with no other function",
+        ),
+        ("{text: {fns: [unicase_compare], inputs: [a]}}", "pairs of strings"),
+        ("{text: {fns: [unicase_compare], inputs: [[a]]}}", "pairs of strings"),
+        (
+            "{text: {fns: [unicase_compare], inputs: [[a, b, c]]}}",
+            "pairs of strings",
+        ),
+        ("{text: {fns: [unicase_compare], inputs: [[a, 1]]}}", "pairs of strings"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+    for good in [
+        "{text: {fns: [checksum, sort_field], inputs: [a, \"\"]}}",
+        "{text: {fns: [media_refs], inputs: []}}",
+        "{text: {fns: [unicase_compare], inputs: [[a, B], [\"\", \"\"]]}}",
+    ] {
+        let parsed = parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+        assert!(parsed.needs().observations.contains("text"));
+    }
+}
+
+#[test]
+fn the_text_functions_are_the_schemas() {
+    let schema: Value =
+        serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
+            .unwrap();
+    let request = &schema["$defs"]["observation_request"]["anyOf"][1]["properties"];
+    let from_schema: Vec<&str> = request["text"]["properties"]["fns"]["items"]["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no text fns enum in {request}"))
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let from_model: Vec<&str> = scenario::TextFunction::ALL.iter().map(|f| f.name()).collect();
+    assert_eq!(from_model, from_schema);
+    let kinds: Vec<&str> = request.as_object().unwrap().keys().map(String::as_str).collect();
+    for kind in scenario::ObservationKind::ALL {
+        assert!(kinds.contains(&kind.name()), "{} is not in the schema", kind.name());
+    }
+}
+
+#[test]
 fn handoffs_split_a_live_scenario_into_alternating_segments() {
     use meguri_testkit::scenario::{Segment, Side};
 

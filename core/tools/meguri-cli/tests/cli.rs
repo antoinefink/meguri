@@ -27,6 +27,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert!(out.status.success());
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(json["supports"]["ops"], serde_json::json!(["advance", "set_clock"]));
+    assert_eq!(json["supports"]["observations"], serde_json::json!(["text"]));
     // dsl.md D7.2: 23 ops besides observe, the actor ops of sync-ops.md
     // among them.
     assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 23);
@@ -97,8 +98,21 @@ fn diff_and_run_compare_with_the_goldens() {
     let json: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(json["tier"], "t0");
     assert_eq!(json["failed"], 0);
-    assert_eq!(json["totals"]["pass"], 1);
-    assert!(json["scenarios"].as_array().unwrap().len() >= 8);
+    let scenarios = json["scenarios"].as_array().unwrap();
+    assert!(scenarios.len() >= 8);
+    let passing: Vec<&str> = scenarios
+        .iter()
+        .filter(|s| s["status"] == "pass")
+        .map(|s| s["scenario"].as_str().unwrap())
+        .collect();
+    assert_eq!(json["totals"]["pass"], passing.len());
+    // The scenarios Meguri has adapters for: the empty runner and the text
+    // area (meguri-text, U20), all of whose 53 scenarios are active.
+    assert!(passing.contains(&"smoke/runner-empty"), "{passing:?}");
+    assert!(
+        passing.iter().filter(|id| id.starts_with("text/")).count() >= 53,
+        "{passing:?}"
+    );
 
     // A filter that matches nothing is a failure, not a silent pass.
     let out = cli(&[

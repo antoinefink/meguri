@@ -13,6 +13,7 @@ use serde_json::{Map, Value};
 use super::FormatError;
 use super::model::{
     ActorName, DUMP_TABLES, DraftArgs, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step, SyncKind,
+    TextRequest,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -293,6 +294,9 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
             if map.get("deck").is_some_and(|d| !d.is_string()) {
                 return bad("deck is a deck name");
             }
+        }
+        ObservationKind::Text => {
+            TextRequest::from_mapping(map)?;
         }
         ObservationKind::DbDump => {
             if let Some(key) = map.keys().find(|k| k.as_str() != "tables") {

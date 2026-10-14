@@ -786,6 +786,102 @@ EOF
     = '[{"code":"unsound","crate":"ppv-lite86","id":"RUSTSEC-2026-9001"}]' ]
 }
 
+# --- core-fuzz (cargo stubbed; runs as if in the fuzz container) -------------
+
+# fuzz_sandbox: fuzz targets alpha and beta, and a cargo stub. `cargo fuzz run`
+# leaves a finding under -artifact_prefix for the targets in $STUB_CRASH and
+# exits with $STUB_RUN_EXIT (default 0) for the others; every call is logged.
+fuzz_sandbox() {
+  local stubs="$BATS_TEST_TMPDIR/fuzz-stubs"
+  mkdir -p "$stubs" "$SB/core/fuzz/fuzz_targets"
+  : >"$SB/core/fuzz/fuzz_targets/alpha.rs"
+  : >"$SB/core/fuzz/fuzz_targets/beta.rs"
+  cat >"$stubs/cargo" <<'EOF'
+#!/bin/bash
+echo "$*" >>"$STUB_LOG"
+[ "$2" = fuzz ] || exit 97
+case "$3" in
+  --version) echo "cargo-fuzz 0.0.0-stub" ;;
+  build) exit "${STUB_BUILD_EXIT:-0}" ;;
+  run)
+    target="$6"
+    for a in "$@"; do
+      case "$a" in -artifact_prefix=*) prefix="${a#-artifact_prefix=}" ;; esac
+    done
+    if [[ " ${STUB_CRASH:-} " == *" $target "* ]]; then
+      printf 'boom' >"${prefix}crash-0123"
+      echo "==1== ERROR: libFuzzer: deadly signal"
+      exit 1
+    fi
+    echo "stat::number_of_executed_units: 42"
+    exit "${STUB_RUN_EXIT:-0}" ;;
+esac
+EOF
+  chmod +x "$stubs/cargo"
+  export PATH="$stubs:$PATH" MG_CONTAINER=fuzz MG_FUZZ_TOOLCHAIN=nightly-stub STUB_LOG="$BATS_TEST_TMPDIR/cargo.log"
+  : >"$STUB_LOG"
+}
+
+@test "core-fuzz rejects bad usage before building anything" {
+  fuzz_sandbox
+  local args
+  for args in "--seconds 0" "--seconds 000" "--seconds -5" "--seconds 1.5" "--seconds abc" "--seconds 12345678" \
+    "--seconds" "--frobnicate" "gamma" "alpha --seconds 0"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg core-fuzz $args
+    [ "$status" -eq 2 ] || { echo "$args"; jq . "$result"; return 1; }
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    validate "$result"
+  done
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "core-fuzz runs every target for the given seconds and passes without findings" {
+  fuzz_sandbox
+  mg core-fuzz --seconds 007
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  [ "$(field .summary.total)" -eq 2 ]
+  [ "$(field .summary.passed)" -eq 2 ]
+  [ "$(field '.details.targets | map("\(.target)=\(.runs)") | join(" ")')" = "alpha=42 beta=42" ]
+  [ "$(grep -c '^+nightly-stub fuzz run -O -a .*-max_total_time=7 ' "$STUB_LOG")" -eq 2 ]
+  [ "$(grep -c '^+nightly-stub fuzz build -O -a$' "$STUB_LOG")" -eq 1 ]
+  [ ! -e "$(dirname "$result")/findings" ]
+  validate "$result"
+
+  : >"$STUB_LOG"
+  mg core-fuzz beta
+  [ "$status" -eq 0 ]
+  [ "$(field .summary.total)" -eq 1 ]
+  grep -q -- '-max_total_time=600 ' "$STUB_LOG"
+  ! grep -q ' alpha ' "$STUB_LOG"
+}
+
+@test "core-fuzz fails a target that finds an input, keeping the input, and on a failed run or build" {
+  fuzz_sandbox
+  export STUB_CRASH=beta
+  mg core-fuzz --seconds 5
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(failure_ids)" = "fuzz/beta" ]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-fuzz --seconds 5 beta" ]
+  [ "$(cat "$(dirname "$result")/findings/beta/crash-0123")" = boom ]
+  [ "$(field '[.artifacts[] | select(.kind == "finding")] | length')" -eq 1 ]
+  validate "$result"
+
+  export STUB_CRASH="" STUB_RUN_EXIT=3
+  mg core-fuzz --seconds 5 alpha
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = "fuzz/alpha-exit-3" ]
+
+  export STUB_RUN_EXIT=0 STUB_BUILD_EXIT=101
+  : >"$STUB_LOG"
+  mg core-fuzz --seconds 5
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = "fuzz-build" ]
+  ! grep -q ' fuzz run ' "$STUB_LOG"
+}
+
 # --- bridge ----------------------------------------------------------------
 
 @test "swift-test --package without a name stops with a usage error" {

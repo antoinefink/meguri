@@ -1,0 +1,10 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
+# the testkit's `text` adapter (meguri-text).
+area: text
+active:
+  - "corpus/*"
+  - "fields/*"
+  - "filenames/*"
+  - "fold/*"
+  - "refs/*"
+  - "strip/*"
