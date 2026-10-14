@@ -65,15 +65,18 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .iter()
             .any(|k| k == "legacy_json")
     );
-    // observations.md O4: blob_decode is a kind of the language, which
-    // Meguri's executor does not run yet (model-ops.md L5).
-    assert!(
-        json["language"]["observations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|k| k == "blob_decode")
-    );
+    // observations.md O4: blob_decode and package_col are kinds of the
+    // language, which Meguri's executor does not run yet (model-ops.md L5).
+    for kind in ["blob_decode", "package_col"] {
+        assert!(
+            json["language"]["observations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == kind),
+            "{kind}"
+        );
+    }
 }
 
 #[test]

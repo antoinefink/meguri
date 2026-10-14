@@ -455,6 +455,68 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ("steps: [{observe: [{blob_decode: {cards: [a]}}]}]", "blob_decode"),
         ("steps: [{observe: [{blob_decode: null}]}]", "cannot take null"),
         ("steps: [{observe: [blob_decode]}]", "does not take"),
+        // model-ops.md L6: the legacy form of export is exact.
+        (
+            "steps: [{export: {format: colpkg, name: x.apkg, legacy: true}}]",
+            "legacy export",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: x.apkg, legacy: false}}]",
+            "legacy export",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: x.apkg, legacy: true, media: true}}]",
+            "legacy export",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: x.colpkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: ../x.apkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: _x.apkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: a b.apkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: .apkg, legacy: true}}]",
+            "package file name",
+        ),
+        // model-ops.md L7.
+        ("steps: [{observe: [{package_col: {name: x.apkg}}]}]", "package_col"),
+        ("steps: [{observe: [{package_col: {columns: [ver]}}]}]", "package_col"),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: []}}]}]",
+            "package_col",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: [ver, ver]}}]}]",
+            "listed twice",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: [cards]}}]}]",
+            "package_col",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: ver}}]}]",
+            "package_col",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.zip, columns: [ver]}}]}]",
+            "package file name",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: [ver], at: 1}}]}]",
+            "package_col",
+        ),
+        ("steps: [{observe: [{package_col: null}]}]", "cannot take null"),
+        ("steps: [{observe: [package_col]}]", "does not take"),
     ] {
         let text = format!("id: area/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{bad}\n");
         let value = scenario::parse_yaml(&text).unwrap();
@@ -473,6 +535,11 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{observe: [{blob_decode: {notetypes: [Pair], decks: [\"A::B\"], presets: [P]}}]}]\n";
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     assert!(parsed.needs().observations.contains("blob_decode"));
+    // model-ops.md L6 and L7; other export forms stay draft and open.
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{export: {format: apkg, name: Note_types-2.v1.apkg, legacy: true}}, {export: {format: colpkg, name: out.colpkg, media: true}}, {observe: [{package_col: {name: Note_types-2.v1.apkg, columns: [ver, conf, models, decks, dconf, tags]}}]}]\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
 }
 
 #[test]

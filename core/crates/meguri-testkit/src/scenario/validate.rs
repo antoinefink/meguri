@@ -117,6 +117,9 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Step::LegacyUpdate(update) = step {
             legacy_update(update).map_err(at)?;
         }
+        if let Step::Export(args) = step {
+            legacy_export(args).map_err(at)?;
+        }
         if let Step::Handoff(to) = step {
             if side == Some(*to) {
                 return Err(at(FormatError::new(format!(
@@ -258,6 +261,46 @@ fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
     Ok(())
 }
 
+/// model-ops.md L6: an export with `legacy` is exactly
+/// `{format: apkg, name: <package file name>, legacy: true}`. Other forms stay
+/// draft (D7.2).
+fn legacy_export(args: &DraftArgs) -> Result<(), FormatError> {
+    if !args.0.contains_key("legacy") {
+        return Ok(());
+    }
+    let exact = args.0.len() == 3
+        && args.0.get("format").and_then(Value::as_str) == Some("apkg")
+        && args.0.get("name").is_some_and(Value::is_string)
+        && args.0.get("legacy") == Some(&Value::Bool(true));
+    if !exact {
+        return Err(FormatError::new(
+            "a legacy export is exactly {format: apkg, name, legacy: true}",
+        ));
+    }
+    package_name(&args.0["name"])
+}
+
+/// model-ops.md L6: a file in the session directory, `^[A-Za-z0-9][A-Za-z0-9._-]*\.apkg$`.
+fn package_name(value: &Value) -> Result<(), FormatError> {
+    let stem = value.as_str().and_then(|name| name.strip_suffix(".apkg"));
+    let ok = stem.is_some_and(|stem| {
+        stem.starts_with(|c: char| c.is_ascii_alphanumeric())
+            && stem
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    });
+    if ok {
+        Ok(())
+    } else {
+        Err(FormatError::new(format!(
+            "{value} is not a package file name (letters, digits, '.', '_' and '-', starting with a letter or digit, ending in .apkg)"
+        )))
+    }
+}
+
+/// The `col` columns `package_col` reads (model-ops.md L7).
+const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "tags"];
+
 /// The schema's rules for the mapping form of an observation request.
 pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value>) -> Result<(), FormatError> {
     let name = kind.name();
@@ -323,6 +366,26 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
             });
             if map.is_empty() || !lists_ok {
                 return bad("takes {notetypes?, decks?, presets?}, each a non-empty list of names");
+            }
+        }
+        // model-ops.md L7.
+        ObservationKind::PackageCol => {
+            if !only(&["name", "columns"]) || !map.contains_key("name") {
+                return bad("takes {name, columns}");
+            }
+            package_name(&map["name"]).map_err(|e| FormatError::new(format!("observation {name}: {e}")))?;
+            let Some(columns) = map.get("columns").and_then(Value::as_array).filter(|c| !c.is_empty()) else {
+                return bad("columns is a non-empty list of col columns");
+            };
+            let mut seen = BTreeSet::new();
+            for column in columns {
+                let column = column.as_str().unwrap_or_default();
+                if !PACKAGE_COLUMNS.contains(&column) {
+                    return bad(&format!("columns are among {}", PACKAGE_COLUMNS.join(", ")));
+                }
+                if !seen.insert(column) {
+                    return bad(&format!("column {column} is listed twice"));
+                }
             }
         }
         ObservationKind::Text => {

@@ -949,6 +949,7 @@ pub enum ObservationKind {
     Digest,
     LegacyJson,
     BlobDecode,
+    PackageCol,
     Text,
 }
 
@@ -968,7 +969,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 17] = [
+    pub const ALL: [ObservationKind; 18] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -985,6 +986,7 @@ impl ObservationKind {
         ObservationKind::Digest,
         ObservationKind::LegacyJson,
         ObservationKind::BlobDecode,
+        ObservationKind::PackageCol,
         ObservationKind::Text,
     ];
 
@@ -1006,6 +1008,7 @@ impl ObservationKind {
             ObservationKind::Digest => "digest",
             ObservationKind::LegacyJson => "legacy_json",
             ObservationKind::BlobDecode => "blob_decode",
+            ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
         }
     }
@@ -1026,6 +1029,7 @@ impl ObservationKind {
             | ObservationKind::Search
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
+            | ObservationKind::PackageCol
             | ObservationKind::Text => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
         }
