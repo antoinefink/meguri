@@ -10,6 +10,17 @@ prints (Python or Anki's Rust backend) goes to stderr.
 
 The worker serves exactly one time zone, $TZ, for its whole life (R1871); its
 clock is the libfaketime file set up by entrypoint.sh.
+
+Actor scenarios (specs/conformance/sync-ops.md S10) run whole with `run`, or
+interactively: begin takes caller_actors and ids and answers with the setup's
+ids and the session resources' descriptions (sync: endpoints and account);
+step takes done for a step a caller-played actor ran and dumps with an op that
+takes them (converge), and answers with the real ids the step created.
+
+At start the worker removes every proxy variable from its environment, so a
+stray one cannot reroute a sync client, and in a recording run
+(ORACLE_SYNC_RECORDER) routes HTTP through the recorder, loopback excepted
+(sync-ops.md S8.1, S9). Children it starts get no proxy variable.
 """
 
 from __future__ import annotations
@@ -43,8 +54,11 @@ class Worker:
             return dict(self.hello)
         if cmd == "run":
             # A whole scenario, or one segment of a live chain (steps, resume,
-            # handoff; dsl.md D9.2).
+            # handoff; dsl.md D9.2). An actor scenario runs whole only.
             self._no_open_session()
+            scenario = req.get("scenario")
+            if isinstance(scenario, dict) and "actors" in scenario and {"steps", "resume", "handoff"} & set(req):
+                raise DriverError("invalid_scenario", detail="an actor scenario runs whole (sync-ops.md S10.1)")
             started = time.perf_counter()
             session = Session(
                 req.get("scenario"), self.tz, self.scratch, self.clock,
@@ -68,20 +82,51 @@ class Worker:
             return resp
         if cmd == "begin":
             self._no_open_session()
-            self.session = Session(req.get("scenario"), self.tz, self.scratch, self.clock)
-            return {"scenario_id": self.session.scenario["id"], "steps": len(self.session.steps)}
+            session = Session(
+                req.get("scenario"), self.tz, self.scratch, self.clock,
+                caller_actors=req.get("caller_actors"), caller_ids=req.get("ids"),
+            )
+            self.session = session
+            resp = {"scenario_id": session.scenario["id"], "steps": len(session.steps)}
+            if session.is_actor_scenario:
+                resp["ids"] = session.setup_ids
+                for name, resource in session.resources.items():
+                    if hasattr(resource, "describe"):
+                        resp[name] = resource.describe()
+            return resp
         if cmd == "step":
             # index: the step's position in the session output (what `end`
             # returns). Ad-hoc steps leave the scenario cursor where it is.
             session = self._open_session()
             index = len(session.outputs)
+            done, dumps = req.get("done"), req.get("dumps")
             if "step" in req:
+                if done is not None or dumps is not None:
+                    raise DriverError("protocol_error", detail="an ad-hoc step comes without done or dumps")
+                if not session.runs_here(req["step"]):
+                    raise DriverError("protocol_error", detail="the caller runs this actor's steps")
                 return {"index": index, "observation": session.run_step(index, req["step"])}
             if session.next_step >= len(session.steps):
                 raise DriverError("no_more_steps", steps=len(session.steps))
-            observation = session.run_step(index, session.steps[session.next_step])
+            step = session.steps[session.next_step]
+            counts = session.id_counts()
+            if not session.runs_here(step):
+                if done is None or dumps is not None:
+                    raise DriverError("protocol_error", detail=f"step {session.next_step} belongs to a caller-played actor: send done")
+                observation = session.record_caller_step(done)
+            else:
+                if done is not None:
+                    raise DriverError("protocol_error", detail=f"the worker runs step {session.next_step}: send no done")
+                session.caller_dumps = _check_dumps(session, step, dumps)
+                try:
+                    observation = session.run_step(index, step, scenario_index=session.next_step)
+                finally:
+                    session.caller_dumps = None
             session.next_step += 1  # a failed step stays next
-            return {"index": index, "observation": observation}
+            resp = {"index": index, "observation": observation}
+            if session.is_actor_scenario:
+                resp["ids"] = session.ids_since(counts)
+            return resp
         if cmd == "end":
             session = self._open_session()
             self.session = None
@@ -122,6 +167,24 @@ class Worker:
             out.flush()
         if self.session is not None:
             self.session.close()
+
+
+def _check_dumps(session: Session, step: dict, dumps: Any) -> dict | None:
+    """dumps names exactly the caller-played actors, and comes only with an op
+    that takes them when the caller plays actors (sync-ops.md S10.4)."""
+    ((name, _),) = step.items()
+    wanted = name in registry.DUMP_OPS and session.caller_actors
+    if not wanted:
+        if dumps is not None:
+            raise DriverError("protocol_error", detail=f"step {session.next_step} takes no dumps")
+        return None
+    if (
+        not isinstance(dumps, dict)
+        or set(dumps) != set(session.caller_actors)
+        or not all(isinstance(v, dict) for v in dumps.values())
+    ):
+        raise DriverError("protocol_error", detail="dumps holds one raw dump for each caller-played actor")
+    return dumps
 
 
 def _step_range(steps: Any, count: int) -> tuple[int, int]:
@@ -167,7 +230,23 @@ def _response_line(resp: dict) -> str:
         return _dumps(err) + "\n"
 
 
+PROXY_VARIABLES = ("http_proxy", "https_proxy", "all_proxy", "no_proxy")
+
+
+def proxy_environment(environ) -> None:
+    """Drop proxy variables in any letter case; in a recording run, route HTTP
+    through the recorder except to loopback (sync-ops.md S8.1, S9)."""
+    for key in list(environ):
+        if key.lower() in PROXY_VARIABLES:
+            del environ[key]
+    recorder = environ.get("ORACLE_SYNC_RECORDER")
+    if recorder:
+        environ["http_proxy"] = f"http://{recorder}"
+        environ["no_proxy"] = "127.0.0.1,localhost"
+
+
 def main() -> int:
+    proxy_environment(os.environ)
     # Protocol output gets its own descriptor; fd 1 and sys.stdout go to stderr,
     # so a stray print in Python or Rust cannot corrupt the stream.
     proto_out = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)

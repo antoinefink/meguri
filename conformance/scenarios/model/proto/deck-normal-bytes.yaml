@@ -1,0 +1,35 @@
+# Canonical bytes of deck common and normal deck kind blobs (protobuf-records
+# P6.4, P6.5.1): the Default deck, nested decks, and a deck with every common
+# and normal-deck field set, including an explicit new limit of 0 and a
+# today-only limit of 0 (fields with explicit presence, P3). The day counters
+# share one day (schema11-json S7.1).
+id: model/proto/deck-normal-bytes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Daily, new_per_day: 15}]
+  decks:
+    - {name: Words, preset: Daily}
+    - "Words::Verbs"
+    - Grammar
+steps:
+  - legacy_update:
+      deck: Words
+      patch:
+        desc: "Daily words"
+        md: true
+        collapsed: false
+        browserCollapsed: true
+        extendNew: 5
+        extendRev: 7
+        reviewLimit: 100
+        newLimit: 0
+        reviewLimitToday: {limit: 30, today: 5}
+        newLimitToday: {limit: 0, today: 5}
+        desiredRetention: 85
+        lrnToday: [5, 1]
+        revToday: [5, 12]
+        newToday: [5, 3]
+        timeToday: [5, 90000]
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(common), hex(kind) FROM decks ORDER BY id"}
+  - observe:
+      - legacy_json: {decks: [Default, Words, "Words::Verbs", Grammar]}

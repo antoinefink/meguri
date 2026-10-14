@@ -1,0 +1,27 @@
+# A filtered deck (protobuf-records P6.5.3, schema11-json S9). No setup section
+# creates one, so the row is inserted with blobs built from the spec:
+# common = both collapsed flags; kind = filtered, reschedule on, one search
+# "is:due" limit 50 order 6, Again 60 s, Hard 600 s. Then the object is saved
+# back with new values and lenient ones ("20" for a limit, "0" for resched).
+id: model/proto/deck-filtered-bytes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000000, 'Cram', 1500000000, 0, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c')"
+  - observe:
+      - legacy_json: {decks: [Cram]}
+  - legacy_update:
+      deck: Cram
+      patch:
+        terms: [["is:due", 50, 6], ["deck:Words", "20", 1]]
+        resched: "0"
+        delays: [1.5, 10]
+        previewDelay: 10
+        previewAgainSecs: 30
+        previewHardSecs: 0
+        previewGoodSecs: 120
+        separate: false
+        desc: "ignored for filtered decks"
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(common), hex(kind) FROM decks WHERE id = 1500000000000"}
+  - observe:
+      - legacy_json: {decks: [Cram]}

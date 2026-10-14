@@ -1,0 +1,49 @@
+# The unicase comparison (specs/text/unicode-primitives.md U2): full case
+# folding from the pinned table, three-character folds in their pinned order,
+# code-point order after folding.
+id: text/fold/unicase
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [unicase_compare]
+          inputs:
+            - ["a", "B"]
+            - ["B", "a"]
+            - ["abc", "ABC"]
+            - ["abc", "ABD"]
+            - ["Z", "a"]
+            - ["Z", "["]
+            - ["_", "a"]
+            - ["ß", "ss"]
+            - ["ß", "SS"]
+            - ["Straße", "STRASSE"]
+            - ["\u1E9E", "ss"]
+            - ["é", "É"]
+            - ["ǅ", "ǆ"]
+            - ["Ǆ", "ǆ"]
+            - ["İ", "i"]
+            - ["İ", "i\u0307"]
+            - ["ı", "I"]
+            - ["\uFB03", "ffi"]
+            - ["\uFB03", "iff"]
+            - ["ΐ", "ι\u0308\u0301"]
+            - ["ΐ", "\u0301ι\u0308"]
+            - ["\u212A", "k"]
+            - ["Σ", "ς"]
+            - ["σ", "ς"]
+            - ["Ꭰ", "ꭰ"]
+            - ["ᲀ", "в"]
+            - ["𐐀", "𐐨"]
+            - ["𞤀", "𞤢"]
+            - ["ꞵ", "Ꞵ"]
+            - ["Ა", "ა"]
+            - ["ꟀX", "ꟁx"]
+            - ["ǰ", "J\u030C"]
+            - ["ŉ", "ʼN"]
+            - ["\u212B", "å"]
+            - ["\u017F", "s"]
+            - ["", ""]
+            - ["", "a"]
+            - ["a", "ab"]
+            - ["é", "f"]

@@ -136,7 +136,13 @@ class StorageOpen(unittest.TestCase):
         )
 
     def test_only_an_open_may_follow_a_refused_open(self):
-        for step in ({"db_exec": {"sql": "SELECT 1"}}, {"observe": ["schema_objects"]}, {"handoff": "meguri"}):
+        for step in (
+            {"db_exec": {"sql": "SELECT 1"}},
+            {"observe": ["schema_objects"]},
+            {"handoff": "meguri"},
+            {"advance": "1d"},
+            {"reopen": {}},
+        ):
             resp = self.run_steps([{"open": {"fixture": "storage/v19.anki2"}}, step])
             self.assertFalse(resp["ok"], step)
             self.assertEqual((resp["error"]["kind"], resp["error"]["step"]), ("invalid_scenario", 1), step)
@@ -159,6 +165,7 @@ class StorageOpen(unittest.TestCase):
         for steps, extra in (
             ([{"advance": "1d"}, opening], {}),
             ([opening], {"setup": {"decks": ["A"]}}),
+            ([opening], {"actors": ["client_a"]}),
         ):
             resp = self.run_steps(steps, **extra)
             self.assertEqual(resp["error"]["kind"], "invalid_scenario", resp)
@@ -173,6 +180,8 @@ class StorageOpen(unittest.TestCase):
             for fixture in ("storage/none.anki2", "storage/dir.anki2"):
                 resp = self.worker.request({"cmd": "step", "step": {"open": {"fixture": fixture}}})
                 self.assertEqual(resp["error"]["kind"], "fixture_error", resp)
+                # protocol.json's error object allows no other member here.
+                self.assertLessEqual(set(resp["error"]), {"kind", "step", "detail"}, resp)
             read = self.worker.request({"cmd": "step", "step": {"db_exec": {"sql": "SELECT count(*) FROM marker"}}})
             self.assertEqual(read["observation"], {"db_exec": {"rows": [[0]]}}, read)
         finally:

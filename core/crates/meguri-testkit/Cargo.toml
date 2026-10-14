@@ -9,10 +9,12 @@ publish.workspace = true
 [dependencies]
 granit-parser.workspace = true
 jiff.workspace = true
-meguri-model.workspace = true
+# test-hooks: armed fault points and the steppable clock (KTD18).
+meguri-model = { workspace = true, features = ["test-hooks"] }
 # The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
 meguri-sync = { workspace = true, features = ["test-hooks"] }
+meguri-text.workspace = true
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:

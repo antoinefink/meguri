@@ -1,0 +1,30 @@
+# Record -> object for note type blobs built from the spec, each with an other
+# holding reserved keys and one unknown key (schema11-json S3, S4-S6): only
+# zz_nt, zz_fld and zz_tmpl reach the object; css, sortf, ord and qfmt come from
+# the records. Blobs: notetype config {css ".card { margin: 0; }", latex_pre
+# "% pre", latex_post "% post", reqs [[0, any, [0]]]}; field configs {font
+# Arial, size 20, id 1001 / 1002}; template config {"{{Front}}", "{{Back}}",
+# id 2001}.
+id: model/schema11/notetype-other-reserved
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - db_exec:
+      sql: "UPDATE notetypes SET config = X'1a142e63617264207b206d617267696e3a20303b207d2a05252070726532062520706f7374420510011a0100fa0f1f7b22637373223a2278222c22736f727466223a332c227a7a5f6e74223a317d' WHERE name = 'Pair'"
+  - db_exec:
+      sql: "UPDATE fields SET config = X'1a05417269616c201448e907fa0f177b226f7264223a392c227a7a5f666c64223a747275657d' WHERE ord = 0 AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"
+  - db_exec:
+      sql: "UPDATE fields SET config = X'1a05417269616c201448ea07' WHERE ord = 1 AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"
+  - db_exec:
+      sql: "UPDATE templates SET config = X'0a097b7b46726f6e747d7d12087b7b4261636b7d7d40d10ffa0f187b2271666d74223a2278222c227a7a5f746d706c223a317d' WHERE ord = 0 AND ntid = (SELECT id FROM notetypes WHERE name = 'Pair')"
+  - observe:
+      - legacy_json: {notetypes: [Pair]}
+  - legacy_update: {notetype: Pair, patch: {}}
+  - db_exec: {sql: "SELECT hex(config) FROM notetypes WHERE name = 'Pair'"}
+  - db_exec: {sql: "SELECT f.ord, hex(f.config) FROM fields f JOIN notetypes n ON n.id = f.ntid WHERE n.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT t.ord, hex(t.config) FROM templates t JOIN notetypes n ON n.id = t.ntid WHERE n.name = 'Pair' ORDER BY t.ord"}

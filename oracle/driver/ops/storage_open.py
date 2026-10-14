@@ -52,7 +52,7 @@ def fixture_path(rel) -> str:
     except OSError:
         regular = False
     if not regular:
-        raise DriverError("fixture_error", fixture=rel, detail="not a regular file under ORACLE_FIXTURES")
+        raise DriverError("fixture_error", detail=f"{rel} is not a regular file under ORACLE_FIXTURES")
     return path
 
 

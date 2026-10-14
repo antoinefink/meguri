@@ -17,6 +17,13 @@ that passes through the reverse proxy becomes one JSON line in
   not stored). A zstd body is decompressed first, across frames.
 - A flow that ends without a response (a reset, a timeout) has `response:
   null` and `error` set to mitmproxy's message.
+- With `record_actor_steps` (the `sync-recorder` service, a forward proxy for
+  the oracle actors of an actor scenario, specs/conformance/sync-ops.md S9),
+  each request path starts with `/<actor>/<step index>`: the addon removes it
+  before the request is forwarded, and the line gets two more members,
+  `actor` (a string) and `step` (an integer); `path` is the forwarded path. A
+  request without the prefix cannot be attributed: it is forwarded, but not
+  recorded, like any exchange that could not be written.
 
 Timestamps, session keys and host keys are recorded as they were; consumers
 compare semantically and ignore them.
@@ -35,12 +42,16 @@ import io
 import json
 import logging
 import os
+import re
 import threading
 
 import zstandard
 from mitmproxy import ctx
 
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+
+# `/<actor>/<step index>` before the sync path (sync-ops.md S2.1, S9).
+ACTOR_STEP = re.compile(r"^/(meguri(?:_(?:[2-9]|[1-9][0-9]+))?|client_[a-z])/(0|[1-9][0-9]*)(/.*)$")
 
 
 def decode_body(raw, content_type):
@@ -82,10 +93,16 @@ def kept_headers(headers):
     return kept
 
 
-def exchange(seq, flow):
+def exchange(seq, flow, actor_steps=False):
     request = flow.request
     response = flow.response
-    return {
+    attributed = {}
+    if actor_steps:
+        prefix = flow.metadata.get("record_sync_prefix")
+        if prefix is None:
+            raise ValueError("the request path has no /<actor>/<step index> prefix")
+        attributed = {"actor": prefix[0], "step": prefix[1]}
+    return attributed | {
         "seq": seq,
         "method": request.method,
         "path": request.path,
@@ -115,6 +132,12 @@ class RecordSync:
         loader.add_option("record_dir", str, "/recordings", "directory that receives exchanges.jsonl")
         loader.add_option(
             "record_health", str, "/tmp/record-sync-health.json", "file that reports the recorder's state"
+        )
+        loader.add_option(
+            "record_actor_steps",
+            bool,
+            False,
+            "strip /<actor>/<step index> from each request path and record actor and step",
         )
 
     def report(self):
@@ -146,7 +169,9 @@ class RecordSync:
         with self.lock:
             self.seq += 1
             try:
-                line = json.dumps(exchange(self.seq, flow), sort_keys=True, ensure_ascii=False)
+                line = json.dumps(
+                    exchange(self.seq, flow, ctx.options.record_actor_steps), sort_keys=True, ensure_ascii=False
+                )
                 with open(self.path, "a", encoding="utf-8") as out:
                     out.write(line + "\n")
             except Exception as err:  # a gap in the recording, whatever the cause
@@ -155,6 +180,15 @@ class RecordSync:
                 return
             self.health["written"] += 1
             self.report()
+
+    def request(self, flow):
+        if not ctx.options.record_actor_steps:
+            return
+        match = ACTOR_STEP.match(flow.request.path)
+        if match is None:
+            return
+        flow.metadata["record_sync_prefix"] = (match.group(1), int(match.group(2)))
+        flow.request.path = match.group(3)
 
     def response(self, flow):
         self.write(flow)

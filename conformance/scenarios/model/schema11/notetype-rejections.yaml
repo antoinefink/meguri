@@ -1,0 +1,59 @@
+# Note type objects Anki refuses (schema11-json S4-S6). The first step gives the
+# fields and template fixed ids so the final observation is deterministic;
+# every later step is rejected with invalid_json and changes nothing.
+id: model/schema11/notetype-rejections
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update:
+      notetype: Pair
+      patch:
+        latexPre: "% pre"
+        latexPost: "% post"
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001}
+  - legacy_update: {notetype: Pair, patch: {type: 2}}
+  - legacy_update: {notetype: Pair, patch: {sortf: -1}}
+  - legacy_update: {notetype: Pair, patch: {did: null}}
+  - legacy_update: {notetype: Pair, patch: {css: null}}
+  - legacy_update: {notetype: Pair, patch: {usn: null}}
+  - legacy_update: {notetype: Pair, patch: {mod: "5"}}
+  - legacy_update: {notetype: Pair, patch: {originalStockKind: "1"}}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        tmpls: [{name: Forward, ord: 0, afmt: "{{Back}}", id: 2001}]
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: 2, rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20.5, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: "yes", rtl: false, font: Arial, size: 20, id: 1001}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}

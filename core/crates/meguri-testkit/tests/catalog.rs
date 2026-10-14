@@ -69,8 +69,9 @@ fn tree() -> tempfile::TempDir {
     write(root, "deviations.yaml", "deviations: []\n");
     fs::create_dir_all(root.join("goldens")).unwrap();
     // AE83: the filtered deck and its cards survive a round trip through
-    // Meguri (the sync area makes the middle a sync); a live chain.
-    let scenario = r#"id: preservation/filtered-deck-sync
+    // Meguri, which edits the note in the middle; a live chain. (Sync
+    // between clients is an actor scenario, sync-ops.md S1.)
+    let scenario = r##"id: preservation/filtered-deck-sync
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 setup:
   decks: [Words]
@@ -79,10 +80,10 @@ setup:
 steps:
   - build_filtered: {name: Filtered, search: "deck:Words"}
   - handoff: meguri
-  - sync: {kind: full_upload}
+  - edit_note: {note: "#n1", fields: [c]}
   - handoff: oracle
   - observe: ["card(#c1)"]
-"#;
+"##;
     write(root, &format!("scenarios/{ID}.yaml"), scenario);
     golden(root, LOCK);
     dir

@@ -1,0 +1,52 @@
+# Schema-11 deck values into the record (schema11-json S7, S8): day counters
+# that disagree on the day, desired retention as a percentage, today-only
+# limits, strings for numbers, negative and invalid extend values, the
+# obsolete "return" key, an unknown key, and kept usn and mod.
+id: model/schema11/deck-values
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+steps:
+  - legacy_update:
+      deck: Words
+      patch:
+        lrnToday: [5, 2]
+        revToday: [7, 3]
+        newToday: [7, 4]
+        timeToday: [6, 1000]
+        desiredRetention: 85
+        reviewLimitToday: {limit: 5, today: 9}
+        newLimit: 4
+        md: true
+        desc: "hi"
+        extendNew: -4
+        extendRev: "x"
+        conf: "1"
+        return: 5
+        sep: 1
+        mod: "1894700000"
+        usn: 3
+  - db_exec: {sql: "SELECT mtime_secs, usn, hex(common), hex(kind) FROM decks WHERE name = 'Words'"}
+  - observe:
+      - legacy_json: {decks: [Words]}
+  - legacy_update:
+      deck: Words
+      patch:
+        reviewLimitToday: {today: null}
+        newLimit: -1
+        desiredRetention: "x"
+        lrnToday: [5]
+        revToday: []
+        newToday: [1, 2, 3]
+        timeToday: [3, 4]
+        browserCollapsed: null
+        extendNew: 2
+  - db_exec: {sql: "SELECT mtime_secs, usn, hex(common), hex(kind) FROM decks WHERE name = 'Words'"}
+  - observe:
+      - legacy_json: {decks: [Words]}
+  - legacy_update: {deck: Words, patch: {desiredRetention: 29, md: null, desc: null}}
+  - db_exec: {sql: "SELECT hex(kind) FROM decks WHERE name = 'Words'"}
+  - legacy_update: {deck: Words, patch: {desiredRetention: 57}}
+  - db_exec: {sql: "SELECT hex(kind) FROM decks WHERE name = 'Words'"}
+  - observe:
+      - legacy_json: {decks: [Words]}

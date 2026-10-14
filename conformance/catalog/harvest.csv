@@ -29,7 +29,7 @@ h6c0d5ffc0db0,rust,supplementary,deckconfig,unclassified,,,open
 h70e1bda7fbd5,rust,supplementary,deckconfig,unclassified,,,open
 h74f60c8aa789,rust,supplementary,deckconfig,unclassified,,,open
 h774fd17fd8ea,rust,supplementary,deckconfig,unclassified,,,open
-h78189711cf81,rust,tag,deckconfig,unclassified,,,open
+h78189711cf81,rust,tag,deckconfig,in-scope,"reserved keys in a preset's other bytes, top level and sub-objects, never reach the legacy JSON object",model/schema11/preset-other,done
 h788f98b55f1d,rust,tag,deckconfig,unclassified,,,open
 h7f7645f98775,rust,tag,deckconfig,unclassified,,,open
 h81d3f640e8fd,rust,tag,deckconfig,unclassified,,,open
@@ -43,7 +43,7 @@ hbfa3b0173663,rust,supplementary,deckconfig,unclassified,,,open
 hc06112477870,rust,supplementary,deckconfig,unclassified,,,open
 hc77e5ddeebb7,rust,supplementary,deckconfig,unclassified,,,open
 hc9c179bfb2ef,rust,supplementary,deckconfig,unclassified,,,open
-hd2c8c7020dc2,rust,tag,deckconfig,unclassified,,,open
+hd2c8c7020dc2,rust,tag,deckconfig,in-scope,"legacy graduating and easy intervals: two or more elements accepted, anything else gives the defaults",model/schema11/preset-values,done
 hd3586154cc8d,rust,supplementary,deckconfig,unclassified,,,open
 hd68f57dc3fd2,rust,supplementary,deckconfig,unclassified,,,open
 hd709478326d6,rust,supplementary,deckconfig,unclassified,,,open
@@ -71,7 +71,7 @@ h25a2a4a1f100,rust,tag,decks,unclassified,,,open
 h26a096646ed7,rust,tag,decks,unclassified,,,open
 h2c1eea8afaea,rust,tag,decks,unclassified,,,open
 h34d675666d1c,rust,tag,decks,unclassified,,,open
-h3bb5ab9d9cbc,rust,tag,decks,unclassified,,,open
+h3bb5ab9d9cbc,rust,tag,decks,in-scope,"deck name components normalized (NFC, control characters, trimming, blank)",model/schema11/deck-names,done
 h3c7a515847bc,rust,tag,decks,unclassified,,,open
 h5159c422dac6,rust,tag,decks,unclassified,,,open
 h59d86b0d0618,rust,tag,decks,unclassified,,,open
@@ -87,14 +87,14 @@ h79589a39cd9f,rust,tag,decks,unclassified,,,open
 h8673919e1db4,rust,tag,decks,unclassified,,,open
 h8b7b9e2cc85a,rust,tag,decks,unclassified,,,open
 h97653de82f30,rust,tag,decks,unclassified,,,open
-h9929404ade51,rust,tag,decks,unclassified,,,open
+h9929404ade51,rust,tag,decks,in-scope,reserved keys in a deck's other bytes never reach the legacy JSON object,model/schema11/deck-other-flatten model/schema11/deck-other-roundtrip,done
 h999720c226d7,rust,tag,decks,unclassified,,,open
 h99b83b4a6481,rust,tag,decks,unclassified,,,open
 ha07b5be6909c,rust,tag,decks,unclassified,,,open
 ha321fffdb44c,rust,tag,decks,unclassified,,,open
 ha7724cf9a502,rust,tag,decks,unclassified,,,open
 ha978090ce7aa,rust,tag,decks,unclassified,,,open
-hbf8f9be771c0,rust,tag,decks,unclassified,,,open
+hbf8f9be771c0,rust,tag,decks,in-scope,human deck names converted to the stored native form,model/schema11/deck-names,done
 hc42b58794e0c,rust,tag,decks,unclassified,,,open
 hcc9150d28b7e,rust,tag,decks,unclassified,,,open
 hcd825469184c,rust,tag,decks,unclassified,,,open
@@ -317,8 +317,8 @@ h8a1d70115eae,python,tag,media,unclassified,,,open
 h026e05052d5b,rust,tag,media,unclassified,,,open
 h02ee289c8351,rust,tag,media,unclassified,,,open
 h0688e35c67d3,rust,tag,media,unclassified,,,open
-h2751253863a4,rust,tag,media,unclassified,,,open
-h2df882b13f13,rust,tag,media,unclassified,,,open
+h2751253863a4,rust,tag,media,in-scope,the 120-byte media file name limit,text/filenames/normalize text/corpus/filenames-01,done
+h2df882b13f13,rust,tag,media,in-scope,the media file name transform,text/filenames/normalize text/corpus/filenames-01,done
 h448a4c3e64ba,rust,tag,media,unclassified,,,open
 h487c9a31bd1f,rust,tag,media,unclassified,,,open
 h4b933596f69b,rust,tag,media,unclassified,,,open
@@ -345,7 +345,7 @@ h9f6e6bc22339,python,tag,model,unclassified,,,open
 hc3bca137eeb2,python,tag,model,unclassified,,,open
 hdadc818e52d7,python,tag,model,unclassified,,,open
 he051a468be4b,python,tag,model,unclassified,,,open
-h09c785fd688d,rust,tag,model,unclassified,,,open
+h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong type takes the default,model/card-data/lenient model/schema11/notetype-values model/schema11/deck-values model/schema11/preset-values,done
 h6719d2739159,rust,tag,model,unclassified,,,open
 had3c7e0753e9,rust,tag,model,unclassified,,,open
 hde5c73b93e34,rust,tag,model,unclassified,,,open
@@ -470,7 +470,7 @@ h9e510243ea25,rust,tag,notetypes,unclassified,,,open
 ha1bb31fa12da,rust,tag,notetypes,unclassified,,,open
 ha2b5da04d17c,rust,tag,notetypes,unclassified,,,open
 ha5a622e9741a,rust,tag,notetypes,unclassified,,,open
-ha8d3154d3f27,rust,tag,notetypes,unclassified,,,open
+ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
 haa4b9cb7903d,rust,tag,notetypes,unclassified,,,open
 haf0842771063,rust,tag,notetypes,unclassified,,,open
 hb543398f1a4c,rust,tag,notetypes,unclassified,,,open
@@ -989,7 +989,7 @@ h6b2af222819b,rust,tag,storage,in-scope,18 is the newest schema opened; newer fi
 h6c9e358dc5b8,rust,tag,storage,in-scope,adding a card row; specified with record I/O and ids (U23),,deferred
 h6efeaad807ac,rust,supplementary,storage,unclassified,,,open
 h802f402a566b,rust,supplementary,storage,unclassified,,,open
-h8deea0884574,rust,tag,storage,in-scope,number precision in card data JSON; specified with the model records (U21),,deferred
+h8deea0884574,rust,tag,storage,in-scope,card data numbers rounded per key and written in shortest form,model/card-data/rewrite,done
 h945f75ebb7a8,rust,tag,storage,not-applicable,internal helper that formats id lists into SQL text; no observable behavior,,done
 h94c7daf74c2e,rust,supplementary,storage,unclassified,,,open
 ha74ff67e3c1f,rust,tag,storage,in-scope,Check Database detection of invalid ids; specified with Check Database (U128),,deferred
@@ -997,7 +997,7 @@ hb30e802d8f2f,rust,supplementary,storage,unclassified,,,open
 hc0fc7c23426d,rust,supplementary,storage,unclassified,,,open
 hc4d781660d05,rust,supplementary,storage,unclassified,,,open
 hc4e797f560a0,rust,supplementary,storage,unclassified,,,open
-he559261b12d3,rust,tag,storage,in-scope,limits on the custom data object stored in card data; specified with the model records (U21),,deferred
+he559261b12d3,rust,tag,storage,out-of-scope,custom scheduling data limits apply only when custom scheduler code sets the data; Meguri never sets it,,done
 he69093b72b82,rust,supplementary,storage,unclassified,,,open
 he9f3ecd2d21f,rust,supplementary,storage,unclassified,,,open
 heba033e5deec,rust,supplementary,storage,in-scope,closing without a downgrade keeps schema 18,storage/open/oracle-made-reopen,done
@@ -1085,20 +1085,20 @@ hca878bd8d66c,rust,tag,tags,unclassified,,,open
 hcd7b5a34f3ac,rust,tag,tags,unclassified,,,open
 hd8d86a3d37b3,rust,tag,tags,unclassified,,,open
 he58668dea421,rust,tag,tags,unclassified,,,open
-h26e80efa4ec6,python,tag,text,unclassified,,,open
-ha04d63efb2f8,python,tag,text,unclassified,,,open
-hf0908a412138,python,tag,text,unclassified,,,open
-h1865ada81cd2,rust,tag,text,unclassified,,,open
-h4b8f37d073df,rust,tag,text,unclassified,,,open
-h627109a11e69,rust,tag,text,unclassified,,,open
-h795f93e05e42,rust,tag,text,unclassified,,,open
-h951f9a33c9e8,rust,tag,text,unclassified,,,open
-h9928c48fa7e7,rust,tag,text,unclassified,,,open
-hc107d6243a3c,rust,tag,text,unclassified,,,open
-h2c27a9391685,typescript,tag,text,unclassified,,,open
-h7d47d968bfb6,typescript,tag,text,unclassified,,,open
-hd903a0575683,typescript,tag,text,unclassified,,,open
-he2a197504da2,typescript,tag,text,unclassified,,,open
+h26e80efa4ec6,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
+ha04d63efb2f8,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
+hf0908a412138,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
+h1865ada81cd2,rust,tag,text,in-scope,renaming media references in imported notes; specified with package import (U120),,deferred
+h4b8f37d073df,rust,tag,text,in-scope,plain stripping and stripping that keeps media names,text/strip/markup text/strip/keep-media,done
+h627109a11e69,rust,tag,text,in-scope,display percent-encoding of local media names,text/refs/iri,done
+h795f93e05e42,rust,tag,text,in-scope,accent folding for nc: searches; specified with search text matching (U81),,deferred
+h951f9a33c9e8,rust,tag,text,in-scope,underscore-prefixed files named by note type templates and CSS; specified with package export (U122),,deferred
+h9928c48fa7e7,rust,tag,text,in-scope,byte-length cuts on a character boundary; covered through the media file name limit,text/filenames/normalize,done
+hc107d6243a3c,rust,tag,text,in-scope,"wildcard and escape handling of search text; specified with search (U80, U81)",,deferred
+h2c27a9391685,typescript,tag,text,not-applicable,question-mark direction in the desktop web UI translation helper; Meguri strings come from its own catalog,,done
+h7d47d968bfb6,typescript,tag,text,in-scope,unit choice for time spans shown in charts and options; decided with the stats chart labels (U226),,deferred
+hd903a0575683,typescript,tag,text,in-scope,unit choice for time spans shown in charts and options; decided with the stats chart labels (U226),,deferred
+he2a197504da2,typescript,tag,text,not-applicable,question-mark direction in the desktop web UI translation helper; Meguri strings come from its own catalog,,done
 h0c2f18667cee,python,tag,tooling,not-applicable,Anki's documentation and release tooling,,done
 h0eb764531bfb,python,tag,tooling,not-applicable,Anki's documentation and release tooling,,done
 h115d3b6864af,python,tag,tooling,not-applicable,Anki's documentation and release tooling,,done

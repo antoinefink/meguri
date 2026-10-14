@@ -1,0 +1,44 @@
+# cargo-fuzz targets (tools/mg core-fuzz). Its own workspace, outside core's:
+# it builds only with the fuzz image's nightly toolchain and sanitizers, and
+# libfuzzer-sys (NCSA, for LLVM's libFuzzer) never reaches a shipped build.
+# Cargo.lock started as a copy of core/Cargo.lock, so the text crates fuzz at
+# the pinned versions; keep the shared entries in step.
+
+[package]
+name = "meguri-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MPL-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+meguri-model = { path = "../crates/meguri-model" }
+meguri-text = { path = "../crates/meguri-text" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "strip_html"
+path = "fuzz_targets/strip_html.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_refs"
+path = "fuzz_targets/media_refs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proto_blobs"
+path = "fuzz_targets/proto_blobs.rs"
+test = false
+doc = false
+bench = false

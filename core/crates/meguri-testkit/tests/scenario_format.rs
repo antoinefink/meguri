@@ -23,18 +23,38 @@ fn hash_of_yaml(text: &str) -> String {
     scenario::scenario_sha256(&scenario::parse_yaml(text).unwrap()).unwrap()
 }
 
-#[test]
-fn every_smoke_scenario_hashes_like_the_oracle_recorded_it() {
-    let mut checked = 0;
-    for entry in fs::read_dir(conformance_dir().join("scenarios/smoke")).unwrap() {
+/// Every scenario file under `dir`, subdirectories included, as (path, id
+/// relative to conformance/scenarios).
+fn scenario_files(dir: &Path, prefix: &str, out: &mut Vec<(PathBuf, String)>) {
+    for entry in fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_str().unwrap().to_owned();
-        if name.starts_with("area.") || name == "runner-empty.yaml" {
+        if path.is_dir() {
+            scenario_files(&path, &format!("{prefix}/{name}"), out);
+        } else if !name.starts_with("area.") && name.ends_with(".yaml") {
+            out.push((path, format!("{prefix}/{}", name.trim_end_matches(".yaml"))));
+        }
+    }
+}
+
+#[test]
+fn every_smoke_scenario_hashes_like_the_oracle_recorded_it() {
+    let mut files = Vec::new();
+    scenario_files(&conformance_dir().join("scenarios/smoke"), "smoke", &mut files);
+    assert!(
+        files.iter().any(|(_, id)| id.starts_with("smoke/sync/")),
+        "the walk reaches subdirectories"
+    );
+    let mut checked = 0;
+    for (path, id) in files {
+        // Every smoke scenario loads, subdirectories included.
+        let loaded = scenario::load(&path).unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert_eq!(loaded.scenario.id, id);
+        // Scenarios the oracle has recorded hash as it did.
+        let golden = conformance_dir().join("goldens").join(format!("{id}.json"));
+        if id == "smoke/runner-empty" || !golden.exists() {
             continue;
         }
-        let loaded = scenario::load(&path).unwrap();
-        let id = format!("smoke/{}", name.trim_end_matches(".yaml"));
-        assert_eq!(loaded.scenario.id, id);
         assert_eq!(loaded.sha256, golden_hash(&id), "{id}");
         checked += 1;
     }
@@ -229,7 +249,7 @@ steps:
   - export: {format: apkg, name: out.apkg}
   - check_db: {}
   - db_exec: {sql: "update cards set due = 1"}
-  - sync: {kind: normal}
+  - reopen: {}
   - handoff: oracle
   - observe:
       - ids
@@ -242,6 +262,7 @@ steps:
       - deck_tree
       - render(#c1)
       - db_dump
+      - {db_dump: {tables: [notes, cards]}}
       - {stats: {}}
       - digest
 "##;
@@ -254,8 +275,9 @@ steps:
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
         ["cards", "config", "decks", "notes", "notetypes", "presets", "revlog"]
     );
-    assert!(needs.ops.contains("build_filtered") && needs.ops.contains("sync"));
+    assert!(needs.ops.contains("build_filtered") && needs.ops.contains("reopen"));
     assert!(!needs.ops.contains("observe"));
+    assert!(matches!(parsed.steps[17], Step::Reopen(_)));
     assert!(needs.observations.contains("fuzz_table") && needs.observations.contains("digest"));
 
     for bad in [
@@ -270,6 +292,14 @@ steps:
         "steps: [{add_note: {notetype: Q, fields: [1]}}]",
         "colour: red",
         "setup: {cards: [{card: \"#c1\", colour: 1}]}",
+        // Actor ops and the server need actors (sync-ops.md S1).
+        "steps: [{sync: {kind: login}}]",
+        "steps: [{actor: client_a}]",
+        "steps: [{net_fault: {kind: clear}}]",
+        "steps: [{converge: {}}]",
+        "server: {clock_offset_secs: 301}",
+        "steps: [{reopen: {now: true}}]",
+        "steps: [{reopen: null}]",
     ] {
         let text = format!("id: area/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{bad}\n");
         let value = scenario::parse_yaml(&text).unwrap();
@@ -325,7 +355,6 @@ fn valid_draft_args(op: &str) -> Value {
         "export" => json!({"format": "apkg", "name": "out.apkg"}),
         "check_db" => json!({}),
         "db_exec" => json!({"sql": "select 1", "params": []}),
-        "sync" => json!({"kind": "normal", "client": "a"}),
         other => panic!("no valid example for draft op {other}: add one with the schema change"),
     }
 }
@@ -340,7 +369,10 @@ fn model_accepts(step: Value) -> Result<(), String> {
 #[test]
 fn the_model_requires_what_the_schema_requires_of_draft_ops() {
     let from_schema = schema_draft_requirements();
-    assert!(from_schema.len() >= 14, "{from_schema:?}");
+    // Thirteen draft ops: `sync` left them when sync-ops.md fixed its shape.
+    assert!(from_schema.len() >= 13, "{from_schema:?}");
+    assert!(!from_schema.iter().any(|(op, _, _)| op == "sync"), "{from_schema:?}");
+    assert!(!scenario::draft_requirements().iter().any(|(op, _)| *op == "sync"));
     let in_model: Vec<(String, Vec<String>)> = scenario::draft_requirements()
         .into_iter()
         .map(|(op, keys)| (op.to_owned(), keys.into_iter().map(str::to_owned).collect()))
@@ -400,6 +432,91 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
         ("steps: [{handoff: elsewhere}]", "unknown variant"),
         ("steps: [{handoff: oracle}, {handoff: oracle}]", "alternate"),
+        (
+            "steps: [{legacy_update: {deck: A, notetype: B, patch: {}}}]",
+            "exactly one",
+        ),
+        ("steps: [{legacy_update: {patch: {}}}]", "exactly one"),
+        ("steps: [{legacy_update: {deck: \"\", patch: {}}}]", "non-empty name"),
+        ("steps: [{legacy_update: {deck: A}}]", "patch"),
+        ("steps: [{legacy_update: {deck: A, patch: 5}}]", "invalid type"),
+        ("steps: [{legacy_update: {deck: A, patch: {}, x: 1}}]", "unknown field"),
+        ("steps: [{observe: [{legacy_json: {}}]}]", "legacy_json"),
+        ("steps: [{observe: [{legacy_json: {decks: []}}]}]", "legacy_json"),
+        ("steps: [{observe: [{legacy_json: {decks: [\"\"]}}]}]", "legacy_json"),
+        ("steps: [{observe: [{legacy_json: {tags: [a]}}]}]", "legacy_json"),
+        ("steps: [{observe: [legacy_json]}]", "does not take"),
+        ("steps: [{observe: [{blob_decode: {}}]}]", "blob_decode"),
+        ("steps: [{observe: [{blob_decode: {presets: []}}]}]", "blob_decode"),
+        (
+            "steps: [{observe: [{blob_decode: {notetypes: [\"\"]}}]}]",
+            "blob_decode",
+        ),
+        ("steps: [{observe: [{blob_decode: {cards: [a]}}]}]", "blob_decode"),
+        ("steps: [{observe: [{blob_decode: null}]}]", "cannot take null"),
+        ("steps: [{observe: [blob_decode]}]", "does not take"),
+        // model-ops.md L6: the legacy form of export is exact.
+        (
+            "steps: [{export: {format: colpkg, name: x.apkg, legacy: true}}]",
+            "legacy export",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: x.apkg, legacy: false}}]",
+            "legacy export",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: x.apkg, legacy: true, media: true}}]",
+            "legacy export",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: x.colpkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: ../x.apkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: _x.apkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: a b.apkg, legacy: true}}]",
+            "package file name",
+        ),
+        (
+            "steps: [{export: {format: apkg, name: .apkg, legacy: true}}]",
+            "package file name",
+        ),
+        // model-ops.md L7.
+        ("steps: [{observe: [{package_col: {name: x.apkg}}]}]", "package_col"),
+        ("steps: [{observe: [{package_col: {columns: [ver]}}]}]", "package_col"),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: []}}]}]",
+            "package_col",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: [ver, ver]}}]}]",
+            "listed twice",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: [cards]}}]}]",
+            "package_col",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: ver}}]}]",
+            "package_col",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.zip, columns: [ver]}}]}]",
+            "package file name",
+        ),
+        (
+            "steps: [{observe: [{package_col: {name: x.apkg, columns: [ver], at: 1}}]}]",
+            "package_col",
+        ),
+        ("steps: [{observe: [{package_col: null}]}]", "cannot take null"),
+        ("steps: [{observe: [package_col]}]", "does not take"),
     ] {
         let text = format!("id: area/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{bad}\n");
         let value = scenario::parse_yaml(&text).unwrap();
@@ -409,6 +526,88 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     // Null where the schema allows it, and an empty id list (every id).
     let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{observe: [{timing: null}, {queue: null}, {ids: []}]}]\n";
     assert!(scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).is_ok());
+    // model-ops.md L1 and L2.
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{legacy_update: {preset: P, patch: {a: null, new: {b: [1]}}}}, {observe: [{legacy_json: {decks: [\"A::B\"], presets: [P]}}]}]\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("legacy_update") && needs.observations.contains("legacy_json"));
+    // model-ops.md L4.
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{observe: [{blob_decode: {notetypes: [Pair], decks: [\"A::B\"], presets: [P]}}]}]\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(parsed.needs().observations.contains("blob_decode"));
+    // model-ops.md L6 and L7; other export forms stay draft and open.
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{export: {format: apkg, name: Note_types-2.v1.apkg, legacy: true}}, {export: {format: colpkg, name: out.colpkg, media: true}}, {observe: [{package_col: {name: Note_types-2.v1.apkg, columns: [ver, conf, models, decks, dconf, tags]}}]}]\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
+}
+
+#[test]
+fn text_requests_follow_the_schema() {
+    let parse = |request: &str| {
+        let text = format!(
+            "id: text/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    for (bad, why) in [
+        ("text", "does not take these arguments"),
+        ("{text: null}", "cannot take null"),
+        ("{text: {fns: [checksum]}}", "exactly {fns, inputs}"),
+        (
+            "{text: {fns: [checksum], inputs: [], extra: 1}}",
+            "exactly {fns, inputs}",
+        ),
+        ("{text: {fns: [], inputs: []}}", "at least one function"),
+        ("{text: {fns: checksum, inputs: []}}", "list of function names"),
+        ("{text: {fns: [strip_html], inputs: []}}", "not a text function"),
+        ("{text: {fns: [checksum, checksum], inputs: []}}", "appears twice"),
+        ("{text: {fns: [checksum], inputs: x}}", "inputs is a list"),
+        ("{text: {fns: [checksum], inputs: [[a, b]]}}", "inputs are strings"),
+        ("{text: {fns: [checksum], inputs: [1]}}", "inputs are strings"),
+        (
+            "{text: {fns: [unicase_compare, checksum], inputs: []}}",
+            "shares a request with no other function",
+        ),
+        ("{text: {fns: [unicase_compare], inputs: [a]}}", "pairs of strings"),
+        ("{text: {fns: [unicase_compare], inputs: [[a]]}}", "pairs of strings"),
+        (
+            "{text: {fns: [unicase_compare], inputs: [[a, b, c]]}}",
+            "pairs of strings",
+        ),
+        ("{text: {fns: [unicase_compare], inputs: [[a, 1]]}}", "pairs of strings"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+    for good in [
+        "{text: {fns: [checksum, sort_field], inputs: [a, \"\"]}}",
+        "{text: {fns: [media_refs], inputs: []}}",
+        "{text: {fns: [unicase_compare], inputs: [[a, B], [\"\", \"\"]]}}",
+    ] {
+        let parsed = parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+        assert!(parsed.needs().observations.contains("text"));
+    }
+}
+
+#[test]
+fn the_text_functions_are_the_schemas() {
+    let schema: Value =
+        serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap())
+            .unwrap();
+    let request = &schema["$defs"]["observation_request"]["anyOf"][1]["properties"];
+    let from_schema: Vec<&str> = request["text"]["properties"]["fns"]["items"]["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no text fns enum in {request}"))
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let from_model: Vec<&str> = scenario::TextFunction::ALL.iter().map(|f| f.name()).collect();
+    assert_eq!(from_model, from_schema);
+    let kinds: Vec<&str> = request.as_object().unwrap().keys().map(String::as_str).collect();
+    for kind in scenario::ObservationKind::ALL {
+        assert!(kinds.contains(&kind.name()), "{} is not in the schema", kind.name());
+    }
 }
 
 #[test]
@@ -471,4 +670,255 @@ steps:
     let plain = scenario::Scenario::from_value(&plain).unwrap();
     assert!(!plain.is_live());
     assert_eq!(plain.segments().len(), 1);
+}
+
+const ACTORS: &str = r##"
+id: sync/all-actor-ops
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri, client_c]
+server: {clock_offset_secs: -301}
+setup:
+  decks: [Words]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - net_fault: {kind: reset, direction: to_client}
+  - actor: client_c
+  - sync: {kind: login}
+  - net_fault: {kind: reset, direction: to_server}
+  - net_fault: {kind: clear}
+  - reopen: {}
+  - observe: [{db_dump: {tables: [col, config]}}]
+  - converge: {}
+"##;
+
+fn actor_scenario(text: &str) -> Result<scenario::Scenario, String> {
+    scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).map_err(|e| e.to_string())
+}
+
+#[test]
+fn actor_scenarios_read_their_actors_server_and_ops() {
+    use meguri_testkit::scenario::{Direction, NetFault, SyncKind};
+
+    let parsed = actor_scenario(ACTORS).unwrap();
+    let names: Vec<&str> = parsed.actors().iter().map(|a| a.as_str()).collect();
+    assert_eq!(names, ["client_a", "meguri", "client_c"]);
+    assert_eq!(
+        parsed.actors().iter().map(|a| a.is_meguri()).collect::<Vec<_>>(),
+        [false, true, false]
+    );
+    assert_eq!(parsed.server.as_ref().map(|s| s.clock_offset_secs), Some(-301));
+    // Actor scenarios are live (dsl.md D9.3): T0 never runs them.
+    assert!(parsed.has_actors() && parsed.is_live());
+    assert!(matches!(&parsed.steps[1], Step::Sync(s) if s.kind == SyncKind::Login));
+    assert!(matches!(&parsed.steps[3], Step::Sync(s) if s.kind == SyncKind::FullUpload));
+    assert!(matches!(&parsed.steps[4], Step::Actor(a) if a.as_str() == "meguri"));
+    assert!(matches!(
+        &parsed.steps[7],
+        Step::NetFault(NetFault::Reset(Direction::ToClient))
+    ));
+    assert!(matches!(
+        &parsed.steps[10],
+        Step::NetFault(NetFault::Reset(Direction::ToServer))
+    ));
+    assert!(matches!(&parsed.steps[11], Step::NetFault(NetFault::Clear)));
+    assert!(matches!(parsed.steps[12], Step::Reopen(_)));
+    assert!(matches!(parsed.steps[14], Step::Converge(_)));
+    // Who runs each step: the first actor until an actor step, global steps
+    // nobody in particular (sync-ops.md S2.3).
+    let by: Vec<Option<&str>> = parsed.step_actors().iter().map(|a| a.map(|a| a.as_str())).collect();
+    assert_eq!(
+        by,
+        [
+            None,
+            Some("client_a"),
+            Some("client_a"),
+            Some("client_a"),
+            None,
+            Some("meguri"),
+            Some("meguri"),
+            None,
+            None,
+            Some("client_c"),
+            None,
+            None,
+            Some("client_c"),
+            Some("client_c"),
+            None,
+        ]
+    );
+    // A server without an offset runs on the scenario clock.
+    let plain = actor_scenario(&ACTORS.replace("server: {clock_offset_secs: -301}\n", "server: {}\n")).unwrap();
+    assert_eq!(plain.server.as_ref().map(|s| s.clock_offset_secs), Some(0));
+    // The language lists the new ops.
+    for op in ["actor", "sync", "net_fault", "converge", "reopen"] {
+        assert!(Step::NAMES.contains(&op), "{op}");
+    }
+}
+
+#[test]
+fn actor_scenarios_are_checked_when_they_load() {
+    let base = |actors: &str, steps: &str| {
+        format!("id: sync/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nactors: {actors}\nsteps: {steps}\n")
+    };
+    for (text, why) in [
+        (base("[]", "[]"), "actors"),
+        (base("[client_a, client_a]", "[]"), "twice"),
+        (base("[meguri_1]", "[]"), "meguri_1"),
+        (base("[meguri_02]", "[]"), "meguri_02"),
+        (base("[client_aa]", "[]"), "client_aa"),
+        (base("[client_A]", "[]"), "client_A"),
+        (base("[anki]", "[]"), "anki"),
+        // S2.3: an actor step names a declared actor.
+        (base("[client_a]", "[{actor: client_b}]"), "client_b"),
+        // S4.2: each actor's first sync is a login, in step order.
+        (base("[client_a]", "[{sync: {kind: normal}}]"), "login"),
+        (
+            base(
+                "[client_a, client_c]",
+                "[{sync: {kind: login}}, {actor: client_c}, {sync: {kind: full_download}}]",
+            ),
+            "client_c",
+        ),
+        (base("[client_a]", "[{sync: {kind: upload}}]"), "upload"),
+        (base("[client_a]", "[{sync: {kind: login, client: a}}]"), "client"),
+        (base("[client_a]", "[{sync: {}}]"), "kind"),
+        (base("[client_a]", "[{net_fault: {kind: reset}}]"), "direction"),
+        (
+            base("[client_a]", "[{net_fault: {kind: reset, direction: sideways}}]"),
+            "sideways",
+        ),
+        (
+            base("[client_a]", "[{net_fault: {kind: clear, direction: to_client}}]"),
+            "direction",
+        ),
+        (base("[client_a]", "[{net_fault: {kind: drop}}]"), "drop"),
+        (base("[client_a]", "[{converge: {all: true}}]"), "all"),
+        (base("[client_a]", "[{handoff: oracle}]"), "handoff"),
+        (
+            format!("{}server: {{clock_offset_secs: 86401}}\n", base("[client_a]", "[]")),
+            "86401",
+        ),
+        (
+            format!("{}server: {{clock_offset_secs: 1.5}}\n", base("[client_a]", "[]")),
+            "clock_offset_secs",
+        ),
+        (format!("{}server: {{skew: 1}}\n", base("[client_a]", "[]")), "skew"),
+        (format!("{}server: null\n", base("[client_a]", "[]")), "server"),
+        // O8: the tables a db_dump lists.
+        (
+            base("[client_a]", "[{observe: [{db_dump: {tables: [cards, cards]}}]}]"),
+            "twice",
+        ),
+        (base("[client_a]", "[{observe: [{db_dump: {tables: []}}]}]"), "tables"),
+        (
+            base("[client_a]", "[{observe: [{db_dump: {tables: [sqlite_master]}}]}]"),
+            "sqlite_master",
+        ),
+        (
+            base("[client_a]", "[{observe: [{db_dump: {tables: [cards], raw: true}}]}]"),
+            "raw",
+        ),
+    ] {
+        let err = actor_scenario(&text).expect_err(&text);
+        assert!(err.contains(why), "{text}: {err}");
+    }
+    // A Meguri actor's name: meguri, or meguri_<n> with n >= 2.
+    for actors in ["[meguri]", "[meguri_2, client_z]", "[meguri_10]"] {
+        assert!(actor_scenario(&base(actors, "[]")).is_ok(), "{actors}");
+    }
+}
+
+#[test]
+fn meguri_actors_need_what_they_run_and_nothing_else() {
+    let path = conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml");
+    let loaded = scenario::load(&path).unwrap();
+    // sync-ops.md S10.2: `actor`; no setup (client_a runs it); the ops and
+    // observations of meguri's steps; advance (the scenario uses it); db_dump
+    // for converge. client_a's full_upload is the oracle's business.
+    let needs = loaded.scenario.needs_of_meguri_actors();
+    assert_eq!(
+        needs.ops.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["actor", "advance", "sync"]
+    );
+    assert_eq!(
+        needs.observations.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["card", "db_dump"]
+    );
+    assert!(needs.setup.is_empty());
+
+    // Without a Meguri actor, nothing.
+    let two = scenario::load(&conformance_dir().join("scenarios/smoke/sync/two-party.yaml")).unwrap();
+    assert!(two.scenario.needs_of_meguri_actors().is_empty());
+
+    // A Meguri first actor runs the setup; steps of oracle actors and global
+    // steps other than the clock add nothing.
+    let text = r##"
+id: sync/meguri-first
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+actors: [meguri, client_b]
+setup: {decks: [Words], notetypes: [{name: P, fields: [F], templates: [{name: T}]}]}
+steps:
+  - sync: {kind: login}
+  - actor: client_b
+  - add_note: {notetype: P, fields: [x]}
+  - answer: {card: "#c1", rating: good}
+  - net_fault: {kind: clear}
+  - set_clock: "2030-01-16T00:00:00"
+  - actor: meguri
+  - reopen: {}
+"##;
+    let needs = actor_scenario(text).unwrap().needs_of_meguri_actors();
+    assert_eq!(
+        needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["decks", "notetypes"]
+    );
+    assert_eq!(
+        needs.ops.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["actor", "reopen", "set_clock", "sync"]
+    );
+    assert!(needs.observations.is_empty());
+}
+
+#[test]
+fn each_meguri_actor_gets_its_own_seed() {
+    use meguri_testkit::exec::actor_seed;
+
+    let loaded = scenario::load(&conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml")).unwrap();
+    // sync-ops.md S2.5: the first eight bytes of SHA-256("<hash>/<actor>").
+    let digest = sha2_hex(&format!("{}/meguri", loaded.sha256));
+    let expected = u64::from_str_radix(&digest[..16], 16).unwrap();
+    assert_eq!(actor_seed(&loaded, "meguri"), expected);
+    assert_ne!(actor_seed(&loaded, "meguri"), actor_seed(&loaded, "meguri_2"));
+}
+
+/// SHA-256 of a text, lower-case hex, through the shell's sha256 tool: an
+/// implementation other than the one under test.
+fn sha2_hex(text: &str) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let (program, args): (&str, &[&str]) = if Command::new("sha256sum").arg("--version").output().is_ok() {
+        ("sha256sum", &[])
+    } else {
+        ("shasum", &["-a", "256"])
+    };
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(text.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_owned()
 }

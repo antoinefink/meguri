@@ -1,0 +1,30 @@
+# Note checksum and sort-field text as saved (specs/text/checksum-and-sort-field.md
+# C1-C4). Covers AE34 (checksum half): a bold first field and the bare text give
+# one checksum.
+id: text/fields/checksum
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [checksum, sort_field]
+          inputs:
+            - "私"
+            - "<b>私</b>"
+            - ""
+            - "<img src=\"a b.jpg\">text"
+            - "e\u0301"
+            - "é"
+            - "a\x01b"
+            - "ab"
+            - " 私"
+            - "私 "
+            - "<div>私</div>"
+            - "[sound:私.mp3]"
+            - "&#31169;"
+            - "<!--c-->私"
+            - "<style>x</style>私"
+            - "Tom & Jerry"
+            - "Tom &amp; Jerry"
+            - "\t5\n"
+            - "123"
+            - "line\r\nbreak"

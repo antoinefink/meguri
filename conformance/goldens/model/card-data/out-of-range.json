@@ -1,0 +1,175 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{\"pos\":5}"],
+            ["{\"pos\":5,\"s\":0.0,\"d\":2.0}"],
+            ["{\"pos\":5,\"s\":0.0,\"d\":1.0}"],
+            ["{\"pos\":5,\"s\":0.0,\"d\":1.0}"],
+            ["{\"pos\":5,\"s\":null,\"d\":1.0}"],
+            ["{\"pos\":5,\"s\":null,\"d\":1.0}"],
+            ["{\"pos\":5,\"s\":null,\"d\":1.0}"],
+            ["{}"],
+            ["{}"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"pos\":5}"],
+            ["{\"pos\":5,\"s\":1.5,\"d\":2.0}"],
+            ["{\"pos\":5,\"s\":1.0,\"d\":2.0}"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "9f9235f1963a468f6892be6dbb93847f4e80c18dc0e3a4e19343ba9d1abcef14",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/card-data/out-of-range",
+  "scenario_sha256": "98a5625f63bdc82ea8bcdbe0194eab002a8b1d1146aa15a4859b38b551a9ddbb",
+  "tz": "UTC"
+}

@@ -1,0 +1,60 @@
+# Anki's canonical bytes for deck-config blobs (specs/model/protobuf-records.md
+# P3, P6.6) and their schema-11 objects (specs/model/schema11-json.md S10):
+# the new collection's Default preset, and a preset with every field set away
+# from its default. Implementer tests decode each blob, re-encode it and get
+# the same bytes, and convert both ways between blob and object.
+id: model/proto/preset-bytes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - name: Daily
+      learn_steps: [1m, 10m, 1h]
+      relearn_steps: [10m, 30m]
+      graduating_interval_days: 2
+      easy_interval_days: 5
+      new_per_day: 15
+      reviews_per_day: 150
+      max_interval_days: 3650
+      min_lapse_interval_days: 2
+      starting_ease: 2.3
+      easy_bonus: 1.25
+      hard_interval: 1.1
+      interval_modifier: 0.95
+      lapse_new_interval: 0.1
+      leech_threshold: 6
+      leech_action: suspend
+      bury_new: true
+      bury_reviews: true
+      bury_interday_learning: true
+      desired_retention: 0.85
+      fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542]
+steps:
+  - legacy_update:
+      preset: Daily
+      patch:
+        fsrsWeights: [0.4, 0.6, 2.4, 5.8]
+        fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105]
+        easyDaysPercentages: [1.0, 1.0, 0.5, 1.0, 1.0, 0.0, 1.0]
+        ignoreRevlogsBeforeDate: "2029-06-01"
+        weightSearch: "deck:Words"
+        sm2Retention: 0.88
+        newMix: 1
+        interdayLearningMix: 2
+        reviewOrder: 7
+        newSortOrder: 3
+        newGatherPriority: 5
+        newPerDayMinimum: 3
+        questionAction: 1
+        answerAction: 3
+        secondsToShowQuestion: 4.5
+        secondsToShowAnswer: 2.25
+        stopTimerOnAnswer: true
+        waitForAudio: false
+        maxTaken: 45
+        timer: 1
+        autoplay: false
+        replayq: false
+        new: {order: 0}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - observe:
+      - legacy_json: {presets: [Default, Daily]}
