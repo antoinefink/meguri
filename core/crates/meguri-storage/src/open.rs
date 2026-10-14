@@ -1,9 +1,9 @@
 //! The open gate (`storage/open-and-connections` C2): one function, callable
 //! on any file path (the live collection, and U124's staging copies before a
 //! swap), that probes, refuses, copies, opens, upgrades and checks the
-//! expected objects, in that order, stopping at the first refusal. Before
-//! the writer opens, nothing has written to the file or created a file next
-//! to it (C3).
+//! expected objects, in that order, stopping at the first refusal. Nothing
+//! writes to a file that phase 2 refuses or creates a file next to it (C3,
+//! R1479).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -191,24 +191,47 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
     })
 }
 
-/// Phase 1, with C3's hot-journal case: the file is opened read-write
-/// without changing its journal mode and read once, so SQLite rolls the
-/// journal back, then probed again.
+/// Phase 1, with C3's hot-journal case. A refused file must keep its bytes
+/// and its journal (R1479), and only a rollback shows the version, so phases
+/// 1 and 2 first run on a copy of the file and its journal, rolled back in a
+/// temporary directory. Only when the copy passes the refusals is the file
+/// itself rolled back (opened read-write without changing its journal mode
+/// and read once, so SQLite rolls the journal back) and probed again.
 fn probe(path: &Path) -> Result<Probed, OpenError> {
     match version::probe(path) {
         Ok(probed) => Ok(probed),
         Err(ProbeError::Open(error)) => Err(error),
         Err(ProbeError::HotJournal) => {
+            refuse::refuse(&probe_rolled_back_copy(path)?)?;
             roll_back_hot_journal(path)?;
-            match version::probe(path) {
-                Ok(probed) => Ok(probed),
-                Err(ProbeError::Open(error)) => Err(error),
-                Err(ProbeError::HotJournal) => Err(OpenError::Io {
-                    detail: "the hot rollback journal is still there after a rollback".to_owned(),
-                }),
-            }
+            probe_after_rollback(path)
         }
     }
+}
+
+fn probe_after_rollback(path: &Path) -> Result<Probed, OpenError> {
+    match version::probe(path) {
+        Ok(probed) => Ok(probed),
+        Err(ProbeError::Open(error)) => Err(error),
+        Err(ProbeError::HotJournal) => Err(OpenError::Io {
+            detail: "the hot rollback journal is still there after a rollback".to_owned(),
+        }),
+    }
+}
+
+/// Phase 1 on a copy of `path` and its hot journal, rolled back in a
+/// temporary directory that is removed when it returns. `path` and its
+/// journal are only read.
+fn probe_rolled_back_copy(path: &Path) -> Result<Probed, OpenError> {
+    let io = |e: std::io::Error| OpenError::Io {
+        detail: format!("copying the file and its hot rollback journal: {e}"),
+    };
+    let dir = tempfile::Builder::new().prefix("meguri-probe-").tempdir().map_err(io)?;
+    let copy = dir.path().join("collection.anki2");
+    fs::copy(path, &copy).map_err(io)?;
+    fs::copy(sibling(path, "-journal"), sibling(&copy, "-journal")).map_err(io)?;
+    roll_back_hot_journal(&copy)?;
+    probe_after_rollback(&copy)
 }
 
 fn roll_back_hot_journal(path: &Path) -> Result<(), OpenError> {

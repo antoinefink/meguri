@@ -6,8 +6,9 @@
 mod common;
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
-use common::{copy_fixture, listing, open, plain, sha256};
+use common::{copy_fixture, exec, int, listing, open, plain, sha256, text};
 use meguri_storage::OpenError;
 
 fn assert_refused_untouched(fixture: &str, expected: &OpenError) {
@@ -111,39 +112,80 @@ fn files_that_are_not_collections_are_refused_and_untouched() {
     );
 }
 
+/// What a writer that crashed in the middle of a transaction leaves: `live`
+/// (a rollback-journal file) after `statements` ran inside a transaction with
+/// a cache small enough to spill pages into the file, copied with its hot
+/// journal to `collection.anki2` in `crashed`. Returns the copy's path.
+fn crash_mid_transaction(live: &Path, statements: &str, crashed: &Path) -> PathBuf {
+    let conn = plain(live);
+    conn.execute_batch("PRAGMA journal_mode = DELETE").unwrap();
+    conn.execute_batch(&format!("PRAGMA cache_size = 2; BEGIN; {statements}"))
+        .unwrap();
+    let path = crashed.join("collection.anki2");
+    fs::copy(live, &path).unwrap();
+    fs::copy(sibling(live, "-journal"), sibling(&path, "-journal")).unwrap();
+    conn.execute_batch("ROLLBACK").unwrap();
+    assert!(fs::metadata(sibling(&path, "-journal")).unwrap().len() > 0);
+    path
+}
+
+fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// Enough rows to spill a two-page cache into the file.
+const SPILL: &str = "CREATE TABLE filler (data blob);
+     WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
+     INSERT INTO filler SELECT zeroblob(2000) FROM n;";
+
 #[test]
-fn a_hot_rollback_journal_is_rolled_back_before_the_version_is_read() {
+fn a_file_refused_behind_a_hot_journal_keeps_its_bytes_and_its_journal() {
     let dir = tempfile::tempdir().unwrap();
     let crashed = dir.path().join("crashed");
     fs::create_dir(&crashed).unwrap();
     let live = dir.path().join("live.anki2");
-    let conn = plain(&live);
-    conn.execute_batch(
-        "PRAGMA journal_mode = DELETE;
-         CREATE TABLE col (id integer PRIMARY KEY, ver integer NOT NULL);
-         INSERT INTO col VALUES (1, 10);
-         CREATE TABLE filler (data blob);",
-    )
-    .unwrap();
-    // A writer that crashes in the middle of a transaction: `ver` changed and
-    // enough pages written to spill the cache into the file, so the journal
-    // is hot. Copying the file and its journal now is what a crash leaves.
-    conn.execute_batch(
-        "PRAGMA cache_size = 2;
-         BEGIN;
-         UPDATE col SET ver = 18;
-         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 400)
-         INSERT INTO filler SELECT zeroblob(2000) FROM n;",
-    )
-    .unwrap();
-    let path = crashed.join("collection.anki2");
-    let journal = crashed.join("collection.anki2-journal");
-    fs::copy(&live, &path).unwrap();
-    fs::copy(dir.path().join("live.anki2-journal"), &journal).unwrap();
-    conn.execute_batch("ROLLBACK").unwrap();
-    assert!(fs::metadata(&journal).unwrap().len() > 0);
+    plain(&live)
+        .execute_batch(
+            "PRAGMA journal_mode = DELETE;
+             CREATE TABLE col (id integer PRIMARY KEY, ver integer NOT NULL);
+             INSERT INTO col VALUES (1, 10);",
+        )
+        .unwrap();
+    // The crashed transaction had set `ver` to 18.
+    let path = crash_mid_transaction(&live, &format!("UPDATE col SET ver = 18; {SPILL}"), &crashed);
+    let journal = sibling(&path, "-journal");
+    let (file_sha, journal_sha) = (sha256(&path), sha256(&journal));
+    let before = listing(&crashed);
 
-    // Read without the rollback, the file would claim version 18.
+    // The version is the one the rollback restores, and the refused file
+    // keeps every byte and its journal (C3, R1479).
     assert_eq!(open(&path).unwrap_err(), OpenError::TooOld { version: 10 });
-    assert!(!journal.exists(), "the rollback removes the journal");
+    assert_eq!(sha256(&path), file_sha, "the refused file changed");
+    assert_eq!(sha256(&journal), journal_sha, "the journal changed");
+    assert_eq!(listing(&crashed), before);
+}
+
+#[test]
+fn a_hot_journal_on_a_file_that_opens_is_rolled_back_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let crashed = dir.path().join("crashed");
+    fs::create_dir(&crashed).unwrap();
+    let live = dir.path().join("live.anki2");
+    fs::copy(common::fixture("schema-18.anki2"), &live).unwrap();
+    // Read without the rollback, the file would claim version 10.
+    let path = crash_mid_transaction(&live, &format!("UPDATE col SET ver = 10; {SPILL}"), &crashed);
+
+    let opened = open(&path).unwrap();
+    assert_eq!(opened.upgraded_from(), None);
+    let w = opened.writer();
+    assert_eq!(int(&exec(w, "SELECT ver FROM col")), 18);
+    assert_eq!(
+        int(&exec(w, "SELECT count(*) FROM sqlite_master WHERE name = 'filler'")),
+        0
+    );
+    assert_eq!(text(&exec(w, "SELECT * FROM pragma_integrity_check")), "ok");
+    assert!(!sibling(&path, "-journal").exists(), "the rollback removes the journal");
+    opened.close().unwrap();
 }

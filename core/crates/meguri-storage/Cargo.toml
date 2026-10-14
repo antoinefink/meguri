@@ -21,12 +21,14 @@ serde.workspace = true
 # raw_value: the upgrade reads the legacy JSON columns member by member, as
 # exact text (specs/model/json-numbers.md N7).
 serde_json = { workspace = true, features = ["raw_value"] }
+# The open gate decides whether a file behind a hot rollback journal is
+# refused on a copy in a temporary directory (open-and-connections C3).
+tempfile.workspace = true
 
 [dev-dependencies]
 # Turns on test-hooks for the tests (testkit depends on this crate with it).
 meguri-testkit.workspace = true
 sha2.workspace = true
-tempfile.workspace = true
 
 [[test]]
 name = "open_refuse"
