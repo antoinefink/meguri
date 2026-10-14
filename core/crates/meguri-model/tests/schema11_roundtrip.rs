@@ -338,6 +338,122 @@ fn notetype_other_drops_reserved_keys() {
     assert_notetype_blobs(&saved, &blob(&rows(&g, 6)[0][0]), &fields, &templates, "saved");
 }
 
+/// The note type of row `row` of the `notetypes` read in
+/// `model/schema11/apkg-notetypes`, with its `fields` and `templates` rows.
+fn packaged_notetype_record(g: &Value, row: &Value) -> Notetype {
+    let name = text(&row[1]);
+    Notetype {
+        id: NotetypeId(int(&row[0])),
+        name: name.to_owned(),
+        mtime: EpochSecs(int(&row[2])),
+        usn: Usn(int(&row[3]) as i32),
+        config: ProtoBlob::decode(&blob(&row[4])).unwrap(),
+        fields: rows(g, 5)
+            .iter()
+            .filter(|f| f[0] == name)
+            .map(|f| NotetypeField {
+                ord: int(&f[1]) as u32,
+                name: text(&f[2]).to_owned(),
+                config: ProtoBlob::decode(&blob(&f[3])).unwrap(),
+                prior_ord: None,
+            })
+            .collect(),
+        templates: rows(g, 6)
+            .iter()
+            .filter(|t| t[0] == name)
+            .map(|t| NotetypeTemplate {
+                ord: int(&t[1]) as u32,
+                name: text(&t[2]).to_owned(),
+                mtime: EpochSecs(int(&t[3])),
+                usn: Usn(int(&t[4]) as i32),
+                config: ProtoBlob::decode(&blob(&t[5])).unwrap(),
+                prior_ord: None,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn legacy_package_notetypes_convert_both_ways() {
+    // S14.1 (S12): a standard and a cloze note type with an add-on member in
+    // the `other` of the note type, a field and the template, exported as a
+    // legacy package (model-ops L6). Step 4 to 6 read the stored rows and
+    // blobs, step 7 is legacy_json and step 9 the package's col row (L7).
+    let g = golden("model/schema11/apkg-notetypes");
+    let package = &common::step(&g, 9)["package_col"];
+    assert_eq!(package["ver"], 11, "a schema-11 collection");
+    let models = package["models"].as_object().expect("models is an object");
+    assert_eq!(models.len(), 2, "{models:?}");
+    let stored = rows(&g, 4);
+    assert_eq!(stored.len(), 2);
+
+    for row in stored {
+        let record = packaged_notetype_record(&g, row);
+        let name = record.name.as_str();
+        let member = models
+            .get(&record.id.0.to_string())
+            .unwrap_or_else(|| panic!("{name}: no models member under its id"));
+        // 3. The package carries the object legacy_json reports.
+        assert_same_json(member, object(&g, 7, "notetypes", name), &format!("{name}: package"));
+        // 1. Record to object.
+        assert_same_json(
+            &json_of(&notetype_to_json(&record)),
+            member,
+            &format!("{name}: record to object"),
+        );
+    }
+
+    // 2. Object to record to object, through the models column's text. The
+    // records hold the stored rows and blobs again: each `other` here has one
+    // top-level member, so its bytes are fixed (S14).
+    let column = package["models"].to_string();
+    let records = col::notetypes_from_json(&column).unwrap();
+    assert_eq!(records.len(), 2);
+    for record in &records {
+        let name = record.name.as_str();
+        let member = &models[&record.id.0.to_string()];
+        assert_same_json(
+            &json_of(&notetype_to_json(record)),
+            member,
+            &format!("{name}: object to record to object"),
+        );
+        let row = stored.iter().find(|row| int(&row[0]) == record.id.0).unwrap();
+        assert_eq!(
+            (record.name.as_str(), record.mtime.0, i64::from(record.usn.0)),
+            (text(&row[1]), int(&row[2]), int(&row[3])),
+            "{name}: notetypes row"
+        );
+        let fields: Vec<&Value> = rows(&g, 5).iter().filter(|f| f[0] == name).collect();
+        let templates: Vec<&Value> = rows(&g, 6).iter().filter(|t| t[0] == name).collect();
+        let field_blobs: Vec<Vec<u8>> = fields.iter().map(|f| blob(&f[3])).collect();
+        let template_blobs: Vec<Vec<u8>> = templates.iter().map(|t| blob(&t[5])).collect();
+        assert_notetype_blobs(record, &blob(&row[4]), &field_blobs, &template_blobs, name);
+        for (field, stored) in record.fields.iter().zip(&fields) {
+            assert_eq!(
+                (i64::from(field.ord), field.name.as_str()),
+                (int(&stored[1]), text(&stored[2]))
+            );
+        }
+        for (template, stored) in record.templates.iter().zip(&templates) {
+            assert_eq!(
+                (i64::from(template.ord), template.name.as_str()),
+                (int(&stored[1]), text(&stored[2])),
+                "{name}: templates row"
+            );
+            assert_eq!(
+                (template.mtime.0, i64::from(template.usn.0)),
+                (int(&stored[3]), int(&stored[4])),
+                "{name}: templates row"
+            );
+        }
+    }
+    assert_same_json(
+        &json_of(&col::notetypes_to_json(&records)),
+        &package["models"],
+        "models column",
+    );
+}
+
 #[test]
 fn refused_notetype_objects() {
     let id = "model/schema11/notetype-rejections";
