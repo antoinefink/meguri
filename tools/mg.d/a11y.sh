@@ -4,9 +4,10 @@
 # Runs the accessibility XCUITest suites (MeguriUITests/Accessibility) on a
 # pool simulator, or on the Mac through the Mac UI gate (root AGENTS.md: at
 # most one Mac UI run an hour; a refused run is queued, warn). Suites attach
-# `a11y-screen.<screen id>` JSON reports (AuditHelpers.screenReport); the job
-# lists them as per-screen evidence in details.screens and screens.json,
-# which `tools/mg critic --a11y <run>` reads.
+# `a11y-screen.<screen id>` JSON reports (AuditHelpers.screenReport), one
+# per screen with a result per state; the job lists them as per-screen
+# evidence of its platform (details.platform) in details.screens and
+# screens.json, which `tools/mg critic --a11y <run>` reads.
 
 mg_job a11y host mg_a11y \
   "Accessibility suites (R1977, R1978, R1980): [--platform iphone|ipad|mac] [--device <leased udid>] [--suite <test class>]... (default AccessibilityHelperTests): system audit at default and largest text size, light and dark, suppressions from Accessibility/suppressions.json, touch targets, VoiceOver order; Mac runs go through the Mac UI gate (queued when refused); per-screen results in screens.json"
@@ -42,6 +43,8 @@ mg_a11y() {
   [ -n "$suites" ] || suites="$MG_A11Y_SUITES"
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
+  mg_detail platform "$(jq -n --arg p "$platform" '$p')"
+  MG_A11Y_PLATFORM="$platform"
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_a11y__usage "--device is for simulators"; return 0; }
     local reason
@@ -101,7 +104,8 @@ mg_a11y__report() {
     jq -r --arg dir "$attachments" '.[].attachments[]? | select(.suggestedHumanReadableName | startswith("a11y-screen.")) | "\($dir)/\(.exportedFileName)"' \
       "$attachments/manifest.json" 2>/dev/null | while IFS= read -r f; do
       [ -f "$f" ] && jq -c . "$f"
-    done | jq -sc '[.[] | {screen, status, unsuppressed: ([.findings[] | select(.suppressed | not)] | length), touchTargets: (.touchTargets | length)}]' \
+    done | jq -sc --arg p "$MG_A11Y_PLATFORM" '[.[] | {screen, platform: $p, status, unsuppressed: ([.findings[] | select(.suppressed | not)] | length),
+      touchTargets: (.touchTargets | length), states: ((.states // {}) | map_values(.status))}]' \
       >"$MG_RUN_DIR/screens.json"
   fi
   mg_artifact screens "$MG_RUN_DIR/screens.json" "per-screen accessibility results"

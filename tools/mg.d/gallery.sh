@@ -66,7 +66,7 @@ mg_gallery() {
     case "$f" in */designsystem.* | */matrix.* | */cardface.*) [ "$components" = true ] || continue ;; esac
     n=$((n + 1))
     old="$(mg_gallery__old "$MG_ROOT" "$f" "$base" "$work/old-$n.png")"
-    mg_gallery__add "$items" "$f" "$MG_ROOT/$f" "$old" /work "" false
+    mg_gallery__add "$items" "$f" "$MG_ROOT/$f" "$old" /work "" false "$MG_ROOT"
   done < <(cd "$MG_ROOT" && find app/Snapshots -name '*.png' -type f 2>/dev/null | grep -E "$MG_GALLERY_KEY_VARIANT" | sort)
   # Pending approvals: the baselines a branch's guard escalated.
   local wt i=0 result branch path
@@ -81,7 +81,7 @@ mg_gallery() {
       mkdir -p "$work/pending-$i/$(dirname "$path")"
       cp "$wt/$path" "$work/pending-$i/$path" 2>/dev/null || continue
       old="$(mg_gallery__old "$wt" "$path" "" "$work/old-$n.png")"
-      mg_gallery__add "$items" "$path" "$work/pending-$i/$path" "$old" "/pending/$i" "$branch" true
+      mg_gallery__add "$items" "$path" "$work/pending-$i/$path" "$old" "/pending/$i" "$branch" true "$wt"
     done < <(jq -r '.details.guard.needs_human_review[]? // empty' "$result")
   done
   # Picks: images copied in, so the container sees them.
@@ -118,11 +118,15 @@ mg_gallery() {
 }
 
 # mg_gallery__old <checkout> <path> <base rev> <out>: the image to compare
-# with: the approved one (approved-baselines.json), else the file at the
-# base revision. Prints its path, or nothing.
+# with: the approved one (approved-baselines.json; after an OS rebaseline,
+# the approved image of the same model's same cell under the old build),
+# else the file at the base revision. Prints its path, or nothing.
 mg_gallery__old() {
   local checkout="$1" path="$2" base="$3" out="$4" blob
-  blob="$(jq -r --arg p "$path" 'first(.baselines[]? | select(.path == $p) | .blob) // empty' "$checkout/docs/design/approved-baselines.json" 2>/dev/null)"
+  blob="$(jq -r --arg p "$path" '
+    def cell: capture("^app/Snapshots/(?<key>[^/]+)/(?<cell>.+)$") | {model: (.key | sub("-[^-]+$"; "")), cell};
+    first((.baselines[]? | select(.path == $p)), (.baselines[]? | select((.path | cell) == ($p | cell))) | .blob) // empty' \
+    "$checkout/docs/design/approved-baselines.json" 2>/dev/null)"
   if [ -n "$blob" ] && git -C "$checkout" cat-file blob "$blob" >"$out" 2>/dev/null; then
     printf '%s\n' "$out"
   elif [ -n "$base" ] && git -C "$checkout" show "$base:$path" >"$out" 2>/dev/null; then
@@ -132,9 +136,21 @@ mg_gallery__old() {
   fi
 }
 
-# mg_gallery__add <items> <baseline path> <new> <old|""> <checkout in container> <branch> <pending>
+# mg_gallery__committed <checkout> <path>: the blob HEAD holds at <path>,
+# when the file there is that blob and git can read it back (the guard reads
+# approved images by blob id); nothing otherwise. Only such an image can be
+# approved (gallery.py decide).
+mg_gallery__committed() {
+  local blob
+  blob="$(git -C "$1" rev-parse -q --verify "HEAD:$2" 2>/dev/null)" || return 0
+  [ "$(git -C "$1" hash-object -- "$1/$2" 2>/dev/null)" = "$blob" ] || return 0
+  git -C "$1" cat-file -e "$blob" 2>/dev/null || return 0
+  printf '%s\n' "$blob"
+}
+
+# mg_gallery__add <items> <baseline path> <new> <old|""> <checkout in container> <branch> <pending> <checkout on the host>
 mg_gallery__add() {
-  local items="$1" path="$2" new="$3" old="$4" checkout="$5" branch="$6" pending="$7" rest subject state cell signature
+  local items="$1" path="$2" new="$3" old="$4" checkout="$5" branch="$6" pending="$7" host="$8" rest subject state cell signature committed
   rest="${path#app/Snapshots/*/}"
   subject="${rest%%/*}"
   rest="${rest#*/}"
@@ -142,12 +158,14 @@ mg_gallery__add() {
   cell="$(basename "$rest" .png)"
   signature="$(jq --arg s "$subject" 'any(.baselines[]?; .screen == $s and .signature == true)' "$MG_ROOT/docs/design/approved-baselines.json" 2>/dev/null || echo false)"
   [ "$(mg_gallery__signature "$subject")" = true ] && signature=true
+  committed="$(mg_gallery__committed "$host" "$path")"
   jq --arg id "$( [ "$pending" = true ] && echo "$branch:")$subject/$state/$cell" --arg s "$subject" --arg st "$state" --arg c "$cell" \
     --arg b "$path" --arg n "$(mg_container_path "$new")" --arg o "$( [ -n "$old" ] && mg_container_path "$old")" \
-    --arg co "$checkout" --arg br "$branch" --argjson p "$pending" --argjson sig "${signature:-false}" \
+    --arg co "$checkout" --arg br "$branch" --argjson p "$pending" --argjson sig "${signature:-false}" --arg cb "$committed" \
     '. + [{id: $id, screen: $s, state: $st, variant: $c, platform: ($c | capture("-(?<d>iphone|ipad|mac)") | .d),
       baseline: $b, new: $n, old: (if $o == "" then null else $o end), checkout: $co,
-      branch: (if $br == "" then null else $br end), pending: $p, signature: $sig}]' "$items" >"$items.tmp" && mv "$items.tmp" "$items"
+      branch: (if $br == "" then null else $br end), pending: $p, signature: $sig,
+      committed_blob: (if $cb == "" then null else $cb end)}]' "$items" >"$items.tmp" && mv "$items.tmp" "$items"
 }
 
 # mg_gallery__signature <screen id>: whether the inventory marks it a

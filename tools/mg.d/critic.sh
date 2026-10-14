@@ -9,11 +9,13 @@
 # deny profile. Its answer is checked against docs/design/critic-issue.schema.json,
 # the rubric and the packet; an invalid answer is an error and records
 # nothing. A valid one goes into the screen status ledger with the evidence
-# of the snapshot and accessibility runs. Every run is a new session (R1984).
+# of the snapshot run (which must cover every platform the snapshot matrix
+# registers each screen on) and of the accessibility runs, one per platform
+# (--a11y, repeatable). Every run is a new session (R1984).
 # MEGURI_CRITIC_CMD replaces `claude` (self-tests use a stub).
 
 mg_job critic host mg_critic \
-  "Design critic (R1983-R1987): <snapshots run id|path|latest> [--screen <id>]... [--a11y <a11y run>] [--drive <drive run>] [--checks <file>] [--ledger <path>]; a fresh restricted Claude session grades the packet against docs/design/rubric.md; validated issues go into docs/design/screen-status.yaml. --probe-isolation checks that a critic session cannot read outside its packet"
+  "Design critic (R1983-R1987): <snapshots run id|path|latest> [--screen <id>]... [--a11y <a11y run>]... [--drive <drive run>] [--checks <file>] [--ledger <path>]; a fresh restricted Claude session grades the packet against docs/design/rubric.md; validated issues go into docs/design/screen-status.yaml. --probe-isolation checks that a critic session cannot read outside its packet"
 
 MG_CRITIC_TOOLS="Read,Glob,Grep"
 
@@ -74,7 +76,7 @@ mg_critic__copy() {
 }
 
 mg_critic() {
-  local snapshots="" a11y="" drive="" checks="" ledger="docs/design/screen-status.yaml" screens=() probe=false s
+  local snapshots="" a11y=() drive="" checks="" ledger="docs/design/screen-status.yaml" screens=() probe=false s
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --screen)
@@ -82,7 +84,7 @@ mg_critic() {
           { mg_critic__usage "--screen takes a screen id (area.screen)"; return 0; }
         screens[${#screens[@]}]="$2" && shift 2
         ;;
-      --a11y) [ "$#" -ge 2 ] || { mg_critic__usage "--a11y needs an a11y run"; return 0; }; a11y="$2" && shift 2 ;;
+      --a11y) [ "$#" -ge 2 ] || { mg_critic__usage "--a11y needs an a11y run"; return 0; }; a11y[${#a11y[@]}]="$2" && shift 2 ;;
       --drive) [ "$#" -ge 2 ] || { mg_critic__usage "--drive needs a drive run"; return 0; }; drive="$2" && shift 2 ;;
       --checks) [ "$#" -ge 2 ] && [ -f "$2" ] || { mg_critic__usage "--checks needs a checks file"; return 0; }; checks="$2" && shift 2 ;;
       --ledger) [ "$#" -ge 2 ] || { mg_critic__usage "--ledger needs a path"; return 0; }; ledger="$2" && shift 2 ;;
@@ -95,12 +97,13 @@ mg_critic() {
     mg_critic__probe
     return 0
   fi
-  [ -n "$snapshots" ] || { mg_critic__usage "usage: tools/mg critic <snapshots run> [--screen <id>]... [--a11y <run>] [--drive <run>] [--ledger <path>]"; return 0; }
-  local snap_dir a11y_dir="" drive_dir=""
+  [ -n "$snapshots" ] || { mg_critic__usage "usage: tools/mg critic <snapshots run> [--screen <id>]... [--a11y <run>]... [--drive <run>] [--ledger <path>]"; return 0; }
+  local snap_dir drive_dir="" a11y_args=() dir
   snap_dir="$(mg_critic__run_dir snapshots "$snapshots")" || { mg_critic__usage "no finished tools/mg snapshots run '$snapshots'"; return 0; }
-  if [ -n "$a11y" ]; then
-    a11y_dir="$(mg_critic__run_dir a11y "$a11y")" || { mg_critic__usage "no finished tools/mg a11y run '$a11y'"; return 0; }
-  fi
+  for s in ${a11y[0]+"${a11y[@]}"}; do
+    dir="$(mg_critic__run_dir a11y "$s")" || { mg_critic__usage "no finished tools/mg a11y run '$s'"; return 0; }
+    a11y_args=(${a11y_args[0]+"${a11y_args[@]}"} --a11y "$(mg_container_path "$dir")")
+  done
   if [ -n "$drive" ]; then
     drive_dir="$(mg_critic__run_dir drive "$drive")" || { mg_critic__usage "no finished tools/mg drive run '$drive'"; return 0; }
   fi
@@ -164,20 +167,20 @@ mg_critic() {
     return 0
   fi
   mg_artifact report "$report" "validated critic issues"
-  local evidence
-  evidence="$(mg_critic__evidence "$snap_dir" "$a11y_dir" "$packet/packet.json")"
-  mg_detail evidence "$evidence"
   if ! mg_image_tools python3 tools/scripts/critic/critic.py apply --report "$(mg_container_path "$report")" \
-    --ledger "$(mg_container_path "$ledger")" --evidence "$evidence" --session "$session" \
+    --packet "$(mg_container_path "$packet")" ${a11y_args[0]+"${a11y_args[@]}"} \
+    --ledger "$(mg_container_path "$ledger")" --session "$session" \
     --commit "$(git -C "$MG_ROOT" rev-parse --verify -q HEAD)" >"$MG_RUN_DIR/apply.json" 2>>"$MG_RUN_DIR/log.txt"; then
     mg_failure ledger "could not record the issues in ${ledger#"$MG_ROOT"/}; see log.txt"
     mg_status error
     return 0
   fi
   mg_artifact ledger "$ledger" "screen status ledger"
-  local statuses high
-  statuses="$(grep -o '{"statuses".*' "$MG_RUN_DIR/apply.json" | tail -n 1 | jq -c .statuses)"
+  local statuses high applied
+  applied="$(grep -o '{"statuses".*' "$MG_RUN_DIR/apply.json" | tail -n 1)"
+  statuses="$(jq -c .statuses <<<"${applied:-null}")"
   mg_detail statuses "${statuses:-null}"
+  mg_detail evidence "$(jq -c '.evidence // null' <<<"${applied:-null}")"
   mg_detail issues "$(jq -c '{high: [.issues[] | select(.severity == "high")] | length, medium: [.issues[] | select(.severity == "medium")] | length, low: [.issues[] | select(.severity == "low")] | length, dropped: (.dropped | length)}' "$report")"
   high="$(jq '[.issues[] | select(.severity == "high")] | length' "$report")"
   mg_count total "$(jq '.issues | length' "$report")"
@@ -194,26 +197,6 @@ mg_critic__prompt() {
   cat <<'EOF'
 Grade the screens in this packet as the critic (your role is in the system prompt and in role.md). Read packet.json, rubric.md, brief.md and the calibration/ files, look at every image packet.json lists and at the references of each screen's patterns, then answer with only the JSON object schema.json describes.
 EOF
-}
-
-# mg_critic__evidence <snapshots dir> <a11y dir> <packet.json>: per screen,
-# the snapshot, accessibility and lint runs behind the grading.
-mg_critic__evidence() {
-  local snap="$1" a11y="$2" packet="$3" commit lint_status lint_run screens="[]"
-  commit="$(jq -r '.commit.sha // empty' "$snap/result.json")"
-  lint_run="$(jq -r '.artifacts[] | select(.kind == "lint-ui") | .path' "$snap/result.json" | head -n 1)"
-  lint_status="$( [ -n "$lint_run" ] && jq -r .status "$lint_run" 2>/dev/null || echo none)"
-  [ -z "$a11y" ] || screens="$(cat "$a11y/screens.json" 2>/dev/null || echo '[]')"
-  jq -c --slurpfile results "$snap/results.jsonl" --argjson a11y "$screens" \
-    --arg run "$(basename "$snap")" --arg status "$(jq -r .status "$snap/result.json")" --arg commit "$commit" \
-    --arg a11yrun "$( [ -n "$a11y" ] && basename "$a11y")" \
-    --arg lintrun "$(basename "$(dirname "${lint_run:-x/x}")")" --arg lint "$lint_status" '
-    [.screens[].id] | map(. as $id | {($id): ({
-      snapshots: {run: $run, commit: $commit,
-        status: (if $status == "pass" and all($results[] | select(.subject == $id); .status == "pass" or .status == "recorded" or .status == "deferred") then "pass" else "fail" end)},
-      lint: {run: $lintrun, status: $lint}
-    } + (if $a11yrun == "" then {} else {a11y: {run: $a11yrun,
-        status: (first($a11y[] | select(.screen == $id) | .status) // "not-audited")}} end))}) | add // {}' "$packet"
 }
 
 # tools/mg critic --probe-isolation: a probe session asked to read a file in

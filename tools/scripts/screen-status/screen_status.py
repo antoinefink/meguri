@@ -4,14 +4,20 @@ operates it): the only place a screen's status lives (R1985, R1987).
 
 Statuses: sketch -> built -> verified -> approved.
   built     the screen exists and has snapshots
-  verified  its latest snapshot and accessibility runs passed and the latest
+  verified  on every platform the snapshot matrix registers it on, its
+            latest snapshot and accessibility runs passed and the latest
             critic check left no high-severity issue (R1985)
   approved  verified, plus Antoine's logged pick (docs/design/decisions.md)
             and gallery approval of its baselines (signature screens, R1988)
 
-A high-severity critic issue moves a verified or approved screen back to
-built; medium issues become tasks; low ones stay listed for the gallery.
-Only this script writes the ledger (tools/mg critic and gallery call it).
+Readiness is computed again after every critic check: a verified or approved
+screen whose check brings a high-severity issue or a failed prerequisite
+goes back to built. A check carries fresh snapshot and critic evidence for
+every platform; an accessibility run it does not carry is kept only while
+the screen's snapshots of that platform are the ones it was recorded with
+(the same image digest), so a changed screen needs a new run. Medium issues
+become tasks; low ones stay listed for the gallery. Only this script writes
+the ledger (tools/mg critic and gallery call it).
 
   screen_status.py check [--ledger L] [--inventory I]
   screen_status.py init [--ledger L] [--inventory I]       add inventory screens missing from the ledger
@@ -48,8 +54,10 @@ HEADER = """\
 # Per screen (ids from screen-inventory.yaml):
 #   status      sketch | built | verified | approved
 #   fix_rounds  agent render-and-fix rounds since the last merge (R1987, U254)
-#   evidence    the runs behind the status: snapshots, a11y, lint, critic
-#               (run id, status, commit)
+#   platforms   where the snapshot matrix registers the screen
+#   evidence    the runs behind the status, per platform: snapshots (with
+#               the digest of the screen's images), a11y (the digest it was
+#               checked against), critic; and lint (run id, status, commit)
 #   issues      open critic issues from the latest check (screen, variant,
 #               rubric rule, severity, region)
 #   tasks       medium critic issues to work on (R1985)
@@ -140,9 +148,9 @@ def problems(ledger, inventory, canonical):
         if status in ("verified", "approved") and highs:
             found.append("%s: %s with %d open high-severity critic issue(s)" % (screen, status, len(highs)))
         if status in ("verified", "approved"):
-            missing = [g for g in ("snapshots", "a11y", "critic") if (entry.get("evidence") or {}).get(g, {}).get("status") != "pass"]
+            missing = evidence_gaps(entry)
             if missing:
-                found.append("%s: %s without passing %s evidence" % (screen, status, ", ".join(missing)))
+                found.append("%s: %s without passing evidence: %s" % (screen, status, "; ".join(missing)))
     return found
 
 
@@ -153,46 +161,85 @@ def history(entry, to, by, reason):
     entry["status"] = to
 
 
+GATES = ("snapshots", "a11y", "critic")
+
+
+def evidence_gaps(entry):
+    """Each registered platform's gate without a passing run."""
+    platforms = entry.get("platforms") or []
+    if not platforms:
+        return ["no platform graded"]
+    evidence = entry.get("evidence") or {}
+    gaps = []
+    for platform in platforms:
+        for gate in GATES:
+            status = ((evidence.get(platform) or {}).get(gate) or {}).get("status")
+            if status != "pass":
+                gaps.append("%s %s: %s" % (platform, gate, status or "no run"))
+    return gaps
+
+
 def verified_ready(entry):
     """Why the screen cannot be verified yet; empty when it can."""
-    reasons = []
-    evidence = entry.get("evidence") or {}
-    for gate in ("snapshots", "a11y"):
-        status = (evidence.get(gate) or {}).get("status")
-        if status != "pass":
-            reasons.append("%s: %s" % (gate, status or "no run"))
+    reasons = evidence_gaps(entry)
     highs = [i for i in entry.get("issues") or [] if i.get("severity") == "high"]
     if highs:
-        reasons.append("%d high-severity critic issue(s) open" % len(highs))
-    if (evidence.get("critic") or {}).get("status") != "pass":
-        reasons.append("no passing critic check")
+        reasons.append("%d high-severity critic issue(s) open: %s" % (
+            len(highs), "; ".join("%s (%s)" % (i["rule"], i.get("variant")) for i in highs)))
     return reasons
+
+
+def merge_evidence(old, given, issues, report):
+    """The evidence after a critic check: fresh snapshot and critic results
+    for every platform the check names, its accessibility runs, and earlier
+    accessibility runs whose platform's images are unchanged."""
+    evidence = {}
+    lint = given.get("lint") or old.get("lint")
+    if lint:
+        evidence["lint"] = lint
+    for platform in given["platforms"]:
+        before = old.get(platform) or {}
+        fresh = given.get(platform) or {}
+        current = {}
+        snapshots = fresh.get("snapshots")
+        digest = (snapshots or {}).get("digest")
+        if snapshots:
+            current["snapshots"] = snapshots
+        if fresh.get("a11y"):
+            current["a11y"] = dict(fresh["a11y"], digest=digest)
+        elif before.get("a11y") and digest and before["a11y"].get("digest") == digest:
+            current["a11y"] = before["a11y"]
+        mine = [i for i in issues if i.get("platform") == platform]
+        highs = [i for i in mine if i["severity"] == "high"]
+        current["critic"] = {
+            "run": report["run"],
+            "session": report.get("session"),
+            "commit": report.get("commit"),
+            "status": "fail" if highs else "pass",
+            "high": len(highs),
+            "medium": sum(1 for i in mine if i["severity"] == "medium"),
+            "low": sum(1 for i in mine if i["severity"] == "low"),
+            "dropped": len([d for d in report.get("dropped") or [] if d["screen"] == report.get("screen") and d.get("platform") == platform]),
+            "date": now(),
+        }
+        evidence[platform] = current
+    return evidence
 
 
 def record_critic(ledger, screen, report, by="tools/mg critic"):
     """Records one critic check of `screen` (report: run, session, commit,
-    evidence{snapshots, a11y, lint}, issues[standing], dropped[]) and moves
-    the status. Returns the new status."""
+    evidence{platforms, lint, <platform>{snapshots, a11y}}, issues[standing,
+    each with its platform], dropped[]) and moves the status. Returns the
+    new status."""
+    given = report.get("evidence") or {}
+    if not given.get("platforms"):
+        raise LedgerError("the critic check of %s names no platform: its evidence lists where the screen is registered" % screen)
     entry = entry_for(ledger, screen)
     issues = [i for i in report.get("issues") or [] if i["screen"] == screen]
-    highs = [i for i in issues if i["severity"] == "high"]
-    evidence = entry.setdefault("evidence", {})
-    for gate, value in (report.get("evidence") or {}).items():
-        if value:
-            evidence[gate] = value
-    evidence["critic"] = {
-        "run": report["run"],
-        "session": report.get("session"),
-        "commit": report.get("commit"),
-        "status": "fail" if highs else "pass",
-        "high": len(highs),
-        "medium": sum(1 for i in issues if i["severity"] == "medium"),
-        "low": sum(1 for i in issues if i["severity"] == "low"),
-        "dropped": len([d for d in report.get("dropped") or [] if d["screen"] == screen]),
-        "date": now(),
-    }
+    entry["platforms"] = list(given["platforms"])
+    entry["evidence"] = merge_evidence(entry.get("evidence") or {}, given, issues, dict(report, screen=screen))
     entry["issues"] = [
-        {k: i[k] for k in ("state", "variant", "rule", "severity", "region", "summary", "image") if k in i} | {"run": report["run"]}
+        {k: i[k] for k in ("platform", "state", "variant", "rule", "severity", "region", "summary", "image") if k in i} | {"run": report["run"]}
         for i in issues
     ]
     if not entry["issues"]:
@@ -214,15 +261,14 @@ def record_critic(ledger, screen, report, by="tools/mg critic"):
             tasks.append(dict(task, since=report["run"]))
     if not tasks:
         entry.pop("tasks")
-    if highs:
-        if entry["status"] in ("verified", "approved", "sketch"):
-            history(entry, "built", by, "critic run %s: %d high-severity issue(s): %s" % (
-                report["run"], len(highs), "; ".join("%s (%s)" % (i["rule"], i["variant"]) for i in highs)))
-    else:
-        if entry["status"] == "sketch":
-            history(entry, "built", by, "critic run %s graded its snapshots" % report["run"])
-        if entry["status"] == "built" and not verified_ready(entry):
-            history(entry, "verified", by, "critic run %s: no high-severity issue; snapshots and accessibility passed" % report["run"])
+    if entry["status"] == "sketch":
+        history(entry, "built", by, "critic run %s graded its snapshots" % report["run"])
+    reasons = verified_ready(entry)
+    if reasons and entry["status"] in ("verified", "approved"):
+        history(entry, "built", by, "critic run %s: %s" % (report["run"], "; ".join(reasons)))
+    elif not reasons and entry["status"] == "built":
+        history(entry, "verified", by, "critic run %s: no high-severity issue; snapshots, accessibility and critic passed on %s" % (
+            report["run"], ", ".join(entry["platforms"])))
     return entry["status"]
 
 

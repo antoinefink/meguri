@@ -12,17 +12,27 @@ ITEMS.json, written by tools/mg gallery: [{"id", "screen", "state", "variant",
 "platform", "baseline" (repo-relative), "new", "old" (paths or null),
 "checkout" (where decisions are written, as this container sees it),
 "branch", "pending" (true for a branch the baseline guard escalated),
-"signature"}].
+"signature", "committed_blob" (the git blob HEAD holds at the baseline's
+path when the file there is that blob, else null: only a committed image
+can be approved, since the guard reads approved images back from git)}].
+
+Decisions are serialized (one at a time, across the server's threads and
+processes), and every file is replaced through a temporary file of its own.
 """
 
 import argparse
+import contextlib
 import datetime
+import fcntl
 import hashlib
 import html
 import json
 import os
+import re
 import shutil
 import sys
+import tempfile
+import threading
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "image-diff"))
@@ -50,6 +60,18 @@ def now():
 def git_blob_id(data):
     """The id `git hash-object` gives these bytes."""
     return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+BASELINE_PATH = re.compile(r"^app/Snapshots/(?P<key>[^/]+)/(?P<cell>.+)$")
+
+
+def same_cell(path):
+    """(model, cell path) of a baseline: the same cell of the same model under
+    another OS build has the same identity."""
+    match = BASELINE_PATH.match(path or "")
+    if not match:
+        return None
+    return match.group("key").rsplit("-", 1)[0], match.group("cell")
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +143,12 @@ def esc(value):
     return html.escape(str(value), quote=True)
 
 
+def full_size(src, alt):
+    """An image that opens at its own size in a new tab: the page shows it
+    scaled to its column, and a reviewer judges pixels (R1989)."""
+    return "<a href='%s' target=_blank rel=noopener><img loading=lazy src='%s' alt='%s'></a>" % (esc(src), esc(src), esc(alt))
+
+
 def render(manifest):
     """The page: one section per screen, pending approvals first."""
     by_screen = {}
@@ -145,7 +173,7 @@ def render(manifest):
             for side in ("old", "new", "diff"):
                 src = item.get(side)
                 parts.append("<figure><figcaption>%s</figcaption>%s</figure>" % (
-                    side, "<img loading=lazy src='%s' alt='%s %s'>" % (esc(src), side, esc(item["id"])) if src else "<div class=none>none</div>"))
+                    side, full_size(src, "%s %s" % (side, item["id"])) if src else "<div class=none>none</div>"))
             parts.append("</div><div class=actions>"
                          "<input class=note placeholder='Note (optional for approve)'>"
                          "<button data-decision=approve>Approve</button>"
@@ -156,9 +184,8 @@ def render(manifest):
     for pick in manifest["picks"]:
         parts.append("<section class=pick data-screen='%s'><h2>Pick a variant: %s</h2><div class=row>" % (esc(pick["screen"]), esc(pick["screen"])))
         for variant in pick.get("variants", []):
-            parts.append("<figure><figcaption><label><input type=radio name='pick-%s' value='%s'> %s</label></figcaption>"
-                         "<img loading=lazy src='%s' alt='%s'></figure>" % (
-                             esc(pick["screen"]), esc(variant["name"]), esc(variant["name"]), esc(variant.get("image") or ""), esc(variant["name"])))
+            parts.append("<figure><figcaption><label><input type=radio name='pick-%s' value='%s'> %s</label></figcaption>%s</figure>" % (
+                esc(pick["screen"]), esc(variant["name"]), esc(variant["name"]), full_size(variant.get("image") or "", variant["name"])))
         parts.append("</div><div class=actions><input class=note placeholder='Why this one'>"
                      "<button data-pick>Pick</button><span class=state></span></div></section>")
     parts.append(PAGE_SCRIPT + "</body></html>")
@@ -180,25 +207,32 @@ img{max-width:100%;border:1px solid var(--line)}.none{border:1px dashed var(--li
 </style></head><body>"""
 
 PAGE_SCRIPT = """<script>
-const served = location.protocol.startsWith('http');
-async function post(path, body, state) {
-  if (!served) { state.textContent = 'open through tools/mg gallery serve to record decisions'; return; }
-  const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  const answer = await response.json();
-  state.textContent = response.ok ? 'recorded: ' + answer.decision : 'error: ' + answer.error;
+// Decisions go to the review server; a page opened from disk only says so.
+const reviewing = location.protocol === 'http:' || location.protocol === 'https:';
+function show(label, text) { label.textContent = text; }
+function send(endpoint, payload, label) {
+  if (!reviewing) return show(label, 'open through tools/mg gallery serve to record decisions');
+  const request = new Request(endpoint, {method: 'POST', body: JSON.stringify(payload)});
+  request.headers.set('Content-Type', 'application/json');
+  fetch(request).then(reply => reply.json().then(answer => {
+    show(label, reply.ok ? 'recorded: ' + answer.decision : 'error: ' + answer.error);
+  })).catch(problem => show(label, 'error: ' + problem));
 }
-document.querySelectorAll('article').forEach(article => {
-  article.querySelectorAll('button').forEach(button => button.addEventListener('click', () =>
-    post('/api/decision', {item: article.dataset.item, decision: button.dataset.decision,
-      note: article.querySelector('.note').value}, article.querySelector('.state'))));
-});
-document.querySelectorAll('section.pick').forEach(section => {
+for (const article of document.querySelectorAll('article')) {
+  const label = article.querySelector('.state');
+  for (const button of article.querySelectorAll('button')) {
+    button.addEventListener('click', () => send('/api/decision',
+      {item: article.dataset.item, decision: button.dataset.decision, note: article.querySelector('.note').value}, label));
+  }
+}
+for (const section of document.querySelectorAll('section.pick')) {
+  const label = section.querySelector('.state');
   section.querySelector('button').addEventListener('click', () => {
     const chosen = section.querySelector('input[type=radio]:checked');
-    post('/api/pick', {screen: section.dataset.screen, variant: chosen ? chosen.value : '',
-      reason: section.querySelector('.note').value}, section.querySelector('.state'));
+    send('/api/pick', {screen: section.dataset.screen, variant: chosen ? chosen.value : '',
+      reason: section.querySelector('.note').value}, label);
   });
-});
+}
 </script>"""
 
 
@@ -213,12 +247,36 @@ def read_json(path, default):
 
 
 def write_json(path, data):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as handle:
-        json.dump(data, handle, indent=2)
-        handle.write("\n")
-    os.replace(tmp, path)
+    """Replaces the file through a temporary file of its own."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix="." + os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(data, handle, indent=2)
+            handle.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+_DECISIONS = threading.Lock()
+
+
+@contextlib.contextmanager
+def one_decision_at_a_time(gallery_dir):
+    """Holds every decision's read-modify-write of the review, approval and
+    decision files to itself: the server's threads share a lock, and other
+    processes serving the same gallery an flock on gallery_dir/.decisions.lock."""
+    with _DECISIONS:
+        with open(os.path.join(gallery_dir, ".decisions.lock"), "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def record_review(checkout, entry, commit=None):
@@ -236,7 +294,14 @@ def record_review(checkout, entry, commit=None):
 def decide(gallery_dir, item_id, decision, note=""):
     """Records Antoine's decision on one gallery item: every decision goes in
     the day's review file; an approval also locks the image as the approved
-    baseline (approved-baselines.json). Returns what was written."""
+    baseline (approved-baselines.json), retiring in the same write the
+    entries it supersedes (the same model's same cell under another OS
+    build). Returns what was written."""
+    with one_decision_at_a_time(gallery_dir):
+        return _decide(gallery_dir, item_id, decision, note)
+
+
+def _decide(gallery_dir, item_id, decision, note):
     if decision not in ("approve", "reject", "note"):
         raise GalleryError("decision must be approve, reject or note")
     if decision in ("reject", "note") and not note.strip():
@@ -264,17 +329,28 @@ def decide(gallery_dir, item_id, decision, note=""):
             with open(current, "rb") as handle:
                 if hashlib.sha256(handle.read()).hexdigest() != entry["sha256"]:
                     raise GalleryError("%s changed since the gallery was built; rebuild it" % item["baseline"])
+        # The guard reads the approved image back from git by its blob id:
+        # only the image HEAD holds at that path can be approved.
+        blob = git_blob_id(data)
+        if item.get("committed_blob") != blob:
+            raise GalleryError("%s is not committed as shown (HEAD holds %s at that path); commit it, rebuild the gallery, then approve" % (
+                item["baseline"], item.get("committed_blob") or "nothing"))
+        path = os.path.join(checkout, APPROVED)
+        approved = read_json(path, {"version": 1, "baselines": []})
+        cell = same_cell(item["baseline"])
+        superseded = sorted(b["path"] for b in approved["baselines"]
+                            if b["path"] != item["baseline"] and cell is not None and same_cell(b["path"]) == cell)
+        if superseded:
+            entry["supersedes"] = superseded
     review = record_review(checkout, entry, manifest.get("commit"))
     written["files"].append(review)
     if decision == "approve":
-        path = os.path.join(checkout, APPROVED)
-        approved = read_json(path, {"version": 1, "baselines": []})
-        approved["baselines"] = [b for b in approved["baselines"] if b["path"] != item["baseline"]]
-        approved["baselines"].append({
+        approved["baselines"] = [b for b in approved["baselines"] if b["path"] != item["baseline"] and b["path"] not in superseded]
+        approved["baselines"].append(dict({
             "path": item["baseline"], "screen": item["screen"], "state": item["state"], "variant": item["variant"],
-            "signature": bool(item.get("signature")), "sha256": entry["sha256"], "blob": git_blob_id(data),
+            "signature": bool(item.get("signature")), "sha256": entry["sha256"], "blob": blob,
             "approved_by": "antoine", "approved_on": today(), "review": review,
-        })
+        }, **({"supersedes": superseded} if superseded else {})))
         approved["baselines"].sort(key=lambda b: b["path"])
         write_json(path, approved)
         written["files"].append(APPROVED)
@@ -287,6 +363,11 @@ def decide(gallery_dir, item_id, decision, note=""):
 def pick(gallery_dir, screen, variant, reason):
     """Antoine's variant pick for a signature screen (R1988): a line in
     decisions.md and the day's review file."""
+    with one_decision_at_a_time(gallery_dir):
+        return _pick(gallery_dir, screen, variant, reason)
+
+
+def _pick(gallery_dir, screen, variant, reason):
     manifest = read_json(os.path.join(gallery_dir, "gallery.json"), None) or {}
     offered = next((p for p in manifest.get("picks", []) if p["screen"] == screen), None)
     if offered is None or variant not in [v["name"] for v in offered.get("variants", [])]:

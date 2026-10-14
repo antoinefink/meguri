@@ -6,21 +6,25 @@ the image-tools container. tools/mg critic runs the session itself.
                    [--checks FILE] [--host-root PATH] [--run ID]
       builds the packet: the screens' snapshot images with their variants,
       contact sheets, the rubric, the brief, reference images, calibration
-      examples, the output schema and packet.json; exit 1 when a screen has
-      no image
+      examples, the output schema and packet.json (with each screen's
+      platforms and per-platform snapshot evidence); exit 1 when a screen has
+      no image on a platform the snapshot matrix registers it on (the run's
+      registry.json)
   critic.py validate --packet DIR --output FILE --report FILE
       reads the session's output (Claude's JSON result), checks it against
       the schema, the rubric and the packet, and drops issues a passing
-      deterministic check contradicts (R1986); exit 1, and no report, when
-      the output is invalid
-  critic.py apply --report FILE --ledger FILE [--inventory FILE] [--evidence JSON]
-                  [--session ID] [--commit SHA]
-      records the report in the screen status ledger (screen_status.py);
-      evidence is {screen: {snapshots|a11y|lint: {run, status, commit}}}
+      deterministic check of the same screen, state, variant and rule
+      contradicts (R1986); exit 1, and no report, when the output is invalid
+  critic.py apply --report FILE --packet DIR [--a11y RUN_DIR]... --ledger FILE
+                  [--inventory FILE] [--session ID] [--commit SHA]
+      records the report in the screen status ledger (screen_status.py) with
+      the packet's snapshot evidence and each a11y run's result for its
+      platform
 """
 
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -96,6 +100,54 @@ def read_results(run_dir):
         return [json.loads(line) for line in handle if line.strip()]
 
 
+def read_registry(run_dir):
+    """{screen: [platforms]}: where the snapshot matrix registers each screen
+    (registry.json, written by tools/mg snapshots)."""
+    path = os.path.join(run_dir, "registry.json")
+    if not os.path.exists(path):
+        raise PacketError("%s has no registry.json: run tools/mg snapshots again (it records where each screen is registered)" % run_dir)
+    with open(path) as handle:
+        screens = json.load(handle).get("screens") or {}
+    return {screen: list(entry.get("platforms") or []) for screen, entry in screens.items()}
+
+
+def read_json(path, default=None):
+    if not os.path.exists(path):
+        return default
+    with open(path) as handle:
+        return json.load(handle)
+
+
+def sha256_file(path):
+    with open(path, "rb") as handle:
+        return hashlib.sha256(handle.read()).hexdigest()
+
+
+def snapshot_evidence(run_dir, results, screen, chosen, host_root):
+    """Per platform, the snapshot run's result for the screen: pass when the
+    run passed and every snapshot of the screen passed, was recorded or is
+    deferred; and the digest of the images graded (which changes when the
+    screen does)."""
+    result = read_json(os.path.join(run_dir, "result.json"), {}) or {}
+    run = os.path.basename(os.path.normpath(run_dir))
+    commit = (result.get("commit") or {}).get("sha")
+    evidence = {}
+    for platform in sorted({e.get("platform") for e in results if e.get("subject") == screen and e.get("platform")}):
+        mine = [e for e in results if e.get("subject") == screen and e.get("platform") == platform and e.get("kind") != "text"]
+        ok = result.get("status") == "pass" and all(e.get("status") in ("pass", "recorded", "deferred") for e in mine)
+        images = sorted((name, sha256_file(path)) for name, (entry, _, path) in chosen.items()
+                        if entry["subject"] == screen and entry.get("platform") == platform)
+        digest = hashlib.sha256(json.dumps(images).encode()).hexdigest()
+        evidence[platform] = {"snapshots": {"run": run, "commit": commit, "status": "pass" if ok else "fail", "digest": digest}}
+    lint = None
+    for artifact in result.get("artifacts") or []:
+        if artifact.get("kind") == "lint-ui":
+            lint_result = read_json(to_container(artifact.get("path", ""), host_root), {}) or {}
+            lint = {"run": os.path.basename(os.path.dirname(artifact.get("path", ""))), "status": lint_result.get("status", "none")}
+            break
+    return evidence, lint
+
+
 def screen_images(results, screens, host_root):
     """Per screen, the latest image of every rendered cell: the baseline when
     it passed, the new render otherwise."""
@@ -132,11 +184,23 @@ def build_packet(args):
     inventory = yaml.safe_load(open(INVENTORY)) or {}
     by_id = {s["id"]: s for s in inventory.get("screens") or []}
     results = read_results(args.snapshots)
+    registry = read_registry(args.snapshots)
     chosen = screen_images(results, set(args.screen or []), args.host_root)
     screens = sorted({entry["subject"] for entry, _, _ in chosen.values()})
     missing = [s for s in args.screen or [] if s not in screens]
     if missing or not screens:
         raise PacketError("no snapshot image for %s in %s" % (", ".join(missing) or "any screen", args.snapshots))
+    # A screen is graded on every platform it is registered on (R1971):
+    # a layout that only breaks on the iPad or the Mac must reach the critic.
+    for screen in screens:
+        if screen not in registry:
+            raise PacketError("%s is not registered in the snapshot matrix (registry.json of %s)" % (screen, args.snapshots))
+        covered = {entry.get("platform") for entry, _, _ in chosen.values() if entry["subject"] == screen}
+        absent = [p for p in registry[screen] if p not in covered]
+        if absent:
+            raise PacketError("the snapshots run has no image of %s on %s, where the snapshot matrix registers it; "
+                              "a screen is graded on all its platforms (tools/mg snapshots --platform %s)" % (
+                                  screen, ", ".join(absent), ",".join(registry[screen])))
     images = []
     for name in sorted(chosen):
         entry, source, path = chosen[name]
@@ -179,16 +243,20 @@ def build_packet(args):
     if args.checks:
         with open(args.checks) as handle:
             checks = json.load(handle).get("checks", [])
+    manifest_screens = []
+    for s in screens:
+        evidence, lint = snapshot_evidence(args.snapshots, results, s, chosen, args.host_root)
+        manifest_screens.append({
+            "id": s, "title": by_id.get(s, {}).get("title", s), "signature": bool(by_id.get(s, {}).get("signature")),
+            "purpose": by_id.get(s, {}).get("purpose", "a sample screen of the verification tooling"),
+            "references": by_id.get(s, {}).get("references") or [],
+            "platforms": registry[s], "evidence": evidence, "lint": lint,
+        })
     manifest = {
         "run": args.run,
         "rubric_version": rubric()["version"],
         "snapshots_run": os.path.basename(os.path.normpath(args.snapshots)),
-        "screens": [
-            {"id": s, "title": by_id.get(s, {}).get("title", s), "signature": bool(by_id.get(s, {}).get("signature")),
-             "purpose": by_id.get(s, {}).get("purpose", "a sample screen of the verification tooling"),
-             "references": by_id.get(s, {}).get("references") or []}
-            for s in screens
-        ],
+        "screens": manifest_screens,
         "images": images,
         "contact_sheets": sheets,
         "references": references,
@@ -300,6 +368,7 @@ def validate(packet_dir, output_path):
         return None, errors
     standing, dropped = [], []
     for issue in output["issues"]:
+        issue = dict(issue, platform=images[issue["image"]].get("platform"))
         check = deterministic_result(packet.get("checks") or [], issue)
         if rules["rules"][issue["rule"]]["deterministic"] and check == "pass":
             dropped.append(dict(issue, dropped="its deterministic check passed for this variant (R1986)"))
@@ -316,14 +385,57 @@ def validate(packet_dir, output_path):
 
 
 def deterministic_result(checks, issue):
-    """The deterministic check's result for the issue's rule and variant:
-    pass, fail, or None when no check covers that cell."""
+    """The deterministic checks' result for the issue's screen, state,
+    variant and rule (a check names each, "*" for every state or variant):
+    fail when any covering check failed, pass when one passed, None when no
+    check covers that image. A check that names no state covers none."""
+    found = set()
     for check in checks:
         if check.get("rule") != issue["rule"] or check.get("screen") != issue["screen"]:
             continue
-        if check.get("variant") in ("*", issue["variant"]):
-            return check.get("status")
-    return None
+        if check.get("state") in ("*", issue["state"]) and check.get("variant") in ("*", issue["variant"]):
+            found.add(check.get("status"))
+    if "fail" in found:
+        return "fail"
+    return "pass" if "pass" in found else None
+
+
+def a11y_evidence(run_dirs):
+    """{platform: {screen: {run, status, commit}}} from tools/mg a11y runs;
+    each run audits one platform (details.platform)."""
+    found = {}
+    for run_dir in run_dirs or []:
+        result = read_json(os.path.join(run_dir, "result.json"))
+        if not result or result.get("job") != "a11y":
+            raise PacketError("%s is not a tools/mg a11y run" % run_dir)
+        platform = (result.get("details") or {}).get("platform")
+        if not platform:
+            raise PacketError("the a11y run %s does not say which platform it audited (details.platform); run tools/mg a11y again" % run_dir)
+        run = result.get("run_id") or os.path.basename(os.path.normpath(run_dir))
+        for screen in read_json(os.path.join(run_dir, "screens.json"), []) or []:
+            found.setdefault(platform, {})[screen["screen"]] = {
+                "run": run, "status": screen.get("status") or "not-audited", "commit": (result.get("commit") or {}).get("sha"),
+                "states": screen.get("states")}
+        # A run that did not audit a screen gives it no evidence (a later
+        # run of the same platform replaces an earlier one).
+    return found
+
+
+def evidence_for(packet, a11y):
+    """Per screen, what the ledger records with the check (screen_status.py):
+    the platforms, the packet's snapshot evidence, each platform's a11y result."""
+    result = {}
+    for screen in packet["screens"]:
+        evidence = {"platforms": screen["platforms"]}
+        if screen.get("lint"):
+            evidence["lint"] = screen["lint"]
+        for platform in screen["platforms"]:
+            evidence[platform] = dict((screen.get("evidence") or {}).get(platform) or {})
+            audited = (a11y.get(platform) or {}).get(screen["id"])
+            if audited:
+                evidence[platform]["a11y"] = {k: v for k, v in audited.items() if v is not None}
+        result[screen["id"]] = evidence
+    return result
 
 
 def main(argv=None):
@@ -343,9 +455,10 @@ def main(argv=None):
     v.add_argument("--report", required=True)
     a = sub.add_parser("apply")
     a.add_argument("--report", required=True)
+    a.add_argument("--packet", required=True)
+    a.add_argument("--a11y", action="append")
     a.add_argument("--ledger", default=screen_status.LEDGER)
     a.add_argument("--inventory", default=screen_status.INVENTORY)
-    a.add_argument("--evidence", default="{}")
     a.add_argument("--session", default="")
     a.add_argument("--commit", default="")
     args = parser.parse_args(argv)
@@ -368,7 +481,8 @@ def main(argv=None):
             return 0
         with open(args.report) as handle:
             report = json.load(handle)
-        evidence = json.loads(args.evidence)
+        with open(os.path.join(args.packet, "packet.json")) as handle:
+            evidence = evidence_for(json.load(handle), a11y_evidence(args.a11y))
         report["session"] = args.session or None
         report["commit"] = args.commit or None
         inventory = screen_status.load_inventory(args.inventory)
@@ -379,7 +493,7 @@ def main(argv=None):
             screen_status.check_screen_id(screen, inventory, canonical)
             statuses[screen] = screen_status.record_critic(ledger, screen, dict(report, evidence=evidence.get(screen, {})))
         screen_status.dump(ledger, args.ledger)
-        print(json.dumps({"statuses": statuses}))
+        print(json.dumps({"statuses": statuses, "evidence": evidence}))
         return 0
     except (PacketError, screen_status.LedgerError, OSError) as error:
         print("critic: %s" % error, file=sys.stderr)

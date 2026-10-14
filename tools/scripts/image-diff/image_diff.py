@@ -116,7 +116,8 @@ def guard(pairs, diff_dir=None):
     beyond the tolerance need human review; changes within it do not."""
     report = {"verdict": "pass", "checked": [], "needs_human_review": []}
     for pair in pairs:
-        entry = {"path": pair["path"]}
+        # supersedes: the approved path this one replaced (an OS rebaseline).
+        entry = {k: pair[k] for k in ("path", "supersedes") if k in pair}
         if not os.path.exists(pair["current"]):
             entry.update(match=False, reason="the approved baseline is gone")
         else:

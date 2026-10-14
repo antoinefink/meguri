@@ -17,9 +17,25 @@ import screen_status  # noqa: E402
 PASS = {"run": "r", "status": "pass", "commit": "c"}
 
 
-def issue(severity, rule="text-truncation", screen="sample.deckOverview", variant="dark-ax5-iphoneSmall", summary="Deck name cut off"):
+def snapshots(status="pass", digest="d1"):
+    return {"run": "s", "status": status, "commit": "c", "digest": digest}
+
+
+def evidence(platforms=("iphone",), a11y=True, snap=None, **per_platform):
+    """A report's evidence: snapshots on every platform, a11y on each unless
+    a11y is False; per_platform overrides one platform's gates."""
+    result = {"platforms": list(platforms), "lint": PASS}
+    for platform in platforms:
+        result[platform] = {"snapshots": snap or snapshots()}
+        if a11y:
+            result[platform]["a11y"] = PASS
+        result[platform].update(per_platform.get(platform, {}))
+    return result
+
+
+def issue(severity, rule="text-truncation", screen="sample.deckOverview", variant="dark-ax5-iphoneSmall", summary="Deck name cut off", platform="iphone"):
     return {"screen": screen, "state": "overflow", "variant": variant, "image": "screens/x.png", "rule": rule,
-            "severity": severity, "region": {"x": 0, "y": 0, "width": 10, "height": 10}, "summary": summary}
+            "severity": severity, "region": {"x": 0, "y": 0, "width": 10, "height": 10}, "summary": summary, "platform": platform}
 
 
 class ScreenStatusTest(unittest.TestCase):
@@ -29,14 +45,14 @@ class ScreenStatusTest(unittest.TestCase):
         self.ledger = screen_status.load(self.ledger_path)
 
     def report(self, run, issues, evidence=None):
-        return {"run": run, "issues": issues, "dropped": [], "evidence": evidence or {"snapshots": PASS, "a11y": PASS}}
+        return {"run": run, "issues": issues, "dropped": [], "evidence": evidence or globals()["evidence"]()}
 
     def test_a_high_issue_keeps_the_screen_out_of_verified_until_a_new_check_passes(self):
         # AE90: the truncated deck name keeps the screen built...
         status = screen_status.record_critic(self.ledger, "sample.deckOverview", self.report("critic-1", [issue("high")]))
         self.assertEqual(status, "built")
         entry = self.ledger["screens"]["sample.deckOverview"]
-        self.assertEqual(entry["evidence"]["critic"]["status"], "fail")
+        self.assertEqual(entry["evidence"]["iphone"]["critic"]["status"], "fail")
         self.assertEqual(entry["issues"][0]["rule"], "text-truncation")
         self.assertEqual(entry["issues"][0]["region"], {"x": 0, "y": 0, "width": 10, "height": 10})
         # ...and a later check by a new critic with no high issue verifies it.
@@ -46,11 +62,60 @@ class ScreenStatusTest(unittest.TestCase):
         self.assertEqual([h["to"] for h in entry["history"]], ["built", "verified"])
 
     def test_verified_needs_passing_snapshots_and_accessibility_runs(self):
-        report = self.report("critic-1", [], {"snapshots": PASS, "a11y": {"run": "a", "status": "fail"}})
+        report = self.report("critic-1", [], evidence(iphone={"a11y": {"run": "a", "status": "fail"}}))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
-        report = self.report("critic-2", [], {"snapshots": PASS})
+        report = self.report("critic-2", [], evidence(a11y=False, snap=snapshots(digest="d2")))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("critic-3", [])), "verified")
+
+    def test_verified_needs_every_registered_platform(self):
+        # The iPad and the Mac have snapshots and a clean critic check but no
+        # accessibility run: not verified, and the reason names them.
+        report = self.report("c1", [], evidence(("iphone", "ipad", "mac"), a11y=False, iphone={"a11y": PASS}))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        entry = self.ledger["screens"]["sample.x"]
+        self.assertEqual(entry["platforms"], ["iphone", "ipad", "mac"])
+        reasons = screen_status.verified_ready(entry)
+        self.assertEqual(reasons, ["ipad a11y: no run", "mac a11y: no run"])
+        # A high issue on one platform fails that platform's critic check only.
+        report = self.report("c2", [issue("high", screen="sample.x", platform="mac")], evidence(("iphone", "ipad", "mac")))
+        screen_status.record_critic(self.ledger, "sample.x", report)
+        self.assertEqual(entry["evidence"]["iphone"]["critic"]["status"], "pass")
+        self.assertEqual(entry["evidence"]["mac"]["critic"]["status"], "fail")
+        self.assertEqual(entry["status"], "built")
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [], evidence(("iphone", "ipad", "mac")))), "verified")
+
+    def test_a_failed_prerequisite_demotes_a_verified_screen(self):
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
+        # A clean critic check over a failed snapshot run.
+        report = self.report("c2", [], evidence(snap=snapshots("fail")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        entry = self.ledger["screens"]["sample.x"]
+        self.assertEqual(entry["history"][-1]["from"], "verified")
+        self.assertIn("iphone snapshots: fail", entry["history"][-1]["reason"])
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [])), "verified")
+        # A failed accessibility run.
+        report = self.report("c4", [], evidence(iphone={"a11y": {"run": "a", "status": "fail"}}))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+
+    def test_an_approved_screen_whose_prerequisite_fails_is_demoted(self):
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c1", []))
+        self.ledger["screens"]["sample.x"]["status"] = "approved"
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [], evidence(snap=snapshots("fail")))), "built")
+
+    def test_retained_accessibility_evidence_lasts_only_while_the_screen_looks_the_same(self):
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
+        # No accessibility run this time, same images: the earlier run stands.
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [], evidence(a11y=False))), "verified")
+        # The screen changed (other images) and no accessibility run came
+        # with the check: the earlier run no longer counts.
+        report = self.report("c3", [], evidence(a11y=False, snap=snapshots(digest="d2")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        self.assertNotIn("a11y", self.ledger["screens"]["sample.x"]["evidence"]["iphone"])
+
+    def test_a_report_without_platforms_is_refused(self):
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.record_critic(self.ledger, "sample.x", {"run": "c1", "issues": [], "dropped": [], "evidence": {}})
 
     def test_a_high_issue_demotes_a_verified_screen(self):
         screen_status.record_critic(self.ledger, "sample.x", self.report("c1", []))
@@ -76,10 +141,11 @@ class ScreenStatusTest(unittest.TestCase):
             screen_status.check_screen_id("home.unknown", inventory, canonical=False)
 
     def test_problems_flag_a_verified_screen_with_a_high_issue(self):
-        self.ledger["screens"]["home.deckList"] = {"status": "verified", "fix_rounds": 0, "issues": [issue("high", screen="home.deckList")]}
+        self.ledger["screens"]["home.deckList"] = {"status": "verified", "fix_rounds": 0, "platforms": ["iphone"],
+                                                   "issues": [issue("high", screen="home.deckList")]}
         found = screen_status.problems(self.ledger, {"home.deckList": {}}, canonical=True)
         self.assertTrue(any("high-severity" in p for p in found), found)
-        self.assertTrue(any("without passing" in p for p in found), found)
+        self.assertTrue(any("without passing evidence: iphone snapshots: no run" in p for p in found), found)
 
     def test_approval_needs_a_verified_screen_a_logged_pick_and_an_approved_baseline(self):
         decisions = os.path.join(self.dir, "decisions.md")

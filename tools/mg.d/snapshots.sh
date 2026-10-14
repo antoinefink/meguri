@@ -3,23 +3,40 @@
 # MeguriSnapshotTests renders every registered subject (MatrixRegistry) in
 # its matrix cells inside the app, compares each image with its baseline in
 # app/Snapshots/<model>-<OS build>/ and writes results.jsonl (and new images)
-# to the run directory; the tests never write baselines. On a simulator the
+# to the run directory; the tests never write baselines. A device class
+# renders on the pool simulator whose screen it is (`--platform iphone`
+# leases the iphone and the iphone-small kinds: the small class needs a
+# small screen's safe area), with its own baselines. On a simulator the
 # job runs the tests once per settings group (Reduce Transparency, Reduce
 # Motion, Liquid Glass opacity), set with devicectl before each run (spike
-# S5) and reset afterwards; a plan run lists the groups first. The Mac test
+# S5) and reset afterwards; a plan run lists the groups first. Every group
+# renders the settings probe, whatever the filter, and the job fails when a
+# probe is missing or a setting left it unchanged. The Mac test
 # host is sandboxed, so its results are written in its container and copied
 # here. `--record <filter>` then copies the images of failing or missing
 # snapshots that match the filter into app/Snapshots/, leaving the others
 # byte for byte; `--rebaseline` records everything for the current OS build
 # and drops the baselines of other builds of the same model (R1974).
 # Approved signature baselines (docs/design/approved-baselines.json) that
-# changed beyond the tolerance fail the run as needs-human-review.
+# changed beyond the tolerance fail the run as needs-human-review; an
+# approved image whose OS build was dropped is compared with its successor
+# (same model and cell, the build that replaced it), and approving the
+# successor in the gallery retires the old entry.
 
 mg_job snapshots host mg_snapshots \
-  "Snapshot matrix (R1970-R1975): [--platform iphone|ipad|mac[,...]] [--device <leased udid>] [--filter <glob>[,...]] [--record <glob>[,...]] [--rebaseline]; app-hosted renders compared with app/Snapshots/<model>-<os build>/ at perceptual precision 0.98, diff PNGs for failures, the approved-baseline guard (needs-human-review)"
+  "Snapshot matrix (R1970-R1975): [--platform iphone|ipad|mac[,...]] [--device <leased udid>]... [--filter <glob>[,...]] [--record <glob>[,...]] [--rebaseline]; app-hosted renders compared with app/Snapshots/<model>-<os build>/ at perceptual precision 0.98, diff PNGs for failures, the approved-baseline guard (needs-human-review)"
 
 MG_SNAP_DEFAULT_GROUP=rt0-rm0-t50
 MG_SNAP_SUITES="GalleryComponentSnapshots ScreenSnapshots"
+
+# mg_snapshots__kinds <platform>: the pool kinds (tools/sim-devices.json) a
+# platform's device classes render on (SnapshotTarget in SnapshotMatrix.swift).
+mg_snapshots__kinds() {
+  case "$1" in
+    iphone) echo "iphone iphone-small" ;;
+    *) echo "$1" ;;
+  esac
+}
 
 mg_snapshots__usage() {
   mg_failure usage "snapshots: $1" "tools/mg --list"
@@ -28,7 +45,7 @@ mg_snapshots__usage() {
 }
 
 mg_snapshots() {
-  local platforms="" device="" filter="" mode=verify rebaseline=false p
+  local platforms="" devices=() filter="" mode=verify rebaseline=false p d kind kinds
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --platform)
@@ -41,7 +58,7 @@ mg_snapshots() {
         ;;
       --device)
         [ "$#" -ge 2 ] && [ -n "$2" ] || { mg_snapshots__usage "--device needs a UDID (tools/mg sim acquire <kind>)"; return 0; }
-        device="$2" && shift 2
+        devices[${#devices[@]}]="$2" && shift 2
         ;;
       --filter)
         [ "$#" -ge 2 ] && [ -n "$2" ] || { mg_snapshots__usage "--filter needs a glob over subject/state/cell names"; return 0; }
@@ -57,11 +74,20 @@ mg_snapshots() {
   done
   [ -n "$platforms" ] || platforms="iphone ipad mac"
   platforms="${platforms# }"
-  if [ -n "$device" ]; then
-    [ "$(printf '%s\n' $platforms | grep -c .)" -eq 1 ] && [ "$platforms" != mac ] ||
-      { mg_snapshots__usage "--device goes with exactly one simulator platform (--platform iphone or ipad)"; return 0; }
-    mg_sim_check_given "$device" || return 0
-  fi
+  # Each --device stands in for the pool kind it is; the job leases the others.
+  kinds=""
+  for p in $platforms; do [ "$p" = mac ] || kinds="$kinds $(mg_snapshots__kinds "$p")"; done
+  MG_SNAP_DEVICES=""
+  for d in ${devices[0]+"${devices[@]}"}; do
+    kind="$("$MG_TOOLS/scripts/sim-pool.sh" status 2>/dev/null | jq -r --arg u "$d" 'first(.devices[] | select(.udid == $u) | .kind) // empty')"
+    if [ -z "$kind" ] || ! mg_word_in "$kind" "$kinds"; then
+      mg_snapshots__usage "--device $d is ${kind:+a $kind simulator, }not one of the kinds --platform $(printf '%s' "$platforms" | tr ' ' ',') renders on (${kinds# })"
+      return 0
+    fi
+    case " $MG_SNAP_DEVICES " in *" $kind="*) mg_snapshots__usage "two --device options for the $kind kind"; return 0 ;; esac
+    mg_sim_check_given "$d" || return 0
+    MG_SNAP_DEVICES="$MG_SNAP_DEVICES $kind=$d"
+  done
   mg_detail snapshots "$(jq -nc --arg m "$mode" --arg f "$filter" --argjson r "$rebaseline" --arg p "$platforms" \
     '{mode: $m, filter: $f, rebaseline: $r, platforms: ($p | split(" "))}')"
 
@@ -79,9 +105,12 @@ mg_snapshots() {
   for p in $platforms; do
     if [ "$p" = mac ]; then
       mg_snapshots__mac || return 0
-    else
-      mg_snapshots__simulator "$p" "$device" || return 0
+      continue
     fi
+    for kind in $(mg_snapshots__kinds "$p"); do
+      d="$(printf '%s\n' $MG_SNAP_DEVICES | sed -n "s/^$kind=//p")"
+      mg_snapshots__simulator "$kind" "$d" || return 0
+    done
   done
   mg_snapshots__finish "$platforms" "$rebaseline"
 }
@@ -144,7 +173,9 @@ mg_snapshots__settings() {
     --liquid-glass-opacity "$(awk -v t="$t" 'BEGIN { printf "%.2f", t / 100 }')" >&2
 }
 
-# mg_snapshots__simulator <iphone|ipad> [udid]: plan, then one run per group.
+# mg_snapshots__simulator <pool kind> [udid]: plan, then one run per group.
+# The test process renders only the device classes of its kind
+# (TEST_RUNNER_MEGURI_SNAPSHOT_TARGET).
 mg_snapshots__simulator() {
   local kind="$1" udid="$2" dir="$MG_RUN_DIR/$1" groups g dest
   if [ -z "$udid" ]; then
@@ -163,10 +194,10 @@ mg_snapshots__simulator() {
   fi
   mg_snapshots__xcodebuild "$dir/plan" "$dest" "$MG_SNAP_SUITES" TEST_RUNNER_MEGURI_SNAPSHOT_MODE=plan \
     TEST_RUNNER_MEGURI_SNAPSHOT_FILTER="$MG_SNAP_FILTER" TEST_RUNNER_MEGURI_SNAPSHOT_GROUP="$MG_SNAP_DEFAULT_GROUP" \
-    TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/plan" || { mg_status error; return 1; }
+    TEST_RUNNER_MEGURI_SNAPSHOT_TARGET="$kind" TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/plan" || { mg_status error; return 1; }
   groups="$( (echo "$MG_SNAP_DEFAULT_GROUP"; [ ! -f "$dir/plan/plan.jsonl" ] || jq -r 'select(.deferred == null) | .group' "$dir/plan/plan.jsonl" | sort -u) |
     awk '!seen[$0]++')"
-  mg_detail "groups_$kind" "$(printf '%s\n' $groups | jq -R . | jq -sc .)"
+  mg_detail "groups_$(printf '%s' "$kind" | tr '-' '_')" "$(printf '%s\n' $groups | jq -R . | jq -sc .)"
   for g in $groups; do
     if ! mg_snapshots__settings "$udid" "$g"; then
       mg_failure settings "devicectl could not set settings group $g on $udid (spike S5)"
@@ -178,7 +209,7 @@ mg_snapshots__simulator() {
     local suites="$MG_SNAP_SUITES SystemSettingsTests"
     [ "$g" != "$MG_SNAP_DEFAULT_GROUP" ] || suites=all
     mg_snapshots__xcodebuild "$dir/$g" "$dest" "$suites" TEST_RUNNER_MEGURI_SNAPSHOT_MODE="$MG_SNAP_MODE" \
-      TEST_RUNNER_MEGURI_SNAPSHOT_FILTER="$MG_SNAP_FILTER" TEST_RUNNER_MEGURI_SNAPSHOT_GROUP="$g" \
+      TEST_RUNNER_MEGURI_SNAPSHOT_FILTER="$MG_SNAP_FILTER" TEST_RUNNER_MEGURI_SNAPSHOT_GROUP="$g" TEST_RUNNER_MEGURI_SNAPSHOT_TARGET="$kind" \
       TEST_RUNNER_MEGURI_SNAPSHOT_OUT="$dir/$g" TEST_RUNNER_MEGURI_INVENTORY_JSON="$MG_RUN_DIR/inventory.json" || { mg_status error; return 1; }
   done
   mg_snapshots__settings "$udid" "$MG_SNAP_DEFAULT_GROUP" >/dev/null 2>&1
@@ -225,6 +256,14 @@ mg_snapshots__finish() {
       jq -r '.problems[]' "$f" | while IFS= read -r line; do mg_failure "state-coverage/$p" "$line"; done
     fi
   done
+  # Where the matrix registers each screen (every state-coverage report
+  # lists all platforms): tools/mg critic grades a screen on all of them.
+  for f in "$MG_RUN_DIR"/*/*/state-coverage.json; do
+    [ -f "$f" ] || continue
+    jq '{screens: ([.screens[] | {(.id): {platforms: (.platforms // []), states}}] | add // {})}' "$f" >"$MG_RUN_DIR/registry.json"
+    mg_artifact registry "$MG_RUN_DIR/registry.json" "where the snapshot matrix registers each screen"
+    break
+  done
 
   # Snapshot outcomes.
   jq -c 'select(.status == "fail" or .status == "new")' "$results" | while IFS= read -r e; do
@@ -257,7 +296,7 @@ mg_snapshots__finish() {
   mg_detail recorded "$recorded"
   mg_detail pruned "$deleted"
   mg_detail keys "$(jq -sc '[.[].key] | unique' "$results")"
-  n="$(jq -s 'length' "$results")"
+  n="$(jq -s '[.[] | select(.status != "captured")] | length' "$results")"
   mg_count total "$n"
   mg_count passed "$(jq -s '[.[] | select(.status == "pass" or .status == "recorded")] | length' "$results")"
   mg_count failed "$(jq -s '[.[] | select(.status == "fail" or .status == "new")] | length' "$results")"
@@ -294,22 +333,40 @@ mg_snapshots__prune() {
   echo "$n"
 }
 
-# The settings self-test (spike S5): each settings group that changes Reduce
-# Transparency or the glass opacity must change the probe (system glass over
-# content); one that renders like the default group's was not applied.
-# Reduce Motion leaves a still frame unchanged: SystemSettingsTests checks it.
+# The settings self-test (spike S5): every settings group of every simulator
+# kind renders the probe (system glass over content), whatever the filter
+# (SystemSettingsTests captures it outside the filter); a group without its
+# probe image fails the run, and so does one that changes Reduce
+# Transparency or the glass opacity but renders like the default group's
+# (its setting was not applied). Reduce Motion leaves a still frame
+# unchanged: SystemSettingsTests checks it.
 mg_snapshots__probe() {
-  local results="$1" kind reference others out
-  for kind in iphone ipad; do
-    reference="$(jq -r --arg k "$kind" --arg g "$MG_SNAP_DEFAULT_GROUP" 'select(.subject == "matrix.probe" and .platform == $k and .group == $g) | .actual // empty' "$results" | head -n 1)"
-    others="$(jq -r --arg k "$kind" --arg g "$MG_SNAP_DEFAULT_GROUP" 'select(.subject == "matrix.probe" and .platform == $k and .group != $g and (.group | test("^rt1|-t(0|100)$"))) | .actual // empty' "$results")"
+  local results="$1" dir kind group reference others out probe missing
+  for dir in "$MG_RUN_DIR"/*/; do
+    dir="${dir%/}"
+    kind="$(basename "$dir")"
+    [ "$kind" != mac ] && [ -d "$dir/plan" ] || continue
+    reference="" others="" missing=""
+    for group in $(cd "$dir" && ls -d rt* 2>/dev/null); do
+      probe="$(jq -r --arg d "$dir/$group/" 'select(.subject == "matrix.probe" and ((.actual // "") | startswith($d))) | .actual' "$results" | head -n 1)"
+      if [ -z "$probe" ] || [ ! -f "$probe" ]; then
+        missing="$missing $group"
+      elif [ "$group" = "$MG_SNAP_DEFAULT_GROUP" ]; then
+        reference="$probe"
+      elif printf '%s' "$group" | grep -Eq '^rt1|-t(0|100)$'; then
+        others="$others $probe"
+      fi
+    done
+    for group in $missing; do
+      mg_failure "probe/$kind/$group" "settings group $group on $kind has no probe image: the settings self-test could not check it (spike S5)"
+    done
     [ -n "$reference" ] && [ -n "$others" ] || continue
     out="$MG_RUN_DIR/probe-$kind.json"
     # shellcheck disable=SC2046 # one path per word
     if ! mg_image_tools python3 tools/scripts/image-diff/image_diff.py differs "$(mg_container_path "$reference")" \
       $(for f in $others; do mg_container_path "$f"; done) --report "$(mg_container_path "$out")" >&2; then
       jq -r '.unchanged[]?' "$out" | while IFS= read -r f; do
-        mg_failure "setting-not-applied/$kind" "the probe in $(basename "$(dirname "$f")") renders like the default settings group: devicectl did not apply that setting (spike S5)"
+        mg_failure "setting-not-applied/$kind" "the probe in ${f#*"/$kind/"} renders like the default settings group: devicectl did not apply that setting (spike S5)"
       done
       [ -s "$out" ] || mg_failure "probe/$kind" "the settings self-test could not compare the probes; see log.txt"
     fi
@@ -319,23 +376,30 @@ mg_snapshots__probe() {
 
 # The baseline guard (R1974): an approved signature baseline whose file
 # differs from the approved image is compared with it at the snapshot
-# tolerance; a mismatch needs human review (gallery approval, U254).
+# tolerance; a mismatch needs human review (gallery approval, U254). An
+# approved path whose OS build was re-recorded away (--rebaseline) is
+# compared through its successor: the same model's same cell under another
+# build. Approving the successor in the gallery retires the old entry.
 mg_snapshots__guard() {
-  local approved="$MG_ROOT/docs/design/approved-baselines.json" pairs="$MG_RUN_DIR/guard-pairs.json" dir="$MG_RUN_DIR/guard" e path sha blob
+  local approved="$MG_ROOT/docs/design/approved-baselines.json" pairs="$MG_RUN_DIR/guard-pairs.json" dir="$MG_RUN_DIR/guard" e path current sha blob
   MG_SNAP_VERDICT=pass
   [ -f "$approved" ] || return 0
   mkdir -p "$dir"
   echo "[]" >"$pairs"
   while IFS= read -r e; do
     path="$(jq -r .path <<<"$e")"
-    if [ -f "$MG_ROOT/$path" ]; then
-      sha="$(shasum -a 256 "$MG_ROOT/$path" | cut -d' ' -f1)"
+    current="$path"
+    [ -f "$MG_ROOT/$path" ] || current="$(mg_snapshots__successor "$path")"
+    if [ -n "$current" ] && [ -f "$MG_ROOT/$current" ]; then
+      sha="$(shasum -a 256 "$MG_ROOT/$current" | cut -d' ' -f1)"
       [ "$sha" != "$(jq -r .sha256 <<<"$e")" ] || continue
+    else
+      current="$path"
     fi
     blob="$dir/approved-$(jq -r .sha256 <<<"$e").png"
     git -C "$MG_ROOT" cat-file blob "$(jq -r .blob <<<"$e")" >"$blob" 2>/dev/null || rm -f "$blob"
-    jq --arg p "$path" --arg c "$(mg_container_path "$MG_ROOT/$path")" --arg a "$( [ -f "$blob" ] && mg_container_path "$blob" || echo /nonexistent)" \
-      '. + [{path: $p, current: $c, approved: $a}]' "$pairs" >"$pairs.tmp" && mv "$pairs.tmp" "$pairs"
+    jq --arg p "$current" --arg old "$path" --arg c "$(mg_container_path "$MG_ROOT/$current")" --arg a "$( [ -f "$blob" ] && mg_container_path "$blob" || echo /nonexistent)" \
+      '. + [{path: $p, current: $c, approved: $a} + (if $p == $old then {} else {supersedes: $old} end)]' "$pairs" >"$pairs.tmp" && mv "$pairs.tmp" "$pairs"
   done < <(jq -c '.baselines[] | select(.signature == true)' "$approved")
   [ "$(jq length "$pairs")" -gt 0 ] || { mg_detail guard '{"verdict": "pass", "checked": 0}'; return 0; }
   if ! mg_image_tools python3 tools/scripts/image-diff/image_diff.py guard "$(mg_container_path "$pairs")" \
@@ -346,9 +410,25 @@ mg_snapshots__guard() {
   fi
   mg_artifact guard "$dir/report.json" "approved-baseline guard"
   MG_SNAP_VERDICT="$(jq -r .verdict "$dir/report.json")"
-  mg_detail guard "$(jq -c '{verdict, checked: (.checked | length), needs_human_review: [.needs_human_review[].path]}' "$dir/report.json")"
+  mg_detail guard "$(jq -c '{verdict, checked: (.checked | length), needs_human_review: [.needs_human_review[].path],
+    supersedes: ([.checked[] | select(.supersedes) | {(.path): .supersedes}] | add // {})}' "$dir/report.json")"
   jq -c '.needs_human_review[]' "$dir/report.json" | while IFS= read -r e; do
-    mg_failure needs-human-review "$(jq -r '"\(.path): the approved signature baseline changed beyond the tolerance (\(.reason // "")); approve it in the gallery (tools/mg gallery) or restore it"' <<<"$e")" \
+    mg_failure needs-human-review "$(jq -r '"\(.path): the approved signature baseline\(if .supersedes then " (approved as \(.supersedes))" else "" end) changed beyond the tolerance (\(.reason // "")); approve it in the gallery (tools/mg gallery) or restore it"' <<<"$e")" \
       "tools/mg gallery --pending $MG_ROOT"
+  done
+}
+
+# mg_snapshots__successor <approved path>: the same model's same cell under
+# another OS build (app/Snapshots/<model>-<build>/<cell path>), if one exists.
+mg_snapshots__successor() {
+  local key rest model f
+  key="${1#app/Snapshots/}"
+  rest="${key#*/}"
+  key="${key%%/*}"
+  model="${key%-*}"
+  for f in "$MG_ROOT/app/Snapshots/$model"-*/"$rest"; do
+    [ -f "$f" ] && [ "$f" != "$MG_ROOT/$1" ] || continue
+    printf '%s\n' "${f#"$MG_ROOT"/}"
+    return 0
   done
 }

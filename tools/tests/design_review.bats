@@ -115,21 +115,32 @@ mg_image_tools() {
   esac
 }
 mg_snapshots__xcodebuild() {
-  local out="$1" dest="$2" suites="$3" mode="" dir=""
+  local out="$1" dest="$2" suites="$3" mode="" dir="" target="" group="" fx
   shift 3
   for a in "$@"; do
     case "$a" in
       TEST_RUNNER_MEGURI_SNAPSHOT_MODE=*) mode="${a#*=}" ;;
       TEST_RUNNER_MEGURI_SNAPSHOT_OUT=*) dir="${a#*=}" ;;
+      TEST_RUNNER_MEGURI_SNAPSHOT_TARGET=*) target="${a#*=}" ;;
+      TEST_RUNNER_MEGURI_SNAPSHOT_GROUP=*) group="${a#*=}" ;;
     esac
   done
-  echo "fake snapshot run mode=$mode dest=$dest suites=$suites" >>"$STUB_LOG"
+  echo "fake snapshot run mode=$mode dest=$dest suites=$suites target=$target group=$group" >>"$STUB_LOG"
   mkdir -p "$dir"
+  if [ "$mode" = plan ]; then
+    [ -z "${FX_PLAN:-}" ] || cp "$FX_PLAN" "$dir/plan.jsonl"
+    return 0
+  fi
   [ -z "${FX_IMAGES:-}" ] || cp -R "$FX_IMAGES/." "$dir/"
-  sed "s|@OUT@|$dir|g; s|@MODE@|$mode|g" "$FX_RESULTS" >"$dir/results.jsonl"
-  [ -n "${FX_NO_COVERAGE:-}" ] || echo '{"screens": [], "problems": []}' >"$dir/state-coverage.json"
+  fx="$FX_RESULTS"
+  [ -z "${FX_RESULTS_DIR:-}" ] || [ ! -f "$FX_RESULTS_DIR/$target-$group.jsonl" ] || fx="$FX_RESULTS_DIR/$target-$group.jsonl"
+  sed "s|@OUT@|$dir|g; s|@MODE@|$mode|g" "$fx" >"$dir/results.jsonl"
+  [ -n "${FX_NO_COVERAGE:-}" ] || echo '{"screens": [{"id": "home.deckList", "states": ["typical"], "platforms": ["iphone", "mac"]}], "problems": []}' >"$dir/state-coverage.json"
   return 0
 }
+mg_sim_lease() { echo "fake lease $1" >>"$STUB_LOG"; MG_SIM_UDID="FAKE-$1"; return 0; }
+mg_sim_check_runtime() { return 0; }
+mg_snapshots__settings() { echo "fake settings $2 on $1" >>"$STUB_LOG"; return 0; }
 EOF
 }
 
@@ -150,7 +161,7 @@ baseline() { mkdir -p "$(dirname "$SB/app/Snapshots/$KEY/$1.png")" && printf '%s
   [ "$(field .status)" = error ]
   mg snapshots --platform iphone,ipad --device 0000
   [ "$(field .status)" = error ]
-  [ "$(field '.failures[0].message')" = "snapshots: --device goes with exactly one simulator platform (--platform iphone or ipad)" ]
+  [ "$(field '.failures[0].message')" = "snapshots: --device 0000 is not one of the kinds --platform iphone,ipad renders on (iphone iphone-small ipad)" ]
   mg snapshots --record
   [ "$(field .status)" = error ]
   not_called 'fake build'
@@ -246,6 +257,77 @@ approve() {
   [[ "$(field .message)" == *needs-human-review* ]]
 }
 
+# probe_line <group>: the settings probe's result in a simulator run.
+probe_line() {
+  jq -nc --arg g "$1" '{name: "matrix.probe/glass/light-standard-iphoneLarge", subject: "matrix.probe", state: "glass",
+    cell: "light-standard-iphoneLarge", status: "pass", platform: "iphone", group: $g, key: "iPhone99,1-99A999", layout: "component",
+    actual: "@OUT@/actual/matrix.probe/glass/light-standard-iphoneLarge.png"}'
+}
+
+probe_fixture() {
+  export FX_IMAGES="$BATS_TEST_TMPDIR/images" FX_RESULTS="$BATS_TEST_TMPDIR/results.jsonl"
+  mkdir -p "$FX_IMAGES/actual/matrix.probe/glass"
+  printf 'look: glass\n' >"$FX_IMAGES/actual/matrix.probe/glass/light-standard-iphoneLarge.png"
+  probe_line rt0-rm0-t50 >"$FX_RESULTS"
+}
+
+@test "the iPhone platform renders on the iphone and iphone-small kinds, each telling the tests its kind" {
+  probe_fixture
+  mg snapshots --platform iphone
+  [ "$(field .status)" = pass ]
+  called '^fake lease iphone$'
+  called '^fake lease iphone-small$'
+  called 'mode=plan dest=id=FAKE-iphone-small .* target=iphone-small'
+  called 'mode=verify dest=id=FAKE-iphone-small suites=all target=iphone-small group=rt0-rm0-t50'
+  [ -f "$SB/build/mg/snapshots/$(field .run_id)/iphone-small/rt0-rm0-t50/results.jsonl" ]
+  # The registry: where the matrix registers each screen.
+  [ "$(field -c '.artifacts[] | select(.kind == "registry") | .path' | xargs jq -c '.screens["home.deckList"].platforms')" = '["iphone","mac"]' ]
+}
+
+@test "a settings group without its probe image fails the run" {
+  probe_fixture
+  export FX_PLAN="$BATS_TEST_TMPDIR/plan.jsonl" FX_RESULTS_DIR="$BATS_TEST_TMPDIR/by-group"
+  mkdir -p "$FX_RESULTS_DIR"
+  echo '{"name": "home.deckList/typical/light-standard-iphoneLarge+rt", "group": "rt1-rm0-t50"}' >"$FX_PLAN"
+  # The rt1 group of the iphone kind renders no probe (as a filter used to
+  # leave it out); the iphone-small kind's does.
+  : >"$FX_RESULTS_DIR/iphone-rt1-rm0-t50.jsonl"
+  probe_line rt1-rm0-t50 >"$FX_RESULTS_DIR/iphone-small-rt1-rm0-t50.jsonl"
+  mg snapshots --platform iphone --filter 'home.*'
+  [ "$(field .status)" = fail ]
+  [ "$(field -c '[.failures[].id]')" = '["probe/iphone/rt1-rm0-t50"]' ]
+  called 'fake settings rt1-rm0-t50 on FAKE-iphone'
+}
+
+@test "after an OS rebaseline the guard checks an approved image through its successor" {
+  local old_key="$KEY" new_key=Mac99,9-99B111 cell=home.deckList/typical/light-standard-macDefault
+  baseline "$cell" "look: blue"
+  git -C "$SB" add app && git -C "$SB" commit -qm baselines
+  approve "$cell" true
+  export FX_IMAGES="$BATS_TEST_TMPDIR/images" FX_RESULTS="$BATS_TEST_TMPDIR/results.jsonl"
+  mkdir -p "$FX_IMAGES/actual/$(dirname "$cell")"
+  printf 'look: blue\nnew OS build\n' >"$FX_IMAGES/actual/$cell.png"
+  KEY="$new_key" result_line "$cell" recorded "@OUT@/actual/$cell.png" >"$FX_RESULTS"
+
+  # The OS update: the new build's images are recorded, the old build's dropped.
+  mg snapshots --platform mac --rebaseline
+  [ "$(field .status)" = pass ]
+  [ ! -d "$SB/app/Snapshots/$old_key" ]
+  [ -f "$SB/app/Snapshots/$new_key/$cell.png" ]
+  # Its approved image is still checked, through the successor: same look.
+  [ "$(field .details.guard.verdict)" = pass ]
+  [ "$(field .details.guard.checked)" -eq 1 ]
+  [ "$(field --arg p "app/Snapshots/$new_key/$cell.png" '.details.guard.supersedes[$p]')" = "app/Snapshots/$old_key/$cell.png" ]
+
+  # Beyond the tolerance on the new build: human review of the successor.
+  printf 'look: green\n' >"$SB/app/Snapshots/$new_key/$cell.png"
+  KEY="$new_key" result_line "$cell" pass >"$FX_RESULTS"
+  mg snapshots --platform mac
+  [ "$(field .status)" = fail ]
+  [ "$(field -c '.details.guard.needs_human_review')" = "[\"app/Snapshots/$new_key/$cell.png\"]" ]
+  [[ "$(field '.failures[] | select(.id == "needs-human-review") | .message')" == *"(approved as app/Snapshots/$old_key/$cell.png)"* ]]
+}
+
 @test "a run whose state coverage check did not run fails" {
   export FX_RESULTS="$BATS_TEST_TMPDIR/results.jsonl" FX_NO_COVERAGE=1
   : >"$FX_RESULTS"
@@ -272,8 +354,9 @@ PY
     '{name: "sample.deckOverview/overflow/light-standard-macDefault", subject: "sample.deckOverview", state: "overflow", cell: "light-standard-macDefault",
       status: "recorded", platform: "mac", group: "mac", layout: "screen", axes: {appearance: "light"}, actual: $a}' >"$snap/results.jsonl"
   jq -n '{job: "snapshots", status: "pass", commit: {sha: "abc"}, artifacts: []}' >"$snap/result.json"
-  jq -n '{job: "a11y", status: "pass", artifacts: []}' >"$a11y/result.json"
-  echo '[{"screen": "sample.deckOverview", "status": "pass"}]' >"$a11y/screens.json"
+  echo '{"screens": {"sample.deckOverview": {"platforms": ["mac"], "states": ["overflow"]}}}' >"$snap/registry.json"
+  jq -n '{job: "a11y", run_id: "a11y1", status: "pass", details: {platform: "mac"}, artifacts: []}' >"$a11y/result.json"
+  echo '[{"screen": "sample.deckOverview", "platform": "mac", "status": "pass"}]' >"$a11y/screens.json"
 }
 
 # The critic stub: logs its arguments and directory, answers with FX_ANSWER
@@ -307,7 +390,8 @@ import sys, yaml
 entry = yaml.safe_load(open(sys.argv[1]))["screens"]["sample.deckOverview"]
 assert entry["status"] == "built", entry
 assert entry["issues"][0]["rule"] == "text-truncation" and entry["issues"][0]["severity"] == "high", entry
-assert entry["evidence"]["a11y"]["status"] == "pass" and entry["evidence"]["snapshots"]["status"] == "pass", entry
+assert entry["platforms"] == ["mac"], entry
+assert entry["evidence"]["mac"]["a11y"]["status"] == "pass" and entry["evidence"]["mac"]["snapshots"]["status"] == "pass", entry
 PY
   local first
   first="$(field .details.session)"
@@ -320,6 +404,19 @@ PY
   [ "$(field .details.session)" != "$first" ]
   [ "$(grep -c '"role":"critic"' "$SB/docs/process/provenance/sessions.jsonl")" -eq 2 ]
   [ "$(git -C "$SB" log -1 --format=%s -- docs/process/provenance/sessions.jsonl)" = "Record session $(field .details.session) (critic, critic-$(field .run_id))" ]
+}
+
+@test "a snapshots run without every platform a screen is registered on is refused before any session starts" {
+  fake_runs
+  critic_stub
+  answer '[]'
+  echo '{"screens": {"sample.deckOverview": {"platforms": ["iphone", "ipad", "mac"]}}}' >"$SB/build/mg/snapshots/snap1/registry.json"
+  mg critic snap1 --a11y a11y1 --ledger build/status.yaml
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = packet ]
+  grep -q 'no image of sample.deckOverview on iphone, ipad' "$SB/build/mg/critic/$(field .run_id)/log.txt"
+  not_called '^critic-cli'
+  [ ! -f "$SB/build/status.yaml" ]
 }
 
 @test "the critic session runs restricted, in a copy of the packet outside home, with the deny profile" {
@@ -421,4 +518,29 @@ EOF
   [ "$(git -C "$wt" log -1 --format=%s)" = "Approve changed signature baselines in the review gallery" ]
   [ "$(git -C "$wt" log -1 --format='%(trailers:key=Approved-by,valueonly)' | sed '/^$/d')" = antoine ]
   [ -z "$(git -C "$wt" status --porcelain -- docs/design)" ]
+}
+
+@test "the gallery takes a baseline's blob only when HEAD holds the file as it is" {
+  local committed="app/Snapshots/$KEY/home.deckList/typical/light-standard-macDefault.png"
+  local untracked="app/Snapshots/$KEY/settings.general/typical/light-standard-macDefault.png"
+  baseline home.deckList/typical/light-standard-macDefault "look: blue"
+  git -C "$SB" add app && git -C "$SB" commit -qm baselines
+  baseline settings.general/typical/light-standard-macDefault "look: grey"
+  cat >"$SB/tools/mg.d/zz-gallery-blob.sh" <<EOF2
+mg_job fx-committed host fx_committed "fixture: committed blobs"
+fx_committed() {
+  mg_detail committed "\$(jq -n --arg b "\$(mg_gallery__committed "\$MG_ROOT" "$committed")" '\$b')"
+  mg_detail untracked "\$(jq -n --arg b "\$(mg_gallery__committed "\$MG_ROOT" "$untracked")" '\$b')"
+  printf 'look: green\n' >"\$MG_ROOT/$committed"
+  mg_detail changed "\$(jq -n --arg b "\$(mg_gallery__committed "\$MG_ROOT" "$committed")" '\$b')"
+  mg_status pass
+}
+EOF2
+  local blob
+  blob="$(git -C "$SB" rev-parse "HEAD:$committed")"
+  mg fx-committed
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.committed)" = "$blob" ]
+  [ "$(field .details.untracked)" = "" ]
+  [ "$(field .details.changed)" = "" ]
 }

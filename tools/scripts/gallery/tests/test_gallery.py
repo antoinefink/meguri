@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -50,6 +51,11 @@ class GalleryTest(unittest.TestCase):
                 "variant": "light-standard-iphoneLarge", "platform": "iphone", "baseline": BASELINE, "new": self.new,
                 "old": self.old, "checkout": self.checkout, "branch": "feat/meguri-v1", "pending": False, "signature": True}
         item.update(changes)
+        # What tools/mg gallery finds in git: the blob HEAD holds at the
+        # baseline's path, when the file there is that blob.
+        if "committed_blob" not in changes:
+            with open(item["new"], "rb") as handle:
+                item["committed_blob"] = gallery.git_blob_id(handle.read())
         return item
 
     def build(self, items=None, picks=None):
@@ -68,6 +74,91 @@ class GalleryTest(unittest.TestCase):
         for text in ("old", "new", "diff", "text-truncation", "Name cut off", "data-decision=approve"):
             self.assertIn(text, page)
         self.assertNotIn("<script src", page)
+
+    def test_every_image_opens_at_full_size(self):
+        manifest = self.build()
+        page = open(os.path.join(self.out, "index.html")).read()
+        [item] = manifest["items"]
+        for side in ("old", "new", "diff"):
+            src = item[side]
+            self.assertIn("<a href='%s' target=_blank rel=noopener><img loading=lazy src='%s'" % (src, src), page)
+
+    def test_an_image_not_committed_as_shown_cannot_be_approved(self):
+        self.build([self.item(committed_blob=None)])
+        with self.assertRaises(gallery.GalleryError) as caught:
+            gallery.decide(self.out, self.item()["id"], "approve", "")
+        self.assertIn("not committed", str(caught.exception))
+        self.build([self.item(committed_blob="0" * 40)])
+        with self.assertRaises(gallery.GalleryError):
+            gallery.decide(self.out, self.item()["id"], "approve", "")
+        self.assertFalse(os.path.exists(os.path.join(self.checkout, gallery.APPROVED)))
+        # A reject needs no committed image.
+        gallery.decide(self.out, self.item()["id"], "reject", "Too faint")
+
+    def test_approving_an_os_builds_successor_retires_the_entry_it_replaces(self):
+        old = "app/Snapshots/iPhone18,1-24A434/home.deckList/typical/light-standard-iphoneLarge.png"
+        other = "app/Snapshots/iPhone18,5-24A434/home.deckList/typical/light-standard-iphoneLarge.png"
+        new = "app/Snapshots/iPhone18,1-24B100/home.deckList/typical/light-standard-iphoneLarge.png"
+        gallery.write_json(os.path.join(self.checkout, gallery.APPROVED), {"version": 1, "baselines": [
+            {"path": old, "screen": "home.deckList", "signature": True, "sha256": "a", "blob": "b"},
+            {"path": other, "screen": "home.deckList", "signature": True, "sha256": "c", "blob": "d"},
+        ]})
+        os.makedirs(os.path.dirname(os.path.join(self.checkout, new)))
+        shutil.copyfile(self.new, os.path.join(self.checkout, new))
+        self.build([self.item(baseline=new)])
+        written = gallery.decide(self.out, self.item()["id"], "approve", "")
+        approved = json.load(open(os.path.join(self.checkout, gallery.APPROVED)))
+        self.assertEqual(sorted(b["path"] for b in approved["baselines"]), sorted([new, other]))
+        entry = next(b for b in approved["baselines"] if b["path"] == new)
+        self.assertEqual(entry["supersedes"], [old])
+        review = json.load(open(os.path.join(self.checkout, written["files"][0])))
+        self.assertEqual(review["decisions"][-1]["supersedes"], [old])
+
+    def test_concurrent_approvals_all_land(self):
+        # Eight images approved at once through the server: every approval and
+        # every decision is kept. Reads are slowed down so that unserialized
+        # read-modify-writes would overwrite each other.
+        items = []
+        for n in range(8):
+            path = "app/Snapshots/iPhone18,1-24A434/home.deckList/typical/cell-%d.png" % n
+            image = self.png(os.path.join(self.checkout, path), (n * 30, 122, 255))
+            items.append(self.item(id="cell-%d" % n, variant="cell-%d" % n, baseline=path, new=image))
+        self.build(items)
+        read_json = gallery.read_json
+
+        def slow_read(path, default):
+            data = read_json(path, default)
+            time.sleep(0.05)
+            return data
+
+        gallery.read_json = slow_read
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(self.out))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % httpd.server_address[1]
+        answers = []
+
+        def approve(item_id):
+            request = urllib.request.Request(base + "/api/decision", data=json.dumps({"item": item_id, "decision": "approve"}).encode(), method="POST")
+            request.add_header("Content-Type", "application/json")
+            answers.append(json.loads(urllib.request.urlopen(request).read()))
+
+        try:
+            threads = [threading.Thread(target=approve, args=(item["id"],)) for item in items]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            gallery.read_json = read_json
+            httpd.shutdown()
+            httpd.server_close()
+        self.assertEqual(len(answers), 8)
+        approved = json.load(open(os.path.join(self.checkout, gallery.APPROVED)))
+        self.assertEqual(len(approved["baselines"]), 8)
+        review_dir = os.path.join(self.checkout, "docs", "design", "reviews")
+        [review] = os.listdir(review_dir)
+        self.assertEqual(len(json.load(open(os.path.join(review_dir, review)))["decisions"]), 8)
+        self.assertEqual([f for f in os.listdir(os.path.dirname(os.path.join(self.checkout, gallery.APPROVED))) if f.endswith(".tmp")], [])
 
     def test_approving_an_image_locks_it_and_records_the_decision(self):
         self.build()

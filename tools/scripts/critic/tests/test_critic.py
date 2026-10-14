@@ -46,7 +46,25 @@ class CriticTest(unittest.TestCase):
         with open(os.path.join(self.run_dir, "results.jsonl"), "w") as handle:
             for entry in self.results:
                 handle.write(json.dumps(entry) + "\n")
+        self.registry({SCREEN: ["iphone"]})
+        with open(os.path.join(self.run_dir, "result.json"), "w") as handle:
+            json.dump({"job": "snapshots", "status": "pass", "commit": {"sha": "abc"}, "artifacts": []}, handle)
         self.packet = os.path.join(self.dir, "packet")
+
+    def registry(self, platforms):
+        """The run's registry.json: where the snapshot matrix registers each screen."""
+        with open(os.path.join(self.run_dir, "registry.json"), "w") as handle:
+            json.dump({"screens": {s: {"platforms": p} for s, p in platforms.items()}}, handle)
+
+    def a11y_run(self, name, platform, status="pass", screen=SCREEN):
+        run = os.path.join(self.dir, name)
+        os.makedirs(run)
+        with open(os.path.join(run, "result.json"), "w") as handle:
+            json.dump({"job": "a11y", "run_id": name, "status": status, "commit": {"sha": "abc"},
+                       "details": {"platform": platform}}, handle)
+        with open(os.path.join(run, "screens.json"), "w") as handle:
+            json.dump([{"screen": screen, "platform": platform, "status": status}], handle)
+        return run
 
     def png(self, name, size=(780, 1688)):
         path = os.path.join(self.dir, "images", name)
@@ -174,8 +192,8 @@ class CriticTest(unittest.TestCase):
         checks = os.path.join(self.dir, "checks.json")
         with open(checks, "w") as handle:
             json.dump({"checks": [
-                {"screen": SCREEN, "variant": "*", "rule": "color-contrast", "status": "pass"},
-                {"screen": SCREEN, "variant": "light-standard-iphoneLarge", "rule": "text-truncation", "status": "pass"},
+                {"screen": SCREEN, "state": "*", "variant": "*", "rule": "color-contrast", "status": "pass"},
+                {"screen": SCREEN, "state": "typical", "variant": "light-standard-iphoneLarge", "rule": "text-truncation", "status": "pass"},
             ]}, handle)
         self.build(checks=checks)
         contrast = self.truncation(rule="color-contrast", summary="Counts look faint")
@@ -183,6 +201,63 @@ class CriticTest(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual([i["rule"] for i in report["issues"]], ["text-truncation"])
         self.assertEqual([i["rule"] for i in report["dropped"]], ["color-contrast"])
+
+    def test_a_passing_check_on_one_state_never_drops_an_issue_on_another(self):
+        # The same rule and variant pass in the typical state and fail in the
+        # overflow state: only the typical state's issue is dropped.
+        self.image("typical", "dark-ax5-iphoneSmall", "pass")
+        with open(os.path.join(self.run_dir, "results.jsonl"), "w") as handle:
+            for entry in self.results:
+                handle.write(json.dumps(entry) + "\n")
+        checks = os.path.join(self.dir, "checks.json")
+        with open(checks, "w") as handle:
+            json.dump({"checks": [
+                {"screen": SCREEN, "state": "typical", "variant": "dark-ax5-iphoneSmall", "rule": "text-truncation", "status": "pass"},
+                {"screen": SCREEN, "state": "overflow", "variant": "dark-ax5-iphoneSmall", "rule": "text-truncation", "status": "fail"},
+            ]}, handle)
+        self.build(checks=checks)
+        typical = self.truncation(state="typical", image="screens/%s/typical/dark-ax5-iphoneSmall.png" % SCREEN)
+        report, errors = critic.validate(self.packet, self.output(self.report([typical, self.truncation()])))
+        self.assertEqual(errors, [])
+        self.assertEqual([i["state"] for i in report["issues"]], ["overflow"])
+        self.assertEqual([i["state"] for i in report["dropped"]], ["typical"])
+        # A check that names no state covers none: the issue stands.
+        with open(checks, "w") as handle:
+            json.dump({"checks": [{"screen": SCREEN, "variant": "*", "rule": "text-truncation", "status": "pass"}]}, handle)
+        self.build(checks=checks)
+        report, errors = critic.validate(self.packet, self.output(self.report([self.truncation()])))
+        self.assertEqual(len(report["issues"]), 1)
+
+    def test_a_run_without_every_platform_the_screen_is_registered_on_is_refused(self):
+        self.registry({SCREEN: ["iphone", "ipad", "mac"]})
+        with self.assertRaises(critic.PacketError) as caught:
+            self.build()
+        self.assertIn("ipad, mac", str(caught.exception))
+        self.assertIn("--platform iphone,ipad,mac", str(caught.exception))
+        # A screen the registry does not know is refused too.
+        self.registry({})
+        with self.assertRaises(critic.PacketError):
+            self.build()
+        os.remove(os.path.join(self.run_dir, "registry.json"))
+        with self.assertRaises(critic.PacketError):
+            self.build()
+
+    def test_the_packet_records_each_platforms_snapshot_evidence_and_issues_name_their_platform(self):
+        manifest = self.build()
+        [screen] = manifest["screens"]
+        self.assertEqual(screen["platforms"], ["iphone"])
+        iphone = screen["evidence"]["iphone"]["snapshots"]
+        self.assertEqual((iphone["run"], iphone["commit"], iphone["status"]), ("snapshots-run", "abc", "pass"))
+        self.assertRegex(iphone["digest"], "^[0-9a-f]{64}$")
+        report, _ = critic.validate(self.packet, self.output(self.report([self.truncation()])))
+        self.assertEqual(report["issues"][0]["platform"], "iphone")
+
+    def test_a_failed_snapshot_of_the_screen_fails_its_platforms_evidence(self):
+        self.image("error", "light-standard-iphoneLarge", "fail")
+        with open(os.path.join(self.run_dir, "results.jsonl"), "w") as handle:
+            for entry in self.results:
+                handle.write(json.dumps(entry) + "\n")
+        self.assertEqual(self.build()["screens"][0]["evidence"]["iphone"]["snapshots"]["status"], "fail")
 
     def test_the_rubric_lists_rules_owners_and_its_version(self):
         rules = critic.rubric()
@@ -197,13 +272,32 @@ class CriticTest(unittest.TestCase):
         with open(report_path, "w") as handle:
             json.dump(report, handle)
         ledger = os.path.join(self.dir, "ledger.yaml")
-        evidence = json.dumps({SCREEN: {"snapshots": {"run": "s", "status": "pass"}, "a11y": {"run": "a", "status": "pass"}}})
-        self.assertEqual(critic.main(["apply", "--report", report_path, "--ledger", ledger, "--evidence", evidence, "--session", "s-1"]), 0)
+        a11y = self.a11y_run("a11y-1", "iphone")
+        self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", a11y,
+                                      "--ledger", ledger, "--session", "s-1"]), 0)
         entry = screen_status.load(ledger)["screens"][SCREEN]
         self.assertEqual(entry["status"], "built")
-        self.assertEqual(entry["evidence"]["critic"]["session"], "s-1")
+        self.assertEqual(entry["platforms"], ["iphone"])
+        self.assertEqual(entry["evidence"]["iphone"]["critic"]["session"], "s-1")
+        self.assertEqual(entry["evidence"]["iphone"]["critic"]["status"], "fail")
+        self.assertEqual(entry["evidence"]["iphone"]["a11y"]["run"], "a11y-1")
+        self.assertEqual(entry["evidence"]["iphone"]["snapshots"]["status"], "pass")
+        # A clean re-check verifies it; an a11y run of another platform is no
+        # evidence for this one.
+        clean, _ = critic.validate(self.packet, self.output(self.report([])))
+        with open(report_path, "w") as handle:
+            json.dump(clean, handle)
+        self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--ledger", ledger]), 0)
+        self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["status"], "verified")
+        mac = self.a11y_run("a11y-mac", "mac", status="fail")
+        self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", mac, "--ledger", ledger]), 0)
+        self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["evidence"]["iphone"]["a11y"]["run"], "a11y-1")
+        # A failed a11y run demotes it.
+        failed = self.a11y_run("a11y-2", "iphone", status="fail")
+        self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", failed, "--ledger", ledger]), 0)
+        self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["status"], "built")
         # The canonical ledger refuses a sample screen.
-        self.assertEqual(critic.main(["apply", "--report", report_path, "--evidence", evidence]), 1)
+        self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet]), 1)
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
