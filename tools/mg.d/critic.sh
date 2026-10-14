@@ -136,8 +136,10 @@ mg_critic() {
   copy="$MG_CRITIC_COPY"
   cp -R "$packet/." "$copy/"
   echo "critic: session $session grades $(jq -r '[.screens[].id] | join(", ")' "$packet/packet.json") in $copy" >&2
+  # The CLI's schema check does not know the 2020-12 meta-schema id; the
+  # answer is checked against the full schema afterwards anyway.
   mg_critic__session "$(mg_critic__prompt)" "$copy" "$out" --output-format json \
-    --json-schema "$(jq -c . "$packet/schema.json")" --append-system-prompt "$(cat "$packet/role.md")"
+    --json-schema "$(jq -c 'del(."$schema", ."$id")' "$packet/schema.json")" --append-system-prompt "$(cat "$packet/role.md")"
   rc=$?
   mg_artifact critic-output "$out" "the critic's answer"
   if [ "$rc" -ne 0 ]; then

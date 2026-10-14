@@ -276,9 +276,10 @@ PY
   echo '[{"screen": "sample.deckOverview", "status": "pass"}]' >"$a11y/screens.json"
 }
 
-# The critic stub: logs its arguments and directory, answers with FX_ANSWER.
+# The critic stub: logs its arguments and directory, answers with FX_ANSWER
+# the way the CLI does with a schema (the message list, ending in a result).
 critic_stub() {
-  stub critic-cli 'echo "critic-cli cwd=$PWD args=$*" >>"$STUB_LOG"; jq -n --slurpfile a "$FX_ANSWER" "{type: \"result\", is_error: false, result: \"done\", structured_output: \$a[0]}"'
+  stub critic-cli 'echo "critic-cli cwd=$PWD args=$*" >>"$STUB_LOG"; jq -n --slurpfile a "$FX_ANSWER" "[{type: \"system\", subtype: \"init\"}, {type: \"result\", is_error: false, result: \"done\", structured_output: \$a[0]}]"'
   export MEGURI_CRITIC_CMD="$BIN/critic-cli"
 }
 

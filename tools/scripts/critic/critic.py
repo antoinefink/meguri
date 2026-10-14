@@ -221,14 +221,22 @@ def platform_notes(platform):
 # The report
 
 def parse_output(path):
-    """The critic's JSON object from Claude's output: `structured_output`
-    when the session had a schema, else the result text (fences allowed)."""
+    """The critic's JSON object from Claude's output (a result message, or
+    the message list ending in one): `structured_output` when the session
+    had a schema, else the result text (fences allowed)."""
     with open(path) as handle:
         raw = handle.read()
     try:
         outer = json.loads(raw)
     except ValueError as error:
         raise PacketError("the session output is not JSON: %s" % error)
+    if isinstance(outer, list):
+        # With a schema, the JSON output is the session's message list; the
+        # answer is in its result message.
+        results = [m for m in outer if isinstance(m, dict) and m.get("type") == "result"]
+        if not results:
+            raise PacketError("the session output has no result message")
+        outer = results[-1]
     if isinstance(outer, dict) and outer.get("type") == "result":
         if outer.get("is_error"):
             raise PacketError("the critic session ended with an error: %s" % str(outer.get("result"))[:300])

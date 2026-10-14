@@ -116,6 +116,16 @@ class CriticTest(unittest.TestCase):
         self.assertEqual(report["issues"][0]["rule"], "text-truncation")
         self.assertEqual(report["issues"][0]["severity"], "high")
 
+    def test_the_answer_may_come_in_the_session_message_list(self):
+        self.build()
+        path = os.path.join(self.dir, "messages.json")
+        with open(path, "w") as handle:
+            json.dump([{"type": "system", "subtype": "init"}, {"type": "assistant"},
+                       {"type": "result", "is_error": False, "structured_output": self.report([self.truncation()])}], handle)
+        report, errors = critic.validate(self.packet, path)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(report["issues"]), 1)
+
     def test_the_answer_may_come_as_fenced_text(self):
         self.build()
         report, errors = critic.validate(self.packet, self.output(self.report([]), structured=False))
