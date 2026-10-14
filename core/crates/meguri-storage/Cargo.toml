@@ -49,3 +49,7 @@ required-features = ["test-hooks"]
 [[test]]
 name = "collation_order"
 required-features = ["test-hooks"]
+
+[[test]]
+name = "open_budget"
+required-features = ["test-hooks"]
