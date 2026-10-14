@@ -98,14 +98,15 @@ mg__lease_stale() {
     { [ -z "$pid" ] && [ -n "$(find "$1" -maxdepth 0 -mmin +2 2>/dev/null)" ]; }
 }
 
-# mg__lease_remove_stale <slot dir> <holder JSON read>: under the mutex,
-# removes the slot if it still holds what was read and is still stale.
-# Another waiter may have removed it and taken the lease meanwhile.
+# mg__lease_remove_stale <lease dir> <holder JSON read>: under the mutex, ends
+# the lease if it still holds what was read and is still stale; a live job in
+# its nested slot (a recording worker died under it) inherits it. Another
+# waiter may have removed it and taken the lease meanwhile.
 mg__lease_remove_stale() {
-  host_lease_lock "$(mg_host_lease_dir)" || return 1
+  host_lease_lock "$1" || return 1
   if [ "$(cat "$1/holder.json" 2>/dev/null)" = "$2" ] && mg__lease_stale "$1" "$2"; then
     echo "host lease: removing a stale lease ($(jq -r '"\(.job) in \(.worktree), pid \(.pid)"' <<<"$2" 2>/dev/null || echo unknown))" >&2
-    rm -rf "$1"
+    host_lease_drop "$1"
   fi
   host_lease_unlock
 }
@@ -215,14 +216,16 @@ mg_host_lease() {
 
 # mg__host_lease_release <lease dir> <pid>: releases the slot <pid> holds (the
 # nested one or the lease), and nothing else: a lease handed to a recording
-# (mg_host_lease_transfer) or inherited from one stays with its holder.
+# (mg_host_lease_transfer) or inherited from one stays with its holder, and a
+# live nested job inherits the lease it releases (record stop of a worker
+# that died or would not stop).
 mg__host_lease_release() {
   local locked=0
   host_lease_lock "$1" && locked=1
   if [ "$(jq -r '.pid // empty' "$1/inner/holder.json" 2>/dev/null)" = "$2" ]; then
     rm -rf "$1/inner"
   elif [ "$(jq -r '.pid // empty' "$1/holder.json" 2>/dev/null)" = "$2" ]; then
-    rm -rf "$1"
+    host_lease_drop "$1"
   fi
   [ "$locked" = 0 ] || host_lease_unlock
 }

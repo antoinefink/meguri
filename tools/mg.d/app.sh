@@ -201,6 +201,15 @@ mg_sim_check_runtime() {
   return 1
 }
 
+# mg_sim_check_given <udid>: a --device the job was given is a pool simulator
+# leased from this checkout, on the pinned runtime. Jobs check it before
+# building, and again once they hold the host lease, before touching the
+# device: while they queued, the lease may have been released and the device
+# leased to another checkout. On failure records it and returns 1.
+mg_sim_check_given() {
+  mg_sim_check_owned "$1" && mg_sim_check_runtime "$1"
+}
+
 # mg_sim_prepare <udid>: the pinned status bar (R1966), after every boot and
 # reset; pool devices stay booted, so before every use. Captures with the live
 # clock and battery would not match the baselines: when the override fails,
@@ -332,12 +341,13 @@ mg_run() {
   fi
   local udid="$MG_D_UDID" app out pid
   if [ -n "$udid" ]; then
-    mg_sim_check_owned "$udid" || return 0
-    mg_sim_check_runtime "$udid" || return 0
+    mg_sim_check_given "$udid" || return 0
   fi
   mg_app_build ios-sim "$MG_D_CONFIG" || return 0
   mg_host_lease || return 0
-  if [ -z "$udid" ]; then
+  if [ -n "$udid" ]; then
+    mg_sim_check_given "$udid" || return 0
+  else
     mg_sim_lease "$MG_D_KIND" keep || return 0
     udid="$MG_SIM_UDID"
     if ! mg_sim_check_runtime "$udid"; then

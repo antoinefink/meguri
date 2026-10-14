@@ -56,8 +56,13 @@ teardown() {
 bg_live() {
   sleep 60 >/dev/null 2>&1 3>&- &
   BG_PID=$!
-  echo "$BG_PID" >>"$BATS_TEST_TMPDIR/bg.pids"
+  bg_track "$BG_PID"
 }
+
+# bg_track <pid>: teardown terminates it (a tools/mg run cancels its job), so
+# a failed test leaves no job waiting for a file. Start such a process with
+# 3>&-: bats waits for whatever holds its fd 3.
+bg_track() { echo "$1" >>"$BATS_TEST_TMPDIR/bg.pids"; }
 
 stub() { printf '#!/bin/bash\n%s\n' "$2" >"$BIN/$1" && chmod +x "$BIN/$1"; }
 
@@ -78,12 +83,16 @@ lease_in_sandbox() { (cd "$SB" && "$POOL" acquire "$1" --holder test 2>/dev/null
 
 add_fixture_jobs() {
   cat >"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
-mg_job fx-lease host fx_lease "fixture: hold the host lease for FX_HOLD seconds"
+mg_job fx-lease host fx_lease "fixture: hold the host lease for FX_HOLD seconds, or until the file FX_UNTIL exists"
 mg_job fx-gate host fx_gate "fixture: take the Mac UI gate"
 fx_lease() {
   mg_host_lease || return 0
   echo "start $1 $(date +%s.%N)" >>"$FX_LOG"
-  sleep "${FX_HOLD:-1}"
+  if [ -n "${FX_UNTIL:-}" ]; then
+    while [ ! -e "$FX_UNTIL" ]; do sleep 0.1; done
+  else
+    sleep "${FX_HOLD:-1}"
+  fi
   echo "end $1 $(date +%s.%N)" >>"$FX_LOG"
   mg_status pass
 }
@@ -130,7 +139,9 @@ waiting_for_mutex() {
 # the image-tools container, as functions that replace the real ones (the
 # fixture file sorts after drive.sh). The fake run writes a drive log of
 # three steps: launch, a tap marked "dismiss-sheet", a snapshot; with
-# MEGURI_DRIVE_FRAMES=1 the tap gets FX_FRAMES (5) sampled frames. The fake
+# MEGURI_DRIVE_FRAMES=1 the tap gets FX_FRAMES (5) sampled frames. It lasts
+# FX_DRIVE_SECONDS (0.6), or with FX_DRIVE_UNTIL=<file> it touches
+# <file>.started and runs until <file> exists. The fake
 # contact sheet fails with FX_SHEET=fail and leaves out the sheets with
 # FX_SHEET=missing; it copies its window list to <out>/input.json.
 add_drive_fakes() {
@@ -144,7 +155,12 @@ mg_app_xcodebuild_test() {
   rm -rf "$prefix.xcresult"
   mkdir -p "$prefix.xcresult"
   t0="$(fx_now)"
-  sleep "${FX_DRIVE_SECONDS:-0.6}"
+  if [ -n "${FX_DRIVE_UNTIL:-}" ]; then
+    : >"$FX_DRIVE_UNTIL.started"
+    while [ ! -e "$FX_DRIVE_UNTIL" ]; do sleep 0.1; done
+  else
+    sleep "${FX_DRIVE_SECONDS:-0.6}"
+  fi
   t1="$(fx_now)"
   [ "${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-0}" != 1 ] || n="${FX_FRAMES:-5}"
   jq -n --argjson t0 "$t0" --argjson t1 "$t1" --argjson n "$n" --arg p "$platform" --arg s2 "${FX_STEP2_STATUS:-ok}" '
@@ -161,9 +177,15 @@ mg_app_xcodebuild_test() {
 mg_drive__export_attachments() {
   local log="$1/drive-log.json" dir="$2" n=0 entries='[]' name
   mkdir -p "$dir"
+  # FX_EXPORT_DROP, FX_EXPORT_EMPTY, FX_EXPORT_LOST: attachment names left
+  # out of the export, exported empty, or listed without their file.
   fx_add() {
     n=$((n + 1))
-    printf '%s' "$2" >"$dir/e$n"
+    case " ${FX_EXPORT_DROP:-} " in *" $1 "*) return 0 ;; esac
+    case " ${FX_EXPORT_EMPTY:-} ${FX_EXPORT_LOST:-} " in
+      *" $1 "*) case " ${FX_EXPORT_EMPTY:-} " in *" $1 "*) : >"$dir/e$n" ;; esac ;;
+      *) printf '%s' "$2" >"$dir/e$n" ;;
+    esac
     entries="$(jq -c --arg s "${1%.*}_0_0A1B2C3D-0000-4000-8000-00000000000$((n % 10)).${1##*.}" --arg e "e$n" '. + [{suggestedHumanReadableName: $s, exportedFileName: $e}]' <<<"$entries")"
   }
   for name in $(jq -r '.steps[].captures[] | .hierarchy, .screenshot' "$log"); do
@@ -285,31 +307,46 @@ EOF
   [ -f "$MEGURI_SIM_POOL_DIR/leases/$u/lease.json" ]
 }
 
-@test "sim-reset waits for the host lease, then checks again that the device is still this checkout's" {
+@test "sim-reset, run, drive, screenshot and record wait for the host lease, then check again that the device is still this checkout's" {
   add_fixture_jobs
-  local u drive reset theirs
+  add_drive_fakes
+  local u args n=0 holder job theirs
   u="$(lease_in_sandbox iphone)"
-  FX_HOLD=3 "$SB/tools/mg" fx-lease drive >/dev/null 2>&1 &
-  drive=$!
-  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
-  "$SB/tools/mg" sim-reset "$u" >"$BATS_TEST_TMPDIR/reset.out" 2>"$BATS_TEST_TMPDIR/reset.err" &
-  reset=$!
-  for _ in $(seq 1 50); do grep -q 'host lease: waiting' "$BATS_TEST_TMPDIR/reset.err" && break; sleep 0.1; done
-  grep -q 'host lease: waiting for fx-lease' "$BATS_TEST_TMPDIR/reset.err"
-  # While it queues, the device goes back to the pool and another checkout
-  # leases it.
-  "$POOL" release "$u" 2>/dev/null
-  theirs="$(cd "$BATS_TEST_TMPDIR" && "$POOL" acquire iphone --holder other 2>/dev/null)"
-  [ "$theirs" = "$u" ]
-  sim __app "$u" com.example.theirs User
-  : >"$STUB_LOG"
-  wait "$drive"
-  wait "$reset" || true
-  result="$(tail -n 1 "$BATS_TEST_TMPDIR/reset.out")"
-  [ "$(field '.failures[0].id')" = device ]
-  [[ "$(field '.failures[0].message')" == *"leased to other in $BATS_TEST_TMPDIR"* ]]
-  not_called "simctl (uninstall|privacy|keychain|ui|status_bar) "
-  sim __apps "$u" | grep -qx com.example.theirs
+  for args in "sim-reset $u" "run --platform iphone --device $u --route sample/sheet" \
+    "drive $SB/tools/drive-scripts/examples/open-sample-sheet.json --device $u" \
+    "screenshot --route sample/sheet --device $u" "screenshot --device $u" "record start --device $u"; do
+    n=$((n + 1))
+    : >"$FX_LOG"
+    FX_UNTIL="$BATS_TEST_TMPDIR/free-$n" "$SB/tools/mg" fx-lease holder >/dev/null 2>&1 3>&- &
+    holder=$!
+    bg_track "$holder"
+    for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+    # shellcheck disable=SC2086
+    "$SB/tools/mg" $args >"$BATS_TEST_TMPDIR/job.out" 2>"$BATS_TEST_TMPDIR/job.err" 3>&- &
+    job=$!
+    bg_track "$job"
+    for _ in $(seq 1 50); do grep -q 'host lease: waiting' "$BATS_TEST_TMPDIR/job.err" && break; sleep 0.1; done
+    grep -q 'host lease: waiting for fx-lease' "$BATS_TEST_TMPDIR/job.err" || { echo "tools/mg $args did not queue"; return 1; }
+    # While it queues, the device goes back to the pool and another checkout
+    # leases it.
+    "$POOL" release "$u" 2>/dev/null
+    theirs="$(cd "$BATS_TEST_TMPDIR" && "$POOL" acquire iphone --holder other 2>/dev/null)"
+    [ "$theirs" = "$u" ]
+    sim __app "$u" com.example.theirs User
+    : >"$STUB_LOG"
+    touch "$BATS_TEST_TMPDIR/free-$n"
+    wait "$holder"
+    wait "$job" || true
+    result="$(tail -n 1 "$BATS_TEST_TMPDIR/job.out")"
+    [ "$(field '.failures[0].id')" = device ] || { echo "tools/mg $args: $(field '.failures')"; return 1; }
+    [[ "$(field '.failures[0].message')" == *"leased to other in $BATS_TEST_TMPDIR"* ]]
+    not_called "simctl (install|launch|terminate|uninstall|privacy|keychain|ui|status_bar|io) |fake xcodebuild-test"
+    sim __apps "$u" | grep -qx com.example.theirs
+    # The device comes back to this checkout for the next job.
+    "$POOL" release "$u" 2>/dev/null
+    [ "$(lease_in_sandbox iphone)" = "$u" ]
+  done
+  [ ! -e "$SB/build/mg/record/active/$u.json" ]
 }
 
 @test "a simulator leased from another checkout or outside the pool is refused" {
@@ -650,6 +687,70 @@ EOF
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
+@test "a recording worker that dies during a nested drive leaves the lease to the drive; another checkout waits for it" {
+  add_fixture_jobs
+  add_drive_fakes
+  local u worker drive drive_pid other theirs go="$BATS_TEST_TMPDIR/drive.go"
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  worker="$(jq -r .pid "$SB/build/mg/record/active/$u.json")"
+  FX_DRIVE_UNTIL="$go" "$SB/tools/mg" drive "$SB/tools/drive-scripts/examples/open-sample-sheet.json" --device "$u" \
+    >"$BATS_TEST_TMPDIR/drive.out" 2>/dev/null 3>&- &
+  drive=$!
+  bg_track "$drive"
+  for _ in $(seq 1 100); do [ -e "$go.started" ] && break; sleep 0.1; done
+  [ -e "$go.started" ]
+  drive_pid="$(jq -r .pid "$MEGURI_HOST_LEASE_DIR/inner/holder.json")"
+  [ "$(jq -r .job "$MEGURI_HOST_LEASE_DIR/inner/holder.json")" = drive ]
+  # The worker dies without releasing anything (SIGKILL to its group).
+  kill -9 -- "-$worker"
+  for _ in $(seq 1 50); do kill -0 "$worker" 2>/dev/null || break; sleep 0.1; done
+  ! kill -0 "$worker" 2>/dev/null
+  # Another checkout finds the recording's lease stale: the drive, still
+  # running, inherits it, and the other checkout queues behind the drive.
+  other="$BATS_TEST_TMPDIR/other"
+  cp -R "$SB" "$other"
+  "$other/tools/mg" fx-lease theirs >/dev/null 2>"$BATS_TEST_TMPDIR/theirs.err" 3>&- &
+  theirs=$!
+  bg_track "$theirs"
+  for _ in $(seq 1 50); do grep -q 'host lease: waiting' "$BATS_TEST_TMPDIR/theirs.err" && break; sleep 0.1; done
+  grep -q "host lease: waiting for drive in $SB" "$BATS_TEST_TMPDIR/theirs.err"
+  [ "$(jq -r '"\(.pid) \(.job) \(.nested // "none") \(.kind // "none")"' "$MEGURI_HOST_LEASE_DIR/holder.json")" = "$drive_pid drive none none" ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  [ ! -s "$FX_LOG" ]
+  touch "$go"
+  wait "$drive"
+  [ "$(jq -r .status "$(tail -n 1 "$BATS_TEST_TMPDIR/drive.out")")" = pass ]
+  wait "$theirs"
+  [ "$(awk '{print $1 $2}' "$FX_LOG" | tr '\n' ' ')" = "starttheirs endtheirs " ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+}
+
+@test "record stop of a dead recording worker leaves the lease to a nested job still running" {
+  add_fixture_jobs
+  local u worker job job_pid go="$BATS_TEST_TMPDIR/job.go"
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  worker="$(jq -r .pid "$SB/build/mg/record/active/$u.json")"
+  FX_UNTIL="$go" "$SB/tools/mg" fx-lease nested >/dev/null 2>&1 3>&- &
+  job=$!
+  bg_track "$job"
+  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+  job_pid="$(jq -r .pid "$MEGURI_HOST_LEASE_DIR/inner/holder.json")"
+  kill -9 -- "-$worker"
+  for _ in $(seq 1 50); do kill -0 "$worker" 2>/dev/null || break; sleep 0.1; done
+  mg record stop --device "$u"
+  [ "$status" -eq 2 ]
+  [[ "$(field '.failures[0].message')" == *"ended before record stop (the worker died)"* ]]
+  [ "$(jq -r '"\(.pid) \(.job) \(.nested // "none")"' "$MEGURI_HOST_LEASE_DIR/holder.json")" = "$job_pid fx-lease none" ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  touch "$go"
+  wait "$job"
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+}
+
 @test "a recording releases its lease under the mutex: a nested slot half-taken meanwhile inherits the lease" {
   local u worker status_file stop nested
   u="$(lease_in_sandbox iphone)"
@@ -886,6 +987,43 @@ EOF
   FAKE_SIM_RECORD_EXIT_AFTER=0.1 mg drive "$script" --platform iphone --record
   [ "$status" -eq 2 ]
   [[ "$(field '.failures[0].message')" == *"stopped before the drive ended"* ]]
+}
+
+@test "a drive whose result bundle lacks a capture its log lists, or holds it empty, is an error, never a pass" {
+  add_drive_fakes
+  local script="$SB/tools/drive-scripts/examples/sample-transition.json"
+  FX_EXPORT_DROP=drive-02-tap-after.png mg drive "$script" --platform iphone
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | join(" ")')" = capture/02-tap-after.png ]
+  [[ "$(field '.failures[0].message')" == *"lists drive-02-tap-after.png, but the result bundle had no such attachment"* ]]
+  [ "$(jq -r .hierarchy_checked "$(dirname "$result")/manifest.json")" = true ]
+
+  FX_EXPORT_EMPTY=drive-03-snapshot-home.json mg drive "$script" --platform iphone
+  [ "$status" -eq 2 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = capture/03-snapshot-home.json ]
+  [[ "$(field '.failures[0].message')" == *"lists drive-03-snapshot-home.json, but its export is empty"* ]]
+
+  # No hierarchy at all: nothing was checked, so nothing passes.
+  : >"$STUB_LOG"
+  FX_EXPORT_DROP="drive-01-launch-after.json drive-02-tap-before.json drive-02-tap-after.json drive-03-snapshot-home.json" \
+    mg drive "$script" --platform iphone
+  [ "$status" -eq 2 ]
+  [ "$(field '[.failures[].id | select(startswith("capture/"))] | length')" = 4 ]
+  [ "$(jq -r .hierarchy_checked "$(dirname "$result")/manifest.json")" = false ]
+  not_called "hierarchy_check.py"
+
+  # The bundle's manifest lists an attachment whose file is missing.
+  FX_EXPORT_LOST=drive-02-tap-before.png mg drive "$script" --platform iphone
+  [ "$status" -eq 2 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "export/02-tap-before.png capture/02-tap-before.png" ]
+}
+
+@test "a sampled frame the drive log lists but the export lacks makes a Mac drive an error" {
+  add_drive_fakes
+  FX_EXPORT_DROP=drive-02-tap-frame-003.png mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac --record
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = capture/02-tap-frame-003.png ]
 }
 
 @test "a failed step in the drive log fails the drive even when XCTest passed" {

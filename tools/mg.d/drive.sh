@@ -116,6 +116,16 @@ mg_drive__screen_stop() {
   return "$early"
 }
 
+# mg_drive__capture_path <out dir> <attachment name>: where an exported
+# capture goes, without its drive- prefix: sampled frames to frames/, the
+# step captures to steps/.
+mg_drive__capture_path() {
+  case "$2" in
+    *-frame-[0-9]*.png) printf '%s/frames/%s\n' "$1" "${2#drive-}" ;;
+    *) printf '%s/steps/%s\n' "$1" "${2#drive-}" ;;
+  esac
+}
+
 # The contact-sheet window of a marked step: <index, 2 digits>-<transition>.
 MG_DRIVE_WINDOW_NAME='def wname: "\(.index | tostring | if length < 2 then "0" + . else . end)-\(.transition)";'
 
@@ -169,8 +179,10 @@ mg_drive__motion_inputs() {
 #   the Mac without it: the driver's FrameSampler screenshots (about 10 per
 #     second), with the screen-recording user step.
 # Records artifacts and failures. Returns 0 pass, 1 fail (failed steps or
-# hierarchy issues), 2 error (the drive, a capture or a requested sheet could
-# not be made, or macOS dropped the input the drive synthesized).
+# hierarchy issues), 2 error (the drive, a capture the log lists, the
+# hierarchy check or a requested sheet could not be made, or macOS dropped
+# the input the drive synthesized). A pass needs every listed capture
+# exported and non-empty, and the hierarchy check run over them.
 mg_drive_run() {
   local script="$1" platform="$2" udid="$3" config="$4" record="$5" out="$6"
   local dest name abs_script rc capture="" video="" rec_start="" rec_log recorder="" capture_error=0
@@ -249,8 +261,7 @@ mg_drive_run() {
   fi
   [ "$rc" -ne 2 ] || return 2
 
-  # Attachments: XCTest names each export <name>_<n>_<UUID>.<ext>. Sampled
-  # frames go to frames/, the step captures to steps/.
+  # Attachments: XCTest names each export <name>_<n>_<UUID>.<ext>.
   local raw="$out/attachments" log
   rm -rf "$raw"
   if ! mg_drive__export_attachments "$out/drive.xcresult" "$raw" >/dev/null 2>"$out/export.log"; then
@@ -265,21 +276,42 @@ mg_drive_run() {
     return 2
   fi
   mkdir -p "$out/steps"
-  local f src dir
+  local f src to incomplete=0
   for f in $(jq -r 'keys[] | select(startswith("drive-") and . != "drive-log.json")' <<<"$map"); do
     src="$(jq -r --arg f "$f" '.[$f]' <<<"$map")"
-    case "$f" in *-frame-[0-9]*.png) dir="$out/frames" ;; *) dir="$out/steps" ;; esac
-    mkdir -p "$dir"
-    mv -f "$raw/$src" "$dir/${f#drive-}"
+    to="$(mg_drive__capture_path "$out" "$f")"
+    mkdir -p "$(dirname "$to")"
+    if ! mv -f "$raw/$src" "$to" 2>>"$out/export.log"; then
+      mg_failure "export/${f#drive-}" "could not move the exported attachment $f ($raw/$src); see $out/export.log"
+      incomplete=1
+    fi
   done
-  mv -f "$raw/$log" "$out/drive-log.json"
-  rm -rf "$raw"
+  if ! mv -f "$raw/$log" "$out/drive-log.json" 2>>"$out/export.log"; then
+    mg_failure export "could not move the exported drive-log.json ($raw/$log); see $out/export.log"
+    return 2
+  fi
+  # A failed move leaves the export behind for a look.
+  [ "$incomplete" -ne 0 ] || rm -rf "$raw"
 
-  # Hierarchy check over every capture, in the image-tools container.
+  # Every capture the drive log lists (hierarchies, screenshots, sampled
+  # frames) must have come out of the result bundle, and not empty: a drive
+  # with a capture missing is an error, never a pass (R1965, R1968).
+  local cap path
+  while IFS= read -r cap; do
+    path="$(mg_drive__capture_path "$out" "$cap")"
+    [ ! -s "$path" ] || continue
+    mg_failure "capture/${cap#drive-}" "the drive log lists $cap, but $([ -e "$path" ] && echo "its export is empty" || echo "the result bundle had no such attachment"); see $out/drive.log" \
+      "tools/mg drive $script"
+    incomplete=1
+  done < <(jq -r '.steps[] | (.captures[] | .hierarchy, .screenshot), (.frames[]?.file) | select(type == "string" and . != "")' "$out/drive-log.json")
+
+  # Hierarchy check over every listed hierarchy, in the image-tools container.
+  # A pass needs it: a drive with no hierarchy checked proves nothing.
   local files=() check_rc=0 checked=false
-  for f in "$out"/steps/*.json; do
-    [ -f "$f" ] && files[${#files[@]}]="$(mg_container_path "$f")"
-  done
+  while IFS= read -r cap; do
+    f="$(mg_drive__capture_path "$out" "$cap")"
+    [ -s "$f" ] && files[${#files[@]}]="$(mg_container_path "$f")"
+  done < <(jq -r '.steps[].captures[].hierarchy | select(type == "string" and . != "")' "$out/drive-log.json")
   if [ "${#files[@]}" -gt 0 ]; then
     mg_image_tools python3 tools/scripts/hierarchy-check/hierarchy_check.py \
       --report "$(mg_container_path "$out/hierarchy-check.json")" "${files[@]}" >&2
@@ -397,7 +429,7 @@ mg_drive_run() {
     jq -e '.error != null or any(.steps[]; .status == "failed")' "$out/manifest.json" >/dev/null; then
     return 1
   fi
-  if [ "$capture_error" -ne 0 ] || { [ "${#files[@]}" -gt 0 ] && [ "$checked" = false ]; }; then
+  if [ "$capture_error" -ne 0 ] || [ "$incomplete" -ne 0 ] || [ "$checked" = false ]; then
     return 2
   fi
   return 0
@@ -423,12 +455,13 @@ mg_drive__job() {
   else
     platform=ios
     if [ -n "$udid" ]; then
-      mg_sim_check_owned "$udid" || return 0
-      mg_sim_check_runtime "$udid" || return 0
+      mg_sim_check_given "$udid" || return 0
     fi
     mg_app_build ios-sim "$config" || return 0
     mg_host_lease || return 0
-    if [ -z "$udid" ]; then
+    if [ -n "$udid" ]; then
+      mg_sim_check_given "$udid" || return 0
+    else
       mg_sim_lease "$kind" release || return 0
       udid="$MG_SIM_UDID"
       mg_sim_check_runtime "$udid" || return 0
@@ -549,9 +582,9 @@ mg_screenshot() {
 # The screen of a simulator the caller leased, as it is.
 mg_screenshot__device() {
   local udid="$1" png="$MG_RUN_DIR/screen.png"
-  mg_sim_check_owned "$udid" || return 0
-  mg_sim_check_runtime "$udid" || return 0
+  mg_sim_check_given "$udid" || return 0
   mg_host_lease || return 0
+  mg_sim_check_given "$udid" || return 0
   mg_sim_prepare "$udid" || return 0
   if ! xcrun simctl io "$udid" screenshot "$png" >&2 || [ ! -s "$png" ]; then
     mg_failure screenshot "simctl io screenshot failed"

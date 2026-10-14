@@ -26,23 +26,16 @@ now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
 holder_pid() { jq -r '.pid // empty' "$1/holder.json" 2>/dev/null; }
 
 # The slot this process holds: the nested one, or the lease. A job of the
-# same checkout running nested in the lease inherits it. Under the lease's
-# mutex: a nested job takes its slot (mkdir, then holder.json) under it too,
-# so it never has its slot removed half-taken.
+# same checkout running nested in the lease inherits it (host_lease_drop).
+# Under the lease's mutex: a nested job takes its slot (mkdir, then
+# holder.json) under it too, so it never has its slot removed half-taken.
 release_lease() {
-  local inner locked=0
+  local locked=0
   host_lease_lock "$lease" && locked=1
   if [ "$(holder_pid "$lease/inner")" = "$me" ]; then
     rm -rf "$lease/inner"
   elif [ "$(holder_pid "$lease")" = "$me" ]; then
-    inner="$(holder_pid "$lease/inner")"
-    if [ -n "$inner" ] && kill -0 "$inner" 2>/dev/null; then
-      jq 'del(.nested)' "$lease/inner/holder.json" >"$lease/holder.json.tmp" &&
-        mv -f "$lease/holder.json.tmp" "$lease/holder.json"
-      rm -rf "$lease/inner"
-    else
-      rm -rf "$lease"
-    fi
+    host_lease_drop "$lease"
   fi
   [ "$locked" = 0 ] || host_lease_unlock
 }

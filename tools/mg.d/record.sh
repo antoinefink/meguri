@@ -108,9 +108,9 @@ mg_record__start() {
     mg_status error
     return 0
   fi
-  mg_sim_check_owned "$udid" || return 0
-  mg_sim_check_runtime "$udid" || return 0
+  mg_sim_check_given "$udid" || return 0
   mg_host_lease || return 0
+  mg_sim_check_given "$udid" || return 0
   mg_sim_prepare "$udid" || return 0
   local video="$MG_RUN_DIR/video.mp4" log="$MG_RUN_DIR/recorder.log" status="$MG_RUN_DIR/recording-status.json"
   local max="${MEGURI_RECORD_MAX_SECONDS:-600}" pid
