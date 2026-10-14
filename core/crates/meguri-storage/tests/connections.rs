@@ -270,3 +270,24 @@ fn after_close_the_main_file_alone_holds_the_collection() {
     );
     reopened.close().unwrap();
 }
+
+#[test]
+fn raw_rows_give_each_value_by_its_storage_class() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open(&path).unwrap();
+    let sql = "SELECT NULL, 7, 1.5, 'é', X'00ff', CAST(X'61ff' AS TEXT)";
+    // TEXT that is not UTF-8 comes back with the replacement character.
+    let expected = vec![vec![
+        SqlValue::Null,
+        SqlValue::Integer(7),
+        SqlValue::Real(1.5),
+        SqlValue::Text("é".to_owned()),
+        SqlValue::Blob(vec![0x00, 0xff]),
+        SqlValue::Text("a\u{fffd}".to_owned()),
+    ]];
+    assert_eq!(exec(opened.writer(), sql).rows, expected);
+    let reader = opened.open_reader(ReaderRole::Query).unwrap();
+    assert_eq!(query(&reader, sql).rows, expected);
+    drop(reader);
+    opened.close().unwrap();
+}
