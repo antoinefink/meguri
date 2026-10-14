@@ -156,3 +156,41 @@ SWIFT
   tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: route stub/quits'
   tap_line '# the app quit within 3 s of a hidden launch \(open -W exit 0\)'
 }
+
+@test "the builds phase builds and checks, but launches, leases and tests nothing, and prints no plan" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  printf '%s\n' 'registry.register("stub/stays") { _ in .screen { Text("") } }' >"$SB/app/Meguri/TestHooks/StubRoutes.swift"
+  STUB_BUILD_OK=1 check_project --phase builds
+  called '^xcodebuild build .* -configuration AppStore -destination platform=macOS'
+  called '^xcodebuild build .* -configuration Debug -destination platform=macOS.*mac-Debug-probe\.xcresult'
+  tap_line 'ok [0-9]+ test-hook routes are registered with literal paths: stub/stays'
+  not_called '^open '
+  not_called '^sim-pool\.sh '
+  not_called '^xcodebuild (test|build .* -destination id=)'
+  ! grep -qE '^1\.\.' <<<"$output"
+}
+
+@test "the devices phase launches the Debug app the builds left, then leases, builds and tests, numbering on" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  printf '%s\n' 'registry.register("stub/stays") { _ in .screen { Text("") } }' >"$SB/app/Meguri/TestHooks/StubRoutes.swift"
+  STUB_BUILD_OK=1 check_project --phase builds
+  local n app
+  n="$(grep -cE '^(not )?ok ' <<<"$output")"
+  : >"$STUB_LOG"
+  check_project --phase devices --continue-from "$n"
+  app="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData/Build/Products/Debug/Meguri.app"
+  [ "$(head -n 1 <<<"$output")" = "ok $((n + 1)) mac-Debug launched hidden stays up: Home" ]
+  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
+  called '^sim-pool\.sh acquire iphone --holder xcode-check$'
+  called '^xcodebuild test .* -destination id=POOL-iphone .*'
+  not_called '^xcodebuild (-list|build .* -destination platform=macOS)'
+  ! grep -q 'test-hook routes are registered' <<<"$output"
+  [ "$(tail -n 1 <<<"$output")" = "1..$((n + $(grep -cE '^(not )?ok ' <<<"$output")))" ]
+}
+
+@test "without a Debug build the devices phase launches nothing on the Mac" {
+  check_project --phase builds --no-ui
+  check_project --phase devices --continue-from 3 --no-ui
+  not_called '^open '
+  [ "$(head -n 1 <<<"$output" | sed -E 's/^(not )?ok ([0-9]+) .*/\2/')" = 4 ]
+}

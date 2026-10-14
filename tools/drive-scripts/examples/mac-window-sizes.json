@@ -1,0 +1,13 @@
+{
+  "name": "mac-window-sizes",
+  "description": "The sample screen at the minimum and the large Mac window size in one run (R1962).",
+  "platforms": ["mac"],
+  "steps": [
+    {"launch": {"route": "sample/screen", "locale": "en_US", "animations": false, "windowSize": "minimum"}},
+    {"wait": "sample.screen.title"},
+    {"snapshot": "minimum"},
+    {"resize": "large"},
+    {"wait": "sample.screen.title"},
+    {"snapshot": "large"}
+  ]
+}

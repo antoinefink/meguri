@@ -93,6 +93,25 @@ services:
     environment:
       TMPDIR: /tmp
 
+  # Image tools (U8): ffmpeg and Python for contact sheets, scene-change and
+  # freeze detection (tools/scripts/contact-sheet) and the hierarchy check
+  # (tools/scripts/hierarchy-check). Docker jobs run in it; host jobs such as
+  # `tools/mg drive` start it themselves with mg_compose.
+  image-tools:
+    build:
+      context: ..
+      dockerfile: docker/image-tools.Dockerfile
+      target: image-tools
+    pull_policy: build
+    init: true
+    working_dir: /work
+    volumes:
+      - ..:/work
+    tmpfs:
+      - /tmp:exec,mode=1777
+    environment:
+      TMPDIR: /tmp
+
   # UI lint gate (U9, R1994): SwiftLint's own image, pinned by digest, with
   # the checkout read-only and no network. `tools/mg lint-ui` passes the files
   # to lint (tools/lint-ui/path-rules.sh picks them) and filters the findings

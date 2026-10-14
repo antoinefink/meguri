@@ -333,6 +333,7 @@ At schema 11 the `col` row holds five JSON texts. At schema 18 all five are the 
 - Input: an id key must be a decimal integer (optional `-`, digits) within `i64`; any other key, or any member that its object rules refuse, refuses the whole column. For `dconf` only, when the text fails to convert, Anki parses it as plain JSON first (a repeated key keeps its last value) and converts that; and the member key, not the object's own `id`, is the preset's id.
 - Output: one compact JSON object per column. Anki writes the members in no particular order; Meguri writes ids in ascending numeric order, tags in the order of the `tags` table, and config keys in ascending byte order.
 - An empty collection at schema 11 holds `{}` in each column.
+- A legacy package carries its collection at schema 11, so the package's `col` row holds these five columns too. Anki's exporter copies a note type as stored: the package's `models` member for a note type is the object that S4 output gives for its record in the exported collection (S14, scenario `schema11/apkg-notetypes`).
 - What an upgrade or a downgrade does with the converted records (renaming duplicate names, replacing a note type id of 0, the starting-ease fixes of schemas 15 and 16, rebuilding tags, the `ver` and journal mode) belongs to the storage specs (U22, U33). This section is only the conversion.
 
 ## S13. Examples
@@ -366,7 +367,7 @@ The model goldens hold Anki's own conversion in both directions, so tests can us
 
 | Record | Scenarios with blob reads and objects |
 |---|---|
-| note type, field, template | `proto/notetype-bytes`, `schema11/notetype-values`, `schema11/notetype-other-reserved` |
+| note type, field, template | `proto/notetype-bytes`, `schema11/notetype-values`, `schema11/notetype-other-reserved`, `schema11/apkg-notetypes` (with a legacy package's objects, S14.1) |
 | deck (normal and filtered) | `proto/deck-normal-bytes`, `proto/deck-filtered-bytes`, `schema11/deck-values`, `schema11/deck-other-flatten`, `schema11/deck-other-roundtrip`, `schema11/deck-names` |
 | deck config | `proto/preset-bytes`, `schema11/preset-values`, `schema11/preset-other`, `schema11/preset-addon-roundtrip` (objects only) |
 | refused objects | `schema11/notetype-rejections`, `schema11/deck-rejections`, `schema11/preset-rejections` |
@@ -374,4 +375,18 @@ The model goldens hold Anki's own conversion in both directions, so tests can us
 - Compare objects as parsed JSON values, as the runner does (`specs/conformance/observations.md` O7).
 - Compare an `other` field whose JSON object has more than one top-level member as a parsed value too: Anki writes those members in no set order (S3), so its bytes are not a fixed expected value. Every other byte of a golden blob is.
 - A record read after `legacy_update` also shows what the save added to the conversion (`specs/conformance/model-ops.md` L2): a note type's `reqs` are the ones Anki recomputed, not the object's `req` (the conversion carries `req` as given, S4.1), and a preset has `usn` -1 and `mtime_secs` of the clock's second instead of the object's `usn` and `mod`.
-- Legacy packages carry these same objects in their `col` columns (S12). The package units (U120, U123) test that path end to end with their own scenarios.
+- Legacy packages carry these same objects in their `col` columns (S12). S14.1 covers the note types of one; the package units (U120, U123) test import and export end to end with their own scenarios.
+
+### S14.1 Note types in a legacy package
+
+`schema11/apkg-notetypes` builds a standard and a cloze note type, each with one add-on member in the `other` of the note type, of a field and of the template, adds a note of each, and exports the collection as a legacy package (`specs/conformance/model-ops.md` L6). Before the export it reads the note types' rows and blobs with `db_exec` and their `legacy_json` objects; after it, `package_col` reports the package's `ver` (11) and its `models` column (L7), whose members are keyed by the note type ids. For each note type this gives three checks:
+
+1. Record → object: the row columns and blobs, converted per S4 to S6, give the package's member under that note type's id, and the `legacy_json` object.
+2. Object → record → object: the `models` value, written as JSON text and read per S12, gives one record per member; S4 output of each record gives that member back.
+3. The package's member and the `legacy_json` object are the same value.
+
+Expected differences between a package's member and the `legacy_json` object:
+
+- In value, none. The exporter copies a note type as stored (same id, name, `mod`, `usn`, configs, and field and template ids), and both objects are the same conversion of the same record. Unknown protobuf fields of the blobs have no JSON form (`model/protobuf-records` P4), so they show in neither, and a schema-11 package cannot carry them.
+- In text, only order and spelling. The note types in `models` and the top-level `other` members of each object come in no set order (S3, S12); nested objects inside `other` members come with sorted keys and their numbers as Anki spells a parsed value (`model/json-numbers` N7). Meguri's output keeps the stored order and spelling instead. Comparing parsed values (O7) hides all of these.
+- What a legacy package holds besides its note types (decks, presets, `conf`), and what the exporter changes there, is the package area's (U120, U123).

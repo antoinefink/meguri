@@ -149,7 +149,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | stable (`model-ops.md` L2) |
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
-| `export` | `{format: apkg \| colpkg, name: <file name>, ...options}` | `{name, sha256}` of the file written | draft (package) |
+| `export` | `{format: apkg \| colpkg, name: <file name>, ...options}`; the legacy package form is exactly `{format: apkg, name, legacy: true}` (`model-ops.md` L6) | legacy form: `{notes: <count>}`; other forms: `{name, sha256}` of the file written | draft (package); the legacy form is stable (`model-ops.md` L6) |
 | `check_db` | `{}` | the check's counters | draft (maintenance) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |

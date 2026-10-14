@@ -1,0 +1,15 @@
+{
+  "name": "sample-routes",
+  "description": "Capture every sample route (a screen, a sheet and an error alert) with a fixed clock and locale.",
+  "platforms": ["ios", "mac"],
+  "steps": [
+    {"launch": {"route": "sample/screen", "now": "2030-01-15T10:00:00", "timeZone": "Asia/Tokyo", "locale": "en_US", "animations": false}},
+    {"wait": "sample.screen.title"},
+    {"snapshot": "sample-screen"},
+    {"launch": {"route": "sample/sheet", "now": "2030-01-15T10:00:00", "timeZone": "Asia/Tokyo", "locale": "en_US", "animations": false}},
+    {"wait": "sample.sheet.coreFeatures"},
+    {"snapshot": "sample-sheet"},
+    {"launch": {"route": "sample/alert", "locale": "en_US", "animations": false}},
+    {"snapshot": "sample-alert"}
+  ]
+}

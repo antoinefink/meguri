@@ -1,0 +1,843 @@
+{
+  "captured_at" : 1791887404.792973,
+  "platform" : "ios",
+  "root" : {
+    "children" : [
+      {
+        "children" : [
+          {
+            "children" : [
+              {
+                "children" : [
+
+                ],
+                "enabled" : true,
+                "focused" : false,
+                "frame" : {
+                  "height" : 2622,
+                  "width" : 1206,
+                  "x" : -402,
+                  "y" : -874
+                },
+                "hit_point" : {
+                  "x" : 201,
+                  "y" : 437
+                },
+                "identifier" : "",
+                "label" : "",
+                "selected" : false,
+                "type" : "other",
+                "value" : null
+              },
+              {
+                "children" : [
+                  {
+                    "children" : [
+                      {
+                        "children" : [
+                          {
+                            "children" : [
+                              {
+                                "children" : [
+                                  {
+                                    "children" : [
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 108,
+                                          "x" : 16,
+                                          "y" : 78
+                                        },
+                                        "hit_point" : {
+                                          "x" : 70,
+                                          "y" : 88.17
+                                        },
+                                        "identifier" : "sample.sheet.title",
+                                        "label" : "Sample sheet",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 43.33,
+                                          "x" : 16,
+                                          "y" : 106.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 37.67,
+                                          "y" : 116.5
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Clock",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 225.67,
+                                          "x" : 160.33,
+                                          "y" : 106.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 273.17,
+                                          "y" : 116.5
+                                        },
+                                        "identifier" : "sample.sheet.clock",
+                                        "label" : "2030-01-15T10:00:00+09:00",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 36,
+                                          "x" : 16,
+                                          "y" : 134.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 34,
+                                          "y" : 144.83
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Date",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 203,
+                                          "x" : 183,
+                                          "y" : 134.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 284.5,
+                                          "y" : 144.83
+                                        },
+                                        "identifier" : "sample.sheet.date",
+                                        "label" : "Tuesday, January 15, 2030",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 79,
+                                          "x" : 16,
+                                          "y" : 163
+                                        },
+                                        "hit_point" : {
+                                          "x" : 55.5,
+                                          "y" : 173.17
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Time zone",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 82.33,
+                                          "x" : 303.67,
+                                          "y" : 163
+                                        },
+                                        "hit_point" : {
+                                          "x" : 344.83,
+                                          "y" : 173.17
+                                        },
+                                        "identifier" : "sample.sheet.timeZone",
+                                        "label" : "Asia/Tokyo",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 139.67,
+                                          "x" : 16,
+                                          "y" : 191.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 85.83,
+                                          "y" : 201.5
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Process time zone",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 82.33,
+                                          "x" : 303.67,
+                                          "y" : 191.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 344.83,
+                                          "y" : 201.5
+                                        },
+                                        "identifier" : "sample.sheet.processTimeZone",
+                                        "label" : "Asia/Tokyo",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 49.67,
+                                          "x" : 16,
+                                          "y" : 219.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 40.83,
+                                          "y" : 229.83
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Locale",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 50.33,
+                                          "x" : 335.67,
+                                          "y" : 219.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 360.83,
+                                          "y" : 229.83
+                                        },
+                                        "identifier" : "sample.sheet.locale",
+                                        "label" : "en_US",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 52,
+                                          "x" : 16,
+                                          "y" : 248
+                                        },
+                                        "hit_point" : {
+                                          "x" : 42,
+                                          "y" : 258.17
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Fixture",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 262.33,
+                                          "x" : 123.67,
+                                          "y" : 248
+                                        },
+                                        "hit_point" : {
+                                          "x" : 254.83,
+                                          "y" : 258.17
+                                        },
+                                        "identifier" : "sample.sheet.fixture",
+                                        "label" : "collection.anki2 69 cf43867b9ced",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 114.67,
+                                          "x" : 16,
+                                          "y" : 276.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 73.33,
+                                          "y" : 286.5
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Reduce Motion",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 21.33,
+                                          "x" : 364.67,
+                                          "y" : 276.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 375.33,
+                                          "y" : 286.5
+                                        },
+                                        "identifier" : "sample.sheet.reduceMotion",
+                                        "label" : "off",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 165.33,
+                                          "x" : 16,
+                                          "y" : 304.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 98.67,
+                                          "y" : 314.83
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Reduce Transparency",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 21.33,
+                                          "x" : 364.67,
+                                          "y" : 304.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 375.33,
+                                          "y" : 314.83
+                                        },
+                                        "identifier" : "sample.sheet.reduceTransparency",
+                                        "label" : "off",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 85,
+                                          "x" : 16,
+                                          "y" : 333
+                                        },
+                                        "hit_point" : {
+                                          "x" : 58.5,
+                                          "y" : 343.17
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Animations",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 21.33,
+                                          "x" : 364.67,
+                                          "y" : 333
+                                        },
+                                        "hit_point" : {
+                                          "x" : 375.33,
+                                          "y" : 343.17
+                                        },
+                                        "identifier" : "sample.sheet.animations",
+                                        "label" : "off",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 40,
+                                          "x" : 16,
+                                          "y" : 361.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 36,
+                                          "y" : 371.5
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Ports",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 271.67,
+                                          "x" : 114.33,
+                                          "y" : 361.33
+                                        },
+                                        "hit_point" : {
+                                          "x" : 250.17,
+                                          "y" : 371.5
+                                        },
+                                        "identifier" : "sample.sheet.ports",
+                                        "label" : "ankiconnect default, migaku default",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 103.33,
+                                          "x" : 16,
+                                          "y" : 389.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 67.67,
+                                          "y" : 399.83
+                                        },
+                                        "identifier" : "",
+                                        "label" : "Core features",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 149,
+                                          "x" : 237,
+                                          "y" : 389.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 311.5,
+                                          "y" : 399.83
+                                        },
+                                        "identifier" : "sample.sheet.coreFeatures",
+                                        "label" : "ankiweb,test-hooks",
+                                        "selected" : false,
+                                        "type" : "staticText",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 20.33,
+                                          "width" : 40.33,
+                                          "x" : 16,
+                                          "y" : 418
+                                        },
+                                        "hit_point" : {
+                                          "x" : 36.17,
+                                          "y" : 428.17
+                                        },
+                                        "identifier" : "sample.sheet.done",
+                                        "label" : "Done",
+                                        "selected" : false,
+                                        "type" : "button",
+                                        "value" : null
+                                      }
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 392.33,
+                                      "width" : 402,
+                                      "x" : 0,
+                                      "y" : 62
+                                    },
+                                    "hit_point" : {
+                                      "x" : 201,
+                                      "y" : 258.17
+                                    },
+                                    "identifier" : "",
+                                    "label" : "",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : null
+                                  },
+                                  {
+                                    "children" : [
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 320.33,
+                                          "width" : 3,
+                                          "x" : 396,
+                                          "y" : 488.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 397.5,
+                                          "y" : 648.83
+                                        },
+                                        "identifier" : "",
+                                        "label" : "",
+                                        "selected" : false,
+                                        "type" : "other",
+                                        "value" : null
+                                      }
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 712,
+                                      "width" : 30,
+                                      "x" : 369,
+                                      "y" : 100
+                                    },
+                                    "hit_point" : {
+                                      "x" : 384,
+                                      "y" : 456
+                                    },
+                                    "identifier" : "",
+                                    "label" : "Vertical scroll bar, 1 page",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : "0%"
+                                  },
+                                  {
+                                    "children" : [
+                                      {
+                                        "children" : [
+
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 320.33,
+                                          "width" : 3,
+                                          "x" : 396,
+                                          "y" : 488.67
+                                        },
+                                        "hit_point" : {
+                                          "x" : 397.5,
+                                          "y" : 648.83
+                                        },
+                                        "identifier" : "",
+                                        "label" : "",
+                                        "selected" : false,
+                                        "type" : "other",
+                                        "value" : null
+                                      }
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 712,
+                                      "width" : 30,
+                                      "x" : 369,
+                                      "y" : 100
+                                    },
+                                    "hit_point" : {
+                                      "x" : 384,
+                                      "y" : 456
+                                    },
+                                    "identifier" : "",
+                                    "label" : "Vertical scroll bar, 1 page",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : "0%"
+                                  }
+                                ],
+                                "enabled" : true,
+                                "focused" : false,
+                                "frame" : {
+                                  "height" : 812,
+                                  "width" : 402,
+                                  "x" : 0,
+                                  "y" : 62
+                                },
+                                "hit_point" : {
+                                  "x" : 201,
+                                  "y" : 468
+                                },
+                                "identifier" : "",
+                                "label" : "",
+                                "selected" : false,
+                                "type" : "scrollView",
+                                "value" : null
+                              }
+                            ],
+                            "enabled" : true,
+                            "focused" : false,
+                            "frame" : {
+                              "height" : 812,
+                              "width" : 402,
+                              "x" : 0,
+                              "y" : 62
+                            },
+                            "hit_point" : {
+                              "x" : 201,
+                              "y" : 468
+                            },
+                            "identifier" : "",
+                            "label" : "",
+                            "selected" : false,
+                            "type" : "other",
+                            "value" : null
+                          }
+                        ],
+                        "enabled" : true,
+                        "focused" : false,
+                        "frame" : {
+                          "height" : 812,
+                          "width" : 402,
+                          "x" : 0,
+                          "y" : 62
+                        },
+                        "hit_point" : {
+                          "x" : 201,
+                          "y" : 468
+                        },
+                        "identifier" : "",
+                        "label" : "",
+                        "selected" : false,
+                        "type" : "other",
+                        "value" : null
+                      }
+                    ],
+                    "enabled" : true,
+                    "focused" : false,
+                    "frame" : {
+                      "height" : 812,
+                      "width" : 402,
+                      "x" : 0,
+                      "y" : 62
+                    },
+                    "hit_point" : {
+                      "x" : 201,
+                      "y" : 468
+                    },
+                    "identifier" : "",
+                    "label" : "",
+                    "selected" : false,
+                    "type" : "other",
+                    "value" : null
+                  }
+                ],
+                "enabled" : true,
+                "focused" : false,
+                "frame" : {
+                  "height" : 812,
+                  "width" : 402,
+                  "x" : 0,
+                  "y" : 62
+                },
+                "hit_point" : {
+                  "x" : 201,
+                  "y" : 468
+                },
+                "identifier" : "",
+                "label" : "",
+                "selected" : false,
+                "type" : "other",
+                "value" : null
+              }
+            ],
+            "enabled" : true,
+            "focused" : false,
+            "frame" : {
+              "height" : 874,
+              "width" : 402,
+              "x" : 0,
+              "y" : 0
+            },
+            "hit_point" : {
+              "x" : 201,
+              "y" : 437
+            },
+            "identifier" : "",
+            "label" : "",
+            "selected" : false,
+            "type" : "other",
+            "value" : null
+          }
+        ],
+        "enabled" : true,
+        "focused" : false,
+        "frame" : {
+          "height" : 874,
+          "width" : 402,
+          "x" : 0,
+          "y" : 0
+        },
+        "hit_point" : {
+          "x" : 201,
+          "y" : 437
+        },
+        "identifier" : "",
+        "label" : "",
+        "selected" : false,
+        "type" : "window",
+        "value" : null
+      }
+    ],
+    "enabled" : true,
+    "focused" : false,
+    "frame" : {
+      "height" : 874,
+      "width" : 402,
+      "x" : 0,
+      "y" : 0
+    },
+    "hit_point" : {
+      "x" : 201,
+      "y" : 437
+    },
+    "identifier" : "",
+    "label" : "Meguri",
+    "selected" : false,
+    "type" : "application",
+    "value" : null
+  },
+  "schema" : 1,
+  "screenshot" : {
+    "origin" : {
+      "x" : 0,
+      "y" : 0
+    },
+    "scale" : 3
+  },
+  "window" : {
+    "height" : 874,
+    "width" : 402,
+    "x" : 0,
+    "y" : 0
+  }
+}
