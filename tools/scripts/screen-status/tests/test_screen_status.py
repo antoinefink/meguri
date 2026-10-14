@@ -59,10 +59,13 @@ class ScreenStatusTest(unittest.TestCase):
     def test_medium_issues_become_tasks_once_and_do_not_block(self):
         medium = issue("medium", rule="layout-alignment", screen="sample.x", summary="Counts not aligned with the title")
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [medium, issue("low", rule="copy-plain", screen="sample.x")])), "verified")
-        screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [medium]))
+        reworded = issue("medium", rule="layout-alignment", screen="sample.x", summary="The counts drift right of the title")
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [reworded]))
         tasks = self.ledger["screens"]["sample.x"]["tasks"]
         self.assertEqual(len(tasks), 1)
         self.assertEqual(tasks[0]["rule"], "layout-alignment")
+        self.assertEqual(tasks[0]["summary"], "The counts drift right of the title")
+        self.assertEqual((tasks[0]["since"], tasks[0]["from"]), ("c1", "c2"))
 
     def test_the_canonical_ledger_takes_inventory_screens_only(self):
         inventory = {"home.deckList": {"states": ["typical"], "signature": True}}

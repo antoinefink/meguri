@@ -214,7 +214,8 @@ def platform_notes(platform):
     if platform == "mac":
         return ("Mac snapshots render off-screen: Liquid Glass cannot be drawn there, so chrome is drawn flat on an opaque "
                 "surface and the window looks inactive. Do not report missing glass or inactive styling on Mac images.")
-    return "Rendered in the app's own window on the simulator, at 2x, with the status bar outside the image."
+    return ("Rendered in the app's own window on the simulator, at 2x, with the status bar outside the image. The image is "
+            "the first screenful: scrolling content continues below its bottom edge.")
 
 
 # ---------------------------------------------------------------------------

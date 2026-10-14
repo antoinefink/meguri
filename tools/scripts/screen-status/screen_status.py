@@ -197,13 +197,21 @@ def record_critic(ledger, screen, report, by="tools/mg critic"):
     ]
     if not entry["issues"]:
         entry.pop("issues")
+    # One task per rule and image: a re-check words the same problem
+    # differently, so the latest wording replaces the earlier one.
     tasks = entry.setdefault("tasks", [])
     for issue in issues:
         if issue["severity"] != "medium":
             continue
-        key = (issue["rule"], issue.get("variant"), issue["summary"])
-        if not any((t["rule"], t.get("variant"), t["summary"]) == key for t in tasks):
-            tasks.append({"rule": issue["rule"], "variant": issue.get("variant"), "summary": issue["summary"], "from": report["run"], "open": True})
+        key = (issue["rule"], issue.get("state"), issue.get("variant"))
+        task = {"rule": issue["rule"], "state": issue.get("state"), "variant": issue.get("variant"),
+                "summary": issue["summary"], "from": report["run"], "open": True}
+        for n, existing in enumerate(tasks):
+            if (existing["rule"], existing.get("state"), existing.get("variant")) == key:
+                tasks[n] = dict(task, since=existing.get("since", existing.get("from")))
+                break
+        else:
+            tasks.append(dict(task, since=report["run"]))
     if not tasks:
         entry.pop("tasks")
     if highs:

@@ -14,35 +14,52 @@ extension TestHooks {
         enum Content {
             case deck(name: String, new: Int, learn: Int, due: Int)
             case empty(name: String)
-            case error
+            case error(name: String)
             case loading
         }
 
         let content: Content
 
         var body: some View {
+            VStack(spacing: 0) {
+                scrollingContent
+                // The primary action stays in reach whatever the title's
+                // length: below the scrolling content, not over it.
+                if case .deck = content {
+                    Button {} label: { Text(verbatim: "Study Now").frame(maxWidth: .infinity) }
+                        .buttonStyle(.bordered)
+                        .tint(ColorToken.textPrimary.color)
+                        .controlSize(.large)
+                        .padding(Spacing.medium)
+                        .accessibilityIdentifier("sample.deckOverview.study")
+                }
+            }
+            .background(.token(.backgroundPrimary))
+        }
+
+        private var scrollingContent: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.medium) {
                     switch content {
                     case let .deck(name, new, learn, due):
                         title(name)
-                        VStack(alignment: .trailing, spacing: Spacing.xxSmall) {
-                            CountColumns.Header()
-                            CountColumns(new: new, learn: learn, due: due)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        Button {} label: { Text(verbatim: "Study Now").frame(maxWidth: .infinity) }
-                            .buttonStyle(.bordered)
-                            .tint(ColorToken.textPrimary.color)
-                            .controlSize(.large)
-                            .accessibilityIdentifier("sample.deckOverview.study")
+                        // A line of counts, not CountColumns: its fixed column
+                        // widths overflow narrow screens at accessibility
+                        // sizes, a defect of the component that its own
+                        // gallery snapshots show; this sample is about the
+                        // deck name.
+                        counts(new: new, learn: learn, due: due)
                     case let .empty(name):
                         title(name)
                         EmptyStateView(
                             Text(verbatim: "No Cards"), systemImage: "rectangle.stack",
                             description: Text(verbatim: "Add notes to this deck to start studying.")
-                        )
-                    case .error:
+                        ) {
+                            Button {} label: { Text(verbatim: "Add Notes") }
+                                .accessibilityIdentifier("sample.deckOverview.addNotes")
+                        }
+                    case let .error(name):
+                        title(name)
                         ErrorStateView(
                             Text(verbatim: "Couldn’t Load the Deck"),
                             message: Text(verbatim: "The collection is busy. Try again in a moment."),
@@ -55,8 +72,18 @@ extension TestHooks {
                 .padding(Spacing.medium)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(.token(.backgroundPrimary))
             .accessibilityIdentifier("sample.deckOverview.screen")
+        }
+
+        /// New, Learn and Due counts in their colours, each with its name
+        /// (colour is never the only cue).
+        private func counts(new: Int, learn: Int, due: Int) -> some View {
+            Text(
+                "\(Text(new, format: .number).foregroundStyle(.token(.countNew))) new · \(Text(learn, format: .number).foregroundStyle(.token(.countLearn))) learning · \(Text(due, format: .number).foregroundStyle(.token(.countDue))) due"
+            )
+            .font(.headline)
+            .foregroundStyle(.token(.textSecondary))
+            .accessibilityIdentifier("sample.deckOverview.counts")
         }
 
         /// The deck name wraps at every text size; a cut-off name is the
@@ -111,7 +138,7 @@ extension TestHooks.SampleDeckOverview: PreviewStates {
                     new: 12_345, learn: 678, due: 99_999
                 ))
             },
-            PreviewFixture(.error) { Self(content: .error) },
+            PreviewFixture(.error) { Self(content: .error(name: "Spanish")) },
             PreviewFixture(.loading) { Self(content: .loading) },
         ]
     }

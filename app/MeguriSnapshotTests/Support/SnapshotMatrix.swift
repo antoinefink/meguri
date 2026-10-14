@@ -76,19 +76,6 @@ enum DeviceClass: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// Safe-area insets of a full-screen window of this class (status bar and
-    /// home indicator on iPhone and iPad; none in a Mac window).
-    var safeArea: (top: CGFloat, bottom: CGFloat) {
-        switch self {
-        case .iphoneSmall, .foldableOuter: (47, 34)
-        case .iphoneLarge: (62, 34)
-        case .iphoneResizable: (24, 20)
-        case .foldableInner: (32, 20)
-        case .ipadCompact, .ipadRegular: (24, 20)
-        case .macMinimum, .macDefault, .macLarge: (0, 0)
-        }
-    }
-
     var horizontalSizeClassIsRegular: Bool {
         switch self {
         case .ipadRegular, .foldableInner, .macMinimum, .macDefault, .macLarge: true

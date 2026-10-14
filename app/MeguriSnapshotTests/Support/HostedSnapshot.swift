@@ -34,7 +34,8 @@ enum SnapshotLayout: String, Codable, Sendable {
     /// A component at the device class's width minus margins, as tall as it
     /// needs, on the primary background, with no safe area.
     case component
-    /// A whole screen at the device class's size with its safe-area insets.
+    /// A whole screen at the device class's size, in the safe area of the
+    /// simulator's own window.
     case screen
 }
 
@@ -439,8 +440,8 @@ enum HostedRenderer {
     }
 
     /// What the window hosts: a component padded on the primary background
-    /// filling the window; a screen with its device class's safe-area
-    /// insets (see `Host` on iOS).
+    /// filling the window; a screen as it is (its safe area comes from the
+    /// window, see `Host` on iOS).
     static func content(_ view: AnyView, cell: MatrixCell, layout: SnapshotLayout) -> AnyView {
         switch layout {
         case .component:
@@ -451,12 +452,7 @@ enum HostedRenderer {
                     .modifier(CellEnvironment(cell: cell))
             )
         case .screen:
-            let insets = cell.device.safeArea
-            return AnyView(
-                view.modifier(CellEnvironment(cell: cell))
-                    .safeAreaPadding(.top, insets.top)
-                    .safeAreaPadding(.bottom, insets.bottom)
-            )
+            return AnyView(view.modifier(CellEnvironment(cell: cell)))
         }
     }
 
@@ -539,10 +535,11 @@ enum HostedRenderer {
     #else
     /// A window of its own on the app's scene, made key and visible, so the
     /// render server draws glass and blur (drawHierarchy). The iOS 27
-    /// safe-area workaround: the hosting controller takes no safe area from
-    /// the window, whose insets are the simulator's and depend on where the
-    /// window sits on its screen (issue #1125 shifted renders by them); a
-    /// screen gets its device class's insets as safe-area padding instead.
+    /// safe-area workaround (issue #1125 shifted renders by the window's
+    /// insets): a component takes no safe area at all; a screen takes the
+    /// window's own, which is the simulator screen's where the window
+    /// overlaps it. Never pad a screen with other insets: UIKit (scroll edge
+    /// effects) keeps reading the window's, and the two would disagree.
     @MainActor
     final class Host {
         private let window: UIWindow
@@ -555,7 +552,9 @@ enum HostedRenderer {
             previousKeyWindow = scene.keyWindow
             UIView.setAnimationsEnabled(false)
             let controller = UIHostingController(rootView: HostedRenderer.content(view, cell: cell, layout: layout))
-            controller.safeAreaRegions = []
+            if layout == .component {
+                controller.safeAreaRegions = []
+            }
             controller.view.backgroundColor = .clear
             controller.traitOverrides.userInterfaceStyle = cell.appearance == .dark ? .dark : .light
             controller.traitOverrides.preferredContentSizeCategory = cell.textSize.contentSizeCategory
