@@ -59,11 +59,15 @@ enum StateCoverage {
         let problems = StateCoverage.problems(registered: registered, inventory: inventory)
         #expect(problems.isEmpty, "\(problems.joined(separator: "; "))")
         // tools/mg snapshots requires this file: a skipped check is no check.
-        // It also lists where each screen is registered (registry.json):
-        // tools/mg critic grades a screen on all those platforms.
+        // It also lists where each screen is registered and the cells it is
+        // rendered in on each platform (registry.json), whatever the run's
+        // filter: tools/mg critic grades a screen only on all of them.
         let report = try JSONSerialization.data(withJSONObject: [
             "screens": MatrixRegistry.screens.map {
-                ["id": $0.id, "states": $0.type.previewStates.map(\.rawValue), "platforms": MatrixRegistry.platforms(of: $0).map(\.rawValue)]
+                [
+                    "id": $0.id, "states": $0.type.previewStates.map(\.rawValue), "platforms": MatrixRegistry.platforms(of: $0).map(\.rawValue),
+                    "cells": MatrixRegistry.renderedCells(of: $0),
+                ] as [String: Any]
             },
             "problems": problems,
         ], options: [.sortedKeys])
@@ -94,6 +98,21 @@ enum StateCoverage {
     @Test func theSampleScreenIsRegisteredOnEveryPlatform() throws {
         let sample = try #require(MatrixRegistry.screens.first { $0.id == "sample.deckOverview" })
         #expect(MatrixRegistry.platforms(of: sample) == [.iphone, .ipad, .mac])
+    }
+
+    /// The registry lists every cell a simulator or the Mac renders, in all
+    /// states (deferred cells are the device session's), so the critic can
+    /// tell a filtered run from a full one.
+    @Test func theRegistryListsEveryRenderedCellOfAScreen() throws {
+        let sample = try #require(MatrixRegistry.screens.first { $0.id == "sample.deckOverview" })
+        let cells = MatrixRegistry.renderedCells(of: sample)
+        #expect(Set(cells.keys) == ["iphone", "ipad", "mac"])
+        #expect(Set(cells["mac"] ?? []) == Set(PreviewState.allCases.flatMap { state in
+            ["light", "dark"].map { "\(state.rawValue)/\($0)-standard-macDefault" }
+        }))
+        let iphone = try #require(cells["iphone"])
+        #expect(iphone.contains("typical/light-ax5-iphoneLarge") && iphone.contains { $0.hasPrefix("overflow/") && $0.hasSuffix("-iphoneSmall") })
+        #expect(!iphone.contains { $0.contains("foldable") }, "foldable cells are deferred")
     }
 
     @Test func aSampleScreenNeedsAllFiveStates() {

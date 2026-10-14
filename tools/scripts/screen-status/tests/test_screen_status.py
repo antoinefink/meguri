@@ -1,6 +1,7 @@
 """Tests for the screen status ledger writer (U10, R1985): the transitions a
 critic check makes, sample screens, tasks and explicit transitions."""
 
+import copy
 import json
 import os
 import subprocess
@@ -17,8 +18,14 @@ import screen_status  # noqa: E402
 PASS = {"run": "r", "status": "pass", "commit": "c"}
 
 
-def snapshots(status="pass", digest="d1"):
-    return {"run": "s", "status": status, "commit": "c", "digest": digest}
+def a11y(status="pass", source="src1", run="a"):
+    """An a11y run's evidence: it audited the app built from `source`."""
+    return {"run": run, "status": status, "commit": "c", "input": source}
+
+
+def snapshots(status="pass", digest="d1", source="src1"):
+    """A snapshot run's evidence: its images (digest) of the app built from `source`."""
+    return {"run": "s", "status": status, "commit": "c", "digest": digest, "input": source}
 
 
 def evidence(platforms=("iphone",), a11y=True, snap=None, **per_platform):
@@ -28,7 +35,7 @@ def evidence(platforms=("iphone",), a11y=True, snap=None, **per_platform):
     for platform in platforms:
         result[platform] = {"snapshots": snap or snapshots()}
         if a11y:
-            result[platform]["a11y"] = PASS
+            result[platform]["a11y"] = globals()["a11y"]()
         result[platform].update(per_platform.get(platform, {}))
     return result
 
@@ -62,7 +69,7 @@ class ScreenStatusTest(unittest.TestCase):
         self.assertEqual([h["to"] for h in entry["history"]], ["built", "verified"])
 
     def test_verified_needs_passing_snapshots_and_accessibility_runs(self):
-        report = self.report("critic-1", [], evidence(iphone={"a11y": {"run": "a", "status": "fail"}}))
+        report = self.report("critic-1", [], evidence(iphone={"a11y": a11y("fail")}))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
         report = self.report("critic-2", [], evidence(a11y=False, snap=snapshots(digest="d2")))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
@@ -71,7 +78,7 @@ class ScreenStatusTest(unittest.TestCase):
     def test_verified_needs_every_registered_platform(self):
         # The iPad and the Mac have snapshots and a clean critic check but no
         # accessibility run: not verified, and the reason names them.
-        report = self.report("c1", [], evidence(("iphone", "ipad", "mac"), a11y=False, iphone={"a11y": PASS}))
+        report = self.report("c1", [], evidence(("iphone", "ipad", "mac"), a11y=False, iphone={"a11y": a11y()}))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
         entry = self.ledger["screens"]["sample.x"]
         self.assertEqual(entry["platforms"], ["iphone", "ipad", "mac"])
@@ -95,7 +102,7 @@ class ScreenStatusTest(unittest.TestCase):
         self.assertIn("iphone snapshots: fail", entry["history"][-1]["reason"])
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [])), "verified")
         # A failed accessibility run.
-        report = self.report("c4", [], evidence(iphone={"a11y": {"run": "a", "status": "fail"}}))
+        report = self.report("c4", [], evidence(iphone={"a11y": a11y("fail")}))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
 
     def test_an_approved_screen_whose_prerequisite_fails_is_demoted(self):
@@ -103,15 +110,40 @@ class ScreenStatusTest(unittest.TestCase):
         self.ledger["screens"]["sample.x"]["status"] = "approved"
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [], evidence(snap=snapshots("fail")))), "built")
 
-    def test_retained_accessibility_evidence_lasts_only_while_the_screen_looks_the_same(self):
+    def test_retained_accessibility_evidence_lasts_only_while_the_app_sources_are_the_same(self):
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
-        # No accessibility run this time, same images: the earlier run stands.
-        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [], evidence(a11y=False))), "verified")
-        # The screen changed (other images) and no accessibility run came
-        # with the check: the earlier run no longer counts.
-        report = self.report("c3", [], evidence(a11y=False, snap=snapshots(digest="d2")))
+        # No accessibility run this time, snapshots of the same sources: the
+        # earlier run stands, whatever the images (a re-recorded baseline).
+        report = self.report("c2", [], evidence(a11y=False, snap=snapshots(digest="d2")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "verified")
+        self.assertEqual(self.ledger["screens"]["sample.x"]["evidence"]["iphone"]["a11y"], a11y())
+        # The app changed and no accessibility run came with the check: the
+        # earlier run audited other code and no longer counts.
+        report = self.report("c3", [], evidence(a11y=False, snap=snapshots(source="src2")))
         self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
         self.assertNotIn("a11y", self.ledger["screens"]["sample.x"]["evidence"]["iphone"])
+
+    def test_an_accessibility_run_counts_only_for_the_app_sources_it_audited(self):
+        # The run keeps the sources it audited; nothing overwrites them.
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
+        entry = self.ledger["screens"]["sample.x"]
+        self.assertEqual(entry["evidence"]["iphone"]["a11y"]["input"], "src1")
+        self.assertNotIn("digest", entry["evidence"]["iphone"]["a11y"])
+        # A check that brings snapshots of new sources with an audit of the
+        # old ones is refused, and records nothing.
+        before = copy.deepcopy(self.ledger)
+        report = self.report("c2", [], evidence(snap=snapshots(source="src2")))
+        with self.assertRaises(screen_status.LedgerError) as caught:
+            screen_status.record_critic(self.ledger, "sample.x", report)
+        self.assertIn("audited app sources src1", str(caught.exception))
+        self.assertIn("rendered src2", str(caught.exception))
+        self.assertEqual(self.ledger, before)
+        # So is one whose snapshot run does not say what it rendered.
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [], evidence(snap=snapshots(source=None))))
+        # A ledger whose audit and snapshots disagree is not verified evidence.
+        entry["evidence"]["iphone"]["a11y"]["input"] = "src0"
+        self.assertEqual(screen_status.evidence_gaps(entry), ["iphone a11y: audited app sources src0, its snapshots rendered src1"])
 
     def test_a_report_without_platforms_is_refused(self):
         with self.assertRaises(screen_status.LedgerError):

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -159,6 +160,41 @@ class GalleryTest(unittest.TestCase):
         [review] = os.listdir(review_dir)
         self.assertEqual(len(json.load(open(os.path.join(review_dir, review)))["decisions"]), 8)
         self.assertEqual([f for f in os.listdir(os.path.dirname(os.path.join(self.checkout, gallery.APPROVED))) if f.endswith(".tmp")], [])
+
+    def test_galleries_in_separate_processes_keep_every_approval_of_one_checkout(self):
+        # Two galleries (two roots, as two tools/mg gallery runs build them)
+        # record decisions in one checkout. Every approval runs in a process
+        # of its own whose reads are slowed down, so read-modify-writes of the
+        # checkout's files that are not serialized across galleries would
+        # overwrite each other.
+        roots = []
+        for g in range(2):
+            items = []
+            for n in range(3):
+                path = "app/Snapshots/iPhone18,1-24A434/home.deckList/typical/g%d-cell-%d.png" % (g, n)
+                image = self.png(os.path.join(self.checkout, path), (g * 100 + n * 30, 122, 255))
+                items.append(self.item(id="g%d-cell-%d" % (g, n), variant="g%d-cell-%d" % (g, n), baseline=path, new=image))
+            root = os.path.join(self.dir, "site-%d" % g)
+            gallery.build(items, root)
+            roots.append((root, [item["id"] for item in items]))
+        script = (
+            "import sys, time\n"
+            "sys.path.insert(0, %r)\n"
+            "import gallery\n"
+            "read = gallery.read_json\n"
+            "def slow(path, default):\n"
+            "    data = read(path, default)\n"
+            "    time.sleep(0.2)\n"
+            "    return data\n"
+            "gallery.read_json = slow\n"
+            "gallery.decide(sys.argv[1], sys.argv[2], 'approve')\n" % os.path.dirname(HERE))
+        processes = [subprocess.Popen([sys.executable, "-c", script, root, item_id]) for root, ids in roots for item_id in ids]
+        self.assertEqual([process.wait(timeout=120) for process in processes], [0] * 6)
+        approved = json.load(open(os.path.join(self.checkout, gallery.APPROVED)))
+        self.assertEqual(sorted(b["variant"] for b in approved["baselines"]), sorted(i for _, ids in roots for i in ids))
+        review_dir = os.path.join(self.checkout, "docs", "design", "reviews")
+        [review] = os.listdir(review_dir)
+        self.assertEqual(len(json.load(open(os.path.join(review_dir, review)))["decisions"]), 6)
 
     def test_approving_an_image_locks_it_and_records_the_decision(self):
         self.build()

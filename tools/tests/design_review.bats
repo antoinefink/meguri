@@ -337,6 +337,29 @@ probe_fixture() {
   [ "$(field '.failures[0].id')" = state-coverage/mac ]
 }
 
+@test "a run records the app sources it rendered: app code changes them, baselines do not" {
+  export FX_RESULTS="$BATS_TEST_TMPDIR/results.jsonl"
+  : >"$FX_RESULTS"
+  mkdir -p "$SB/app/Meguri" "$SB/core"
+  echo 'struct A {}' >"$SB/app/Meguri/A.swift"
+  mg snapshots --platform mac
+  local first
+  first="$(field .details.input)"
+  [[ "$first" =~ ^[0-9a-f]{64}$ ]]
+  # A recorded baseline, committed or not, is no source.
+  baseline home.deckList/typical/light-standard-macDefault "look: new"
+  mg snapshots --platform mac
+  [ "$(field .details.input)" = "$first" ]
+  git -C "$SB" add app && git -C "$SB" commit -qm sources
+  mg snapshots --platform mac
+  [ "$(field .details.input)" = "$first" ]
+  # Changed code is other sources; the digest leaves the staging area alone.
+  echo 'struct B {}' >>"$SB/app/Meguri/A.swift"
+  mg snapshots --platform mac
+  [ "$(field .details.input)" != "$first" ]
+  [ "$(git -C "$SB" status --porcelain -- app)" = " M app/Meguri/A.swift" ]
+}
+
 # --- critic ----------------------------------------------------------------
 
 # A finished snapshots run with two images of the sample screen, and an
@@ -354,9 +377,9 @@ PY
   jq -nc --arg a "$snap/mac/mac/actual/sample.deckOverview/overflow/light-standard-macDefault.png" \
     '{name: "sample.deckOverview/overflow/light-standard-macDefault", subject: "sample.deckOverview", state: "overflow", cell: "light-standard-macDefault",
       status: "recorded", platform: "mac", group: "mac", layout: "screen", axes: {appearance: "light"}, actual: $a}' >"$snap/results.jsonl"
-  jq -n '{job: "snapshots", status: "pass", commit: {sha: "abc"}, artifacts: []}' >"$snap/result.json"
-  echo '{"screens": {"sample.deckOverview": {"platforms": ["mac"], "states": ["overflow"]}}}' >"$snap/registry.json"
-  jq -n '{job: "a11y", run_id: "a11y1", status: "pass", details: {platform: "mac"}, artifacts: []}' >"$a11y/result.json"
+  jq -n '{job: "snapshots", status: "pass", commit: {sha: "abc"}, artifacts: [], details: {input: "src1"}}' >"$snap/result.json"
+  echo '{"screens": {"sample.deckOverview": {"platforms": ["mac"], "states": ["overflow"], "cells": {"mac": ["overflow/light-standard-macDefault"]}}}}' >"$snap/registry.json"
+  jq -n '{job: "a11y", run_id: "a11y1", status: "pass", details: {platform: "mac", input: "src1"}, artifacts: []}' >"$a11y/result.json"
   echo '[{"screen": "sample.deckOverview", "platform": "mac", "status": "pass"}]' >"$a11y/screens.json"
 }
 
@@ -416,6 +439,26 @@ PY
   [ "$(field .status)" = error ]
   [ "$(field '.failures[0].id')" = packet ]
   grep -q 'no image of sample.deckOverview on iphone, ipad' "$SB/build/mg/critic/$(field .run_id)/log.txt"
+  not_called '^critic-cli'
+  [ ! -f "$SB/build/status.yaml" ]
+}
+
+@test "a filtered snapshots run, or an a11y run of other app sources, is refused before any session starts" {
+  fake_runs
+  critic_stub
+  answer '[]'
+  local registry="$SB/build/mg/snapshots/snap1/registry.json"
+  jq '.screens["sample.deckOverview"].cells.mac += ["typical/light-standard-macDefault"]' "$registry" >"$registry.tmp" && mv "$registry.tmp" "$registry"
+  mg critic snap1 --a11y a11y1 --ledger build/status.yaml
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = packet ]
+  grep -q 'no image of sample.deckOverview in 1 of the cells .*mac typical/light-standard-macDefault' "$SB/build/mg/critic/$(field .run_id)/log.txt"
+  fake_runs
+  jq '.details.input = "src0"' "$SB/build/mg/a11y/a11y1/result.json" >"$BATS_TEST_TMPDIR/a11y.json" && mv "$BATS_TEST_TMPDIR/a11y.json" "$SB/build/mg/a11y/a11y1/result.json"
+  mg critic snap1 --a11y a11y1 --ledger build/status.yaml
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = packet ]
+  grep -q 'audited sample.deckOverview on mac in app sources src0, the snapshots run snap1 rendered src1' "$SB/build/mg/critic/$(field .run_id)/log.txt"
   not_called '^critic-cli'
   [ ! -f "$SB/build/status.yaml" ]
 }

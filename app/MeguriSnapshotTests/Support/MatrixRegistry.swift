@@ -101,5 +101,14 @@ enum MatrixRegistry {
     static func platforms(of screen: ScreenRegistration) -> [SnapshotPlatform] {
         SnapshotPlatform.allCases.filter { platform in screen.type.previewStates.contains { screen.set(platform, $0) != nil } }
     }
+
+    /// Per platform, every `state/cell` of the screen a simulator or the Mac
+    /// renders (deferred cells left out), in matrix order: what a full
+    /// snapshot run gives the critic.
+    static func renderedCells(of screen: ScreenRegistration) -> [String: [String]] {
+        Dictionary(uniqueKeysWithValues: platforms(of: screen).map { platform in
+            (platform.rawValue, screenCases(on: platform).filter { $0.subject == screen.id && $0.cell.deferredReason == nil }.map { "\($0.state)/\($0.cell.name)" })
+        })
+    }
 }
 #endif

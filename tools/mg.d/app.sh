@@ -66,6 +66,27 @@ mg_app_build() {
   return 0
 }
 
+# mg_app_input_digest: a sha256 of the sources an app build is made from,
+# app/ and core/ as the working tree holds them (committed or not; ignored
+# files and app/Snapshots/, whose baselines are no input, left out). Jobs that
+# build the same sources print the same digest: snapshots and a11y record it
+# (details.input), and the status ledger counts an audit only for the
+# sources its snapshots rendered. Uses a copy of the index, so the real one
+# and the staging area are untouched; prints nothing when git cannot.
+mg_app_input_digest() {
+  local index paths=() p tree
+  for p in app core; do [ ! -e "$MG_ROOT/$p" ] || paths[${#paths[@]}]="$p"; done
+  index="$(mktemp "${TMPDIR:-/tmp}/mg-input-index.XXXXXX")" || return 0
+  cp "$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$index" 2>/dev/null || rm -f "$index"
+  if [ "${#paths[@]}" -gt 0 ]; then
+    GIT_INDEX_FILE="$index" git -C "$MG_ROOT" add -A -- "${paths[@]}" ':(exclude)app/Snapshots' >/dev/null 2>&1 || { rm -f "$index"; return 0; }
+  fi
+  tree="$(GIT_INDEX_FILE="$index" git -C "$MG_ROOT" write-tree 2>/dev/null)"
+  rm -f "$index"
+  [ -n "$tree" ] || return 0
+  git -C "$MG_ROOT" ls-tree -r "$tree" -- app core 2>/dev/null | grep -v "$(printf '\t')app/Snapshots/" | shasum -a 256 | cut -c1-64
+}
+
 # mg_app_xcodebuild_test <out prefix> <mac|ios> <destination> <config> [xcodebuild args]:
 # test-without-building of the UI plan into <prefix>.xcresult and <prefix>.log.
 # Returns 0 pass, 1 test failures, 2 could not run (records a user step when

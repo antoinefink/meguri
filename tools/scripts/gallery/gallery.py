@@ -16,8 +16,10 @@ ITEMS.json, written by tools/mg gallery: [{"id", "screen", "state", "variant",
 path when the file there is that blob, else null: only a committed image
 can be approved, since the guard reads approved images back from git)}].
 
-Decisions are serialized (one at a time, across the server's threads and
-processes), and every file is replaced through a temporary file of its own.
+Decisions are serialized: one at a time per gallery (the server's threads
+and processes), and one at a time per checkout they are written to, whichever
+gallery takes them (an flock in the checkout's build/mg/gallery/). Every file
+is replaced through a temporary file of its own.
 """
 
 import argparse
@@ -266,17 +268,33 @@ _DECISIONS = threading.Lock()
 
 
 @contextlib.contextmanager
+def flocked(path):
+    """An exclusive flock on `path` (created if missing) for the block."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
 def one_decision_at_a_time(gallery_dir):
-    """Holds every decision's read-modify-write of the review, approval and
-    decision files to itself: the server's threads share a lock, and other
-    processes serving the same gallery an flock on gallery_dir/.decisions.lock."""
+    """Holds a gallery's decisions to one at a time: the server's threads
+    share a lock, and other processes serving the same gallery an flock on
+    gallery_dir/.decisions.lock (its pending-commits list)."""
     with _DECISIONS:
-        with open(os.path.join(gallery_dir, ".decisions.lock"), "w") as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
+        with flocked(os.path.join(gallery_dir, ".decisions.lock")):
+            yield
+
+
+def checkout_lock(checkout):
+    """Holds the read-modify-write of a checkout's review, approval and
+    decision files to one decision at a time, across galleries: two galleries
+    (processes, containers) may write to one checkout. Taken after the
+    gallery's own lock, never before it."""
+    return flocked(os.path.join(checkout, "build", "mg", "gallery", "decisions.lock"))
 
 
 def record_review(checkout, entry, commit=None):
@@ -313,6 +331,17 @@ def _decide(gallery_dir, item_id, decision, note):
     if item is None:
         raise GalleryError("no item %s in this gallery" % item_id)
     checkout = item["checkout"]
+    with checkout_lock(checkout):
+        written = _record(gallery_dir, manifest, item, checkout, decision, note)
+    if item.get("pending"):
+        with open(os.path.join(gallery_dir, "pending-commits.jsonl"), "a") as handle:
+            handle.write(json.dumps({"checkout": checkout, "branch": item.get("branch"), "files": written["files"], "item": item_id}) + "\n")
+    return written
+
+
+def _record(gallery_dir, manifest, item, checkout, decision, note):
+    """The decision's writes in the checkout (under its lock)."""
+    item_id = item["id"]
     entry = {
         "item": item_id, "screen": item["screen"], "state": item["state"], "variant": item["variant"],
         "baseline": item["baseline"], "decision": decision, "note": note.strip(), "branch": item.get("branch"),
@@ -354,9 +383,6 @@ def _decide(gallery_dir, item_id, decision, note):
         approved["baselines"].sort(key=lambda b: b["path"])
         write_json(path, approved)
         written["files"].append(APPROVED)
-    if item.get("pending"):
-        with open(os.path.join(gallery_dir, "pending-commits.jsonl"), "a") as handle:
-            handle.write(json.dumps({"checkout": checkout, "branch": item.get("branch"), "files": written["files"], "item": item_id}) + "\n")
     return written
 
 
@@ -375,10 +401,11 @@ def _pick(gallery_dir, screen, variant, reason):
     if not reason.strip():
         raise GalleryError("a pick needs its reason")
     checkout = offered.get("checkout", ".")
-    review = record_review(checkout, {"screen": screen, "decision": "pick", "variant": variant, "note": reason.strip()})
-    reason_cell = reason.strip().replace("|", "/").replace("\n", " ")
-    with open(os.path.join(checkout, DECISIONS), "a") as handle:
-        handle.write("| %s | %s | Picked %s | %s | gallery, %s |\n" % (today(), screen, variant, reason_cell, review.replace("docs/design/", "")))
+    with checkout_lock(checkout):
+        review = record_review(checkout, {"screen": screen, "decision": "pick", "variant": variant, "note": reason.strip()})
+        reason_cell = reason.strip().replace("|", "/").replace("\n", " ")
+        with open(os.path.join(checkout, DECISIONS), "a") as handle:
+            handle.write("| %s | %s | Picked %s | %s | gallery, %s |\n" % (today(), screen, variant, reason_cell, review.replace("docs/design/", "")))
     return {"decision": "pick", "files": [review, DECISIONS]}
 
 

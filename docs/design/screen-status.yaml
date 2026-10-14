@@ -6,8 +6,11 @@
 # Per screen (ids from screen-inventory.yaml):
 #   status      sketch | built | verified | approved
 #   fix_rounds  agent render-and-fix rounds since the last merge (R1987, U254)
-#   evidence    the runs behind the status: snapshots, a11y, lint, critic
-#               (run id, status, commit)
+#   platforms   where the snapshot matrix registers the screen
+#   evidence    the runs behind the status, per platform: snapshots (the
+#               digest of the screen's images, the app sources rendered:
+#               input), a11y (the app sources audited: input), critic; and
+#               lint (run id, status, commit)
 #   issues      open critic issues from the latest check (screen, variant,
 #               rubric rule, severity, region)
 #   tasks       medium critic issues to work on (R1985)

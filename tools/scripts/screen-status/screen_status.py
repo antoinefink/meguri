@@ -13,11 +13,14 @@ Statuses: sketch -> built -> verified -> approved.
 Readiness is computed again after every critic check: a verified or approved
 screen whose check brings a high-severity issue or a failed prerequisite
 goes back to built. A check carries fresh snapshot and critic evidence for
-every platform; an accessibility run it does not carry is kept only while
-the screen's snapshots of that platform are the ones it was recorded with
-(the same image digest), so a changed screen needs a new run. Medium issues
-become tasks; low ones stay listed for the gallery. Only this script writes
-the ledger (tools/mg critic and gallery call it).
+every platform. An accessibility run counts only for the app sources it
+audited: snapshot and a11y runs record the digest of the sources they built
+(`input`, tools/mg's mg_app_input_digest), a check that brings an a11y run
+of other sources than its snapshots is refused, and an a11y run it does not
+carry is kept only while the platform's snapshots are of the sources it
+audited, so changed code needs a new run. Medium issues become tasks; low
+ones stay listed for the gallery. Only this script writes the ledger
+(tools/mg critic and gallery call it).
 
   screen_status.py check [--ledger L] [--inventory I]
   screen_status.py init [--ledger L] [--inventory I]       add inventory screens missing from the ledger
@@ -55,9 +58,10 @@ HEADER = """\
 #   status      sketch | built | verified | approved
 #   fix_rounds  agent render-and-fix rounds since the last merge (R1987, U254)
 #   platforms   where the snapshot matrix registers the screen
-#   evidence    the runs behind the status, per platform: snapshots (with
-#               the digest of the screen's images), a11y (the digest it was
-#               checked against), critic; and lint (run id, status, commit)
+#   evidence    the runs behind the status, per platform: snapshots (the
+#               digest of the screen's images, the app sources rendered:
+#               input), a11y (the app sources audited: input), critic; and
+#               lint (run id, status, commit)
 #   issues      open critic issues from the latest check (screen, variant,
 #               rubric rule, severity, region)
 #   tasks       medium critic issues to work on (R1985)
@@ -165,18 +169,29 @@ GATES = ("snapshots", "a11y", "critic")
 
 
 def evidence_gaps(entry):
-    """Each registered platform's gate without a passing run."""
+    """Each registered platform's gate without a passing run, and each
+    accessibility run that did not audit the sources its snapshots rendered."""
     platforms = entry.get("platforms") or []
     if not platforms:
         return ["no platform graded"]
     evidence = entry.get("evidence") or {}
     gaps = []
     for platform in platforms:
+        mine = evidence.get(platform) or {}
         for gate in GATES:
-            status = ((evidence.get(platform) or {}).get(gate) or {}).get("status")
+            status = (mine.get(gate) or {}).get("status")
             if status != "pass":
                 gaps.append("%s %s: %s" % (platform, gate, status or "no run"))
+            elif gate == "a11y" and not same_sources(mine.get("a11y"), mine.get("snapshots")):
+                gaps.append("%s a11y: audited app sources %s, its snapshots rendered %s" % (
+                    platform, mine["a11y"].get("input") or "unknown", (mine.get("snapshots") or {}).get("input") or "unknown"))
     return gaps
+
+
+def same_sources(a11y, snapshots):
+    """Whether an accessibility run audited the app sources the snapshots rendered."""
+    audited = (a11y or {}).get("input")
+    return bool(audited) and audited == (snapshots or {}).get("input")
 
 
 def verified_ready(entry):
@@ -191,8 +206,9 @@ def verified_ready(entry):
 
 def merge_evidence(old, given, issues, report):
     """The evidence after a critic check: fresh snapshot and critic results
-    for every platform the check names, its accessibility runs, and earlier
-    accessibility runs whose platform's images are unchanged."""
+    for every platform the check names, its accessibility runs (each must
+    have audited the sources its platform's snapshots rendered), and earlier
+    accessibility runs of the sources the new snapshots rendered."""
     evidence = {}
     lint = given.get("lint") or old.get("lint")
     if lint:
@@ -202,12 +218,17 @@ def merge_evidence(old, given, issues, report):
         fresh = given.get(platform) or {}
         current = {}
         snapshots = fresh.get("snapshots")
-        digest = (snapshots or {}).get("digest")
         if snapshots:
             current["snapshots"] = snapshots
         if fresh.get("a11y"):
-            current["a11y"] = dict(fresh["a11y"], digest=digest)
-        elif before.get("a11y") and digest and before["a11y"].get("digest") == digest:
+            if not same_sources(fresh["a11y"], snapshots):
+                raise LedgerError(
+                    "%s on %s: the a11y run %s audited app sources %s, the snapshots run %s rendered %s; an audit counts only "
+                    "for the sources it audited (tools/mg a11y --platform %s on the snapshots' sources)" % (
+                        report.get("screen"), platform, fresh["a11y"].get("run"), fresh["a11y"].get("input") or "unknown",
+                        (snapshots or {}).get("run"), (snapshots or {}).get("input") or "unknown", platform))
+            current["a11y"] = dict(fresh["a11y"])
+        elif before.get("a11y") and same_sources(before["a11y"], snapshots):
             current["a11y"] = before["a11y"]
         mine = [i for i in issues if i.get("platform") == platform]
         highs = [i for i in mine if i["severity"] == "high"]
@@ -234,10 +255,12 @@ def record_critic(ledger, screen, report, by="tools/mg critic"):
     given = report.get("evidence") or {}
     if not given.get("platforms"):
         raise LedgerError("the critic check of %s names no platform: its evidence lists where the screen is registered" % screen)
-    entry = entry_for(ledger, screen)
     issues = [i for i in report.get("issues") or [] if i["screen"] == screen]
+    # Checked before anything is written: a refused check records nothing.
+    evidence = merge_evidence((ledger["screens"].get(screen) or {}).get("evidence") or {}, given, issues, dict(report, screen=screen))
+    entry = entry_for(ledger, screen)
     entry["platforms"] = list(given["platforms"])
-    entry["evidence"] = merge_evidence(entry.get("evidence") or {}, given, issues, dict(report, screen=screen))
+    entry["evidence"] = evidence
     entry["issues"] = [
         {k: i[k] for k in ("platform", "state", "variant", "rule", "severity", "region", "summary", "image") if k in i} | {"run": report["run"]}
         for i in issues

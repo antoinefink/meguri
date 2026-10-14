@@ -24,6 +24,7 @@ class Args:
         self.screen = None
         self.drive = None
         self.checks = None
+        self.a11y = None
         self.host_root = ""
         self.run = "critic-test"
         self.__dict__.update(kwargs)
@@ -48,20 +49,27 @@ class CriticTest(unittest.TestCase):
                 handle.write(json.dumps(entry) + "\n")
         self.registry({SCREEN: ["iphone"]})
         with open(os.path.join(self.run_dir, "result.json"), "w") as handle:
-            json.dump({"job": "snapshots", "status": "pass", "commit": {"sha": "abc"}, "artifacts": []}, handle)
+            json.dump({"job": "snapshots", "status": "pass", "commit": {"sha": "abc"}, "artifacts": [],
+                       "details": {"input": "src1"}}, handle)
         self.packet = os.path.join(self.dir, "packet")
 
-    def registry(self, platforms):
-        """The run's registry.json: where the snapshot matrix registers each screen."""
+    def registry(self, platforms, cells=None):
+        """The run's registry.json: where the snapshot matrix registers each
+        screen and the cells it renders there (by default those the run has
+        images of)."""
+        def rendered(screen, platform):
+            return sorted({"%s/%s" % (e["state"], e["cell"]) for e in self.results
+                           if e["subject"] == screen and e.get("platform") == platform and e["status"] != "deferred"})
         with open(os.path.join(self.run_dir, "registry.json"), "w") as handle:
-            json.dump({"screens": {s: {"platforms": p} for s, p in platforms.items()}}, handle)
+            json.dump({"screens": {s: {"platforms": p, "cells": (cells or {}).get(s) or {q: rendered(s, q) for q in p}}
+                                   for s, p in platforms.items()}}, handle)
 
-    def a11y_run(self, name, platform, status="pass", screen=SCREEN):
+    def a11y_run(self, name, platform, status="pass", screen=SCREEN, source="src1"):
         run = os.path.join(self.dir, name)
         os.makedirs(run)
         with open(os.path.join(run, "result.json"), "w") as handle:
             json.dump({"job": "a11y", "run_id": name, "status": status, "commit": {"sha": "abc"},
-                       "details": {"platform": platform}}, handle)
+                       "details": {"platform": platform, "input": source}}, handle)
         with open(os.path.join(run, "screens.json"), "w") as handle:
             json.dump([{"screen": screen, "platform": platform, "status": status}], handle)
         return run
@@ -242,12 +250,37 @@ class CriticTest(unittest.TestCase):
         with self.assertRaises(critic.PacketError):
             self.build()
 
+    def test_a_run_that_leaves_out_a_registered_cell_is_refused(self):
+        # A filtered run (typical and overflow only) of a screen registered
+        # in the error state too: a clean answer would clear issues in cells
+        # nobody looked at, so the critic does not grade it.
+        rendered = ["overflow/dark-ax5-iphoneSmall", "typical/light-standard-iphoneLarge"]
+        self.registry({SCREEN: ["iphone"]}, {SCREEN: {"iphone": rendered + ["error/light-standard-iphoneLarge"]}})
+        with self.assertRaises(critic.PacketError) as caught:
+            self.build()
+        self.assertIn("error/light-standard-iphoneLarge", str(caught.exception))
+        self.assertIn("filter", str(caught.exception))
+        # A registry from before the cells were listed cannot show coverage.
+        with open(os.path.join(self.run_dir, "registry.json"), "w") as handle:
+            json.dump({"screens": {SCREEN: {"platforms": ["iphone"]}}}, handle)
+        with self.assertRaises(critic.PacketError):
+            self.build()
+        self.registry({SCREEN: ["iphone"]}, {SCREEN: {"iphone": rendered}})
+        self.assertEqual(len(self.build()["images"]), 2)
+
+    def test_an_a11y_run_of_other_app_sources_is_refused_before_the_session(self):
+        with self.assertRaises(critic.PacketError) as caught:
+            self.build(a11y=[self.a11y_run("a11y-old", "iphone", source="src0")])
+        self.assertIn("src0", str(caught.exception))
+        self.assertIn("src1", str(caught.exception))
+        self.assertEqual(len(self.build(a11y=[self.a11y_run("a11y-new", "iphone")])["images"]), 2)
+
     def test_the_packet_records_each_platforms_snapshot_evidence_and_issues_name_their_platform(self):
         manifest = self.build()
         [screen] = manifest["screens"]
         self.assertEqual(screen["platforms"], ["iphone"])
         iphone = screen["evidence"]["iphone"]["snapshots"]
-        self.assertEqual((iphone["run"], iphone["commit"], iphone["status"]), ("snapshots-run", "abc", "pass"))
+        self.assertEqual((iphone["run"], iphone["commit"], iphone["status"], iphone["input"]), ("snapshots-run", "abc", "pass", "src1"))
         self.assertRegex(iphone["digest"], "^[0-9a-f]{64}$")
         report, _ = critic.validate(self.packet, self.output(self.report([self.truncation()])))
         self.assertEqual(report["issues"][0]["platform"], "iphone")
@@ -296,6 +329,10 @@ class CriticTest(unittest.TestCase):
         failed = self.a11y_run("a11y-2", "iphone", status="fail")
         self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", failed, "--ledger", ledger]), 0)
         self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["status"], "built")
+        # An a11y run of other sources is refused and records nothing.
+        old = self.a11y_run("a11y-3", "iphone", source="src0")
+        self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", old, "--ledger", ledger]), 1)
+        self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["evidence"]["iphone"]["a11y"]["run"], "a11y-2")
         # The canonical ledger refuses a sample screen.
         self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet]), 1)
 

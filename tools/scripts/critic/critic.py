@@ -3,13 +3,15 @@
 the image-tools container. tools/mg critic runs the session itself.
 
   critic.py packet --snapshots RUN_DIR --out DIR [--screen ID]... [--drive RUN_DIR]
-                   [--checks FILE] [--host-root PATH] [--run ID]
+                   [--checks FILE] [--a11y RUN_DIR]... [--host-root PATH] [--run ID]
       builds the packet: the screens' snapshot images with their variants,
       contact sheets, the rubric, the brief, reference images, calibration
       examples, the output schema and packet.json (with each screen's
-      platforms and per-platform snapshot evidence); exit 1 when a screen has
-      no image on a platform the snapshot matrix registers it on (the run's
-      registry.json)
+      platforms and per-platform snapshot evidence); exit 1 when the run
+      lacks an image of a cell the snapshot matrix renders a screen in (the
+      run's registry.json: every platform, state and cell, so a filtered run
+      cannot clear issues in cells it left out), or when an a11y run audited
+      other app sources than the snapshots rendered (before any session)
   critic.py validate --packet DIR --output FILE --report FILE
       reads the session's output (Claude's JSON result), checks it against
       the schema, the rubric and the packet, and drops issues a passing
@@ -101,14 +103,16 @@ def read_results(run_dir):
 
 
 def read_registry(run_dir):
-    """{screen: [platforms]}: where the snapshot matrix registers each screen
-    (registry.json, written by tools/mg snapshots)."""
+    """{screen: {"platforms": [...], "cells": {platform: ["state/cell", ...]}}}:
+    where the snapshot matrix registers each screen and the cells it renders
+    there, whatever the run's filter (registry.json, written by tools/mg
+    snapshots)."""
     path = os.path.join(run_dir, "registry.json")
     if not os.path.exists(path):
         raise PacketError("%s has no registry.json: run tools/mg snapshots again (it records where each screen is registered)" % run_dir)
     with open(path) as handle:
         screens = json.load(handle).get("screens") or {}
-    return {screen: list(entry.get("platforms") or []) for screen, entry in screens.items()}
+    return {screen: {"platforms": list(entry.get("platforms") or []), "cells": entry.get("cells")} for screen, entry in screens.items()}
 
 
 def read_json(path, default=None):
@@ -131,6 +135,7 @@ def snapshot_evidence(run_dir, results, screen, chosen, host_root):
     result = read_json(os.path.join(run_dir, "result.json"), {}) or {}
     run = os.path.basename(os.path.normpath(run_dir))
     commit = (result.get("commit") or {}).get("sha")
+    source = (result.get("details") or {}).get("input")
     evidence = {}
     for platform in sorted({e.get("platform") for e in results if e.get("subject") == screen and e.get("platform")}):
         mine = [e for e in results if e.get("subject") == screen and e.get("platform") == platform and e.get("kind") != "text"]
@@ -138,7 +143,7 @@ def snapshot_evidence(run_dir, results, screen, chosen, host_root):
         images = sorted((name, sha256_file(path)) for name, (entry, _, path) in chosen.items()
                         if entry["subject"] == screen and entry.get("platform") == platform)
         digest = hashlib.sha256(json.dumps(images).encode()).hexdigest()
-        evidence[platform] = {"snapshots": {"run": run, "commit": commit, "status": "pass" if ok else "fail", "digest": digest}}
+        evidence[platform] = {"snapshots": {"run": run, "commit": commit, "status": "pass" if ok else "fail", "digest": digest, "input": source}}
     lint = None
     for artifact in result.get("artifacts") or []:
         if artifact.get("kind") == "lint-ui":
@@ -190,17 +195,30 @@ def build_packet(args):
     missing = [s for s in args.screen or [] if s not in screens]
     if missing or not screens:
         raise PacketError("no snapshot image for %s in %s" % (", ".join(missing) or "any screen", args.snapshots))
-    # A screen is graded on every platform it is registered on (R1971):
-    # a layout that only breaks on the iPad or the Mac must reach the critic.
+    # A screen is graded on every platform it is registered on (R1971), in
+    # every cell it is rendered in: a layout that only breaks on the iPad or
+    # the Mac must reach the critic, and a clean answer replaces the screen's
+    # earlier issues, so a run that left cells out (a filter) cannot be
+    # graded.
     for screen in screens:
         if screen not in registry:
             raise PacketError("%s is not registered in the snapshot matrix (registry.json of %s)" % (screen, args.snapshots))
+        platforms = registry[screen]["platforms"]
         covered = {entry.get("platform") for entry, _, _ in chosen.values() if entry["subject"] == screen}
-        absent = [p for p in registry[screen] if p not in covered]
+        absent = [p for p in platforms if p not in covered]
         if absent:
             raise PacketError("the snapshots run has no image of %s on %s, where the snapshot matrix registers it; "
                               "a screen is graded on all its platforms (tools/mg snapshots --platform %s)" % (
-                                  screen, ", ".join(absent), ",".join(registry[screen])))
+                                  screen, ", ".join(absent), ",".join(platforms)))
+        cells = registry[screen]["cells"]
+        if cells is None:
+            raise PacketError("registry.json of %s does not list the cells %s is rendered in: run tools/mg snapshots again" % (args.snapshots, screen))
+        rendered = {(entry.get("platform"), "%s/%s" % (entry["state"], entry["cell"])) for entry, _, _ in chosen.values() if entry["subject"] == screen}
+        left_out = ["%s %s" % (p, c) for p in platforms for c in cells.get(p) or [] if (p, c) not in rendered]
+        if left_out:
+            raise PacketError("the snapshots run has no image of %s in %d of the cells the snapshot matrix renders it in (%s%s); "
+                              "a screen is graded in all of them: run tools/mg snapshots --platform %s without a filter that leaves them out" % (
+                                  screen, len(left_out), ", ".join(left_out[:6]), ", ..." if len(left_out) > 6 else "", ",".join(platforms)))
     images = []
     for name in sorted(chosen):
         entry, source, path = chosen[name]
@@ -243,14 +261,25 @@ def build_packet(args):
     if args.checks:
         with open(args.checks) as handle:
             checks = json.load(handle).get("checks", [])
+    audits = a11y_evidence(getattr(args, "a11y", None))
     manifest_screens = []
     for s in screens:
         evidence, lint = snapshot_evidence(args.snapshots, results, s, chosen, args.host_root)
+        # An audit counts only for the app sources it audited: refused here,
+        # before a session grades anything (the ledger refuses it too).
+        for platform, by_screen in sorted(audits.items()):
+            audited = by_screen.get(s)
+            snap = (evidence.get(platform) or {}).get("snapshots") or {}
+            if audited and (not audited.get("input") or audited.get("input") != snap.get("input")):
+                raise PacketError("the a11y run %s audited %s on %s in app sources %s, the snapshots run %s rendered %s; "
+                                  "run tools/mg a11y --platform %s on the snapshots' sources" % (
+                                      audited["run"], s, platform, audited.get("input") or "unknown", snap.get("run") or "(none)",
+                                      snap.get("input") or "unknown", platform))
         manifest_screens.append({
             "id": s, "title": by_id.get(s, {}).get("title", s), "signature": bool(by_id.get(s, {}).get("signature")),
             "purpose": by_id.get(s, {}).get("purpose", "a sample screen of the verification tooling"),
             "references": by_id.get(s, {}).get("references") or [],
-            "platforms": registry[s], "evidence": evidence, "lint": lint,
+            "platforms": registry[s]["platforms"], "evidence": evidence, "lint": lint,
         })
     manifest = {
         "run": args.run,
@@ -401,8 +430,9 @@ def deterministic_result(checks, issue):
 
 
 def a11y_evidence(run_dirs):
-    """{platform: {screen: {run, status, commit}}} from tools/mg a11y runs;
-    each run audits one platform (details.platform)."""
+    """{platform: {screen: {run, status, commit, input, states}}} from tools/mg
+    a11y runs; each run audits one platform (details.platform), in the app
+    built from the sources its details.input names."""
     found = {}
     for run_dir in run_dirs or []:
         result = read_json(os.path.join(run_dir, "result.json"))
@@ -415,7 +445,7 @@ def a11y_evidence(run_dirs):
         for screen in read_json(os.path.join(run_dir, "screens.json"), []) or []:
             found.setdefault(platform, {})[screen["screen"]] = {
                 "run": run, "status": screen.get("status") or "not-audited", "commit": (result.get("commit") or {}).get("sha"),
-                "states": screen.get("states")}
+                "input": (result.get("details") or {}).get("input"), "states": screen.get("states")}
         # A run that did not audit a screen gives it no evidence (a later
         # run of the same platform replaces an earlier one).
     return found
@@ -447,6 +477,7 @@ def main(argv=None):
     p.add_argument("--screen", action="append")
     p.add_argument("--drive")
     p.add_argument("--checks")
+    p.add_argument("--a11y", action="append")
     p.add_argument("--host-root", default="")
     p.add_argument("--run", default="")
     v = sub.add_parser("validate")

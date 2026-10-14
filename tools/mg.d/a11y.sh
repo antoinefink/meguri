@@ -7,7 +7,9 @@
 # `a11y-screen.<screen id>` JSON reports (AuditHelpers.screenReport), one
 # per screen with a result per state; the job lists them as per-screen
 # evidence of its platform (details.platform) in details.screens and
-# screens.json, which `tools/mg critic --a11y <run>` reads.
+# screens.json, which `tools/mg critic --a11y <run>` reads, with the app
+# sources it audited (details.input, mg_app_input_digest). Findings on the
+# Mac window's own elements are listed as excluded, not counted.
 
 mg_job a11y host mg_a11y \
   "Accessibility suites (R1977, R1978, R1980): [--platform iphone|ipad|mac] [--device <leased udid>] [--suite <test class>]... (default AccessibilityHelperTests): system audit at default and largest text size, light and dark, suppressions from Accessibility/suppressions.json, touch targets, VoiceOver order; Mac runs go through the Mac UI gate (queued when refused); per-screen results in screens.json"
@@ -44,6 +46,7 @@ mg_a11y() {
   for s in $suites; do only[${#only[@]}]="-only-testing:MeguriUITests/$s"; done
   mg_detail suites "$(printf '%s\n' $suites | jq -R . | jq -sc .)"
   mg_detail platform "$(jq -n --arg p "$platform" '$p')"
+  mg_detail input "$(jq -n --arg d "$(mg_app_input_digest)" 'if $d == "" then null else $d end')"
   MG_A11Y_PLATFORM="$platform"
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_a11y__usage "--device is for simulators"; return 0; }
@@ -104,7 +107,9 @@ mg_a11y__report() {
     jq -r --arg dir "$attachments" '.[].attachments[]? | select(.suggestedHumanReadableName | startswith("a11y-screen.")) | "\($dir)/\(.exportedFileName)"' \
       "$attachments/manifest.json" 2>/dev/null | while IFS= read -r f; do
       [ -f "$f" ] && jq -c . "$f"
-    done | jq -sc --arg p "$MG_A11Y_PLATFORM" '[.[] | {screen, platform: $p, status, unsuppressed: ([.findings[] | select(.suppressed | not)] | length),
+    done | jq -sc --arg p "$MG_A11Y_PLATFORM" '[.[] | {screen, platform: $p, status,
+      unsuppressed: ([.findings[] | select((.suppressed | not) and .excluded == null)] | length),
+      excluded: ([.findings[] | select(.excluded != null)] | length),
       touchTargets: (.touchTargets | length), states: ((.states // {}) | map_values(.status))}]' \
       >"$MG_RUN_DIR/screens.json"
   fi

@@ -90,6 +90,8 @@ mg_snapshots() {
   done
   mg_detail snapshots "$(jq -nc --arg m "$mode" --arg f "$filter" --argjson r "$rebaseline" --arg p "$platforms" \
     '{mode: $m, filter: $f, rebaseline: $r, platforms: ($p | split(" "))}')"
+  # The app sources this run renders (tools/mg critic matches a11y runs to it).
+  mg_detail input "$(jq -n --arg d "$(mg_app_input_digest)" 'if $d == "" then null else $d end')"
 
   mg_lint_ui_first || return 0
   if ! mg_image_tools python3 tools/scripts/screen-status/screen_status.py inventory-json \
@@ -256,11 +258,12 @@ mg_snapshots__finish() {
       jq -r '.problems[]' "$f" | while IFS= read -r line; do mg_failure "state-coverage/$p" "$line"; done
     fi
   done
-  # Where the matrix registers each screen (every state-coverage report
-  # lists all platforms): tools/mg critic grades a screen on all of them.
+  # Where the matrix registers each screen and the cells it renders there,
+  # whatever the filter (every state-coverage report lists all platforms):
+  # tools/mg critic grades a screen only on all of them.
   for f in "$MG_RUN_DIR"/*/*/state-coverage.json; do
     [ -f "$f" ] || continue
-    jq '{screens: ([.screens[] | {(.id): {platforms: (.platforms // []), states}}] | add // {})}' "$f" >"$MG_RUN_DIR/registry.json"
+    jq '{screens: ([.screens[] | {(.id): {platforms: (.platforms // []), states, cells}}] | add // {})}' "$f" >"$MG_RUN_DIR/registry.json"
     mg_artifact registry "$MG_RUN_DIR/registry.json" "where the snapshot matrix registers each screen"
     break
   done

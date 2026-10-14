@@ -116,6 +116,9 @@ mg_critic() {
   for s in ${screens[0]+"${screens[@]}"}; do args=(${args[0]+"${args[@]}"} --screen "$s"); done
   [ -z "$drive_dir" ] || args=(${args[0]+"${args[@]}"} --drive "$(mg_container_path "$drive_dir")")
   [ -z "$checks" ] || args=(${args[0]+"${args[@]}"} --checks "$(mg_container_path "$checks")")
+  # The a11y runs too: one that audited other app sources than the snapshots
+  # rendered is refused before a session starts.
+  args=(${args[0]+"${args[@]}"} ${a11y_args[0]+"${a11y_args[@]}"})
   if ! mg_image_tools python3 tools/scripts/critic/critic.py packet --snapshots "$(mg_container_path "$snap_dir")" \
     --out "$(mg_container_path "$packet")" --host-root "$MG_ROOT" --run "$MG_RUN_ID" ${args[0]+"${args[@]}"} >&2; then
     mg_failure packet "could not build the critic packet from $snap_dir; see log.txt"
