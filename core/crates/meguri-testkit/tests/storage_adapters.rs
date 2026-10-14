@@ -136,6 +136,55 @@ fn an_op_that_changes_the_schema_fails_the_run() {
     assert_eq!((error.kind.as_str(), error.step), ("schema_guard", Some(2)));
 }
 
+/// Ops of a later area that change a definition but no `(type, name)`.
+fn add_column(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    raw(session, &["ALTER TABLE cards ADD COLUMN sneaked_in integer"])
+}
+
+fn redefine_index(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    raw(
+        session,
+        &[
+            "DROP INDEX ix_cards_usn",
+            "CREATE INDEX ix_cards_usn ON cards (usn, mod)",
+        ],
+    )
+}
+
+fn raw(session: &mut Session<'_>, statements: &[&str]) -> Result<OpResult, ExecError> {
+    let writer = session.storage.collection().unwrap().writer();
+    for sql in statements {
+        writer
+            .execute_raw(sql, &[])
+            .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+    }
+    Ok(OpResult::Done)
+}
+
+#[test]
+fn an_op_that_adds_a_column_or_redefines_an_index_fails_the_run() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, adapter) in [
+        (
+            "column",
+            add_column as fn(&mut Session<'_>, &Step) -> Result<OpResult, ExecError>,
+        ),
+        ("index", redefine_index),
+    ] {
+        let mut registry = MeguriExecutor::core_registry();
+        registry.op("check_db", adapter);
+        let meguri = MeguriExecutor::with(registry);
+        let loaded = load(
+            dir.path(),
+            &format!("storage/guard-{name}"),
+            "steps:\n  - open: {fixture: storage/schema-18.anki2}\n  - check_db: {}\n",
+            &["schema-18.anki2"],
+        );
+        let error = meguri.run(&loaded).unwrap_err();
+        assert_eq!(error.kind, "schema_guard", "{name}: {error:?}");
+    }
+}
+
 #[test]
 fn a_handoff_closes_the_collection_and_the_next_segment_opens_what_was_handed() {
     let dir = tempfile::tempdir().unwrap();

@@ -9,7 +9,7 @@
 //! engine and `CoreHost::open` do not exist (U24, U38), the gate is the
 //! collection open.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,9 +39,9 @@ const COLLECTION: &str = "collection.anki2";
 pub struct Storage {
     // Fields drop in order: the collection closes before its directory goes.
     collection: Option<OpenedCollection>,
-    /// The `(type, name)` set of `sqlite_master` after the last open or
-    /// `db_exec`, which every later Meguri operation must leave as it is.
-    baseline: BTreeSet<(String, String)>,
+    /// `sqlite_master` after the last open or `db_exec`, which every later
+    /// Meguri operation must leave as it is.
+    baseline: Objects,
     dir: Option<TempDir>,
 }
 
@@ -83,7 +83,10 @@ impl Storage {
         Ok(())
     }
 
-    /// S6.2: the objects are the ones after the last open or `db_exec`.
+    /// S6.2: the objects are the ones after the last open or `db_exec`, each
+    /// with the definition it had then: a column added to a table or an index
+    /// defined again under its name adds to the collection as much as a new
+    /// object (R2016).
     fn guard(&self) -> Result<(), ExecError> {
         let Some(collection) = &self.collection else {
             return Ok(());
@@ -92,11 +95,17 @@ impl Storage {
         if now == self.baseline {
             return Ok(());
         }
-        let added: Vec<_> = now.difference(&self.baseline).collect();
-        let removed: Vec<_> = self.baseline.difference(&now).collect();
+        let added: Vec<_> = now.keys().filter(|k| !self.baseline.contains_key(*k)).collect();
+        let removed: Vec<_> = self.baseline.keys().filter(|k| !now.contains_key(*k)).collect();
+        let redefined: Vec<_> = now
+            .iter()
+            .filter_map(|(k, v)| self.baseline.get(k).filter(|was| *was != v).map(|_| k))
+            .collect();
         Err(ExecError::new(
             "schema_guard",
-            format!("sqlite_master changed (storage/schema-18 S6.2): added {added:?}, removed {removed:?}"),
+            format!(
+                "sqlite_master changed (storage/schema-18 S6.2): added {added:?}, removed {removed:?}, redefined {redefined:?}"
+            ),
         ))
     }
 }
@@ -110,13 +119,16 @@ impl fmt::Debug for Storage {
     }
 }
 
-fn object_set(collection: &OpenedCollection) -> Result<BTreeSet<(String, String)>, ExecError> {
+/// `sqlite_master`: `(type, name)` to `(tbl_name, sql)` as stored.
+type Objects = BTreeMap<(String, String), (String, Option<String>)>;
+
+fn object_set(collection: &OpenedCollection) -> Result<Objects, ExecError> {
     Ok(collection
         .writer()
         .schema_objects()
         .map_err(core)?
         .into_iter()
-        .map(|o| (o.kind, o.name))
+        .map(|o| ((o.kind, o.name), (o.tbl_name, o.sql)))
         .collect())
 }
 

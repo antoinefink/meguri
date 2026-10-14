@@ -53,6 +53,8 @@ fn a_thousand_writes_leave_the_objects_unchanged() {
     let opened = open(&path).unwrap();
     let writer = opened.writer();
     let before = object_set(writer);
+    // Every definition too: a column added to a table changes no name.
+    let definitions = sorted_objects(writer);
     let deck = SqlValue::Integer(1);
     for i in 0..1000_i64 {
         let sql = match i % 5 {
@@ -71,10 +73,18 @@ fn a_thousand_writes_leave_the_objects_unchanged() {
         .execute_raw("UPDATE decks SET mtime_secs = 1 WHERE id = ?1", &[deck])
         .unwrap();
     assert_eq!(object_set(writer), before);
+    assert_eq!(sorted_objects(writer), definitions);
     opened.close().unwrap();
     let reopened = open(&path).unwrap();
     assert_eq!(object_set(reopened.writer()), before);
+    assert_eq!(sorted_objects(reopened.writer()), definitions);
     reopened.close().unwrap();
+}
+
+fn sorted_objects(writer: &meguri_storage::Writer) -> Vec<meguri_storage::SchemaObject> {
+    let mut objects = writer.schema_objects().unwrap();
+    objects.sort();
+    objects
 }
 
 #[test]
