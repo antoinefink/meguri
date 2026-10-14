@@ -33,6 +33,7 @@ leniency, refusals).
 | schema11-json S10.1-S10.3, S10.5 input rule 1 | `rslib/src/deckconfig/schema11.rs` (`new`, `rev`, `lapse` read with `default_on_invalid`) | a part that does not read is replaced whole by its default, its extra members included; recorded as `model/schema11/preset-part-defaults` |
 | model-ops L4 | `rslib/src/error/mod.rs` (a prost decode error becomes the protobuf error kind), `rslib/src/storage/deck/mod.rs` (a kind with no member is a database error) | which read failures `blob_decode` maps to `invalid_blob` |
 | model-ops L6, L7; schema11-json S12 (package bullet), S14.1 | `rslib/src/import_export/package/apkg/export.rs`, `rslib/src/import_export/gather.rs`, `rslib/src/import_export/insert.rs`, `rslib/src/import_export/package/meta.rs`, `rslib/src/import_export/package/colpkg/export.rs`, `rslib/src/storage/upgrades/mod.rs` (downgrade to 11), `rslib/src/storage/notetype/mod.rs` (`models` written from every note type), `rslib/src/notetype/service.rs` (the legacy getter uses the same conversion), `proto/anki/import_export.proto` | a legacy export is `meta` version 2, `collection.anki21` at schema 11, a placeholder `collection.anki2` and `media`; only the note types of exported notes, inserted unchanged into a fresh collection that is then downgraded; entry choice by `meta` version or entry presence. A black-box probe in the oracle image (pylib export, then SQLite on the extracted entry) showed a standard and a cloze note type's `models` members equal to their `legacy_json` objects as parsed values, nested `other` keys sorted on both sides, `1.5e3` stored as `1500.0`, `ver` 11, and zip entry times from the clock |
+| model-ops L6 ("the collection does not change"; open, reported to the spec writer) | `rslib/src/import_export/gather.rs` (`gather_data` reads `timing_today` first), `rslib/src/scheduler/mod.rs` (`timing_for_timestamp` stores rollover 4 when the config has none) | the oracle maintainer's reading: exporting a collection with no `rollover` config entry stores one (value 4, usn -1, mtime the clock's second), as any read of today does; nothing else changes. Driver tests `ExportLegacy.test_without_a_rollover_hour_export_stores_the_default` and `test_exporting_changes_no_stored_row_once_a_rollover_hour_is_stored`. `model/schema11/apkg-notetypes` observes nothing after its export but the package, so its golden does not show it |
 
 Driver hints for the oracle maintainer (model ops):
 
@@ -69,6 +70,9 @@ Driver hints for the oracle maintainer (model ops):
   and empties the columns). Parse each requested JSON column like
   `legacy_json` does (`json.loads` with the duplicate-key guard), so ints
   stay ints and floats stay floats.
-- Record `model/schema11/apkg-notetypes` with
-  `tools/mg oracle record model/schema11/apkg-notetypes`, then update
-  model-ops L5 (the golden now exists).
+- Both live in `driver/ops/package.py`; `model/schema11/apkg-notetypes` is
+  recorded and model-ops L5 says so. The meta entry is read with pylib's
+  generated `PackageMetadata` message (a later field 1 replaces an earlier
+  one). L7's other run errors (an archive, entry, `col` row or column that
+  does not read) are `internal_error` with a detail: protocol.json has no
+  kind for a malformed package.
