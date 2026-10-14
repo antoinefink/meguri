@@ -313,7 +313,8 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                 return bad("deck is a deck name");
             }
         }
-        ObservationKind::LegacyJson => {
+        // model-ops.md L1 and L4.
+        ObservationKind::LegacyJson | ObservationKind::BlobDecode => {
             let lists_ok = map.iter().all(|(key, names)| {
                 matches!(key.as_str(), "notetypes" | "decks" | "presets")
                     && names.as_array().is_some_and(|names| {

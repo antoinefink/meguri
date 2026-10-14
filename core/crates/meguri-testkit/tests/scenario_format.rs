@@ -446,6 +446,15 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ("steps: [{observe: [{legacy_json: {decks: [\"\"]}}]}]", "legacy_json"),
         ("steps: [{observe: [{legacy_json: {tags: [a]}}]}]", "legacy_json"),
         ("steps: [{observe: [legacy_json]}]", "does not take"),
+        ("steps: [{observe: [{blob_decode: {}}]}]", "blob_decode"),
+        ("steps: [{observe: [{blob_decode: {presets: []}}]}]", "blob_decode"),
+        (
+            "steps: [{observe: [{blob_decode: {notetypes: [\"\"]}}]}]",
+            "blob_decode",
+        ),
+        ("steps: [{observe: [{blob_decode: {cards: [a]}}]}]", "blob_decode"),
+        ("steps: [{observe: [{blob_decode: null}]}]", "cannot take null"),
+        ("steps: [{observe: [blob_decode]}]", "does not take"),
     ] {
         let text = format!("id: area/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{bad}\n");
         let value = scenario::parse_yaml(&text).unwrap();
@@ -460,6 +469,10 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     let needs = parsed.needs();
     assert!(needs.ops.contains("legacy_update") && needs.observations.contains("legacy_json"));
+    // model-ops.md L4.
+    let text = "id: area/ok\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps: [{observe: [{blob_decode: {notetypes: [Pair], decks: [\"A::B\"], presets: [P]}}]}]\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(parsed.needs().observations.contains("blob_decode"));
 }
 
 #[test]
