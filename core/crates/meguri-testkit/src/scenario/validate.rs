@@ -108,6 +108,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
     }
     actors(s)?;
+    opens(s)?;
     let mut side: Option<Side> = None;
     for (index, step) in s.steps.iter().enumerate() {
         let at = |e: FormatError| FormatError::new(format!("step {index} ({}): {e}", step.name()));
@@ -178,6 +179,29 @@ fn actors(s: &Scenario) -> Result<(), FormatError> {
             }
             _ => {}
         }
+    }
+    Ok(())
+}
+
+/// storage-ops.md P1.3: a scenario with an `open` step has no setup, its
+/// first step is `open`, and it has no actors (each actor gets a new
+/// collection, sync-ops.md S2.2).
+fn opens(s: &Scenario) -> Result<(), FormatError> {
+    if !s.opens_fixtures() {
+        return Ok(());
+    }
+    if !s.setup.sections().is_empty() {
+        return Err(FormatError::new(
+            "a scenario with an open step has no setup (storage-ops.md P1.3)",
+        ));
+    }
+    if !matches!(s.steps.first(), Some(Step::Open(_))) {
+        return Err(FormatError::new(
+            "a scenario with an open step starts with open (storage-ops.md P1.3)",
+        ));
+    }
+    if s.has_actors() {
+        return Err(FormatError::new("an actor scenario has no open step"));
     }
     Ok(())
 }

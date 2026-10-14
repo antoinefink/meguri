@@ -9,6 +9,7 @@ pub mod live;
 mod meguri;
 mod oracle;
 pub mod parties;
+mod storage;
 pub mod sync_guard;
 mod text;
 
@@ -22,10 +23,11 @@ use serde_json::Value;
 use crate::scenario::LoadedScenario;
 pub use crate::scenario::Needs;
 pub use meguri::{
-    HandoffFn, MeguriExecutor, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat, Session, SetupFn,
-    SyncAccount, actor_seed,
+    FinishFn, HandoffFn, MeguriExecutor, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat, Session,
+    SetupFn, SyncAccount, actor_seed,
 };
 pub use oracle::{Hello, OracleExecutor};
+pub use storage::{Storage, normalize_sql};
 
 /// A failed run: a protocol error kind (`unknown_ref`, `invalid_scenario`,
 /// `unsupported_op`, `anki_error`, `worker_died`, ...), the step when known and

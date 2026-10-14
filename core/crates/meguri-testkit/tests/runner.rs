@@ -917,8 +917,9 @@ fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
     write(root, "scenarios/smoke/chain.yaml", chain);
     golden_for(root, "smoke/chain", json!({"steps": [{}, {}, {"timing": {}}]}));
     let suite = Suite::open(root).unwrap();
-    // Meguri has no handoff adapters yet: pending.
-    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    // Without the storage area, Meguri has no handoff adapters: pending.
+    let without_storage = || MeguriExecutor::area_registry(&["clock", "text"]);
+    let report = suite.run(&[], &MeguriExecutor::with(without_storage()), "test");
     assert_eq!(report.outcomes[0].status, Status::Pending);
     assert!(report.outcomes[0].live);
     assert!(report.outcomes[0].missing.as_ref().unwrap().ops.contains("handoff"));
@@ -932,9 +933,12 @@ fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
             .contains("timing")
     );
 
-    let mut registry = MeguriExecutor::core_registry();
+    let mut registry = without_storage();
     registry.handoff(|_, _| Ok(()), |_, _| Ok(()));
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
+    // With the storage area's own handoff adapters too.
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
     assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
     assert_eq!(report.outcomes[0].repro, "tools/mg conformance --live smoke/chain");
     assert!(report.failures().is_empty());
@@ -1041,13 +1045,13 @@ fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
     );
     assert_eq!(
         missing.observations.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["card", "db_dump"]
+        ["card"]
     );
     assert!(report.failures().is_empty(), "{}", report.render_text());
 
     // Once Meguri has what its actor needs, the scenario is live: T0 still
     // runs none of it (every adapter here would fail the run).
-    let mut registry = MeguriExecutor::core_registry();
+    let mut registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.actor(never_dump);
     registry.op_rejecting("sync", &["clock_incorrect", "network"], never_op);
     registry.observation("card", never_observe);

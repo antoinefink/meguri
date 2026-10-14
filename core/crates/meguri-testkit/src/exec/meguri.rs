@@ -40,6 +40,10 @@ pub type SetupFn = for<'a> fn(&mut Session<'a>, &Setup) -> Result<(), ExecError>
 /// or opens the ones handed over in it (in). The executor carries the clock
 /// and the logical ids itself.
 pub type HandoffFn = for<'a> fn(&mut Session<'a>, &Path) -> Result<(), ExecError>;
+/// Runs when a run or the last segment of a chain ends on Meguri, after its
+/// steps: the checks an area makes over the whole run (the storage area's
+/// schema guard).
+pub type FinishFn = for<'a> fn(&mut Session<'a>) -> Result<(), ExecError>;
 /// The raw dump of a Meguri actor's collection (sync-ops.md S7.2): the
 /// `db_dump` value of all twelve tables without O8's normalization of random
 /// values.
@@ -60,6 +64,7 @@ pub struct Registry {
     observations: BTreeMap<&'static str, ObserveFn>,
     handoff: Option<(HandoffFn, HandoffFn)>,
     actor: Option<RawDumpFn>,
+    finish: Vec<FinishFn>,
 }
 
 impl Registry {
@@ -108,6 +113,11 @@ impl Registry {
         self.handoff = Some((out, into));
     }
 
+    /// A check that runs when a run on Meguri ends, after its steps.
+    pub fn finish(&mut self, f: FinishFn) {
+        self.finish.push(f);
+    }
+
     /// What makes Meguri an actor of actor scenarios, through the parties
     /// executor (sync-ops.md S10.2, S10.4): each Meguri actor is a session
     /// with a collection of its own and its seat (`Session::actor`), and
@@ -148,6 +158,8 @@ pub struct Session<'a> {
     /// The actor this session plays in a mixed run of an actor scenario;
     /// `None` elsewhere.
     pub actor: Option<Seat>,
+    /// The session directory and the open collection (`exec/storage.rs`).
+    pub storage: super::storage::Storage,
 }
 
 /// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
@@ -200,11 +212,30 @@ impl MeguriExecutor {
         MeguriExecutor::with(MeguriExecutor::core_registry())
     }
 
+    /// The areas that have adapters, by name.
+    pub const AREAS: [&'static str; 3] = ["clock", "storage", "text"];
+
     /// Every area adapter that exists.
     pub fn core_registry() -> Registry {
+        MeguriExecutor::area_registry(&MeguriExecutor::AREAS)
+    }
+
+    /// The adapters of these areas only (runner tests that stand in for an
+    /// area, such as the storage area's handoff).
+    ///
+    /// # Panics
+    ///
+    /// On a name that is not in [`MeguriExecutor::AREAS`].
+    pub fn area_registry(areas: &[&str]) -> Registry {
         let mut registry = Registry::default();
-        super::clock::register(&mut registry);
-        super::text::register(&mut registry);
+        for area in areas {
+            match *area {
+                "clock" => super::clock::register(&mut registry),
+                "storage" => super::storage::register(&mut registry),
+                "text" => super::text::register(&mut registry),
+                other => panic!("no area {other} has Meguri adapters"),
+            }
+        }
         registry
     }
 
@@ -232,6 +263,7 @@ impl MeguriExecutor {
             notes: resume.map(|h| h.notes.clone()).unwrap_or_default(),
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
             actor: None,
+            storage: Default::default(),
         })
     }
 
@@ -262,7 +294,23 @@ impl MeguriExecutor {
         Ok(outputs)
     }
 
+    fn finish(&self, session: &mut Session<'_>) -> Result<(), ExecError> {
+        self.registry.finish.iter().try_for_each(|f| f(session))
+    }
+
     fn step(&self, session: &mut Session<'_>, step: &Step) -> Result<Value, ExecError> {
+        // storage-ops.md P1.2, P1.3: a scenario that opens fixtures starts
+        // with no collection, and a refused open leaves none; only `open`
+        // may run then.
+        if session.scenario.scenario.opens_fixtures() && !session.storage.is_open() && !matches!(step, Step::Open(_)) {
+            return Err(ExecError::new(
+                "invalid_scenario",
+                format!(
+                    "{} with no collection open: only open may follow a refused open",
+                    step.name()
+                ),
+            ));
+        }
         let mut out = Map::new();
         match step {
             Step::Observe(requests) => {
@@ -358,6 +406,7 @@ impl MeguriExecutor {
                     notes: Vec::new(),
                     cards: Vec::new(),
                     actor: None,
+                    storage: Default::default(),
                 };
                 (name.clone(), session)
             })
@@ -470,6 +519,7 @@ impl Executor for MeguriExecutor {
         let mut session = self.session(loaded, None)?;
         self.run_setup(&mut session)?;
         let outputs = self.run_steps(&mut session, 0..loaded.scenario.steps.len())?;
+        self.finish(&mut session)?;
         Ok(json!({"steps": outputs}))
     }
 }
@@ -487,7 +537,10 @@ impl SegmentExecutor for MeguriExecutor {
         }
         let steps = self.run_steps(&mut session, request.steps.clone())?;
         let handoff = match &request.hand_off_to {
-            None => None,
+            None => {
+                self.finish(&mut session)?;
+                None
+            }
             Some(rel) => {
                 let dir = request.root.join(rel);
                 std::fs::create_dir_all(&dir)
