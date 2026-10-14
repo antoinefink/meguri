@@ -3338,10 +3338,10 @@ The plan was written without a synchronous user checkpoint, at the user's instru
     Long-lived snapshots never use the interactive, query or server readers.
   - Nothing is ever added to `collection.anki2` (R2016). Derived data lives in a rebuildable `meguri-derived.db` (R1487–R1489).
   - A full upload streams a `VACUUM INTO` snapshot. Every collection swap (full download and upload, `.colpkg` import, restore) goes through U124's verified-replace primitive.
-- KTD4. **Protobuf records.**
-  - Hand-written prost structs follow the specs. A codec layer captures unknown field tags with their wire bytes and re-appends them on encode (R1463, R1486), proved by round-trip property tests with injected unknown tags.
+- KTD4. **Protobuf records.** Amended 2026-10-14 after U21's review: no prost, and no serde_json `preserve_order` or `float_roundtrip` (`docs/process/review-log/U21.md`, A2). Units that still name prost or those features follow this text.
+  - Message structs and their wire codec are hand-written from the specs (`specs/model/protobuf-records.md`), without prost. The codec keeps unknown fields with their exact wire bytes at every message level and writes them by field number among the known fields (P4). A record whose decoded content did not change is written back as the bytes it was read with (P5) (R1463, R1486). prost's derived encoder cannot place unknown fields that way, and its decoder would need a second capture pass at every nesting level. Evidence: round-trip property tests with injected unknown fields of every wire type, the model goldens used as conversion pairs (`specs/model/schema11-json.md` S14), and the `proto_blobs` fuzz target.
   - Generating code from Anki's `.proto` files is forbidden.
-  - Legacy JSON uses serde_json with `preserve_order` and `float_roundtrip`. Numbers keep Anki's types: f32 for FSRS values, i64 for ids.
+  - Legacy JSON is read from serde_json raw values with std's exact number parsers and written with ryu. Values without a declared type stay the exact text they were read with, so their member order and number spelling survive (`specs/model/json-numbers.md` N7). Numbers keep Anki's types: f32 for FSRS values, i64 for ids. serde_json's `preserve_order` and `float_roundtrip` are not enabled: raw text leaves nothing for `preserve_order` to order, std's exact parsers already give what `float_roundtrip` is for, and Cargo feature unification would turn either one on for every crate in the build, meguri-testkit's golden parsing included. A unit that edits a JSON object in place keeps its untouched members as raw text in stored order in the same way. This replaces rust-stack §5's serde_json feature advice.
 - KTD5. **Op executor, change stream, undo and lifecycle live in the core (`meguri-engine`).**
   - Every write from UI, sync, local servers, optimizer, rollover or maintenance is an op on one serialized executor.
   - An op carries a `source` and returns its sequence number, a ChangeSet, undo metadata and the collection generation.
@@ -3513,7 +3513,7 @@ flowchart TB
     Search["meguri-search"]
     Tmpl["meguri-template"]
     Storage["meguri-storage (rusqlite, WAL, derived store)"]
-    Model["meguri-model (prost + unknown fields, change value types)"]
+    Model["meguri-model (hand-written protobuf codec + unknown fields, change value types)"]
     Text["meguri-text"]
   end
   Files[("collection.anki2, media, derived db, backups (private container)")]
@@ -3687,7 +3687,7 @@ core/                                    Rust workspace
   AGENTS.md
   crates/
     meguri-text/                         strip_html, entities, NFC/NFKD, unicase, csum, sort field, media refs, folding
-    meguri-model/                        ids/usn/mtime, prost records + unknown-field codec, schema-11 JSON, clock seam, faultpoints,
+    meguri-model/                        ids/usn/mtime, hand-written protobuf records + unknown-field codec, schema-11 JSON, clock seam, faultpoints,
                                          change value types (ChangeSet, OpSource, ChangeKind)
     meguri-storage/                      rusqlite open, collation, WAL, connections, schema, rows, graves, config, derived store, media store
     meguri-template/                     template parser/renderer, filters, cloze, type-in, image occlusion, preview
@@ -4911,10 +4911,10 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `core/fuzz/fuzz_targets/proto_blobs.rs`
 
 **Approach:**
-- KTD4: message structs are hand-written from the spec with `prost` derives (field numbers and wire types are interop facts; Anki's `.proto` files are never used). Each blob codec wraps decoding with unknown-field capture: unrecognized (tag, wire bytes) are kept in order and re-appended on encode. `other` (legacy JSON keys) is opaque bytes.
+- KTD4 (as amended 2026-10-14): message structs and their wire codec are hand-written from the spec, without prost (field numbers and wire types are interop facts; Anki's `.proto` files are never used). Each blob codec captures unknown fields at every message level as their exact wire bytes, in read order, and writes them by field number among the known fields (`specs/model/protobuf-records.md` P4). `other` (legacy JSON keys) is opaque bytes.
 - Records keep their original blob bytes and re-encode only when a field was modified. Unchanged blobs are written back byte-identical, and the no-op check (U23) compares decoded content, so encoding-order differences never create churn.
 - Card `data` JSON: key set and per-key precision from the spec; absent keys omitted; unknown keys and unknown `cd` content kept (deliberate deviation, R1461).
-- Numbers decode into Anki's type (f32 for FSRS parameters, desired retention, decay; i64 for ids) and print as shortest round-trip f32 text; `serde_json` uses `preserve_order` + `float_roundtrip` workspace-wide, never `arbitrary_precision` (rust-stack §5).
+- Numbers decode into Anki's type (f32 for FSRS parameters, desired retention, decay; i64 for ids) and print as shortest round-trip f32 text. JSON is read from serde_json raw values with std's exact parsers, never through `serde_json::Value` or `f64`, and untyped values stay their read text (`specs/model/json-numbers.md` N7); no `preserve_order`, `float_roundtrip` or `arbitrary_precision` (KTD4 as amended 2026-10-14).
 - Deck-config FSRS lists are separate fields (`fsrsWeights`, `fsrsParams5`, `fsrsParams6`, plus unknown future lists via capture). Only `fsrsParams6`, the list for the pinned FSRS version (R696), is writable through the model API; this is R1486's "current list", and U47 is its only writer.
 - Schema-11 JSON converts notetypes, decks, deck configs and the `col` JSON columns in both directions, flattening `other` into the legacy object (R1464). Consumers: U22 (upgrade), U33 (downgrade), U107 (sync wire format), U120/U122 (legacy packages).
 - Clock (cross-area contract): injected source of `now_ms`, current UTC offset and IANA zone id, supplied by Swift in the app and by the scenario clock in tests; a steppable fixed clock exists only under feature `test-hooks` (KTD18). U23 (ids), U40 (day clock) and U95/U100 consume it. No system time-zone lookup in the core.
@@ -4927,14 +4927,16 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Test scenarios:**
 - Property: random known fields plus injected unknown tags of every wire type (varint, len, fixed32, fixed64) in notetype, field, template, deck common, deck kind and deck-config blobs → decode, encode → identical bytes.
 - An unmodified record from an oracle-produced collection is written back with identical blob bytes.
-- Deck `common.other` holding `{"browser_collapsed":true,"extendNew":10,"x_addon":[1]}` → schema-11 JSON contains those keys at top level; converting back yields identical `other` bytes.
+- Deck `common.other` holding `{"browser_collapsed":true,"extendNew":10,"x_addon":[1]}` with `extend_new` 3 → schema-11 JSON has `browser_collapsed` and `x_addon` at top level and `extendNew` 3 from the record, because `extendNew` is reserved and the protobuf field wins (`specs/model/schema11-json.md` S3, oracle); converting back yields `other` `{"browser_collapsed":true,"x_addon":[1]}`. An `other` with no reserved key and no key the object writes, `{"browser_collapsed":true,"x_addon":[1,{"b":2,"a":1.10}]}`, converts back to identical bytes. (Amended 2026-10-14, `docs/process/review-log/U21.md`, A3: this case first asked for identical bytes for the example with `extendNew`, which the oracle contradicts.)
 - Deck config carrying `fsrsWeights`, `fsrsParams5`, `fsrsParams6` and an unknown repeated-float field → updating `fsrsParams6` leaves every other byte unchanged.
 - Card data with `s`, `d`, `dr`, `decay`, `lrt`, `cd` and an unknown key `zz` → round trip keeps `zz`; number text matches the golden; `0.212` stays `0.212`.
 - A synthetic preset carrying Migaku-style legacy keys in `other` (built by the spec writer; never from `local-data/`) survives decode/encode and schema-11 conversion.
 - Truncated or malformed protobuf bytes → typed decode error, no panic (fuzz target, 10 min).
 - Schema-11 JSON of notetypes from an oracle-produced legacy `.apkg` → converted values equal the oracle's own conversion (golden).
 
-**Verification:** round-trip property suites and `conformance/scenarios/model/` goldens pass on macOS and Linux; proto fuzz target clean.
+**Verification:** round-trip property suites and the conversion-pair tests over every `conformance/goldens/model/` golden (`specs/model/schema11-json.md` S14) pass; T0 on the macOS and Linux lanes reports every `conformance/scenarios/model/` scenario `pending` on Meguri's executor and none failed; proto fuzz target clean.
+
+Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). This line first asked for the `conformance/scenarios/model/` goldens to pass on Meguri's executor. Those scenarios use ops and setup sections that later units build (`specs/conformance/model-ops.md` L5): `db_exec` (storage area), the setup sections for note types, decks, presets and notes, `suspend`, `add_note`, the legacy `export` and `package_col`. So their Meguri runs move to the units where everything they use exists, and each of those units' Verification lists them: U36 for `model/proto/` and `model/schema11/` except `apkg-notetypes`, U48 for `model/card-data/`, U123 for `model/schema11/apkg-notetypes`.
 
 ### U22. meguri-storage: open, collation, WAL, connections, schema check and upgrade
 
@@ -5625,12 +5627,14 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - `conformance/fixtures/preservation/` (oracle-produced "kitchen sink" collections), `conformance/scenarios/preservation/`, `conformance/goldens/preservation/`
 - `core/crates/meguri-testkit/src/dump/preservation.rs`
 - `core/crates/meguri-engine/tests/preservation_churn.rs`
+- `core/crates/meguri-testkit/src/exec/model.rs` (Meguri's model adapters, moved from U21)
 
 **Approach:**
 - The spec writer builds fixtures through the oracle containing every preserved-only feature: filtered decks with `odid`/`odue` and search terms, revlog type 3, SM-2 fields, Easy Days, `cardStateCustomizer`, custom data `cd`, unknown config keys (`heatmap`, sidebar add-on keys, `_nt_*` keys), legacy deck keys, notetypes with LaTeX settings and unknown protobuf fields, preset FSRS lists including an unknown future list, MathJax/TTS content and add-on filters in templates.
 - Scenarios run the same ops on Meguri and the oracle and compare normalized dumps (U4 `db_dump`, extended here); live legs (sync round trips, oracle reopen) run in T1.
 - Churn scenarios assert zero pending rows (`usn = -1`), unchanged `col.mod` and zero dirty media after repeated launches and idle periods.
 - Each leg is owned by the unit that implements the behavior: review (U43), render (U60), sync (U107), device-local settings (U160), optimizer (U47), and the Migaku startup leg (a stub until U137 lands). This unit owns the fixtures, the dump rules and the suite wiring, and lands in M1 so the preservation suite guards the M1 trial.
+- Model scenarios (moved from U21, amended 2026-10-14; `docs/process/review-log/U21.md`, A1): this unit builds Meguri's `legacy_json`, `legacy_update` and `blob_decode` adapters on U21's codecs (`specs/conformance/model-ops.md` L1, L2, L4), and Meguri's `db_exec` (`specs/conformance/dsl.md`) unless the storage area has registered it already. With the note type, deck and preset setup sections of U28 and U29, that runs `conformance/scenarios/model/proto/` and `model/schema11/` (all but `apkg-notetypes`) on Meguri's executor.
 
 **Execution note:** Spec writer builds fixtures and dump rules first; legs land as their implementing units land.
 
@@ -5646,7 +5650,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Ten open/close cycles plus a 1,000-op run → `sqlite_master` unchanged (R2016).
 - An optimizer write (U47 leg) → only `fsrsParams6` changes in the preset blob (R1486, R696); with `fsrsParams5` present and `fsrsParams6` empty, the write fills `fsrsParams6` and `fsrsParams5` stays byte-identical.
 
-**Verification:** preservation suite green in T0 (goldens) on every core change and in T1 (live legs); the R2017 normalized-dump comparison reports zero differences.
+**Verification:** preservation suite green in T0 (goldens) on every core change and in T1 (live legs); the R2017 normalized-dump comparison reports zero differences; `conformance/scenarios/model/proto/` and `model/schema11/` except `apkg-notetypes` pass on Meguri's executor on the macOS and Linux lanes.
 
 ### U37. Collection FFI surface and CoreBridge engine services
 
@@ -6238,7 +6242,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - Empty on a filtered deck restores `odue`/`odid` cards exactly as the oracle does, including a queue-4 preview card.
 - None of bury, suspend, unbury or unsuspend writes a revlog row.
 
-**Verification:** All `conformance/scenarios/sched/ops/**` goldens match; every op appears in U25's undo status with its name.
+**Verification:** All `conformance/scenarios/sched/ops/**` goldens match; every op appears in U25's undo status with its name; `conformance/scenarios/model/card-data/` passes on Meguri's executor on the macOS and Linux lanes (moved from U21, amended 2026-10-14: these scenarios use `suspend` with `specs/conformance/model-ops.md` L3's arguments, and `db_exec`).
 
 ### U49. Deck options and scheduling preferences
 
@@ -7257,7 +7261,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Requirements:** R1115 (key), R1134, R1135 (order storage), R1137, R1138, R1141 (keys and fallback), R1265, R1266, R1267 (synced-key part), R1038 (setting key), R1196/R1198 (remembered-input keys); supports R1112, R1157, R1171, R1218 (owned by Browser UI and Settings).
 
-**Dependencies:** U23 (config table), U21 (serde_json `preserve_order`), U24 (op executor), U25 (undo entries for the saved-search ops).
+**Dependencies:** U23 (config table), U21 (raw-text JSON that keeps member order, KTD4 as amended), U24 (op executor), U25 (undo entries for the saved-search ops).
 
 **Files:**
 - `specs/browser/config-keys.md` (spec-writer)
@@ -7750,7 +7754,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
   - Labels, long dates and colours are formatted in Swift. The core returns dates and numbers.
 - History comes from U95 filtered by `limhist`/`limdate` (R1312). The forecast scans U95's card table: queue 2/3, home deck in scope, due day ≥ today, up to `limfcst` or the 73,000-day cap (R1310–R1311). Today's cell rule is R1305. Levels follow R1313–R1314 over the shown scope's daily average. Streaks follow R1327–R1330 over exactly the history the grid uses (R1331). `limdecks` and `limcdel` apply to Home only (R1340, R1341). Stats-screen code never reads this module (R1343).
 - Mapping a heatmap day to `prop:rated=-N` and `prop:due=N`: the spec must state which day offset N is when the civil heatmap day and the Anki day differ (DST edges). The browse result may differ from the tooltip count (R1323).
-- Config writer: an engine op through U23's config table path. It patches only the changed fields of the parsed JSON object, keeps `colors`, `version` and unknown fields byte-for-byte (serde_json `preserve_order`, raw values for untouched members) and keeps value types (integers stay integers). It creates the key only on the first user change (R1337–R1338). The op marks config dirty for sync and invalidates U95 totals through the normal change stream.
+- Config writer: an engine op through U23's config table path. It patches only the changed fields of the parsed JSON object, keeps `colors`, `version` and unknown fields byte-for-byte (untouched members kept as raw text in stored order, KTD4 as amended) and keeps value types (integers stay integers). It creates the key only on the first user change (R1337–R1338). The op marks config dirty for sync and invalidates U95 totals through the normal change stream.
 - Settings (U160) passes a typed patch: mode, limhist, limfcst, limdate, limcdel, limresched, limdecks. Per-device display toggles (R1342) are not handled here.
 
 **Execution note:** The spec writer comes first, with goldens from the add-on oracle op added in U95. The implementer then works test-first. The config writer's byte-preservation tests are Meguri-authored (no oracle).
@@ -8211,7 +8215,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Execution note:** Spec writer first. Wire goldens come from the oracle encoding the same records. Implementer test-first.
 
-**Patterns to follow:** KTD4 (protobuf records), U21's schema-11 converters, rust-stack JSON settings (`preserve_order`, `float_roundtrip`).
+**Patterns to follow:** KTD4 (protobuf records), U21's schema-11 converters, KTD4's JSON handling as amended (raw values, std's exact number parsers).
 
 **Test scenarios:**
 - Wire goldens: the oracle emits schema-11 JSON for notetypes (including a Migaku type with `other` keys), normal and filtered decks, and deck configs with `fsrsParams5/6` and unknown keys → Meguri's encoding equals the golden after canonical JSON ordering, and decode→encode round-trips.
@@ -8743,7 +8747,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 **Approach:**
 - This unit creates the `meguri-package` crate. Per KTD2 it sits above `meguri-engine` and writes the collection only through engine ops. Per the core layering rule, only `meguri-storage` issues SQL against the collection.
 - **Classification:** a pure function maps a file to `Apkg`, `Colpkg` or `Unsupported`. The name rule of R1596 wins first. Otherwise content decides: a `meta` entry or a collection entry makes it a package, whatever the extension (R1595). The UI (U150, U160) and the local servers call the same function.
-- **Container reader:** follows rust-stack §5. It uses `zip` with default features off plus `deflate`, and streaming `zstd` decoding. The `meta` protobuf is a hand-written prost struct (KTD4). The format comes from the entry layout and the meta version, and an unknown version is refused (R1597). Media maps come in two shapes: latest is zstd protobuf, legacy is JSON. Every media name passes the safe-name check, and an unsafe name rejects the whole package as corrupt (R1598).
+- **Container reader:** follows rust-stack §5. It uses `zip` with default features off plus `deflate`, and streaming `zstd` decoding. The `meta` protobuf is a hand-written message struct, without prost (KTD4 as amended). The format comes from the entry layout and the meta version, and an unknown version is refused (R1597). Media maps come in two shapes: latest is zstd protobuf, legacy is JSON. Every media name passes the safe-name check, and an unsafe name rejects the whole package as corrupt (R1598).
 - **Bounds (R1599):** every entry decompresses in streaming mode into an app-private staging directory with a per-entry cap, a total cap and a compression-ratio cap. Whole entries are never buffered in memory (R1852). Only zip entries are read.
 - **File safety comes from U32; `fsutil` holds only the package staging layout, reused by U122–U127:**
   - Staging names are recognisable (one staging directory plus a fixed temp suffix) and registered with U32's leftover patterns, so U32's R1493 launch cleanup removes them.
@@ -8923,7 +8927,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Execution note:** spec writer first, then implementer test-first. Oracle compatibility is proven by T1 live tests.
 
-**Patterns to follow:** U33's downgrade entry point; rust-stack §5 JSON settings (`preserve_order`, `float_roundtrip`, exact numeric types).
+**Patterns to follow:** U33's downgrade entry point; KTD4's JSON handling as amended (raw values, std's exact number parsers, exact numeric types).
 
 **Test scenarios:**
 - T1: legacy `.apkg` from Meguri → the oracle imports it, and the dump equals the source subset.
@@ -8933,7 +8937,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 - The schema-11 DB from Meguri's legacy export equals the schema-11 DB from the oracle's legacy export of the same scenario, compared as normalized dumps (golden).
 - Live collection file hash, version and journal mode are unchanged after a legacy export.
 
-**Verification:** `conformance/scenarios/package/legacy-export/` goldens and the T1 legacy suites pass.
+**Verification:** `conformance/scenarios/package/legacy-export/` goldens and the T1 legacy suites pass; `conformance/scenarios/model/schema11/apkg-notetypes` passes on Meguri's executor on the macOS and Linux lanes, with the legacy form of `export` (`specs/conformance/model-ops.md` L6) and `package_col` (L7, through U120's package reader) (moved from U21, amended 2026-10-14).
 
 ### U124. `.colpkg` import/export and verified collection replacement
 

@@ -1,0 +1,379 @@
+{
+  "captured_at": 1791893211.964215,
+  "platform": "mac",
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [],
+                "enabled": true,
+                "focused": false,
+                "frame": {
+                  "height": 748,
+                  "width": 1180,
+                  "x": 0,
+                  "y": 62
+                },
+                "hit_point": {
+                  "x": 590,
+                  "y": 436
+                },
+                "identifier": "home.placeholder.title",
+                "label": "",
+                "selected": false,
+                "type": "staticText",
+                "value": "Meguri"
+              }
+            ],
+            "enabled": false,
+            "focused": false,
+            "frame": {
+              "height": 780,
+              "width": 1180,
+              "x": 0,
+              "y": 30
+            },
+            "hit_point": {
+              "x": 590,
+              "y": 420
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "group",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": false,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 16,
+              "x": 8,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 16,
+              "y": 46
+            },
+            "identifier": "_XCUI:CloseWindow",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "enabled": false,
+                    "focused": false,
+                    "frame": {
+                      "height": 14,
+                      "width": 14,
+                      "x": 55,
+                      "y": 39
+                    },
+                    "hit_point": {
+                      "x": 62,
+                      "y": 46
+                    },
+                    "identifier": "",
+                    "label": "",
+                    "selected": false,
+                    "type": "group",
+                    "value": null
+                  }
+                ],
+                "enabled": false,
+                "focused": false,
+                "frame": {
+                  "height": 14,
+                  "width": 14,
+                  "x": 55,
+                  "y": 39
+                },
+                "hit_point": {
+                  "x": 62,
+                  "y": 46
+                },
+                "identifier": "",
+                "label": "",
+                "selected": false,
+                "type": "group",
+                "value": null
+              }
+            ],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 16,
+              "x": 54,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 62,
+              "y": 46
+            },
+            "identifier": "_XCUI:ZoomWindow",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 16,
+              "x": 31,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 39,
+              "y": 46
+            },
+            "identifier": "_XCUI:MinimizeWindow",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 50,
+              "x": 82,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 107,
+              "y": 46
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "staticText",
+            "value": "Meguri"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "enabled": true,
+                "focused": false,
+                "frame": {
+                  "height": 18,
+                  "width": 218,
+                  "x": 481,
+                  "y": 378
+                },
+                "hit_point": {
+                  "x": 590,
+                  "y": 387
+                },
+                "identifier": "_NS:74",
+                "label": "",
+                "selected": false,
+                "type": "staticText",
+                "value": "Sample error"
+              },
+              {
+                "children": [],
+                "enabled": true,
+                "focused": false,
+                "frame": {
+                  "height": 18,
+                  "width": 218,
+                  "x": 481,
+                  "y": 404
+                },
+                "hit_point": {
+                  "x": 590,
+                  "y": 413
+                },
+                "identifier": "_NS:58",
+                "label": "",
+                "selected": false,
+                "type": "staticText",
+                "value": "The sample error state."
+              },
+              {
+                "children": [],
+                "enabled": true,
+                "focused": false,
+                "frame": {
+                  "height": 30,
+                  "width": 112,
+                  "x": 475,
+                  "y": 436
+                },
+                "hit_point": {
+                  "x": 531,
+                  "y": 451
+                },
+                "identifier": "action-button-2",
+                "label": "Cancel",
+                "selected": false,
+                "type": "button",
+                "value": null
+              },
+              {
+                "children": [],
+                "enabled": true,
+                "focused": false,
+                "frame": {
+                  "height": 30,
+                  "width": 112,
+                  "x": 593,
+                  "y": 436
+                },
+                "hit_point": {
+                  "x": 649,
+                  "y": 451
+                },
+                "identifier": "action-button-1",
+                "label": "Try Again",
+                "selected": false,
+                "type": "button",
+                "value": null
+              }
+            ],
+            "enabled": false,
+            "focused": false,
+            "frame": {
+              "height": 122,
+              "width": 260,
+              "x": 460,
+              "y": 359
+            },
+            "hit_point": {
+              "x": 590,
+              "y": 420
+            },
+            "identifier": "_NS:87",
+            "label": "alert",
+            "selected": false,
+            "type": "sheet",
+            "value": null
+          }
+        ],
+        "enabled": false,
+        "focused": false,
+        "frame": {
+          "height": 780,
+          "width": 1180,
+          "x": 0,
+          "y": 30
+        },
+        "hit_point": {
+          "x": 590,
+          "y": 420
+        },
+        "identifier": "main",
+        "label": "",
+        "selected": false,
+        "type": "window",
+        "value": null
+      },
+      {
+        "children": [
+          {
+            "children": [],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 32,
+              "width": 146,
+              "x": 393.5,
+              "y": -1
+            },
+            "hit_point": {
+              "x": 466.5,
+              "y": 30.5
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 32,
+              "width": 146,
+              "x": 545.5,
+              "y": -1
+            },
+            "hit_point": {
+              "x": 618.5,
+              "y": 30.5
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          }
+        ],
+        "enabled": false,
+        "focused": false,
+        "frame": {
+          "height": 30,
+          "width": 685,
+          "x": 80,
+          "y": 0
+        },
+        "hit_point": null,
+        "identifier": "",
+        "label": "",
+        "selected": false,
+        "type": "touchBar",
+        "value": null
+      }
+    ],
+    "enabled": false,
+    "focused": false,
+    "frame": {
+      "height": 0,
+      "width": 0,
+      "x": 0,
+      "y": 0
+    },
+    "hit_point": null,
+    "identifier": "",
+    "label": "",
+    "selected": false,
+    "type": "application",
+    "value": null
+  },
+  "schema": 1,
+  "screenshot": {
+    "origin": {
+      "x": 0,
+      "y": 30
+    },
+    "scale": 2
+  },
+  "window": {
+    "height": 780,
+    "width": 1180,
+    "x": 0,
+    "y": 30
+  }
+}

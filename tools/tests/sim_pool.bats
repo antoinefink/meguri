@@ -293,14 +293,15 @@ assert_pool_devices_untouched() {
   [ "$(jq -r '.devices | length' <<<"$output")" -eq 2 ]
   [ "$(jq -r --arg u "$u" '.devices[] | select(.udid == $u) | "\(.kind) \(.leased) \(.lease.holder) \(.lease_expired) \(.current_runtime)"' <<<"$output")" = "iphone true s1 false true" ]
   [ "$(jq -r '.devices[] | select(.name == "Meguri-Pool-ipad-1") | "\(.kind) \(.leased) \(.state)"' <<<"$output")" = "ipad false Shutdown" ]
-  [ "$(jq -r '[.kinds[].kind] | join(" ")' <<<"$output")" = "iphone ipad" ]
+  [ "$(jq -r '[.kinds[].kind] | join(" ")' <<<"$output")" = "iphone iphone-small ipad ipad-small foldable" ]
+  [ "$(jq -r '.kinds[] | select(.kind == "ipad-small") | .device_type' <<<"$output")" = com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro ]
   [[ "$stderr" == *"Meguri-Pool-iphone-1  $u  Booted  leased to s1"* ]]
 }
 
 @test "usage errors exit 2 without touching a simulator" {
   pool acquire watch
   [ "$status" -eq 2 ]
-  [[ "$stderr" == *"unknown kind 'watch' (kinds: iphone ipad)"* ]]
+  [[ "$stderr" == *"unknown kind 'watch' (kinds: iphone iphone-small ipad ipad-small foldable)"* ]]
   pool acquire
   [ "$status" -eq 2 ]
   pool acquire iphone --ttl-min 0
@@ -438,4 +439,68 @@ mg_sandbox() {
   [ ! -s "$STUB_LOG" ]
   [ ! -e "$MEGURI_SIM_POOL_DIR" ]
   [ "$(jq '.devices | length' "$FAKE_SIM_DB")" -eq 1 ]
+}
+
+# --- kinds from tools/sim-devices.json (U8) ------------------------------------
+
+@test "every pinned kind is created from the device type tools/sim-devices.json names" {
+  local kind type u
+  for kind in iphone-small ipad-small; do
+    type="$(jq -r --arg k "$kind" '.devices[] | select(.kind == $k) | .device_type' "$REPO_ROOT/tools/sim-devices.json")"
+    pool acquire "$kind" --holder t1
+    [ "$status" -eq 0 ]
+    u="${lines[0]}"
+    called "^xcrun simctl create Meguri-Pool-$kind-1 $type $RT27\$"
+    [ "$(lease "$u" .kind)" = "$kind" ]
+  done
+  # Meguri-Pool-iphone-small-1 is not an iphone pool device.
+  pool acquire iphone --holder t2
+  called "^xcrun simctl create Meguri-Pool-iphone-1 $IPHONE_TYPE $RT27\$"
+}
+
+@test "a pinned device type missing from Xcode fails the acquire" {
+  jq '.devices[0].device_type = "com.apple.CoreSimulator.SimDeviceType.iPhone-99"' "$REPO_ROOT/tools/sim-devices.json" >"$BATS_TEST_TMPDIR/devices.json"
+  MEGURI_SIM_DEVICES_JSON="$BATS_TEST_TMPDIR/devices.json" pool acquire iphone
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"Xcode has no device type com.apple.CoreSimulator.SimDeviceType.iPhone-99"* ]]
+  not_called "simctl create"
+}
+
+@test "the foldable kind is unavailable until Xcode has a foldable iPhone, then created like the others" {
+  pool acquire foldable
+  [ "$status" -eq 4 ]
+  [[ "$stderr" == *"unavailable: toolchain"* ]]
+  not_called "simctl create"
+  FAKE_SIM_FOLDABLE=1 pool acquire foldable --holder t1
+  [ "$status" -eq 0 ]
+  called "^xcrun simctl create Meguri-Pool-foldable-1 com.apple.CoreSimulator.SimDeviceType.iPhone-Fold $RT27\$"
+}
+
+# --- reset ------------------------------------------------------------------
+
+@test "reset cleans a leased device and keeps it booted and leased" {
+  pool acquire iphone --holder t1
+  local u="${lines[0]}"
+  sim __app "$u" com.example.user User
+  : >"$STUB_LOG"
+  pool reset "$u"
+  [ "$status" -eq 0 ]
+  called "^xcrun simctl uninstall $u com.example.user\$"
+  called "^xcrun simctl status_bar $u clear\$"
+  [ -f "$LEASES/$u/lease.json" ]
+  [ "$(sim __state "$u")" = Booted ]
+  assert_pool_devices_untouched
+}
+
+@test "reset refuses a device nobody leased and a simulator outside the pool" {
+  local free other
+  free="$(sim __add Meguri-Pool-iphone-1 Booted)"
+  other="$(sim __add "My iPhone" Booted)"
+  pool reset "$free"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"is not leased"* ]]
+  pool reset "$other"
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"not a pool device"* ]]
+  not_called "simctl (uninstall|privacy|keychain)"
 }

@@ -1,0 +1,18 @@
+# Human deck names into native form (schema11-json S11, R1465): split at "::",
+# NFC, ASCII controls removed, whitespace and ":" trimmed, empty components
+# become "blank"; emoji and mixed scripts pass unchanged.
+id: model/schema11/deck-names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words, Other]
+steps:
+  - legacy_update: {deck: Words, patch: {name: "  A ::  :B: \u0007x ::  "}}
+  - legacy_update: {deck: Other, patch: {name: "a:::b"}}
+  - db_exec: {sql: "SELECT name, hex(name) FROM decks ORDER BY id"}
+  - observe:
+      - legacy_json: {decks: ["A::B: x::blank", "a::b"]}
+  - legacy_update: {deck: "A::B: x::blank", patch: {name: "Café::日本語::😀 Emoji"}}
+  - legacy_update: {deck: "a::b", patch: {name: "::Tail::"}}
+  - db_exec: {sql: "SELECT name, hex(name) FROM decks ORDER BY id"}
+  - observe:
+      - legacy_json: {decks: ["Café::日本語::😀 Emoji", "blank::Tail::blank"]}

@@ -1,0 +1,13 @@
+{
+  "name": "open-sample-sheet",
+  "description": "Open the sample sheet route with a fixture and a fixed clock, capture it, dismiss it and capture Home.",
+  "platforms": ["ios", "mac"],
+  "steps": [
+    {"launch": {"route": "sample/sheet", "fixture": "app/Fixtures/TestHooks/single-file.fixture", "now": "2030-01-15T10:00:00", "timeZone": "Asia/Tokyo", "locale": "en_US", "animations": false}},
+    {"wait": "sample.sheet.title"},
+    {"snapshot": "sheet"},
+    {"tap": "sample.sheet.done", "transition": "dismiss-sheet"},
+    {"wait": {"id": "sample.sheet.title", "gone": true}},
+    {"snapshot": "home"}
+  ]
+}

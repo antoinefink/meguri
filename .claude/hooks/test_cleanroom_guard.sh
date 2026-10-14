@@ -11,7 +11,7 @@ fails=0
 t() { # agent tool input-json expected
   out=$(jq -nc --arg a "$1" --arg t "$2" --argjson i "$3" --arg tp "$T/sess.jsonl" \
     '{agent_id:$a,tool_name:$t,tool_input:$i,transcript_path:$tp,cwd:"/Users/antoine/code/meguri",session_id:"s"}' |
-    TMPDIR="$T/tmp" python3 "$HERE/cleanroom_guard.py")
+    TMPDIR="$T/tmp" MEGURI_HOLD_FILE="$T/no-hold" python3 "$HERE/cleanroom_guard.py")
   got=$([ -n "$out" ] && echo deny || echo allow)
   if [ "$got" != "$4" ]; then echo "FAIL: expected $4, got $got: $1 $2 $3"; fails=$((fails + 1)); fi
 }

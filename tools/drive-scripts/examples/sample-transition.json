@@ -1,0 +1,12 @@
+{
+  "name": "sample-transition",
+  "description": "Dismiss the sample sheet with animations on; with tools/mg drive --record the marked step becomes a contact sheet.",
+  "platforms": ["ios", "mac"],
+  "steps": [
+    {"launch": {"route": "sample/sheet", "locale": "en_US", "animations": true}},
+    {"wait": "sample.sheet.done"},
+    {"tap": "sample.sheet.done", "transition": "dismiss-sheet"},
+    {"wait": {"id": "sample.sheet.title", "gone": true}},
+    {"snapshot": "home"}
+  ]
+}

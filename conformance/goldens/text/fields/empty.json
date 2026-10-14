@@ -1,0 +1,23 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "text": {
+          "field_empty": [false, false, true, true, true, true, true, true, true, false, false, false, false, false, true, true, true, true, false, false, false, true, false, false, true, true, true, true, false, false, true, false, false, false]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "fbc5a11dd4d3962f547dee61e88f825440d69914f5e226959da40a343f45a1f6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "text/fields/empty",
+  "scenario_sha256": "83709d3dc3a35df4dc6cbcca1a7441b7ea3ea37ea5afca124bbe2e9ca136e699",
+  "tz": "UTC"
+}

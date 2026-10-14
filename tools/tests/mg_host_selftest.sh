@@ -56,7 +56,7 @@ remove_project_containers() {
 cleanup() {
   remove_project_containers
   sbcompose down >/dev/null 2>&1
-  sbcompose --profile sync-rig --profile spec-record down >/dev/null 2>&1
+  sbcompose --profile sync-rig --profile spec-record --profile oracle-sync --profile oracle-record down >/dev/null 2>&1
   [ -z "$RIG_IMAGE" ] || docker image rm -f "$RIG_IMAGE" >/dev/null 2>&1
   docker image rm -f "$PROJECT-dev" "$PROJECT-fuzz" "$PROJECT-similarity" >/dev/null 2>&1
   rm -rf "$SB-wt"
@@ -681,6 +681,30 @@ t_sync_rig_up_fails_when_the_recording_is_unwritable() {
   expect "down status" "$(field .status)" pass
 }
 
+# The fault proxy and the recorder of actor scenarios (sync-ops.md S8.2): only
+# on the internal oracle-internal network, nothing published, pinned by the
+# rig's digests, never started by a plain `compose up`.
+t_actor_scenario_proxies_are_internal_only() {
+  local cfg
+  cfg="$(sbcompose --profile '*' config --format json)" || return 1
+  expect "networks" "$(jq -c '[.services["sync-faults", "sync-recorder"] | .networks | keys] | unique' <<<"$cfg")" \
+    '[["oracle-internal"]]' &&
+    expect "oracle-internal is internal" "$(jq '.networks["oracle-internal"].internal' <<<"$cfg")" true &&
+    expect "published ports" "$(jq '[.services["sync-faults", "sync-recorder"] | .ports // [] | length] | add' <<<"$cfg")" 0 &&
+    expect "toxiproxy pin" "$(jq -r '.services["sync-faults"].image == .services.toxiproxy.image' <<<"$cfg")" true &&
+    expect "mitmdump pin" "$(jq -r '.services["sync-recorder"].image == .services.mitmdump.image' <<<"$cfg")" true &&
+    expect "profiles" "$(jq -c '[.services["sync-faults", "sync-recorder"] | .profiles]' <<<"$cfg")" \
+      '[["oracle-sync"],["oracle-record"]]'
+}
+
+# record_sync.py's actor and step attribution (sync-ops.md S9): its unit tests
+# (docker/mitm/tests) with mitmproxy's own test helpers, in the sync-recorder
+# image.
+t_recorder_attributes_exchanges_to_actors_and_steps() {
+  sbcompose --profile oracle-record run --rm -T --no-deps --entrypoint python3 -e PYTHONDONTWRITEBYTECODE=1 \
+    sync-recorder -B -m unittest discover -v -s /opt/mitm/tests </dev/null
+}
+
 # The simulator pool under macOS /bin/bash 3.2 and BSD tools, against the fake
 # `xcrun simctl` (sim_pool_fake_xcrun.sh): no real simulator is touched.
 t_sim_pool_on_macos_bash() {
@@ -730,6 +754,68 @@ t_sim_pool_on_macos_bash() {
     expect "status leased" "$(field '[.details.devices[] | select(.leased)] | length')" 3
 }
 
+# Host lease, Mac UI gate and sim-setup (U8) under macOS bash 3.2 and BSD
+# tools, with the real session check (ioreg, system_profiler) and caffeinate.
+t_host_lease_gate_and_sim_setup_on_macos_bash() {
+  local dir="$SB/host-lease" first u
+  local MEGURI_HOST_LEASE_DIR="$dir/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1 MEGURI_MAC_UI_DIR="$dir/mac-ui" FX_LOG="$dir/fx.log"
+  export MEGURI_HOST_LEASE_DIR MEGURI_HOST_LEASE_POLL_SECONDS MEGURI_MAC_UI_DIR FX_LOG
+  mkdir -p "$dir" && : >"$FX_LOG" || return 1
+  cat >"$SB/tools/mg.d/zz-host-fixture.sh" <<'EOF'
+mg_job fx-lease host fx_lease "fixture: hold the host lease for FX_HOLD seconds"
+mg_job fx-gate host fx_gate "fixture: take the Mac UI gate"
+fx_lease() { mg_host_lease || return 0; echo "start $1" >>"$FX_LOG"; sleep "${FX_HOLD:-1}"; echo "end $1" >>"$FX_LOG"; mg_status pass; }
+fx_gate() { mg_mac_ui_gate || return 0; echo "allowed ${MEGURI_ALLOW_MAC_UI:-unset}" >>"$FX_LOG"; mg_status pass; }
+EOF
+  FX_HOLD=2 /bin/bash "$MG" fx-lease a >/dev/null 2>>"$SB/stderr.log" &
+  first=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$FX_LOG" ] && break; sleep 0.2; done
+  FX_HOLD=0 mg fx-lease b
+  wait "$first"
+  expect "second lease exit" "$RC" 0 &&
+    expect "leases in turn" "$(tr '\n' ' ' <"$FX_LOG")" "start a end a start b end b " &&
+    expect "lease released" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free || return 1
+  : >"$FX_LOG"
+  mg fx-gate
+  expect "gate allows the first run" "$(field .status) $(cat "$FX_LOG")" "pass allowed 1" || return 1
+  mg fx-gate
+  expect "gate queues the next" "$(field .status) $(field .details.queued)" "warn true" &&
+    expect "queued reason" "$(field .message | grep -c 'the next may start at 20')" 1 || return 1
+  rm -f "$SB/tools/mg.d/zz-host-fixture.sh"
+
+  local PATH="$dir/bin:$PATH" STUB_LOG="$dir/stub.log" FAKE_SIM_DB="$dir/sims.json"
+  local MEGURI_SIM_POOL_DIR="$dir/pool" MEGURI_SIM_DEVICES_DIR="$dir/Devices" MEGURI_SIM_POOL_SETTLE_SECONDS=0
+  export PATH STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR MEGURI_SIM_POOL_SETTLE_SECONDS
+  mkdir -p "$dir/bin" "$MEGURI_SIM_DEVICES_DIR" && : >"$STUB_LOG" || return 1
+  ln -s "$SB/tools/tests/sim_pool_fake_xcrun.sh" "$dir/bin/xcrun" || return 1
+  mg sim-setup
+  u="$(jq -r '.devices.iphone.udids[0]' "$SB/build/sim-devices.local.json")"
+  expect "sim-setup exit" "$RC" 0 &&
+    expect "created kinds" "$(grep -c '^xcrun simctl create ' "$STUB_LOG")" 4 &&
+    expect "foldable lane" "$(field '.details.foldable.status')" unavailable || return 1
+  : >"$STUB_LOG"
+  mg sim-setup
+  expect "rerun creates nothing" "$(grep -c '^xcrun simctl create ' "$STUB_LOG")" 0 &&
+    expect "same iPhone" "$(jq -r '.devices.iphone.udids[0]' "$SB/build/sim-devices.local.json")" "$u" || return 1
+
+  # A recording under macOS bash and BSD ps: the worker holds the lease, is
+  # known by its pid and start time, and releases the lease (under the
+  # lease's mutex) when record stop ends it.
+  local state worker
+  u="$(cd "$SB" && tools/scripts/sim-pool.sh acquire iphone --holder selftest 2>/dev/null)"
+  mg record start --device "$u"
+  state="$SB/build/mg/record/active/$u.json"
+  worker="$(jq -r .pid "$state" 2>/dev/null)"
+  expect "record start" "$RC $(field .status)" "0 pass" &&
+    expect "worker start time" "$(jq -r .pid_started "$state")" "$(ps -o lstart= -p "$worker" | sed 's/[[:space:]]*$//')" &&
+    expect "the worker holds the lease" "$(jq -r '"\(.pid) \(.kind)"' "$MEGURI_HOST_LEASE_DIR/holder.json")" "$worker recording" || return 1
+  mg record stop --device "$u"
+  "$SB/tools/scripts/sim-pool.sh" release "$u" >/dev/null 2>&1
+  expect "record stop" "$RC $(field .status) $(field .details.recording.reason)" "0 pass stopped" &&
+    expect "the worker ended" "$(kill -0 "$worker" 2>/dev/null && echo running || echo ended)" ended &&
+    expect "the lease is free" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -744,7 +830,9 @@ t_cancelling_a_host_job_removes_its_container t_implementer_worktree_and_commit_
 t_parallel_session_records_on_macos t_similarity_flags_a_copy_through_tools_mg t_similarity_scans_changed_files_and_commits
 t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_removes_it
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
-t_sync_rig_up_fails_when_the_recording_is_unwritable t_sim_pool_on_macos_bash t_results_validate_against_schema"
+t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
+t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
+t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

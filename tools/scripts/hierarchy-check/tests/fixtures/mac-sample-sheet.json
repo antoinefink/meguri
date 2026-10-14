@@ -1,0 +1,740 @@
+{
+  "captured_at": 1791893209.744431,
+  "platform": "mac",
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [],
+                "enabled": true,
+                "focused": false,
+                "frame": {
+                  "height": 748,
+                  "width": 1180,
+                  "x": 0,
+                  "y": 62
+                },
+                "hit_point": {
+                  "x": 590,
+                  "y": 436
+                },
+                "identifier": "home.placeholder.title",
+                "label": "",
+                "selected": false,
+                "type": "staticText",
+                "value": "Meguri"
+              }
+            ],
+            "enabled": false,
+            "focused": false,
+            "frame": {
+              "height": 780,
+              "width": 1180,
+              "x": 0,
+              "y": 30
+            },
+            "hit_point": {
+              "x": 590,
+              "y": 420
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "group",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": false,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 16,
+              "x": 8,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 16,
+              "y": 46
+            },
+            "identifier": "_XCUI:CloseWindow",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "enabled": false,
+                    "focused": false,
+                    "frame": {
+                      "height": 14,
+                      "width": 14,
+                      "x": 55,
+                      "y": 39
+                    },
+                    "hit_point": {
+                      "x": 62,
+                      "y": 46
+                    },
+                    "identifier": "",
+                    "label": "",
+                    "selected": false,
+                    "type": "group",
+                    "value": null
+                  }
+                ],
+                "enabled": false,
+                "focused": false,
+                "frame": {
+                  "height": 14,
+                  "width": 14,
+                  "x": 55,
+                  "y": 39
+                },
+                "hit_point": {
+                  "x": 62,
+                  "y": 46
+                },
+                "identifier": "",
+                "label": "",
+                "selected": false,
+                "type": "group",
+                "value": null
+              }
+            ],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 16,
+              "x": 54,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 62,
+              "y": 46
+            },
+            "identifier": "_XCUI:ZoomWindow",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 16,
+              "x": 31,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 39,
+              "y": 46
+            },
+            "identifier": "_XCUI:MinimizeWindow",
+            "label": "",
+            "selected": false,
+            "type": "button",
+            "value": null
+          },
+          {
+            "children": [],
+            "enabled": true,
+            "focused": false,
+            "frame": {
+              "height": 16,
+              "width": 50,
+              "x": 82,
+              "y": 38
+            },
+            "hit_point": {
+              "x": 107,
+              "y": 46
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "staticText",
+            "value": "Meguri"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 88,
+                          "x": 346,
+                          "y": 156
+                        },
+                        "hit_point": {
+                          "x": 390,
+                          "y": 164
+                        },
+                        "identifier": "sample.sheet.title",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Sample sheet"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 34.5,
+                          "x": 346,
+                          "y": 180
+                        },
+                        "hit_point": {
+                          "x": 363.25,
+                          "y": 188
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Clock"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 179,
+                          "x": 655,
+                          "y": 180
+                        },
+                        "hit_point": {
+                          "x": 744.5,
+                          "y": 188
+                        },
+                        "identifier": "sample.sheet.clock",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "2030-01-15T10:00:00+09:00"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 28.5,
+                          "x": 346,
+                          "y": 204
+                        },
+                        "hit_point": {
+                          "x": 360.25,
+                          "y": 212
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Date"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 161.5,
+                          "x": 672.5,
+                          "y": 204
+                        },
+                        "hit_point": {
+                          "x": 753.25,
+                          "y": 212
+                        },
+                        "identifier": "sample.sheet.date",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Tuesday, January 15, 2030"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 63,
+                          "x": 346,
+                          "y": 228
+                        },
+                        "hit_point": {
+                          "x": 377.5,
+                          "y": 236
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Time zone"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 65.5,
+                          "x": 768.5,
+                          "y": 228
+                        },
+                        "hit_point": {
+                          "x": 801.25,
+                          "y": 236
+                        },
+                        "identifier": "sample.sheet.timeZone",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Asia/Tokyo"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 111.5,
+                          "x": 346,
+                          "y": 252
+                        },
+                        "hit_point": {
+                          "x": 401.75,
+                          "y": 260
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Process time zone"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 65.5,
+                          "x": 768.5,
+                          "y": 252
+                        },
+                        "hit_point": {
+                          "x": 801.25,
+                          "y": 260
+                        },
+                        "identifier": "sample.sheet.processTimeZone",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Asia/Tokyo"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 39.5,
+                          "x": 346,
+                          "y": 276
+                        },
+                        "hit_point": {
+                          "x": 365.75,
+                          "y": 284
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Locale"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 40,
+                          "x": 794,
+                          "y": 276
+                        },
+                        "hit_point": {
+                          "x": 814,
+                          "y": 284
+                        },
+                        "identifier": "sample.sheet.locale",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "en_US"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 41.5,
+                          "x": 346,
+                          "y": 300
+                        },
+                        "hit_point": {
+                          "x": 366.75,
+                          "y": 308
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Fixture"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 209,
+                          "x": 625,
+                          "y": 300
+                        },
+                        "hit_point": {
+                          "x": 729.5,
+                          "y": 308
+                        },
+                        "identifier": "sample.sheet.fixture",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "collection.anki2 69 cf43867b9ced"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 91,
+                          "x": 346,
+                          "y": 324
+                        },
+                        "hit_point": {
+                          "x": 391.5,
+                          "y": 332
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Reduce Motion"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 17,
+                          "x": 817,
+                          "y": 324
+                        },
+                        "hit_point": {
+                          "x": 825.5,
+                          "y": 332
+                        },
+                        "identifier": "sample.sheet.reduceMotion",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "off"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 131.5,
+                          "x": 346,
+                          "y": 348
+                        },
+                        "hit_point": {
+                          "x": 411.75,
+                          "y": 356
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Reduce Transparency"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 17,
+                          "x": 817,
+                          "y": 348
+                        },
+                        "hit_point": {
+                          "x": 825.5,
+                          "y": 356
+                        },
+                        "identifier": "sample.sheet.reduceTransparency",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "off"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 32,
+                          "x": 346,
+                          "y": 372
+                        },
+                        "hit_point": {
+                          "x": 362,
+                          "y": 380
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Ports"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 217,
+                          "x": 617,
+                          "y": 372
+                        },
+                        "hit_point": {
+                          "x": 725.5,
+                          "y": 380
+                        },
+                        "identifier": "sample.sheet.ports",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "ankiconnect default, migaku default"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 82.5,
+                          "x": 346,
+                          "y": 396
+                        },
+                        "hit_point": {
+                          "x": 387.25,
+                          "y": 404
+                        },
+                        "identifier": "",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "Core features"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 16,
+                          "width": 118.5,
+                          "x": 715.5,
+                          "y": 396
+                        },
+                        "hit_point": {
+                          "x": 774.75,
+                          "y": 404
+                        },
+                        "identifier": "sample.sheet.coreFeatures",
+                        "label": "",
+                        "selected": false,
+                        "type": "staticText",
+                        "value": "ankiweb,test-hooks"
+                      },
+                      {
+                        "children": [],
+                        "enabled": true,
+                        "focused": false,
+                        "frame": {
+                          "height": 24,
+                          "width": 56,
+                          "x": 346,
+                          "y": 420
+                        },
+                        "hit_point": {
+                          "x": 374,
+                          "y": 432
+                        },
+                        "identifier": "sample.sheet.done",
+                        "label": "Done",
+                        "selected": false,
+                        "type": "button",
+                        "value": null
+                      }
+                    ],
+                    "enabled": false,
+                    "focused": false,
+                    "frame": {
+                      "height": 560,
+                      "width": 520,
+                      "x": 330,
+                      "y": 140
+                    },
+                    "hit_point": {
+                      "x": 590,
+                      "y": 420
+                    },
+                    "identifier": "",
+                    "label": "",
+                    "selected": false,
+                    "type": "scrollView",
+                    "value": null
+                  }
+                ],
+                "enabled": false,
+                "focused": false,
+                "frame": {
+                  "height": 560,
+                  "width": 520,
+                  "x": 330,
+                  "y": 140
+                },
+                "hit_point": {
+                  "x": 590,
+                  "y": 420
+                },
+                "identifier": "",
+                "label": "",
+                "selected": false,
+                "type": "group",
+                "value": null
+              }
+            ],
+            "enabled": false,
+            "focused": false,
+            "frame": {
+              "height": 560,
+              "width": 520,
+              "x": 330,
+              "y": 140
+            },
+            "hit_point": {
+              "x": 590,
+              "y": 420
+            },
+            "identifier": "",
+            "label": "",
+            "selected": false,
+            "type": "sheet",
+            "value": null
+          }
+        ],
+        "enabled": false,
+        "focused": false,
+        "frame": {
+          "height": 780,
+          "width": 1180,
+          "x": 0,
+          "y": 30
+        },
+        "hit_point": {
+          "x": 590,
+          "y": 420
+        },
+        "identifier": "main",
+        "label": "",
+        "selected": false,
+        "type": "window",
+        "value": null
+      },
+      {
+        "children": [],
+        "enabled": false,
+        "focused": false,
+        "frame": {
+          "height": 30,
+          "width": 685,
+          "x": 80,
+          "y": 0
+        },
+        "hit_point": null,
+        "identifier": "",
+        "label": "",
+        "selected": false,
+        "type": "touchBar",
+        "value": null
+      }
+    ],
+    "enabled": false,
+    "focused": false,
+    "frame": {
+      "height": 0,
+      "width": 0,
+      "x": 0,
+      "y": 0
+    },
+    "hit_point": null,
+    "identifier": "",
+    "label": "",
+    "selected": false,
+    "type": "application",
+    "value": null
+  },
+  "schema": 1,
+  "screenshot": {
+    "origin": {
+      "x": 0,
+      "y": 30
+    },
+    "scale": 2
+  },
+  "window": {
+    "height": 780,
+    "width": 1180,
+    "x": 0,
+    "y": 30
+  }
+}

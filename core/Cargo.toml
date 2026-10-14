@@ -44,6 +44,12 @@ meguri-text = { path = "crates/meguri-text" }
 # load time. Only meguri-ffi and tools/uniffi-bindgen-swift may use it.
 uniffi = { version = "=0.32.2", default-features = false }
 
+# Deck description rendering (meguri-text, specs/text/description-html.md):
+# Meguri-defined output with no oracle parity, exact-pinned so the sanitizer's
+# parse tree changes only by a deliberate bump.
+html5ever = "=0.39.0"
+pulldown-cmark = { version = "=0.13.4", default-features = false, features = ["html"] }
+
 # Workspace tooling.
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 serde = { version = "1.0.228", features = ["derive"] }

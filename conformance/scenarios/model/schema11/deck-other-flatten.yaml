@@ -1,0 +1,13 @@
+# The deck `other` bytes flatten into the schema-11 object (schema11-json S3):
+# common.other = {"browser_collapsed":true,"extendNew":10,"x_addon":[1]} and
+# extend_new = 3. Expected: browser_collapsed and x_addon at the top level;
+# extendNew is a reserved key, so the object's extendNew is 3, from the record.
+id: model/schema11/deck-other-flatten
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+steps:
+  - db_exec:
+      sql: "UPDATE decks SET common = CAST(common || X'fa0f377b2262726f777365725f636f6c6c6170736564223a747275652c22657874656e644e6577223a31302c22785f6164646f6e223a5b315d7d' AS BLOB), kind = X'0a0408011003' WHERE name = 'Words'"
+  - observe:
+      - legacy_json: {decks: [Words]}

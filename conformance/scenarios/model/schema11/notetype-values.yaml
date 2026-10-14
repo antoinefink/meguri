@@ -1,0 +1,31 @@
+# Schema-11 note type values into the record (schema11-json S4-S6): lenient and
+# bool-from-anything readers, defaults for missing keys, unknown keys kept in
+# other at all three levels, did 0 meaning none, an out-of-range bsize.
+id: model/schema11/notetype-values
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update:
+      notetype: Pair
+      patch:
+        latexPre: "% pre"
+        latexPost: "% post"
+        latexsvg: "1"
+        css: 5
+        originalId: 123
+        vers: []
+        flds:
+          - {name: Front, ord: 0, sticky: "1", rtl: "TRUE", font: Arial, size: 20, description: 5, plainText: "yes", collapsed: "TRUE", excludeFromSearch: 0, id: "12", tag: 7, preventDeletion: "x", media: []}
+          - {name: Back, ord: 1, sticky: "0.0", rtl: "False", font: "Noto Sans", size: 18, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", did: 0, bfont: 3, bsize: 300, id: 2001, zz_tmpl: "k"}
+  - db_exec: {sql: "SELECT hex(config) FROM notetypes WHERE name = 'Pair'"}
+  - db_exec: {sql: "SELECT f.ord, f.name, hex(f.config) FROM fields f JOIN notetypes n ON n.id = f.ntid WHERE n.name = 'Pair' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT t.ord, t.name, hex(t.config) FROM templates t JOIN notetypes n ON n.id = t.ntid WHERE n.name = 'Pair' ORDER BY t.ord"}
+  - observe:
+      - legacy_json: {notetypes: [Pair]}

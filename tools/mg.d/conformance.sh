@@ -120,9 +120,14 @@ mg_conformance() {
   fi
   trap 'mg_conf__cleanup; exit 143' TERM
   MG_CONF_LANES=""
-  local failed=false rc
+  local failed=false rc actors
 
   if [ "$live" = true ]; then
+    # Actor scenarios' workers need this run's fault proxy (sync-ops.md S8.2).
+    actors="$(mg_oracle__actor_scenarios ${filters[0]+"${filters[@]}"})" || return 0
+    if [ -n "$actors" ]; then
+      mg_oracle__sync_faults || return 0
+    fi
     mg_conf__record_stale ${filters[0]+"${filters[@]}"} || failed=true
   fi
 
@@ -166,6 +171,7 @@ mg_conformance() {
 
   if [ "$live" = true ]; then
     mg_conf__live_replay "$jobs" ${filters[0]+"${filters[@]}"} || failed=true
+    mg_oracle__sync_stop
   fi
 
   mg_detail lanes "$(printf '%s' "$MG_CONF_LANES" | jq -sc 'add // {}')"
@@ -230,9 +236,11 @@ EOF
 }
 
 # T1 (dsl.md D10): live oracle workers replay the selected scenarios against
-# their goldens (any difference or error fails, active or not), and live
-# scenarios run as Meguri/oracle chains through a handoff directory the
-# workers mount at /handoff.
+# their goldens (any difference or error fails, active or not), live chains run
+# as Meguri/oracle chains through a handoff directory the workers mount at
+# /handoff, and actor scenarios run in the parties executor. The workers get
+# this run's fault proxy API (ORACLE_SYNC_FAULTS), which meguri-cli checks with
+# the endpoint guard before it starts any worker (sync-ops.md S8.3).
 mg_conf__live_replay() {
   local jobs="$1" live="$MG_RUN_DIR/t1-live.json" handoff="$MG_RUN_DIR/handoff" cmd rc
   shift
@@ -241,10 +249,11 @@ mg_conf__live_replay() {
   fi
   mkdir -p "$handoff" "$MG_ROOT/conformance/fixtures"
   cmd="$(jq -nc --arg p "$(mg_compose_project)" --arg f "$MG_ROOT/docker/compose.yml" --arg l "meguri.mg.run-id=$MG_RUN_ID" \
-    --arg h "$handoff:/handoff" --arg x "$MG_ROOT/conformance/fixtures:/fixtures:ro" \
+    --arg h "$handoff:/handoff" --arg x "$MG_ROOT/conformance/fixtures:/fixtures:ro" --arg faults "$MG_ORACLE_SYNC_FAULTS" \
     '["docker", "compose", "-p", $p, "-f", $f, "run", "--rm", "-T", "--no-deps", "--label", $l, "-e", "TZ={tz}",
-      "-v", $h, "-e", "ORACLE_HANDOFF=/handoff", "-v", $x, "-e", "ORACLE_FIXTURES=/fixtures", "oracle"]')"
-  MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_ORACLE_CONTEXT="$MG_ORACLE_DIR" \
+      "-v", $h, "-e", "ORACLE_HANDOFF=/handoff", "-v", $x, "-e", "ORACLE_FIXTURES=/fixtures"]
+     + (if $faults == "" then [] else ["-e", "ORACLE_SYNC_FAULTS=" + $faults] end) + ["oracle"]')"
+  MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_ORACLE_CONTEXT="$MG_ORACLE_DIR" ORACLE_SYNC_FAULTS="$MG_ORACLE_SYNC_FAULTS" \
     mg_conf__cli_native conformance run --live --conformance "$MG_ROOT/conformance" --lane live-oracle \
     --oracle-cmd "$cmd" --jobs "$jobs" --handoff-dir "$handoff" --report "$live" "$@"
   rc=$?

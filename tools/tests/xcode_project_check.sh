@@ -2,7 +2,8 @@
 # Checks of the Xcode project (U7), run by `tools/mg xcode-check` on the host;
 # prints TAP.
 #
-# usage: xcode_project_check.sh <work dir> [--iphone UDID] [--ipad UDID] [--no-ui]
+# usage: xcode_project_check.sh <work dir> [--phase builds|devices [--continue-from N]]
+#          [--iphone UDID] [--ipad UDID] [--no-ui]
 #
 # Builds every configuration for the Mac and the iPhone and iPad simulators
 # into <work dir>/DerivedData and checks build settings, zero warnings, the
@@ -10,7 +11,14 @@
 # and Profile, absent in Release and AppStore), folder-synchronized groups
 # and the test plans, launches the Mac Debug app hidden on Home and on every
 # test-hook route and checks it stays up, then runs the Unit plan, the
-# app-hosted tests and TestHooksTests (into <work dir>/DerivedData-tests).
+# app-hosted tests, TestHooksTests and the agent driver's DriveScriptTests
+# (into <work dir>/DerivedData-tests).
+#
+# Phases: `builds` is everything up to the Mac checks (no launch, no
+# simulator, no test run, no TAP plan line); `devices` is the rest: the
+# hidden Mac launches of the Debug app `builds` left, the simulator builds
+# and every test run, numbered from N + 1. `tools/mg xcode-check` takes the
+# host lease between the two (tools/mg.d/host.sh). Without --phase, both.
 # Without --iphone/--ipad it leases the simulators from the shared pool
 # (tools/scripts/sim-pool.sh) after the Mac configuration builds, and releases
 # them at exit; it never creates, shuts down or deletes a simulator (root
@@ -28,11 +36,21 @@ shift
 IPHONE=""
 IPAD=""
 UI=true
+PHASE=all
+FIRST=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --iphone) IPHONE="${2:?}" && shift ;;
     --ipad) IPAD="${2:?}" && shift ;;
     --no-ui) UI=false ;;
+    --phase)
+      case "${2:-}" in builds | devices) PHASE="$2" ;; *) echo "xcode_project_check: --phase takes builds or devices" >&2 && exit 2 ;; esac
+      shift
+      ;;
+    --continue-from)
+      case "${2:-}" in "" | *[!0-9]*) echo "xcode_project_check: --continue-from takes a test count" >&2 && exit 2 ;; esac
+      FIRST="$2" && shift
+      ;;
     *) echo "xcode_project_check: unknown argument '$1'" >&2 && exit 2 ;;
   esac
   shift
@@ -47,14 +65,15 @@ LOGS="$WORK/logs"
 mkdir -p "$LOGS"
 # Build settings are read once per run, and every product checked below is
 # signed by this run (a test build into the same DerivedData would have
-# re-signed them with test entitlements).
-rm -rf "$WORK"/settings-*.txt "$DD/Build/Products"
+# re-signed them with test entitlements). The devices phase uses the Debug
+# app the builds phase left.
+[ "$PHASE" = devices ] || rm -rf "$WORK"/settings-*.txt "$DD/Build/Products" "$WORK/mac-debug-built"
 PROJECT="$REPO/app/Meguri.xcodeproj"
 STAMP="$REPO/app/Packages/MeguriCore/Binaries/.stamp"
 CONFIGS="Debug Profile Release AppStore"
 POOL="$REPO/tools/scripts/sim-pool.sh"
 
-N=0
+N="$FIRST"
 FAILED=0
 ok() { N=$((N + 1)) && echo "ok $N $1"; }
 not_ok() {
@@ -70,6 +89,11 @@ check() { # check <name> <command...>: ok when the command succeeds; its output 
   shift
   if out="$("$@" 2>&1)"; then ok "$name"; else not_ok "$name" "${out:-exit $?}"; fi
 }
+builds_phase() { [ "$PHASE" != devices ]; }
+devices_phase() { [ "$PHASE" != builds ]; }
+# Written by the builds phase when mac-Debug built: the devices phase
+# launches that app.
+MAC_DEBUG_BUILT="$WORK/mac-debug-built"
 
 # Xcode registers every Mac app it builds with LaunchServices, and the widget
 # inside with PlugInKit. Release and AppStore carry the daily-driver ids: left
@@ -209,15 +233,17 @@ no_build_settings_in_pbxproj() {
 }
 
 # --- Project structure ------------------------------------------------------
-list="$(xcodebuild -list -json -project "$PROJECT" 2>/dev/null)"
-check "the project has the four targets, configurations and shared schemes" jq -e '
-  .project
-  | (.targets == ["Meguri", "MeguriWidget", "MeguriUITests", "MeguriSnapshotTests"])
-    and (.configurations == ["Debug", "Profile", "Release", "AppStore"])
-    and ((.schemes | index("Meguri")) != null) and ((.schemes | index("Meguri-Profile")) != null)
-    and ((.schemes | index("Meguri-AppStore")) != null)' <<<"$list"
+if builds_phase; then
+  list="$(xcodebuild -list -json -project "$PROJECT" 2>/dev/null)"
+  check "the project has the four targets, configurations and shared schemes" jq -e '
+    .project
+    | (.targets == ["Meguri", "MeguriWidget", "MeguriUITests", "MeguriSnapshotTests"])
+      and (.configurations == ["Debug", "Profile", "Release", "AppStore"])
+      and ((.schemes | index("Meguri")) != null) and ((.schemes | index("Meguri-Profile")) != null)
+      and ((.schemes | index("Meguri-AppStore")) != null)' <<<"$list"
 
-check "project.pbxproj holds no build settings (they live in app/Config)" no_build_settings_in_pbxproj
+  check "project.pbxproj holds no build settings (they live in app/Config)" no_build_settings_in_pbxproj
+fi
 
 # routes_from_source: the test-hook routes, read from their registrations
 # (`register("area/screen")`), for the hidden-launch check below. Fails when a
@@ -232,7 +258,9 @@ routes_from_source() {
   [ -n "$routes" ] || { echo "no route registration in $dir" && return 1; }
   echo "$routes"
 }
-if ROUTES="$(routes_from_source 2>&1)"; then
+if ! builds_phase; then
+  ROUTES="$(routes_from_source 2>/dev/null)" || ROUTES=""
+elif ROUTES="$(routes_from_source 2>&1)"; then
   ok "test-hook routes are registered with literal paths: ${ROUTES//$'\n'/ }"
 else
   not_ok "test-hook routes are registered with literal paths" "$ROUTES"
@@ -248,45 +276,51 @@ conditions_ok() { # conditions_ok <config> <sdk> <hooks yes|no> <ankiweb yes|no>
   case "$c" in *" ANKIWEB_ENABLED "*) [ "$4" = yes ] || { echo "ANKIWEB_ENABLED in '$c'" && return 1; } ;;
     *) [ "$4" = no ] || { echo "no ANKIWEB_ENABLED in '$c'" && return 1; } ;; esac
 }
-for config in $CONFIGS; do
-  case "$config" in
-    Debug | Profile) hooks=yes ankiweb=yes features=ankiweb,test-hooks id=com.antoinefink.meguri.dev ;;
-    Release) hooks=no ankiweb=yes features=ankiweb id=com.antoinefink.meguri ;;
-    AppStore) hooks=no ankiweb=no features="" id=com.antoinefink.meguri ;;
-  esac
-  for sdk in macosx iphonesimulator; do
-    check "$config $sdk: compilation conditions (hooks $hooks, AnkiWeb $ankiweb)" conditions_ok "$config" "$sdk" "$hooks" "$ankiweb"
-    check "$config $sdk: core features '$features'" expect_setting "$config" "$sdk" MEGURI_CORE_FEATURES "$features"
-    check "$config $sdk: bundle id $id" expect_setting "$config" "$sdk" PRODUCT_BUNDLE_IDENTIFIER "$id"
-    check "$config $sdk: arm64 only" expect_setting "$config" "$sdk" ARCHS arm64
+if builds_phase; then
+  for config in $CONFIGS; do
+    case "$config" in
+      Debug | Profile) hooks=yes ankiweb=yes features=ankiweb,test-hooks id=com.antoinefink.meguri.dev ;;
+      Release) hooks=no ankiweb=yes features=ankiweb id=com.antoinefink.meguri ;;
+      AppStore) hooks=no ankiweb=no features="" id=com.antoinefink.meguri ;;
+    esac
+    for sdk in macosx iphonesimulator; do
+      check "$config $sdk: compilation conditions (hooks $hooks, AnkiWeb $ankiweb)" conditions_ok "$config" "$sdk" "$hooks" "$ankiweb"
+      check "$config $sdk: core features '$features'" expect_setting "$config" "$sdk" MEGURI_CORE_FEATURES "$features"
+      check "$config $sdk: bundle id $id" expect_setting "$config" "$sdk" PRODUCT_BUNDLE_IDENTIFIER "$id"
+      check "$config $sdk: arm64 only" expect_setting "$config" "$sdk" ARCHS arm64
+    done
+    check "$config: iOS App Group group.$id" expect_setting "$config" iphonesimulator MEGURI_APP_GROUP "group.$id"
+    check "$config: Mac App Group DNQ34W43XX.$id" expect_setting "$config" macosx MEGURI_APP_GROUP "DNQ34W43XX.$id"
+    case "$config" in
+      Debug) check "Debug: debugger entitlement, no hardened runtime" bash -c '[ "$1" = YES ] && [ "$2" = NO ]' _ \
+        "$(setting Debug macosx CODE_SIGN_INJECT_BASE_ENTITLEMENTS)" "$(setting Debug macosx ENABLE_HARDENED_RUNTIME)" ;;
+      *) check "$config: no debugger entitlement, hardened runtime on the Mac" bash -c '[ "$1" = NO ] && [ "$2" = YES ]' _ \
+        "$(setting "$config" macosx CODE_SIGN_INJECT_BASE_ENTITLEMENTS)" "$(setting "$config" macosx ENABLE_HARDENED_RUNTIME)" ;;
+    esac
   done
-  check "$config: iOS App Group group.$id" expect_setting "$config" iphonesimulator MEGURI_APP_GROUP "group.$id"
-  check "$config: Mac App Group DNQ34W43XX.$id" expect_setting "$config" macosx MEGURI_APP_GROUP "DNQ34W43XX.$id"
-  case "$config" in
-    Debug) check "Debug: debugger entitlement, no hardened runtime" bash -c '[ "$1" = YES ] && [ "$2" = NO ]' _ \
-      "$(setting Debug macosx CODE_SIGN_INJECT_BASE_ENTITLEMENTS)" "$(setting Debug macosx ENABLE_HARDENED_RUNTIME)" ;;
-    *) check "$config: no debugger entitlement, hardened runtime on the Mac" bash -c '[ "$1" = NO ] && [ "$2" = YES ]' _ \
-      "$(setting "$config" macosx CODE_SIGN_INJECT_BASE_ENTITLEMENTS)" "$(setting "$config" macosx ENABLE_HARDENED_RUNTIME)" ;;
-  esac
-done
 
-# --- Test plans (R1866, R1953) ----------------------------------------------
-for plan in Unit UI Snapshot Performance; do
-  check "test plan $plan has no automatic retries" jq -e '
-    [.defaultOptions, (.configurations[].options)] | all(
-      ((.testRepetitionMode // "none") == "none") and (has("maximumTestRepetitions") | not))' \
-    "$REPO/app/TestPlans/$plan.xctestplan"
-done
-check "test plan Performance: no coverage, no sanitizers, no screenshots, not parallel" jq -e '
-  .defaultOptions as $o
-  | ($o.codeCoverage == false) and ($o.addressSanitizer.enabled == false) and ($o.threadSanitizerEnabled == false)
-    and ($o.undefinedBehaviorSanitizerEnabled == false) and ($o.uiTestingScreenshotsLifetime == "keepNever")
-    and (.testTargets | all(.parallelizable == false))' "$REPO/app/TestPlans/Performance.xctestplan"
-check "scheme Meguri-Profile tests in Profile without a debugger" bash -c '
-  f="$1/app/Meguri.xcodeproj/xcshareddata/xcschemes/Meguri-Profile.xcscheme"
-  [ "$(xmllint --xpath "string(//TestAction/@buildConfiguration)" "$f")" = Profile ] &&
-  [ -z "$(xmllint --xpath "string(//TestAction/@selectedDebuggerIdentifier)" "$f")" ] &&
-  [ "$(xmllint --xpath "string(//BuildActionEntry/@buildForArchiving)" "$f")" = NO ]' _ "$REPO"
+  # --- Test plans (R1866, R1953) --------------------------------------------
+  for plan in Unit UI Snapshot Performance; do
+    check "test plan $plan has no automatic retries" jq -e '
+      [.defaultOptions, (.configurations[].options)] | all(
+        ((.testRepetitionMode // "none") == "none") and (has("maximumTestRepetitions") | not))' \
+      "$REPO/app/TestPlans/$plan.xctestplan"
+  done
+  check "test plan Performance: no coverage, no sanitizers, no screenshots, not parallel" jq -e '
+    .defaultOptions as $o
+    | ($o.codeCoverage == false) and ($o.addressSanitizer.enabled == false) and ($o.threadSanitizerEnabled == false)
+      and ($o.undefinedBehaviorSanitizerEnabled == false) and ($o.uiTestingScreenshotsLifetime == "keepNever")
+      and (.testTargets | all(.parallelizable == false))' "$REPO/app/TestPlans/Performance.xctestplan"
+  # XCTest's own failure attachments include a recording of the whole screen:
+  # on the Mac, the user's desktop. UI tests attach what they need themselves.
+  check "test plan UI keeps no system attachments" jq -e '.defaultOptions.uiTestingScreenshotsLifetime == "keepNever"' \
+    "$REPO/app/TestPlans/UI.xctestplan"
+  check "scheme Meguri-Profile tests in Profile without a debugger" bash -c '
+    f="$1/app/Meguri.xcodeproj/xcshareddata/xcschemes/Meguri-Profile.xcscheme"
+    [ "$(xmllint --xpath "string(//TestAction/@buildConfiguration)" "$f")" = Profile ] &&
+    [ -z "$(xmllint --xpath "string(//TestAction/@selectedDebuggerIdentifier)" "$f")" ] &&
+    [ "$(xmllint --xpath "string(//BuildActionEntry/@buildForArchiving)" "$f")" = NO ]' _ "$REPO"
+fi
 
 # --- Builds -----------------------------------------------------------------
 # build <name> <config> <destination>: xcodebuild build with a result bundle;
@@ -348,91 +382,101 @@ stays_up() {
 
 KTD22="com.apple.security.app-sandbox com.apple.security.network.client com.apple.security.network.server com.apple.security.files.user-selected.read-write com.apple.security.files.bookmarks.app-scope"
 FIXTURES=com.apple.security.temporary-exception.files.absolute-path.read-only
-for config in $CONFIGS; do
-  case "$config" in
-    Debug | Profile) features=ankiweb,test-hooks ;;
-    Release) features=ankiweb ;;
-    AppStore) features="" ;;
-  esac
-  build "mac-$config" "$config" "platform=macOS,arch=arm64" || { forget_mac_app "$config"; continue; }
-  app="$DD/Build/Products/$config/Meguri.app"
-  check "mac-$config links the $config core (features '$features')" stamp_is "$config" "$features" mac
-  case "$config" in
-    Debug)
-      # shellcheck disable=SC2086
-      check "mac-Debug entitlements: KTD22 set, fixture read access, debugger" entitlements_are "$app" $KTD22 $FIXTURES com.apple.security.get-task-allow
-      check "mac-Debug fixture read access is the checkout, read-only" expect_entitlement "$app" "$FIXTURES" "[\"$REPO/\"]" ;;
-    Profile)
-      # shellcheck disable=SC2086
-      check "mac-Profile entitlements: KTD22 set and fixture read access" entitlements_are "$app" $KTD22 $FIXTURES ;;
-    *)
-      # shellcheck disable=SC2086
-      check "mac-$config entitlements are exactly the KTD22 set (ad hoc: no App Group)" entitlements_are "$app" $KTD22
-      check "mac-$config has the hardened runtime" hardened "$app" ;;
-  esac
-  widget=com.apple.security.app-sandbox
-  [ "$config" != Debug ] || widget="$widget com.apple.security.get-task-allow"
-  # shellcheck disable=SC2086
-  check "mac-$config widget entitlements: sandbox only (ad hoc)" entitlements_are "$app/Contents/PlugIns/MeguriWidget.appex" $widget
-  check "mac-$config app and widget are arm64 only" bash -c '
-    [ "$(lipo -archs "$1/Contents/MacOS/Meguri")" = arm64 ] &&
-    [ "$(lipo -archs "$1/Contents/PlugIns/MeguriWidget.appex/Contents/MacOS/MeguriWidget")" = arm64 ] ||
-    { lipo -archs "$1/Contents/MacOS/Meguri"; exit 1; }' _ "$app"
-  # shellcheck disable=SC2046
-  markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"
-  case "$config" in
-    Debug | Profile) check "mac-$config contains the test hooks (found: $markers)" \
-      bash -c 'case "$1" in TestHooks*" rust") ;; *) exit 1 ;; esac' _ "$markers" ;;
-    *) check "mac-$config contains no test hook (found: $markers)" test "$markers" = "- -" ;;
-  esac
-  if [ "$config" = Debug ]; then
-    check "mac-Debug launched hidden stays up: Home" stays_up "$app"
-    for route in $ROUTES; do
-      check "mac-Debug launched hidden stays up: route $route" stays_up "$app" -MeguriRoute "$route"
-    done
-  fi
-  forget_mac_app "$config"
-done
-
-# not_registered <app...>: the apps are gone, and LaunchServices and PlugInKit
-# hold no record of them or of anything inside them.
-not_registered() {
-  local records app found left=""
-  records="$("$LSREGISTER" -dump 2>/dev/null | sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p'
-    pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
-  for app in "$@"; do
-    [ ! -e "$app" ] || left="$left$app is still on disk"$'\n'
-    found="$(awk -v p="$app" '$0 == p || index($0, p "/") == 1 { print $0 " is registered" }' <<<"$records")"
-    [ -z "$found" ] || left="$left$found"$'\n'
+if builds_phase; then
+  for config in $CONFIGS; do
+    case "$config" in
+      Debug | Profile) features=ankiweb,test-hooks ;;
+      Release) features=ankiweb ;;
+      AppStore) features="" ;;
+    esac
+    build "mac-$config" "$config" "platform=macOS,arch=arm64" || { forget_mac_app "$config"; continue; }
+    app="$DD/Build/Products/$config/Meguri.app"
+    check "mac-$config links the $config core (features '$features')" stamp_is "$config" "$features" mac
+    case "$config" in
+      Debug)
+        # shellcheck disable=SC2086
+        check "mac-Debug entitlements: KTD22 set, fixture read access, debugger" entitlements_are "$app" $KTD22 $FIXTURES com.apple.security.get-task-allow
+        check "mac-Debug fixture read access is the checkout, read-only" expect_entitlement "$app" "$FIXTURES" "[\"$REPO/\"]" ;;
+      Profile)
+        # shellcheck disable=SC2086
+        check "mac-Profile entitlements: KTD22 set and fixture read access" entitlements_are "$app" $KTD22 $FIXTURES ;;
+      *)
+        # shellcheck disable=SC2086
+        check "mac-$config entitlements are exactly the KTD22 set (ad hoc: no App Group)" entitlements_are "$app" $KTD22
+        check "mac-$config has the hardened runtime" hardened "$app" ;;
+    esac
+    widget=com.apple.security.app-sandbox
+    [ "$config" != Debug ] || widget="$widget com.apple.security.get-task-allow"
+    # shellcheck disable=SC2086
+    check "mac-$config widget entitlements: sandbox only (ad hoc)" entitlements_are "$app/Contents/PlugIns/MeguriWidget.appex" $widget
+    check "mac-$config app and widget are arm64 only" bash -c '
+      [ "$(lipo -archs "$1/Contents/MacOS/Meguri")" = arm64 ] &&
+      [ "$(lipo -archs "$1/Contents/PlugIns/MeguriWidget.appex/Contents/MacOS/MeguriWidget")" = arm64 ] ||
+      { lipo -archs "$1/Contents/MacOS/Meguri"; exit 1; }' _ "$app"
+    # shellcheck disable=SC2046
+    markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"
+    case "$config" in
+      Debug | Profile) check "mac-$config contains the test hooks (found: $markers)" \
+        bash -c 'case "$1" in TestHooks*" rust") ;; *) exit 1 ;; esac' _ "$markers" ;;
+      *) check "mac-$config contains no test hook (found: $markers)" test "$markers" = "- -" ;;
+    esac
+    [ "$config" != Debug ] || : >"$MAC_DEBUG_BUILT"
+    forget_mac_app "$config"
   done
-  [ -z "$left" ] || { printf '%s' "$left" && return 1; }
-}
-check "mac Release and AppStore apps are deleted and unregistered (LaunchServices, PlugInKit)" \
-  not_registered "$DD/Build/Products/Release/Meguri.app" "$DD/Build/Products/AppStore/Meguri.app"
 
-# Pool devices are leased only now, after the Mac configuration builds, so
-# that other agents can use them meanwhile.
-[ -n "$IPHONE" ] || { lease iphone iPhone && IPHONE="$LEASE"; }
-[ -n "$IPAD" ] || { lease ipad iPad && IPAD="$LEASE"; }
-if [ -n "$IPHONE" ] && build "iphone-Debug" Debug "id=$IPHONE"; then
-  check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
-  check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
-    com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'
+  # not_registered <app...>: the apps are gone, and LaunchServices and
+  # PlugInKit hold no record of them or of anything inside them.
+  not_registered() {
+    local records app found left=""
+    records="$("$LSREGISTER" -dump 2>/dev/null | sed -n 's/^path: *\(.*\) (0x[0-9a-fA-F]*)$/\1/p'
+      pluginkit -mADvvv -i com.antoinefink.meguri.widget 2>/dev/null | sed -n 's/^[[:space:]]*Path = //p')"
+    for app in "$@"; do
+      [ ! -e "$app" ] || left="$left$app is still on disk"$'\n'
+      found="$(awk -v p="$app" '$0 == p || index($0, p "/") == 1 { print $0 " is registered" }' <<<"$records")"
+      [ -z "$found" ] || left="$left$found"$'\n'
+    done
+    [ -z "$left" ] || { printf '%s' "$left" && return 1; }
+  }
+  check "mac Release and AppStore apps are deleted and unregistered (LaunchServices, PlugInKit)" \
+    not_registered "$DD/Build/Products/Release/Meguri.app" "$DD/Build/Products/AppStore/Meguri.app"
 
+  # --- Folder-synchronized groups -------------------------------------------
+  probe="SyncedFolderProbe$$"
+  if printf 'enum %s {\n    static let marker = "%s"\n}\n' "$probe" "$probe" >"$REPO/app/Meguri/App/$probe.swift" &&
+    build "mac-Debug-probe" Debug "platform=macOS,arch=arm64"; then
+    # shellcheck disable=SC2046
+    check "a new Swift file under app/Meguri is compiled" \
+      perl -e 'my $p = shift; local $/; for (@ARGV) { open(my $h, "<:raw", $_) or die; exit 0 if index(<$h>, $p) >= 0 } exit 1' \
+      "$probe" $(executables "$DD/Build/Products/Debug/Meguri.app/Contents/MacOS" Meguri)
+    check "adding it needed no project change" git -C "$REPO" diff --quiet -- app/Meguri.xcodeproj
+  fi
+  rm -f "$REPO/app/Meguri/App/$probe.swift"
 fi
-[ -z "$IPAD" ] || build "ipad-Debug" Debug "id=$IPAD"
 
-# --- Folder-synchronized groups ---------------------------------------------
-probe="SyncedFolderProbe$$"
-if printf 'enum %s {\n    static let marker = "%s"\n}\n' "$probe" "$probe" >"$REPO/app/Meguri/App/$probe.swift" &&
-  build "mac-Debug-probe" Debug "platform=macOS,arch=arm64"; then
-  # shellcheck disable=SC2046
-  check "a new Swift file under app/Meguri is compiled" \
-    perl -e 'my $p = shift; local $/; for (@ARGV) { open(my $h, "<:raw", $_) or die; exit 0 if index(<$h>, $p) >= 0 } exit 1' \
-    "$probe" $(executables "$DD/Build/Products/Debug/Meguri.app/Contents/MacOS" Meguri)
-  check "adding it needed no project change" git -C "$REPO" diff --quiet -- app/Meguri.xcodeproj
+# --- Launches and simulators (the devices phase) ----------------------------
+# Hidden launches of the Mac Debug app the builds left, on Home and on every
+# test-hook route.
+if devices_phase && [ -f "$MAC_DEBUG_BUILT" ]; then
+  app="$DD/Build/Products/Debug/Meguri.app"
+  check "mac-Debug launched hidden stays up: Home" stays_up "$app"
+  for route in $ROUTES; do
+    check "mac-Debug launched hidden stays up: route $route" stays_up "$app" -MeguriRoute "$route"
+  done
 fi
-rm -f "$REPO/app/Meguri/App/$probe.swift"
+
+if devices_phase; then
+  # Pool devices are leased only now, after the Mac configuration builds, so
+  # that other agents can use them meanwhile.
+  [ -n "$IPHONE" ] || { lease iphone iPhone && IPHONE="$LEASE"; }
+  [ -n "$IPAD" ] || { lease ipad iPad && IPAD="$LEASE"; }
+  if [ -n "$IPHONE" ] && build "iphone-Debug" Debug "id=$IPHONE"; then
+    check "iphone-Debug links the Debug core with the simulator slice" stamp_is Debug ankiweb,test-hooks sim
+    check "iphone-Debug entitlements: the .dev App Group" expect_sim_entitlement "$DD/Build/Products/Debug-iphonesimulator/Meguri.app/Meguri" \
+      com.apple.security.application-groups '["group.com.antoinefink.meguri.dev"]'
+
+  fi
+  [ -z "$IPAD" ] || build "ipad-Debug" Debug "id=$IPAD"
+fi
 
 # --- Tests ------------------------------------------------------------------
 # run_tests <name> <scheme> <plan> <config> <destination> [-only-testing:...]
@@ -455,7 +499,7 @@ run_tests() {
   fi
 }
 
-if [ "$UI" = true ]; then
+if devices_phase && [ "$UI" = true ]; then
   run_tests mac-unit Meguri Unit Debug "platform=macOS,arch=arm64"
   run_tests mac-app-hosted Meguri Snapshot Debug "platform=macOS,arch=arm64"
   # Mac XCUITest takes over the cursor and keyboard: it runs only through
@@ -472,9 +516,11 @@ if [ "$UI" = true ]; then
     done
     # Profile through its own scheme and the Performance plan (no debugger).
     run_tests iphone-Profile-TestHooksTests Meguri-Profile Performance Profile "id=$IPHONE" -only-testing:MeguriUITests/TestHooksTests
+    # The agent driver's script parser (U8); it launches no app.
+    run_tests iphone-Debug-DriveScriptTests Meguri UI Debug "id=$IPHONE" -only-testing:MeguriUITests/DriveScriptTests
   fi
   [ -z "$IPAD" ] || run_tests ipad-Debug-TestHooksTests Meguri UI Debug "id=$IPAD" -only-testing:MeguriUITests/TestHooksTests
 fi
 
-echo "1..$N"
+[ "$PHASE" = builds ] || echo "1..$N"
 [ "$FAILED" -eq 0 ]
