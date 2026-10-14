@@ -425,7 +425,7 @@ mg_drive__job() {
       udid="$MG_SIM_UDID"
       mg_sim_check_runtime "$udid" || return 0
     fi
-    mg_sim_prepare "$udid"
+    mg_sim_prepare "$udid" || return 0
   fi
   mg_drive_run "$script" "$platform" "$udid" "$config" "$record" "$MG_RUN_DIR"
   local rc=$? manifest="$MG_RUN_DIR/manifest.json"
@@ -542,7 +542,7 @@ mg_screenshot__device() {
   mg_sim_check_owned "$udid" || return 0
   mg_sim_check_runtime "$udid" || return 0
   mg_host_lease || return 0
-  mg_sim_prepare "$udid"
+  mg_sim_prepare "$udid" || return 0
   if ! xcrun simctl io "$udid" screenshot "$png" >&2 || [ ! -s "$png" ]; then
     mg_failure screenshot "simctl io screenshot failed"
     mg_status error

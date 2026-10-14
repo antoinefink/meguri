@@ -796,7 +796,24 @@ EOF
   : >"$STUB_LOG"
   mg sim-setup
   expect "rerun creates nothing" "$(grep -c '^xcrun simctl create ' "$STUB_LOG")" 0 &&
-    expect "same iPhone" "$(jq -r '.devices.iphone.udids[0]' "$SB/build/sim-devices.local.json")" "$u"
+    expect "same iPhone" "$(jq -r '.devices.iphone.udids[0]' "$SB/build/sim-devices.local.json")" "$u" || return 1
+
+  # A recording under macOS bash and BSD ps: the worker holds the lease, is
+  # known by its pid and start time, and releases the lease (under the
+  # lease's mutex) when record stop ends it.
+  local state worker
+  u="$(cd "$SB" && tools/scripts/sim-pool.sh acquire iphone --holder selftest 2>/dev/null)"
+  mg record start --device "$u"
+  state="$SB/build/mg/record/active/$u.json"
+  worker="$(jq -r .pid "$state" 2>/dev/null)"
+  expect "record start" "$RC $(field .status)" "0 pass" &&
+    expect "worker start time" "$(jq -r .pid_started "$state")" "$(ps -o lstart= -p "$worker" | sed 's/[[:space:]]*$//')" &&
+    expect "the worker holds the lease" "$(jq -r '"\(.pid) \(.kind)"' "$MEGURI_HOST_LEASE_DIR/holder.json")" "$worker recording" || return 1
+  mg record stop --device "$u"
+  "$SB/tools/scripts/sim-pool.sh" release "$u" >/dev/null 2>&1
+  expect "record stop" "$RC $(field .status) $(field .details.recording.reason)" "0 pass stopped" &&
+    expect "the worker ended" "$(kill -0 "$worker" 2>/dev/null && echo running || echo ended)" ended &&
+    expect "the lease is free" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free
 }
 
 t_results_validate_against_schema() {

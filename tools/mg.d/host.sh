@@ -85,6 +85,10 @@ mg_host_session_state() {
   echo ok
 }
 
+# Every lease change but taking a free lease runs under its mutex.
+# shellcheck source=/dev/null
+. "$MG_TOOLS/scripts/host-lease-mutex.sh"
+
 # mg__lease_stale <lock dir> <holder JSON>: whether the holder died, or died
 # between mkdir and writing holder.json.
 mg__lease_stale() {
@@ -92,6 +96,26 @@ mg__lease_stale() {
   pid="$(jq -r '.pid // empty' <<<"$2" 2>/dev/null)"
   { [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; } ||
     { [ -z "$pid" ] && [ -n "$(find "$1" -maxdepth 0 -mmin +2 2>/dev/null)" ]; }
+}
+
+# mg__lease_remove_stale <slot dir> <holder JSON read>: under the mutex,
+# removes the slot if it still holds what was read and is still stale.
+# Another waiter may have removed it and taken the lease meanwhile.
+mg__lease_remove_stale() {
+  host_lease_lock "$(mg_host_lease_dir)" || return 1
+  if [ "$(cat "$1/holder.json" 2>/dev/null)" = "$2" ] && mg__lease_stale "$1" "$2"; then
+    echo "host lease: removing a stale lease ($(jq -r '"\(.job) in \(.worktree), pid \(.pid)"' <<<"$2" 2>/dev/null || echo unknown))" >&2
+    rm -rf "$1"
+  fi
+  host_lease_unlock
+}
+
+# mg__lease_write <slot dir> <nested true|false>: this job's holder.json.
+mg__lease_write() {
+  jq -n --arg job "$MG_JOB" --arg run "${MG_RUN_ID:-}" --argjson pid "$$" --arg wt "$MG_ROOT" --arg at "$(mg__iso "$(mg__epoch)")" \
+    --argjson nested "$2" \
+    '{job: $job, run_id: $run, pid: $pid, worktree: $wt, started_at: $at} + (if $nested then {nested: true} else {} end)' >"$1/holder.json.tmp" &&
+    mv -f "$1/holder.json.tmp" "$1/holder.json"
 }
 
 # mg_host_lease: takes the host lease, waiting while another job holds it,
@@ -102,7 +126,9 @@ mg__lease_stale() {
 # it holds it for this checkout, this checkout's jobs take the one nested slot
 # <lease>/inner instead, so that the recording can film them; other checkouts
 # keep queueing. A nested job still running when the recording stops inherits
-# the lease (tools/scripts/sim-record.sh).
+# the lease (tools/scripts/sim-record.sh). The nested slot is taken, and the
+# recording's lease released, under the lease's mutex
+# (tools/scripts/host-lease-mutex.sh).
 mg_host_lease() {
   local dir wait="${MEGURI_HOST_LEASE_WAIT_SECONDS:-3600}" poll="${MEGURI_HOST_LEASE_POLL_SECONDS:-5}"
   local start holder inner announced="" lock
@@ -116,26 +142,39 @@ mg_host_lease() {
   while :; do
     if mkdir "$dir" 2>/dev/null; then
       lock="$dir"
+      mg__lease_write "$lock" false
       break
     fi
     holder="$(cat "$dir/holder.json" 2>/dev/null)"
     if mg__lease_stale "$dir" "$holder"; then
-      echo "host lease: removing a stale lease ($(jq -r '"\(.job) in \(.worktree), pid \(.pid)"' <<<"$holder" 2>/dev/null || echo unknown))" >&2
-      rm -rf "$dir"
+      mg__lease_remove_stale "$dir" "$holder" || mg_sleep "$poll"
       continue
     fi
     if [ "$(jq -r '"\(.kind // "")|\(.worktree // "")"' <<<"$holder" 2>/dev/null)" = "recording|$MG_ROOT" ]; then
-      # mkdir fails when the recording released the lease meanwhile; the next
-      # round takes the lease itself.
+      # The nested slot is taken under the mutex, so the recording cannot
+      # release or hand over the lease between its mkdir and holder.json.
+      if ! host_lease_lock "$dir"; then
+        mg_sleep "$poll"
+        continue
+      fi
+      if [ "$(cat "$dir/holder.json" 2>/dev/null)" != "$holder" ]; then
+        # The recording released or handed over the lease since it was read.
+        host_lease_unlock
+        continue
+      fi
       if mkdir "$dir/inner" 2>/dev/null; then
         lock="$dir/inner"
+        mg__lease_write "$lock" true
+        host_lease_unlock
         break
       fi
       inner="$(cat "$dir/inner/holder.json" 2>/dev/null)"
-      if [ -d "$dir/inner" ] && mg__lease_stale "$dir/inner" "$inner"; then
+      if mg__lease_stale "$dir/inner" "$inner"; then
         rm -rf "$dir/inner"
+        host_lease_unlock
         continue
       fi
+      host_lease_unlock
       [ -z "$inner" ] || holder="$inner"
     fi
     if [ $(($(mg__epoch) - start)) -ge "$wait" ]; then
@@ -151,9 +190,6 @@ mg_host_lease() {
     fi
     mg_sleep "$poll"
   done
-  jq -n --arg job "$MG_JOB" --arg run "${MG_RUN_ID:-}" --argjson pid "$$" --arg wt "$MG_ROOT" --arg at "$(mg__iso "$(mg__epoch)")" \
-    --argjson nested "$([ "$lock" = "$dir" ] && echo false || echo true)" \
-    '{job: $job, run_id: $run, pid: $pid, worktree: $wt, started_at: $at} + (if $nested then {nested: true} else {} end)' >"$lock/holder.json"
   mg_on_exit "mg__host_lease_release '$dir' $$"
   mg_detail host_lease "$(jq -c --argjson waited "$(($(mg__epoch) - start))" '. + {waited_s: $waited}' "$lock/holder.json")"
   [ -z "$announced" ] || echo "host lease: taken after $(($(mg__epoch) - start)) s" >&2
@@ -181,11 +217,14 @@ mg_host_lease() {
 # nested one or the lease), and nothing else: a lease handed to a recording
 # (mg_host_lease_transfer) or inherited from one stays with its holder.
 mg__host_lease_release() {
+  local locked=0
+  host_lease_lock "$1" && locked=1
   if [ "$(jq -r '.pid // empty' "$1/inner/holder.json" 2>/dev/null)" = "$2" ]; then
     rm -rf "$1/inner"
   elif [ "$(jq -r '.pid // empty' "$1/holder.json" 2>/dev/null)" = "$2" ]; then
     rm -rf "$1"
   fi
+  [ "$locked" = 0 ] || host_lease_unlock
 }
 
 # mg_host_lease_transfer <pid> <JSON object>: hands the slot this job holds
@@ -194,17 +233,21 @@ mg__host_lease_release() {
 # releases it; until then other jobs wait for it, and the slot turns stale
 # when it dies. Returns 1 when this job holds no slot.
 mg_host_lease_transfer() {
-  local dir slot
+  local dir slot rc=0
   dir="$(mg_host_lease_dir)"
+  host_lease_lock "$dir" || return 1
   if [ "$(jq -r '.pid // empty' "$dir/inner/holder.json" 2>/dev/null)" = "$$" ]; then
     slot="$dir/inner"
   elif [ "$(jq -r '.pid // empty' "$dir/holder.json" 2>/dev/null)" = "$$" ]; then
     slot="$dir"
   else
+    host_lease_unlock
     return 1
   fi
   jq --argjson pid "$1" --argjson extra "$2" '. + $extra + {pid: $pid}' "$slot/holder.json" >"$slot/holder.json.tmp" &&
-    mv -f "$slot/holder.json.tmp" "$slot/holder.json"
+    mv -f "$slot/holder.json.tmp" "$slot/holder.json" || rc=1
+  host_lease_unlock
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------

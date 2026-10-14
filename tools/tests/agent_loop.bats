@@ -48,6 +48,15 @@ setup() {
 
 teardown() {
   pkill -f "$BATS_TEST_TMPDIR/bin/caffeinate" 2>/dev/null || true
+  [ ! -f "$BATS_TEST_TMPDIR/bg.pids" ] || xargs kill <"$BATS_TEST_TMPDIR/bg.pids" 2>/dev/null || true
+}
+
+# bg_live: starts a process that lives a minute, a stand-in holder; sets
+# BG_PID. teardown kills it.
+bg_live() {
+  sleep 60 >/dev/null 2>&1 3>&- &
+  BG_PID=$!
+  echo "$BG_PID" >>"$BATS_TEST_TMPDIR/bg.pids"
 }
 
 stub() { printf '#!/bin/bash\n%s\n' "$2" >"$BIN/$1" && chmod +x "$BIN/$1"; }
@@ -86,6 +95,35 @@ fx_gate() {
 EOF
   export FX_LOG="$BATS_TEST_TMPDIR/fx.log"
   : >"$FX_LOG"
+}
+
+# mutex_hold: holds the host lease's mutex (tools/scripts/host-lease-mutex.sh)
+# from a background process until mutex_free, as a job taking its nested slot
+# or a recording releasing its lease would.
+mutex_hold() {
+  rm -f "$BATS_TEST_TMPDIR/mutex.held" "$BATS_TEST_TMPDIR/mutex.free"
+  perl -MFcntl=:flock -MTime::HiRes=sleep -e '
+    open(my $f, ">>", $ARGV[0]) or die "$ARGV[0]: $!\n";
+    flock($f, LOCK_EX) or die "flock: $!\n";
+    open(my $h, ">", $ARGV[1]) or die; close $h;
+    sleep 0.05 until -e $ARGV[2];' \
+    "$MEGURI_HOST_LEASE_DIR.mutex" "$BATS_TEST_TMPDIR/mutex.held" "$BATS_TEST_TMPDIR/mutex.free" >/dev/null 2>&1 3>&- &
+  MUTEX_PID=$!
+  for _ in $(seq 1 50); do [ -e "$BATS_TEST_TMPDIR/mutex.held" ] && return 0; sleep 0.1; done
+  echo "the test could not take the mutex"
+  return 1
+}
+mutex_free() { touch "$BATS_TEST_TMPDIR/mutex.free" && wait "$MUTEX_PID"; }
+
+# waiting_for_mutex: whether some process waits for the lease's mutex
+# (host_lease_lock's perl), within 5 s.
+waiting_for_mutex() {
+  for _ in $(seq 1 50); do
+    pgrep -f 'timed out after 30 s' >/dev/null && return 0
+    sleep 0.1
+  done
+  echo "nothing waits for the host lease's mutex"
+  return 1
 }
 
 # Fakes for a drive: the build, the XCUITest run and its result bundle, and
@@ -247,6 +285,33 @@ EOF
   [ -f "$MEGURI_SIM_POOL_DIR/leases/$u/lease.json" ]
 }
 
+@test "sim-reset waits for the host lease, then checks again that the device is still this checkout's" {
+  add_fixture_jobs
+  local u drive reset theirs
+  u="$(lease_in_sandbox iphone)"
+  FX_HOLD=3 "$SB/tools/mg" fx-lease drive >/dev/null 2>&1 &
+  drive=$!
+  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+  "$SB/tools/mg" sim-reset "$u" >"$BATS_TEST_TMPDIR/reset.out" 2>"$BATS_TEST_TMPDIR/reset.err" &
+  reset=$!
+  for _ in $(seq 1 50); do grep -q 'host lease: waiting' "$BATS_TEST_TMPDIR/reset.err" && break; sleep 0.1; done
+  grep -q 'host lease: waiting for fx-lease' "$BATS_TEST_TMPDIR/reset.err"
+  # While it queues, the device goes back to the pool and another checkout
+  # leases it.
+  "$POOL" release "$u" 2>/dev/null
+  theirs="$(cd "$BATS_TEST_TMPDIR" && "$POOL" acquire iphone --holder other 2>/dev/null)"
+  [ "$theirs" = "$u" ]
+  sim __app "$u" com.example.theirs User
+  : >"$STUB_LOG"
+  wait "$drive"
+  wait "$reset" || true
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/reset.out")"
+  [ "$(field '.failures[0].id')" = device ]
+  [[ "$(field '.failures[0].message')" == *"leased to other in $BATS_TEST_TMPDIR"* ]]
+  not_called "simctl (uninstall|privacy|keychain|ui|status_bar) "
+  sim __apps "$u" | grep -qx com.example.theirs
+}
+
 @test "a simulator leased from another checkout or outside the pool is refused" {
   local theirs mine
   theirs="$(cd "$BATS_TEST_TMPDIR" && "$POOL" acquire iphone --holder other 2>/dev/null)"
@@ -289,6 +354,26 @@ EOF
   [ "$(field '.details.host_lease.job')" = fx-lease ]
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
   called "^caffeinate -d -i -w "
+}
+
+@test "two worktrees of one repository share one host lease, in the main checkout" {
+  add_fixture_jobs
+  unset MEGURI_HOST_LEASE_DIR
+  local wt="$BATS_TEST_TMPDIR/wt" first
+  git -C "$SB" worktree add -q -b wt "$wt"
+  wt="$(cd "$wt" && pwd -P)"
+  cp "$SB/tools/mg.d/zz-fixture.sh" "$wt/tools/mg.d/"
+  FX_HOLD=2 "$wt/tools/mg" fx-lease a >/dev/null 2>&1 &
+  first=$!
+  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+  [ "$(jq -r '"\(.job) \(.worktree)"' "$SB/build/mg/host.lock/holder.json")" = "fx-lease $wt" ]
+  [ ! -e "$wt/build/mg/host.lock" ]
+  FX_HOLD=0 mg fx-lease b
+  wait "$first"
+  [ "$status" -eq 0 ]
+  [ "$(awk '{print $1 $2}' "$FX_LOG" | tr '\n' ' ')" = "starta enda startb endb " ]
+  [[ "$stderr" == *"host lease: waiting for fx-lease in $wt"* ]]
+  [ ! -e "$SB/build/mg/host.lock" ]
 }
 
 @test "a locked session makes the job report blocked: host, not fail, and frees the lease" {
@@ -354,6 +439,51 @@ EOF
   stub ps "printf '  303 $daily/Contents/MacOS/Meguri\n'"
   mg fx-mac
   [ "$status" -eq 0 ]
+}
+
+@test "xcode-check builds without the host lease, then queues for it before launches, simulators and tests" {
+  add_fixture_jobs
+  cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
+mg_lint_ui_first() { return 0; }
+mg__xcframework() { return 0; }
+EOF
+  # The project check logs each phase it runs and where its numbering starts.
+  cat >"$SB/tools/tests/xcode_project_check.sh" <<'EOF'
+#!/bin/bash
+phase=all first=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in --phase) phase="$2" && shift ;; --continue-from) first="$2" && shift ;; esac
+  shift
+done
+echo "phase $phase from $first" >>"$FX_LOG"
+if [ "$phase" = builds ]; then
+  echo "ok 1 mac-Debug builds"
+  echo "not ok 2 mac-Profile builds"
+  exit 1
+fi
+echo "ok $((first + 1)) mac-Debug launched hidden stays up: Home"
+echo "1..$((first + 1))"
+EOF
+  FX_HOLD=3 "$SB/tools/mg" fx-lease a >/dev/null 2>&1 &
+  local first=$!
+  for _ in $(seq 1 50); do [ -s "$FX_LOG" ] && break; sleep 0.1; done
+  mg xcode-check
+  wait "$first"
+  [ "$status" -eq 1 ]
+  [ "$(awk '{print $1 $2}' "$FX_LOG" | tr '\n' ' ')" = "starta phasebuilds enda phasedevices " ]
+  [ "$(awk '$2 == "devices" {print $4}' "$FX_LOG")" = 2 ]
+  [[ "$stderr" == *"host lease: waiting for fx-lease in $SB"* ]]
+  [ "$(field '.details.host_lease.job')" = xcode-check ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "3 2 1" ]
+  [ "$(field '.failures[0].id')" = "mac-Profile builds" ]
+
+  # A Mac that cannot take the lease keeps the builds' results.
+  : >"$FX_LOG"
+  STUB_LOCKED=1 mg xcode-check
+  [ "$status" -eq 2 ]
+  [ "$(cat "$FX_LOG")" = "phase builds from 0" ]
+  [ "$(field '[.failures[].id] | sort | join(" ")')" = "blocked-host mac-Profile builds" ]
+  [ "$(field '.summary.total')" = 2 ]
 }
 
 # --- Mac UI gate ----------------------------------------------------------------
@@ -520,6 +650,66 @@ EOF
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
+@test "a recording releases its lease under the mutex: a nested slot half-taken meanwhile inherits the lease" {
+  local u worker status_file stop nested
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  worker="$(jq -r .pid "$SB/build/mg/record/active/$u.json")"
+  status_file="$(jq -r .status "$SB/build/mg/record/active/$u.json")"
+  # A job of this checkout between the mkdir of its nested slot and its
+  # holder.json, holding the mutex.
+  mutex_hold
+  mkdir "$MEGURI_HOST_LEASE_DIR/inner"
+  "$SB/tools/mg" record stop --device "$u" >"$BATS_TEST_TMPDIR/stop.out" 2>/dev/null &
+  stop=$!
+  for _ in $(seq 1 50); do [ -s "$status_file" ] && break; sleep 0.1; done
+  [ -s "$status_file" ]
+  waiting_for_mutex
+  # The recording waits for the mutex: it neither released nor deleted the lease.
+  [ -d "$MEGURI_HOST_LEASE_DIR/inner" ]
+  [ "$(jq -r .pid "$MEGURI_HOST_LEASE_DIR/holder.json")" = "$worker" ]
+  bg_live
+  nested=$BG_PID
+  jq -n --argjson p "$nested" --arg wt "$SB" '{job: "fx-lease", pid: $p, worktree: $wt, started_at: "now", nested: true}' \
+    >"$MEGURI_HOST_LEASE_DIR/inner/holder.json"
+  mutex_free
+  wait "$stop"
+  [ "$(jq -r .status "$(tail -n 1 "$BATS_TEST_TMPDIR/stop.out")")" = pass ]
+  [ "$(jq -r '"\(.pid) \(.job) \(.nested // "none")"' "$MEGURI_HOST_LEASE_DIR/holder.json")" = "$nested fx-lease none" ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  kill "$nested"
+}
+
+@test "a nested job waiting for the mutex starts over when the recording's lease changed meanwhile" {
+  add_fixture_jobs
+  local u job other result_b
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  mutex_hold
+  MEGURI_HOST_LEASE_WAIT_SECONDS=3 FX_HOLD=0 "$SB/tools/mg" fx-lease nested >"$BATS_TEST_TMPDIR/nested.out" 2>/dev/null &
+  job=$!
+  waiting_for_mutex
+  [ ! -s "$FX_LOG" ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  # Meanwhile the recording ended and another checkout took the lease.
+  bg_live
+  other=$BG_PID
+  jq -n --argjson p "$other" '{job: "busy", pid: $p, worktree: "/elsewhere", started_at: "now"}' >"$MEGURI_HOST_LEASE_DIR/holder.json"
+  mutex_free
+  wait "$job" || true
+  result_b="$(tail -n 1 "$BATS_TEST_TMPDIR/nested.out")"
+  [ "$(jq -r '.failures[0].id' "$result_b")" = host-busy ]
+  [[ "$(jq -r '.failures[0].message' "$result_b")" == *"busy in /elsewhere"* ]]
+  [ ! -s "$FX_LOG" ]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR/inner" ]
+  kill "$other"
+  mg record stop --device "$u"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .job "$MEGURI_HOST_LEASE_DIR/holder.json")" = busy ]
+}
+
 @test "a recording stops itself at the limit and frees the lease; record stop then warns" {
   local u
   u="$(lease_in_sandbox iphone)"
@@ -532,6 +722,49 @@ EOF
   [ "$(field .status)" = warn ]
   [[ "$(field .message)" == *"stopped at the 1 s limit"* ]]
   [ -n "$(field '.artifacts[] | select(.kind == "video") | .path')" ]
+}
+
+@test "record stop signals no process that took over the pid of a worker stopped at the limit" {
+  local u state live
+  u="$(lease_in_sandbox iphone)"
+  MEGURI_RECORD_MAX_SECONDS=1 mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  state="$SB/build/mg/record/active/$u.json"
+  for _ in $(seq 1 60); do [ -e "$MEGURI_HOST_LEASE_DIR" ] || break; sleep 0.1; done
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  # The worker exited; its pid now runs something else.
+  bg_live
+  live=$BG_PID
+  jq --argjson p "$live" '.pid = $p' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+  mg record stop --device "$u"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  kill -0 "$live"
+  kill "$live"
+}
+
+@test "record stop of a killed worker whose pid was reused signals nothing and frees the worker's slot" {
+  local u state worker live
+  u="$(lease_in_sandbox iphone)"
+  mg record start --device "$u"
+  [ "$status" -eq 0 ]
+  state="$SB/build/mg/record/active/$u.json"
+  worker="$(jq -r .pid "$state")"
+  # SIGKILL: no status file, and the slot stays; the worker leads its group.
+  kill -9 -- "-$worker"
+  for _ in $(seq 1 50); do kill -0 "$worker" 2>/dev/null || break; sleep 0.1; done
+  [ -d "$MEGURI_HOST_LEASE_DIR" ]
+  # The pid now runs something else; the slot names it, so it never looks stale.
+  bg_live
+  live=$BG_PID
+  jq --argjson p "$live" '.pid = $p' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+  jq --argjson p "$live" '.pid = $p' "$MEGURI_HOST_LEASE_DIR/holder.json" >"$BATS_TEST_TMPDIR/h" && mv "$BATS_TEST_TMPDIR/h" "$MEGURI_HOST_LEASE_DIR/holder.json"
+  mg record stop --device "$u"
+  [ "$status" -eq 2 ]
+  [[ "$(field '.failures[0].message')" == *"ended before record stop (the worker died)"* ]]
+  kill -0 "$live"
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+  kill "$live"
 }
 
 @test "a recorder that fails on its own ends the recording; record stop reports it as an error" {
@@ -589,6 +822,29 @@ EOF
   not_called "simctl (install|launch) |status_bar [^ ]+ override|simctl io |fake xcodebuild-test"
   # run gives back the simulator it leased for the refused launch.
   [ -z "$("$POOL" status 2>/dev/null | jq -r --arg w "$SB" '.devices[] | select(.kind == "iphone" and .lease.worktree == $w) | .udid')" ]
+}
+
+@test "a failed status-bar override stops run, drive, screenshot, record and sim-reset with an error" {
+  add_drive_fakes
+  local u args leased
+  u="$(lease_in_sandbox iphone)"
+  export FAKE_SIM_STATUS_BAR_FAIL=1
+  : >"$STUB_LOG"
+  for args in "run --platform iphone --device $u --route sample/sheet" "run --platform iphone --route sample/sheet" \
+    "drive $SB/tools/drive-scripts/examples/open-sample-sheet.json --device $u" "screenshot --device $u" \
+    "record start --device $u" "sim-reset $u"; do
+    # shellcheck disable=SC2086
+    mg $args
+    [ "$status" -eq 2 ] || { echo "tools/mg $args exited $status"; return 1; }
+    [ "$(field '.failures[0].id')" = status-bar ] || { echo "tools/mg $args: $(field '.failures')"; return 1; }
+    [[ "$(field '.failures[0].message')" == *"status_bar override failed on "* ]]
+  done
+  called "simctl status_bar $u override "
+  not_called "simctl (install|launch) |simctl io |fake xcodebuild-test"
+  [ ! -e "$SB/build/mg/record/active/$u.json" ]
+  # run gives back the simulator it leased itself.
+  leased="$("$POOL" status 2>/dev/null | jq -r --arg w "$SB" '[.devices[] | select(.lease.worktree == $w) | .udid] | join(" ")')"
+  [ "$leased" = "$u" ]
 }
 
 # --- drive: capture results ------------------------------------------------------

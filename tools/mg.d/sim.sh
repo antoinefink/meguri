@@ -108,7 +108,7 @@ mg_sim__details() {
 mg_job sim-setup host mg_sim_setup \
   "Check the pinned iOS runtime build and device types (tools/sim-devices.json) and make sure the pool has one device of each kind (creating it through sim-pool.sh); writes build/sim-devices.local.json. [--kinds k1,k2]"
 mg_job sim-reset host mg_sim_reset \
-  "Reset a pool simulator this checkout leased (user apps, privacy, keychain, UI options, status bar) and keep the lease: <udid>"
+  "Reset a pool simulator this checkout leased (user apps, privacy, keychain, UI options, status bar) and keep the lease, under the host lease: <udid>"
 
 # The newest available iOS runtime (the pool's): identifier, version, build.
 mg_sim__pool_runtime() {
@@ -200,15 +200,21 @@ mg_sim_setup() {
   fi
 }
 
+# A reset uninstalls the apps, the UI-test runner included: it waits for the
+# host lease like any job that uses a simulator, so it never pulls the app
+# from under a drive of this checkout, and checks the lease again once it
+# holds the host (the device may have been released meanwhile).
 mg_sim_reset() {
   [ "$#" -eq 1 ] || { mg_sim__usage "usage: tools/mg sim-reset <udid>"; return 0; }
+  mg_sim_check_owned "$1" || return 0
+  mg_host_lease || return 0
   mg_sim_check_owned "$1" || return 0
   if ! "$MG_TOOLS/scripts/sim-pool.sh" reset "$1"; then
     mg_failure sim-pool "sim-pool.sh reset $1 failed; see log.txt"
     mg_status error
     return 0
   fi
-  mg_sim_prepare "$1"
+  mg_sim_prepare "$1" || return 0
   mg_message "sim-reset: $1 is reset and still leased"
   mg_status pass
 }

@@ -16,7 +16,8 @@
 # recordVideo ... <file>` writes the file and runs until SIGINT (with
 # FAKE_SIM_RECORD_EMPTY=1 the file is empty; FAKE_SIM_RECORD_EXIT_AFTER=<s>
 # makes it fail after that long); `io <udid> screenshot <file>` writes a
-# stand-in PNG.
+# stand-in PNG. FAKE_SIM_STATUS_BAR_FAIL=1 makes `status_bar <udid> override`
+# fail.
 
 set -u
 [ "${1:-}" = simctl ] || { echo "fake xcrun: only simctl is faked" >&2; exit 97; }
@@ -143,6 +144,10 @@ EOF
     ;;
   privacy\ * | keychain\ * | ui\ * | status_bar\ * | install\ * | launch\ *)
     need_booted "$2" "$1"
+    if [ "$1 ${3:-}" = "status_bar override" ] && [ "${FAKE_SIM_STATUS_BAR_FAIL:-}" = 1 ]; then
+      echo "fake simctl: status_bar override failed" >&2
+      exit 1
+    fi
     ;;
   io\ *)
     need_booted "$2" io

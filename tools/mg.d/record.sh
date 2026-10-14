@@ -60,6 +60,23 @@ mg_record__stop_recorder() {
   wait "$1" 2>/dev/null
 }
 
+# mg_record__proc_start <pid>: when the process started (ps lstart); empty
+# when no such process runs.
+mg_record__proc_start() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/[[:space:]]*$//'; }
+
+# mg_record__worker_alive <state file>: whether the recording worker the
+# state names still runs. A worker that stopped at the limit leaves its state
+# until record stop, and its PID may belong to another process by then: the
+# process must have the worker's start time and run sim-record.sh.
+mg_record__worker_alive() {
+  local pid started
+  pid="$(jq -r '.pid // empty' "$1" 2>/dev/null)"
+  started="$(jq -r '.pid_started // empty' "$1" 2>/dev/null)"
+  [ -n "$pid" ] && [ -n "$started" ] && [ "$(mg_record__proc_start "$pid")" = "$started" ] || return 1
+  case "$(ps -o command= -p "$pid" 2>/dev/null)" in *sim-record.sh*) return 0 ;; esac
+  return 1
+}
+
 # Set once record start has handed the lease and the recording to the worker;
 # until then, the job's exit stops the worker (cancellation, failures).
 MG_RECORD_HANDED=""
@@ -86,7 +103,7 @@ mg_record() {
 
 mg_record__start() {
   local udid="$1" state="$MG_RECORD_ACTIVE/$1.json"
-  if [ -f "$state" ] && kill -0 "$(jq -r .pid "$state")" 2>/dev/null; then
+  if [ -f "$state" ] && mg_record__worker_alive "$state"; then
     mg_failure recording "$udid is already being recorded into $(jq -r .video "$state")" "tools/mg record stop --device $udid"
     mg_status error
     return 0
@@ -94,7 +111,7 @@ mg_record__start() {
   mg_sim_check_owned "$udid" || return 0
   mg_sim_check_runtime "$udid" || return 0
   mg_host_lease || return 0
-  mg_sim_prepare "$udid"
+  mg_sim_prepare "$udid" || return 0
   local video="$MG_RUN_DIR/video.mp4" log="$MG_RUN_DIR/recorder.log" status="$MG_RUN_DIR/recording-status.json"
   local max="${MEGURI_RECORD_MAX_SECONDS:-600}" pid
   case "$max" in "" | *[!0-9]* | 0) max=600 ;; esac
@@ -116,9 +133,9 @@ mg_record__start() {
     return 0
   fi
   MG_RECORD_HANDED=1
-  jq -n --arg u "$udid" --argjson pid "$pid" --arg v "$video" --arg log "$log" --arg st "$status" \
+  jq -n --arg u "$udid" --argjson pid "$pid" --arg ps "$(mg_record__proc_start "$pid")" --arg v "$video" --arg log "$log" --arg st "$status" \
     --argjson t "$MG_RECORD_STARTED" --arg run "$MG_RUN_ID" --argjson max "$max" \
-    '{udid: $u, pid: $pid, video: $v, log: $log, status: $st, started_epoch: $t, run_id: $run, max_seconds: $max}' >"$state"
+    '{udid: $u, pid: $pid, pid_started: $ps, video: $v, log: $log, status: $st, started_epoch: $t, run_id: $run, max_seconds: $max}' >"$state"
   mg_detail recording "$(cat "$state")"
   mg_message "record: recording $udid into $video (it holds the host lease; this checkout's jobs run inside it); stop with tools/mg record stop --device $udid (at the latest after $max s)"
   mg_status pass
@@ -136,16 +153,28 @@ mg_record__stop() {
   video="$(jq -r .video "$state")"
   status="$(jq -r '.status // empty' "$state")"
   max="$(jq -r '.max_seconds // "?"' "$state")"
-  kill -TERM "$pid" 2>/dev/null
-  for i in $(seq 1 200); do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.1
-  done
-  if kill -0 "$pid" 2>/dev/null; then
-    # The worker leads its own process group: end it with the recorder.
-    kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+  if [ -s "$status" ]; then
+    # The worker ended on its own (the limit, or the recorder exited) or is
+    # ending: it writes its status, then releases its slot. Nothing to signal.
+    for i in $(seq 1 50); do
+      mg_record__worker_alive "$state" || break
+      sleep 0.1
+    done
+  elif mg_record__worker_alive "$state"; then
+    kill -TERM "$pid" 2>/dev/null
+    for i in $(seq 1 200); do
+      mg_record__worker_alive "$state" || break
+      sleep 0.1
+    done
+    if mg_record__worker_alive "$state"; then
+      # The worker leads its own process group: end it with the recorder.
+      kill -9 -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+      mg__host_lease_release "$(mg_host_lease_dir)" "$pid"
+      mg_failure record "the recording worker did not stop within 20 s; the video may be unusable"
+    fi
+  else
+    # The worker died without a status (killed): release the slot it held.
     mg__host_lease_release "$(mg_host_lease_dir)" "$pid"
-    mg_failure record "the recording worker did not stop within 20 s; the video may be unusable"
   fi
   reason="$(jq -r '.reason // empty' "$status" 2>/dev/null)"
   mg_detail recording "$(jq -c --arg at "$(mg__hires_now)" --arg r "${reason:-unknown}" \

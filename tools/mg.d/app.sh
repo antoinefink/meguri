@@ -177,13 +177,19 @@ mg_sim_check_runtime() {
 }
 
 # mg_sim_prepare <udid>: the pinned status bar (R1966), after every boot and
-# reset; pool devices stay booted, so before every use.
+# reset; pool devices stay booted, so before every use. Captures with the live
+# clock and battery would not match the baselines: when the override fails,
+# records the failure (error) and returns 1, and the job stops.
 mg_sim_prepare() {
   local args
   args="$(jq -r '.status_bar | to_entries[] | "--\(.key)\n\(.value)"' tools/sim-devices.json)"
   local a=() line
   while IFS= read -r line; do a[${#a[@]}]="$line"; done <<<"$args"
-  xcrun simctl status_bar "$1" override "${a[@]}" >&2 || echo "$MG_JOB: could not override the status bar of $1" >&2
+  xcrun simctl status_bar "$1" override "${a[@]}" >&2 && return 0
+  mg_failure status-bar "simctl status_bar override failed on $1; nothing was captured with the live status bar (R1966)" "$MG_DEFAULT_REPRO"
+  mg_message "$MG_JOB: could not pin the status bar of $1"
+  mg_status error
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -314,7 +320,10 @@ mg_run() {
       return 0
     fi
   fi
-  mg_sim_prepare "$udid"
+  if ! mg_sim_prepare "$udid"; then
+    [ -n "$MG_D_UDID" ] || "$MG_TOOLS/scripts/sim-pool.sh" release "$udid" >&2
+    return 0
+  fi
   app="$(mg_app_products ios-sim "$MG_D_CONFIG")/Meguri.app"
   if ! xcrun simctl install "$udid" "$app" >&2; then
     mg_failure install "simctl install failed on $udid"
