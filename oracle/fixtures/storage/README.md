@@ -22,6 +22,15 @@ full checkout; it needs Docker with linux/amd64 emulation.
 - `make.py` uses each release's own Python API, with fallbacks for the names
   that changed between 2.1.26 and 26.09.3, then edits the closed file with
   `sqlite3`. It checks `col.ver` after the release closes the file.
+- No stock note type text in any file, free pages included (R1959): `make.py`
+  turns on `secure_delete` on Anki's own connection (`col.db`) right after the
+  release creates the collection, before anything rewrites or deletes a row
+  holding stock text; without it the deleted note types stay in free space.
+  Each release then checks the file it wrote, and `stock-check` checks all 17
+  against 26.09.3's stock note types: no 16-byte piece of any stock CSS or
+  template (raw or JSON-escaped) may appear in the bytes, except pieces the
+  recipe's own `Pair` and `Gap` hold. The stock text is read in memory only.
+  Never `VACUUM` a fixture below 18 (U16: it may renumber the old `graves`).
 - The clock runs (libfaketime start-at, `@<epoch>` in the timestamp file):
   2.1.26 waits for the clock to move when it picks a note type id, so a frozen
   clock hangs it. Content is made on 2026-09-01 (day 0) and day 5 (UTC).

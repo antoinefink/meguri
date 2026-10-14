@@ -49,7 +49,7 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "aa38b479e052e75b40bbe6ac498681631fbf77aadea554966696df3cb7ac2cac",
+    "driver_sha256": "8948f98c8a7cd4473077b831e79cc522cc4bfaa59454b50ea717c7b02dd2965c",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "storage/open/refuse-versions",

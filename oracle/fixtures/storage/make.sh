@@ -8,8 +8,9 @@
 #
 # Without --tag it builds the oracle image with `tools/mg oracle build`. The
 # fixtures are written only when every check passes: each release wrote the
-# schema version its recipe needs, and Anki 26.09.3 upgrades every converted
-# object with at most one unknown key (README.md).
+# schema version its recipe needs, no file holds a piece of a stock note
+# type's CSS or templates, and Anki 26.09.3 upgrades every converted object
+# with at most one unknown key (README.md).
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -75,6 +76,9 @@ if jq -e 'select(.problems != [])' "$work/upgrade-check.jsonl" >/dev/null; then
 fi
 files=()
 for f in "$work"/*.anki2; do files+=("/out/$(basename "$f")"); done
+# Each release checked its own file; this checks every finished file, the
+# derived ones included, against 26.09.3's stock note types (U16).
+current stock-check "${files[@]}" >/dev/null
 current summary "${files[@]}" >"$work/summary.jsonl"
 jq -e -s 'all(.[]; .sidecars == [])' "$work/summary.jsonl" >/dev/null
 

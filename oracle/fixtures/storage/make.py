@@ -18,9 +18,13 @@ note type ids. Driven by make.sh; see README.md for the recipes.
   python3 make.py summary FILE...     what a fixture holds, as JSON (sqlite3 only)
   python3 make.py upgrade-check FILE  (26.09.3 only) upgrade a copy with Anki and
       report every converted object whose `other` JSON has more than one key
+  python3 make.py stock-check FILE... (26.09.3 only) fail when a file still holds
+      a piece of this release's stock note type CSS or templates
 
-Only the standard and upgrade-check commands import anki; the others use
-Python's sqlite3 module on files Anki has closed.
+Only the standard, upgrade-check and stock-check commands import anki; the
+others use Python's sqlite3 module on files Anki has closed. standard turns on
+secure_delete on Anki's connection right after it opens the new collection and
+fails when the file it wrote still holds the stock text of its release.
 """
 
 from __future__ import annotations
@@ -42,6 +46,15 @@ MEGURI_FIXTURE = (
     '123456789012345678901], "d": "a/b\\u00e9\\u0001\\""}'
 )
 DYN_ADDED = 5
+# The note types of the standard content (U16).
+PAIR_TEMPLATES = [("Forward", "{{Front}}", "{{Front}} = {{Back}}"), ("Reverse", "{{Back}}", "{{Back}} = {{Front}}")]
+PAIR_CSS = ".card { font-size: 18px; color: navy; }"
+GAP_TEMPLATES = [("Gap", "{{cloze:Text}}", "{{cloze:Text}} / {{Extra}}")]
+GAP_CSS = ".cloze { color: teal; }"
+OWN_TEXT = [PAIR_CSS, GAP_CSS] + [s for t in PAIR_TEMPLATES + GAP_TEMPLATES for s in t[1:]]
+# Stock text is looked for in pieces of this many bytes, so a piece that an
+# overflow page boundary or a later write cut off is found too.
+STOCK_PIECE = 16
 
 
 # --- clock ---------------------------------------------------------------------
@@ -104,6 +117,15 @@ def remove_notetype(col, m) -> None:
         col.models.remove(int(m["id"]))
     else:
         col.models.rem(m)
+
+
+def secure_delete(col) -> None:
+    """secure_delete on Anki's own connection (U16): from here on SQLite
+    overwrites with zeros every cell it deletes and every page it frees, so the
+    deleted stock note types leave nothing in the file (R1959)."""
+    col.db.execute("pragma secure_delete = on")
+    if col.db.scalar("pragma secure_delete") != 1:
+        raise SystemExit("secure_delete did not turn on for this release's connection")
 
 
 def preset(col, name, **new):
@@ -201,18 +223,14 @@ def standard(out: str, expect_ver: int, downgrade: bool, ease_cases: bool, drop_
     path = os.path.join(work, "collection.anki2")
     set_clock(T0)
     col = open_col(path)
+    # As early as the release allows: before anything rewrites a row that holds
+    # stock text, so no stale copy of it is freed without being zeroed.
+    secure_delete(col)
     ensure_v2(col)
     stock = list(col.models.all())
-    pair = notetype(
-        col, "Pair", False, ["Front", "Back"],
-        [("Forward", "{{Front}}", "{{Front}} = {{Back}}"), ("Reverse", "{{Back}}", "{{Back}} = {{Front}}")],
-        ".card { font-size: 18px; color: navy; }",
-    )
-    gap = notetype(
-        col, "Gap", True, ["Text", "Extra"],
-        [("Gap", "{{cloze:Text}}", "{{cloze:Text}} / {{Extra}}")],
-        ".cloze { color: teal; }",
-    )
+    stock_text = stock_texts(stock)
+    pair = notetype(col, "Pair", False, ["Front", "Back"], PAIR_TEMPLATES, PAIR_CSS)
+    gap = notetype(col, "Gap", True, ["Text", "Extra"], GAP_TEMPLATES, GAP_CSS)
     for m in stock:
         remove_notetype(col, m)
 
@@ -294,6 +312,7 @@ def standard(out: str, expect_ver: int, downgrade: bool, ease_cases: bool, drop_
     finish(path, lapsed, ease, drop_keys)
     shutil.copyfile(path, out)
     shutil.rmtree(work)
+    no_stock_left([out], stock_text)
     print(json.dumps(summary(out), sort_keys=True))
 
 
@@ -598,6 +617,68 @@ def summary(path: str) -> dict:
     return out
 
 
+def stock_texts(models) -> list:
+    """[(label, text)]: the CSS and template text of the note types a release
+    created by itself. Kept in memory only, never written anywhere (R1959)."""
+    out = []
+    for m in models:
+        out.append(("%s css" % m["name"], m["css"]))
+        for t in m["tmpls"]:
+            out.append(("%s/%s front" % (m["name"], t["name"]), t["qfmt"]))
+            out.append(("%s/%s back" % (m["name"], t["name"]), t["afmt"]))
+    return out
+
+
+def _encodings(text: str) -> set:
+    """The bytes a text takes in a fixture: UTF-8 (a TEXT column or a protobuf
+    string) or the inside of a JSON string, escaped by Python or by Anki."""
+    return {text.encode(), json.dumps(text)[1:-1].encode(), json.dumps(text, ensure_ascii=False)[1:-1].encode()}
+
+
+def _pieces(blob: bytes, n: int) -> set:
+    n = min(n, len(blob))
+    return {blob[i : i + n] for i in range(len(blob) - n + 1)}
+
+
+def no_stock_left(paths, texts) -> None:
+    """Fail when any file still holds a piece of stock text anywhere in its
+    bytes, free pages and unused space inside pages included (U16). Pieces that
+    the standard content's own note types also hold ({{Front}}, {{cloze:Text}})
+    are not Anki's and are skipped."""
+    own = b"\0".join(e for t in OWN_TEXT for e in _encodings(t))
+    needles = {}
+    for label, text in texts:
+        for enc in _encodings(text):
+            needles.setdefault(label, set()).update(p for p in _pieces(enc, STOCK_PIECE) if p not in own)
+    failed = []
+    for path in paths:
+        with open(path, "rb") as f:
+            data = f.read()
+        windows = _pieces(data, STOCK_PIECE)
+        found = sorted(
+            label for label, pieces in needles.items()
+            if any(p in windows if len(p) == STOCK_PIECE else p in data for p in pieces)
+        )
+        if found:
+            failed.append("%s: %s" % (os.path.basename(path), ", ".join(found)))
+    if failed:
+        raise SystemExit("stock note type text left in a fixture:\n  " + "\n  ".join(failed))
+
+
+def stock_check(paths) -> None:
+    """(26.09.3 only) no_stock_left for finished fixtures, against the stock
+    note types this release creates, read from a scratch collection."""
+    work = tempfile.mkdtemp(prefix="stock-")
+    col = open_col(os.path.join(work, "collection.anki2"))
+    texts = stock_texts(col.models.all())
+    col.close()
+    shutil.rmtree(work)
+    if not texts:
+        raise SystemExit("this release created no stock note type")
+    no_stock_left(paths, texts)
+    print(json.dumps({"stock_check": [os.path.basename(p) for p in paths]}))
+
+
 def upgrade_check(path: str) -> dict:
     """Upgrade a copy with this image's Anki (26.09.3) and list the converted
     objects whose `other` JSON has more than one top-level key (unstable in
@@ -659,6 +740,8 @@ def main(argv) -> int:
     elif cmd == "upgrade-check":
         for path in args:
             print(json.dumps(upgrade_check(path), sort_keys=True, ensure_ascii=False))
+    elif cmd == "stock-check":
+        stock_check(args)
     else:
         print(__doc__, file=sys.stderr)
         return 64
