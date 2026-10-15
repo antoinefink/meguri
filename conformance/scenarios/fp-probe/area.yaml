@@ -1,7 +1,8 @@
 # specs/conformance/dsl.md D9.1. The fsrs_next scenarios run on Meguri's
 # sched adapter. corpus/fuzz-table stays pending until Meguri has the setup
-# sections it uses (presets, decks, notetypes, notes) and a fuzz_table
-# adapter; meanwhile tools/mg fp-probe checks the table (float-determinism.md
-# F4, F10).
+# sections it uses (presets, decks, notetypes, notes; U27-U29) and a
+# fuzz_table adapter, which U45 adds and activates it with (plan, U14
+# Verification as amended 2026-10-16). Meanwhile tools/mg fp-probe checks the
+# table (float-determinism.md F4, F10).
 area: fp-probe
 active: [next-states-edges, "corpus/next-states-*"]
