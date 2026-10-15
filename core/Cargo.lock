@@ -1152,6 +1152,7 @@ dependencies = [
  "hdrhistogram",
  "jiff",
  "libc",
+ "meguri-engine",
  "meguri-model",
  "meguri-storage",
  "meguri-sync",

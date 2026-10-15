@@ -19,11 +19,11 @@ use crate::changes::observers::{self, ObservedCommit};
 use crate::changes::stream::{EventKind, Seq};
 use crate::changes::{self, MediaNotes};
 use crate::error::EngineError;
-use crate::executor::ExecShared;
 use crate::executor::exclusive::Privilege;
 use crate::executor::op::{OpContext, OpResult, OpSpec, OpTiming, UndoMeta, WriteDelay};
 use crate::executor::preconditions::{self, TouchIndex};
 use crate::executor::source::QueueKind;
+use crate::executor::{ExecShared, WriterWake};
 use crate::lifecycle::Generation;
 use crate::monotonic;
 use crate::progress::ProgressPhase;
@@ -80,10 +80,34 @@ pub(crate) fn run(
 ) {
     let mut collection = Some(collection);
     let mut touched = TouchIndex::new(floor);
-    while let Some(task) = shared.next_task() {
+    let mut flush = WalFlush::default();
+    loop {
+        flush.observe(&shared, collection.as_ref());
+        let task = match shared.next_task(flush.due) {
+            WriterWake::Task(task) => task,
+            WriterWake::Flush => {
+                let _busy = activity.busy();
+                flush.sync(&shared, collection.as_ref());
+                continue;
+            }
+            WriterWake::Stop => break,
+        };
         {
             let _busy = activity.busy();
+            // A catalog long write/maintenance task may hold the thread past
+            // the deadline. Cover earlier commits before it starts.
+            let may_run_long = task.meta.declared.is_some()
+                || super::catalog::lookup(task.meta.name)
+                    .is_some_and(|def| def.may_declare_long_write() || def.is_maintenance_task());
+            if may_run_long && flush.due.is_some() {
+                flush.sync(&shared, collection.as_ref());
+            }
             let Task { meta, body } = task;
+            // A failed replace can still reopen a new writer in the same
+            // generation. DATA_VERSION belongs to a connection, not a file.
+            if meta.control {
+                flush.version = None;
+            }
             if let Some(error) = refusal(&shared, &meta) {
                 body.fail(error);
             } else {
@@ -108,6 +132,83 @@ pub(crate) fn run(
         && let Err(error) = collection.close()
     {
         tracing::warn!(%error, "closing the collection when the writer stopped");
+    }
+}
+
+/// Group nearby commits. Start early enough to leave room for a normal
+/// write phase (~200 ms, O8) and the full sync before C9.2's one-second bound.
+const WAL_FLUSH_DELAY: Duration = Duration::from_millis(750);
+/// The first retry after a failed sync; each further failure doubles it up
+/// to the maximum, so a lasting I/O error does not spin the writer.
+const WAL_FLUSH_RETRY: Duration = Duration::from_millis(50);
+const WAL_FLUSH_RETRY_MAX: Duration = Duration::from_secs(1);
+
+#[derive(Default)]
+struct WalFlush {
+    version: Option<(Generation, u32)>,
+    due: Option<Duration>,
+    /// Failed syncs since the last one that succeeded.
+    failures: u32,
+}
+
+impl WalFlush {
+    fn observe(&mut self, shared: &ExecShared, collection: Option<&OpenedCollection>) {
+        let Some(collection) = collection else {
+            *self = Self::default();
+            return;
+        };
+        match collection.writer().data_version() {
+            Ok(version) => {
+                let version = (shared.generation(), version);
+                if self.version != Some(version) {
+                    // Also covers commits made by the open gate or maintenance.
+                    self.due.get_or_insert_with(|| monotonic::now() + WAL_FLUSH_DELAY);
+                    self.version = Some(version);
+                }
+            }
+            Err(error) => {
+                tracing::error!(%error, "reading the writer's WAL durability token");
+                self.due.get_or_insert_with(|| monotonic::now() + WAL_FLUSH_RETRY);
+            }
+        }
+    }
+
+    fn sync(&mut self, _shared: &ExecShared, collection: Option<&OpenedCollection>) {
+        let Some(collection) = collection else {
+            *self = Self::default();
+            return;
+        };
+        // No other commit can run on this writer during xSync. Only a
+        // successful call advances coverage; a failure keeps every commit due.
+        #[cfg(feature = "test-hooks")]
+        let (started, through) = (monotonic::now(), _shared.last_seq());
+        let result = collection.writer().sync_wal();
+        #[cfg(feature = "test-hooks")]
+        if !matches!(result, Ok(false)) {
+            let completed = monotonic::now();
+            _shared.record_durability(|events| {
+                events.syncs.push(super::durability_events::WalSync {
+                    started,
+                    completed,
+                    through,
+                    succeeded: result.is_ok(),
+                });
+            });
+        }
+        match result {
+            Ok(_) => {
+                self.due = None;
+                self.failures = 0;
+            }
+            Err(error) => {
+                self.failures = self.failures.saturating_add(1);
+                let backoff = WAL_FLUSH_RETRY
+                    .saturating_mul(1 << (self.failures - 1).min(5))
+                    .min(WAL_FLUSH_RETRY_MAX);
+                tracing::error!(%error, failures = self.failures, "full sync of the collection WAL failed; retrying");
+                self.due = Some(monotonic::now() + backoff);
+            }
+        }
     }
 }
 
@@ -253,6 +354,13 @@ fn run_op<T>(
     drop(delay);
 
     let write = monotonic::now().saturating_sub(started);
+    #[cfg(feature = "test-hooks")]
+    shared.record_durability(|events| {
+        events.writes.push(super::durability_events::WritePhase {
+            started,
+            completed: monotonic::now(),
+        });
+    });
     span.record("rows", derived.rows);
     span.record("write_ms", write.as_secs_f64() * 1000.0);
     if let Some(plan) = spec.plan_time {

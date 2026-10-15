@@ -8,7 +8,8 @@ publish.workspace = true
 
 [features]
 # Test-only hooks (KTD18): the storage and model hooks (armed fault points,
-# raw SQL, the steppable clock). Never on by default or in Release.
+# raw SQL, the steppable clock) and the WAL-flush observations. Never on by
+# default or in Release; meguri-testkit turns it on.
 test-hooks = ["meguri-model/test-hooks", "meguri-storage/test-hooks"]
 
 [dependencies]
@@ -24,8 +25,9 @@ libc.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-# Turns on the storage and model test hooks for the tests (raw reads, the
-# steppable clock) and gives them fixture collections.
+# Turns on this crate's, storage's and model's test hooks for the tests (raw
+# reads, the steppable clock, WAL-flush observations) and gives them fixture
+# collections.
 meguri-testkit.workspace = true
 tempfile.workspace = true
 
@@ -34,3 +36,7 @@ tempfile.workspace = true
 [[bench]]
 name = "executor"
 harness = false
+
+[[test]]
+name = "wal_durability"
+required-features = ["test-hooks"]

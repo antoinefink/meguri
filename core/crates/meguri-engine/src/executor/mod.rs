@@ -3,6 +3,8 @@
 //! commit lock that ties seqs to snapshots.
 
 pub mod catalog;
+#[cfg(feature = "test-hooks")]
+pub mod durability_events;
 pub(crate) mod exclusive;
 pub mod op;
 pub mod plan_commit;
@@ -15,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use meguri_model::clock::Clock;
 use meguri_storage::Writer;
@@ -30,6 +33,11 @@ use writer::{CloseTask, MaintenanceTask, OpTask, ReplaceTask, Replaced, Task, Ta
 
 /// What the writer thread and the submitters share.
 pub(crate) struct ExecShared {
+    /// WAL syncs and write phases, recorded only after a test asks
+    /// (`Collection::record_durability_events`), so long runs with test hooks
+    /// on (benches, fault loops) keep no growing log.
+    #[cfg(feature = "test-hooks")]
+    durability_events: Mutex<Option<durability_events::DurabilityEvents>>,
     queue: Mutex<QueueState>,
     /// The writer waits here for tasks.
     wake: Condvar,
@@ -54,6 +62,12 @@ struct QueueState {
     stop: bool,
 }
 
+pub(crate) enum WriterWake {
+    Task(Task),
+    Flush,
+    Stop,
+}
+
 impl ExecShared {
     pub(crate) fn new(
         admission: Admission,
@@ -65,6 +79,8 @@ impl ExecShared {
         last_seq: Seq,
     ) -> ExecShared {
         ExecShared {
+            #[cfg(feature = "test-hooks")]
+            durability_events: Mutex::default(),
             queue: Mutex::new(QueueState {
                 queues: Queues::default(),
                 parked: Vec::new(),
@@ -106,6 +122,29 @@ impl ExecShared {
 
     pub(crate) fn write_delay(&self) -> Option<WriteDelay> {
         *self.lock_delay()
+    }
+
+    #[cfg(feature = "test-hooks")]
+    fn lock_durability(&self) -> MutexGuard<'_, Option<durability_events::DurabilityEvents>> {
+        self.durability_events.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn start_durability_recording(&self) {
+        self.lock_durability().get_or_insert_with(Default::default);
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn durability_events(&self) -> durability_events::DurabilityEvents {
+        self.lock_durability().clone().unwrap_or_default()
+    }
+
+    /// Adds to the durability log when a test turned recording on.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fn record_durability(&self, record: impl FnOnce(&mut durability_events::DurabilityEvents)) {
+        if let Some(events) = self.lock_durability().as_mut() {
+            record(events);
+        }
     }
 
     /// Queues, parks or refuses a task (`engine/lifecycle` L3, L4). Once the
@@ -182,19 +221,32 @@ impl ExecShared {
         }
     }
 
-    /// The next task for the writer; `None` once stopped with empty queues.
-    pub(crate) fn next_task(&self) -> Option<Task> {
+    /// Sleeps indefinitely when clean, or until the pending WAL flush is due.
+    /// Check the deadline even with queued tasks so traffic cannot starve it.
+    pub(crate) fn next_task(&self, flush_at: Option<Duration>) -> WriterWake {
         let mut queue = self.lock_queue();
         loop {
+            let wait = flush_at.map(|at| at.saturating_sub(crate::monotonic::now()));
+            if wait == Some(Duration::ZERO) {
+                return WriterWake::Flush;
+            }
             if let Some(task) = queue.queues.pop_next() {
                 queue.running = true;
-                return Some(task);
+                return WriterWake::Task(task);
             }
             if queue.stop {
-                return None;
+                return WriterWake::Stop;
             }
             self.idle.notify_all();
-            queue = self.wake.wait(queue).unwrap_or_else(PoisonError::into_inner);
+            queue = match wait {
+                Some(wait) => {
+                    self.wake
+                        .wait_timeout(queue, wait)
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .0
+                }
+                None => self.wake.wait(queue).unwrap_or_else(PoisonError::into_inner),
+            };
         }
     }
 

@@ -44,6 +44,20 @@ impl fmt::Debug for Collection {
 }
 
 impl Collection {
+    /// Starts recording the writer's WAL sync attempts and op write phases
+    /// (storage C9.2). Nothing is recorded before this call.
+    #[cfg(feature = "test-hooks")]
+    pub fn record_durability_events(&self) {
+        self.core.exec.start_durability_recording();
+    }
+
+    /// What was recorded since [`Collection::record_durability_events`],
+    /// read without queueing writer work.
+    #[cfg(feature = "test-hooks")]
+    pub fn durability_events(&self) -> crate::executor::durability_events::DurabilityEvents {
+        self.core.exec.durability_events()
+    }
+
     /// The generation this handle belongs to.
     pub fn generation(&self) -> Generation {
         self.generation

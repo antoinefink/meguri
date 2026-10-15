@@ -55,6 +55,8 @@ pub(crate) const READ_WRITE: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
 #[derive(Debug)]
 pub struct Writer {
     pub(crate) conn: Connection,
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fail_next_wal_sync: std::cell::Cell<bool>,
 }
 
 impl Writer {
@@ -70,7 +72,11 @@ impl Writer {
                 detail: format!("the journal mode stayed {mode}, not wal"),
             },
         })?;
-        Ok(Writer { conn })
+        Ok(Writer {
+            conn,
+            #[cfg(feature = "test-hooks")]
+            fail_next_wal_sync: std::cell::Cell::new(false),
+        })
     }
 }
 

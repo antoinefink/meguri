@@ -11,6 +11,7 @@ pub mod checkpoint;
 pub mod collation;
 pub mod conn_init;
 pub mod connections;
+mod durability;
 mod error;
 pub mod ids;
 pub mod journal;
