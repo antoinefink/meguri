@@ -110,6 +110,28 @@ fake_cli() {
   cat >"$FAKE_CLI" <<'EOF'
 #!/bin/bash
 echo "meguri-cli $*" >>"$STUB_LOG"
+# anonymize: fails with $FAKE_ANON_KIND, or writes a clone (the source's
+# file) and $FAKE_ANON_REPORT (default: every check passes), and makes the
+# salt file when it is missing.
+if [ "$1" = anonymize ]; then
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in --copy) copy="$2" ;; --out) out="$2" ;; --salt-file) salt="$2" ;; esac
+    shift 2
+  done
+  if [ -n "${FAKE_ANON_KIND:-}" ]; then
+    echo "meguri-cli anonymize: $FAKE_ANON_KIND: made up" >&2
+    exit 1
+  fi
+  [ -f "$copy/collection.anki2" ] || exit 3
+  [ -f "$salt" ] || printf '%064d\n' 0 >"$salt"
+  mkdir -p "$out" && cp "$copy/collection.anki2" "$out/collection.anki2" || exit 4
+  report="${FAKE_ANON_REPORT:-}"
+  [ -n "$report" ] || report='{"checks": {"leak": {"locations": [], "status": "pass"}, "media": "pass", "rows": "pass", "structure": "pass"}, "format": 1, "notes": 3}'
+  printf '%s\n' "$report" >"$out/anonymize.json"
+  echo "$out/anonymize.json"
+  exit 0
+fi
 [ "$1" = private ] || exit 2
 cmd="$2"
 shift 2
@@ -334,6 +356,139 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = hook-exists ]
   [[ "$(field '.failures[0].message')" == *"/hooks/pre-commit exists"* ]]
+}
+
+# --- anonymize (meguri-cli and the oracle job faked) ------------------------
+
+# anonymize_sandbox: a made-up fixture directory with a manifest, and a stub
+# for the oracle job that reports $STUB_DIR/<basename of the dir>.json (or
+# cannot run when there is none). Both reports start equal.
+anonymize_sandbox() {
+  export STUB_DIR="$BATS_TEST_TMPDIR/oracle"
+  mkdir -p "$STUB_DIR"
+  cat >"$SB/tools/mg.d/zz-stub.sh" <<'STUB'
+mg_oracle() {
+  echo "oracle $*" >>"$STUB_LOG"
+  local report="$STUB_DIR/$(basename "$2").json"
+  [ -f "$report" ] || { mg_failure oracle-tree-differs "made up: no oracle here"; mg_status error; return 0; }
+  mg_detail check "$(jq -c . "$report")"
+  mg_status pass
+}
+STUB
+  FIX="$SB/build/fixtures/s-1-10k"
+  mkdir -p "$FIX/collection.media"
+  printf 'a made-up collection' >"$FIX/collection.anki2"
+  printf '{"now_ms": 1894701600123, "utc_offset_secs": 3600}\n' >"$FIX/manifest.json"
+  REPORT='{"changed_tables": ["col", "config"], "check_db": {"future_ids": 0}, "counts": {"cards": 10}, "now": 1894701600, "timing": {"days_elapsed": 500}, "tz": "Etc/GMT-1", "schedule": {"cards": 10, "decks": {"1": {"cards": 4, "next_states_sha256": "a1"}, "77": {"cards": 6, "next_states_sha256": "b2"}}, "root": {"new": 1}, "sha256": "aaa"}}'
+  printf '%s\n' "$REPORT" >"$STUB_DIR/s-1-10k.json"
+  printf '%s\n' "$REPORT" >"$STUB_DIR/clone.json"
+}
+
+@test "anonymize: a fixture's clone through the network-less service, then V3 on both at the manifest's instant" {
+  anonymize_sandbox
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  local run clone
+  run="$(field .run_id)"
+  clone="$SB/build/private/$run/clone"
+  [ -f "$clone/collection.anki2" ]
+  [ "$(field .details.clone.path)" = "build/private/$run/clone" ]
+  [ "$(field .details.report.notes)" -eq 3 ]
+  [ "$(field .details.v3.equal)" = true ]
+  [[ "$(field '[.artifacts[] | select(.kind == "clone") | .path] | first')" == *"build/private/$run/clone" ]]
+  # The source read-only at /vault; the clone and the salt under build/.
+  grep -q "service private vault=$FIX$" "$STUB_LOG"
+  grep -q "meguri-cli anonymize --copy $FIX --out $clone --salt-file $SB/build/private/anonymize.salt" "$STUB_LOG"
+  [ -f "$SB/build/private/anonymize.salt" ]
+  # K1's defaults from the manifest, given to both checks.
+  [ "$(grep -c '^oracle check .* --schedule --now 2030-01-15T10:00:00Z --tz Etc/GMT-1$' "$STUB_LOG")" -eq 2 ]
+  grep -q "^oracle check $FIX " "$STUB_LOG"
+  grep -q "^oracle check $clone " "$STUB_LOG"
+  [ "$(field .summary.total)" -eq 5 ]
+  [ "$(field .summary.failed)" -eq 0 ]
+}
+
+@test "anonymize: a schedule or Check Database difference fails V3, naming the members and deck ids" {
+  anonymize_sandbox
+  jq -c '.schedule.sha256 = "bbb" | .schedule.decks["77"].next_states_sha256 = "zz" | .changed_tables += ["notes"]' \
+    <<<"$REPORT" >"$STUB_DIR/clone.json"
+  mg anonymize --source build/fixtures/s-1-10k --now 2030-01-15T11:00:00+01:00 --tz Europe/Paris
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(",")')" = "v3/schedule,v3/changed_notes" ]
+  [[ "$(field '.failures[0].message')" == *"differ: 77" ]]
+  [ "$(field -c .details.v3.decks)" = '["77"]' ]
+  [ "$(grep -c '^oracle check .* --schedule --now 2030-01-15T11:00:00+01:00 --tz Europe/Paris$' "$STUB_LOG")" -eq 2 ]
+}
+
+@test "anonymize: V4 review items warn, a V4 failure fails, an oracle that cannot run is an error" {
+  anonymize_sandbox
+  export FAKE_ANON_REPORT='{"checks": {"leak": {"locations": [{"column": "val", "hits": 1, "key": "addonDecks", "table": "config"}], "status": "warn"}, "media": "pass", "rows": "pass", "structure": "pass"}, "notes": 3}'
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$(field .status)" = warn ]
+  [[ "$(field .message)" == *"1 review items"* ]]
+  export FAKE_ANON_REPORT='{"checks": {"leak": {"locations": [{"column": "name", "hits": 1, "key": 5, "table": "decks"}], "status": "fail"}, "media": "pass", "rows": "pass", "structure": "pass"}, "notes": 3}'
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = leak ]
+  unset FAKE_ANON_REPORT
+  rm "$STUB_DIR/clone.json"
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = v3/clone ]
+  [[ "$(field '.failures[0].message')" == *"oracle-tree-differs"* ]]
+  [[ "$(field .message)" == *"V3 (the oracle) could not"* ]]
+}
+
+@test "anonymize: meguri-cli's error kind is the failure; nothing goes outside build/" {
+  anonymize_sandbox
+  FAKE_ANON_KIND=structure_changed mg anonymize --source build/fixtures/s-1-10k
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = structure_changed ]
+  ! grep -q '^oracle' "$STUB_LOG"
+  : >"$STUB_LOG"
+  mg anonymize --source build/fixtures/s-1-10k --out "$BATS_TEST_TMPDIR/elsewhere"
+  [ "$(field '.failures[0].id')" = usage ]
+  mg anonymize --source build/fixtures/s-1-10k --out build/../x
+  [ "$(field '.failures[0].id')" = usage ]
+  mg anonymize --source build/fixtures/s-1-10k --salt-file /tmp/salt
+  [ "$(field '.failures[0].id')" = usage ]
+  mg anonymize --source build/fixtures/nothing
+  [ "$(field '.failures[0].id')" = no_collection ]
+  make_source
+  mg anonymize --source "$SB/local-data/anki"
+  [ "$(field '.failures[0].id')" = usage ]
+  [[ "$(field '.failures[0].message')" == *"through the vault"* ]]
+  ! grep -q 'compose' "$STUB_LOG"
+}
+
+@test "anonymize: by default a fresh vault copy, refused on CI and in implementer worktrees, deleted at the end" {
+  anonymize_sandbox
+  CI=true mg anonymize
+  [ "$(field '.failures[0].id')" = ci-marker ]
+  printf '{"role": "implementer"}\n' >"$SB/.git/meguri-session.json"
+  mg anonymize
+  [ "$(field '.failures[0].id')" = implementer-worktree ]
+  rm "$SB/.git/meguri-session.json"
+  ! grep -q docker "$STUB_LOG"
+  mg anonymize --tz UTC
+  [ "$(field '.failures[0].id')" = no-source ]
+  make_source
+  printf '%s\n' "$REPORT" >"$STUB_DIR/copy.json"
+  mg anonymize --tz UTC
+  [ "$(field .status)" = pass ]
+  local run
+  run="$(field .run_id)"
+  grep -q "service private vault=$SB/local-data/anki$" "$STUB_LOG"
+  grep -q "service private vault=$SB/build/private/$run/copy$" "$STUB_LOG"
+  # 12:00 today in the zone given (no manifest).
+  grep -q "^oracle check $SB/build/private/$run/copy --schedule --now $(date -u +%Y-%m-%d)T12:00:00+00:00 --tz UTC$" "$STUB_LOG"
+  [ "$(field .details.clone.from_vault)" = true ]
+  [ ! -e "$SB/build/private/$run/copy" ]
+  [ -f "$SB/build/private/$run/clone/collection.anki2" ]
+  no_private_text "$result" "$SB/build/mg/anonymize/$run/log.txt"
 }
 
 @test "the job's CI markers are the vault's" {

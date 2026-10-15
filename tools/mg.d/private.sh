@@ -26,6 +26,20 @@
 # scans the summary and only then, with --record, writes it to
 # conformance/reports/private/<name>.json. Its copy is deleted at the end
 # unless --keep.
+#
+#   tools/mg anonymize [--source <dir>] [--out <dir>] [--salt-file <file>] [--now <instant>] [--tz <zone>]
+#
+# The anonymized clone (specs/fixtures/anonymizer.md A2.3): meguri-cli
+# anonymize in the private service (the source read-only at /vault; V1, V2,
+# V4, V5), then V3: tools/mg oracle check --schedule on the source and on
+# the clone at one instant, compared. The default source is a fresh vault
+# copy (the vault's rules and refusals apply; the copy is deleted at the
+# end); another directory, such as build/fixtures/<...>-10k, is used as it
+# is. The clone and the salt stay under build/: a clone of the private
+# collection is still private-adjacent.
+
+mg_job anonymize host mg_anonymize \
+  "Anonymized clone (specs/fixtures/anonymizer.md): [--source <dir>] [--out <dir>] [--salt-file <file>] [--now <instant>] [--tz <zone>]; default source a fresh vault copy, clone in build/private/<run>/clone, salt build/private/anonymize.salt; V1, V2, V4, V5 by meguri-cli, V3 by tools/mg oracle check --schedule on the source and the clone"
 
 mg_job private host mg_private \
   "Private collection vault (local-data/anki/, read-only, never off this Mac): status | copy | suite [--record <name>] [--keep] | scan-outputs [paths...] (default: the staged lines); copies and the token set stay in build/private/"
@@ -126,10 +140,16 @@ mg__private_docker() {
 # /vault [args...]` in the private service, the source mounted read-only at
 # /vault. Paths the script writes are under /work (the checkout).
 mg__private_run() {
-  local script="$1"
-  shift
+  mg__private_run_on "$MG_ROOT/$MG_PRIVATE_SOURCE" "$@"
+}
+
+# mg__private_run_on <dir> <script> [args...]: mg__private_run with <dir>
+# (absolute) mounted read-only at /vault.
+mg__private_run_on() {
+  local source="$1" script="$2"
+  shift 2
   mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" \
-    -v "$MG_ROOT/$MG_PRIVATE_SOURCE:/vault:ro" \
+    -v "$source:/vault:ro" \
     private sh -c "$script" sh "$MG_PRIVATE_CLI" /vault ${1+"$@"} </dev/null
 }
 
@@ -400,4 +420,261 @@ mg_private() {
     copy) mg__private_copy_job "$@" ;;
     suite) mg__private_suite "$@" ;;
   esac
+}
+
+# ------------------------------------------------------------- anonymize
+
+mg__anonymize_usage() {
+  mg_failure usage "$1; usage: tools/mg anonymize [--source <dir>] [--out <dir>] [--salt-file <file>] [--now <instant>] [--tz <zone>]"
+  mg_message "anonymize: usage error"
+  mg_status error
+}
+
+# mg__anonymize_abs <path>: the path made absolute against the checkout.
+mg__anonymize_abs() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$MG_ROOT/$1" ;;
+  esac
+}
+
+# mg__anonymize_under_build <absolute path>: whether it lies under the
+# checkout's build/ (written as such: no '.' or '..' component). The
+# private service sees the checkout only, at /work.
+mg__anonymize_under_build() {
+  case "$1" in
+    */../* | */.. | */./* | */.) return 1 ;;
+    "$MG_ROOT"/build/?*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# mg__anonymize_host_zone: this Mac's IANA zone ($TZ when it names one, or
+# the target of /etc/localtime).
+mg__anonymize_host_zone() {
+  local link
+  case "${TZ:-}" in
+    */* | UTC) printf '%s\n' "$TZ"; return 0 ;;
+  esac
+  link="$(readlink /etc/localtime 2>/dev/null)" || return 0
+  case "$link" in
+    */zoneinfo/*) printf '%s\n' "${link#*/zoneinfo/}" ;;
+  esac
+}
+
+# mg__anonymize_clock <source> <--now or ""> <--tz or "">: sets
+# MG__ANON_NOW and MG__ANON_TZ (A2.3): the values given, else the source
+# manifest's by collection-check.md K1, else 12:00 today in this Mac's
+# zone. Records a usage error and returns 1 when there is none.
+mg__anonymize_clock() {
+  local source="$1" now="$2" tz="$3" manifest="$1/manifest.json"
+  if [ -f "$manifest" ]; then
+    [ -n "$now" ] || now="$(jq -r 'if (.now_ms | type) == "number" then (.now_ms / 1000 | floor | todate) else empty end' "$manifest")"
+    [ -n "$tz" ] || tz="$(jq -r '.utc_offset_secs as $o
+      | if ($o | type) != "number" then empty
+        elif $o == 0 then "UTC"
+        elif ($o % 3600) == 0 and $o >= -43200 and $o <= 50400 then
+          ($o / 3600 | floor) as $h | if $h > 0 then "Etc/GMT-\($h)" else "Etc/GMT+\(0 - $h)" end
+        else empty end' "$manifest")"
+  else
+    [ -n "$tz" ] || tz="$(mg__anonymize_host_zone)"
+    if [ -z "$now" ] && [ -n "$tz" ]; then
+      now="$(python3 -I -c 'import datetime, sys, zoneinfo
+z = zoneinfo.ZoneInfo(sys.argv[1])
+print(datetime.datetime.now(z).replace(hour=12, minute=0, second=0, microsecond=0).isoformat())' "$tz" 2>/dev/null)"
+    fi
+  fi
+  if [ -z "$now" ] || [ -z "$tz" ]; then
+    mg__anonymize_usage "no instant and zone for the oracle checks: pass --now and --tz (collection-check.md K1)"
+    return 1
+  fi
+  MG__ANON_NOW="$now"
+  MG__ANON_TZ="$tz"
+}
+
+# mg__anonymize_v3 <source> <clone>: A17 V3. Runs tools/mg oracle check
+# --schedule on both at MG__ANON_NOW in MG__ANON_TZ and compares counts,
+# timing, check_db, schedule and changed_tables. Sets MG__ANON_V3 to pass,
+# fail or error and writes v3.json (the members and deck ids that differ).
+mg__anonymize_v3() {
+  local source="$1" clone="$2" side dir result repro
+  for side in source clone; do
+    dir="$source"
+    [ "$side" = source ] || dir="$clone"
+    repro="tools/mg oracle check $dir --schedule --now $MG__ANON_NOW --tz $MG__ANON_TZ"
+    echo "anonymize: V3 on the $side -> $repro" >&2
+    result="$("$MG_TOOLS/mg" oracle check "$dir" --schedule --now "$MG__ANON_NOW" --tz "$MG__ANON_TZ" </dev/null)"
+    result="${result##*$'\n'}"
+    if [ -z "$result" ] || [ ! -f "$result" ]; then
+      mg_failure "v3/$side" "tools/mg oracle check wrote no result for the $side; see log.txt" "$repro"
+      MG__ANON_V3=error
+      return 0
+    fi
+    mg_artifact oracle-check "$result" "$side"
+    if ! jq -e '.details.check.schedule.sha256' "$result" >/dev/null 2>&1; then
+      mg_failure "v3/$side" "oracle check on the $side gave no schedule: $(jq -r '.status + ": " + ([.failures[]? | .id + " " + .message] | join("; "))' "$result")" "$repro"
+      MG__ANON_V3=error
+      return 0
+    fi
+    jq -c '.details.check' "$result" >"$MG_RUN_DIR/v3-$side.json"
+  done
+  jq -n --slurpfile s "$MG_RUN_DIR/v3-source.json" --slurpfile c "$MG_RUN_DIR/v3-clone.json" '
+    $s[0] as $s | $c[0] as $c
+    | {members: [("counts", "timing", "check_db", "schedule") as $k | select($s[$k] != $c[$k]) | $k],
+       decks: ([$s.schedule.decks, $c.schedule.decks] | map(keys) | add | unique
+         | map(select($s.schedule.decks[.] != $c.schedule.decks[.]))),
+       changed_tables: [$c.changed_tables[] | select(. != "col" and . != "config")
+         | select(. as $t | ($s.changed_tables | index($t)) == null)],
+       sha256: {source: $s.schedule.sha256, clone: $c.schedule.sha256},
+       now: $s.now, tz: $s.tz}
+    | . + {equal: ((.members | length) == 0 and (.changed_tables | length) == 0)}' >"$MG_RUN_DIR/v3.json"
+  mg_detail v3 "$(jq -c . "$MG_RUN_DIR/v3.json")"
+  if jq -e '.equal' "$MG_RUN_DIR/v3.json" >/dev/null; then
+    MG__ANON_V3=pass
+    return 0
+  fi
+  MG__ANON_V3=fail
+  jq -r '.members[] | select(. != "schedule")' "$MG_RUN_DIR/v3.json" | while IFS= read -r member; do
+    mg_failure "v3/$member" "the oracle reports a different $member for the clone than for the source" "tools/mg anonymize"
+  done
+  if jq -e '.members | index("schedule")' "$MG_RUN_DIR/v3.json" >/dev/null; then
+    mg_failure v3/schedule "the clone's schedule differs from the source's (schedule.sha256); decks whose digests differ: $(jq -r '.decks | join(", ")' "$MG_RUN_DIR/v3.json")" "tools/mg anonymize"
+  fi
+  jq -r '.changed_tables[]' "$MG_RUN_DIR/v3.json" | while IFS= read -r table; do
+    mg_failure "v3/changed_$table" "Check Database changed $table in the clone but not in the source" "tools/mg anonymize"
+  done
+}
+
+# tools/mg anonymize [--source <dir>] [--out <dir>] [--salt-file <file>] [--now <instant>] [--tz <zone>]
+mg_anonymize() {
+  local source="" out="" salt="" now="" tz="" vault=false
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --source | --out | --salt-file | --now | --tz)
+        [ "$#" -ge 2 ] || {
+          mg__anonymize_usage "$1 needs a value"
+          return 0
+        }
+        case "$1" in
+          --source) source="$2" ;;
+          --out) out="$2" ;;
+          --salt-file) salt="$2" ;;
+          --now) now="$2" ;;
+          --tz) tz="$2" ;;
+        esac
+        shift 2
+        ;;
+      *)
+        mg__anonymize_usage "unknown argument '$1'"
+        return 0
+        ;;
+    esac
+  done
+  local run="$MG_PRIVATE_DIR/$MG_RUN_ID"
+  out="$(mg__anonymize_abs "${out:-$run/clone}")"
+  salt="$(mg__anonymize_abs "${salt:-$MG_PRIVATE_DIR/anonymize.salt}")"
+  mg__anonymize_under_build "$out" || {
+    mg__anonymize_usage "--out must lie under build/ (nothing is written outside it)"
+    return 0
+  }
+  mg__anonymize_under_build "$salt" || {
+    mg__anonymize_usage "--salt-file must lie under build/"
+    return 0
+  }
+  if [ -z "$source" ]; then
+    vault=true
+    mg__private_guard || return 0
+    mg__private_source_ok || {
+      mg__private_no_source
+      return 0
+    }
+  else
+    source="$(mg__anonymize_abs "$source")"
+    if [ ! -f "$source/collection.anki2" ]; then
+      mg_failure no_collection "$source has no collection.anki2" "tools/mg anonymize --source <dir with a collection.anki2>"
+      mg_message "anonymize: no collection.anki2 in the source"
+      mg_status error
+      return 0
+    fi
+    source="$(cd "$source" && pwd -P)"
+    case "$source/" in
+      "$(cd "$MG_ROOT" && pwd -P)/$(dirname "$MG_PRIVATE_SOURCE")/"*)
+        mg__anonymize_usage "the private collection is read only through the vault: leave --source out"
+        return 0
+        ;;
+      *:*)
+        mg__anonymize_usage "$source has a ':', which a bind mount cannot carry"
+        return 0
+        ;;
+    esac
+  fi
+  mg__private_docker || return 0
+  if [ "$vault" = true ]; then
+    mg_on_exit "rm -rf '$MG_ROOT/$run/copy'"
+    mg__private_copy "$run" || return 0
+    source="$MG_ROOT/$run/copy"
+  fi
+  mg__anonymize_clock "$source" "$now" "$tz" || return 0
+  mkdir -p "$(dirname "$out")" "$(dirname "$salt")"
+  chmod 700 "$MG_ROOT/$MG_PRIVATE_DIR" 2>/dev/null
+
+  local err="$MG_RUN_DIR/anonymize.stderr" rc kind
+  mg__private_run_on "$source" '"$1" anonymize --copy "$2" --out "$3" --salt-file "$4"' \
+    "/work/${out#"$MG_ROOT"/}" "/work/${salt#"$MG_ROOT"/}" 2>"$err" >/dev/null
+  rc=$?
+  cat "$err" >&2
+  if [ "$rc" -ne 0 ] || [ ! -f "$out/anonymize.json" ]; then
+    kind="$(sed -n 's/^meguri-cli anonymize: \([a-z_]*\):.*$/\1/p' "$err" | tail -n 1)"
+    mg_failure "${kind:-anonymize}" "meguri-cli anonymize failed (exit $rc): $(grep '^meguri-cli anonymize:' "$err" | tail -n 1)" "tools/mg anonymize"
+    mg_message "anonymize: ${kind:-meguri-cli failed}"
+    mg_status error
+    return 0
+  fi
+  local report
+  report="$(jq -c . "$out/anonymize.json")"
+  mg_detail report "$report"
+  mg_detail clone "$(jq -nc --arg p "${out#"$MG_ROOT"/}" --arg now "$MG__ANON_NOW" --arg tz "$MG__ANON_TZ" --argjson vault "$vault" \
+    '{path: $p, now: $now, tz: $tz, from_vault: $vault}')"
+  mg_artifact clone "$out" "anonymized clone (private-adjacent: stays on this Mac)"
+  mg_artifact report "$out/anonymize.json" "anonymize.json (counts only)"
+
+  MG__ANON_V3=error
+  mg__anonymize_v3 "$source" "$out"
+
+  local check status passed=0 failed=0 leak
+  for check in structure rows leak media; do
+    if [ "$check" = leak ]; then
+      status="$(jq -r '.checks.leak.status' <<<"$report")"
+    else
+      status="$(jq -r --arg c "$check" '.checks[$c]' <<<"$report")"
+    fi
+    case "$status" in
+      pass | warn) passed=$((passed + 1)) ;;
+      *)
+        failed=$((failed + 1))
+        mg_failure "$check" "anonymize.json: check $check is $status" "tools/mg anonymize"
+        ;;
+    esac
+  done
+  case "$MG__ANON_V3" in
+    pass) passed=$((passed + 1)) ;;
+    *) failed=$((failed + 1)) ;;
+  esac
+  mg_count total 5
+  mg_count passed "$passed"
+  mg_count failed "$failed"
+  leak="$(jq -r '.checks.leak.status' <<<"$report")"
+  if [ "$failed" -gt 0 ] && { [ "$MG__ANON_V3" != error ] || [ "$failed" -gt 1 ]; }; then
+    mg_message "anonymize: $failed of 5 checks fail (clone at ${out#"$MG_ROOT"/})"
+    mg_status fail
+  elif [ "$MG__ANON_V3" = error ]; then
+    mg_message "anonymize: clone at ${out#"$MG_ROOT"/}; V1, V2, V4, V5 ran, V3 (the oracle) could not"
+    mg_status error
+  elif [ "$leak" = warn ]; then
+    mg_message "anonymize: every check passes; V4 lists $(jq '.checks.leak.locations | length' <<<"$report") review items (clone at ${out#"$MG_ROOT"/})"
+    mg_status warn
+  else
+    mg_message "anonymize: every check passes (clone at ${out#"$MG_ROOT"/})"
+    mg_status pass
+  fi
 }

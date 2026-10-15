@@ -9,9 +9,12 @@ Nothing from the user's collection is in this folder, and nothing ever will be. 
 | The user's collection (`collection.anki2`, its `-wal`, `collection.media/`) | `local-data/anki/` of the main checkout | never |
 | Per-run copies, the vault's access log, the suite's private log | `build/private/<run>/` | never |
 | The private token set | `build/private/tokens/` | never |
+| The anonymized clone (`tools/mg anonymize`), its report and its salt | `build/private/<run>/clone/`, `build/private/anonymize.salt` | never, unless Antoine decides otherwise |
 | Private suite summaries | `conformance/reports/private/<name>.json` | yes, after the scan |
 
-Only `tools/mg private` reads the collection. It runs in the main checkout, refuses CI machines and implementer or fixer worktrees, and copies the collection through a read-only mount in a container without a network. It opens the collection database, its write-ahead log and the media folder, and nothing else in the profile folder.
+Only `tools/mg private` and `tools/mg anonymize` (by default) read the collection. They run in the main checkout, refuse CI machines and implementer or fixer worktrees, and copy the collection through a read-only mount in a container without a network. They open the collection database, its write-ahead log and the media folder, and nothing else in the profile folder.
+
+The anonymized clone (`specs/fixtures/anonymizer.md`) holds none of the collection's text, deck names, tags or media names, and Anki schedules it exactly as the collection. It is still derived from the collection, so it stays on this Mac.
 
 ## What a committed result may hold
 
