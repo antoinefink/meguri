@@ -3,7 +3,8 @@
 # They cover what the container suite cannot: macOS /bin/bash 3.2 and BSD
 # tools, the real doctor on this Mac, a docker job started (and killed) from
 # the host, cargo's lock shared between dev containers, a dev image rebuild
-# that reuses every layer, and the simulator pool's locks (with a fake simctl).
+# that reuses every layer, the simulator pool's locks (with a fake simctl) and
+# host jobs whose container tests run only under bash 5 (fixtures-check).
 #
 # usage: mg_host_selftest.sh <sandbox dir>
 # The sandbox is a throwaway copy of tools/ and docker/ in its own git repo
@@ -816,6 +817,39 @@ EOF
     expect "the lease is free" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free
 }
 
+# fixtures-check (U11), a host job, under macOS bash 3.2 with the fixtures and
+# oracle jobs stubbed: collections that need no extra oracle argument (a size,
+# a recipe) and one that does (the due deck).
+t_fixtures_check_on_macos_bash() {
+  local dir="$SB/fixtures-check" testkit="$SB/core/crates/meguri-testkit"
+  local MG_CONTAINER=dev STUB_DIR="$SB/fixtures-check" STUB_LOG="$SB/fixtures-check/stub.log"
+  export MG_CONTAINER STUB_DIR STUB_LOG
+  mkdir -p "$dir" "$testkit/profiles/worst-cases" "$testkit/fixtures/recipes" && : >"$STUB_LOG" || return 1
+  printf '{"totals": {"span_days": 500}}\n' >"$testkit/profiles/user-shape.json"
+  printf '{"due_deck": {"review_limit": 9999}}\n' >"$testkit/profiles/worst-cases/due.json"
+  cat >"$SB/tools/mg.d/zz-fixtures-stub.sh" <<'EOF'
+mg_fixtures() { echo "fixtures $*" >>"$STUB_LOG"; mg_detail fixtures "$(jq -sc . "$STUB_DIR/summaries.jsonl")"; mg_status pass; }
+mg_oracle() { echo "oracle $*" >>"$STUB_LOG"; mg_detail check "$(jq -c . "$STUB_DIR/$(basename "$2").json")"; mg_status pass; }
+EOF
+  local m='{"counts": {"cards": 10, "decks": 2, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}}'
+  local report='{"changed_tables": ["col", "config"], "check_db": {"card_properties": 0}, "counts": {"cards": 10, "decks": 2, "graves": 0, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}, "decks": {"Due": {"learning": 0, "new": 0, "review": 10}}, "render": {}, "timing": {"days_elapsed": 500}}'
+  {
+    jq -nc --argjson m "$m" '{target: "10k", kind: "size", dir: "build/fixtures/s-1-10k", manifest: $m}'
+    jq -nc --argjson m "$m" '{target: "due", kind: "worst-case", dir: "build/fixtures/s-1-due", manifest: $m}'
+    jq -nc --argjson m "$m" '{target: "r", kind: "recipe", dir: "build/fixtures/recipes/r-1", manifest: $m}'
+  } >"$dir/summaries.jsonl"
+  printf '%s\n' "$report" >"$dir/s-1-10k.json"
+  printf '%s\n' "$report" >"$dir/s-1-due.json"
+  printf '%s\n' "$report" | jq -c '.timing.days_elapsed = 120' >"$dir/r-1.json"
+  mg fixtures-check
+  rm -f "$SB/tools/mg.d/zz-fixtures-stub.sh"
+  expect "exit" "$RC" 0 &&
+    expect "status" "$(field .status) $(field .summary.passed) $(field '.failures | length')" "pass 3 0" &&
+    expect "default targets" "$(head -n 1 "$STUB_LOG")" "fixtures 10k 100k worst-cases recipes --seed 1" &&
+    expect "oracle checks" "$(grep '^oracle ' "$STUB_LOG" | tr '\n' '|')" \
+      "oracle check $SB/build/fixtures/s-1-10k|oracle check $SB/build/fixtures/s-1-due --deck Due|oracle check $SB/build/fixtures/recipes/r-1|"
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -832,7 +866,7 @@ t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_r
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
 t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
 t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
-t_results_validate_against_schema"
+t_fixtures_check_on_macos_bash t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

@@ -1057,7 +1057,7 @@ STUB
   validate "$result"
 }
 
-@test "fixtures-check stops when generating fails or the oracle gives no report, and rejects bad usage" {
+@test "fixtures-check stops when generating fails or the oracle gives no report or one it cannot read, and rejects bad usage" {
   fixtures_check_sandbox
   STUB_FIXTURES_STATUS=fail mg fixtures-check
   [ "$status" -eq 1 ]
@@ -1066,9 +1066,13 @@ STUB
   rm "$STUB_DIR/s-1-due.json"
   jq -c 'if .target == "big" then del(.large_field_notes) else . end' "$STUB_DIR/summaries.jsonl" >"$STUB_DIR/x"
   mv "$STUB_DIR/x" "$STUB_DIR/summaries.jsonl"
+  # A report the assertions cannot read is a failure, never a pass.
+  jq -c 'del(.changed_tables)' "$STUB_DIR/s-1-10k.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-10k.json"
+  jq -c 'del(.check_db)' "$STUB_DIR/r-1.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/r-1.json"
   mg fixtures-check
   [ "$status" -eq 1 ]
-  [ "$(failure_ids)" = "$(printf 'fixtures-check/big/render\nfixtures-check/due/oracle')" ]
+  [ "$(field .summary.passed)" -eq 0 ]
+  [ "$(failure_ids)" = "$(printf 'fixtures-check/10k/report\nfixtures-check/big/render\nfixtures-check/due/oracle\nfixtures-check/r/report')" ]
   local args
   for args in "--seed" "--seed x" "--frobnicate"; do
     # shellcheck disable=SC2086 # each case is a word list

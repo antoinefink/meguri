@@ -195,7 +195,7 @@ mg__fixtures_check_usage() {
 # and F11's assertions on its report. Prints "pass" or "fail" last.
 mg__fixtures_check_one() {
   local summary="$1" profile_today="$2" target kind dir abs today worst result report manifest
-  local args=() problems limit note
+  local args=() problems note repro
   target="$(jq -r .target <<<"$summary")"
   kind="$(jq -r .kind <<<"$summary")"
   dir="$(jq -r .dir <<<"$summary")"
@@ -217,23 +217,26 @@ mg__fixtures_check_one() {
     fi
     args+=(--render-note "$note")
   fi
-  echo "fixtures-check: $target -> tools/mg oracle check $dir ${args[*]}" >&2
+  # args may be empty: macOS bash 3.2 calls an empty array unbound under set -u.
+  repro="tools/mg oracle check $dir${args[0]+ ${args[*]}}"
+  echo "fixtures-check: $target -> $repro" >&2
   result="$("$MG_TOOLS/mg" oracle check "$abs" ${args[0]+"${args[@]}"} </dev/null)"
   result="${result##*$'\n'}"
   if [ -z "$result" ] || [ ! -f "$result" ]; then
-    mg_failure "fixtures-check/$target/oracle" "tools/mg oracle check wrote no result; see log.txt" "tools/mg oracle check $dir ${args[*]}"
+    mg_failure "fixtures-check/$target/oracle" "tools/mg oracle check wrote no result; see log.txt" "$repro"
     echo fail
     return 0
   fi
   mg_artifact oracle-check "$result" "$target"
   report="$(jq -c '.details.check // empty' "$result")"
   if [ -z "$report" ]; then
-    mg_failure "fixtures-check/$target/oracle" "oracle check: $(jq -r '.status + ": " + ([.failures[] | .id + " " + .message] | join("; "))' "$result")" "tools/mg oracle check $dir ${args[*]}"
+    mg_failure "fixtures-check/$target/oracle" "oracle check: $(jq -r '.status + ": " + ([.failures[] | .id + " " + .message] | join("; "))' "$result")" "$repro"
     echo fail
     return 0
   fi
-  # K9's status (Check Database problems, changed tables), then F11.
-  problems="$(jq -rn --argjson r "$report" --argjson m "$manifest" --argjson w "$worst" \
+  # K9's status (Check Database problems, changed tables), then F11. A report
+  # these expressions cannot read (jq fails) is a failure, never a pass.
+  if ! problems="$(jq -rn --argjson r "$report" --argjson m "$manifest" --argjson w "$worst" \
     --argjson today "$today" --argjson large "$MG_FIXTURES_LARGE_ANSWER" --arg note "${note:-}" '
     ([$r.check_db | if has("error") then "Check Database found the file corrupt"
        else to_entries[] | select(.value > 0) | "Check Database reported \(.value) of \(.key)" end])
@@ -253,10 +256,14 @@ mg__fixtures_check_one() {
            else [$cards[] | select(.status != "ok" or .answer_bytes <= $large)
              | "card \(.card) of note \($note) rendered \(.status) with \(.answer_bytes) answer bytes"] end
        else [] end)
-    | .[]')"
+    | .[]')"; then
+    mg_failure "fixtures-check/$target/report" "could not read the oracle check report $result; see log.txt" "$repro"
+    echo fail
+    return 0
+  fi
   if [ -n "$problems" ]; then
     while IFS= read -r line; do
-      mg_failure "fixtures-check/$target" "$line" "tools/mg oracle check $dir ${args[*]}"
+      mg_failure "fixtures-check/$target" "$line" "$repro"
     done <<<"$problems"
     echo fail
   else
