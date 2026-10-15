@@ -818,8 +818,9 @@ EOF
 }
 
 # fixtures-check (U11), a host job, under macOS bash 3.2 with the fixtures and
-# oracle jobs stubbed: collections that need no extra oracle argument (a size,
-# a recipe) and one that does (the due deck).
+# oracle jobs and the recipes' launch run stubbed: collections that need no
+# extra oracle argument (a size, a recipe) and one that does (the due deck),
+# and the recipe's launch check.
 t_fixtures_check_on_macos_bash() {
   local dir="$SB/fixtures-check" testkit="$SB/core/crates/meguri-testkit"
   local MG_CONTAINER=dev STUB_DIR="$SB/fixtures-check" STUB_LOG="$SB/fixtures-check/stub.log"
@@ -830,6 +831,7 @@ t_fixtures_check_on_macos_bash() {
   cat >"$SB/tools/mg.d/zz-fixtures-stub.sh" <<'EOF'
 mg_fixtures() { echo "fixtures $*" >>"$STUB_LOG"; mg_detail fixtures "$(jq -sc . "$STUB_DIR/summaries.jsonl")"; mg_status pass; }
 mg_oracle() { echo "oracle $*" >>"$STUB_LOG"; mg_detail check "$(jq -c . "$STUB_DIR/$(basename "$2").json")"; mg_status pass; }
+mg__fixtures_launch_run() { echo "launch $1" >>"$STUB_LOG"; printf '{"result": "Passed", "passed": 1, "failed": 0, "skipped": 0, "messages": []}\n' >"$2.json"; }
 EOF
   local m='{"counts": {"cards": 10, "decks": 2, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}}'
   local report='{"changed_tables": ["col", "config"], "check_db": {"card_properties": 0}, "counts": {"cards": 10, "decks": 2, "graves": 0, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}, "decks": {"Due": {"learning": 0, "new": 0, "review": 10}}, "render": {}, "timing": {"days_elapsed": 500}}'
@@ -844,10 +846,11 @@ EOF
   mg fixtures-check
   rm -f "$SB/tools/mg.d/zz-fixtures-stub.sh"
   expect "exit" "$RC" 0 &&
-    expect "status" "$(field .status) $(field .summary.passed) $(field '.failures | length')" "pass 3 0" &&
+    expect "status" "$(field .status) $(field .summary.passed) $(field '.failures | length')" "pass 4 0" &&
     expect "default targets" "$(head -n 1 "$STUB_LOG")" "fixtures 10k 100k worst-cases recipes --seed 1" &&
     expect "oracle checks" "$(grep '^oracle ' "$STUB_LOG" | tr '\n' '|')" \
-      "oracle check $SB/build/fixtures/s-1-10k|oracle check $SB/build/fixtures/s-1-due --deck Due|oracle check $SB/build/fixtures/recipes/r-1|"
+      "oracle check $SB/build/fixtures/s-1-10k|oracle check $SB/build/fixtures/s-1-due --deck Due|oracle check $SB/build/fixtures/recipes/r-1|" &&
+    expect "launch run" "$(grep '^launch ' "$STUB_LOG")" "launch $SB/build/fixtures/recipes/r-1"
 }
 
 t_results_validate_against_schema() {

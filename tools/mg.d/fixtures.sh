@@ -7,17 +7,23 @@
 #   recipes                 recipes/<name>-<seed>/
 # each holding collection.anki2, collection.media/ and manifest.json. A size
 # or worst-case directory whose manifest matches the request is reused
-# (`cached`); recipes are always made again (meguri-cli generate). Every run
+# (`cached`); recipes are always made again (meguri-cli generate). Each run
+# holds its directory's lock (.<name>.lock beside it) and publishes the
+# directory whole, so concurrent runs never mix two outputs. Every run
 # must stay within the R1804 budget for 1M cards: 10 minutes and 2 GB peak
 # memory.
 #
 # fixtures-check (host) is F11's T1: it runs fixtures, then
 # `tools/mg oracle check` on each collection, and checks what F11 asks.
+# When recipes are among its targets it also launches them through
+# -MeguriFixture in the app process on this Mac (MeguriSnapshotTests'
+# RecipeFixtureTests, as tools/mg snapshots runs its suites): U11's "UI
+# recipes load through the launch option".
 
 mg_job fixtures docker:dev mg_fixtures \
   "Synthetic collections into build/fixtures: <size> (10k 100k 150k 500k 1m, or a card count) | <worst case> | <recipe> | worst-cases | recipes ... [--seed N] [--media files] [--cards N (worst cases)]"
 mg_job fixtures-check host mg_fixtures_check \
-  "Oracle checks of generated collections (F11 T1): [target...] (default 10k 100k worst-cases recipes) [--seed N]; runs tools/mg fixtures, then tools/mg oracle check on each: no Check Database problem, nothing changed but col and config, counts equal the manifest's, the pinned day; the due worst case's deck count and the large-field worst case's render"
+  "Oracle checks of generated collections (F11 T1): [target...] (default 10k 100k worst-cases recipes) [--seed N]; runs tools/mg fixtures, then tools/mg oracle check on each: no Check Database problem, nothing changed but col and config, counts equal the manifest's, the pinned day; the due worst case's deck count and the large-field worst case's render; recipes also launched through -MeguriFixture in the app on this Mac (RecipeFixtureTests)"
 
 MG_FIXTURES_BUDGET_MS=600000
 MG_FIXTURES_BUDGET_KB=2097152
@@ -271,9 +277,74 @@ mg__fixtures_check_one() {
   fi
 }
 
+# The app-hosted suite that launches each recipe through -MeguriFixture at
+# its pinned instant (U11 Verification: UI recipes load through the launch
+# option).
+MG_FIXTURES_LAUNCH_SUITE=MeguriSnapshotTests/RecipeFixtureTests
+
+# mg__fixtures_launch_run <dirs, ':'-separated> <out prefix>: builds the
+# Snapshot plan for the Mac and runs the launch suite on the recipes in the
+# app process (off-screen windows only, as tools/mg snapshots runs it);
+# writes <prefix>.json {result, passed, failed, skipped, messages}: the
+# suite's result, its passed and failed cases (one per recipe directory,
+# the Swift Testing arguments), skipped tests and failure messages.
+# Returns 1, with the failure recorded, when the suite could not run.
+mg__fixtures_launch_run() {
+  local dirs="$1" prefix="$2" rc tests
+  mg_app_build mac Debug Snapshot || return 1
+  mg_host_lease || return 1
+  mg_app_mac_guard || return 1
+  rm -rf "$prefix.xcresult"
+  TEST_RUNNER_MEGURI_RECIPE_FIXTURES="$dirs" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri \
+    -testPlan Snapshot -configuration Debug -destination "platform=macOS,arch=arm64" -derivedDataPath "$MG_APP_DD" \
+    -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never "-only-testing:$MG_FIXTURES_LAUNCH_SUITE" >"$prefix.log" 2>&1
+  rc=$?
+  mg_artifact log "$prefix.log" "xcodebuild test $MG_FIXTURES_LAUNCH_SUITE"
+  tests="$(xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null)" || tests=null
+  if ! xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
+    jq -ce --argjson tests "${tests:-null}" '[$tests | .. | objects | select(.nodeType? == "Arguments") | .result] as $cases
+      | {result, passed: ($cases | map(select(. == "Passed")) | length), failed: ($cases | map(select(. == "Failed")) | length),
+        skipped: .skippedTests, messages: [$tests | .. | objects | select(.nodeType? == "Failure Message") | .name | .[0:600]]}' >"$prefix.json"; then
+    mg_failure fixtures-check/launch "xcodebuild test-without-building could not run $MG_FIXTURES_LAUNCH_SUITE (exit $rc); see $(basename "$prefix").log" \
+      "tools/mg fixtures-check recipes"
+    return 1
+  fi
+}
+
+# mg__fixtures_check_launch <summaries>: the launch suite on every recipe
+# of the run; each recipe is one passing case, and a skip is a failure.
+# Sets MG_FIXTURES_LAUNCH to pass or fail. Not run in a subshell: the host
+# lease it takes lasts until the job ends.
+mg__fixtures_check_launch() {
+  local summaries="$1" dirs n prefix="$MG_RUN_DIR/launch" problems line repro="tools/mg fixtures-check recipes"
+  MG_FIXTURES_LAUNCH=fail
+  dirs="$(jq -r --arg root "$MG_ROOT" 'select(.kind == "recipe") | .dir | if startswith("/") then . else "\($root)/\(.)" end' "$summaries")"
+  n="$(printf '%s\n' "$dirs" | grep -c .)"
+  dirs="$(printf '%s\n' "$dirs" | paste -sd: -)"
+  echo "fixtures-check: $n recipes -> $MG_FIXTURES_LAUNCH_SUITE" >&2
+  mg__fixtures_launch_run "$dirs" "$prefix" || return 0
+  mg_artifact launch "$prefix.json" "$MG_FIXTURES_LAUNCH_SUITE results"
+  if ! problems="$(jq -r --argjson n "$n" '
+    .messages
+    + [select(.result != "Passed") | "the launch suite ended \(.result), \(.failed) cases failed"]
+    + [select(.skipped != 0) | "\(.skipped) launch cases were skipped: a skipped check is no check"]
+    + [select(.passed != $n) | "\(.passed) launch cases passed for \($n) recipes"]
+    | .[]' "$prefix.json")"; then
+    mg_failure fixtures-check/launch "could not read the launch results $prefix.json; see log.txt" "$repro"
+    return 0
+  fi
+  if [ -n "$problems" ]; then
+    while IFS= read -r line; do
+      mg_failure fixtures-check/launch "$line" "$repro"
+    done <<<"$problems"
+    return 0
+  fi
+  MG_FIXTURES_LAUNCH=pass
+}
+
 # tools/mg fixtures-check [target...] [--seed N]
 mg_fixtures_check() {
-  local seed=1 targets=() gen status summaries outcome passed=0 failed=0 span profile_today
+  local seed=1 targets=() gen status summaries outcome passed=0 failed=0 span profile_today what
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --) shift ;;
@@ -321,14 +392,25 @@ mg_fixtures_check() {
       failed=$((failed + 1))
     fi
   done <"$summaries"
+  # The recipes launched in the app: one more check.
+  what="the oracle check of each collection"
+  if jq -e 'select(.kind == "recipe")' "$summaries" >/dev/null; then
+    mg__fixtures_check_launch "$summaries"
+    what="$what and the recipes' launch check"
+    if [ "$MG_FIXTURES_LAUNCH" = pass ]; then
+      passed=$((passed + 1))
+    else
+      failed=$((failed + 1))
+    fi
+  fi
   mg_count total $((passed + failed))
   mg_count passed "$passed"
   mg_count failed "$failed"
   if [ "$failed" -eq 0 ]; then
-    mg_message "fixtures-check: $passed collections pass the oracle checks"
+    mg_message "fixtures-check: $passed checks pass ($what)"
     mg_status pass
   else
-    mg_message "fixtures-check: $failed of $((passed + failed)) collections fail the oracle checks"
+    mg_message "fixtures-check: $failed of $((passed + failed)) checks fail ($what)"
     mg_status fail
   fi
 }
