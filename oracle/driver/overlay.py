@@ -27,6 +27,7 @@ from .numbers import to_f32
 RATINGS = ("again", "hard", "good", "easy")
 DAY_COLUMNS = {0: "again", 3: "hard", 6: "good", 9: "easy"}
 MEMORY_COLUMNS = {1: "again", 2: "again", 4: "hard", 5: "hard", 7: "good", 8: "good", 10: "easy", 11: "easy"}
+STABILITY_COLUMNS = frozenset({1, 4, 7, 10})
 # A rating's day entry is in the class through the button order when the
 # rating before it has one in the class (sched/fsrs-transitions T5).
 FOLLOWS = {"good": "hard", "easy": "good"}
@@ -34,7 +35,11 @@ FOLLOWS = {"good": "hard", "easy": "good"}
 DAY_GAP = 1
 UNROUNDED_TOLERANCE = 1e-5
 BOUNDARY_TOLERANCE = 1e-5
-MEMORY_TOLERANCE = 1e-5
+# F8.3: a stability within max(relative 1e-4, 1e-5 days), a difficulty
+# within relative 1e-5.
+STABILITY_RELATIVE = 1e-4
+STABILITY_FLOOR = 1e-5
+DIFFICULTY_RELATIVE = 1e-5
 RECOMPUTE_TOLERANCE = 1e-9
 
 # 0.9 as the f32 the crate uses (F8.2 rule 3), widened.
@@ -143,9 +148,10 @@ def scalar_diff(linux: Any, apple: Any, path: list | None = None, out: list | No
 
 
 def classify(ptr: str) -> tuple[str, str, str, str] | None:
-    """(kind, set pointer, rating, stability pointer) of a next-state day or
-    memory pointer (F8.1); None for every other pointer. The stability pointer
-    is the sibling stability a day entry's unrounded interval comes from."""
+    """(kind, set pointer, rating, detail) of a next-state day or memory
+    pointer (F8.1); None for every other pointer. A day entry's detail is the
+    pointer of the sibling stability its unrounded interval comes from; a
+    memory entry's is its member, "stability" or "difficulty"."""
     m = _NEXT_STATES.match(ptr)
     if m:
         set_ptr, rating, tail = m.groups()
@@ -153,7 +159,7 @@ def classify(ptr: str) -> tuple[str, str, str, str] | None:
             stability = f"{set_ptr}/{rating}/{tail.removesuffix('scheduled_days')}memory_state/stability"
             return "day", set_ptr, rating, stability
         if tail in _MEMORY_TAILS:
-            return "memory", set_ptr, rating, ""
+            return "memory", set_ptr, rating, tail.rsplit("/", 1)[1]
         return None
     m = _FSRS_NEXT.match(ptr)
     if m:
@@ -161,7 +167,8 @@ def classify(ptr: str) -> tuple[str, str, str, str] | None:
         if column in DAY_COLUMNS:
             return "day", set_ptr, DAY_COLUMNS[column], f"{set_ptr}/{column + 1}"
         if column in MEMORY_COLUMNS:
-            return "memory", set_ptr, MEMORY_COLUMNS[column], ""
+            member = "stability" if column in STABILITY_COLUMNS else "difficulty"
+            return "memory", set_ptr, MEMORY_COLUMNS[column], member
     return None
 
 
@@ -204,12 +211,15 @@ def _is_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def memory_in_class(entry: dict) -> bool:
-    """F8.3."""
+def memory_in_class(entry: dict, member: str) -> bool:
+    """F8.3, for a memory entry whose member is "stability" or "difficulty"."""
     lin, app = entry["linux"], entry["apple"]
     if not (_is_float(lin) and _is_float(app)) or lin == app:
         return False
-    return abs(app - lin) <= MEMORY_TOLERANCE * max(abs(lin), abs(app))
+    m = max(abs(lin), abs(app))
+    if member == "stability":
+        return abs(app - lin) <= max(STABILITY_RELATIVE * m, STABILITY_FLOOR)
+    return abs(app - lin) <= DIFFICULTY_RELATIVE * m
 
 
 def day_rules_1_2(entry: dict) -> bool:
@@ -226,6 +236,12 @@ def day_rules_1_2(entry: dict) -> bool:
     return abs(u_a - u_l) <= UNROUNDED_TOLERANCE * u_l
 
 
+MEMORY_REASONS = {
+    "stability": "stabilities differ by more than relative 1e-4 and by more than 1e-5, or are not both floats",
+    "difficulty": "difficulties differ by more than relative 1e-5, or are not both floats",
+}
+
+
 def outside_class(entries: list[dict]) -> list[dict]:
     """The entries of one overlay outside the fp-libm-boundary class (F8),
     each with a reason. Day entries must carry `unrounded` as recorded."""
@@ -237,10 +253,10 @@ def outside_class(entries: list[dict]) -> list[dict]:
         if kind_info is None:
             out.append({**entry, "reason": "not a next-state day or memory value"})
             continue
-        kind, set_ptr, rating, _ = kind_info
+        kind, set_ptr, rating, detail = kind_info
         if kind == "memory":
-            if not memory_in_class(entry):
-                out.append({**entry, "reason": "memory values differ by more than relative 1e-5, or are not both floats"})
+            if not memory_in_class(entry, detail):
+                out.append({**entry, "reason": MEMORY_REASONS[detail]})
             continue
         if not day_rules_1_2(entry):
             out.append({**entry, "reason": "days differ by other than 1, or the unrounded intervals are missing or apart"})
