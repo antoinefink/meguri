@@ -1147,6 +1147,7 @@ dependencies = [
  "meguri-model",
  "meguri-storage",
  "meguri-sync",
+ "meguri-template",
  "meguri-text",
  "rand 0.9.4",
  "ryu",

@@ -1,0 +1,16 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
+# the testkit's `template` adapter (meguri-template, U60). Pending until notes,
+# note types and cards exist in Meguri's executor (U27, U29):
+# special-fields/cards (template card cases) and template/legacy-req.
+area: render
+active:
+  - "corpus/*"
+  - "filters/*"
+  - "special-fields/new-note"
+  - "template/blank"
+  - "template/comments"
+  - "template/conditionals"
+  - "template/delimiters"
+  - "template/errors"
+  - "template/names"
+  - "template/tags"
