@@ -712,7 +712,9 @@ t_sim_pool_on_macos_bash() {
   local PATH="$dir/bin:$PATH" STUB_LOG="$dir/stub.log" FAKE_SIM_DB="$dir/sims.json"
   local MEGURI_SIM_POOL_DIR="$dir/pool" MEGURI_SIM_DEVICES_DIR="$dir/Devices"
   local MEGURI_SIM_POOL_SETTLE_SECONDS=0 MEGURI_SIM_POOL_POLL_SECONDS=1 MEGURI_SIM_POOL_WAIT_SECONDS=3
-  export PATH STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR
+  # The pool on this Mac (U8c moved it to the test VM): never the real VM.
+  local MEGURI_MAC_VM_CONFIG="$dir/no-mac-vm.json" MEGURI_SIM_ALLOW_HOST=1
+  export PATH STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR MEGURI_MAC_VM_CONFIG MEGURI_SIM_ALLOW_HOST
   export MEGURI_SIM_POOL_SETTLE_SECONDS MEGURI_SIM_POOL_POLL_SECONDS MEGURI_SIM_POOL_WAIT_SECONDS
   mkdir -p "$dir/bin" "$MEGURI_SIM_DEVICES_DIR" && : >"$STUB_LOG" || return 1
   ln -s "$SB/tools/tests/sim_pool_fake_xcrun.sh" "$dir/bin/xcrun" || return 1
@@ -785,7 +787,9 @@ EOF
 
   local PATH="$dir/bin:$PATH" STUB_LOG="$dir/stub.log" FAKE_SIM_DB="$dir/sims.json"
   local MEGURI_SIM_POOL_DIR="$dir/pool" MEGURI_SIM_DEVICES_DIR="$dir/Devices" MEGURI_SIM_POOL_SETTLE_SECONDS=0
+  local MEGURI_MAC_VM_CONFIG="$dir/no-mac-vm.json" MEGURI_SIM_ALLOW_HOST=1
   export PATH STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR MEGURI_SIM_POOL_SETTLE_SECONDS
+  export MEGURI_MAC_VM_CONFIG MEGURI_SIM_ALLOW_HOST
   mkdir -p "$dir/bin" "$MEGURI_SIM_DEVICES_DIR" && : >"$STUB_LOG" || return 1
   ln -s "$SB/tools/tests/sim_pool_fake_xcrun.sh" "$dir/bin/xcrun" || return 1
   mg sim-setup

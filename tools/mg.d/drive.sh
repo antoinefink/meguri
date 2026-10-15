@@ -1,8 +1,8 @@
 # Agent drive loop (U8, R1961, R1964, R1965, R1968). Sourced by tools/mg.
 #
 # `drive` runs a drive script (tools/drive-scripts/AGENTS.md) through the
-# XCUITest AgentDriverTests on a simulator from the pool or for the Mac in
-# the macOS test VM (mac-vm.sh), exports the hierarchy and
+# XCUITest AgentDriverTests on a simulator from the pool or for the Mac, both
+# in the macOS test VM (mac-vm.sh), exports the hierarchy and
 # screenshot taken before and after every step from the result bundle into
 # build/mg/<job>/<run>/steps/, runs hierarchy-check over every hierarchy, and
 # writes manifest.json. `ui-tree` and `screenshot` drive a one-step script
@@ -169,13 +169,14 @@ mg_drive__motion_inputs() {
 }
 
 # mg_drive_run <script> <mac|ios> <udid|""> <config> <record yes|no> <out dir>:
-# runs the script (the app and UI tests are built; the host lease, or for the
-# Mac what mg_mac_ui_take takes, is held), exports its captures, checks them
-# and writes <out>/manifest.json. A Mac drive in the test VM first copies the
+# runs the script (the app and UI tests are built; what mg_sim_take or, for
+# the Mac, mg_mac_ui_take takes is held), exports its captures, checks them
+# and writes <out>/manifest.json. A drive in the test VM first copies the
 # script and the fixtures its launch steps name to the same paths there.
 # With record, it also captures motion and makes a contact sheet for every
 # step marked with a transition:
-#   simulators: simctl io recordVideo around the drive;
+#   simulators: simctl io recordVideo around the drive (in the test VM, the
+#     video comes back into <out>);
 #   the Mac in the test VM: the driver's FrameSampler screenshots (about 10
 #     per second); the host cannot record the VM's screen;
 #   the Mac with Screen Recording (MEGURI_MAC_UI_ALLOW_HOST=1 runs):
@@ -218,7 +219,7 @@ mg_drive_run() {
       rec_log="$out/record.log"
       mg_record__start_recorder "$udid" "$video" "$rec_log"
       recorder="$MG_RECORDER_PID"
-      mg_on_exit "kill -9 $recorder 2>/dev/null"
+      mg_on_exit "kill -9 $recorder 2>/dev/null; mg_record__kill_remote '$video'"
       if ! mg_record__wait_started "$rec_log" "$recorder"; then
         mg_failure record "simctl io recordVideo did not start; see $rec_log"
         return 2
@@ -236,7 +237,7 @@ mg_drive_run() {
       ;;
   esac
 
-  if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
+  if { [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; } || { [ "$platform" != mac ] && [ "$MG_SIM_RUNNER" = vm ]; }; then
     local inputs=("$abs_script") fixture
     while IFS= read -r fixture; do
       case "$fixture" in /*) inputs[${#inputs[@]}]="$fixture" ;; *) inputs[${#inputs[@]}]="$MG_ROOT/$fixture" ;; esac
@@ -244,7 +245,7 @@ mg_drive_run() {
     mg_mac_vm_copy_in "${inputs[@]}" || return 2
   fi
 
-  echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid") ($config)${capture:+, capturing motion: $capture}" >&2
+  echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid${MG_SIM_RUNNER:+ ($MG_SIM_RUNNER)}") ($config)${capture:+, capturing motion: $capture}" >&2
   local since refused=0
   since="$(mg_app_log_now)"
   TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$abs_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
@@ -261,7 +262,7 @@ mg_drive_run() {
         mg_failure record "simctl io recordVideo stopped before the drive ended; see $rec_log"
         capture_error=1
       fi
-      mg_record__stop_recorder "$recorder"
+      mg_record__stop_recorder "$recorder" "$video"
       ;;
     screen)
       if ! mg_drive__screen_stop; then
@@ -454,8 +455,8 @@ mg_drive_run() {
 # Jobs
 
 # mg_drive__job <script> <kind> <udid> <config> <record>: builds, takes the
-# host lease and a pool simulator (or for the Mac the test VM, mac-vm.sh) and
-# runs the script.
+# test VM (mac-vm.sh: the pool VM's lease and a pool simulator, or for the Mac
+# a VM's lease) and runs the script.
 mg_drive__job() {
   local script="$1" kind="$2" udid="$3" config="$4" record="$5" platform
   if [ "$kind" = mac ]; then
@@ -465,11 +466,12 @@ mg_drive__job() {
     mg_mac_ui_take || return 0
   else
     platform=ios
+    mg_sim_begin || return 0
     if [ -n "$udid" ]; then
       mg_sim_check_given "$udid" || return 0
     fi
     mg_app_build ios-sim "$config" || return 0
-    mg_host_lease || return 0
+    mg_sim_take || return 0
     if [ -n "$udid" ]; then
       mg_sim_check_given "$udid" || return 0
     else
@@ -590,14 +592,16 @@ mg_screenshot() {
   fi
 }
 
-# The screen of a simulator the caller leased, as it is.
+# The screen of a simulator the caller leased, as it is (in the test VM, the
+# capture comes back into the run directory).
 mg_screenshot__device() {
   local udid="$1" png="$MG_RUN_DIR/screen.png"
+  mg_sim_begin || return 0
   mg_sim_check_given "$udid" || return 0
-  mg_host_lease || return 0
+  mg_sim_take --no-copy || return 0
   mg_sim_check_given "$udid" || return 0
   mg_sim_prepare "$udid" || return 0
-  if ! xcrun simctl io "$udid" screenshot "$png" >&2 || [ ! -s "$png" ]; then
+  if ! mg_sim_mkdir "$MG_RUN_DIR" || ! mg_simctl io "$udid" screenshot "$png" >&2 || ! mg_sim_fetch "$png" || [ ! -s "$png" ]; then
     mg_failure screenshot "simctl io screenshot failed"
     mg_status error
     return 0

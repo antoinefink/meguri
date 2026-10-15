@@ -130,6 +130,12 @@ case "$name $*" in
   "vm-ssh xcodebuild -version")
     [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
     printf 'Xcode %s\nBuild version %s\n' "${STUB_VM_XCODE:-27.0}" 27A266a ;;
+  "vm-ssh xcrun simctl list runtimes --json")
+    if [ "${STUB_VM_RUNTIME:-1}" = 1 ]; then
+      echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","buildversion":"24A434","isAvailable":true,"platform":"iOS"}]}'
+    else
+      echo '{"runtimes":[]}'
+    fi ;;
   "rustup toolchain list") echo 1.99.0-aarch64-apple-darwin ;;
   "rustup +1.99.0 target list --installed")
     printf '%s\n' ${STUB_RUST_TARGETS-aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim} ;;
@@ -173,6 +179,7 @@ assert_read_only_calls() {
     -e '^df -Pk /' \
     -e '^tart list --format json$' \
     -e '^vm-ssh xcodebuild -version$' \
+    -e '^vm-ssh xcrun simctl list runtimes --json$' \
     "$STUB_LOG" || true)"
   if [ -n "$bad" ]; then
     echo "doctor issued commands outside the read-only allowlist:"
@@ -471,7 +478,16 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   mg doctor
   [ "$(field .status)" = pass ]
   jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "pass" and (.message | contains("running, SSH answers, Xcode 27.0 (27A266a) as on this Mac")))' "$result"
-  [ "$(field -c '.details.mac_vm.vms[0] | [.drive_connected, .present, .state, .ssh, .xcode, .xcode_matches_host]')" = '[true,true,"running",true,"27.0 (27A266a)",true]' ]
+  [ "$(field -c '.details.mac_vm.vms[0] | [.drive_connected, .present, .state, .ssh, .xcode, .xcode_matches_host, .sim_runtime]')" = '[true,true,"running",true,"27.0 (27A266a)",true,true]' ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac/simulators" and .status == "pass" and (.message | contains("iOS 27.0 (24A434) simulator runtime")))' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 0 ]
+
+  # A VM without the pinned simulator runtime warns, naming the script that
+  # adds it (not a user step: an agent runs it).
+  STUB_VM_RUNTIME=0 mg doctor
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac/simulators" and .status == "warn" and (.message | contains("tools/vm/add-sim-runtime.sh")))' "$result"
+  [ "$(field '.details.mac_vm.vms[0].sim_runtime')" = false ]
   [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 0 ]
 
   # A stopped VM is fine: Mac UI jobs start it. Doctor never does.
@@ -499,7 +515,7 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   mg doctor
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
-  jq -e '.details.checks[] | select(.id == "mac-vm" and .status == "warn" and (.message | contains("no Mac UI test VM is configured")))' "$result"
+  jq -e '.details.checks[] | select(.id == "mac-vm" and .status == "warn" and (.message | contains("no macOS test VM is configured")))' "$result"
   [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
   [ "$(field .details.mac_vm.configured)" = false ]
 

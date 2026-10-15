@@ -1,6 +1,6 @@
-# Mac UI tests in a VM
+# Mac UI tests and simulators in a VM
 
-Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. This page records the VM as set up and verified on that day.
+Antoine decided on 2026-10-15 that Mac UI-driving suites run in a macOS virtual machine on this Mac. Before, they ran on the real screen, at most once an hour. Plan unit U8b implements the change. The same day he extended it: everything that would disturb his Mac runs in the VM, as soon and as often as useful. Plan unit U8c moves the simulators there. This page records the VM as set up and verified on that day.
 
 ## The VM
 
@@ -46,9 +46,35 @@ On 2026-10-15, from the U8b worktree: `mac-ui --suite a11y` passed (11 passed, 1
 
 A test run in the VM outlives a lost SSH session or a killed job. So a job stops any leftover run (`xcodebuild test-without-building` and the UI-test runner) when it takes the VM, and right after it loses a session. If the run cannot be stopped, the job runs no more suites, and the VM gets no new run until a later job stops it. Verified on the real VM on 2026-10-15: the local SSH client of a running a11y suite was killed, and the job stopped the run in the VM before test-hooks started; a leftover process with a test run's command line was stopped before `a11y --platform mac` ran (11 passed, 1 skipped).
 
+## Simulators (U8c)
+
+### Provisioning (2026-10-15)
+
+- The iOS 27.0 (24A434) simulator runtime came from this Mac, not from a download. Here it is a cryptex disk image of 8.07 GB (`Restore/043-70362-657.dmg` in its MobileAsset directory, `xcrun simctl runtime list -j` gives the path). Its directory went to `~/runtime-import/` in the VM by tar over SSH in 37 s, and `xcrun simctl runtime add` of that disk image took 47 s there. CoreSimulator cloned it into `/Library/Developer/CoreSimulator/Images/`, so the VM's disk use did not grow; the import directory was removed afterwards. `tools/vm/add-sim-runtime.sh` does these steps, and leaves a VM that already has the runtime alone (it did so on the provisioned VM). `tools/mg doctor` warns while the VM lacks it.
+- `tools/mg sim-setup` then created the pool in the VM: `Meguri-Pool-iphone-1`, `-iphone-small-1`, `-ipad-1` and `-ipad-small-1` on the pinned runtime; the foldable lane is `unavailable: toolchain`, as on the host.
+- Some SpringBoards ignore appearance changes: `simctl ui appearance dark` and `XCUIDevice.appearance = .dark` were accepted, and SpringBoard's style arbiter never logged them, so the accessibility audit's dark variants rendered light ("the variant's appearance did not apply"). It hit the iPhone's first boot and the iPad's SpringBoard restarted 45 s after its first boot; the small iPad's restart and a second small iPad's first boot were fine. A SpringBoard just restarted also drops changes for some seconds. A restart inside the simulator (`launchctl kickstart -k user/foreground/com.apple.SpringBoard` through `simctl spawn`) fixed each broken one. So once after every boot the pool switches the device to dark and back and looks for the arbiter's "changing style … to 2" in the simulator's log, and restarts SpringBoard (then waits 30 s) until it shows, at most three times. The device stays booted.
+
+### How jobs use it
+
+The simulator pool lives in the VM: `tools/scripts/sim-pool.sh` (and `tools/mg sim`) runs itself there over SSH, with its leases in the VM's `~/Library/Caches/meguri/sim-pool/`; a lease still names the host checkout. Every simulator job (`sim-setup`, `sim-reset`, `run`, `drive`, `ui-tree`, `screenshot`, `record`, `a11y`, `snapshots`, `xcode-check`) builds on the host as before, takes the VM's lease instead of the host lease, copies the products (and fixtures, drive scripts, snapshot baselines) to the same paths there, runs `simctl`, `devicectl` and `xcodebuild test-without-building` there, and copies result bundles, screenshots, videos and snapshot output back into its run directory. Its `result.json` has `details.sim_runner: "vm"`. The simulators need no unlocked session on the host; only `xcode-check`'s hidden Mac launches do. Without the VM they are queued (warn, user step `mac-vm`); `MEGURI_SIM_ALLOW_HOST=1` uses the host's pool instead, for a run Antoine starts himself. Jobs that hold both the VM's lease and the host lease take the VM's first.
+
+### Verified (2026-10-15, from the U8c worktree)
+
+All runs went through the VM with `details.sim_runner: "vm"` and no host lease. From the first drive on, a watcher sampled the host every few seconds: the host's own seven pool simulators, booted before U8c, stayed as they were, no other simulator booted on the host, and none of these runs took the host lease. From 15:57 (local time) the host session was locked.
+
+- `a11y --platform iphone` (20261015T124436Z-76381): 12 passed, 438 s with the incremental build.
+- `drive tools/drive-scripts/examples/open-sample-sheet.json --platform iphone` (20261015T130907Z-51806): 6 steps, no issue, 84 s; the captures show the pinned status bar (9:41, full battery).
+- `a11y --platform ipad`: the first run (20261015T131046Z-55871) failed the dark variants (the SpringBoard above). The second (20261015T133652Z-80265) got past them and timed out acquiring a background assertion for the app: the VM had booted four pool devices in the previous half hour and its load average had reached about 400. Once the load had dropped, the third (20261015T135902Z-23915) passed, 12 tests in 376 s, with the host locked.
+- Snapshot comparison, `snapshots --platform iphone,ipad` (20261015T140536Z-33911), against the committed baselines: 152 pass, 44 deferred, no failing or new image, on the iphone, iphone-small and ipad kinds, with every settings group's probe present and applied (9 groups on the iPhone, 4 on the small iPhone, 1 on the iPad). Every image matched, so simulator snapshot runs stay in the VM; Mac snapshots render in-process on the host as before.
+- `drive tools/drive-scripts/examples/sample-transition.json --platform iphone --record` (20261015T140934Z-45711): 5 steps, no issue; simctl recorded in the VM, the video came back and the contact sheet of the marked step was made from it. It first waited for the VM's lease, which a Mac UI performance run of another worktree held.
+- A leased iPhone: `sim acquire`, `record start` (the worker recorded in the VM and held its lease), `run --route sample/sheet` and `screenshot --device` inside the recording's lease (nested), `record stop` (a 20.8 s video back in the run directory), `sim release`: all passed.
+- `xcode-check` was not run for real: the host was locked, and its hidden Mac launches wait for an unlocked session. Its simulator runs in the VM are covered by `tools/tests/xcode_project_check.bats`.
+
 ## Limits
 
 - The T9 drive must be connected and mounted. Without it, there is no VM.
-- Timings in the VM do not represent the hardware. Mac UI performance suites (`ui-perf --platform mac`, U12) run in the VM against baselines recorded there; CPU benchmarks without UI (`bench-mac`) stay on the host.
+- Timings in the VM do not represent the hardware. Mac and iOS UI performance suites (`ui-perf`, U12) run in the VM against baselines recorded there; CPU benchmarks without UI (`bench-mac`) stay on the host.
+- One VM holds the simulator pool (the first configured VM that can run). A second VM adds capacity for Mac UI suites only.
+- The VM has 6 CPUs and 12 GB of memory. Pool devices stay booted (five on 2026-10-15), and a device's first boots load the VM for several minutes: a suite that runs meanwhile can time out. More CPUs and memory (`tart set meguri-mac --cpu … --memory …`, with the VM stopped) would give simulators more room.
 - The host cannot record the VM's screen: Mac `drive --record` in the VM makes its contact sheets from screenshots the test runner samples.
 - Input-driving Mac tests fail in the VM until Apple fixes the macOS 27.0.1 bug, exactly as on the host.

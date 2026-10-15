@@ -11,12 +11,16 @@
 # Motion, Liquid Glass opacity), set with devicectl before each run (spike
 # S5) and reset afterwards; a plan run lists the groups first. Every group
 # renders the settings probe, whatever the filter, and the job fails when a
-# probe is missing or a setting left it unchanged. The Mac test
-# host is sandboxed, so its results are written in its container and copied
-# here. `--record <filter>` then copies the images of failing or missing
-# snapshots that match the filter into app/Snapshots/, leaving the others
-# byte for byte; `--rebaseline` records everything for the current OS build
-# and drops the baselines of other builds of the same model (R1974).
+# probe is missing or a setting left it unchanged. Simulators run in the
+# macOS test VM (U8c, mac-vm.sh): the products, app/Snapshots (the baselines
+# the tests read at their source path) and the inventory go there, and each
+# run's output directory comes back. The Mac renders in-process on this Mac,
+# off-screen; its test host is sandboxed, so its results are written in its
+# container and copied here. `--record <filter>` then copies the images of
+# failing or missing snapshots that match the filter into app/Snapshots/,
+# leaving the others byte for byte; `--rebaseline` records everything for
+# the current OS build and drops the baselines of other builds of the same
+# model (R1974).
 # Approved signature baselines (docs/design/approved-baselines.json) that
 # changed beyond the tolerance fail the run as needs-human-review; an
 # approved image whose OS build was dropped is compared with its successor
@@ -74,6 +78,8 @@ mg_snapshots() {
   done
   [ -n "$platforms" ] || platforms="iphone ipad mac"
   platforms="${platforms# }"
+  # Simulators: where they run is decided before anything else touches them.
+  [ "$platforms" = mac ] || mg_sim_begin || return 0
   # Each --device stands in for the pool kind it is; the job leases the others.
   kinds=""
   for p in $platforms; do [ "$p" = mac ] || kinds="$kinds $(mg_snapshots__kinds "$p")"; done
@@ -104,6 +110,9 @@ mg_snapshots() {
   case " $platforms " in *" mac "*) mg_app_build mac Debug Snapshot || return 0 ;; esac
 
   MG_SNAP_MODE="$mode" MG_SNAP_FILTER="$filter" MG_SNAP_BROKEN=0
+  # The simulators' lease (the test VM's) comes before the Mac's host lease,
+  # whatever the platform order: every job that takes both takes them so.
+  case " $platforms " in *" iphone "* | *" ipad "*) mg_snapshots__sim_lease || return 0 ;; esac
   for p in $platforms; do
     if [ "$p" = mac ]; then
       mg_snapshots__mac || return 0
@@ -125,22 +134,60 @@ mg_snapshots__lease() {
   MG_SNAP_LEASED=1
 }
 
+# The simulators' lease, taken once: the test VM's (with the products,
+# app/Snapshots and the inventory copied in), or the host lease with
+# MEGURI_SIM_ALLOW_HOST=1.
+mg_snapshots__sim_lease() {
+  [ -z "${MG_SNAP_SIM_LEASED:-}" ] || return 0
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_sim_take || return 1
+    if ! mg_mac_vm_copy_in "$MG_ROOT/app/Snapshots" "$MG_RUN_DIR/inventory.json"; then
+      mg_message "snapshots: the test VM could not run the simulators: the baselines could not be copied into it"
+      mg_status error
+      return 1
+    fi
+  else
+    mg_snapshots__lease || return 1
+  fi
+  MG_SNAP_SIM_LEASED=1
+}
+
 # mg_snapshots__xcodebuild <out dir> <destination> <only-testing suites|all> <env...>:
 # test-without-building of the Snapshot plan with TEST_RUNNER_ variables;
-# writes <out>.log and <out>.xcresult. Records tests that failed outside the
-# snapshot suites (their snapshot failures come from results.jsonl).
+# writes <out>.log and <out>.xcresult. A simulator run in the test VM writes
+# its output directory there (TEST_RUNNER_MEGURI_SNAPSHOT_OUT, the same path)
+# and it comes back here. Records tests that failed outside the snapshot
+# suites (their snapshot failures come from results.jsonl).
 mg_snapshots__xcodebuild() {
-  local out="$1" dest="$2" suites="$3" only=() s rc summary
+  local out="$1" dest="$2" suites="$3" only=() s rc summary e
   shift 3
   if [ "$suites" != all ]; then
     for s in $suites; do only[${#only[@]}]="-only-testing:MeguriSnapshotTests/$s"; done
   fi
   rm -rf "$out.xcresult"
   mkdir -p "$(dirname "$out")"
-  env "$@" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan Snapshot -configuration Debug \
-    -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$out.xcresult" -collect-test-diagnostics never \
-    ${only[0]+"${only[@]}"} >"$out.log" 2>&1
-  rc=$?
+  if [ "$dest" != "platform=macOS,arch=arm64" ] && [ "$MG_SIM_RUNNER" = vm ]; then
+    # mg_vm_xcodebuild_test passes the exported TEST_RUNNER_ variables.
+    for e in "$@"; do export "${e?}"; done
+    rm -rf "$out"
+    mg_vm_xcodebuild_test "$out" Snapshot iphonesimulator "$dest" Debug ${only[0]+"${only[@]}"}
+    rc=$?
+    for e in "$@"; do unset "${e%%=*}"; done
+    if [ -n "$MG_MAC_VM_RUN_ERROR" ]; then
+      mg_artifact log "$out.log" "xcodebuild test $(basename "$(dirname "$out")")/$(basename "$out") (in the test VM)"
+      MG_SNAP_BROKEN=1
+      return 1
+    fi
+    # The run's output directory comes back (a run that wrote none has none).
+    if mg_mac_vm_ssh "test -d $(mvl_q "$out")" >/dev/null 2>&1; then
+      mg_sim_fetch "$out" || { MG_SNAP_BROKEN=1; return 1; }
+    fi
+  else
+    env "$@" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan Snapshot -configuration Debug \
+      -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$out.xcresult" -collect-test-diagnostics never \
+      ${only[0]+"${only[@]}"} >"$out.log" 2>&1
+    rc=$?
+  fi
   mg_artifact log "$out.log" "xcodebuild test $(basename "$(dirname "$out")")/$(basename "$out")"
   summary="$(xcrun xcresulttool get test-results summary --path "$out.xcresult" 2>/dev/null |
     jq -c '{result, passed: .passedTests, failed: .failedTests, skipped: .skippedTests}')" || summary=""
@@ -170,7 +217,7 @@ mg_snapshots__settings() {
   rm="$(printf '%s' "$group" | sed -E 's/^rt([01])-rm([01])-t([0-9]+)$/\2/')"
   t="$(printf '%s' "$group" | sed -E 's/^rt([01])-rm([01])-t([0-9]+)$/\3/')"
   printf '%s' "$group" | grep -Eq '^rt[01]-rm[01]-t[0-9]+$' || { echo "snapshots: bad settings group '$group'" >&2; return 1; }
-  xcrun devicectl device settings appearance --device "$udid" --mode light --text-size large --larger-accessibility-sizes off \
+  mg_devicectl device settings appearance --device "$udid" --mode light --text-size large --larger-accessibility-sizes off \
     --increase-contrast off --reduce-transparency "$(onoff "$rt")" --reduce-motion "$(onoff "$rm")" \
     --liquid-glass-opacity "$(awk -v t="$t" 'BEGIN { printf "%.2f", t / 100 }')" >&2
 }
@@ -180,12 +227,12 @@ mg_snapshots__settings() {
 # (TEST_RUNNER_MEGURI_SNAPSHOT_TARGET).
 mg_snapshots__simulator() {
   local kind="$1" udid="$2" dir="$MG_RUN_DIR/$1" groups g dest
+  mg_snapshots__sim_lease || return 1
   if [ -z "$udid" ]; then
     mg_sim_lease "$kind" release || return 1
     udid="$MG_SIM_UDID"
     mg_sim_check_runtime "$udid" || return 1
   fi
-  mg_snapshots__lease || return 1
   [ -z "$2" ] || mg_sim_check_given "$udid" || return 1
   dest="id=$udid"
   mg_on_exit "mg_snapshots__settings '$udid' '$MG_SNAP_DEFAULT_GROUP' >/dev/null 2>&1"

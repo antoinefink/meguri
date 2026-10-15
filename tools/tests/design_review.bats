@@ -40,8 +40,9 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   export MEGURI_HOST_LEASE_DIR="$BATS_TEST_TMPDIR/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1
   export MEGURI_MAC_UI_DIR="$BATS_TEST_TMPDIR/mac-ui"
-  # No test VM: Mac runs here take the host path (mac_vm.bats covers the VM).
-  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_MAC_UI_ALLOW_HOST=1
+  # No test VM: Mac and simulator runs here take the host path (mac_vm.bats
+  # and sim_vm.bats cover the VM).
+  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_MAC_UI_ALLOW_HOST=1 MEGURI_SIM_ALLOW_HOST=1
   export TMPDIR="$BATS_TEST_TMPDIR/tmp"
   mkdir -p "$HOME" "$TMPDIR"
   : >"$STUB_LOG"

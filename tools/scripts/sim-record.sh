@@ -1,8 +1,11 @@
 #!/bin/bash
 # Recording worker for `tools/mg record start` (U8, R1976). Runs in its own
 # session and outlives that job: it records a simulator's screen with
-# `simctl io recordVideo`, keeps the display awake (caffeinate) and holds the
-# host lease the job handed to it (tools/mg.d/host.sh) until it stops.
+# `simctl io recordVideo` and holds the lease the job handed to it
+# (tools/mg.d/host.sh: the test VM's, or the host's) until it stops. With
+# MEGURI_SIM_RECORD_SSH (the test VM's SSH wrapper, U8c) simctl records in
+# the VM, into the same path, and the video comes back when it stops; on
+# this Mac the worker also keeps the display awake (caffeinate).
 #
 # usage: sim-record.sh <udid> <video> <recorder log> <lease dir> <status file> <max seconds>
 #
@@ -18,9 +21,12 @@ set -u
 udid="$1" video="$2" log="$3" lease="$4" status="$5" max="$6"
 me=$$
 recorder="" awake="" reason=stopped
+vm="${MEGURI_SIM_RECORD_SSH:-}"
 
 # shellcheck source=SCRIPTDIR/host-lease-mutex.sh
 . "$(dirname "$0")/host-lease-mutex.sh"
+# shellcheck source=SCRIPTDIR/mac-vm-lib.sh
+. "$(dirname "$0")/mac-vm-lib.sh"
 
 now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
 holder_pid() { jq -r '.pid // empty' "$1/holder.json" 2>/dev/null; }
@@ -40,18 +46,34 @@ release_lease() {
   [ "$locked" = 0 ] || host_lease_unlock
 }
 
+# In the VM: a command there (its pid file is <video>.pid there).
+remote() { "$vm" "$1" </dev/null; }
+
 finish() {
   trap '' INT TERM HUP
   local code="" i
   if [ -n "$recorder" ]; then
-    kill -INT "$recorder" 2>/dev/null
+    if [ -n "$vm" ]; then
+      remote "kill -INT \$(cat $(mvl_q "$video.pid")) 2>/dev/null" >/dev/null 2>&1
+    else
+      kill -INT "$recorder" 2>/dev/null
+    fi
     for i in $(seq 1 150); do
       kill -0 "$recorder" 2>/dev/null || break
       sleep 0.1
     done
+    [ -z "$vm" ] || remote "p=$(mvl_q "$video.pid"); [ ! -f \"\$p\" ] || kill -9 \$(cat \"\$p\") 2>/dev/null; rm -f \"\$p\"" >/dev/null 2>&1
     kill -9 "$recorder" 2>/dev/null
     wait "$recorder" 2>/dev/null
     code=$?
+    if [ -n "$vm" ]; then
+      rm -f "$video"
+      if mvl_copy_out "$vm" "the test VM" "$video" 2>>"$log"; then
+        remote "rm -f $(mvl_q "$video")" >/dev/null 2>&1
+      else
+        echo "sim-record: $MVL_REASON" >>"$log"
+      fi
+    fi
   fi
   [ -z "$awake" ] || kill "$awake" 2>/dev/null
   jq -n --arg r "$reason" --arg c "$code" --argjson t "$(now)" \
@@ -62,14 +84,20 @@ finish() {
 }
 
 trap 'reason=stopped; finish' INT TERM HUP
-if command -v caffeinate >/dev/null 2>&1; then
+if [ -z "$vm" ] && command -v caffeinate >/dev/null 2>&1; then
   caffeinate -d -i -w "$me" >/dev/null 2>&1 &
   awake=$!
 fi
-# A background command of a script starts with SIGINT ignored; simctl stops
-# cleanly on SIGINT, so it gets the default back.
-perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
-  xcrun simctl io "$udid" recordVideo --codec h264 --force "$video" </dev/null >"$log" 2>&1 &
+if [ -n "$vm" ]; then
+  # simctl replaces the shell that wrote its pid: SIGINT reaches it there.
+  remote "mkdir -p $(mvl_q "$(dirname "$video")") && rm -f $(mvl_q "$video") && echo \$\$ >$(mvl_q "$video.pid") &&
+    exec xcrun simctl io $(mvl_q "$udid") recordVideo --codec h264 --force $(mvl_q "$video")" >"$log" 2>&1 &
+else
+  # A background command of a script starts with SIGINT ignored; simctl stops
+  # cleanly on SIGINT, so it gets the default back.
+  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
+    xcrun simctl io "$udid" recordVideo --codec h264 --force "$video" </dev/null >"$log" 2>&1 &
+fi
 recorder=$!
 start="$(date +%s)"
 while kill -0 "$recorder" 2>/dev/null; do

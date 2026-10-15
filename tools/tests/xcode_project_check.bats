@@ -12,6 +12,7 @@ setup() {
   SB="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App"
   cp "$REPO_ROOT/tools/tests/xcode_project_check.sh" "$SB/tools/tests/"
+  cp "$REPO_ROOT/tools/scripts/mac-vm-lib.sh" "$SB/tools/scripts/"
   STUBS="$BATS_TEST_TMPDIR/stubs"
   mkdir -p "$STUBS"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
@@ -30,13 +31,24 @@ EOF
   chmod +x "$SB/tools/scripts/sim-pool.sh"
   unset STUB_POOL_BUSY
   # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
-  # product check runs; test runs pass. A launched app stays up, except on the
-  # route stub/quits.
+  # product check runs; builds for testing write the plan's simulator
+  # xctestrun; test runs pass. A launched app stays up, except on the route
+  # stub/quits.
   cat >"$STUBS/_stub" <<'EOF'
 #!/usr/bin/env bash
 name="$(basename "$0")"
 printf '%s\n' "$name $*" >>"$STUB_LOG"
 case "$name $*" in
+  "xcodebuild build-for-testing "*)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -derivedDataPath) dd="$2" ;; -scheme) scheme="$2" ;; -testPlan) plan="$2" ;; -configuration) config="$2" ;;
+      esac
+      shift
+    done
+    mkdir -p "$dd/Build/Products"
+    echo "__TESTROOT__/$config-iphonesimulator/" >"$dd/Build/Products/${scheme}_${plan}_iphonesimulator27.0-arm64.xctestrun"
+    ;;
   "xcrun xcresulttool get build-results "*) echo '{"errorCount":0,"warningCount":0,"warnings":[]}' ;;
   "xcrun xcresulttool get "*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
   "xcodebuild build "*) [ "${STUB_BUILD_OK:-}" = 1 ] || exit 65 ;;
@@ -52,6 +64,29 @@ EOF
   done
   export PATH="$STUBS:$PATH"
   unset MEGURI_ALLOW_MAC_UI
+}
+
+# The test VM's SSH wrapper (--vm-ssh): logs each command and answers as the
+# VM would: a test run reports its exit code (STUB_VM_RC, 0), a result bundle
+# is there and comes back as a tar of an empty directory.
+vm_ssh_stub() {
+  cat >"$STUBS/vm-ssh" <<'EOF'
+#!/usr/bin/env bash
+printf 'vm-ssh %s\n' "$1" >>"$STUB_LOG"
+cat >/dev/null
+case "$1" in
+  *"xcodebuild test-without-building"*) echo "mg-xcode-check: remote exit ${STUB_VM_RC:-0}"; exit "${STUB_VM_RC:-0}" ;;
+  "tar -C "*)
+    eval "set -- $1"
+    t="$(mktemp -d)"
+    mkdir -p "$t/$6"
+    tar -C "$t" -cf - "$6"
+    rm -rf "$t"
+    ;;
+esac
+exit 0
+EOF
+  chmod +x "$STUBS/vm-ssh"
 }
 
 check_project() {
@@ -193,4 +228,37 @@ SWIFT
   check_project --phase devices --continue-from 3 --no-ui
   not_called '^open '
   [ "$(head -n 1 <<<"$output" | sed -E 's/^(not )?ok ([0-9]+) .*/\2/')" = 4 ]
+}
+
+@test "with the test VM, simulator builds use any simulator and each simulator run is built here and tested in the VM" {
+  vm_ssh_stub
+  check_project --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  called '^sim-pool\.sh acquire iphone --holder xcode-check$'
+  called '^xcodebuild build .* -configuration Debug -destination generic/platform=iOS Simulator '
+  not_called '^xcodebuild (build|test) .* -destination id='
+  called '^xcodebuild build-for-testing .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination generic/platform=iOS Simulator '
+  called "^vm-ssh \\{ mkdir -p .* xcodebuild test-without-building -xctestrun '[^']*/DerivedData-tests/Build/Products/Meguri_UI_iphonesimulator27.0-arm64.xctestrun' "
+  called "^vm-ssh .*-destination 'id=POOL-ipad' .*'-only-testing:MeguriUITests/TestHooksTests'"
+  # The products go to the VM before each run, the bundle comes back.
+  called "^vm-ssh rm -rf '[^']*/DerivedData-tests/Build/Products' && mkdir -p "
+  tap_line 'ok [0-9]+ iphone-Release-TestHooksTests: Passed .*'
+  tap_line 'ok [0-9]+ ipad-Debug-TestHooksTests: Passed .*'
+  called '^sim-pool\.sh release POOL-iphone$'
+  # The Mac runs stay on this Mac.
+  called '^xcodebuild test .* -testPlan Unit .* -destination platform=macOS,arch=arm64 '
+
+  # A run that fails in the VM is a failing test.
+  STUB_VM_RC=65 check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+}
+
+@test "without the test VM, xcode-check builds for the simulator but leases and tests none" {
+  check_project --no-sims
+  not_called '^sim-pool\.sh '
+  called '^xcodebuild build .* -destination generic/platform=iOS Simulator '
+  not_called 'id=POOL'
+  not_called '^xcodebuild build-for-testing'
+  tap_line 'ok [0-9]+ lease the iPhone and iPad simulators # SKIP queued: no test VM \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ simulator test runs # SKIP queued: no test VM \(user step mac-vm\)'
 }

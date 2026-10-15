@@ -17,7 +17,11 @@
 # FAKE_SIM_RECORD_EMPTY=1 the file is empty; FAKE_SIM_RECORD_EXIT_AFTER=<s>
 # makes it fail after that long); `io <udid> screenshot <file>` writes a
 # stand-in PNG. FAKE_SIM_STATUS_BAR_FAIL=1 makes `status_bar <udid> override`
-# fail.
+# fail. `spawn <udid> launchctl kickstart|list` stands in for SpringBoard's
+# restart, `spawn <udid> log show` for its style arbiter's log: with
+# FAKE_SIM_SB=stale new devices' SpringBoard ignores appearance changes until
+# FAKE_SIM_SB_RESTARTS (1) restarts, or never. FAKE_SIM_NO_RT27=1 leaves the iOS 27.0 runtime out
+# until `runtime add <image>` adds it.
 
 set -u
 [ "${1:-}" = simctl ] || { echo "fake xcrun: only simctl is faked" >&2; exit 97; }
@@ -49,8 +53,8 @@ add() { # add <name> <state> <type> <runtime>: prints the UDID
   local n udid
   n="$(jq -r .next "$DB")"
   udid="$(printf '00000000-0000-4000-8000-%012d' "$n")"
-  upd --arg u "$udid" --arg n "$1" --arg s "$2" --arg t "$3" --arg r "$4" '.next += 1 |
-    .devices += [{udid: $u, name: $n, state: $s, type: $t, runtime: $r,
+  upd --arg u "$udid" --arg n "$1" --arg s "$2" --arg t "$3" --arg r "$4" --arg sb "${FAKE_SIM_SB:-ok}" '.next += 1 |
+    .devices += [{udid: $u, name: $n, state: $s, type: $t, runtime: $r, appearance: "light", springboard: $sb, restarts: 0,
       apps: [{id: "com.apple.Preferences", type: "System"}, {id: "com.apple.mobilesafari", type: "System"}]}]'
   mkdir -p "$MEGURI_SIM_DEVICES_DIR/$udid/data"
   printf '%s\n' "$udid"
@@ -59,10 +63,12 @@ add() { # add <name> <state> <type> <runtime>: prints the UDID
 lock
 case "${1:-} ${2:-}" in
   "list runtimes")
+    rt27='{"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "buildversion": "'"${FAKE_SIM_RT27_BUILD:-24A434}"'", "isAvailable": true, "platform": "iOS"},'
+    [ "${FAKE_SIM_NO_RT27:-}" != 1 ] || [ -e "$DB.runtime-added" ] || rt27=""
     cat <<EOF
 {"runtimes": [
   {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2", "version": "18.2", "buildversion": "22C150", "isAvailable": true, "platform": "iOS"},
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "buildversion": "${FAKE_SIM_RT27_BUILD:-24A434}", "isAvailable": true, "platform": "iOS"},
+  $rt27
   {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "buildversion": "24B5", "isAvailable": false, "platform": "iOS"},
   {"identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-28-0", "version": "28.0", "buildversion": "23R1", "isAvailable": true, "platform": "watchOS"}
 ]}
@@ -142,7 +148,18 @@ EOF
     need_booted "$2" uninstall
     upd --arg u "$2" --arg b "$3" '(.devices[] | select(.udid == $u) | .apps) |= map(select(.id != $b))'
     ;;
-  privacy\ * | keychain\ * | ui\ * | status_bar\ * | install\ * | launch\ *)
+  launch\ *)
+    # simctl launch [--options] <udid> <bundle id> [args]: prints "<bundle id>: <pid>".
+    shift
+    while [ "${1#--}" != "${1:-}" ]; do shift; done
+    need_booted "$1" launch
+    echo "${2:-?}: 4242"
+    ;;
+  "ui "*)
+    need_booted "$2" ui
+    [ "${3:-}" != appearance ] || upd --arg u "$2" --arg a "$4" '(.devices[] | select(.udid == $u) | .appearance) = $a'
+    ;;
+  privacy\ * | keychain\ * | status_bar\ * | install\ *)
     need_booted "$2" "$1"
     if [ "$1 ${3:-}" = "status_bar override" ] && [ "${FAKE_SIM_STATUS_BAR_FAIL:-}" = 1 ]; then
       echo "fake simctl: status_bar override failed" >&2
@@ -168,6 +185,29 @@ EOF
         while :; do sleep 0.1; done
         ;;
       *) echo "fake simctl io: unexpected $3" >&2; exit 97 ;;
+    esac
+    ;;
+  "runtime add")
+    [ -f "${3:-}" ] || { echo "fake simctl runtime add: no image at ${3:-}" >&2; exit 1; }
+    : >"$DB.runtime-added"
+    echo "D: 87197EB7-5F23-4323-BCB1-A9E56C24B65F iOS (27.0 - 24A434) (Ready)"
+    ;;
+  spawn\ *)
+    # Only launchctl in the simulator (restarting SpringBoard, listing it)
+    # and its log of the style arbiter, which logs a change to dark while
+    # the appearance is dark and SpringBoard applies changes.
+    need_booted "$2" spawn
+    case "$3 ${4:-}" in
+      "launchctl kickstart")
+        upd --arg u "$2" --arg need "${FAKE_SIM_SB_RESTARTS:-1}" '(.devices[] | select(.udid == $u)) |=
+          (.restarts += 1 | if $need != "never" and .restarts >= ($need | tonumber) then .springboard = "ok" else . end)'
+        ;;
+      "launchctl list") printf 'PID\tStatus\tLabel\n4242\t0\tcom.apple.SpringBoard\n' ;;
+      "log show")
+        jq -r --arg u "$2" '.devices[] | select(.udid == $u and .appearance == "dark" and (.springboard // "ok") == "ok")
+          | "2026-10-15 15:29:20.971 Df SpringBoard[4242:27643] [com.apple.UIKit:UserInterfaceStyleArbiter] Arbiter changing style from 1 to 2, notifying: 1"' "$DB"
+        ;;
+      *) echo "fake simctl spawn: unexpected $*" >&2; exit 97 ;;
     esac
     ;;
   erase\ *)
