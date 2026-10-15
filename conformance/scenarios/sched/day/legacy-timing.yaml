@@ -1,0 +1,44 @@
+# R595 (D4): a collection without creationOffset keeps Anki's legacy day
+# count: whole days since crt's rollover instant, read with the current
+# offset. crt here is 2030-01-16 02:00 Paris time, before the rollover hour.
+# Shown: the count truncated toward zero and wrapped to 32 bits when now is
+# more than a day before that instant, next_day_at equal to now during the
+# boundary second, and rollover hours 12 and 0. The first day query runs at
+# creation (D14.2); the next one comes after its boundary, so both executors
+# compute afresh.
+id: sched/day/legacy-timing
+clock: {tz: Europe/Paris, start: "2030-01-10T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = 'creationOffset'"}
+  - db_exec: {sql: "UPDATE col SET crt = 1894755600"}
+  - set_clock: "2030-01-14T03:00:00"
+  - observe: [timing]
+  - set_clock: "2030-01-15T05:00:00"
+  - observe: [timing]
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - set_clock: "2030-01-20T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - set_config: {key: rollover, value: 12}
+  - set_clock: "2030-01-22T11:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - set_config: {key: rollover, value: 0}
+  - set_clock: "2030-01-24T23:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}

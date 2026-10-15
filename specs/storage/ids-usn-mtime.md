@@ -92,9 +92,10 @@ A row that a local action creates or changes gets `usn` -1 and, where S1 lists a
 | `.apkg` update of an existing note (R1602) | -1 | the incoming note's | set to `now_ms` |
 | Undo or redo | the restored row's | the restored row's | restored (S5) |
 | Raw write: staging copies (U33, U122, U123), the unbury at day rollover (U40), scenario `db_exec` | as written | as written | unchanged |
+| Day clock config writes: `rollover`, `localOffset`, `lastUnburied` (`sched/day-clock#D5`, `#D7`) | -1 | `now_s` | unchanged |
 | Schema upgrade on open (`storage/schema-upgrade`, not an operation) | as that spec gives: -1 only for the decks and cards it changes (U9.1) | as that spec gives | unchanged |
 
-Day rollover's unbury rewrites `cards.queue` without touching `mod` or `usn`, and records the day in the `lastUnburied` config key with a local change.
+Day rollover's unbury rewrites `cards.queue` without touching `mod` or `usn`, and records the day in the `lastUnburied` config key. That config write, like the day clock's writes of `rollover` and `localOffset`, stamps the row as a local change but leaves `col.mod` alone, as Anki does: Anki makes these writes outside any operation (`sched/day-clock#D5`).
 
 ## S4. Writes that change nothing
 
@@ -115,7 +116,7 @@ Meguri applies S4 everywhere. Where an Anki operation stamps an unchanged row an
 ## S5. `col.mod`
 
 - An operation that makes at least one real change sets `col.mod` to `now_ms` once, when it commits, however many rows it changed (R1471). An operation that changes nothing leaves `col.mod` alone (R1472).
-- A change to any config key counts, `curDeck` included, so it marks the collection changed for sync (R1474).
+- A change to any config key counts, `curDeck` included, so it marks the collection changed for sync (R1474). The day clock's writes are the exception (S3).
 - Undo sets `col.mod` back to the value it had before the undone operation; redo sets it back to the value that operation set. Neither sets it to `now_ms`.
 - Raw writes and the marking of sent rows leave it unchanged; a sync sets it at its end (R1531).
 - Some Anki maintenance paths that keep no undo record set `col.mod` even when they change nothing. Meguri does not; the owning area records the deviation if a scenario shows it.

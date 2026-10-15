@@ -76,3 +76,61 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/sched/day-clock.md D6, D12: Meguri computes the day afresh when the
+  # UTC offset, rollover, creationOffset or crt changed since it computed it;
+  # Anki keeps the computed day until its boundary passes.
+  - id: day-clock-offset-change-before-boundary
+    requirement: R464
+    summary: One second before 04:00 CEST on the day Paris moves its clocks forward, Meguri's next boundary is 04:00 CEST (02:00Z); Anki keeps the boundary it computed with +01:00 (03:00Z).
+    test: sched/day/offset-change-recompute
+    scenarios: [sched/day/offset-change-recompute]
+    pointer: /steps/4/timing
+    transform: {replace: {days_elapsed: 1, next_day_at: 1901152800, now: 1901152799, utc_offset_secs: 7200}}
+  - id: day-clock-offset-change-at-boundary
+    requirement: R464
+    summary: At 04:00:00 CEST Meguri starts day 2; Anki stays on day 1 until 05:00 CEST.
+    test: sched/day/offset-change-recompute
+    scenarios: [sched/day/offset-change-recompute]
+    pointer: /steps/6/timing
+    transform: {replace: {days_elapsed: 2, next_day_at: 1901239200, now: 1901152800, utc_offset_secs: 7200}}
+  - id: day-clock-offset-change-after-boundary
+    requirement: R464
+    summary: At 04:00:01 CEST Meguri is on day 2; Anki stays on day 1 until 05:00 CEST.
+    test: sched/day/offset-change-recompute
+    scenarios: [sched/day/offset-change-recompute]
+    pointer: /steps/8/timing
+    transform: {replace: {days_elapsed: 2, next_day_at: 1901239200, now: 1901152801, utc_offset_secs: 7200}}
+  - id: day-clock-config-change-rollover-later
+    requirement: R597
+    summary: Right after rollover moves from 4 to 12 at 10:00, Meguri is back on day 4 until 12:00; Anki keeps day 5 and its 04:00 boundary until that boundary passes.
+    test: sched/day/rollover-change-recompute
+    scenarios: [sched/day/rollover-change-recompute]
+    pointer: /steps/4/timing
+    transform: {replace: {days_elapsed: 4, next_day_at: 1895137200, now: 1895130000, utc_offset_secs: 3600}}
+  - id: day-clock-config-change-new-boundary
+    requirement: R597
+    summary: At 12:00 Meguri starts day 5 again with its next boundary at 12:00 the next day; Anki still reports the 04:00 boundary it computed before the change.
+    test: sched/day/rollover-change-recompute
+    scenarios: [sched/day/rollover-change-recompute]
+    pointer: /steps/6/timing
+    transform: {replace: {days_elapsed: 5, next_day_at: 1895223600, now: 1895137200, utc_offset_secs: 3600}}
+  # specs/sched/day-clock.md D4, D12.3: Meguri never adds creationOffset to a
+  # legacy collection; Anki's desktop layer adds it when it opens one.
+  - id: legacy-timing-kept-on-reopen-day
+    requirement: R595
+    summary: After a reopen the legacy collection keeps legacy timing (day 138) in Meguri; Anki switches it to new timing (day 139).
+    test: sched/day/legacy-timing-kept-on-reopen
+    scenarios: [sched/day/legacy-timing-kept-on-reopen]
+    pointer: /steps/7/timing
+    transform: {replace: {days_elapsed: 138, next_day_at: 1906682400, now: 1906617600, utc_offset_secs: 7200}}
+  - id: legacy-timing-kept-on-reopen-config
+    requirement: R595
+    summary: After the reopen Meguri's config has no creationOffset and lastUnburied stays 138; Anki adds creationOffset -60 and records day 139.
+    test: sched/day/legacy-timing-kept-on-reopen
+    scenarios: [sched/day/legacy-timing-kept-on-reopen]
+    pointer: /steps/8/db_exec/rows
+    transform:
+      replace:
+        - [lastUnburied, -1, 1906617600, "138"]
+        - [localOffset, -1, 1906531200, "-120"]
+        - [rollover, -1, 1906531200, "4"]

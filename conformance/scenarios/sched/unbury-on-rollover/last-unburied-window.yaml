@@ -1,0 +1,33 @@
+# R598 (D7): the unbury runs when lastUnburied is earlier than today or more
+# than 7 days ahead of it, and not otherwise. Today is day 10 throughout; the
+# scenario writes lastUnburied and buries the card again between checks. An
+# unreadable lastUnburied (a string) reads as 0.
+id: sched/unbury-on-rollover/last-unburied-window
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-25T10:00:00"
+  - observe: [timing]
+  - db_exec: {sql: "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (1700000000000, 'g1700000000000', (SELECT id FROM notetypes ORDER BY id LIMIT 1), 1700000000, 3, '', 'one' || char(31) || 'uno', 'one', 0, 0, '')"}
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000001, 1700000000000, 1, 0, 1700000001, 3, 0, -3, 1, 0, 0, 0, 0, 0, 0, 0, 0, '')"}
+  - set_config: {key: lastUnburied, value: 17}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - set_config: {key: lastUnburied, value: 18}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2"}
+  - set_config: {key: lastUnburied, value: 10}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - set_config: {key: lastUnburied, value: 9}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - db_exec: {sql: "UPDATE cards SET queue = -3"}
+  - set_config: {key: lastUnburied, value: "10"}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}

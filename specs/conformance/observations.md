@@ -37,7 +37,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | Kind | Arguments | Value |
 |---|---|---|
 | `ids` | note and card references, or none for all | `{"#nN": <note id>, "#cN": <card id>}`: real ids, allocated by `specs/storage/ids-usn-mtime.md` I2: the clock's instant in milliseconds, or the table's largest id plus one when that instant is taken |
-| `timing` | none | `{days_elapsed, next_day_at, now, utc_offset_secs}`: the scheduler's day number, the next day boundary and the current instant in epoch seconds, and the local UTC offset now |
+| `timing` | none | `{days_elapsed, next_day_at, now, utc_offset_secs}`: the scheduler's day number, the next day boundary and the current instant in epoch seconds, and the local UTC offset now (seconds east). Observing it runs one day query with its writes and unbury check (`sched/day-clock#D5`, `#D7`, `#D14.2`) |
 | `card` | card references or none | `{"#cN": <row> \| null}`: the stored card row with columns `id` (as `#cN`), `nid` (as `#nN`), `did` and `odid` (deck names; `null` for 0), `ord`, `mod`, `usn`, `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `flags` and `data` (parsed JSON object; `{}` when empty; the text when it is not JSON) |
 | `revlog` | card references or none | `{"#cN": [<row>, ...]}`: the card's review-log rows in id order, columns `id`, `cid` (as `#cN`), `usn`, `ease`, `ivl`, `lastIvl`, `factor`, `time`, `type` |
 | `next_states` | card references or none | `{"#cN": {current, again, hard, good, easy}}`: the scheduling state now and after each rating (O5) |
