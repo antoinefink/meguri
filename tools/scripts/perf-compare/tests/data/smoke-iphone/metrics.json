@@ -1,0 +1,133 @@
+[
+  {
+    "testIdentifier": "SmokePerfTests/testLaunch()",
+    "testIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testLaunch",
+    "testRuns": [
+      {
+        "device": {
+          "deviceId": "9733870D-9757-41DE-9D13-1E10031B381F",
+          "deviceName": "Meguri-Pool-iphone-1"
+        },
+        "metrics": [
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Duration (ApplicationFirstFramePresentationResponsive)",
+            "identifier": "com.apple.dt.XCTMetric_ApplicationLaunch-ApplicationFirstFramePresentationResponsive.duration",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              2.984913375,
+              2.998885542,
+              2.993531791,
+              3.0972176250000003,
+              2.961285709
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          }
+        ],
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Default"
+        }
+      }
+    ]
+  },
+  {
+    "testIdentifier": "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()",
+    "testIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay",
+    "testRuns": [
+      {
+        "device": {
+          "deviceId": "9733870D-9757-41DE-9D13-1E10031B381F",
+          "deviceName": "Meguri-Pool-iphone-1"
+        },
+        "metrics": [
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Absolute Memory Physical (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.antoinefink.meguri.dev.physical_absolute",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              33540.736,
+              33475.2,
+              33475.2,
+              33475.2,
+              37980.8
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Memory Peak Physical (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.antoinefink.meguri.dev.physical_peak",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              33622.656,
+              33507.968,
+              33524.352,
+              33507.968,
+              38062.72
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Memory Physical (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.antoinefink.meguri.dev.physical",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              -49.152,
+              0,
+              0,
+              0,
+              4505.6
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Duration (probe.syntheticDelay)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-probe.syntheticDelay.duration",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              0.033461583,
+              0.031927250000000004,
+              0.033432333,
+              0.033610917000000004,
+              0.031003167
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          }
+        ],
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Default"
+        }
+      }
+    ]
+  }
+]

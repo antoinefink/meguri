@@ -14,13 +14,19 @@ import notify
 ///   the test hooks, app/AGENTS.md) and without a debugger, else it fails at
 ///   setup; the Performance plan and `tools/mg perf-ui` fix the rest of
 ///   R1866 (no coverage, sanitizers, screenshots or parallel testing).
-/// - `measure(app:prepare:action:)` runs the action once unmeasured
-///   (warm-up: the app's caches and, once review pages exist, a warmed web
-///   content process), then `iterations` times between `startMeasuring()`
-///   and `stopMeasuring()`, with one `XCTOSSignpostMetric` per interval,
-///   `XCTHitchMetric` and `XCTMemoryMetric`.
-/// - `tools/mg perf-ui` turns the result bundle's metrics into a perf result
-///   (tools/scripts/perf-compare) for U241's gate.
+/// - `measure(app:prepare:action:)` asks the app for a warmed web content
+///   process and waits for it (R1866, `TestHooks.WebContentWarmup`), runs
+///   the action once unmeasured (warm-up: the app's caches and the warmed
+///   page), checks the web content process still answers, then runs the
+///   action `iterations` times between `startMeasuring()` and
+///   `stopMeasuring()`, with one `XCTOSSignpostMetric` per interval,
+///   `XCTHitchMetric` and `XCTMemoryMetric`. Without a ready process it
+///   throws before measuring.
+/// - It also records the intervals it measures as an activity named
+///   `declarationPrefix` + names: `tools/mg perf-ui` fails a test whose
+///   declared interval has no measurements, and a performance suite with no
+///   metrics (tools/scripts/perf-compare, which writes the perf result for
+///   U241's gate).
 ///
 /// A new subclass joins the UI plan's skipped tests (app/TestPlans).
 @MainActor
@@ -30,6 +36,13 @@ class PerfTestCase: XCTestCase {
 
     /// Measured iterations, after the warm-up run.
     nonisolated class var iterations: Int { 5 }
+
+    /// How long the app may take to report a warmed web content process.
+    nonisolated class var webContentTimeout: TimeInterval { 30 }
+
+    /// The title of the activity that declares a test's measured intervals,
+    /// followed by their names separated by spaces (perf-compare reads it).
+    nonisolated static let declarationPrefix = "meguri.perf.intervals:"
 
     /// The intervals of `intervalNames` (setup has checked they resolve).
     var intervals: [IntervalName] { (try? Self.registered(Self.intervalNames)) ?? [] }
@@ -95,15 +108,19 @@ class PerfTestCase: XCTestCase {
             + [XCTHitchMetric(application: app), XCTMemoryMetric(application: app)]
     }
 
-    /// Runs `action` once unmeasured, then `iterations` measured times;
-    /// `prepare` runs before each, outside the measurement.
+    /// Warms the app's web content process, runs `action` once unmeasured,
+    /// checks the process is still ready, then runs `action` `iterations`
+    /// measured times; `prepare` runs before each, outside the measurement.
     func measure(
         app: XCUIApplication,
         prepare: (XCUIApplication) -> Void = { _ in },
         action: (XCUIApplication) -> Void
-    ) {
+    ) throws {
+        try warmWebContent()
         prepare(app)
         action(app)
+        try warmWebContent()
+        XCTContext.runActivity(named: Self.declaration(intervals)) { _ in }
         let options = XCTMeasureOptions()
         options.invocationOptions = [.manuallyStart, .manuallyStop]
         options.iterationCount = Self.iterations
@@ -112,6 +129,31 @@ class PerfTestCase: XCTestCase {
             startMeasuring()
             action(app)
             stopMeasuring()
+        }
+    }
+
+    /// The activity title declaring `intervals`.
+    nonisolated static func declaration(_ intervals: [IntervalName]) -> String {
+        ([declarationPrefix] + intervals.map(\.name)).joined(separator: " ")
+    }
+
+    /// Asks the running app for a warmed web content process and waits until
+    /// it reports one ready (R1866): the notification
+    /// `<bundle id>.testhooks.warmWebContent`, answered by
+    /// `<bundle id>.testhooks.webContentReady`. Throws when no answer comes.
+    func warmWebContent() throws {
+        let id = try BuildUnderTest.current().expectedBundleIdentifier
+        let ready = "\(id).testhooks.webContentReady"
+        #if os(macOS)
+        let answer = XCTNSNotificationExpectation(
+            name: Notification.Name(ready), object: nil, notificationCenter: DistributedNotificationCenter.default())
+        #else
+        let answer = XCTDarwinNotificationExpectation(notificationName: ready)
+        #endif
+        post("\(id).testhooks.warmWebContent")
+        guard XCTWaiter().wait(for: [answer], timeout: Self.webContentTimeout) == .completed else {
+            throw PreconditionFailure(
+                description: "the app reported no warmed web content process within \(Self.webContentTimeout) s (R1866)")
         }
     }
 

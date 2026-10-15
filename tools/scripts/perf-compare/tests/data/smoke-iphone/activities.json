@@ -1,0 +1,486 @@
+[
+  {
+    "testIdentifier": "SmokePerfTests/testLaunch()",
+    "testIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testLaunch",
+    "testName": "testLaunch()",
+    "testRuns": [
+      {
+        "activities": [
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082221.345,
+            "title": "Start Test at 2026-10-15 18:37:01.345"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082221.346,
+            "title": "Set Up"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082222.032,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082224.76,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082221.35,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082221.349,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082226.184,
+            "title": "Terminate com.antoinefink.meguri.dev:374"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082227.739,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082230.174,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082227.53,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082227.528,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082231.515,
+            "title": "Terminate com.antoinefink.meguri.dev:1057"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082233.859,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082236.315,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082233.65,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082233.649,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082237.656,
+            "title": "Terminate com.antoinefink.meguri.dev:1314"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082239.581,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082242.054,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082239.374,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082239.372,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082243.399,
+            "title": "Terminate com.antoinefink.meguri.dev:1370"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082245.312,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082247.745,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082245.103,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082245.102,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082249.117,
+            "title": "Terminate com.antoinefink.meguri.dev:1409"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082251.01,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082253.598,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082250.801,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082250.8,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082254.927,
+            "title": "Terminate com.antoinefink.meguri.dev:1508"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082256.834,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082259.257,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082256.624,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082256.623,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082260.606,
+            "title": "Terminate com.antoinefink.meguri.dev:1548"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082262.366,
+            "title": "Tear Down"
+          }
+        ],
+        "device": {
+          "architecture": "arm64",
+          "deviceId": "9733870D-9757-41DE-9D13-1E10031B381F",
+          "deviceName": "Meguri-Pool-iphone-1",
+          "modelName": "iPhone 17 Pro",
+          "osBuildNumber": "24A434",
+          "osVersion": "27.0",
+          "platform": "iOS Simulator"
+        },
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Default"
+        }
+      }
+    ]
+  },
+  {
+    "testIdentifier": "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()",
+    "testIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay",
+    "testName": "testProbeIntervalMeasuresItsSyntheticDelay()",
+    "testRuns": [
+      {
+        "activities": [
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082262.369,
+            "title": "Start Test at 2026-10-15 18:37:42.369"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082262.37,
+            "title": "Set Up"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082262.58,
+                    "title": "Setting up automation session"
+                  },
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082265.122,
+                    "title": "Wait for com.antoinefink.meguri.dev to idle"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082262.373,
+                "title": "Launch com.antoinefink.meguri.dev"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082262.372,
+            "title": "Open com.antoinefink.meguri.dev"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "childActivities": [
+                  {
+                    "activityType": "com.apple.dt.xctest.activity-type.internal",
+                    "isAssociatedWithFailure": false,
+                    "startTime": 1792082267.578,
+                    "title": "Checking existence of `\"perf.probe.runs\" StaticText`"
+                  }
+                ],
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082267.577,
+                "title": "Checking `Expect predicate `existsNoRetry == 1` for object \"perf.probe.runs\" StaticText`"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082266.549,
+            "title": "Waiting 15.0s for \"perf.probe.runs\" StaticText to exist"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082271.49,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082271.489,
+            "title": "Checking `Expect predicate `label == \"Runs: 1\" OR value == \"Runs: 1\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.userCreated",
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082271.519,
+            "title": "meguri.perf.intervals: probe.syntheticDelay"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082272.557,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082272.556,
+            "title": "Checking `Expect predicate `label == \"Runs: 2\" OR value == \"Runs: 2\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082274.259,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082274.258,
+            "title": "Checking `Expect predicate `label == \"Runs: 3\" OR value == \"Runs: 3\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082275.947,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082275.946,
+            "title": "Checking `Expect predicate `label == \"Runs: 4\" OR value == \"Runs: 4\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082277.64,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082277.639,
+            "title": "Checking `Expect predicate `label == \"Runs: 5\" OR value == \"Runs: 5\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082279.331,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082279.331,
+            "title": "Checking `Expect predicate `label == \"Runs: 6\" OR value == \"Runs: 6\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082280.994,
+                "title": "Find the \"perf.probe.runs\" StaticText"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082280.993,
+            "title": "Checking `Expect predicate `label == \"Runs: 7\" OR value == \"Runs: 7\"` for object \"perf.probe.runs\" StaticText`"
+          },
+          {
+            "activityType": "com.apple.dt.xctest.activity-type.internal",
+            "childActivities": [
+              {
+                "activityType": "com.apple.dt.xctest.activity-type.internal",
+                "isAssociatedWithFailure": false,
+                "startTime": 1792082281.667,
+                "title": "Terminate com.antoinefink.meguri.dev:1597"
+              }
+            ],
+            "isAssociatedWithFailure": false,
+            "startTime": 1792082281.667,
+            "title": "Tear Down"
+          }
+        ],
+        "device": {
+          "architecture": "arm64",
+          "deviceId": "9733870D-9757-41DE-9D13-1E10031B381F",
+          "deviceName": "Meguri-Pool-iphone-1",
+          "modelName": "iPhone 17 Pro",
+          "osBuildNumber": "24A434",
+          "osVersion": "27.0",
+          "platform": "iOS Simulator"
+        },
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Default"
+        }
+      }
+    ]
+  }
+]

@@ -1,10 +1,12 @@
 #!/usr/bin/env bats
 # Self-tests for the performance jobs (U12): perf-ui's refusals and wiring
 # (Profile only, the Meguri-Profile scheme's Performance plan, one perf
-# result per suite from the result bundle's metrics), bench and
-# bench-icount's arguments, metrics' refusals. Apple tools and builds are
-# faked; perf_compare.py runs here (its own tests are in
-# image-tools-selftest), on the metrics of a real SmokePerfTests run.
+# result per performance suite from the result bundle's metrics, failing a
+# suite with no metrics or a declared interval with no measurements),
+# bench, bench-mac and bench-icount's arguments and wiring, metrics'
+# refusals. Apple tools, builds and cargo are faked; perf_compare.py runs
+# here (its own tests are in image-tools-selftest), on a real SmokePerfTests
+# run on the iPhone 17 Pro simulator (metrics, tests and activities).
 
 bats_require_minimum_version 1.5.0
 
@@ -42,9 +44,12 @@ setup() {
   stub xcrun 'echo "xcrun $*" >>"$STUB_LOG"
 case "$*" in
   "xcresulttool get test-results metrics "*) cat "$FX_METRICS" ;;
+  "xcresulttool get test-results tests "*) cat "$FX_TESTS" ;;
+  "xcresulttool get test-results activities --test-id "*) jq -c --arg id "$6" ".[] | select(.testIdentifier == \$id)" "$FX_ACTIVITIES" ;;
   *) exit 70 ;;
 esac'
-  export FX_METRICS="$REPO_ROOT/tools/scripts/perf-compare/tests/data/xcresult-smoke-metrics.json"
+  local run="$REPO_ROOT/tools/scripts/perf-compare/tests/data/smoke-iphone"
+  export FX_METRICS="$run/metrics.json" FX_TESTS="$run/tests.json" FX_ACTIVITIES="$run/activities.json"
   export PATH="$BIN:$PATH"
   add_fakes
 }
@@ -134,6 +139,40 @@ EOF
   # The probe interval, its percentiles and measured values.
   [ "$(jq -c '[.results[] | select(.name == "probe.syntheticDelay" and .metric == "duration") | .percentile]' "$out")" = '["p50","p95","p99","max"]' ]
   jq -e '[.results[] | select(.name == "probe.syntheticDelay" and .metric == "duration") | .value] | all(. >= 30 and . < 100)' "$out"
+}
+
+@test "perf-ui fails a performance suite that yields no metrics" {
+  export FX_METRICS="$BATS_TEST_TMPDIR/no-metrics.json"
+  echo '[]' >"$FX_METRICS"
+  mg perf-ui
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .message)" = "perf-ui: 1 suite(s) without a valid perf result" ]
+  [ "$(field '.failures[0].id')" = perf-result/SmokePerfTests ]
+  [[ "$(field '.failures[0].message')" == *"suite SmokePerfTests has no metrics"* ]]
+  # Only the harness's own checks are exempt.
+  [ "$(field -c .details.unmeasured)" = '["PerfTestCaseTests"]' ]
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result")] | length')" = 0 ]
+}
+
+@test "perf-ui fails a test whose declared interval has no measurements" {
+  export FX_METRICS="$BATS_TEST_TMPDIR/no-signposts.json"
+  jq '[.[] | .testRuns |= map(.metrics |= map(select(.identifier | contains("OSSignpost") | not)))]' \
+    "$REPO_ROOT/tools/scripts/perf-compare/tests/data/smoke-iphone/metrics.json" >"$FX_METRICS"
+  mg perf-ui --suite SmokePerfTests
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = perf-result/SmokePerfTests ]
+  [[ "$(field '.failures[0].message')" == *"testProbeIntervalMeasuresItsSyntheticDelay() declares probe.syntheticDelay but has no measurements of it"* ]]
+  called 'xcresulttool get test-results activities --test-id SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay\(\)'
+  called 'xcresulttool get test-results activities --test-id SmokePerfTests/testLaunch\(\)'
+}
+
+@test "perf-ui writes no result for the harness's own checks alone" {
+  mg perf-ui --suite PerfTestCaseTests
+  [ "$(field .status)" = pass ]
+  [ "$(field -c .details.unmeasured)" = '["PerfTestCaseTests"]' ]
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result")] | length')" = 0 ]
+  not_called 'activities --test-id PerfTestCaseTests'
 }
 
 @test "perf-ui fails when a performance test fails, and names the device it was given" {

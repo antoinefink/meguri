@@ -45,7 +45,9 @@ class PercentileTest(unittest.TestCase):
 class XcresultTest(unittest.TestCase):
     """On the metrics of real SmokePerfTests runs: the iPhone 17 Pro
     simulator (xcresult-smoke-metrics.json) and the Mac test VM
-    (xcresult-smoke-metrics-mac.json)."""
+    (xcresult-smoke-metrics-mac.json). smoke-mac-vm/ and smoke-iphone/ each
+    hold one whole run: metrics, tests and the activities that declare its
+    intervals (smoke-iphone/ feeds tools/tests/perf.bats)."""
 
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -53,7 +55,14 @@ class XcresultTest(unittest.TestCase):
             self.metrics = json.load(f)
 
     def convert(self, suite="SmokePerfTests"):
-        return perf_compare.from_xcresult(self.metrics, suite, "Profile", SIMULATOR)
+        return perf_compare.from_xcresult(self.metrics, suite, "Profile", SIMULATOR, [])
+
+    def mac_run(self):
+        with open(data("smoke-mac-vm/metrics.json")) as f:
+            metrics = json.load(f)
+        with open(data("smoke-mac-vm/activities.json")) as f:
+            activities = json.load(f)
+        return metrics, activities
 
     def rows(self, doc, name, metric):
         return [r for r in doc["results"] if r["name"] == name and r["metric"] == metric]
@@ -86,7 +95,7 @@ class XcresultTest(unittest.TestCase):
         # The Mac (test VM) reports XCTHitchMetric; the iOS simulator does not.
         with open(data("xcresult-smoke-metrics-mac.json")) as f:
             mac = json.load(f)
-        doc = perf_compare.from_xcresult(mac, "SmokePerfTests", "Profile", SIMULATOR)
+        doc = perf_compare.from_xcresult(mac, "SmokePerfTests", "Profile", SIMULATOR, [])
         hitch = {(r["metric"], r["unit"]) for r in doc["results"] if r["name"] == "xctest.hitch"}
         self.assertEqual(hitch, {("hitch-time-ratio", "ms/s"), ("number-of-hitches", "count"),
                                  ("hitches-total-duration", "ms")})
@@ -95,25 +104,81 @@ class XcresultTest(unittest.TestCase):
         launch = [r for r in doc["results"] if r["name"] == "xctest.application-launch"]
         self.assertEqual({r["metric"] for r in launch}, {"duration"})
 
-    def test_another_suite_has_no_metrics(self):
-        with self.assertRaises(perf_compare.InputError):
+    def test_a_suite_without_metrics_fails(self):
+        with self.assertRaisesRegex(perf_compare.InputError, "^suite NoSuchPerfTests has no metrics$"):
             self.convert("NoSuchPerfTests")
+        _, activities = self.mac_run()
+        with self.assertRaisesRegex(perf_compare.InputError, "suite SmokePerfTests has no metrics"):
+            perf_compare.from_xcresult([], "SmokePerfTests", "Profile", SIMULATOR, activities)
+
+    def test_declared_intervals_come_from_the_tests_activities(self):
+        _, activities = self.mac_run()
+        self.assertEqual(perf_compare.declared_intervals(activities, "SmokePerfTests"),
+                         {"SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()": ["probe.syntheticDelay"]})
+        self.assertEqual(perf_compare.declared_intervals(activities, "OtherPerfTests"), {})
+
+    def test_a_declared_interval_with_measurements_converts(self):
+        for run_ in ("smoke-mac-vm", "smoke-iphone"):
+            with open(data(f"{run_}/metrics.json")) as f:
+                metrics = json.load(f)
+            with open(data(f"{run_}/activities.json")) as f:
+                activities = json.load(f)
+            doc = perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities)
+            probe = self.rows(doc, "probe.syntheticDelay", "duration")
+            self.assertEqual([r["percentile"] for r in probe], ["p50", "p95", "p99", "max"], run_)
+            self.assertTrue(all(30.0 <= r["value"] < 100.0 for r in probe), probe)
+
+    def test_a_declared_interval_without_measurements_fails(self):
+        metrics, activities = self.mac_run()
+        for test in metrics:
+            for run_ in test["testRuns"]:
+                run_["metrics"] = [m for m in run_["metrics"] if "OSSignpost" not in m["identifier"]]
+        with self.assertRaisesRegex(
+                perf_compare.InputError,
+                r"^SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay\(\) declares probe.syntheticDelay "
+                r"but has no measurements of it$"):
+            perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities)
+        # A signpost metric whose iterations measured nothing counts as missing too.
+        metrics, activities = self.mac_run()
+        for test in metrics:
+            for run_ in test["testRuns"]:
+                for metric in run_["metrics"]:
+                    if "OSSignpost" in metric["identifier"]:
+                        metric["measurements"] = []
+        with self.assertRaisesRegex(perf_compare.InputError, "declares probe.syntheticDelay"):
+            perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities)
 
     def test_the_cli_writes_a_valid_result(self):
         runner = os.path.join(self.dir, "runner.json")
         out = os.path.join(self.dir, "out", "SmokePerfTests.json")
         with open(runner, "w") as f:
             json.dump(SIMULATOR, f)
-        done = run("xcresult", data("xcresult-smoke-metrics.json"), "--suite", "SmokePerfTests",
-                   "--configuration", "Profile", "--runner", runner, "--out", out)
+        done = run("xcresult", data("smoke-mac-vm/metrics.json"), "--suite", "SmokePerfTests",
+                   "--configuration", "Profile", "--runner", runner,
+                   "--activities", data("smoke-mac-vm/activities.json"), "--out", out)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(perf_compare.validate([out]), [])
+
+    def test_the_cli_writes_nothing_when_a_declared_interval_is_missing(self):
+        runner = os.path.join(self.dir, "runner.json")
+        out = os.path.join(self.dir, "out", "SmokePerfTests.json")
+        with open(runner, "w") as f:
+            json.dump(SIMULATOR, f)
+        empty = os.path.join(self.dir, "metrics.json")
+        with open(empty, "w") as f:
+            json.dump([], f)
+        done = run("xcresult", empty, "--suite", "SmokePerfTests", "--configuration", "Profile", "--runner", runner,
+                   "--activities", data("smoke-mac-vm/activities.json"), "--out", out)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("suite SmokePerfTests has no metrics", done.stderr)
+        self.assertIn("declares probe.syntheticDelay but has no measurements of it", done.stderr)
+        self.assertFalse(os.path.exists(out))
 
     def test_an_unknown_unit_is_refused(self):
         metrics = json.loads(json.dumps(self.metrics))
         metrics[0]["testRuns"][0]["metrics"][0]["unitOfMeasurement"] = "furlongs"
         with self.assertRaises(perf_compare.InputError):
-            perf_compare.from_xcresult(metrics, metrics[0]["testIdentifier"].split("/")[0], "Profile", SIMULATOR)
+            perf_compare.from_xcresult(metrics, metrics[0]["testIdentifier"].split("/")[0], "Profile", SIMULATOR, [])
 
 
 class GungraunTest(unittest.TestCase):

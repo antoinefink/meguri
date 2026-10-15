@@ -4,12 +4,17 @@ produce into tools/perf/perf-result.schema.json, which U241's perf-gate
 reads, and validates perf results.
 
   perf_compare.py xcresult <metrics.json> --suite <class> --configuration <config>
-                  --runner <runner.json> --out <result.json>
+                  --runner <runner.json> --activities <activities.json> --out <result.json>
       `xcrun xcresulttool get test-results metrics` output of a UI
       performance run: the suite's tests' XCTest metrics, one row per
       percentile (p50, p95, p99, max) of each metric's per-iteration
       measurements. Signpost metrics are named after their interval
       (IntervalNames); XCTest's own metrics are xctest.<metric>.
+      The suite must have metrics, and every interval one of its tests
+      declares must have measurements in that test (PerfTestCase's activity
+      `meguri.perf.intervals: <name> ...`, read from a JSON list of the
+      tests' `get test-results activities` outputs); otherwise nothing is
+      written.
   perf_compare.py gungraun <summaries.jsonl> --suite <bench target> --out <result.json>
       gungraun's JSON lines (--output-format=json, summary schema v7): one
       `instructions` row (callgrind Ir) per benchmark, named
@@ -101,10 +106,39 @@ def xctest_metric(metric):
     return "xctest." + (kebab(kind) or "metric"), kebab(display) or "value"
 
 
-def from_xcresult(metrics_doc, suite, configuration, runner):
+# PerfTestCase's activity declaring the intervals a test measures.
+DECLARATION = "meguri.perf.intervals:"
+
+
+def declared_intervals(activities_docs, suite):
+    """{test identifier: [interval names]} that the suite's tests declare,
+    from a list of `xcresulttool get test-results activities` outputs."""
+    if not isinstance(activities_docs, list):
+        raise InputError("activities are a list of xcresulttool activities outputs")
+    declared = {}
+
+    def walk(names, activities):
+        for activity in activities or []:
+            title = activity.get("title", "")
+            if title.startswith(DECLARATION):
+                names.extend(n for n in title[len(DECLARATION):].split() if n not in names)
+            walk(names, activity.get("childActivities"))
+
+    for doc in activities_docs:
+        identifier = doc.get("testIdentifier", "")
+        if identifier.split("/", 1)[0] != suite:
+            continue
+        names = declared.setdefault(identifier, [])
+        for run in doc.get("testRuns", []):
+            walk(names, run.get("activities"))
+    return {identifier: names for identifier, names in declared.items() if names}
+
+
+def from_xcresult(metrics_doc, suite, configuration, runner, activities_docs):
     if not isinstance(metrics_doc, list):
         raise InputError("xcresulttool metrics output is a list of tests")
     rows = []
+    measured_names = {}
     for test in metrics_doc:
         identifier = test.get("testIdentifier", "")
         if identifier.split("/", 1)[0] != suite:
@@ -120,6 +154,7 @@ def from_xcresult(metrics_doc, suite, configuration, runner):
                 result_unit, factor = UNITS[unit]
                 measured = [v * factor for v in values]
                 name, kind = xctest_metric(metric)
+                measured_names.setdefault(identifier, set()).add(name)
                 for label, per_hundred in PERCENTILES:
                     rows.append({
                         "name": name,
@@ -131,8 +166,12 @@ def from_xcresult(metrics_doc, suite, configuration, runner):
                         "samples": len(measured),
                         "measurements": measured,
                     })
-    if not rows:
-        raise InputError(f"no metrics for suite {suite}")
+    problems = [] if rows else [f"suite {suite} has no metrics"]
+    for identifier, names in sorted(declared_intervals(activities_docs, suite).items()):
+        problems += [f"{identifier} declares {name} but has no measurements of it"
+                     for name in names if name not in measured_names.get(identifier, set())]
+    if problems:
+        raise InputError("; ".join(problems))
     return {
         "schema_version": 1,
         "suite": suite,
@@ -297,6 +336,7 @@ def main(argv):
     xc.add_argument("--suite", required=True)
     xc.add_argument("--configuration", required=True)
     xc.add_argument("--runner", required=True)
+    xc.add_argument("--activities", required=True)
     xc.add_argument("--out", required=True)
     gg = commands.add_parser("gungraun")
     gg.add_argument("summaries")
@@ -316,7 +356,9 @@ def main(argv):
                 metrics = json.load(f)
             with open(args.runner) as f:
                 runner = json.load(f)
-            write(from_xcresult(metrics, args.suite, args.configuration, runner), args.out)
+            with open(args.activities) as f:
+                activities = json.load(f)
+            write(from_xcresult(metrics, args.suite, args.configuration, runner, activities), args.out)
         elif args.command == "signposts":
             with open(args.table) as f:
                 write(summarize_signposts(f.read(), set(registry_names(args.registry))), args.out)

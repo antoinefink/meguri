@@ -21,6 +21,8 @@ enum TestHooks {
         arguments: [String] = ProcessInfo.processInfo.arguments,
         bundleIdentifier: String = Bundle.main.bundleIdentifier ?? ""
     ) -> Session {
+        // Performance tests ask for a warmed web content process (R1866).
+        WebContentWarmup.shared.listen()
         do throws(TestHookError) {
             let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
             try options.apply(

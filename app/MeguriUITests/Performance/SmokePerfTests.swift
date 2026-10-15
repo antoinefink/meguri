@@ -18,7 +18,7 @@ final class SmokePerfTests: PerfTestCase {
         XCTAssert(runs.waitForExistence(timeout: 15), "the probe screen is not on screen")
         let probe = "\(try BuildUnderTest.current().expectedBundleIdentifier).testhooks.perfProbe"
         var done = 0
-        measure(app: app) { _ in
+        try measure(app: app) { _ in
             done += 1
             post(probe)
             XCTAssert(waitForText(runs, "Runs: \(done)"), "probe run \(done) did not finish")
@@ -53,6 +53,13 @@ final class PerfTestCaseTests: XCTestCase {
 
     func testRegisteredNamesResolve() throws {
         XCTAssertEqual(try PerfTestCase.registered(["probe.syntheticDelay"]), [IntervalNames.probeSyntheticDelay])
+    }
+
+    func testTheDeclarationNamesTheMeasuredIntervals() throws {
+        XCTAssertEqual(
+            PerfTestCase.declaration(try PerfTestCase.registered(["probe.syntheticDelay", "review.answerToNextVisible"])),
+            "meguri.perf.intervals: probe.syntheticDelay review.answerToNextVisible")
+        XCTAssertEqual(PerfTestCase.declaration([]), "meguri.perf.intervals:")
     }
 }
 

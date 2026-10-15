@@ -1,0 +1,106 @@
+{
+  "devices": [
+    {
+      "architecture": "arm64",
+      "deviceId": "9733870D-9757-41DE-9D13-1E10031B381F",
+      "deviceName": "Meguri-Pool-iphone-1",
+      "modelName": "iPhone 17 Pro",
+      "osBuildNumber": "24A434",
+      "osVersion": "27.0",
+      "platform": "iOS Simulator"
+    }
+  ],
+  "testNodes": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "duration": "0,012s",
+                  "durationInSeconds": 0.012290000915527344,
+                  "name": "testAnIntervalNameThatIsNotRegisteredFailsAtSetUp()",
+                  "nodeIdentifier": "PerfTestCaseTests/testAnIntervalNameThatIsNotRegisteredFailsAtSetUp()",
+                  "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/PerfTestCaseTests/testAnIntervalNameThatIsNotRegisteredFailsAtSetUp",
+                  "nodeType": "Test Case",
+                  "result": "Passed"
+                },
+                {
+                  "duration": "0,0042s",
+                  "durationInSeconds": 0.004233956336975098,
+                  "name": "testAnyConfigurationButProfileIsRefused()",
+                  "nodeIdentifier": "PerfTestCaseTests/testAnyConfigurationButProfileIsRefused()",
+                  "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/PerfTestCaseTests/testAnyConfigurationButProfileIsRefused",
+                  "nodeType": "Test Case",
+                  "result": "Passed"
+                },
+                {
+                  "duration": "0,004s",
+                  "durationInSeconds": 0.004030942916870117,
+                  "name": "testRegisteredNamesResolve()",
+                  "nodeIdentifier": "PerfTestCaseTests/testRegisteredNamesResolve()",
+                  "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/PerfTestCaseTests/testRegisteredNamesResolve",
+                  "nodeType": "Test Case",
+                  "result": "Passed"
+                },
+                {
+                  "duration": "0,0035s",
+                  "durationInSeconds": 0.0035429000854492188,
+                  "name": "testTheDeclarationNamesTheMeasuredIntervals()",
+                  "nodeIdentifier": "PerfTestCaseTests/testTheDeclarationNamesTheMeasuredIntervals()",
+                  "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/PerfTestCaseTests/testTheDeclarationNamesTheMeasuredIntervals",
+                  "nodeType": "Test Case",
+                  "result": "Passed"
+                }
+              ],
+              "name": "PerfTestCaseTests",
+              "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/PerfTestCaseTests",
+              "nodeType": "Test Suite",
+              "result": "Passed"
+            },
+            {
+              "children": [
+                {
+                  "duration": "41s",
+                  "durationInSeconds": 41.02405595779419,
+                  "name": "testLaunch()",
+                  "nodeIdentifier": "SmokePerfTests/testLaunch()",
+                  "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testLaunch",
+                  "nodeType": "Test Case",
+                  "result": "Passed"
+                },
+                {
+                  "duration": "20s",
+                  "durationInSeconds": 20.34321093559265,
+                  "name": "testProbeIntervalMeasuresItsSyntheticDelay()",
+                  "nodeIdentifier": "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()",
+                  "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay",
+                  "nodeType": "Test Case",
+                  "result": "Passed"
+                }
+              ],
+              "name": "SmokePerfTests",
+              "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests",
+              "nodeType": "Test Suite",
+              "result": "Passed"
+            }
+          ],
+          "name": "MeguriUITests",
+          "nodeIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests",
+          "nodeType": "UI test bundle",
+          "result": "Passed"
+        }
+      ],
+      "name": "Performance",
+      "nodeType": "Test Plan",
+      "result": "Passed"
+    }
+  ],
+  "testPlanConfigurations": [
+    {
+      "configurationId": "1",
+      "configurationName": "Default"
+    }
+  ]
+}

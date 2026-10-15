@@ -314,6 +314,9 @@ mg_bench_icount() {
 # The perf-ui defaults: the harness's own checks and the smoke set (U19
 # picks what runs per change).
 MG_PERF_UI_SUITES="PerfTestCaseTests SmokePerfTests"
+# The harness's own checks: they measure nothing and have no perf result.
+# Every other suite is a performance suite and must yield one.
+MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests"
 
 # mg__perf_ui_runner <mac|udid> <out.json>: the perf result's runner, the
 # baseline key U241 uses (model and OS build; CPU and OS on the Mac).
@@ -419,32 +422,59 @@ mg_perf_ui() {
     return 0
   fi
 
-  # The result bundle's metrics, then one perf result per suite.
-  local metrics="$MG_RUN_DIR/metrics.json" runner="$MG_RUN_DIR/runner.json" results="$MG_RUN_DIR/results" out bad=0
+  # The result bundle's metrics, the tests that ran and the activities of
+  # the performance suites' tests (their declared intervals), then one perf
+  # result per performance suite.
+  local metrics="$MG_RUN_DIR/metrics.json" tests="$MG_RUN_DIR/tests.json" runner="$MG_RUN_DIR/runner.json"
+  local results="$MG_RUN_DIR/results" acts out err why bad=0 id n f
   mkdir -p "$results"
-  if ! xcrun xcresulttool get test-results metrics --path "$prefix.xcresult" --compact >"$metrics" 2>>"$MG_RUN_DIR/log.txt"; then
-    mg_failure metrics "xcresulttool could not read the metrics of $prefix.xcresult"
+  if ! xcrun xcresulttool get test-results metrics --path "$prefix.xcresult" --compact >"$metrics" 2>>"$MG_RUN_DIR/log.txt" ||
+    ! xcrun xcresulttool get test-results tests --path "$prefix.xcresult" --compact >"$tests" 2>>"$MG_RUN_DIR/log.txt"; then
+    mg_failure metrics "xcresulttool could not read the metrics or the tests of $prefix.xcresult"
     mg_message "perf-ui: no metrics in the result bundle$([ "$rc" -eq 0 ] || echo "; the performance tests failed too, see $prefix.log")"
     mg_status error
     return 0
   fi
   mg_artifact metrics "$metrics" "xcresulttool test-results metrics"
+  mg_artifact tests "$tests" "xcresulttool test-results tests"
   mg__perf_ui_runner "$([ "$platform" = mac ] && echo mac || echo "$udid")" "$runner"
-  local unmeasured=()
+  local unmeasured=() converted=""
   for s in "${suites[@]}"; do
-    out="$results/${s%%/*}.json"
-    # A suite that measures nothing (the harness's own checks) has no result.
-    if ! jq -e --arg s "${s%%/*}" 'any(.[]; (.testIdentifier | split("/")[0]) == $s and any(.testRuns[].metrics[]?; true))' \
-      "$metrics" >/dev/null 2>&1; then
+    # The harness's own checks measure nothing: no result.
+    if mg_word_in "${s%%/*}" "$MG_PERF_UI_CHECK_SUITES"; then
       unmeasured[${#unmeasured[@]}]="$s"
       continue
     fi
-    if mg_image_tools python3 "$MG_PERF_COMPARE" xcresult "$(mg_container_path "$metrics")" --suite "${s%%/*}" \
-      --configuration Profile --runner "$(mg_container_path "$runner")" --out "$(mg_container_path "$out")" >&2 &&
-      mg_image_tools python3 "$MG_PERF_COMPARE" validate "$(mg_container_path "$out")" >&2; then
+    # One result per class, whichever of its tests were named.
+    ! mg_word_in "${s%%/*}" "$converted" || continue
+    converted="$converted ${s%%/*}"
+    out="$results/${s%%/*}.json"
+    err="$MG_RUN_DIR/perf-compare-${s%%/*}.err"
+    acts="$MG_RUN_DIR/activities/${s%%/*}"
+    mkdir -p "$acts"
+    : >"$err"
+    n=0
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      n=$((n + 1))
+      xcrun xcresulttool get test-results activities --test-id "$id" --path "$prefix.xcresult" --compact \
+        >"$acts/$n.json" 2>>"$MG_RUN_DIR/log.txt" || {
+        echo "xcresulttool could not read the activities of $id" >>"$err"
+        rm -f "$acts/$n.json"
+      }
+    done < <(jq -r --arg s "${s%%/*}" '.. | objects | select(.nodeType? == "Test Case")
+      | .nodeIdentifier // empty | select(split("/")[0] == $s)' "$tests" 2>/dev/null)
+    for f in "$acts"/*.json; do [ ! -f "$f" ] || cat "$f"; done | jq -s . >"$acts.json"
+    if [ ! -s "$err" ] &&
+      mg_image_tools python3 "$MG_PERF_COMPARE" xcresult "$(mg_container_path "$metrics")" --suite "${s%%/*}" \
+        --configuration Profile --runner "$(mg_container_path "$runner")" --activities "$(mg_container_path "$acts.json")" \
+        --out "$(mg_container_path "$out")" 2>>"$err" >&2 &&
+      mg_image_tools python3 "$MG_PERF_COMPARE" validate "$(mg_container_path "$out")" >>"$err" 2>&1; then
       mg_artifact perf-result "$out" "${s%%/*}"
     else
-      mg_failure "perf-result/${s%%/*}" "perf-compare could not write a valid perf result for $s; see log.txt"
+      cat "$err" >&2
+      why="$(grep -E '^(perf_compare.py|xcresulttool|/)' "$err" | tail -n 1 | sed 's/^perf_compare.py xcresult: //')"
+      mg_failure "perf-result/${s%%/*}" "no valid perf result for $s: ${why:-see log.txt}"
       bad=$((bad + 1))
     fi
   done
