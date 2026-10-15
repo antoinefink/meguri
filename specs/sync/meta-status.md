@@ -146,6 +146,6 @@ Actor scenarios under `conformance/scenarios/sync/meta/` (`specs/conformance/syn
 | `outcomes` | upload only, download only, no changes after a download, a normal sync after a local change, equal `mod` over differing `scm`, a choice when both sides have cards (M3) | recorded |
 | `clock-behind` | AE63: the server 360 s behind, `clock_incorrect` for both actors, the collection unchanged and the server's content unchanged (M2) | recorded |
 | `clock-edge` | exactly 300 s passes (M2) | recorded |
-| `status` | the sync status: offline answers, the remembered answer for 299 s and not 300 s, the answer of a sync and of a download remembered, an online answer, no request where none is needed (M5, M6) | waits for the driver's `status` kind (sync-ops.md S4.1) |
+| `status` | the sync status: offline answers, the remembered answer for 299 s and not 300 s, the answer of a sync and of a download remembered, an online answer, no request where none is needed (M5, M6) | recorded |
 
 `smoke/sync/server-clock-ahead` shows 301 s refused, and `sync/transport/identity-accepted` a download-only outcome. What the official server cannot show (`cont` false, a non-empty `msg`, an answer that does not decode, the remembered answer's key rule, a clock moved back) is tested in `meguri-sync` against the scripted stub (`transport.md` T13).
