@@ -34,9 +34,9 @@ setup() {
   export MEGURI_SIM_POOL_SETTLE_SECONDS=0 MEGURI_SIM_POOL_POLL_SECONDS=1 MEGURI_SIM_POOL_WAIT_SECONDS=2
   export MEGURI_HOST_LEASE_DIR="$BATS_TEST_TMPDIR/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1
   export MEGURI_MAC_UI_DIR="$BATS_TEST_TMPDIR/mac-ui"
-  # No test VM: these tests cover the host path of Mac UI jobs (U8);
-  # tests/mac_vm.bats covers the VM (U8b).
-  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_MAC_UI_ALLOW_HOST=1
+  # No test VM: these tests cover the host path of Mac UI and simulator jobs
+  # (U8); tests/mac_vm.bats and tests/sim_vm.bats cover the VM (U8b, U8c).
+  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_MAC_UI_ALLOW_HOST=1 MEGURI_SIM_ALLOW_HOST=1
   : >"$STUB_LOG"
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN" "$MEGURI_SIM_DEVICES_DIR"

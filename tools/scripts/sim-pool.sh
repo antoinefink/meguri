@@ -2,6 +2,20 @@
 # tools/scripts/sim-pool.sh: a shared pool of iOS simulators, created once,
 # booted once, kept booted, and leased to one caller at a time.
 #
+# The pool lives in the macOS test VM (U8c, docs/process/mac-ui-vm.md): the
+# first VM of the per-host config (tools/vm/AGENTS.md) that can run. Called
+# on this Mac, the script starts that VM headless when it is stopped, waits
+# for its logged-in session and runs itself there over SSH, with the caller's
+# checkout, directory and pid recorded in the lease. Without a VM it runs on
+# this Mac only with MEGURI_SIM_ALLOW_HOST=1 (a run Antoine starts himself),
+# and otherwise exits 5 (queued).
+#
+# The VM runs one job at a time (its lease, tools/mg.d/mac-vm.sh). acquire
+# and gc (but gc --list) create, boot and delete simulators there, so they
+# run under that lease: directly when the caller runs under the job that
+# holds it (a job's own leases and scripts), otherwise through `tools/mg sim
+# <command>`, which waits for the lease and runs this script again under it.
+#
 # A fresh simulator's first boot crashes system apps (PosterBoard, about 15 s
 # in) and a shutdown crashes simulator daemons; macOS shows each crash as a
 # dialog on Antoine's screen. So pool devices are never shut down, erased or
@@ -33,19 +47,32 @@
 # device is reset first. The lease's pid is informational.
 #
 # Exit codes: 0 ok, 1 failed, 2 usage, 3 every device stayed leased until
-# the wait ran out, 4 the kind's device type is unavailable in this toolchain.
+# the wait ran out, 4 the kind's device type is unavailable in this toolchain,
+# 5 no test VM can run the pool (queued; MEGURI_SIM_ALLOW_HOST=1 runs it
+# here), 6 the test VM could not run it (the config is not valid, the VM did
+# not start or answer, the SSH session failed).
 # Output other than results goes to stderr.
 #
 # Overrides (self-tests): MEGURI_SIM_POOL_DIR, MEGURI_SIM_POOL_MAX,
 # MEGURI_SIM_POOL_WAIT_SECONDS (1200), MEGURI_SIM_POOL_POLL_SECONDS (10),
-# MEGURI_SIM_POOL_SETTLE_SECONDS (30), MEGURI_SIM_DEVICES_DIR,
-# MEGURI_SIM_DEVICES_JSON (tools/sim-devices.json).
+# MEGURI_SIM_POOL_SETTLE_SECONDS (30), MEGURI_SIM_POOL_SPRINGBOARD_SECONDS
+# (30), MEGURI_SIM_DEVICES_DIR,
+# MEGURI_SIM_DEVICES_JSON (tools/sim-devices.json); MEGURI_MAC_VM_CONFIG and
+# the other overrides of tools/scripts/mac-vm-lib.sh. The MEGURI_SIM_POOL_*
+# and MEGURI_SIM_DEVICES_DIR overrides set here go to the VM along.
+# Internal: MEGURI_SIM_POOL_IN_VM=1 (this run is the VM's), with
+# MEGURI_SIM_POOL_CALLER naming the caller's description (vm, worktree, cwd,
+# pid), which sets MEGURI_SIM_POOL_VM, _WORKTREE, _CWD and _PID;
+# MEGURI_SIM_POOL_VIA_MG=1 (this run asked tools/mg sim to take the VM's
+# lease: the run it starts must find it held).
 #
 # Runs under macOS /bin/bash 3.2 with BSD tools, and with GNU tools in the
 # dev container (self-tests).
 
 set -u
 
+SP_SCRIPTS="$(cd "$(dirname "$0")" && pwd -P)"
+SP_ROOT="$(cd "$SP_SCRIPTS/../.." && pwd -P)"
 SP_DEVICES_JSON="${MEGURI_SIM_DEVICES_JSON:-$(cd "$(dirname "$0")/.." && pwd -P)/sim-devices.json}"
 SP_KINDS="" # set from SP_DEVICES_JSON before any command runs
 
@@ -53,10 +80,12 @@ SP_PREFIX=Meguri-Pool-
 SP_DIR="${MEGURI_SIM_POOL_DIR:-$HOME/Library/Caches/meguri/sim-pool}"
 SP_LEASES="$SP_DIR/leases"
 SP_LOCK="$SP_DIR/pool.lock"
+SP_READY="$SP_DIR/springboard" # devices whose SpringBoard was checked since their boot
 SP_MAX="${MEGURI_SIM_POOL_MAX:-3}"
 SP_WAIT="${MEGURI_SIM_POOL_WAIT_SECONDS:-1200}"
 SP_POLL="${MEGURI_SIM_POOL_POLL_SECONDS:-10}"
 SP_SETTLE="${MEGURI_SIM_POOL_SETTLE_SECONDS:-30}"
+SP_SB_SETTLE="${MEGURI_SIM_POOL_SPRINGBOARD_SECONDS:-30}"
 SP_DEVICES_DIR="${MEGURI_SIM_DEVICES_DIR:-$HOME/Library/Developer/CoreSimulator/Devices}"
 SP_DEFAULT_TTL=60
 SP_TAB=$'\t'
@@ -161,18 +190,28 @@ sp_lease_state() {
   fi
 }
 
+# sp_checkout: the caller's checkout (in the VM, the one on the host).
+sp_checkout() {
+  if [ -n "${MEGURI_SIM_POOL_WORKTREE:-}" ]; then
+    printf '%s\n' "$MEGURI_SIM_POOL_WORKTREE"
+  else
+    git rev-parse --show-toplevel 2>/dev/null || pwd -P
+  fi
+}
+
 # sp_write_lease <udid> <kind> <holder> <ttl minutes>
 sp_write_lease() {
   local d="$SP_LEASES/$1" now cwd top
   now="$(sp_now)"
-  cwd="$(pwd -P)"
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || top="$cwd"
+  cwd="${MEGURI_SIM_POOL_CWD:-$(pwd -P)}"
+  top="$(sp_checkout)"
   jq -n --arg udid "$1" --arg kind "$2" --arg holder "$3" --argjson ttl "$4" \
-    --arg cwd "$cwd" --arg wt "$top" --argjson pid "$PPID" --argjson now "$now" '{
+    --arg cwd "$cwd" --arg wt "$top" --argjson pid "${MEGURI_SIM_POOL_PID:-$PPID}" --argjson now "$now" \
+    --arg vm "${MEGURI_SIM_POOL_VM:-}" '{
       udid: $udid, kind: $kind, holder: $holder, worktree: $wt, cwd: $cwd, pid: $pid,
       ttl_min: $ttl, acquired_at: ($now | todate), expires_at: ($now + $ttl * 60 | todate),
       acquired_epoch: $now, expires_epoch: ($now + $ttl * 60)
-    }' >"$d/lease.json.tmp" && mv -f "$d/lease.json.tmp" "$d/lease.json"
+    } + (if $vm == "" then {} else {vm: $vm} end)' >"$d/lease.json.tmp" && mv -f "$d/lease.json.tmp" "$d/lease.json"
 }
 
 # sp_take <udid> <kind> <holder> <ttl>: lease a device nobody holds (under the pool lock).
@@ -270,6 +309,7 @@ sp_user_apps() {
 
 # sp_boot <udid> <state>: boot unless booted, wait for the boot to finish.
 sp_boot() {
+  rm -f "$SP_READY/$1"
   if [ "$2" = Shutdown ]; then
     xcrun simctl boot "$1" >&2 || sp_log "simctl boot $1 failed; waiting for its boot status"
   fi
@@ -287,6 +327,62 @@ sp_settle() {
     sp_log "letting $1 settle for $SP_SETTLE s after its boot"
     sp_sleep "$SP_SETTLE"
   fi
+}
+
+# sp_appearance_applies <udid>: whether the simulator's SpringBoard applies
+# an appearance change: dark, seen by its style arbiter (the unified log
+# inside the simulator) within 10 s, then light again.
+sp_appearance_applies() {
+  local since _ seen=1
+  xcrun simctl ui "$1" appearance light >&2 || return 1
+  since="$(date '+%Y-%m-%d %H:%M:%S')"
+  xcrun simctl ui "$1" appearance dark >&2 || return 1
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    sp_sleep 1
+    if xcrun simctl spawn "$1" log show --start "$since" --style compact \
+      --predicate 'category == "UserInterfaceStyleArbiter"' 2>/dev/null | grep -q 'changing style from [0-9]* to 2'; then
+      seen=0
+      break
+    fi
+  done
+  xcrun simctl ui "$1" appearance light >&2 || return 1
+  return "$seen"
+}
+
+# sp_prepare_springboard <udid> <name>: once after each boot, checks that
+# SpringBoard applies appearance changes (simctl ui appearance,
+# XCUIDevice.appearance), restarting it (inside the simulator; the device
+# stays booted) until it does, at most 3 times. In the test VM on 2026-10-15
+# the SpringBoard of a fresh boot, and one restarted soon after it, accepted
+# the change and never applied it, so the accessibility audit's dark variants
+# rendered light. Devices booted before this check (no mark in $SP_READY)
+# get it on their next acquire.
+sp_prepare_springboard() {
+  local n=0 _
+  [ ! -e "$SP_READY/$1" ] || return 0
+  while :; do
+    if sp_appearance_applies "$1"; then
+      mkdir -p "$SP_READY" && : >"$SP_READY/$1"
+      [ "$n" -eq 0 ] || sp_log "SpringBoard on $2 applies appearance changes after $n restart(s)"
+      return 0
+    fi
+    if [ "$n" -ge 3 ]; then
+      sp_log "SpringBoard on $2 still ignores appearance changes after $n restarts"
+      return 1
+    fi
+    n=$((n + 1))
+    sp_log "SpringBoard on $2 ignores appearance changes; restarting it ($n of 3)"
+    xcrun simctl spawn "$1" launchctl kickstart -k user/foreground/com.apple.SpringBoard >&2 || {
+      sp_log "restarting SpringBoard on $2 failed"
+      return 1
+    }
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      xcrun simctl spawn "$1" launchctl list 2>/dev/null | awk '$3 == "com.apple.SpringBoard" && $1 ~ /^[0-9]+$/ { found = 1 } END { exit !found }' && break
+      sp_sleep 1
+    done
+    # A SpringBoard just started drops appearance changes for a while.
+    sp_sleep "$SP_SB_SETTLE"
+  done
 }
 
 # sp_reset <udid>: back to a clean state, still booted.
@@ -394,7 +490,7 @@ sp_acquire() {
   done
   [ -n "$kind" ] || sp_usage "acquire: missing kind"
   pinned="$(sp_kind_type "$kind")" || sp_usage "acquire: unknown kind '$kind' (kinds: $(sp_kind_names))"
-  [ -n "$holder" ] || holder="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)")"
+  [ -n "$holder" ] || holder="$(basename "$(sp_checkout)")"
   rt="$(sp_runtime)" || { sp_log "simctl list runtimes failed"; exit 1; }
   [ -n "$rt" ] || { sp_log "no iOS simulator runtime is installed"; exit 1; }
   rt_id="${rt%%"$SP_TAB"*}"
@@ -432,6 +528,7 @@ sp_acquire() {
   else
     xcrun simctl bootstatus "$SP_UDID" -b >&2 || { sp_log "$SP_NAME did not report booted"; exit 1; }
   fi
+  sp_prepare_springboard "$SP_UDID" "$SP_NAME" || exit 1
   if [ "$SP_HOW" = takeover ]; then
     sp_reset "$SP_UDID" || exit 1
   fi
@@ -511,7 +608,7 @@ sp_release() {
   fi
   if [ "$SP_STATE" != Booted ]; then
     sp_log "$SP_NAME is $SP_STATE; booting it again"
-    sp_boot "$udid" "$SP_STATE" && sp_settle "$SP_NAME" || rc=1
+    sp_boot "$udid" "$SP_STATE" && sp_settle "$SP_NAME" && sp_prepare_springboard "$udid" "$SP_NAME" || rc=1
   fi
   [ "$rc" -ne 0 ] || sp_reset "$udid" || rc=1
   sp_lock
@@ -564,8 +661,8 @@ sp_status() {
     done
   fi
   json="$(printf '%s\n' "$json" | jq -s --arg dir "$SP_DIR" --arg rt "$rt" --argjson max "$SP_MAX" \
-    --arg kinds "$SP_KINDS" --arg orphans "$orphans" '{
-      pool_dir: $dir,
+    --arg kinds "$SP_KINDS" --arg orphans "$orphans" --arg vm "${MEGURI_SIM_POOL_VM:-}" '{
+      pool_dir: $dir, vm: (if $vm == "" then null else $vm end),
       runtime: (if $rt == "" then null else ($rt | split("\t") | {identifier: .[0], version: .[1]}) end),
       max_per_kind: $max,
       kinds: [$kinds | split("\n")[] | select(. != "") | split("|")
@@ -573,7 +670,7 @@ sp_status() {
       devices: [.[] | select(. != null)] | sort_by(.name),
       orphan_leases: [$orphans | split(" ")[] | select(. != "")]
     }')" || exit 1
-  jq -r '"pool \(.pool_dir), runtime \(.runtime.version // "none"), at most \(.max_per_kind) per kind",
+  jq -r '"pool \(.pool_dir)\(if .vm then " in the test VM \(.vm)" else "" end), runtime \(.runtime.version // "none"), at most \(.max_per_kind) per kind",
     (.devices[] | "  \(.name)  \(.udid)  \(.state)\(if .current_runtime then "" else "  (old runtime)" end)  " +
       (if .lease == null then "free"
        else "leased to \(.lease.holder // "?") (\(.lease.worktree // "?")) until \(.lease.expires_at // "?")" +
@@ -643,6 +740,118 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Where the pool lives
+
+# sp_route <command> [args]: the pool is the test VM's (U8c). Runs this
+# script there over SSH and exits with its code, or returns to run it here
+# (no VM and MEGURI_SIM_ALLOW_HOST=1); exits 5 when no VM can run it and 6
+# when the VM could not.
+sp_route() {
+  local rc vm logs
+  # shellcheck source=mac-vm-lib.sh
+  . "$SP_SCRIPTS/mac-vm-lib.sh"
+  MVL_REASON=""
+  mvl_probe
+  rc=$?
+  case "$rc" in
+    0) ;;
+    2)
+      sp_log "$MVL_REASON"
+      exit 6
+      ;;
+    *)
+      [ "${MEGURI_SIM_ALLOW_HOST:-}" != 1 ] || return 0
+      sp_log "queued: $MVL_REASON; simulators run only in the macOS test VM (docs/process/mac-ui-vm.md), never on this Mac (MEGURI_SIM_ALLOW_HOST=1 uses this Mac's simulators, for a run Antoine starts himself)"
+      exit 5
+      ;;
+  esac
+  vm="$(jq -c '.[0]' <<<"$MVL_VMS")"
+  if sp_changes_pool "$@" && ! mvl_lease_held "$(mvl_lease_dir "$SP_ROOT" "$(jq -r .name <<<"$vm")")"; then
+    sp_via_mg "$@"
+  fi
+  # The tart log of a VM this starts stays: tart keeps writing to it.
+  logs="${TMPDIR:-/tmp}/meguri-sim-pool-vm"
+  mkdir -p "$logs" || { sp_log "cannot create $logs"; exit 6; }
+  if ! mvl_ensure_ready "$vm" "$logs"; then
+    sp_log "the test VM could not run the pool: $MVL_REASON"
+    exit 6
+  fi
+  sp_forward "$vm" "$@"
+}
+
+# sp_changes_pool <command> [args]: whether the command creates, boots or
+# deletes simulators: acquire, and gc but gc --list.
+sp_changes_pool() {
+  local a
+  case "${1:-}" in
+    acquire) return 0 ;;
+    gc)
+      for a in "$@"; do [ "$a" != --list ] || return 1; done
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# sp_via_mg <command> [args]: the command under the VM's lease, through
+# `tools/mg sim <command>` (which takes it and runs this script again under
+# it). Prints what that run printed and exits with its code: 5 when the job
+# was queued, 6 when it did not run the pool (the VM's lease stayed busy, the
+# VM did not start or answer).
+sp_via_mg() {
+  local result rc
+  if [ -n "${MEGURI_SIM_POOL_VIA_MG:-}" ]; then
+    sp_log "tools/mg sim ran the pool without holding the test VM's lease"
+    exit 6
+  fi
+  sp_log "$1 changes the pool in the test VM: running it under the VM's lease (tools/mg sim $1)"
+  result="$(MEGURI_SIM_POOL_VIA_MG=1 "$SP_ROOT/tools/mg" sim "$@" </dev/null | tail -n 1)"
+  rc="$(jq -r '.details.pool.exit // empty' "$result" 2>/dev/null)"
+  if [ -z "$rc" ]; then
+    [ "$(jq -r '.details.queued // false' "$result" 2>/dev/null)" != true ] || exit 5
+    sp_log "the test VM could not run the pool under its lease: $(jq -r '.message // "no result"' "$result" 2>/dev/null || echo "tools/mg sim $1 left no result")"
+    exit 6
+  fi
+  jq -r '.details.pool.output | select(. != "")' "$result"
+  exit "$rc"
+}
+
+# sp_forward <vm JSON> <command> [args]: this script, the kinds file and the
+# caller's description go to a temporary directory in the VM (one per call:
+# a script being replaced while bash reads it breaks), and the script runs
+# there for the caller (the lease names this Mac's checkout, not a directory
+# of the VM). Exits with the VM's exit code; 6 when SSH failed.
+sp_forward() {
+  local vm="$1" ssh name envs=(MEGURI_SIM_POOL_IN_VM=1) v json tmp rc
+  shift
+  ssh="$(jq -r .ssh <<<"$vm")"
+  name="$(jq -r .name <<<"$vm")"
+  for v in MEGURI_SIM_POOL_DIR MEGURI_SIM_POOL_MAX MEGURI_SIM_POOL_WAIT_SECONDS MEGURI_SIM_POOL_POLL_SECONDS \
+    MEGURI_SIM_POOL_SETTLE_SECONDS MEGURI_SIM_POOL_SPRINGBOARD_SECONDS MEGURI_SIM_DEVICES_DIR; do
+    [ -z "${!v:-}" ] || envs[${#envs[@]}]="$v=${!v}"
+  done
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/meguri-sim-pool.XXXXXX")" || { sp_log "cannot create a temporary directory"; exit 1; }
+  jq -n --arg vm "$name" --arg wt "$(sp_checkout)" --arg cwd "$(pwd -P)" --argjson pid "$PPID" \
+    '{vm: $vm, worktree: $wt, cwd: $cwd, pid: $pid}' >"$tmp/caller.json" || { rm -rf "$tmp"; sp_log "cannot describe the caller"; exit 1; }
+  json="$(basename "$SP_DEVICES_JSON")"
+  COPYFILE_DISABLE=1 tar -cf - -C "$SP_SCRIPTS" sim-pool.sh -C "$tmp" caller.json -C "$(dirname "$SP_DEVICES_JSON")" "$json" |
+    "$ssh" "d=\$(mktemp -d /tmp/meguri-sim-pool.XXXXXX) || exit 1
+tar -C \"\$d\" -xf - || { rm -rf \"\$d\"; exit 1; }
+env $(mvl_q "${envs[@]}") MEGURI_SIM_POOL_CALLER=\"\$d/caller.json\" MEGURI_SIM_DEVICES_JSON=\"\$d\"/$(mvl_q "$json") \\
+  /bin/bash \"\$d/sim-pool.sh\" $(mvl_q "$@")
+rc=\$?
+rm -rf \"\$d\"
+exit \$rc"
+  rc="${PIPESTATUS[1]}"
+  rm -rf "$tmp"
+  if [ "$rc" -eq 255 ]; then
+    sp_log "the SSH session to the test VM $name failed"
+    exit 6
+  fi
+  exit "$rc"
+}
+
+# ---------------------------------------------------------------------------
 
 trap sp_on_exit EXIT
 trap 'exit 143' TERM
@@ -653,10 +862,21 @@ if ! command -v jq >/dev/null 2>&1; then
   sp_log "jq is required (macOS ships /usr/bin/jq)"
   exit 1
 fi
-for v in "$SP_MAX" "$SP_WAIT" "$SP_POLL" "$SP_SETTLE"; do
+for v in "$SP_MAX" "$SP_WAIT" "$SP_POLL" "$SP_SETTLE" "$SP_SB_SETTLE"; do
   sp_is_uint "$v" || sp_usage "MEGURI_SIM_POOL_* overrides must be whole numbers"
 done
 SP_KINDS="$(sp_kinds)" && [ -n "$SP_KINDS" ] || { sp_log "cannot read the kinds from $SP_DEVICES_JSON"; exit 1; }
+
+if [ -n "${MEGURI_SIM_POOL_IN_VM:-}" ]; then
+  if [ -n "${MEGURI_SIM_POOL_CALLER:-}" ]; then
+    MEGURI_SIM_POOL_VM="$(jq -r '.vm // empty' "$MEGURI_SIM_POOL_CALLER")"
+    MEGURI_SIM_POOL_WORKTREE="$(jq -r '.worktree // empty' "$MEGURI_SIM_POOL_CALLER")"
+    MEGURI_SIM_POOL_CWD="$(jq -r '.cwd // empty' "$MEGURI_SIM_POOL_CALLER")"
+    MEGURI_SIM_POOL_PID="$(jq -r '.pid // empty' "$MEGURI_SIM_POOL_CALLER")"
+  fi
+else
+  sp_route "$@"
+fi
 
 cmd="${1:-}"
 [ "$#" -gt 0 ] && shift

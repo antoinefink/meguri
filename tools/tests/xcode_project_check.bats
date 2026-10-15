@@ -12,6 +12,7 @@ setup() {
   SB="$BATS_TEST_TMPDIR/repo"
   mkdir -p "$SB/tools/tests" "$SB/tools/scripts" "$SB/app/Meguri/App"
   cp "$REPO_ROOT/tools/tests/xcode_project_check.sh" "$SB/tools/tests/"
+  cp "$REPO_ROOT/tools/scripts/mac-vm-lib.sh" "$SB/tools/scripts/"
   STUBS="$BATS_TEST_TMPDIR/stubs"
   mkdir -p "$STUBS"
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
@@ -30,13 +31,24 @@ EOF
   chmod +x "$SB/tools/scripts/sim-pool.sh"
   unset STUB_POOL_BUSY
   # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
-  # product check runs; test runs pass. A launched app stays up, except on the
-  # route stub/quits.
+  # product check runs; builds for testing write the plan's simulator
+  # xctestrun; test runs pass. A launched app stays up, except on the route
+  # stub/quits.
   cat >"$STUBS/_stub" <<'EOF'
 #!/usr/bin/env bash
 name="$(basename "$0")"
 printf '%s\n' "$name $*" >>"$STUB_LOG"
 case "$name $*" in
+  "xcodebuild build-for-testing "*)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -derivedDataPath) dd="$2" ;; -scheme) scheme="$2" ;; -testPlan) plan="$2" ;; -configuration) config="$2" ;;
+      esac
+      shift
+    done
+    mkdir -p "$dd/Build/Products"
+    echo "__TESTROOT__/$config-iphonesimulator/" >"$dd/Build/Products/${scheme}_${plan}_iphonesimulator27.0-arm64.xctestrun"
+    ;;
   "xcrun xcresulttool get build-results "*) echo '{"errorCount":0,"warningCount":0,"warnings":[]}' ;;
   "xcrun xcresulttool get "*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
   "xcodebuild build "*) [ "${STUB_BUILD_OK:-}" = 1 ] || exit 65 ;;
@@ -52,6 +64,102 @@ EOF
   done
   export PATH="$STUBS:$PATH"
   unset MEGURI_ALLOW_MAC_UI
+}
+
+teardown() {
+  # A VM run left going by a lost SSH session.
+  cat "$BATS_TEST_TMPDIR"/vms/*/tests.pids 2>/dev/null | xargs kill -9 2>/dev/null || true
+}
+
+# The test VM (--vm-ssh): the fake VM of tests/mac_vm.bats (mac_vm_fake_ssh.sh),
+# which runs each command here, in its own copy of the file system
+# ($FAKE_VM_DIR/meguri-mac/fs); its wrapper logs each command as
+# `vm-ssh <command>`. The VM's xcodebuild test-without-building needs the
+# products at the -xctestrun path and, at the repository's paths, what the
+# run's tests read there, as this checkout holds it: the snapshot baselines
+# (Snapshot plan), the hook fixtures (TestHooksTests) and the example drive
+# scripts (DriveScriptTests); otherwise its tests fail (exit 65). It exits
+# FAKE_VM_TEST_RC (0) and leaves a result bundle. Each run is a process of
+# the VM that its pgrep and pkill see (tests.pids). FAKE_VM_SSH_DROP=1: the
+# first run loses its SSH session and goes on there until it is stopped;
+# =down: SSH stops answering as it does.
+fake_vm() {
+  export FAKE_VM_DIR="$BATS_TEST_TMPDIR/vms" FAKE_VM_NAME=meguri-mac FAKE_VM_BIN="$BATS_TEST_TMPDIR/vm-bin"
+  FAKE_VM_MIRROR="$(cd "$BATS_TEST_TMPDIR" && pwd -P)"
+  FAKE_VM_REPO="$(cd "$SB" && pwd -P)"
+  export FAKE_VM_MIRROR FAKE_VM_REPO MEGURI_MAC_VM_STOP_SECONDS=2
+  VM_FS="$FAKE_VM_DIR/meguri-mac/fs"
+  mkdir -p "$VM_FS" "$FAKE_VM_BIN"
+  echo running >"$FAKE_VM_DIR/meguri-mac/state"
+  printf '#!/usr/bin/env bash\nprintf "vm-ssh %%s\\n" "$1" >>"$STUB_LOG"\nexec %q "$@"\n' \
+    "$REPO_ROOT/tools/tests/mac_vm_fake_ssh.sh" >"$STUBS/vm-ssh"
+  cat >"$FAKE_VM_BIN/pgrep" <<'EOF'
+#!/usr/bin/env bash
+rc=1
+for pid in $(cat "$FAKE_VM/tests.pids" 2>/dev/null); do
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null)" || continue
+  if printf "%s\n" "$cmd" | grep -Eq -- "${!#}"; then echo "$pid"; rc=0; fi
+done
+exit "$rc"
+EOF
+  cat >"$FAKE_VM_BIN/pkill" <<'EOF'
+#!/usr/bin/env bash
+echo "vm-pkill $*" >>"$STUB_LOG"
+sig=TERM
+[ "$1" != -9 ] || sig=KILL
+pids="$(pgrep -f "${!#}")" || exit 1
+kill -s "$sig" $pids 2>/dev/null
+exit 0
+EOF
+  cat >"$FAKE_VM_BIN/xcodebuild" <<'EOF'
+#!/usr/bin/env bash
+unmap() { local s="$*"; printf "%s" "${s//"$FAKE_VM_FS"/}"; }
+echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
+other="$(pgrep -f 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/[^/]*UITests-Runner')" && echo "vm-overlap with $other" >>"$STUB_LOG"
+echo "$$" >>"$FAKE_VM/tests.pids"
+only=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in -xctestrun) run="$2" && shift ;; -resultBundlePath) bundle="$2" && shift ;; -only-testing:*) only="${1#-only-testing:}" ;; esac
+  shift
+done
+[ -f "$run" ] || { echo "xcodebuild: error: no xctestrun at $(unmap "$run")"; exit 70; }
+case "$(basename "$run") $only" in
+  *_Snapshot_*) need=app/Snapshots ;;
+  *TestHooksTests) need=app/Fixtures ;;
+  *DriveScriptTests) need=tools/drive-scripts ;;
+  *) need="" ;;
+esac
+if [ -n "$need" ] && ! diff -r "$FAKE_VM_REPO/$need" "$FAKE_VM_FS$FAKE_VM_REPO/$need" >/dev/null 2>&1; then
+  echo "Test failed: $need in the VM is not this checkout's"
+  exit 65
+fi
+if [ -n "${FAKE_VM_SSH_DROP:-}" ] && [ ! -e "$FAKE_VM/ssh-dropped" ]; then
+  : >"$FAKE_VM/ssh-dropped"
+  [ "$FAKE_VM_SSH_DROP" != down ] || : >"$FAKE_VM_DIR/ssh-down"
+  # The iOS runner survives xcodebuild's SIGTERM until cleanup sends SIGKILL.
+  bash -c 'trap "" TERM; exec -a /Simulator/MeguriUITests-Runner.app/MeguriUITests-Runner sleep 600' \
+    </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+  echo "$!" >>"$FAKE_VM/tests.pids"
+  until pgrep -f 'UITests-Runner[.]app/[^/]*UITests-Runner' >/dev/null; do sleep 0.01; done
+  kill -9 "$PPID"
+  exec </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+  for _ in $(seq 1 6000); do sleep 0.1; done
+  exit 0
+fi
+mkdir -p "$bundle"
+exit "${FAKE_VM_TEST_RC:-0}"
+EOF
+  chmod +x "$STUBS/vm-ssh" "$FAKE_VM_BIN"/*
+}
+
+vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/meguri-mac" "$FAKE_VM_BIN/pgrep" -f 'xcodebuild[ ]test-without-building' >/dev/null; }
+
+# The sources VM runs read at the repository's paths.
+add_test_inputs() {
+  mkdir -p "$SB/app/Snapshots/iPhone18,1-24A434" "$SB/app/Fixtures/TestHooks" "$SB/tools/drive-scripts/examples"
+  echo baseline-1 >"$SB/app/Snapshots/iPhone18,1-24A434/home.png"
+  echo fixture-1 >"$SB/app/Fixtures/TestHooks/single-file.fixture"
+  echo '{"name": "x", "steps": []}' >"$SB/tools/drive-scripts/examples/x.json"
 }
 
 check_project() {
@@ -193,4 +301,102 @@ SWIFT
   check_project --phase devices --continue-from 3 --no-ui
   not_called '^open '
   [ "$(head -n 1 <<<"$output" | sed -E 's/^(not )?ok ([0-9]+) .*/\2/')" = 4 ]
+}
+
+@test "with the test VM, simulator builds use any simulator and each simulator run is built here and tested in the VM" {
+  fake_vm
+  add_test_inputs
+  check_project --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  called '^sim-pool\.sh acquire iphone --holder xcode-check$'
+  called '^xcodebuild build .* -configuration Debug -destination generic/platform=iOS Simulator '
+  not_called '^xcodebuild (build|test) .* -destination id='
+  called '^xcodebuild build-for-testing .* -scheme Meguri-Profile -testPlan Performance -configuration Profile -destination generic/platform=iOS Simulator '
+  called "^vm-ssh \\{ mkdir -p .* xcodebuild test-without-building -xctestrun '[^']*/DerivedData-tests/Build/Products/Meguri_UI_iphonesimulator27.0-arm64.xctestrun' "
+  called "^vm-ssh .*-destination 'id=POOL-ipad' .*'-only-testing:MeguriUITests/TestHooksTests'"
+  # The products go to the VM before each run, the bundle comes back.
+  called "^vm-ssh rm -rf '[^']*/DerivedData-tests/Build/Products' && mkdir -p "
+  tap_line 'ok [0-9]+ iphone-Release-TestHooksTests: Passed .*'
+  tap_line 'ok [0-9]+ ipad-Debug-TestHooksTests: Passed .*'
+  called '^sim-pool\.sh release POOL-iphone$'
+  # The Mac runs stay on this Mac.
+  called '^xcodebuild test .* -testPlan Unit .* -destination platform=macOS,arch=arm64 '
+
+  not_called '^vm-overlap'
+
+  # A run that fails in the VM is a failing test.
+  FAKE_VM_TEST_RC=65 check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+}
+
+@test "VM runs read the baselines, hook fixtures and example scripts as this checkout holds them, not an earlier copy" {
+  fake_vm
+  add_test_inputs
+  check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  tap_line 'ok [0-9]+ iphone-app-hosted: Passed .*'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+  tap_line 'ok [0-9]+ ipad-Debug-TestHooksTests: Passed .*'
+  tap_line 'ok [0-9]+ iphone-Debug-DriveScriptTests: Passed .*'
+  # Copied once per run, not before every test.
+  [ "$(grep -c "^vm-ssh rm -rf '[^']*/app/Snapshots' && mkdir -p " "$STUB_LOG")" = 1 ]
+
+  # Changed here since: the next run's copy in the VM is the new one.
+  echo baseline-2 >"$SB/app/Snapshots/iPhone18,1-24A434/home.png"
+  rm "$SB/app/Fixtures/TestHooks/single-file.fixture"
+  echo fixture-2 >"$SB/app/Fixtures/TestHooks/directory.fixture"
+  check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  tap_line 'ok [0-9]+ iphone-app-hosted: Passed .*'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+  [ "$(cat "$VM_FS$FAKE_VM_REPO/app/Snapshots/iPhone18,1-24A434/home.png")" = baseline-2 ]
+  [ ! -e "$VM_FS$FAKE_VM_REPO/app/Fixtures/TestHooks/single-file.fixture" ]
+}
+
+@test "a VM run that loses its SSH session is stopped there before the next run starts; one that cannot be stopped ends the VM runs" {
+  fake_vm
+  add_test_inputs
+  FAKE_VM_SSH_DROP=1 check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  [ "$status" -ne 0 ]
+  tap_line 'not ok [0-9]+ iphone-app-hosted: .*'
+  tap_line '# xcode_project_check: the SSH session to meguri-mac ended before xcodebuild did'
+  tap_line '# xcode_project_check: stopped that run in meguri-mac'
+  tap_line 'ok [0-9]+ iphone-Debug-TestHooksTests: Passed .*'
+  local stop second
+  stop="$(grep -n '^vm-pkill -f ' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  second="$(grep -n '^vm-xcodebuild ' "$STUB_LOG" | sed -n 2p | cut -d: -f1)"
+  [ -n "$stop" ] && [ -n "$second" ] && [ "$stop" -lt "$second" ] || { cat "$STUB_LOG"; return 1; }
+  not_called '^vm-overlap'
+  ! vm_tests_running
+  ! FAKE_VM="$FAKE_VM_DIR/meguri-mac" "$FAKE_VM_BIN/pgrep" -f 'UITests-Runner[.]app/[^/]*UITests-Runner'
+  called '^vm-pkill -9 -f '
+
+  # SSH stops answering as well: the run cannot be stopped, and no other run
+  # starts in the VM.
+  rm -f "$FAKE_VM_DIR/meguri-mac/ssh-dropped"
+  : >"$STUB_LOG"
+  FAKE_VM_SSH_DROP=down check_project --phase devices --vm-ssh "$STUBS/vm-ssh" --vm-name meguri-mac
+  [ "$status" -ne 0 ]
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
+  tap_line 'not ok [0-9]+ iphone-Debug-TestHooksTests: not run'
+  tap_line '# the run iphone-app-hosted lost its SSH session and may still be running in meguri-mac \(the VM did not answer .*'
+  tap_line 'not ok [0-9]+ ipad-Debug-TestHooksTests: not run'
+  not_called '^xcodebuild build-for-testing .* -scheme Meguri-Profile '
+  vm_tests_running
+}
+
+@test "without the test VM, xcode-check builds for the simulator but leases and tests none" {
+  check_project --no-sims
+  not_called '^sim-pool\.sh '
+  called '^xcodebuild build .* -destination generic/platform=iOS Simulator '
+  not_called 'id=POOL'
+  not_called '^xcodebuild build-for-testing'
+  tap_line 'ok [0-9]+ lease the iPhone and iPad simulators # SKIP queued: no test VM \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ simulator test runs # SKIP queued: no test VM \(user step mac-vm\)'
+}
+
+@test "without the test VM, supplied iPhone and iPad IDs do not start simulator test runs" {
+  check_project --phase devices --no-sims --iphone GIVEN-IPHONE --ipad GIVEN-IPAD
+  not_called '^sim-pool\.sh '
+  not_called '^xcodebuild test .* -destination id='
+  not_called '^xcodebuild build-for-testing'
+  tap_line 'ok [0-9]+ simulator test runs # SKIP queued: no test VM \(user step mac-vm\)'
 }

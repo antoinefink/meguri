@@ -28,6 +28,9 @@ setup() {
   export MEGURI_SIM_POOL_DIR="$BATS_TEST_TMPDIR/pool"
   export MEGURI_SIM_DEVICES_DIR="$BATS_TEST_TMPDIR/Devices"
   export MEGURI_SIM_POOL_SETTLE_SECONDS=0 MEGURI_SIM_POOL_POLL_SECONDS=1 MEGURI_SIM_POOL_WAIT_SECONDS=2
+  # The pool on this machine, as with MEGURI_SIM_ALLOW_HOST=1 and no test VM
+  # (U8c); tests/sim_vm.bats runs it in a fake VM.
+  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_SIM_ALLOW_HOST=1
   : >"$STUB_LOG"
   mkdir -p "$BATS_TEST_TMPDIR/bin" "$MEGURI_SIM_DEVICES_DIR"
   ln -s "$REPO_ROOT/tools/tests/sim_pool_fake_xcrun.sh" "$BATS_TEST_TMPDIR/bin/xcrun"
@@ -119,6 +122,73 @@ assert_pool_devices_untouched() {
   [ "${lines[0]}" = "$u" ]
   not_called '^xcrun simctl (create|boot) '
   [ -d "$LEASES/$u" ]
+}
+
+@test "after a boot the pool checks that SpringBoard applies a change to dark; a healthy one is left alone, and a reused device is not checked again" {
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}" dark check
+  # Light, dark, the arbiter's log, light again: after the boot and the
+  # settle time, before the lease is handed out.
+  dark="$(grep -n "^xcrun simctl ui $u appearance dark\$" "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  check="$(grep -n "^xcrun simctl spawn $u log show --start .* --predicate category == \"UserInterfaceStyleArbiter\"\$" "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  [ -n "$dark" ]
+  [ -n "$check" ]
+  [ "$(grep -n "^xcrun simctl bootstatus $u" "$STUB_LOG" | head -n 1 | cut -d: -f1)" -lt "$dark" ]
+  [ "$dark" -lt "$check" ]
+  [ "$(jq -r --arg u "$u" '.devices[] | select(.udid == $u) | .appearance' "$FAKE_SIM_DB")" = light ]
+  not_called '^xcrun simctl spawn .* launchctl kickstart'
+  pool release "$u"
+  : >"$STUB_LOG"
+  pool acquire iphone
+  [ "${lines[0]}" = "$u" ]
+  not_called '^xcrun simctl spawn '
+  assert_pool_devices_untouched
+}
+
+@test "a SpringBoard that ignores appearance changes is restarted in the simulator until it applies them, at most three times" {
+  export FAKE_SIM_SB=stale FAKE_SIM_SB_RESTARTS=2 MEGURI_SIM_POOL_SPRINGBOARD_SECONDS=0
+  pool acquire iphone
+  [ "$status" -eq 0 ]
+  local u="${lines[0]}"
+  [ "$(grep -c "^xcrun simctl spawn $u launchctl kickstart -k user/foreground/com.apple.SpringBoard\$" "$STUB_LOG")" = 2 ]
+  [[ "$stderr" == *"applies appearance changes after 2 restart(s)"* ]]
+  [ "$(sim __state "$u")" = Booted ]
+  assert_pool_devices_untouched
+
+  # One that never does fails the acquire, and the lease is not handed out.
+  FAKE_SIM_SB_RESTARTS=never pool acquire iphone
+  [ "$status" -eq 1 ]
+  [[ "$stderr" == *"still ignores appearance changes after 3 restarts"* ]]
+  [ "$(ls "$LEASES" | wc -l | tr -d ' ')" = 1 ]
+  assert_pool_devices_untouched
+}
+
+@test "a booted pool device not checked since its boot is checked on its next acquire" {
+  local u
+  u="$(FAKE_SIM_SB=stale sim __add Meguri-Pool-iphone-1 Booted)"
+  export MEGURI_SIM_POOL_SPRINGBOARD_SECONDS=0
+  pool acquire iphone
+  [ "${lines[0]}" = "$u" ]
+  [ "$(grep -c "^xcrun simctl spawn $u launchctl kickstart" "$STUB_LOG")" = 1 ]
+  not_called "^xcrun simctl (boot|shutdown) $u"
+  pool release "$u"
+  : >"$STUB_LOG"
+  pool acquire iphone
+  not_called '^xcrun simctl spawn '
+}
+
+@test "without a test VM the pool runs here only with MEGURI_SIM_ALLOW_HOST=1; otherwise it is queued (exit 5)" {
+  unset MEGURI_SIM_ALLOW_HOST
+  pool acquire iphone
+  [ "$status" -eq 5 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"queued: no macOS test VM is configured"*"simulators run only in the macOS test VM"* ]]
+  [ ! -s "$STUB_LOG" ]
+  [ ! -e "$LEASES" ]
+  MEGURI_SIM_ALLOW_HOST=1 pool status
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .vm <<<"$output")" = null ]
 }
 
 @test "acquire prefers a booted free pool device and ignores pool devices on older runtimes" {

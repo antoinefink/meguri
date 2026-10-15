@@ -2,8 +2,8 @@
 # sweep and VoiceOver scripts). Sourced by tools/mg; a host job.
 #
 # Runs the accessibility XCUITest suites (MeguriUITests/Accessibility) on a
-# pool simulator, or for the Mac in the macOS test VM (mac-vm.sh; queued,
-# warn, without it). Suites attach
+# pool simulator or for the Mac, both in the macOS test VM (mac-vm.sh;
+# queued, warn, without it). Suites attach
 # `a11y-screen.<screen id>` JSON reports (AuditHelpers.screenReport), one
 # per screen with a result per state; the job lists them as per-screen
 # evidence of its platform (details.platform) in details.screens and
@@ -12,7 +12,7 @@
 # Mac window's own elements are listed as excluded, not counted.
 
 mg_job a11y host mg_a11y \
-  "Accessibility suites (R1977, R1978, R1980): [--platform iphone|ipad|mac] [--device <leased udid>] [--suite <test class>]... (default AccessibilityHelperTests): system audit at default and largest text size, light and dark, suppressions from Accessibility/suppressions.json, touch targets, VoiceOver order; Mac runs go to the macOS test VM (queued without it); per-screen results in screens.json"
+  "Accessibility suites (R1977, R1978, R1980): [--platform iphone|ipad|mac] [--device <leased udid>] [--suite <test class>]... (default AccessibilityHelperTests): system audit at default and largest text size, light and dark, suppressions from Accessibility/suppressions.json, touch targets, VoiceOver order; simulator and Mac runs go to the macOS test VM (queued without it); per-screen results in screens.json"
 
 MG_A11Y_SUITES="AccessibilityHelperTests"
 
@@ -60,11 +60,12 @@ mg_a11y() {
     mg_a11y__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
+  mg_sim_begin || return 0
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
   fi
   mg_app_build ios-sim Debug || return 0
-  mg_host_lease || return 0
+  mg_sim_take || return 0
   if [ -n "$device" ]; then
     mg_sim_check_given "$device" || return 0
     udid="$device"

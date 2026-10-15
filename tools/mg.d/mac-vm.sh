@@ -1,10 +1,13 @@
-# Mac UI suites in the macOS test VM (U8b). Sourced by tools/mg.
+# Jobs in the macOS test VM (U8b: Mac UI suites; U8c: simulators). Sourced
+# by tools/mg.
 #
 # Every Mac XCUITest run (mac-ui, a11y --platform mac, drive --platform mac)
-# builds on the host and runs its tests in a macOS VM on this Mac
-# (docs/process/mac-ui-vm.md, tools/vm/AGENTS.md), so it never takes over the
-# host's screen, needs no host session and runs as often as needed. The VMs
-# are named by a per-host config, never by the repository:
+# and every simulator job (sim, sim-setup, run, drive, screenshot, ui-tree,
+# record, a11y, snapshots, xcode-check) builds on the host and runs its tests
+# and simulators in a macOS VM on this Mac (docs/process/mac-ui-vm.md,
+# tools/vm/AGENTS.md), so it never takes over the host's screen, boots no
+# simulator on the host, needs no host session and runs as often as needed.
+# The VMs are named by a per-host config, never by the repository:
 # $MEGURI_MAC_VM_CONFIG, else ~/Library/Application Support/meguri/mac-vm.json:
 #
 #   {"tart": "/Volumes/T9/meguri-vm/bin/tart",
@@ -12,20 +15,28 @@
 #    "vms": ["meguri-mac", {"name": "meguri-mac-2", "ssh": "<its wrapper>"}]}
 #
 # `ssh` is a wrapper that runs its arguments as a shell command in that VM;
-# a VM entry may name its own (and its own tart). A run takes the first VM
-# whose lease is free (mac-vm.<name>.lock beside the host lease, shared by
-# every checkout), starts it headless when it is not running, waits for a
-# logged-in session, copies this checkout's test products and app/Fixtures to
-# the same absolute paths in the VM, runs xcodebuild test-without-building
-# there and copies the result bundle back. Without the config, the drive or
-# the VM, the suites are queued (warn, user step mac-vm), or with
-# MEGURI_MAC_UI_ALLOW_HOST=1 take the host path (host lease and hourly gate,
-# host.sh). A VM that does not start or answer is an error, never a reason to
-# use the host's screen.
+# a VM entry may name its own (and its own tart). A Mac UI run takes the
+# first VM whose lease is free (mac-vm.<name>.lock beside the host lease,
+# shared by every checkout); a simulator job takes the lease of the pool VM,
+# the first VM that can run, where the simulator pool lives. The job starts
+# the VM headless when it is not running, waits for a logged-in session,
+# copies this checkout's test products and app/Fixtures to the same absolute
+# paths in the VM, runs xcodebuild test-without-building (and simctl) there
+# and copies the result bundle and captures back. Without the config, the
+# drive or the VM, the job is queued (warn, user step mac-vm); with
+# MEGURI_MAC_UI_ALLOW_HOST=1 Mac suites take the host path (host lease and
+# hourly gate, host.sh), with MEGURI_SIM_ALLOW_HOST=1 simulator jobs use this
+# Mac's pool. A VM that does not start or answer is an error, never a reason
+# to use the host's screen or simulators. The config, state, start and copy
+# helpers are tools/scripts/mac-vm-lib.sh, shared with scripts that run
+# outside tools/mg.
 #
 # Overrides (self-tests): MEGURI_MAC_VM_CONFIG, MEGURI_MAC_VM_POLL_SECONDS (3),
 # MEGURI_MAC_VM_BOOT_SECONDS (240), MEGURI_MAC_VM_LEASE_WAIT_SECONDS (3600),
 # MEGURI_MAC_VM_STOP_SECONDS (20).
+
+# shellcheck source=tools/scripts/mac-vm-lib.sh
+. "$MG_TOOLS/scripts/mac-vm-lib.sh"
 
 MG_MAC_RUNNER=""
 MG_MAC_VM=""
@@ -37,39 +48,23 @@ MG_MAC_VM_TESTING=""
 MG_MAC_VM_LOST=""
 MG_MAC_VM_MARK="mg-mac-vm: remote exit"
 
-mg_mac_vm_config_path() {
-  printf '%s\n' "${MEGURI_MAC_VM_CONFIG:-$HOME/Library/Application Support/meguri/mac-vm.json}"
-}
+mg_mac_vm_config_path() { mvl_config_path; }
 
 # mg__mac_vm_read_config: sets MG_MAC_VM_ALL to the configured VMs, a JSON
 # array of {name, tart, ssh}. Returns 1 without a config and 2 for one that
 # is not valid, with MG_MAC_VM_REASON.
 mg__mac_vm_read_config() {
-  local cfg vms
-  cfg="$(mg_mac_vm_config_path)"
-  MG_MAC_VM_ALL='[]'
-  if [ ! -f "$cfg" ]; then
-    MG_MAC_VM_REASON="no Mac UI test VM is configured ($cfg is missing)"
-    return 1
-  fi
-  if ! vms="$(jq -ce '. as $c | [(.vms // [])[] | (if type == "string" then {name: .} else . end)
-      | {name, tart: (.tart // $c.tart), ssh: (.ssh // $c.ssh)}]
-      | if length > 0 and all(.[]; ([.name, .tart, .ssh] | all(type == "string" and . != ""))
-          and (.name | test("^[A-Za-z0-9._-]+$"))) then . else error("invalid") end' "$cfg" 2>/dev/null)"; then
-    MG_MAC_VM_REASON="$cfg is not valid: it needs {\"tart\": <wrapper>, \"ssh\": <wrapper>, \"vms\": [<name> or {\"name\", \"ssh\"}, ...]} (tools/vm/AGENTS.md)"
-    return 2
-  fi
-  MG_MAC_VM_ALL="$vms"
-  return 0
+  local rc
+  mvl_read_config
+  rc=$?
+  MG_MAC_VM_ALL="$MVL_ALL"
+  MG_MAC_VM_REASON="${MVL_REASON:-}"
+  return "$rc"
 }
 
 # mg__mac_vm_state <tart> <name>: running, stopped (or tart's other state),
 # or missing; nothing when tart cannot list its VMs.
-mg__mac_vm_state() {
-  local list
-  list="$("$1" list --format json 2>/dev/null </dev/null)" || return 0
-  jq -r --arg n "$2" 'first(.[]? | select(.Name == $n) | (.State // "unknown")) // "missing"' <<<"$list" 2>/dev/null
-}
+mg__mac_vm_state() { mvl_state "$@"; }
 
 # mg_mac_vm_probe: the configured VMs that can run now: their wrappers are
 # there (the drive that holds them is connected) and tart lists them. Sets
@@ -77,57 +72,38 @@ mg__mac_vm_state() {
 # sets MG_MAC_VM_REASON and returns 1 (none can) or 2 (the config is not
 # valid). Reads only.
 mg_mac_vm_probe() {
-  local rc n i=0 vm name tart ssh state reasons=""
-  mg__mac_vm_read_config
+  local rc
+  MVL_REASON=""
+  mvl_probe
   rc=$?
-  [ "$rc" -eq 0 ] || return "$rc"
-  MG_MAC_VMS='[]'
-  n="$(jq length <<<"$MG_MAC_VM_ALL")"
-  while [ "$i" -lt "$n" ]; do
-    vm="$(jq -c --argjson i "$i" '.[$i]' <<<"$MG_MAC_VM_ALL")"
-    i=$((i + 1))
-    name="$(jq -r .name <<<"$vm")"
-    tart="$(jq -r .tart <<<"$vm")"
-    ssh="$(jq -r .ssh <<<"$vm")"
-    if [ ! -x "$tart" ]; then
-      reasons="$reasons; the tart wrapper $tart is not there (is the drive that holds the VM connected?)"
-      continue
-    fi
-    if [ ! -x "$ssh" ]; then
-      reasons="$reasons; the SSH wrapper $ssh of $name is not there (is the drive that holds the VM connected?)"
-      continue
-    fi
-    state="$(mg__mac_vm_state "$tart" "$name")"
-    case "$state" in
-      "") reasons="$reasons; $tart list failed" && continue ;;
-      missing) reasons="$reasons; tart lists no VM named $name" && continue ;;
-    esac
-    MG_MAC_VMS="$(jq -c --argjson v "$vm" --arg s "$state" '. + [$v + {state: $s}]' <<<"$MG_MAC_VMS")"
-  done
-  if [ "$MG_MAC_VMS" = '[]' ]; then
-    MG_MAC_VM_REASON="${reasons#; }"
-    return 1
-  fi
-  return 0
+  MG_MAC_VMS="${MVL_VMS:-[]}"
+  MG_MAC_VM_REASON="$MVL_REASON"
+  return "$rc"
 }
 
 # mg_mac_vm_user_step: the one-time step behind a missing VM.
 mg_mac_vm_user_step() {
-  mg_user_step mac-vm missing true "Connect the drive with the Mac UI test VM" \
-    "Mac UI suites run only in the macOS test VM, never on this Mac's screen: connect the T9 drive, or set the VM up and name it in $(mg_mac_vm_config_path) (docs/process/mac-ui-vm.md). Until then they are queued."
+  mg_user_step mac-vm missing true "Connect the drive with the macOS test VM" \
+    "Simulators and Mac UI suites run only in the macOS test VM, never on this Mac: connect the T9 drive, or set the VM up and name it in $(mg_mac_vm_config_path) (docs/process/mac-ui-vm.md). Until then they are queued."
 }
 
-# mg__mac_vm_detail <JSON object>: merged into details.mac_vm.
+# mg__mac_vm_detail <JSON object>: merged into details.mac_vm. `started`
+# stays true once a step of the job started the VM.
 mg__mac_vm_detail() {
-  MG_MAC_VM_DETAIL="$(jq -c --argjson d "$1" '. + $d' <<<"$MG_MAC_VM_DETAIL")"
+  MG_MAC_VM_DETAIL="$(jq -c --argjson d "$1" '(.started // false) as $s | . + $d
+    | if has("started") then .started = ($s or .started) else . end' <<<"$MG_MAC_VM_DETAIL")"
   mg_detail mac_vm "$MG_MAC_VM_DETAIL"
 }
 
-# mg__mac_vm_fail <id> <reason>: the VM could not run the suites: an error,
+# mg__mac_vm_fail <id> <reason>: the VM could not run the job: an error,
 # never fail, and never a run on the host instead.
 mg__mac_vm_fail() {
   mg_failure "$1" "$2"
-  mg_message "$MG_JOB: the test VM could not run the suites: $2"
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_message "$MG_JOB: the test VM could not run the simulators: $2"
+  else
+    mg_message "$MG_JOB: the test VM could not run the suites: $2"
+  fi
   mg_status error
 }
 
@@ -151,9 +127,7 @@ mg_mac_ui_begin() {
       return 0
       ;;
     2)
-      mg_failure mac-vm-config "$MG_MAC_VM_REASON" "tools/mg doctor"
-      mg_message "$MG_JOB: $MG_MAC_VM_REASON"
-      mg_status error
+      mg__mac_vm_config_error
       return 1
       ;;
   esac
@@ -167,12 +141,25 @@ mg_mac_ui_begin() {
     mg_detail mac_runner '"host"'
     return 0
   fi
+  mg__mac_vm_queued "Mac UI suites run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac's screen"
+  return 1
+}
+
+# mg__mac_vm_config_error: a config that is not valid (error).
+mg__mac_vm_config_error() {
+  mg_failure mac-vm-config "$MG_MAC_VM_REASON" "tools/mg doctor"
+  mg_message "$MG_JOB: $MG_MAC_VM_REASON"
+  mg_status error
+}
+
+# mg__mac_vm_queued <what runs only in the VM>: no VM can run the job now:
+# queued (warn), with the mac-vm user step.
+mg__mac_vm_queued() {
   mg_detail queued true
   mg_detail mac_vm "$(jq -nc --arg r "$MG_MAC_VM_REASON" --arg c "$(mg_mac_vm_config_path)" '{reason: $r, config: $c}')"
   mg_mac_vm_user_step
-  mg_message "$MG_JOB: queued: $MG_MAC_VM_REASON; Mac UI suites run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac's screen"
+  mg_message "$MG_JOB: queued: $MG_MAC_VM_REASON; $1"
   mg_status warn
-  return 1
 }
 
 # mg_mac_ui_take: after the build, what the runner needs: the VM's lease,
@@ -187,9 +174,9 @@ mg_mac_ui_take() {
   fi
 }
 
-# mg_mac_vm_take: a VM lease, the VM running with a logged-in session and no
-# test run left in it, and this checkout's test products and fixtures in it.
-# Sets MG_MAC_VM.
+# mg_mac_vm_take [--no-copy]: a VM lease, the VM running with a logged-in
+# session and no test run left in it, and (unless --no-copy) this checkout's
+# test products and fixtures in it. Sets MG_MAC_VM.
 mg_mac_vm_take() {
   local name
   mg__mac_vm_lease || return 1
@@ -207,8 +194,9 @@ mg_mac_vm_take() {
     echo "mac-vm: stopped a UI test run that an earlier job left in $name" >&2
     mg__mac_vm_detail '{"stopped_left_run": true}'
   fi
+  [ "${1:-}" != --no-copy ] || return 0
   if ! mg_mac_vm_copy_in "$MG_ROOT/$MG_APP_DD/Build/Products" "$MG_ROOT/app/Fixtures"; then
-    mg_message "$MG_JOB: the test VM could not run the suites: the test products could not be copied into it"
+    mg_message "$MG_JOB: the test VM could not run the $([ "$MG_SIM_RUNNER" = vm ] && echo simulators || echo suites): the test products could not be copied into it"
     mg_status error
     return 1
   fi
@@ -216,17 +204,187 @@ mg_mac_vm_take() {
 }
 
 # ---------------------------------------------------------------------------
-# VM lease: one run at a time per VM, across every checkout.
+# Simulators in the VM (U8c)
+#
+# The pool's simulators live in the first configured VM that can run (the
+# pool VM): tools/scripts/sim-pool.sh runs there over SSH by itself. Jobs
+# that use a simulator call mg_sim_begin before they build and mg_sim_take
+# after, then reach the simulators through mg_simctl and mg_devicectl, and
+# test with mg_vm_xcodebuild_test (mg_app_xcodebuild_test).
 
-mg__mac_vm_lease_dir() { printf '%s/mac-vm.%s.lock\n' "$(dirname "$(mg_host_lease_dir)")" "$1"; }
+MG_SIM_RUNNER=""
+
+# mg_sim_begin: where this job's simulators are, decided before it builds:
+# the pool VM (MG_SIM_RUNNER=vm; MG_MAC_VM names it, started headless when
+# it was not running, and the job's VM lease will be that VM's); without one,
+# this Mac's simulators with MEGURI_SIM_ALLOW_HOST=1 (host); otherwise the job
+# is recorded as queued (warn) and this returns 2. A config that is not
+# valid, or a VM that does not start or answer, is an error (returns 1),
+# never a reason to boot a simulator on this Mac.
+mg_sim_begin() {
+  local rc
+  MG_SIM_RUNNER=""
+  mg_mac_vm_probe
+  rc=$?
+  case "$rc" in
+    0)
+      MG_SIM_RUNNER=vm
+      MG_MAC_VMS="$(jq -c '[.[0]]' <<<"$MG_MAC_VMS")"
+      MG_MAC_VM="$(jq -c '.[0]' <<<"$MG_MAC_VMS")"
+      mg_detail sim_runner '"vm"'
+      mg__mac_vm_detail "$(jq -c '{name}' <<<"$MG_MAC_VM")"
+      mg__mac_vm_boot || return 1
+      return 0
+      ;;
+    2)
+      mg__mac_vm_config_error
+      return 1
+      ;;
+  esac
+  if [ "${MEGURI_SIM_ALLOW_HOST:-}" = 1 ]; then
+    echo "$MG_JOB: no test VM ($MG_MAC_VM_REASON); MEGURI_SIM_ALLOW_HOST=1: using this Mac's simulators" >&2
+    MG_SIM_RUNNER=host
+    mg_detail sim_runner '"host"'
+    return 0
+  fi
+  mg__mac_vm_queued "simulators run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac"
+  return 2
+}
+
+# mg_sim_take [--no-copy]: after the build, the lease a simulator job holds
+# while it uses its device: the pool VM's lease (mg_mac_vm_take, which also
+# copies the products in unless --no-copy), or this Mac's host lease.
+mg_sim_take() {
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_mac_vm_take "$@"
+  else
+    mg_host_lease
+  fi
+}
+
+# mg_simctl <args>: `xcrun simctl` where the job's simulators are.
+mg_simctl() {
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_mac_vm_ssh "xcrun simctl $(mvl_q "$@")"
+  else
+    xcrun simctl "$@"
+  fi
+}
+
+# mg_devicectl <args>: `xcrun devicectl` where the job's simulators are.
+mg_devicectl() {
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_mac_vm_ssh "xcrun devicectl $(mvl_q "$@")"
+  else
+    xcrun devicectl "$@"
+  fi
+}
+
+# mg_sim_mkdir <absolute dir>: makes a directory where the simulators write
+# (in the VM, at the same path), for captures that come back afterwards.
+mg_sim_mkdir() {
+  mkdir -p "$1" || return 1
+  [ "$MG_SIM_RUNNER" != vm ] || mg_mac_vm_ssh "mkdir -p $(mvl_q "$1")"
+}
+
+# mg_sim_fetch <absolute path>...: in the VM, copies captures the simulators
+# wrote there back to the same paths here and removes them from the VM;
+# nothing to do on this Mac. Records a failure (mac-vm-copy) and returns 1
+# when one does not come back.
+mg_sim_fetch() {
+  [ "$MG_SIM_RUNNER" = vm ] || return 0
+  mg_mac_vm_copy_out "$@" || return 1
+  mg_mac_vm_ssh "rm -rf $(mvl_q "$@")" >/dev/null 2>&1
+  return 0
+}
+
+# mg_sim_pool_take: before the pool's own changes (sim acquire and gc,
+# sim-setup), the pool VM's lease (mg_sim_take --no-copy), so that no
+# simulator is created, booted or deleted in the VM while another job runs
+# there. Nothing to take when this process runs under the job that holds it
+# (mvl_lease_held), nor for this Mac's pool (MEGURI_SIM_ALLOW_HOST=1, as
+# before U8c). Returns 1 when the job cannot go on (recorded).
+mg_sim_pool_take() {
+  [ "$MG_SIM_RUNNER" = vm ] || return 0
+  if mvl_lease_held "$(mg__mac_vm_lease_dir "$(jq -r .name <<<"$MG_MAC_VM")")"; then
+    echo "$MG_JOB: runs under the job that holds the test VM's lease" >&2
+    return 0
+  fi
+  mg_sim_take --no-copy
+}
+
+# mg_vm_fixture <path>: puts a launch fixture (a -MeguriFixture value, or a
+# drive script's launch.fixture) where the app in the leased VM reads it,
+# and sets MG_VM_FIXTURE to the path the launch must name there: a fixture in
+# this checkout goes to its own path; one outside it goes under the run
+# directory (vm-fixtures/<n>/, left there: an app launched by `run` may read
+# it after the job ends), because the VM's paths outside a checkout are not
+# this Mac's. A value that is not absolute stays as it is (the app
+# refuses it, as on this Mac). Records a failure and returns 1 when the
+# fixture is not here or cannot be copied.
+mg_vm_fixture() {
+  local dir
+  MG_VM_FIXTURE="$1"
+  case "$1" in /*) ;; *) return 0 ;; esac
+  if [ ! -e "$1" ]; then
+    mg_failure fixture "the launch fixture $1 does not exist; nothing was launched with it"
+    return 1
+  fi
+  case "$1" in
+    "$MG_ROOT"/?*)
+      mg_mac_vm_copy_in "$1"
+      return
+      ;;
+  esac
+  MG_VM_FIXTURES=$((${MG_VM_FIXTURES:-0} + 1))
+  dir="$MG_RUN_DIR/vm-fixtures/$MG_VM_FIXTURES"
+  if ! mvl_copy_to "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$1" "$dir"; then
+    mg_failure mac-vm-copy "$MVL_REASON"
+    return 1
+  fi
+  MG_VM_FIXTURE="$dir/$(basename "$1")"
+  echo "$MG_JOB: the fixture $1 is $MG_VM_FIXTURE in the test VM" >&2
+}
+
+# mg_vm_launch_args <launch argument>...: the app's launch arguments for the
+# leased VM, in MG_VM_ARGS: each -MeguriFixture value put there and named by
+# its path there (mg_vm_fixture). Read in pairs as the app reads them
+# (LaunchOptions.swift): a -Meguri<Name> argument takes the next one as its
+# value. Returns 1 when a fixture could not be put there (recorded).
+mg_vm_launch_args() {
+  MG_VM_ARGS=()
+  while [ "$#" -gt 0 ]; do
+    MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$1"
+    case "$1" in
+      -Meguri?*)
+        [ "$#" -ge 2 ] || break
+        if [ "$1" = -MeguriFixture ]; then
+          mg_vm_fixture "$2" || return 1
+          MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$MG_VM_FIXTURE"
+        else
+          MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$2"
+        fi
+        shift
+        ;;
+    esac
+    shift
+  done
+}
+
+# ---------------------------------------------------------------------------
+# VM lease: one job at a time per VM, across every checkout. A recording of
+# this checkout keeps the lease between jobs (record start); this checkout's
+# jobs then run in its nested slot (mg__lease_try, host.sh).
+
+mg__mac_vm_lease_dir() { mvl_lease_dir "$MG_ROOT" "$1"; }
 
 # mg__mac_vm_lease: takes the first free VM of MG_MAC_VMS, waiting while all
-# are leased; a lease whose holder died is removed (under the host lease's
-# mutex helpers, on the VM lease's own mutex file). Released when the job
-# ends.
+# are leased; a lease whose holder died is removed (under the lease's mutex,
+# tools/scripts/host-lease-mutex.sh, on the VM lease's own mutex file). Sets
+# MG_LEASE_DIR. Released when the job ends.
 mg__mac_vm_lease() {
   local wait="${MEGURI_MAC_VM_LEASE_WAIT_SECONDS:-3600}" poll="${MEGURI_MAC_VM_POLL_SECONDS:-3}"
-  local start n i vm name dir holder holders announced=""
+  local start n i vm name dir holders announced=""
   start="$(mg__epoch)"
   n="$(jq length <<<"$MG_MAC_VMS")"
   mkdir -p "$(dirname "$(mg_host_lease_dir)")" || {
@@ -240,20 +398,20 @@ mg__mac_vm_lease() {
       vm="$(jq -c --argjson i "$i" '.[$i]' <<<"$MG_MAC_VMS")"
       name="$(jq -r .name <<<"$vm")"
       dir="$(mg__mac_vm_lease_dir "$name")"
-      if mkdir "$dir" 2>/dev/null; then
-        mg__lease_write "$dir" false
-        mg_on_exit "mg__mac_vm_release '$dir' $$"
-        MG_MAC_VM="$vm"
-        mg__mac_vm_detail "$(jq -c --arg n "$name" --argjson w "$(($(mg__epoch) - start))" '{name: $n, lease: (. + {waited_s: $w})}' "$dir/holder.json")"
-        [ -z "$announced" ] || echo "VM lease: took $name after $(($(mg__epoch) - start)) s" >&2
-        return 0
-      fi
-      holder="$(cat "$dir/holder.json" 2>/dev/null)"
-      if mg__lease_stale "$dir" "$holder"; then
-        mg__mac_vm_remove_stale "$dir" "$holder" || mg_sleep "$poll"
-        continue
-      fi
-      holders="$holders; $name: $(jq -r '"\(.job) in \(.worktree) since \(.started_at)"' <<<"$holder" 2>/dev/null || echo "another job")"
+      mg__lease_try "$dir" "VM lease"
+      case $? in
+        0)
+          MG_LEASE_DIR="$dir"
+          mg_on_exit "mg__host_lease_release '$dir' $$"
+          MG_MAC_VM="$vm"
+          mg__mac_vm_detail "$(jq -c --arg n "$name" --argjson w "$(($(mg__epoch) - start))" '{name: $n, lease: (. + {waited_s: $w})}' "$MG_LEASE_SLOT/holder.json")"
+          [ -z "$announced" ] || echo "VM lease: took $name after $(($(mg__epoch) - start)) s" >&2
+          return 0
+          ;;
+        2) continue ;;
+        3) mg_sleep "$poll" && continue ;;
+      esac
+      holders="$holders; $name: $(jq -r '"\(.job) in \(.worktree) since \(.started_at)"' <<<"$MG_LEASE_HOLDER" 2>/dev/null || echo "another job")"
       i=$((i + 1))
     done
     if [ $(($(mg__epoch) - start)) -ge "$wait" ]; then
@@ -268,84 +426,22 @@ mg__mac_vm_lease() {
   done
 }
 
-# mg__mac_vm_remove_stale <lease dir> <holder JSON read>: removes the lease
-# if it still holds what was read and its holder is dead.
-mg__mac_vm_remove_stale() {
-  host_lease_lock "$1" || return 1
-  if [ "$(cat "$1/holder.json" 2>/dev/null)" = "$2" ] && mg__lease_stale "$1" "$2"; then
-    echo "VM lease: removing a stale lease ($(jq -r '"\(.job) in \(.worktree), pid \(.pid)"' <<<"$2" 2>/dev/null || echo unknown))" >&2
-    rm -rf "$1"
-  fi
-  host_lease_unlock
-}
-
-# mg__mac_vm_release <lease dir> <pid>: releases the lease <pid> holds.
-mg__mac_vm_release() {
-  local locked=0
-  host_lease_lock "$1" && locked=1
-  [ "$(jq -r '.pid // empty' "$1/holder.json" 2>/dev/null)" != "$2" ] || rm -rf "$1"
-  [ "$locked" = 0 ] || host_lease_unlock
-}
-
 # ---------------------------------------------------------------------------
 # Starting the VM
 
-# mg__mac_vm_start <tart> <name> <log>: `tart run --no-graphics` in a session
-# of its own (perl setsid), so the VM outlives this job, its process group
-# and its terminal, with none of the job's files open. Jobs never stop it.
-mg__mac_vm_start() {
-  (
-    cd / && exec perl -MPOSIX=setsid -e 'fork and exit 0; setsid(); exec @ARGV or die "exec $ARGV[0]: $!\n"' \
-      "$1" run --no-graphics "$2" </dev/null >"$3" 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
-  )
-}
-
-# mg__mac_vm_boot: starts the leased VM headless when it is not running, then
-# waits until SSH answers in a logged-in session (the console belongs to a
-# user, not to the login window): about 20 s after a boot. On failure
-# records an error and returns 1.
+# mg__mac_vm_boot: starts the VM MG_MAC_VM names headless when it is not
+# running (mvl_start: in a session of its own, so it outlives this job; jobs
+# never stop it), then waits until SSH answers in a logged-in session. On
+# failure records an error and returns 1.
 mg__mac_vm_boot() {
-  local name tart state started=false log="" t0 now user err last
-  local limit="${MEGURI_MAC_VM_BOOT_SECONDS:-240}" poll="${MEGURI_MAC_VM_POLL_SECONDS:-3}"
+  local name rc=0
   name="$(jq -r .name <<<"$MG_MAC_VM")"
-  tart="$(jq -r .tart <<<"$MG_MAC_VM")"
-  err="$MG_RUN_DIR/mac-vm-ssh.err"
-  state="$(mg__mac_vm_state "$tart" "$name")"
-  if [ "$state" != running ]; then
-    log="$MG_RUN_DIR/tart-run-$name.log"
-    echo "mac-vm: starting $name headless (it was ${state:-in an unknown state})" >&2
-    mg__mac_vm_start "$tart" "$name" "$log"
-    started=true
-    mg_artifact log "$log" "tart run $name"
-  fi
-  mg__mac_vm_detail "$(jq -nc --argjson s "$started" '{started: $s}')"
-  t0="$(mg__epoch)"
-  while :; do
-    user="$(mg_mac_vm_ssh 'stat -f %Su /dev/console' 2>"$err")"
-    if [ -n "$user" ] && [ "$user" != root ]; then
-      [ "$started" = false ] || echo "mac-vm: $name answers with $user logged in after $(($(mg__epoch) - t0)) s" >&2
-      rm -f "$err"
-      return 0
-    fi
-    now="$(mg__epoch)"
-    # tart run fails within seconds when the VM cannot start: no need to wait
-    # out the limit.
-    if [ "$started" = true ] && { [ $((now - t0)) -ge 15 ] || [ $((now - t0)) -ge "$limit" ]; } &&
-      [ "$(mg__mac_vm_state "$tart" "$name")" != running ]; then
-      mg__mac_vm_fail mac-vm-start "tart could not start $name: $(tail -n 3 "$log" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
-      return 1
-    fi
-    if [ $((now - t0)) -ge "$limit" ]; then
-      if [ "$user" = root ]; then
-        last="the login window still has the console"
-      else
-        last="$(tail -n 2 "$err" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')"
-      fi
-      mg__mac_vm_fail mac-vm-ssh "$name did not answer over SSH in a logged-in session within $limit s (last: ${last:-no answer})"
-      return 1
-    fi
-    mg_sleep "$poll"
-  done
+  mvl_ensure_ready "$MG_MAC_VM" "$MG_RUN_DIR" || rc=1
+  [ -z "$MVL_TART_LOG" ] || mg_artifact log "$MVL_TART_LOG" "tart run $name"
+  mg__mac_vm_detail "$(jq -nc --argjson s "$MVL_STARTED" '{started: $s}')"
+  [ "$rc" -eq 0 ] && return 0
+  mg__mac_vm_fail "mac-vm-$MVL_FAIL" "$MVL_REASON"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -358,13 +454,7 @@ mg_mac_vm_ssh() { "$(jq -r .ssh <<<"$MG_MAC_VM")" "$1" </dev/null; }
 mg_mac_vm_ssh_in() { "$(jq -r .ssh <<<"$MG_MAC_VM")" "$1"; }
 
 # mg_mac_vm_q <word>...: the words, each single-quoted for the VM's shell.
-mg_mac_vm_q() {
-  local out="" a
-  for a in "$@"; do
-    out="$out '$(printf '%s' "$a" | sed "s/'/'\\\\''/g")'"
-  done
-  printf '%s' "${out# }"
-}
+mg_mac_vm_q() { mvl_q "$@"; }
 
 # mg_mac_vm_copy_in <absolute path>...: copies files and directories to the
 # same absolute paths in the leased VM (tar over SSH), replacing what is
@@ -373,37 +463,31 @@ mg_mac_vm_q() {
 # are replaced. Records a failure (mac-vm-copy) and returns 1 when a copy
 # fails.
 mg_mac_vm_copy_in() {
-  local p parent base rcs
-  for p in "$@"; do
-    [ -e "$p" ] || continue
-    case "$p" in
-      "$MG_ROOT"/?*) ;;
-      /?*) [ ! -d "$p" ] || { mg_failure mac-vm-copy "will not replace the directory $p in the VM: only this checkout's directories are copied"; return 1; } ;;
-      *) mg_failure mac-vm-copy "not an absolute path: $p"; return 1 ;;
-    esac
-    parent="$(dirname "$p")"
-    base="$(basename "$p")"
-    echo "mac-vm: copying $p into the VM" >&2
-    COPYFILE_DISABLE=1 tar -C "$parent" -cf - "$base" |
-      mg_mac_vm_ssh_in "rm -rf $(mg_mac_vm_q "$p") && mkdir -p $(mg_mac_vm_q "$parent") && tar -C $(mg_mac_vm_q "$parent") -xf -"
-    rcs="${PIPESTATUS[*]}"
-    if [ "$rcs" != "0 0" ]; then
-      mg_failure mac-vm-copy "copying $p into the VM $(jq -r .name <<<"$MG_MAC_VM") failed (tar and ssh exit codes: $rcs); see log.txt"
-      return 1
-    fi
-  done
-  return 0
+  mvl_copy_in "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$MG_ROOT" "$@" && return 0
+  mg_failure mac-vm-copy "$MVL_REASON"
+  return 1
 }
 
-# mg__mac_vm_xctestrun <config>: this checkout's UI-plan xctestrun (or
-# MG_APP_TEST_PLAN's, built with MG_APP_TEST_SCHEME) built for the
-# configuration (the newest, when several SDKs left one). Debug and Profile
-# builds write the same file name; its test root says which.
-mg__mac_vm_xctestrun() {
-  local f
+# mg_mac_vm_copy_out <absolute path>...: copies files and directories back
+# from the same absolute paths in the leased VM, replacing what is here.
+# Records a failure (mac-vm-copy) and returns 1 when one does not come back.
+mg_mac_vm_copy_out() {
+  mvl_copy_out "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$@" && return 0
+  mg_failure mac-vm-copy "$MVL_REASON"
+  return 1
+}
+
+# mg__vm_xctestrun <plan> <sdk> <config>: this checkout's xctestrun of the
+# test plan (built with the scheme MG_APP_TEST_SCHEME, Meguri by default) for
+# the SDK (macosx, iphonesimulator) and configuration (the newest, when
+# several SDK versions left one). Debug and Profile builds write the same
+# file name; its test root says which.
+mg__vm_xctestrun() {
+  local f root="$3"
+  [ "$2" = macosx ] || root="$3-$2"
   # shellcheck disable=SC2012 # newest first; the names are Xcode's
-  ls -t "$MG_ROOT/$MG_APP_DD/Build/Products"/"${MG_APP_TEST_SCHEME:-Meguri}_${MG_APP_TEST_PLAN:-UI}"_macosx*-arm64.xctestrun 2>/dev/null | while IFS= read -r f; do
-    if grep -q "__TESTROOT__/$1/" "$f"; then
+  ls -t "$MG_ROOT/$MG_APP_DD/Build/Products/${MG_APP_TEST_SCHEME:-Meguri}_$1_$2"*.xctestrun 2>/dev/null | while IFS= read -r f; do
+    if grep -q "__TESTROOT__/$root/" "$f"; then
       printf '%s\n' "$f"
       break
     fi
@@ -411,26 +495,36 @@ mg__mac_vm_xctestrun() {
 }
 
 # mg_mac_vm_xcodebuild_test <prefix> <destination> <config> [xcodebuild args]:
-# the UI plan's tests in the leased VM, from the products copied there
-# (test-without-building -xctestrun), with this job's TEST_RUNNER_ variables.
-# Writes <prefix>.log here and copies <prefix>.xcresult back. Returns
-# xcodebuild's exit code; when the VM could not run the tests (no xctestrun,
-# a lost SSH session, a result bundle that did not come back) records the
-# failure, sets MG_MAC_VM_RUN_ERROR and returns 1. A run whose SSH session was
-# lost may go on in the VM: it is stopped before this returns, or when it
-# cannot be, MG_MAC_VM_LOST is set.
+# the Mac UI plan's (or MG_APP_TEST_PLAN's) tests in the leased VM
+# (mg_vm_xcodebuild_test).
 mg_mac_vm_xcodebuild_test() {
-  local prefix="$1" dest="$2" config="$3" xctestrun n envs=() rc code dir base vm rcs probe out copy_error=""
-  shift 3
+  local prefix="$1"
+  shift
+  mg_vm_xcodebuild_test "$prefix" "${MG_APP_TEST_PLAN:-UI}" macosx "$@"
+}
+
+# mg_vm_xcodebuild_test <prefix> <plan> <sdk> <destination> <config> [xcodebuild args]:
+# a test plan's tests in the leased VM, from the products copied there
+# (test-without-building -xctestrun), with this job's TEST_RUNNER_ variables:
+# the Mac's (sdk macosx) or a simulator's in the VM (iphonesimulator,
+# destination id=<udid>). Writes <prefix>.log here and copies
+# <prefix>.xcresult back. Returns xcodebuild's exit code; when the VM could
+# not run the tests (no xctestrun, a lost SSH session, a result bundle that
+# did not come back) records the failure, sets MG_MAC_VM_RUN_ERROR and
+# returns 1. A run whose SSH session was lost may go on in the VM: it is
+# stopped before this returns, or when it cannot be, MG_MAC_VM_LOST is set.
+mg_vm_xcodebuild_test() {
+  local prefix="$1" plan="$2" sdk="$3" dest="$4" config="$5" xctestrun n envs=() rc code dir base vm rcs probe out copy_error=""
+  shift 5
   MG_MAC_VM_RUN_ERROR=""
   vm="$(jq -r .name <<<"$MG_MAC_VM")"
   dir="$(dirname "$prefix")"
   base="$(basename "$prefix")"
-  xctestrun="$(mg__mac_vm_xctestrun "$config")"
+  xctestrun="$(mg__vm_xctestrun "$plan" "$sdk" "$config")"
   if [ -z "$xctestrun" ]; then
-    echo "no $config ${MG_APP_TEST_PLAN:-UI}-plan xctestrun in $MG_APP_DD/Build/Products" >"$prefix.log"
-    mg_failure mac-vm-xctestrun "no ${MG_APP_TEST_PLAN:-UI}-plan xctestrun for $config in $MG_APP_DD/Build/Products; build it first" \
-      "tools/mg build-app --platform mac --config $config"
+    echo "no $config $plan-plan xctestrun for $sdk in $MG_APP_DD/Build/Products" >"$prefix.log"
+    mg_failure mac-vm-xctestrun "no $plan-plan xctestrun for $config ($sdk) in $MG_APP_DD/Build/Products; build it first" \
+      "tools/mg build-app --platform $([ "$sdk" = macosx ] && echo mac || echo ios-sim) --config $config"
     MG_MAC_VM_RUN_ERROR=1
     return 1
   fi
@@ -491,41 +585,16 @@ mg_mac_vm_xcodebuild_test() {
   return "$code"
 }
 
-# mg__mac_vm_stop_tests: stops every UI test run in the leased VM (xcodebuild
-# test-without-building and the test runner it drives: SIGTERM, then SIGKILL
-# halfway through MEGURI_MAC_VM_STOP_SECONDS) and confirms none is left. Only
-# the lease holder runs tests in the VM, so any such process is a run left
-# behind, and two runs would share the VM's one login session. Returns 0 when
-# none is left (MG_MAC_VM_STOPPED=1 when it stopped one); 1 when one still
-# runs or the VM did not answer, with MG_MAC_VM_STOP_REASON.
+# mg__mac_vm_stop_tests: stops every UI test run in the leased VM and
+# confirms none is left (mvl_stop_tests). Returns 0 when none is left
+# (MG_MAC_VM_STOPPED=1 when it stopped one); 1 when one still runs or the VM
+# did not answer, with MG_MAC_VM_STOP_REASON.
 mg__mac_vm_stop_tests() {
-  local t="${MEGURI_MAC_VM_STOP_SECONDS:-20}" out rc
-  MG_MAC_VM_STOPPED=""
-  MG_MAC_VM_STOP_REASON=""
-  # The brackets keep the shell that runs this command from matching itself.
-  out="$(mg_mac_vm_ssh "p=$(mg_mac_vm_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/')
-if pgrep -f \"\$p\" >/dev/null; then
-  echo 'mg-mac-vm: stopping'
-  pkill -f \"\$p\"
-  i=0
-  while pgrep -f \"\$p\" >/dev/null && [ \$i -lt $t ]; do
-    [ \$i -ne $((t / 2)) ] || pkill -9 -f \"\$p\"
-    sleep 1
-    i=\$((i + 1))
-  done
-fi
-if pgrep -f \"\$p\" >/dev/null; then echo 'mg-mac-vm: still running'; else echo 'mg-mac-vm: none'; fi" 2>&1)"
-  rc=$?
-  if grep -qx 'mg-mac-vm: none' <<<"$out"; then
-    ! grep -qx 'mg-mac-vm: stopping' <<<"$out" || MG_MAC_VM_STOPPED=1
-    return 0
-  fi
-  if grep -qx 'mg-mac-vm: still running' <<<"$out"; then
-    MG_MAC_VM_STOP_REASON="it was still running $t s after SIGTERM and SIGKILL"
-  else
-    MG_MAC_VM_STOP_REASON="the VM did not answer (ssh exit $rc: $(tail -n 1 <<<"$out"))"
-  fi
-  return 1
+  local rc=0
+  mvl_stop_tests "$(jq -r .ssh <<<"$MG_MAC_VM")" || rc=1
+  MG_MAC_VM_STOPPED="$MVL_STOPPED"
+  MG_MAC_VM_STOP_REASON="$MVL_REASON"
+  return "$rc"
 }
 
 # mg__mac_vm_stop_orphans: when this job started a test run in the VM and

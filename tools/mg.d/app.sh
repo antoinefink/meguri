@@ -1,9 +1,12 @@
 # App builds and launches (U8, R1961, R1962). Sourced by tools/mg; host jobs.
 #
 # Builds go to build/app/DerivedData (build-for-testing of the UI plan, so
-# drive, ui-tree and screenshot reuse them). Launches take the host lease
-# (host.sh). Simulators come from the pool (tools/scripts/sim-pool.sh): a
-# --device must be a pool device this checkout leased. The Mac app is
+# drive, ui-tree and screenshot reuse them). Simulators come from the pool
+# (tools/scripts/sim-pool.sh), which lives in the macOS test VM (U8c,
+# mac-vm.sh): simulator jobs call mg_sim_begin before they build and
+# mg_sim_take after (the VM's lease, the products copied in), and reach the
+# simulators through mg_simctl. A --device must be a pool device this
+# checkout leased. Mac launches take the host lease (host.sh). The Mac app is
 # launched hidden (open -g -j) and never in Release or AppStore, whose ids
 # are the daily driver's (app/AGENTS.md).
 
@@ -91,16 +94,22 @@ mg_app_input_digest() {
 # mg_app_xcodebuild_test <out prefix> <mac|ios> <destination> <config> [xcodebuild args]:
 # test-without-building of the UI plan (or MG_APP_TEST_PLAN with the scheme
 # MG_APP_TEST_SCHEME, as perf-ui sets them) into <prefix>.xcresult and <prefix>.log.
-# Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER): to the test VM
-# (mac-vm.sh) or this Mac. Returns 0 pass, 1 test failures, 2 could not run
-# (records a user step when macOS has not allowed UI automation).
+# Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER), simulator runs
+# where mg_sim_begin did (MG_SIM_RUNNER): to the test VM (mac-vm.sh) or this
+# Mac. Returns 0 pass, 1 test failures, 2 could not run (records a user step
+# when macOS has not allowed UI automation).
 mg_app_xcodebuild_test() {
-  local prefix="$1" platform="$2" dest="$3" config="$4" rc summary
+  local prefix="$1" platform="$2" dest="$3" config="$4" rc summary sdk=""
   shift 4
   rm -rf "$prefix.xcresult"
   mkdir -p "$(dirname "$prefix")"
   if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
-    mg_mac_vm_xcodebuild_test "$prefix" "$dest" "$config" "$@"
+    sdk=macosx
+  elif [ "$platform" != mac ] && [ "$MG_SIM_RUNNER" = vm ]; then
+    sdk=iphonesimulator
+  fi
+  if [ -n "$sdk" ]; then
+    mg_vm_xcodebuild_test "$prefix" "${MG_APP_TEST_PLAN:-UI}" "$sdk" "$dest" "$config" "$@"
     rc=$?
     mg_artifact log "$prefix.log" "xcodebuild test ($platform, in the test VM)"
     [ -z "$MG_MAC_VM_RUN_ERROR" ] || return 2
@@ -179,9 +188,10 @@ mg_app_mac_input_refused() {
 # ---------------------------------------------------------------------------
 # Simulators from the pool
 
-# mg_sim_lease <kind> <release|keep>: leases a pool device for this job; sets
-# MG_SIM_UDID. With release, the device goes back to the pool (reset) when
-# the job ends. On failure records it and returns 1.
+# mg_sim_lease <kind> <release|keep>: leases a pool device for this job (in
+# the test VM, sim-pool.sh); sets MG_SIM_UDID. With release, the device goes
+# back to the pool (reset) when the job ends. On failure records it and
+# returns 1.
 mg_sim_lease() {
   local rc
   MG_SIM_UDID="$("$MG_TOOLS/scripts/sim-pool.sh" acquire "$1" --holder "$(basename "$MG_ROOT") $MG_JOB")"
@@ -196,6 +206,11 @@ mg_sim_lease() {
       ;;
     3)
       mg_failure pool-busy "every $1 pool device stayed leased; see log.txt" "tools/mg sim status"
+      mg_status error
+      return 1
+      ;;
+    5 | 6)
+      mg_failure sim-vm "sim-pool.sh acquire $1: the test VM could not lease a simulator (exit $rc); see log.txt" "tools/mg doctor"
       mg_status error
       return 1
       ;;
@@ -239,9 +254,9 @@ mg_sim_check_owned() {
 mg_sim_check_runtime() {
   local pinned rid actual
   pinned="$(jq -c .runtime tools/sim-devices.json)"
-  rid="$(xcrun simctl list devices --json 2>/dev/null |
+  rid="$(mg_simctl list devices --json 2>/dev/null |
     jq -r --arg u "$1" 'first(.devices | to_entries[] | select(any(.value[]; .udid == $u)) | .key) // empty')"
-  actual="$(xcrun simctl list runtimes --json 2>/dev/null |
+  actual="$(mg_simctl list runtimes --json 2>/dev/null |
     jq -c --arg r "$rid" 'first(.runtimes[] | select(.identifier == $r) | {identifier, version, build: .buildversion}) // null')"
   [ -n "$actual" ] || actual=null
   mg_detail runtime "$(jq -nc --arg u "$1" --argjson e "$pinned" --argjson a "$actual" '{device: $u, expected: $e, actual: $a}')"
@@ -273,7 +288,7 @@ mg_sim_prepare() {
   args="$(jq -r '.status_bar | to_entries[] | "--\(.key)\n\(.value)"' tools/sim-devices.json)"
   local a=() line
   while IFS= read -r line; do a[${#a[@]}]="$line"; done <<<"$args"
-  xcrun simctl status_bar "$1" override "${a[@]}" >&2 && return 0
+  mg_simctl status_bar "$1" override "${a[@]}" >&2 && return 0
   mg_failure status-bar "simctl status_bar override failed on $1; nothing was captured with the live status bar (R1966)" "$MG_DEFAULT_REPRO"
   mg_message "$MG_JOB: could not pin the status bar of $1"
   mg_status error
@@ -394,11 +409,21 @@ mg_run() {
     return 0
   fi
   local udid="$MG_D_UDID" app out pid
+  mg_sim_begin || return 0
   if [ -n "$udid" ]; then
     mg_sim_check_given "$udid" || return 0
   fi
   mg_app_build ios-sim "$MG_D_CONFIG" || return 0
-  mg_host_lease || return 0
+  mg_sim_take || return 0
+  # A fixture the launch names must be in the VM, where the app reads it.
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    if ! mg_vm_launch_args "${launch[@]}"; then
+      mg_message "run: a launch fixture could not be put in the test VM; nothing was launched"
+      mg_status error
+      return 0
+    fi
+    launch=("${MG_VM_ARGS[@]}")
+  fi
   if [ -n "$udid" ]; then
     mg_sim_check_given "$udid" || return 0
   else
@@ -414,12 +439,12 @@ mg_run() {
     return 0
   fi
   app="$(mg_app_products ios-sim "$MG_D_CONFIG")/Meguri.app"
-  if ! xcrun simctl install "$udid" "$app" >&2; then
+  if ! mg_simctl install "$udid" "$app" >&2; then
     mg_failure install "simctl install failed on $udid"
     mg_status error
     return 0
   fi
-  if ! out="$(xcrun simctl launch --terminate-running-process "$udid" "$MG_APP_DEV_ID" "${launch[@]}")"; then
+  if ! out="$(mg_simctl launch --terminate-running-process "$udid" "$MG_APP_DEV_ID" "${launch[@]}")"; then
     mg_failure launch "simctl launch failed on $udid"
     mg_status fail
     return 0

@@ -517,7 +517,7 @@ vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebui
     [ "$(field .status)" = warn ]
     [ "$(field .details.queued)" = true ]
     [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
-    [[ "$(field .message)" == *"queued"*"no Mac UI test VM is configured"* ]] || { echo "tools/mg $args: $(field .message)"; return 1; }
+    [[ "$(field .message)" == *"queued"*"no macOS test VM is configured"* ]] || { echo "tools/mg $args: $(field .message)"; return 1; }
   done
   not_called "^fake build"
   not_called "^host-xcodebuild"

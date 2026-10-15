@@ -1,16 +1,25 @@
 # Shared iOS simulator pool. Sourced by tools/mg.
 #
 # tools/scripts/sim-pool.sh keeps Meguri-Pool-<kind>-<n> simulators booted and
-# leases them out (see its header); this host job wraps it for agents. Scripts
-# call sim-pool.sh directly. The UDID and the lease land in result.json:
+# leases them out (see its header); the pool lives in the macOS test VM (U8c,
+# mac-vm.sh), and sim-pool.sh runs itself there. This host job wraps it for
+# agents: details.sim_runner says where the pool is; without a VM the job is
+# queued (warn, user step mac-vm). acquire and gc (but gc --list) change the
+# VM's pool: they hold its lease (mg_sim_pool_take), as sim-setup does, so
+# nothing is created, booted or deleted there while another job runs in it.
+# Scripts call sim-pool.sh directly; its own acquire and gc come here when
+# their caller does not hold the VM's lease. The UDID and the lease land in
+# result.json:
 #   udid="$(jq -r .details.udid "$(tools/mg sim acquire iphone)")"
 #   tools/mg sim release "$udid"
-# details: acquire and renew: udid, lease, device; release: udid, released;
-# status: pool_dir, runtime, max_per_kind, kinds, devices, orphan_leases;
-# gc: older_than_hours, list_only, targets, deleted, failed.
+# details: pool: {exit, output} of sim-pool.sh (what a direct call would
+# have printed and returned); acquire and renew: udid, lease, device;
+# release: udid, released; status: pool_dir, runtime, max_per_kind, kinds,
+# devices, orphan_leases; gc: older_than_hours, list_only, targets, deleted,
+# failed.
 
 mg_job sim host mg_sim \
-  "Shared iOS simulator pool: acquire <iphone|ipad> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]"
+  "Shared iOS simulator pool, in the macOS test VM (queued without it; acquire and gc wait for the VM's lease): acquire <iphone|ipad> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]"
 
 mg_sim__usage() {
   mg_failure usage "usage: tools/mg sim acquire <kind> [--holder <label>] [--ttl-min N] | renew <udid> [--ttl-min N] | release <udid> | status | gc [--older-than-hours N] [--list]" \
@@ -39,8 +48,14 @@ mg_sim() {
     "") mg_sim__usage "missing subcommand"; return 0 ;;
     *) mg_sim__usage "unknown subcommand '$sub'"; return 0 ;;
   esac
+  mg_sim_begin || return 0
+  case "$sub" in
+    acquire) mg_sim_pool_take || return 0 ;;
+    gc) mg_word_in --list "$*" || mg_sim_pool_take || return 0 ;;
+  esac
   out="$("$MG_TOOLS/scripts/sim-pool.sh" "$sub" "$@")"
   rc=$?
+  [ "$sub" = status ] || mg_detail pool "$(jq -n --argjson rc "$rc" --arg out "$out" '{exit: $rc, output: $out}')"
   case "$rc" in
     0) ;;
     2) mg_sim__usage "$sub: invalid arguments; see log.txt"; return 0 ;;
@@ -53,6 +68,12 @@ mg_sim() {
     3)
       mg_failure pool-busy "every pool device of this kind stayed leased until the wait ran out; see log.txt" "tools/mg sim status"
       mg_message "sim: $sub timed out waiting for a free device"
+      mg_status error
+      return 0
+      ;;
+    5 | 6)
+      mg_failure sim-vm "sim-pool.sh $sub: the test VM could not run the pool (exit $rc); see log.txt" "tools/mg doctor"
+      mg_message "sim: $sub: the test VM could not run the pool"
       mg_status error
       return 0
       ;;
@@ -106,13 +127,13 @@ mg_sim__details() {
 # Pinned simulators (U8, R1962, R1966)
 
 mg_job sim-setup host mg_sim_setup \
-  "Check the pinned iOS runtime build and device types (tools/sim-devices.json) and make sure the pool has one device of each kind (creating it through sim-pool.sh); writes build/sim-devices.local.json. [--kinds k1,k2]"
+  "Check the pinned iOS runtime build and device types (tools/sim-devices.json) in the macOS test VM and make sure its pool has one device of each kind (creating it through sim-pool.sh, under the VM's lease); writes build/sim-devices.local.json. [--kinds k1,k2]"
 mg_job sim-reset host mg_sim_reset \
-  "Reset a pool simulator this checkout leased (user apps, privacy, keychain, UI options, status bar) and keep the lease, under the host lease: <udid>"
+  "Reset a pool simulator this checkout leased (user apps, privacy, keychain, UI options, status bar) and keep the lease, under the test VM's lease: <udid>"
 
 # The newest available iOS runtime (the pool's): identifier, version, build.
 mg_sim__pool_runtime() {
-  xcrun simctl list runtimes --json | jq -c '[.runtimes[] | select(.isAvailable != false and
+  mg_simctl list runtimes --json | jq -c '[.runtimes[] | select(.isAvailable != false and
       ((.platform // "") == "iOS" or (.identifier | test("SimRuntime\\.iOS-"))))]
     | sort_by(.version | split(".") | map(tonumber? // 0)) | last // null
     | if . == null then null else {identifier, version, build: .buildversion} end'
@@ -126,6 +147,9 @@ mg_sim_setup() {
       *) mg_sim__usage "usage: tools/mg sim-setup [--kinds iphone,ipad]"; return 0 ;;
     esac
   done
+  mg_sim_begin || return 0
+  # It may create and boot pool devices: under the VM's lease.
+  mg_sim_pool_take || return 0
   local expected actual
   expected="$(jq -c .runtime "$pinned")"
   actual="$(mg_sim__pool_runtime)" || actual=null
@@ -138,7 +162,7 @@ mg_sim_setup() {
   fi
 
   local types missing kinds kind foldable
-  types="$(xcrun simctl list devicetypes --json)"
+  types="$(mg_simctl list devicetypes --json)"
   missing="$(jq -r --argjson t "$types" '.devices[] | select(.device_type as $d | [$t.devicetypes[].identifier] | index($d) | not) | "\(.kind) (\(.device_type))"' "$pinned")"
   if [ -n "$missing" ]; then
     mg_failure device-type-missing "Xcode has no device type for: $(printf '%s' "$missing" | tr '\n' ' ')" 
@@ -188,9 +212,11 @@ mg_sim_setup() {
   done
   mkdir -p build
   jq -n --argjson rt "$actual" --argjson d "$devices" --argjson pin "$(jq -c '.devices' "$pinned")" \
-    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{checked_at: $at, runtime: $rt, devices: ($d | with_entries(.value += {
+    --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg runner "$MG_SIM_RUNNER" \
+    --arg vm "$([ "$MG_SIM_RUNNER" != vm ] || jq -r .name <<<"$MG_MAC_VM")" '{checked_at: $at, runner: $runner,
+      vm: (if $vm == "" then null else $vm end), runtime: $rt, devices: ($d | with_entries(.value += {
       device_type: (.key as $k | first($pin[] | select(.kind == $k) | .device_type) // null)}))}' >build/sim-devices.local.json
-  mg_artifact json build/sim-devices.local.json "pinned simulators on this Mac"
+  mg_artifact json build/sim-devices.local.json "pinned simulators $([ "$MG_SIM_RUNNER" = vm ] && echo "in the test VM" || echo "on this Mac")"
   mg_detail devices "$devices"
   mg_message "sim-setup: runtime $(jq -r '"\(.version) (\(.build))"' <<<"$actual") ok; $(jq -r 'to_entries | map("\(.key) \(.value.status)") | join(", ")' <<<"$devices")$([ -n "$foldable" ] || echo "; foldable: unavailable: toolchain")"
   if [ -s "$MG_STATE/failures.jsonl" ]; then
@@ -201,13 +227,14 @@ mg_sim_setup() {
 }
 
 # A reset uninstalls the apps, the UI-test runner included: it waits for the
-# host lease like any job that uses a simulator, so it never pulls the app
-# from under a drive of this checkout, and checks the lease again once it
-# holds the host (the device may have been released meanwhile).
+# lease like any job that uses a simulator (the test VM's), so it never pulls
+# the app from under a drive of this checkout, and checks the lease again
+# once it holds the VM (the device may have been released meanwhile).
 mg_sim_reset() {
   [ "$#" -eq 1 ] || { mg_sim__usage "usage: tools/mg sim-reset <udid>"; return 0; }
+  mg_sim_begin || return 0
   mg_sim_check_owned "$1" || return 0
-  mg_host_lease || return 0
+  mg_sim_take --no-copy || return 0
   mg_sim_check_owned "$1" || return 0
   if ! "$MG_TOOLS/scripts/sim-pool.sh" reset "$1"; then
     mg_failure sim-pool "sim-pool.sh reset $1 failed; see log.txt"

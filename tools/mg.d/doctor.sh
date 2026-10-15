@@ -4,7 +4,7 @@
 # lists what is missing in user_steps (docs/process/one-time-setup.md).
 
 mg_job doctor host mg_doctor \
-  "Check Xcode, iOS runtime, Docker, Rust targets, disk and the Mac UI test VM; list missing one-time user steps"
+  "Check Xcode, iOS runtime, Docker, Rust targets, disk and the macOS test VM (Mac UI suites and simulators); list missing one-time user steps"
 
 MG_DOCTOR_TEAM=DNQ34W43XX
 MG_DOCTOR_MIN_XCODE_MAJOR=27
@@ -32,21 +32,23 @@ mg__doctor_toolchain_values() {
   sed -n "s/^$1 *= *//p" core/rust-toolchain.toml 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | sed '/^$/d'
 }
 
-# mg__doctor_mac_vm <host Xcode version> <host Xcode build>: the Mac UI test
+# mg__doctor_mac_vm <host Xcode version> <host Xcode build>: the macOS test
 # VM (mac-vm.sh, docs/process/mac-ui-vm.md): configured, its drive
-# connected, present, running, answering over SSH, with the host's Xcode. It
-# reads only: a stopped VM is not started (Mac UI jobs start it). Problems
-# warn; Mac UI suites queue without the VM.
+# connected, present, running, answering over SSH, with the host's Xcode and
+# the pinned iOS simulator runtime (tools/sim-devices.json; U8c). It reads
+# only: a stopped VM is not started (jobs start it). Problems warn; Mac UI
+# suites and simulator jobs queue without the VM.
 mg__doctor_mac_vm() {
-  local host_xcode="$1 ($2)" rc n i=0 vm name tart ssh state out vxv vxb status msg vms='[]' missing=0
+  local host_xcode="$1 ($2)" rc n i=0 vm name tart ssh state out vxv vxb status msg vms='[]' missing=0 pin rt
   mg__mac_vm_read_config
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    mg__doctor_check mac-vm warn "$MG_MAC_VM_REASON; Mac UI suites queue until there is one"
+    mg__doctor_check mac-vm warn "$MG_MAC_VM_REASON; Mac UI suites and simulator jobs queue until there is one"
     mg_mac_vm_user_step
     mg_detail mac_vm "$(jq -nc --arg c "$(mg_mac_vm_config_path)" --argjson ok "$([ "$rc" -eq 1 ] && echo false || echo null)" '{config: $c, configured: $ok, vms: []}')"
     return 0
   fi
+  pin="$(jq -c .runtime tools/sim-devices.json)"
   n="$(jq length <<<"$MG_MAC_VM_ALL")"
   while [ "$i" -lt "$n" ]; do
     vm="$(jq -c --argjson i "$i" '.[$i]' <<<"$MG_MAC_VM_ALL")"
@@ -54,7 +56,7 @@ mg__doctor_mac_vm() {
     name="$(jq -r .name <<<"$vm")"
     tart="$(jq -r .tart <<<"$vm")"
     ssh="$(jq -r .ssh <<<"$vm")"
-    state="" vxv="" vxb=""
+    state="" vxv="" vxb="" rt=""
     if [ ! -x "$tart" ] || [ ! -x "$ssh" ]; then
       status=warn missing=1
       msg="$name: $([ -x "$tart" ] && echo "its SSH wrapper $ssh" || echo "the tart wrapper $tart") is not there; connect the drive that holds the VM"
@@ -74,16 +76,28 @@ mg__doctor_mac_vm() {
           else
             status=pass msg="$name: running, SSH answers, Xcode $vxv ($vxb) as on this Mac"
           fi
+          if [ -n "$vxv" ]; then
+            # The simulators' runtime (U8c): the pool runs there on it.
+            rt="$("$ssh" "xcrun simctl list runtimes --json" </dev/null 2>/dev/null | jq -r --argjson p "$pin" \
+              'if any(.runtimes[]?; .identifier == $p.identifier and .buildversion == $p.build and .isAvailable != false) then "yes" else "no" end' 2>/dev/null)"
+            if [ "$rt" = yes ]; then
+              mg__doctor_check "mac-vm/$name/simulators" pass "$name: iOS $(jq -r '"\(.version) (\(.build))"' <<<"$pin") simulator runtime; the simulator pool runs there"
+            else
+              rt=no
+              mg__doctor_check "mac-vm/$name/simulators" warn "$name: no iOS $(jq -r '"\(.version) (\(.build))"' <<<"$pin") simulator runtime; add it with tools/vm/add-sim-runtime.sh (docs/process/mac-ui-vm.md), or simulator jobs fail there"
+            fi
+          fi
           ;;
-        *) status=pass msg="$name: $state; Mac UI jobs start it headless when they need it" ;;
+        *) status=pass msg="$name: $state; Mac UI and simulator jobs start it headless when they need it" ;;
       esac
     fi
     mg__doctor_check "mac-vm/$name" "$status" "$msg"
     vms="$(jq -c --arg n "$name" --argjson d "$([ -x "$tart" ] && [ -x "$ssh" ] && echo true || echo false)" --arg s "$state" \
-      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" '. + [{name: $n, drive_connected: $d,
+      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" --arg rt "$rt" '. + [{name: $n, drive_connected: $d,
         present: (if $s == "" then null else $s != "missing" end), state: (if $s == "" or $s == "missing" then null else $s end),
         ssh: (if $s != "running" then null else $x != "" end),
-        xcode: (if $x == "" then null else "\($x) (\($b))" end), xcode_matches_host: (if $x == "" then null else "\($x) (\($b))" == $hx end)}]' <<<"$vms")"
+        xcode: (if $x == "" then null else "\($x) (\($b))" end), xcode_matches_host: (if $x == "" then null else "\($x) (\($b))" == $hx end),
+        sim_runtime: (if $rt == "" then null else $rt == "yes" end)}]' <<<"$vms")"
   done
   [ "$missing" -eq 0 ] || mg_mac_vm_user_step
   mg_detail mac_vm "$(jq -nc --arg c "$(mg_mac_vm_config_path)" --argjson v "$vms" '{config: $c, configured: true, vms: $v}')"

@@ -8,7 +8,8 @@
 # first from $FAKE_VM_BIN, with FAKE_VM_FS set to the VM's file system root.
 # The command gets a clean environment, as over SSH: only the fakes' own
 # variables (FAKE_*, STUB_LOG, MEGURI_HOST_LEASE_DIR), HOME and PATH, so a
-# variable the job forgot to pass never reaches it. A VM that is not running,
+# variable the job forgot to pass never reaches it, and SIGINT at its
+# default. A VM that is not running,
 # or $FAKE_VM_DIR/ssh-down, refuses the connection (exit 255). A command that
 # matches the ERE in FAKE_VM_SSH_FAIL loses its connection (exit 255); one
 # that matches FAKE_VM_SSH_EMPTY_TAR prints an empty tar archive and exits 0.
@@ -34,4 +35,7 @@ envs=()
 for n in $(compgen -e); do
   case "$n" in FAKE_* | STUB_LOG | MEGURI_HOST_LEASE_DIR | HOME) envs+=("$n=${!n}") ;; esac
 done
-exec env -i "${envs[@]}" PATH="$FAKE_VM_BIN:$PATH" FAKE_VM_FS="$vm/fs" FAKE_VM="$vm" bash -c "$cmd"
+# Like sshd, the remote command starts with SIGINT at its default, even when
+# this client was started in the background (which ignores it).
+exec perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!\n"' \
+  env -i "${envs[@]}" PATH="$FAKE_VM_BIN:$PATH" FAKE_VM_FS="$vm/fs" FAKE_VM="$vm" bash -c "$cmd"

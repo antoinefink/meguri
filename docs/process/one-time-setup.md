@@ -19,7 +19,7 @@ Accept the Xcode license: open Xcode once, or run `sudo xcodebuild -license acce
 
 ### `ios-runtime`
 
-Install the iOS 27 simulator runtime: Xcode › Settings › Components, or `xcodebuild -downloadPlatform iOS`. The iPhone and iPad simulators share it. Doctor fails without it.
+Install the iOS 27 simulator runtime: Xcode › Settings › Components, or `xcodebuild -downloadPlatform iOS`. The iPhone and iPad simulators share it. Builds for the simulator need it on this Mac, and the test VM's simulators get their copy from it (`tools/vm/add-sim-runtime.sh`, run by an agent). Doctor fails without it.
 
 ### `xcode-account`
 
@@ -35,7 +35,7 @@ Let the Xcode UI-test runner control the Mac. On the first macOS UI-test run, ma
 
 ### `mac-vm`
 
-Keep the T9 drive with the Mac UI test VM connected. Every Mac UI suite (`tools/mg mac-ui`, `a11y --platform mac`, `drive --platform mac`) runs in that macOS VM, never on this Mac's screen (`docs/process/mac-ui-vm.md`). The host names it in `~/Library/Application Support/meguri/mac-vm.json`. Without the config, the drive or the VM, the suites are queued (status warn). Doctor checks the config, the drive, the VM, SSH and the VM's Xcode.
+Keep the T9 drive with the macOS test VM connected. Every Mac UI suite (`tools/mg mac-ui`, `a11y --platform mac`, `drive --platform mac`) and every simulator (`sim`, `run`, `drive`, `screenshot`, `record`, `a11y`, `snapshots`, `xcode-check`) runs in that VM, never on this Mac (`docs/process/mac-ui-vm.md`). The host names it in `~/Library/Application Support/meguri/mac-vm.json`. Without the config, the drive or the VM, those jobs are queued (status warn). Doctor checks the config, the drive, the VM, SSH, the VM's Xcode and its simulator runtime.
 
 ### `mac-input`
 
@@ -67,7 +67,7 @@ Approve the scheduler entry for nightly jobs when `tools/mg nightly` (U19) asks 
 
 ### `host-session`
 
-Not a one-time step. App and simulator jobs (`build-app` excepted) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later, so UI gates wait too. While they run, they keep the display awake; a simulator recording (`tools/mg record start`) does so until it is stopped, at most 10 minutes. Mac UI suites run in the test VM and need no unlocked session; only a host run (`MEGURI_MAC_UI_ALLOW_HOST=1`) waits, and takes the screen at most once an hour.
+Not a one-time step. Jobs that launch the Mac app on this Mac (`run --platform mac`, `screenshot --platform mac`, the hidden launches of `xcode-check`) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later. While they run, they keep the display awake. Simulator jobs and Mac UI suites run in the test VM and need no unlocked session; only a host run (`MEGURI_SIM_ALLOW_HOST=1`, `MEGURI_MAC_UI_ALLOW_HOST=1`) waits, and a Mac UI host run takes the screen at most once an hour.
 
 ## Not user steps
 
