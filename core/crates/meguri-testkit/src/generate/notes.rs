@@ -8,6 +8,7 @@
 //! gap after the note's creation. Notes with no reviewed card are created
 //! on days drawn from the unreviewed-notes histogram.
 
+use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use meguri_model::ids::{CardId, NoteId, NotetypeId};
@@ -15,6 +16,7 @@ use meguri_model::note::{FIELD_SEPARATOR, Note};
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 use meguri_text::checksum::{note_checksum, sort_text_of};
+use meguri_text::fold::compare_folded;
 
 use super::cards::{CardInput, Due, Target, card_rows};
 use super::decks::DeckPlan;
@@ -23,7 +25,7 @@ use super::notetypes::{GenNotetype, Kind};
 use super::profile::Profile;
 use super::revlog::Fsrs;
 use super::rng::{Rng, Stream};
-use super::{AllIds, NoteRows, Timeline, WorstCase, draw_target};
+use super::{AllIds, GenError, NoteRows, Timeline, WorstCase, draw_target};
 
 pub struct NoteContext<'a> {
     pub profile: &'a Profile,
@@ -105,7 +107,8 @@ impl TagPool {
         self.names.is_empty()
     }
 
-    /// The tags of note `index` of `total`, sorted.
+    /// The tags of note `index` of `total`, in `unicase` order (F4.5,
+    /// F6.6).
     pub fn for_note(&self, index: u64, total: u64, rng: &mut Rng) -> Vec<String> {
         if self.names.is_empty() {
             return Vec::new();
@@ -119,14 +122,13 @@ impl TagPool {
             }
         }
         let count = self.per_note.sample(rng).unwrap_or(0).max(0) as usize;
-        for _ in 0..count.min(self.names.len()) {
+        for _ in 0..count {
             picked.push(rng.below(self.names.len() as u64) as usize);
         }
         picked.sort_unstable();
         picked.dedup();
-        let mut tags: Vec<String> = picked.into_iter().map(|i| self.names[i].clone()).collect();
-        tags.sort();
-        tags
+        let tags: Vec<String> = picked.into_iter().map(|i| self.names[i].clone()).collect();
+        unicase_sorted(tags)
     }
 }
 
@@ -151,6 +153,14 @@ pub fn assign_notetypes(profile: &Profile, types: &[GenNotetype], cards: u64, sc
         out.swap(i, j);
     }
     out
+}
+
+/// Tags in `unicase` order (`text/unicode-primitives` U2), those equal
+/// under it after the first dropped: the order Anki's tag clean-up leaves.
+pub fn unicase_sorted(mut tags: Vec<String>) -> Vec<String> {
+    tags.sort_by(|a, b| compare_folded(a, b));
+    tags.dedup_by(|b, a| compare_folded(a, b) == Ordering::Equal);
+    tags
 }
 
 const SYLLABLES: [&str; 24] = [
@@ -178,30 +188,30 @@ impl NoteContext<'_> {
         self.worst.is_some_and(|w| w.due_deck.is_some())
     }
 
-    /// The last day reviews may fall on.
+    /// The last day answers may fall on: the day before the pinned day
+    /// (F4.4).
     fn last_review_day(&self) -> i64 {
-        if self.due_mode() {
-            self.timeline.today - 1
-        } else {
-            self.timeline.today
-        }
+        self.timeline.today - 1
     }
 
-    /// A review instant on a day from `min_day` to the last review day.
+    /// The start of the pinned day, epoch milliseconds: every answer is
+    /// before it.
+    fn pinned_day_start_ms(&self) -> i64 {
+        (self.timeline.crt + self.timeline.today * 86_400) * 1000
+    }
+
+    /// An answer instant on a day from `min_day` to the last review day
+    /// (F4.6); `None` when that range is empty. Such an instant is always
+    /// before now.
     fn review_instant(&self, rng: &mut Rng, min_day: i64) -> Option<i64> {
         let max_day = self.last_review_day();
         if min_day > max_day {
             return None;
         }
         let revlog = &self.profile.revlog;
-        for _ in 0..16 {
-            let day = revlog.review_days.sample_within(rng, min_day, max_day + 1);
-            let hour = revlog.hour_of_day.sample(rng).unwrap_or(12);
-            if let Some(ms) = self.timeline.instant(day, hour, rng) {
-                return Some(ms);
-            }
-        }
-        None
+        let day = revlog.review_days.sample_within(rng, min_day, max_day + 1);
+        let hour = revlog.hour_of_day.sample(rng).unwrap_or(12);
+        self.timeline.instant(day, hour, rng)
     }
 
     fn reviews_per_card(&self, rng: &mut Rng) -> usize {
@@ -219,7 +229,11 @@ impl NoteContext<'_> {
         first - gap * 1000 - rng.below(1000) as i64
     }
 
-    /// The creation instant of a note none of whose cards is reviewed.
+    /// The creation instant of a note none of whose cards is reviewed: a
+    /// day within `[0, today]`, an hour, drawn again while the instant is
+    /// after now (F4.6). After 16 refusals (a day and hour mix that keeps
+    /// landing after now on the pinned day) it takes an instant in the day
+    /// before now, so generation always ends.
     fn created_unreviewed(&self, rng: &mut Rng) -> i64 {
         let today = self.timeline.today;
         for _ in 0..16 {
@@ -233,7 +247,7 @@ impl NoteContext<'_> {
                 return ms.max(self.timeline.crt_ms() + 1000);
             }
         }
-        self.timeline.now_ms - 1000 - rng.below(86_400_000) as i64
+        (self.timeline.now_ms - 1000 - rng.below(86_400_000) as i64).max(self.timeline.crt_ms() + 1000)
     }
 }
 
@@ -329,7 +343,7 @@ fn fields(
 }
 
 /// The rows of note `index`, of note type `types[nt]`.
-pub fn generate_note(ctx: &NoteContext<'_>, index: u64, nt: u16, ids: &mut AllIds) -> NoteRows {
+pub fn generate_note(ctx: &NoteContext<'_>, index: u64, nt: u16, ids: &mut AllIds) -> Result<NoteRows, GenError> {
     let mut rng = Rng::stream(ctx.seed, Stream::Note, index);
     let rng = &mut rng;
     let notetype = &ctx.types[usize::from(nt)];
@@ -382,7 +396,9 @@ pub fn generate_note(ctx: &NoteContext<'_>, index: u64, nt: u16, ids: &mut AllId
         None => ctx.created_unreviewed(rng),
     };
 
+    // The note id is the creation instant (F4.7), moved up when taken.
     let note_id = NoteId(ids.notes.claim(created));
+    let created = note_id.0;
     let (values, media) = fields(ctx, notetype, index, card_count, rng);
     let tags = ctx.tags.for_note(index, ctx.total_notes, rng);
     let note = Note {
@@ -428,39 +444,36 @@ pub fn generate_note(ctx: &NoteContext<'_>, index: u64, nt: u16, ids: &mut AllId
             &input,
             &mut ids.revlog,
             rng,
-        );
+        )?;
         rows.cards.push(card);
         rows.revlog.extend(entries);
     }
-    rows
+    Ok(rows)
 }
 
-/// Review instants of a card whose note was created at `created`, not its
-/// first reviewed card: the first one a first-review gap after the
-/// creation, the others on later review days. Empty when no first review
-/// fits before the last review day ends.
+/// Answer instants of a card whose note was created at `created`, not its
+/// note's lead card (F4.6): the first one a first-review gap after the
+/// creation, within the seconds left before the pinned day, then the
+/// others drawn on days from that first day on, keeping those after the
+/// first. Empty when no first answer fits.
 fn sibling_reviews(ctx: &NoteContext<'_>, rng: &mut Rng, created: i64) -> Vec<i64> {
-    let limit = (ctx.timeline.crt + (ctx.last_review_day() + 1) * 86_400) * 1000;
-    let limit = limit.min(ctx.timeline.now_ms);
+    let limit = ctx.pinned_day_start_ms();
     let room = (limit - created) / 1000;
     if room < 2 {
         return Vec::new();
     }
     let gap = ctx.profile.revlog.first_review_gap_secs.sample_within(rng, 1, room);
     let first = created + gap * 1000 + rng.below(1000) as i64;
-    if first > limit {
+    if first >= limit {
         return Vec::new();
     }
     let mut out = vec![first];
     let first_day = ctx.timeline.day_of(first);
     for _ in 1..ctx.reviews_per_card(rng) {
-        for _ in 0..8 {
-            if let Some(ms) = ctx.review_instant(rng, first_day)
-                && ms > first
-            {
-                out.push(ms);
-                break;
-            }
+        if let Some(ms) = ctx.review_instant(rng, first_day)
+            && ms > first
+        {
+            out.push(ms);
         }
     }
     out.sort_unstable();

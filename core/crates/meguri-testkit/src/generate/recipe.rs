@@ -45,13 +45,14 @@ use serde_json::Value;
 use super::cards::{CardInput, Due, Target, card_rows};
 use super::decks::{deck, default_preset_message, preset};
 use super::media::{MediaFile, MediaKind};
-use super::notes::words;
+use super::notes::{unicase_sorted, words};
 use super::notetypes::{Kind, base_templates, field_names, notetype};
 use super::profile::{Histogram, NotetypeShape, RevlogShape};
 use super::revlog::Fsrs;
 use super::rng::{Rng, Stream};
 use super::{
-    AllIds, GENERATOR_VERSION, GenError, Manifest, MediaMode, NoteRows, Output, Timeline, base_config, config_entry,
+    AllIds, GENERATOR_VERSION, GenError, LATEST_NOW_MS, Manifest, MediaMode, NoteRows, Output, Timeline, base_config,
+    closing_config,
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -267,14 +268,25 @@ fn revlog_shape() -> RevlogShape {
     }
 }
 
-/// Days of history before the pinned instant.
-const SPAN_DAYS: u64 = 120;
+/// Days of history before the pinned day (F9.2).
+pub const SPAN_DAYS: u64 = 120;
 
 /// Generates the recipe into `dir`.
 pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifest, GenError> {
     let (now_ms, offset) = recipe.instant()?;
-    let timeline = Timeline::new(now_ms, offset, recipe.rollover_hour.unwrap_or(4), SPAN_DAYS);
-    let mut out = Output::create(dir, &timeline, &base_config(&timeline), MediaMode::Files)?;
+    if now_ms >= LATEST_NOW_MS {
+        return Err(GenError::Recipe(format!(
+            "now {} is too late: every due must fit i32 (F4.3)",
+            recipe.now
+        )));
+    }
+    let rollover = recipe.rollover_hour.unwrap_or(4);
+    if rollover > 23 {
+        return Err(GenError::Recipe(format!("rollover_hour {rollover} is not 0 to 23")));
+    }
+    let timeline = Timeline::new(now_ms, offset, rollover, SPAN_DAYS);
+    // Recipe decks and tags are expanded: UI fixtures show their whole tree.
+    let mut out = Output::create(dir, &timeline, &base_config(&timeline), MediaMode::Files, false)?;
     let mut ids = AllIds::default();
     let mut structure = Rng::stream(seed, Stream::Recipe, 0);
 
@@ -309,7 +321,7 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
 
     // Decks, parents first.
     let mut deck_ids: Vec<(String, DeckId)> = vec![("Default".to_owned(), DeckId(ids.decks.claim(1)))];
-    let mut deck_rows = vec![deck(DeckId(1), "Default", DeckConfigId(1), &timeline)];
+    let mut deck_rows = vec![deck(DeckId(1), "Default", DeckConfigId(1), &timeline, false)];
     let mut spec_decks = Vec::new();
     for spec in &recipe.decks {
         let parts: Vec<&str> = spec.name.split("::").collect();
@@ -330,15 +342,16 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
                 DeckConfigId(1)
             };
             let id = DeckId(ids.decks.claim(timeline.crt_ms() + deck_ids.len() as i64));
-            deck_rows.push(deck(id, &name, preset, &timeline));
+            deck_rows.push(deck(id, &name, preset, &timeline, false));
             deck_ids.push((name, id));
         }
         spec_decks.push(deck_ids.last().expect("just added").1);
     }
 
-    // Note types, in a fixed order, for those the recipe uses.
+    // Note types, in a fixed order, for those the recipe uses; ids by their
+    // place in that order (F4.7).
     let mut types = Vec::new();
-    for (i, kind) in RecipeType::ALL.iter().enumerate() {
+    for kind in RecipeType::ALL.iter() {
         if !recipe
             .decks
             .iter()
@@ -346,7 +359,7 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         {
             continue;
         }
-        let id = NotetypeId(ids.notetypes.claim(timeline.crt_ms() + i as i64));
+        let id = NotetypeId(ids.notetypes.claim(timeline.crt_ms() + types.len() as i64));
         let mut record = notetype(id, kind.name(), &kind.shape(), None, &timeline, &mut structure);
         if *kind == RecipeType::Broken {
             let names = field_names(Kind::Normal, 2);
@@ -434,17 +447,14 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
                         index: note_index,
                         seed,
                     },
-                );
+                )?;
                 out.push(rows)?;
                 note_index += 1;
             }
         }
     }
 
-    let closing = vec![
-        config_entry("curModel", &types[0].1.id.0.to_string(), &timeline),
-        config_entry("nextPos", &(position + 1).to_string(), &timeline),
-    ];
+    let closing = closing_config(&timeline, types[0].1.id.0, u64::from(position));
     let name = recipe.recipe.clone();
     out.finish(&closing, |counts| Manifest {
         generator_version: GENERATOR_VERSION,
@@ -453,6 +463,7 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         seed,
         cards_requested: counts.cards,
         now_ms,
+        utc_offset_secs: offset,
         profile_sha256: None,
         media: MediaMode::Files,
         counts,
@@ -473,36 +484,28 @@ struct RecipeNote<'a> {
     seed: u64,
 }
 
-/// Review instants for a recipe card in `target` state, increasing.
+/// Answer instants for a recipe card in `target` state, increasing, all
+/// before the pinned day (F9.2, F4.4): a learning card has one answer in
+/// the 24 hours before the pinned day, so it is due now; a due card's last
+/// answer is 1 to 20 days before today; a later card's (and a suspended or
+/// buried one's) 1 to 3 days before today. Earlier answers come a week (6
+/// days for later cards) apart.
 fn recipe_reviews(timeline: &Timeline, target: Target, rng: &mut Rng) -> Vec<i64> {
     let at = |day: i64, rng: &mut Rng| {
         (timeline.crt + day * 86_400 + 3600 * (2 + rng.below(14) as i64)) * 1000 + rng.below(3_600_000) as i64
     };
+    let pinned_day_start = (timeline.crt + timeline.today * 86_400) * 1000;
     let count = 2 + rng.below(6) as i64;
     match target {
         Target::New => Vec::new(),
-        Target::Learning | Target::Relearning => {
-            // Earlier reviews on earlier days, the last within the last
-            // hour but at least a step ago, so the card is due now.
-            let mut out: Vec<i64> = (1..count).map(|i| at(timeline.today - 40 + i * 5, rng)).collect();
-            if target == Target::Learning {
-                out.clear();
-            }
-            out.push(timeline.now_ms - (super::cards::STEP_SECS + 60) * 1000 - rng.below(1_800_000) as i64);
-            out
-        }
+        Target::Learning => vec![pinned_day_start - 86_400_000 + rng.below(86_400_000) as i64],
         Target::Review(Due::Today) => {
             let last = timeline.today - 1 - rng.below(20) as i64;
             (0..count).map(|i| at(last - (count - 1 - i) * 7, rng)).collect()
         }
         _ => {
-            let last = timeline.today - rng.below(3) as i64;
-            let mut out: Vec<i64> = (0..count).map(|i| at(last - (count - 1 - i) * 6, rng)).collect();
-            out.retain(|&ms| ms < timeline.now_ms - 60_000);
-            if out.is_empty() {
-                out.push(timeline.now_ms - 3_600_000);
-            }
-            out
+            let last = timeline.today - 1 - rng.below(3) as i64;
+            (0..count).map(|i| at(last - (count - 1 - i) * 6, rng)).collect()
         }
     }
 }
@@ -514,17 +517,20 @@ fn recipe_note(
     ids: &mut AllIds,
     rng: &mut Rng,
     n: RecipeNote<'_>,
-) -> NoteRows {
+) -> Result<NoteRows, GenError> {
     let reviews = recipe_reviews(timeline, n.target, rng);
     let created = match reviews.first() {
         Some(&first) => first - 86_400_000 - rng.below(86_400_000) as i64,
         None => timeline.now_ms - 86_400_000 * (1 + rng.below(30) as i64),
     };
+    // The note id is the creation instant (F4.7), moved up when taken.
     let note_id = NoteId(ids.notes.claim(created));
+    let created = note_id.0;
 
+    // Field text and tags are NFC (F6.6), as Anki would save them.
     let mut values: Vec<String> = (0..2)
         .map(|f| match n.spec.fields.get(f) {
-            Some(template) => template.replace("{n}", &n.number.to_string()),
+            Some(template) => meguri_text::normalize::nfc(&template.replace("{n}", &n.number.to_string())).into_owned(),
             None => words(6 + rng.below(20) as usize, rng),
         })
         .collect();
@@ -559,9 +565,13 @@ fn recipe_note(
             }
         }
     }
-    let mut tags = n.spec.tags.clone();
-    tags.sort();
-    tags.dedup();
+    let tags = unicase_sorted(
+        n.spec
+            .tags
+            .iter()
+            .map(|t| meguri_text::normalize::nfc(t).into_owned())
+            .collect(),
+    );
     let note = Note {
         id: note_id,
         guid: meguri_text::base91::encode(rng.u64()),
@@ -597,9 +607,9 @@ fn recipe_note(
             target: n.target,
             reviews: &reviews,
         };
-        let (card, entries) = card_rows(shape, timeline, fsrs, &input, &mut ids.revlog, rng);
+        let (card, entries) = card_rows(shape, timeline, fsrs, &input, &mut ids.revlog, rng)?;
         rows.cards.push(card);
         rows.revlog.extend(entries);
     }
-    rows
+    Ok(rows)
 }

@@ -1,12 +1,12 @@
 //! `meguri-cli profile-extract`: the shape of a collection as aggregate
-//! histograms (U11, R1940). It copies the collection (and its `-wal`) to a
-//! temporary directory and reads the copy; the media folder is read for
-//! file sizes and extensions only. The output holds counts and numeric
-//! histograms, no text, names or ids.
+//! histograms (U11, R1940; `fixtures/synthetic-collections` F2.6). It
+//! copies the collection (and its `-wal`) to a temporary directory and
+//! reads the copy; the media folder is read for file sizes and extensions
+//! only. The output holds counts and numeric histograms, no text, names or
+//! ids.
 //!
 //! ```text
-//! meguri-cli profile-extract --collection PATH --out FILE
-//!     [--media-dir DIR] [--tz IANA | --utc-offset ±HH:MM]
+//! meguri-cli profile-extract <collection> --media-dir <dir> --tz <IANA zone> --out <file>
 //! ```
 //!
 //! The private collection is extracted only by a role allowed to read
@@ -18,22 +18,8 @@ use meguri_testkit::generate::profile;
 
 fn usage(message: &str) -> i32 {
     eprintln!("meguri-cli profile-extract: {message}");
-    eprintln!(
-        "usage: meguri-cli profile-extract --collection PATH --out FILE [--media-dir DIR] [--tz IANA | --utc-offset ±HH:MM]"
-    );
+    eprintln!("usage: meguri-cli profile-extract <collection> --media-dir <dir> --tz <IANA zone> --out <file>");
     2
-}
-
-/// `±HH:MM` in seconds.
-fn parse_offset(text: &str) -> Option<i32> {
-    let (sign, rest) = match text.as_bytes().first()? {
-        b'+' => (1, &text[1..]),
-        b'-' => (-1, &text[1..]),
-        _ => return None,
-    };
-    let (h, m) = rest.split_once(':')?;
-    let seconds = h.parse::<i32>().ok()? * 3600 + m.parse::<i32>().ok()? * 60;
-    (seconds < 86_400).then_some(sign * seconds)
 }
 
 pub fn main(args: &[String]) -> i32 {
@@ -41,40 +27,37 @@ pub fn main(args: &[String]) -> i32 {
     let mut out: Option<PathBuf> = None;
     let mut media_dir: Option<PathBuf> = None;
     let mut tz: Option<jiff::tz::TimeZone> = None;
-    let mut fixed: Option<i32> = None;
     let mut rest = args.iter();
-    while let Some(flag) = rest.next() {
+    while let Some(arg) = rest.next() {
+        if !arg.starts_with("--") {
+            if collection.is_some() {
+                return usage(&format!("one collection, not also {arg}"));
+            }
+            collection = Some(PathBuf::from(arg));
+            continue;
+        }
         let Some(value) = rest.next() else {
-            return usage(&format!("{flag} needs a value"));
+            return usage(&format!("{arg} needs a value"));
         };
-        match flag.as_str() {
-            "--collection" => collection = Some(PathBuf::from(value)),
+        match arg.as_str() {
             "--out" => out = Some(PathBuf::from(value)),
             "--media-dir" => media_dir = Some(PathBuf::from(value)),
             "--tz" => match jiff::tz::TimeZone::get(value) {
                 Ok(zone) => tz = Some(zone),
                 Err(e) => return usage(&format!("--tz {value}: {e}")),
             },
-            "--utc-offset" => match parse_offset(value) {
-                Some(seconds) => fixed = Some(seconds),
-                None => return usage(&format!("--utc-offset {value}: expected ±HH:MM")),
-            },
             other => return usage(&format!("unknown option {other}")),
         }
     }
-    let (Some(collection), Some(out)) = (collection, out) else {
-        return usage("--collection and --out are required");
+    let (Some(collection), Some(media_dir), Some(tz), Some(out)) = (collection, media_dir, tz, out) else {
+        return usage("<collection>, --media-dir, --tz and --out are required");
     };
     let offset_at = |ms: i64| -> i32 {
-        match (&tz, fixed) {
-            (Some(zone), _) => jiff::Timestamp::from_millisecond(ms)
-                .map(|ts| zone.to_offset(ts).seconds())
-                .unwrap_or(0),
-            (None, Some(seconds)) => seconds,
-            (None, None) => 0,
-        }
+        jiff::Timestamp::from_millisecond(ms)
+            .map(|ts| tz.to_offset(ts).seconds())
+            .unwrap_or(0)
     };
-    let extracted = match profile::extract(&collection, media_dir.as_deref(), &offset_at) {
+    let extracted = match profile::extract(&collection, Some(&media_dir), &offset_at) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("meguri-cli profile-extract: {e}");

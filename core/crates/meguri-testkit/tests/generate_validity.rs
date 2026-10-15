@@ -5,8 +5,11 @@
 //! by hand, so the later comparisons rest on numbers computed independently
 //! of the generator.
 //!
-//! The oracle checks of the unit (Check Database, deck-tree counts, render)
-//! need oracle driver support and are not here.
+//! The histories are replayed through the answer table written out from
+//! the spec (`fixtures/synthetic-collections` F5) and fsrs itself, so the
+//! card and review-log columns are checked against values the generator did
+//! not compute. The oracle checks of the unit (F11 T1: Check Database,
+//! deck-list counts, render) run in `tools/mg fixtures-check`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -29,10 +32,11 @@ use meguri_model::revlog::{RevlogEntry, RevlogKind};
 use meguri_model::rng::SeededRandom;
 use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
+use meguri_storage::raw::SqlValue;
 use meguri_storage::{CollectionBuilder, OpenOptions, ReadRows, StampMode, Table, open_collection};
 use meguri_testkit::generate::profile::{self, Histogram, Profile, VOCABULARY};
 use meguri_testkit::generate::recipe::{DeckSpec, MediaSpec, Recipe, generate_recipe};
-use meguri_testkit::generate::{self, Manifest, MediaMode, Request, WorstCase, media};
+use meguri_testkit::generate::{self, GenError, Manifest, MediaMode, Request, WorstCase, media};
 use serde_json::Value;
 
 // ---------------------------------------------------------------- helpers
@@ -62,6 +66,54 @@ fn measured(dir: &Path, offset_secs: i32) -> Profile {
         &offset,
     )
     .unwrap()
+}
+
+/// Measured for a comparison with `reference` (F2.5): the day histograms
+/// get the reference's span.
+fn measured_against(dir: &Path, reference: &Profile) -> Profile {
+    let offset_secs = reference.utc_offset_secs;
+    let offset = move |_: i64| offset_secs;
+    profile::measure_against(
+        &dir.join("collection.anki2"),
+        Some(&dir.join("collection.media")),
+        &offset,
+        reference,
+    )
+    .unwrap()
+}
+
+/// Every row of one raw query.
+fn query(path: &Path, sql: &str) -> Vec<Vec<SqlValue>> {
+    open(path).writer().execute_raw(sql, &[]).unwrap().rows
+}
+
+fn int(value: &SqlValue) -> i64 {
+    match value {
+        SqlValue::Integer(v) => *v,
+        other => panic!("not an integer: {other:?}"),
+    }
+}
+
+fn text(value: &SqlValue) -> String {
+    match value {
+        SqlValue::Text(v) => v.clone(),
+        SqlValue::Blob(v) => String::from_utf8(v.clone()).unwrap(),
+        other => panic!("not text: {other:?}"),
+    }
+}
+
+fn all_revlog(path: &Path) -> Vec<RevlogEntry> {
+    let collection = open(path);
+    let rows = collection.writer();
+    let mut out = Vec::new();
+    let mut after = None;
+    loop {
+        let page = rows.revlog_after(after, 50_000).unwrap();
+        let Some(last) = page.last() else { break };
+        after = Some(last.id);
+        out.extend(page);
+    }
+    out
 }
 
 fn assert_close(what: &str, distance: Option<f64>, limit: f64) {
@@ -276,8 +328,11 @@ fn measure_counts_a_hand_built_collection() {
         },
     ];
     let builder = CollectionBuilder::create(&path, &col, &config, &OpenOptions::new(&clock, &random)).unwrap();
-    // Notes: n1 on day 2, n2 on day 3, n3 on day 9 (never reviewed).
+    // Notes: n1 on day 2, n2 on day 3, n3 on day 9 (never reviewed); n4 on
+    // day 5 of a note type that does not exist (totals only), with a card;
+    // n5 on day 6, without cards (none of its cards has a row).
     let (n1, n2, n3) = ((CRT + 2 * DAY) * 1000, (CRT + 3 * DAY) * 1000, (CRT + 9 * DAY) * 1000);
+    let (n4, n5) = ((CRT + 5 * DAY) * 1000, (CRT + 6 * DAY) * 1000);
     {
         let mut scope = builder.begin(StampMode::Raw, &clock).unwrap();
         for preset in [1, 2] {
@@ -311,13 +366,19 @@ fn measure_counts_a_hand_built_collection() {
                 n1,
                 100,
                 &["hello", "<img src=\"a.png\"> [sound:b.mp3]"],
-                " x::y z ",
+                " x::y z STRASSE ",
             ))
             .unwrap();
         scope
             .put(&hand_note(n2, 200, &["{{c1::a}} {{c2::b}}", ""], ""))
             .unwrap();
-        scope.put(&hand_note(n3, 100, &["new one", "back"], " Z ")).unwrap();
+        // `Z` is `z`, and `Straße` is `STRASSE` under unicase (lower-casing
+        // alone would make them two tags).
+        scope
+            .put(&hand_note(n3, 100, &["new one", "back"], " Z Straße "))
+            .unwrap();
+        scope.put(&hand_note(n4, 999, &["lost", "type"], " orphan ")).unwrap();
+        scope.put(&hand_note(n5, 100, &["solo", ""], "")).unwrap();
         // c1 (n1): review; c2, c3 (n2): new, suspended review card; c4 (n3): new.
         scope
             .put(&hand_card(n1, n1, 11, 0, CardType::Review, CardQueue::Review, 10))
@@ -330,6 +391,9 @@ fn measure_counts_a_hand_built_collection() {
             .unwrap();
         scope
             .put(&hand_card(n3, n3, 1, 0, CardType::New, CardQueue::New, 0))
+            .unwrap();
+        scope
+            .put(&hand_card(n4, n4, 1, 0, CardType::New, CardQueue::New, 0))
             .unwrap();
         // Reviews: c1 on day 2 at 07:00:30 and day 12 at 21:15; c3 on day 20 at 09:00.
         let r1 = (CRT + 2 * DAY + 3 * 3600 + 30) * 1000;
@@ -344,34 +408,39 @@ fn measure_counts_a_hand_built_collection() {
 
     let p = profile::measure(&path, Some(&media_dir), &utc).unwrap();
     let t = &p.totals;
-    assert_eq!((t.notes, t.cards, t.revlog, t.notetypes), (3, 4, 3, 2));
+    assert_eq!((t.notes, t.cards, t.revlog, t.notetypes), (5, 5, 3, 2));
     assert_eq!((t.decks, t.filtered_decks, t.presets), (3, 0, 2));
-    // `x::y` and `z` (`Z` is the same tag).
-    assert_eq!(t.tags, 2);
+    // `x::y`, `z` and `straße` (n4's `orphan` is on a note without a type).
+    assert_eq!(t.tags, 3);
     assert_eq!((t.media_files, t.media_bytes), (2, 5100));
     // Last activity: the review on day 20.
     assert_eq!(t.span_days, 20);
     assert_eq!(p.rollover_hour, 4);
 
     let normal = &p.notetypes[0];
-    assert_eq!((normal.kind.as_str(), normal.notes, normal.cards), ("normal", 2, 2));
+    assert_eq!((normal.kind.as_str(), normal.notes, normal.cards), ("normal", 3, 2));
     assert_eq!(normal.template_bytes, vec![[25, 5]]);
     assert_eq!((normal.script_bytes, normal.css_bytes), (3, 7));
     assert_eq!(normal.media_refs, vec![[0, 0], [1, 1]]);
-    // Field 0: "hello" (5) and "new one" (7) are both in [4, 8).
-    assert_eq!(normal.field_bytes[0].counts[normal.field_bytes[0].bucket(5)], 2);
-    assert_eq!(normal.refs_per_note.counts[0..3], [1, 0, 1]);
+    // Field 0: "hello" (5), "new one" (7) and "solo" (4) are in [4, 8).
+    assert_eq!(normal.field_bytes[0].counts[normal.field_bytes[0].bucket(5)], 3);
+    // References per note: n3 and n5 none, n1 two.
+    assert_eq!(normal.refs_per_note.counts[0..3], [2, 0, 1]);
+    // Cards per note: n1 and n3 one each; n5 has none and is not counted.
     assert_eq!(normal.cards_per_note.counts[0], 2);
+    assert_eq!(normal.cards_per_note.total(), 2);
     let cloze = &p.notetypes[1];
     assert_eq!((cloze.kind.as_str(), cloze.notes, cloze.cards), ("cloze", 1, 2));
     assert_eq!(cloze.cards_per_note.counts[1], 1);
 
     assert_eq!(p.decks.depth.counts[0..2], [2, 1]);
     assert_eq!(p.decks.decks_per_preset, vec![2, 1]);
-    // Cards per deck: Default 1, Lang 2, Lang::Verbs 1.
-    assert_eq!(p.decks.cards_per_deck.counts[1..3], [2, 1]);
-    assert_eq!(p.tags.depth.counts[0..2], [1, 1]);
-    assert_eq!(p.tags.per_note.counts[0..3], [1, 1, 1]);
+    // Cards per deck: Default 2 (c4, n4's card), Lang 2, Lang::Verbs 1.
+    assert_eq!(p.decks.cards_per_deck.counts[1..3], [1, 2]);
+    // Depth 1: `z`, `straße`; depth 2: `x::y`.
+    assert_eq!(p.tags.depth.counts[0..2], [2, 1]);
+    // Tags per note: n2 and n5 none, n3 two, n1 three (n4 not measured).
+    assert_eq!(p.tags.per_note.counts[0..4], [2, 0, 1, 1]);
     assert_eq!(
         p.media.kinds,
         BTreeMap::from([("audio".to_owned(), 1), ("image".to_owned(), 1)])
@@ -383,7 +452,7 @@ fn measure_counts_a_hand_built_collection() {
         [
             ("buried", 0),
             ("learning", 0),
-            ("new", 2),
+            ("new", 3),
             ("relearning", 0),
             ("review", 1),
             ("suspended", 1)
@@ -417,9 +486,23 @@ fn measure_counts_a_hand_built_collection() {
     assert_eq!(r.first_review_gap_secs.counts[21], 1);
     assert_eq!(r.first_review_gap_secs.total(), 2);
     assert_eq!(r.answer_ms.counts[r.answer_ms.bucket(700)], 1);
-    // Only n3 is unreviewed, created on day 9.
+    // Unreviewed: n5 (day 6) and n3 (day 9); not n4, whose type is missing.
     let unreviewed = &p.notes.unreviewed_creation_days;
-    assert_eq!((unreviewed.total(), unreviewed.counts[1]), (1, 1));
+    assert_eq!(unreviewed.counts[0..2], [1, 1]);
+    assert_eq!(unreviewed.total(), 2);
+    assert_eq!(p.utc_offset_secs, 0);
+
+    // F2.5: against a reference whose span is 30 days, the day histograms
+    // take its edges, 0 to 35 by 7, and keep their counts; the measured
+    // span stays 20.
+    let mut reference = p.clone();
+    reference.totals.span_days = 30;
+    let against = profile::measure_against(&path, Some(&media_dir), &utc, &reference).unwrap();
+    assert_eq!(against.totals.span_days, 20);
+    assert_eq!(against.revlog.review_days.edges, [0, 7, 14, 21, 28, 35]);
+    assert_eq!(against.revlog.review_days.counts, [1, 1, 1, 0, 0]);
+    assert_eq!(against.notes.unreviewed_creation_days.edges, [0, 7, 14, 21, 28, 35]);
+    assert_eq!(against.notes.unreviewed_creation_days.counts, [1, 1, 0, 0, 0]);
 }
 
 // ------------------------------------------------------- the user shape
@@ -450,8 +533,8 @@ fn ten_thousand_cards_are_reproducible_and_follow_the_profile() {
     assert_eq!(a.dump_sha256, b.dump_sha256, "same seed and profile, same rows");
     assert_ne!(a.dump_sha256, c.dump_sha256, "another seed, other rows");
 
-    let ma = measured(dir_a.path(), p.utc_offset_secs);
-    let mc = measured(dir_c.path(), p.utc_offset_secs);
+    let ma = measured_against(dir_a.path(), &p);
+    let mc = measured_against(dir_c.path(), &p);
     // Another seed: the same shape within sampling tolerance.
     assert_close(
         "seeds: cards per note type",
@@ -524,7 +607,7 @@ fn ten_thousand_cards_are_reproducible_and_follow_the_profile() {
 fn hundred_thousand_cards_follow_the_temporal_shape_and_keep_ids_historical() {
     let p = shape();
     let (dir, manifest) = run(&Request::new(p.clone(), 100_000, 7));
-    let m = measured(dir.path(), p.utc_offset_secs);
+    let m = measured_against(dir.path(), &p);
     assert_close(
         "reviews by day",
         m.revlog.review_days.distance(&p.revlog.review_days),
@@ -570,7 +653,25 @@ fn hundred_thousand_cards_follow_the_temporal_shape_and_keep_ids_historical() {
         .unwrap()
         .id
         .0;
-    assert!(latest <= NOW_MS, "a review in the future: {latest}");
+    // F4.4: no answer on the pinned day, which starts at the last rollover
+    // (the profile's hour, in its offset) at or before now.
+    let pinned_day_start = pinned_day_start_ms(NOW_MS, p.utc_offset_secs, p.rollover_hour);
+    assert!(
+        latest < pinned_day_start,
+        "an answer on the pinned day: {latest} >= {pinned_day_start}"
+    );
+    // F4.7: no note id after now either.
+    let notes = all_notes(&path);
+    assert!(notes.iter().all(|n| n.id.0 <= NOW_MS));
+}
+
+/// The start of the day holding `now_ms`: its last local rollover at or
+/// before it (F4.3), computed from the definition.
+fn pinned_day_start_ms(now_ms: i64, offset_secs: i32, rollover_hour: u8) -> i64 {
+    let local_ms = now_ms + i64::from(offset_secs) * 1000;
+    let rollover_ms = i64::from(rollover_hour) * 3_600_000;
+    let since = (local_ms - rollover_ms).rem_euclid(86_400_000);
+    now_ms - since
 }
 
 // ------------------------------------------------------ profile extract
@@ -933,30 +1034,85 @@ fn the_recipes_give_their_decks_and_counts() {
         let recipe = Recipe::named(&name).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let manifest = generate_recipe(&recipe, 1, dir.path()).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let (now_ms, _) = recipe.instant().unwrap();
+        let (now_ms, offset) = recipe.instant().unwrap();
+        assert_eq!(manifest.utc_offset_secs, offset, "{name}: the offset of now");
         let path = collection(dir.path());
         let collection = open(&path);
         let rows = collection.writer();
         let crt = rows.col().unwrap().created.0;
         let today = (now_ms / 1000 - crt).div_euclid(DAY);
+        // F9.2: 120 days of history before the pinned day.
+        assert_eq!(today, 120, "{name}");
+        let pinned_day_start = (crt + today * DAY) * 1000;
         let mut decks: HashMap<i64, String> = HashMap::new();
         for id in rows.ids_after(Table::Decks, None, 100_000).unwrap() {
             decks.insert(id, rows.deck(DeckId(id)).unwrap().unwrap().human_name());
         }
         drop(collection);
-        // Counts by deck name: new, learning due now, due, later, suspended, buried.
+        let mut answers: HashMap<i64, Vec<i64>> = HashMap::new();
+        for entry in all_revlog(&path) {
+            answers.entry(entry.card_id.0).or_default().push(entry.id.0);
+        }
+        let notes: HashMap<i64, Note> = all_notes(&path).into_iter().map(|n| (n.id.0, n)).collect();
+        // Counts by deck name: new, learning due now, due, later, suspended,
+        // buried; and F9.2's answer days.
         let mut counts: HashMap<String, [u32; 6]> = HashMap::new();
         for card in all_cards(&path) {
             let slot = match (card.queue, card.card_type) {
                 (CardQueue::New, _) => 0,
-                (CardQueue::Learning, _) if i64::from(card.due) <= now_ms / 1000 => 1,
+                (CardQueue::Learning, CardType::Learning) if i64::from(card.due) <= now_ms / 1000 => 1,
+                (CardQueue::InterdayLearning, CardType::Learning) if i64::from(card.due) <= today => 1,
                 (CardQueue::Review, _) if i64::from(card.due) <= today => 2,
                 (CardQueue::Review, _) => 3,
                 (CardQueue::Suspended, _) => 4,
-                (CardQueue::BuriedByScheduler | CardQueue::BuriedByUser, _) => 5,
+                (CardQueue::BuriedByUser, _) => 5,
                 other => panic!("{name}: unexpected card state {other:?}"),
             };
             counts.entry(decks[&card.deck_id.0].clone()).or_default()[slot] += 1;
+            let ids = answers.get(&card.id.0).cloned().unwrap_or_default();
+            let created = card.note_id.0;
+            assert!(notes.contains_key(&created), "{name}: card {} has a note", card.id);
+            let Some(&last) = ids.iter().max() else {
+                assert_eq!(slot, 0, "{name}: card {} has answers", card.id);
+                // Created 1 to 30 days before now; a note id taken already
+                // moves up a few milliseconds (F4.7).
+                let before = now_ms - created;
+                assert!(
+                    (DAY * 1000 - 1000..=30 * DAY * 1000).contains(&before),
+                    "{name}: new note {created} made {before} ms before now"
+                );
+                continue;
+            };
+            assert!(
+                last < pinned_day_start,
+                "{name}: card {} answered on the pinned day",
+                card.id
+            );
+            let first = *ids.iter().min().unwrap();
+            let gap = first - created;
+            assert!(
+                (DAY * 1000 - 1000..=2 * DAY * 1000).contains(&gap),
+                "{name}: note {created} made {gap} ms before its first answer"
+            );
+            let last_day = (last / 1000 - crt).div_euclid(DAY);
+            match slot {
+                1 => {
+                    assert_eq!(ids.len(), 1, "{name}: a learning card has one answer");
+                    assert!(
+                        pinned_day_start - last <= DAY * 1000,
+                        "{name}: within 24 h of the pinned day"
+                    );
+                }
+                2 => assert!(
+                    (today - 20..=today - 1).contains(&last_day),
+                    "{name}: due card's last day {last_day}"
+                ),
+                3 => assert!(
+                    (today - 3..=today - 1).contains(&last_day),
+                    "{name}: later card's last day {last_day}"
+                ),
+                _ => {}
+            }
         }
         let mut cards = 0;
         for spec in &recipe.decks {
@@ -1044,4 +1200,513 @@ fn histogram_sampling_follows_the_counts() {
         drawn.add(v);
     }
     assert_close("sampling", h.distance(&drawn), 0.01);
+}
+
+// -------------------------------------------- histories and card columns
+
+/// Where a card is before an answer: the rows of F5.1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Step1,
+    Step2,
+    Review,
+    Relearning,
+}
+
+/// F5.1, written out from the spec's table: the phase an answer leaves the
+/// card in, and its delay in seconds (`None`: F days).
+fn answer_table(phase: Phase, button: u8) -> (Phase, Option<i64>) {
+    use Phase::*;
+    match (phase, button) {
+        (Step1, 1) => (Step1, Some(60)),
+        (Step1, 2) => (Step1, Some(330)),
+        (Step1, 3) => (Step2, Some(600)),
+        (Step1, 4) => (Review, None),
+        (Step2, 1) => (Step1, Some(60)),
+        (Step2, 2) => (Step2, Some(600)),
+        (Step2, 3 | 4) => (Review, None),
+        (Review, 1) => (Relearning, Some(600)),
+        (Review, 2..=4) => (Review, None),
+        (Relearning, 1) => (Relearning, Some(600)),
+        (Relearning, 2) => (Relearning, Some(900)),
+        (Relearning, 3 | 4) => (Review, None),
+        other => panic!("no button {other:?}"),
+    }
+}
+
+/// F5.6: the FSRS difficulty mapped to `revlog.factor` in f32 steps.
+fn expected_revlog_factor(difficulty: f32) -> u32 {
+    let n: f32 = (difficulty - 1.0) / 9.0;
+    let s: f32 = n + 0.1;
+    (s * 1000.0).round() as u32
+}
+
+/// Replays every card's review log through F5.1 and fsrs (F5.3) and checks
+/// the card's columns (F5.4, F5.5) and every review-log column (F5.6).
+/// With `due_targets`, a review card's interval may be one of F5.5's due
+/// targets instead of F days. Returns how many cards ended in each (type,
+/// queue).
+fn check_histories(path: &Path, now_ms: i64, due_targets: bool) -> BTreeMap<(i8, i8), usize> {
+    let positions_by_note = true;
+    let fsrs = fsrs::FSRS::new(&[]).unwrap();
+    let interval = |stability: f32| -> i64 {
+        f64::from(fsrs.next_interval(Some(stability), 0.9, 3).round().clamp(1.0, 36_500.0)) as i64
+    };
+    let crt = open(path).writer().col().unwrap().created.0;
+    let day_of = |ms: i64| (ms.div_euclid(1000) - crt).div_euclid(DAY);
+    let today = day_of(now_ms);
+    let pinned_day_start = (crt + today * DAY) * 1000;
+    let mut by_card: HashMap<i64, Vec<RevlogEntry>> = HashMap::new();
+    for entry in all_revlog(path) {
+        by_card.entry(entry.card_id.0).or_default().push(entry);
+    }
+    let mut seen: BTreeMap<(i8, i8), usize> = BTreeMap::new();
+    let mut position_of_note: HashMap<i64, u32> = HashMap::new();
+    for card in all_cards(path) {
+        *seen.entry((card.card_type as i8, card.queue as i8)).or_default() += 1;
+        let id = card.id;
+        let rows = by_card.remove(&card.id.0).unwrap_or_default();
+        let position = if rows.is_empty() {
+            assert_eq!(
+                (card.card_type, card.queue),
+                (CardType::New, CardQueue::New),
+                "card {id}"
+            );
+            assert_eq!((card.interval, card.ease_factor, card.reps, card.lapses), (0, 0, 0, 0));
+            assert_eq!(card.remaining_steps, 0);
+            assert_eq!(card.mtime.0, card.note_id.0.div_euclid(1000), "card {id}: mod");
+            assert!(card.data.memory_state.is_none() && card.data.last_review_secs.is_none());
+            card.due as u32
+        } else {
+            card.data.new_position.unwrap_or_else(|| panic!("card {id}: pos"))
+        };
+        if positions_by_note {
+            let first = *position_of_note.entry(card.note_id.0).or_insert(position);
+            assert_eq!(first, position, "card {id}: siblings share their note's position");
+        }
+        if rows.is_empty() {
+            continue;
+        }
+
+        // fsrs's memory states over the answers (F5.3).
+        let days: Vec<i64> = rows.iter().map(|r| day_of(r.id.0)).collect();
+        let item = fsrs::FSRSItem {
+            reviews: rows
+                .iter()
+                .zip(&days)
+                .enumerate()
+                .map(|(i, (r, &day))| fsrs::FSRSReview {
+                    rating: u32::from(r.button),
+                    delta_t: if i == 0 { 0 } else { (day - days[i - 1]) as u32 },
+                })
+                .collect(),
+        };
+        let states = fsrs.historical_memory_states(item, None).unwrap();
+
+        let mut phase = Phase::Step1;
+        let mut previous_ivl = 0;
+        let mut previous_id = card.id.0;
+        let mut ease = 0i64;
+        let mut lapses = 0;
+        let mut last_delay = None;
+        for (i, r) in rows.iter().enumerate() {
+            let at = format!("card {id}, answer {i}");
+            assert!(r.id.0 > previous_id, "{at}: ids increase from the card's");
+            assert!(r.id.0 < pinned_day_start, "{at}: on the pinned day (F4.4)");
+            previous_id = r.id.0;
+            let kind = match phase {
+                Phase::Step1 | Phase::Step2 => RevlogKind::Learning,
+                Phase::Review => RevlogKind::Review,
+                Phase::Relearning => RevlogKind::Relearning,
+            };
+            assert_eq!(r.kind, kind, "{at}: kind");
+            let (next, delay) = answer_table(phase, r.button);
+            let next_day = (crt + (days[i] + 1) * DAY) * 1000;
+            let ivl = match delay {
+                Some(secs) if r.id.0 + secs * 1000 >= next_day => 1,
+                Some(secs) => -secs,
+                // The last answer of a review card: the card's interval,
+                // checked below.
+                None if i + 1 == rows.len() => i64::from(r.interval),
+                None => interval(states[i].stability),
+            };
+            assert_eq!(i64::from(r.interval), ivl, "{at}: ivl");
+            assert_eq!(i64::from(r.last_interval), previous_ivl, "{at}: lastIvl");
+            assert_eq!(
+                r.ease_factor,
+                expected_revlog_factor(states[i].difficulty),
+                "{at}: factor"
+            );
+            assert!(r.answer_millis <= 60_000, "{at}: time {}", r.answer_millis);
+            // F5.4.
+            match phase {
+                Phase::Step1 | Phase::Step2 if next == Phase::Review => ease = 2500,
+                Phase::Review => match r.button {
+                    1 => ease = (ease - 200).max(1300),
+                    2 => ease = (ease - 150).max(1300),
+                    4 => ease += 150,
+                    _ => {}
+                },
+                _ => {}
+            }
+            if phase == Phase::Review && r.button == 1 {
+                lapses += 1;
+            }
+            previous_ivl = ivl;
+            last_delay = delay.map(|secs| (secs, ivl == 1));
+            phase = next;
+        }
+
+        let last = rows.last().unwrap();
+        let last_secs = last.id.0.div_euclid(1000);
+        let last_day = days[days.len() - 1];
+        let state = states[states.len() - 1];
+        let learning_queue = || match last_delay {
+            Some((_, true)) => (CardQueue::InterdayLearning, last_day + 1),
+            Some((secs, false)) => (CardQueue::Learning, last_secs + secs),
+            None => panic!("card {id}: a learning phase after F days"),
+        };
+        match phase {
+            Phase::Step1 | Phase::Step2 => {
+                assert_eq!(card.card_type, CardType::Learning, "card {id}");
+                let (queue, due) = learning_queue();
+                assert_eq!((card.queue, i64::from(card.due)), (queue, due), "card {id}");
+                assert_eq!(card.interval, 0, "card {id}");
+                let left = if phase == Phase::Step1 { 2 } else { 1 };
+                assert_eq!(card.remaining_steps, left, "card {id}: left");
+            }
+            Phase::Relearning => {
+                assert_eq!(card.card_type, CardType::Relearning, "card {id}");
+                let (queue, due) = learning_queue();
+                assert_eq!((card.queue, i64::from(card.due)), (queue, due), "card {id}");
+                assert_eq!(i64::from(card.interval), interval(state.stability), "card {id}: ivl");
+                assert_eq!(card.remaining_steps, 1, "card {id}: left");
+            }
+            Phase::Review => {
+                assert_eq!(card.card_type, CardType::Review, "card {id}");
+                assert!(
+                    matches!(
+                        card.queue,
+                        CardQueue::Review | CardQueue::Suspended | CardQueue::BuriedByUser
+                    ),
+                    "card {id}: queue {:?}",
+                    card.queue
+                );
+                assert_eq!(
+                    i64::from(card.interval),
+                    i64::from(last.interval),
+                    "card {id}: ivl is the last row's"
+                );
+                assert_eq!(
+                    i64::from(card.due),
+                    last_day + i64::from(card.interval),
+                    "card {id}: due"
+                );
+                // F days, or a due target (F5.5).
+                let f = interval(state.stability);
+                let ivl = i64::from(card.interval);
+                let due_today = (1i64).max(f.min(today - last_day));
+                let due_later = f.max(today - last_day + 1).min(36_500);
+                assert!(
+                    ivl == f || (due_targets && (ivl == due_today || ivl == due_later)),
+                    "card {id}: ivl {ivl}, F {f}, last day {last_day}, today {today}"
+                );
+                assert_eq!(card.remaining_steps, 0, "card {id}: left");
+            }
+        }
+        assert_eq!(i64::from(card.ease_factor), ease, "card {id}: factor");
+        assert_eq!((card.reps as usize, card.lapses), (rows.len(), lapses), "card {id}");
+        assert_eq!(card.mtime.0, last_secs, "card {id}: mod");
+        assert_eq!((card.original_due, card.original_deck_id.0, card.flags), (0, 0, 0));
+        let data = &card.data;
+        assert_eq!(data.last_review_secs, Some(last_secs), "card {id}: lrt");
+        let memory = data.memory_state.unwrap();
+        assert!(
+            (memory.stability - state.stability).abs() <= 1e-4 + state.stability * 1e-6,
+            "card {id}: s"
+        );
+        assert!((memory.difficulty - state.difficulty).abs() <= 1e-3, "card {id}: d");
+        assert_eq!(data.desired_retention, Some(0.9));
+        assert_eq!(data.decay, Some(0.154));
+    }
+    assert!(by_card.is_empty(), "review-log rows without a card");
+    if positions_by_note {
+        // F6.6: positions 1 to the note count, one per note.
+        let mut positions: Vec<u32> = position_of_note.values().copied().collect();
+        positions.sort_unstable();
+        assert_eq!(positions, (1..=positions.len() as u32).collect::<Vec<_>>());
+    }
+    seen
+}
+
+#[test]
+fn histories_follow_the_answer_table() {
+    let p = shape();
+    let (dir, manifest) = run(&Request::new(p.clone(), 4000, 21));
+    let path = collection(dir.path());
+    let seen = check_histories(&path, NOW_MS, false);
+    // Every final state the table allows, buried by the user (queue -3).
+    for (state, what) in [
+        ((0, 0), "new"),
+        ((1, 1), "learning"),
+        ((3, 1), "relearning"),
+        ((2, 2), "review"),
+        ((2, -1), "suspended"),
+        ((2, -3), "buried"),
+    ] {
+        assert!(seen.get(&state).copied().unwrap_or(0) > 0, "no {what} card: {seen:?}");
+    }
+    assert!(!seen.contains_key(&(2, -2)), "queue -2 needs a sibling answered today");
+    let notes = query(&path, "SELECT count(*) FROM notes")[0][0].clone();
+    assert_eq!(int(&notes) as u64, manifest.counts.notes);
+}
+
+#[test]
+fn recipe_and_worst_case_histories_follow_the_answer_table() {
+    for name in Recipe::names().unwrap() {
+        let recipe = Recipe::named(&name).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        generate_recipe(&recipe, 3, dir.path()).unwrap();
+        let (now_ms, _) = recipe.instant().unwrap();
+        check_histories(&collection(dir.path()), now_ms, true);
+    }
+    let (dir, _, _) = worst("due-500k", Some(1500));
+    check_histories(&collection(dir.path()), NOW_MS, true);
+}
+
+// ------------------------------------------------------ collection rows
+
+/// The config rows of F6.2, as (key, JSON text).
+fn expected_config(offset_secs: i32, rollover: u8, today: i64, cur_model: i64, notes: u64) -> Vec<(String, String)> {
+    let mut rows: Vec<(String, String)> = [
+        ("activeDecks", "[1]".to_owned()),
+        ("addToCur", "true".to_owned()),
+        ("collapseTime", "1200".to_owned()),
+        ("creationOffset", (-offset_secs / 60).to_string()),
+        ("curDeck", "1".to_owned()),
+        ("curModel", cur_model.to_string()),
+        ("dayLearnFirst", "false".to_owned()),
+        ("dueCounts", "true".to_owned()),
+        ("estTimes", "true".to_owned()),
+        ("fsrs", "true".to_owned()),
+        ("lastUnburied", today.to_string()),
+        ("loadBalancerEnabled", "true".to_owned()),
+        ("newSpread", "0".to_owned()),
+        ("nextPos", (notes + 1).to_string()),
+        ("rollover", rollover.to_string()),
+        ("sched2021", "true".to_owned()),
+        ("schedVer", "2".to_owned()),
+        ("sortBackwards", "false".to_owned()),
+        ("sortType", "\"noteFld\"".to_owned()),
+        ("timeLim", "0".to_owned()),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v))
+    .collect();
+    rows.sort();
+    rows
+}
+
+/// F6: the rows besides notes, cards and the review log.
+fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u8, recipe: bool) {
+    let collection = open(path);
+    let rows = collection.writer();
+    let col = rows.col().unwrap();
+    let crt = col.created.0;
+    let today = (now_ms / 1000 - crt).div_euclid(DAY);
+    // F6.1.
+    assert_eq!(
+        (
+            col.modified.0,
+            col.schema_modified.0,
+            col.last_sync.0,
+            col.usn.0,
+            col.dirty
+        ),
+        (now_ms, crt * 1000, 0, 0, 0)
+    );
+    // crt is the pinned day's start minus `today` days, at the rollover.
+    assert_eq!(
+        (crt + today * DAY) * 1000,
+        pinned_day_start_ms(now_ms, offset_secs, rollover)
+    );
+    let notetypes = rows.ids_after(Table::Notetypes, None, 1000).unwrap();
+    let decks = rows.ids_after(Table::Decks, None, 100_000).unwrap();
+    drop(collection);
+    let notes = int(&query(path, "SELECT count(*) FROM notes")[0][0]) as u64;
+
+    // F6.2: every key, its value, usn -1 and mtime crt.
+    let config: Vec<(String, String)> = query(path, "SELECT KEY, usn, mtime_secs, val FROM config ORDER BY KEY")
+        .iter()
+        .map(|row| {
+            assert_eq!((int(&row[1]), int(&row[2])), (-1, crt), "config {:?}", row[0]);
+            (text(&row[0]), text(&row[3]))
+        })
+        .collect();
+    assert_eq!(
+        config,
+        expected_config(offset_secs, rollover, today, notetypes[0], notes)
+    );
+
+    let collection = open(path);
+    let rows = collection.writer();
+    // F6.4: collapsed as Anki creates decks, expanded in recipes; no
+    // studied-today counters.
+    for id in decks {
+        let deck = rows.deck(DeckId(id)).unwrap().unwrap();
+        let common = &deck.common;
+        assert_eq!(
+            (common.study_collapsed, common.browser_collapsed),
+            (!recipe, !recipe),
+            "deck {}",
+            deck.human_name()
+        );
+        assert_eq!(
+            (
+                common.last_day_studied,
+                common.new_studied,
+                common.review_studied,
+                common.learning_studied,
+                common.milliseconds_studied
+            ),
+            (0, 0, 0, 0, 0)
+        );
+        assert_eq!((deck.mtime.0, deck.usn.0), (crt, -1));
+    }
+    // F6.5.
+    let mut field_ids = HashSet::new();
+    for id in &notetypes {
+        let nt = rows.notetype(NotetypeId(*id)).unwrap().unwrap();
+        let c = &nt.config;
+        assert_eq!((c.original_stock_kind, c.sort_field_idx), (0, 0), "{}", nt.name);
+        assert!(c.latex_pre.is_empty() && c.latex_post.is_empty());
+        let reqs: Vec<(u32, i32, Vec<u32>)> = c
+            .reqs
+            .iter()
+            .map(|r| (r.card_ord, r.kind, r.field_ords.clone()))
+            .collect();
+        let wanted: Vec<(u32, i32, Vec<u32>)> = (0..nt.templates.len() as u32).map(|ord| (ord, 1, vec![0])).collect();
+        assert_eq!(reqs, wanted, "{}: reqs", nt.name);
+        assert_eq!((nt.mtime.0, nt.usn.0), (crt, -1));
+        for field in &nt.fields {
+            assert_eq!((field.config.font_name.as_str(), field.config.font_size), ("Arial", 20));
+            assert!(field_ids.insert(field.config.id.unwrap()), "field ids are distinct");
+        }
+        for template in &nt.templates {
+            assert_eq!((template.mtime.0, template.usn.0), (0, 0));
+            assert!(template.config.id.is_some());
+        }
+    }
+    drop(collection);
+    // F6.7: one row per tag on notes, no parent rows, collapsed per kind.
+    let mut on_notes: Vec<String> = Vec::new();
+    for note in all_notes(path) {
+        assert!(note.tags.is_empty() || (note.tags.starts_with(' ') && note.tags.ends_with(' ')));
+        on_notes.extend(note.tags.split_whitespace().map(str::to_owned));
+    }
+    on_notes.sort_by_key(|t| t.to_lowercase());
+    on_notes.dedup_by_key(|t| t.to_lowercase());
+    let tag_rows = query(path, "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag");
+    let mut tags: Vec<String> = Vec::new();
+    for row in &tag_rows {
+        assert_eq!(
+            (int(&row[1]), int(&row[2]), &row[3]),
+            (-1, i64::from(!recipe), &SqlValue::Null)
+        );
+        tags.push(text(&row[0]));
+    }
+    tags.sort_by_key(|t| t.to_lowercase());
+    assert_eq!(tags, on_notes, "tag rows are the tags on notes");
+    // F6.8.
+    assert_eq!(int(&query(path, "SELECT count(*) FROM graves")[0][0]), 0);
+}
+
+#[test]
+fn collection_rows_are_those_of_a_new_collection() {
+    let p = shape();
+    let (dir, manifest) = run(&Request::new(p.clone(), 1500, 31));
+    assert_eq!(manifest.generator_version, 2);
+    assert_eq!(manifest.utc_offset_secs, p.utc_offset_secs);
+    check_collection_rows(
+        &collection(dir.path()),
+        NOW_MS,
+        p.utc_offset_secs,
+        p.rollover_hour,
+        false,
+    );
+    for name in Recipe::names().unwrap() {
+        let recipe = Recipe::named(&name).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        generate_recipe(&recipe, 1, dir.path()).unwrap();
+        let (now_ms, offset) = recipe.instant().unwrap();
+        check_collection_rows(
+            &collection(dir.path()),
+            now_ms,
+            offset,
+            recipe.rollover_hour.unwrap_or(4),
+            true,
+        );
+    }
+    // A recipe at +09:00 writes creationOffset -540 (minutes west).
+    let recipe = Recipe::named("error-prone").unwrap();
+    assert!(recipe.now.ends_with("+09:00"));
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = generate_recipe(&recipe, 1, dir.path()).unwrap();
+    assert_eq!(manifest.utc_offset_secs, 32_400);
+    let offset = query(
+        &collection(dir.path()),
+        "SELECT val FROM config WHERE KEY = 'creationOffset'",
+    );
+    assert_eq!(text(&offset[0][0]), "-540");
+}
+
+#[test]
+fn note_tags_are_in_unicase_order() {
+    let recipe = Recipe {
+        recipe: "tags".to_owned(),
+        description: "tag order".to_owned(),
+        now: "2030-01-15T10:00:00Z".to_owned(),
+        rollover_hour: None,
+        presets: Vec::new(),
+        decks: vec![DeckSpec {
+            name: "Tags".to_owned(),
+            new: 1,
+            tags: vec![
+                "beta".to_owned(),
+                "Alpha".to_owned(),
+                "_under".to_owned(),
+                "Zeta".to_owned(),
+                "alpha".to_owned(),
+            ],
+            ..DeckSpec::default()
+        }],
+    };
+    let dir = tempfile::tempdir().unwrap();
+    generate_recipe(&recipe, 1, dir.path()).unwrap();
+    let notes = all_notes(&collection(dir.path()));
+    // `_` (U+005F) sorts before letters once case is folded; `alpha` is
+    // `Alpha`, which came first.
+    assert_eq!(notes[0].tags, " _under Alpha beta Zeta ");
+}
+
+#[test]
+fn requests_needing_a_million_positions_are_refused() {
+    let p = shape();
+    // About 0.87 notes per card: 1.2M cards need more than 999,999 notes.
+    let cards = 1_200_000;
+    assert!(p.totals.notes as f64 / p.totals.cards as f64 * cards as f64 > 999_999.0);
+    let dir = tempfile::tempdir().unwrap();
+    let watch = meguri_testkit::wallclock::Stopwatch::start();
+    let result = generate::generate(&Request::new(p, cards, 1), dir.path());
+    assert!(matches!(result, Err(GenError::Request(_))), "{result:?}");
+    assert!(watch.elapsed_ms() < 60_000, "refused before generating");
+    assert!(!collection(dir.path()).exists());
+}
+
+#[test]
+fn an_fsrs_refusal_is_a_generation_error() {
+    let fsrs = generate::revlog::Fsrs::new();
+    assert!(matches!(fsrs.states(&[]), Err(GenError::Fsrs(_))));
+    // A history the generator makes is never refused.
+    assert_eq!(fsrs.states(&[(3, 0), (1, 2), (3, 2), (4, 9)]).unwrap().len(), 4);
 }

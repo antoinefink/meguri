@@ -1,6 +1,8 @@
-//! A card and its review log from its review instants: the history comes
-//! first, and the card's scheduling fields and `data` follow from it
-//! (`model/row-records` R4, R5; `model/card-data-json`).
+//! A card and its review log from its answer instants
+//! (`fixtures/synthetic-collections` F5): the history comes first, and the
+//! card's scheduling fields and `data` follow from it as Anki's scheduler
+//! with the generated presets would have written them (`model/row-records`
+//! R4, R5; `model/card-data-json`).
 
 use meguri_model::card::{Card, CardQueue, CardType};
 use meguri_model::card_data::{CardData, MemoryState};
@@ -10,23 +12,22 @@ use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 
 use super::profile::RevlogShape;
-use super::revlog::{Ending, Fsrs, difficulty_factor, outcomes};
+use super::revlog::{Delay, Ending, Fsrs, Phase, difficulty_factor, outcomes};
 use super::rng::Rng;
-use super::{DESIRED_RETENTION, Ids, Timeline};
+use super::{DESIRED_RETENTION, GenError, Ids, Timeline};
 
-/// When a review card falls due.
+/// When a review card falls due (F5.5 due targets).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Due {
     /// As its interval gives.
     Any,
     /// Today or earlier: the interval is shortened to reach today at most.
-    /// Its last review must be before today.
     Today,
     /// After today: the interval is lengthened past today at least.
     Later,
 }
 
-/// The state a card ends in.
+/// The state a card ends in (F5.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     New,
@@ -43,12 +44,14 @@ impl Target {
     }
 }
 
-/// Learning and relearning cards are due again this long after their last
-/// review.
-pub const STEP_SECS: i64 = 600;
-
-/// `cards.factor` of a card that has left the new queue.
+/// `cards.factor` of a card the moment it first reaches review (F5.4).
 pub const STARTING_FACTOR: u16 = 2500;
+
+/// The lowest `cards.factor` after Again or Hard (F5.4).
+pub const MINIMUM_FACTOR: u16 = 1300;
+
+/// The most `revlog.time` holds: the presets cap answer times at 60 s.
+pub const MAX_ANSWER_MS: i64 = 60_000;
 
 pub struct CardInput<'a> {
     pub id: CardId,
@@ -59,8 +62,43 @@ pub struct CardInput<'a> {
     pub position: u32,
     pub created_ms: i64,
     pub target: Target,
-    /// Review instants, increasing, after `id`.
+    /// Answer instants, increasing, after `id`, before the pinned day.
     pub reviews: &'a [i64],
+}
+
+/// What one answer scheduled, after the day-boundary rule (F5.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scheduled {
+    Secs(i64),
+    /// A delay in seconds that reached the next day.
+    OneDay,
+    Days(u32),
+}
+
+impl Scheduled {
+    /// `revlog.ivl` (F5.6).
+    fn revlog_ivl(self) -> i32 {
+        match self {
+            Scheduled::Secs(secs) => -(secs as i32),
+            Scheduled::OneDay => 1,
+            Scheduled::Days(days) => days as i32,
+        }
+    }
+}
+
+/// F5.4: `cards.factor` after an answer given in phase `before` that left
+/// the card in `after`.
+fn next_factor(factor: u16, before: Phase, after: Phase, button: u8) -> u16 {
+    match before {
+        Phase::Step1 | Phase::Step2 if after == Phase::Review && factor == 0 => STARTING_FACTOR,
+        Phase::Review => match button {
+            1 => factor.saturating_sub(200).max(MINIMUM_FACTOR),
+            2 => factor.saturating_sub(150).max(MINIMUM_FACTOR),
+            4 => factor.saturating_add(150),
+            _ => factor,
+        },
+        _ => factor,
+    }
 }
 
 /// The card row and its review-log rows.
@@ -71,7 +109,7 @@ pub fn card_rows(
     input: &CardInput<'_>,
     revlog_ids: &mut Ids,
     rng: &mut Rng,
-) -> (Card, Vec<RevlogEntry>) {
+) -> Result<(Card, Vec<RevlogEntry>), GenError> {
     let mut card = Card {
         id: input.id,
         note_id: input.note_id,
@@ -93,17 +131,17 @@ pub fn card_rows(
         data: CardData::default(),
     };
     if input.target.is_new() || input.reviews.is_empty() {
-        return (card, Vec::new());
+        return Ok((card, Vec::new()));
     }
     let wanted = match input.target {
         Target::Learning => Ending::Learning,
         Target::Relearning => Ending::Relearning,
         _ => Ending::Review,
     };
-    let (buttons, ending) = outcomes(shape, wanted, input.reviews.len(), rng);
+    let (answers, ending) = outcomes(shape, wanted, input.reviews.len(), rng);
 
-    // Review-log ids: each instant, moved past the previous id and any id
-    // already taken.
+    // Review-log ids: each instant, moved past the previous id of the card
+    // (its own id first) and any id already taken (F4.7).
     let mut ids = Vec::with_capacity(input.reviews.len());
     let mut previous = input.id.0;
     for &instant in input.reviews {
@@ -112,33 +150,79 @@ pub fn card_rows(
         previous = id;
     }
     let days: Vec<i64> = ids.iter().map(|&id| timeline.day_of(id)).collect();
-    let history: Vec<(u8, i64)> = buttons.iter().zip(&days).map(|(&(b, _), &d)| (b, d)).collect();
-    let states = fsrs.states(&history);
-    let last_ms = *ids.last().expect("a reviewed card has reviews");
-    let last_secs = last_ms.div_euclid(1000);
-    let last_day = *days.last().expect("a reviewed card has reviews");
-    let stability = states.as_ref().and_then(|s| s.last()).map(|s| s.stability);
+    let history: Vec<(u8, i64)> = answers.iter().zip(&days).map(|(a, &d)| (a.button, d)).collect();
+    let states = fsrs.states(&history)?;
+    if states.len() != answers.len() {
+        return Err(GenError::Fsrs(format!(
+            "{} memory states for {} answers",
+            states.len(),
+            answers.len()
+        )));
+    }
 
-    let final_interval = match ending {
-        Ending::Learning => {
+    // What each answer scheduled (F5.1).
+    let mut scheduled: Vec<Scheduled> = answers
+        .iter()
+        .zip(&ids)
+        .zip(&days)
+        .zip(&states)
+        .map(|(((answer, &id), &day), state)| match answer.delay {
+            Delay::Secs(secs) => {
+                let next_day_ms = (timeline.crt + (day + 1) * 86_400) * 1000;
+                if id + secs * 1000 >= next_day_ms {
+                    Scheduled::OneDay
+                } else {
+                    Scheduled::Secs(secs)
+                }
+            }
+            Delay::Days => Scheduled::Days(fsrs.interval(state.stability)),
+        })
+        .collect();
+
+    let last = answers.len() - 1;
+    let last_ms = ids[last];
+    let last_secs = last_ms.div_euclid(1000);
+    let last_day = days[last];
+    let last_state = states[last];
+    let last_phase = answers[last].after;
+    debug_assert!(matches!(
+        (ending, last_phase),
+        (Ending::Learning, Phase::Step1 | Phase::Step2)
+            | (Ending::Relearning, Phase::Relearning)
+            | (Ending::Review, Phase::Review)
+    ));
+
+    // F5.5: the card's columns from its last answer.
+    let learning_due = |card: &mut Card, scheduled: Scheduled| match scheduled {
+        Scheduled::Secs(secs) => {
+            card.queue = CardQueue::Learning;
+            card.due = i32::try_from(last_secs + secs).unwrap_or(i32::MAX);
+        }
+        _ => {
+            card.queue = CardQueue::InterdayLearning;
+            card.due = i32::try_from(last_day + 1).unwrap_or(i32::MAX);
+        }
+    };
+    match last_phase {
+        Phase::Step1 | Phase::Step2 => {
             card.card_type = CardType::Learning;
-            card.queue = CardQueue::Learning;
-            card.due = i32::try_from(last_secs + STEP_SECS).unwrap_or(i32::MAX);
-            card.remaining_steps = 1;
-            -(STEP_SECS as i32)
+            learning_due(&mut card, scheduled[last]);
+            card.interval = 0;
+            card.remaining_steps = if last_phase == Phase::Step1 { 2 } else { 1 };
         }
-        Ending::Relearning => {
+        Phase::Relearning => {
             card.card_type = CardType::Relearning;
-            card.queue = CardQueue::Learning;
-            card.due = i32::try_from(last_secs + STEP_SECS).unwrap_or(i32::MAX);
-            card.interval = stability.map_or(1, |s| fsrs.interval(s));
+            learning_due(&mut card, scheduled[last]);
+            card.interval = fsrs.interval(last_state.stability);
             card.remaining_steps = 1;
-            -(STEP_SECS as i32)
         }
-        Ending::Review => {
-            let natural = stability.map_or(1, |s| fsrs.interval(s)) as i64;
+        Phase::Review => {
+            let natural = match scheduled[last] {
+                Scheduled::Days(days) => i64::from(days),
+                _ => 1,
+            };
             let interval = match input.target {
-                Target::Review(Due::Today) => natural.min((timeline.today - last_day).max(1)),
+                Target::Review(Due::Today) => natural.min(timeline.today - last_day).max(1),
                 Target::Review(Due::Later) => natural.max(timeline.today - last_day + 1),
                 _ => natural,
             }
@@ -146,58 +230,55 @@ pub fn card_rows(
             card.card_type = CardType::Review;
             card.queue = match input.target {
                 Target::Suspended => CardQueue::Suspended,
-                Target::Buried => CardQueue::BuriedByScheduler,
+                Target::Buried => CardQueue::BuriedByUser,
                 _ => CardQueue::Review,
             };
             card.interval = interval as u32;
             card.due = i32::try_from(last_day + interval).unwrap_or(i32::MAX);
-            interval as i32
+            card.remaining_steps = 0;
+            scheduled[last] = Scheduled::Days(interval as u32);
         }
-    };
-    card.ease_factor = STARTING_FACTOR;
-    card.reps = ids.len() as u32;
-    card.lapses = buttons
+    }
+    let mut factor = 0u16;
+    let mut before = Phase::Step1;
+    for answer in &answers {
+        factor = next_factor(factor, before, answer.after, answer.button);
+        before = answer.after;
+    }
+    card.ease_factor = factor;
+    card.reps = answers.len() as u32;
+    card.lapses = answers
         .iter()
-        .filter(|&&(b, kind)| b == 1 && kind == RevlogKind::Review)
+        .filter(|a| a.button == 1 && a.kind == RevlogKind::Review)
         .count() as u32;
     card.mtime = EpochSecs(last_secs);
     card.data.new_position = Some(input.position);
-    card.data.memory_state = states.as_ref().and_then(|s| s.last()).map(|s| MemoryState {
-        stability: s.stability,
-        difficulty: s.difficulty,
+    card.data.memory_state = Some(MemoryState {
+        stability: last_state.stability,
+        difficulty: last_state.difficulty,
     });
     card.data.desired_retention = Some(DESIRED_RETENTION);
     card.data.decay = Some(fsrs.decay());
     card.data.last_review_secs = Some(last_secs);
 
+    // F5.6: the review log.
     let mut entries = Vec::with_capacity(ids.len());
     let mut last_interval = 0i32;
-    for i in 0..ids.len() {
-        let interval = if i + 1 == ids.len() {
-            final_interval
-        } else if days[i + 1] > days[i] {
-            i32::try_from(days[i + 1] - days[i]).unwrap_or(i32::MAX)
-        } else {
-            -i32::try_from(((ids[i + 1] - ids[i]) / 1000).max(1)).unwrap_or(i32::MAX)
-        };
-        let difficulty = states.as_ref().and_then(|s| s.get(i)).map(|s| s.difficulty);
-        let answer = shape
-            .answer_ms
-            .sample(rng)
-            .unwrap_or(8000)
-            .clamp(0, i64::from(u32::MAX));
+    for (i, answer) in answers.iter().enumerate() {
+        let interval = scheduled[i].revlog_ivl();
+        let time = shape.answer_ms.sample(rng).unwrap_or(8000).clamp(0, MAX_ANSWER_MS);
         entries.push(RevlogEntry {
             id: RevlogId(ids[i]),
             card_id: input.id,
             usn: Usn::PENDING,
-            button: buttons[i].0,
+            button: answer.button,
             interval,
             last_interval,
-            ease_factor: difficulty.map_or(u32::from(STARTING_FACTOR), difficulty_factor),
-            answer_millis: answer as u32,
-            kind: buttons[i].1,
+            ease_factor: difficulty_factor(states[i].difficulty),
+            answer_millis: time as u32,
+            kind: answer.kind,
         });
         last_interval = interval;
     }
-    (card, entries)
+    Ok((card, entries))
 }

@@ -107,7 +107,6 @@ fn profile_extract_writes_a_profile_from_a_copy() {
     let target = dir.path().join("shape.json");
     let out = cli(&[
         "profile-extract",
-        "--collection",
         path(&collection),
         "--media-dir",
         path(&source.join("collection.media")),
@@ -136,6 +135,26 @@ fn bad_arguments_are_usage_errors() {
         &["generate", "10k"],
         &["generate", "recipe", "no-such-recipe", "--out", "/tmp/x"],
         &["profile-extract", "--out", "/tmp/x"],
+        // F2.6: the media folder and the zone are required.
+        &["profile-extract", "/tmp/c.anki2", "--tz", "UTC", "--out", "/tmp/x"],
+        &[
+            "profile-extract",
+            "/tmp/c.anki2",
+            "--media-dir",
+            "/tmp/m",
+            "--out",
+            "/tmp/x",
+        ],
+        &[
+            "profile-extract",
+            "/tmp/c.anki2",
+            "--media-dir",
+            "/tmp/m",
+            "--tz",
+            "Nowhere/Atlantis",
+            "--out",
+            "/tmp/x",
+        ],
     ] {
         let out = cli(args);
         assert_eq!(

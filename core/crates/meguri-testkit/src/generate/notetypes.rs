@@ -7,7 +7,7 @@
 use meguri_model::ids::NotetypeId;
 use meguri_model::notetype::{Notetype, NotetypeField, NotetypeTemplate};
 use meguri_model::proto::ProtoBlob;
-use meguri_model::proto::notetype::{FieldConfig, NotetypeConfig, TemplateConfig};
+use meguri_model::proto::notetype::{CardRequirement, FieldConfig, NotetypeConfig, TemplateConfig};
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 
@@ -181,9 +181,21 @@ pub fn notetype(
             }
         })
         .collect();
+    // F6.5: sort field 0, no LaTeX, `original_stock_kind` 0 whatever the
+    // profile's, and the requirements Anki computes on every save of these
+    // templates: each front needs the first field (kind 1, any).
     let mut config = NotetypeConfig::default();
     config.kind = if kind == Kind::Cloze { 1 } else { 0 };
     config.css = css(shape.css_bytes);
+    config.reqs = (0..template_count as u32)
+        .map(|ord| {
+            let mut req = CardRequirement::default();
+            req.card_ord = ord;
+            req.kind = 1;
+            req.field_ords = vec![0];
+            req
+        })
+        .collect();
     Notetype {
         id,
         name: name.to_owned(),

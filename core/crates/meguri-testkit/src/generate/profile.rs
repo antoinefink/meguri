@@ -401,8 +401,13 @@ impl Profile {
         if self.format != FORMAT {
             return bad(format!("format {} (this generator reads {FORMAT})", self.format));
         }
-        if self.rollover_hour > 23 || UtcOffset::from_seconds(self.utc_offset_secs).is_none() {
-            return bad("rollover hour or UTC offset out of range".to_owned());
+        if self.rollover_hour > 23
+            || UtcOffset::from_seconds(self.utc_offset_secs).is_none()
+            || self.utc_offset_secs % 60 != 0
+        {
+            return bad(
+                "rollover hour out of range, or a UTC offset that is not whole minutes within a day".to_owned(),
+            );
         }
         let mut histograms: Vec<(&str, &Histogram)> = vec![
             ("decks.depth", &self.decks.depth),
@@ -461,6 +466,29 @@ pub type OffsetAt<'a> = &'a dyn Fn(i64) -> i32;
 /// read in). The file is opened through the open gate, which may upgrade
 /// it: pass a copy (`extract` does).
 pub fn measure(path: &Path, media_dir: Option<&Path>, offset_at: OffsetAt<'_>) -> Result<Profile, GenError> {
+    measure_with_span(path, media_dir, offset_at, None)
+}
+
+/// [`measure`] for a comparison with `reference` (F2.5, F3): the day
+/// histograms (`review_days`, `unreviewed_creation_days`) get the edges of
+/// the reference's `span_days`, never those of a span recomputed from the
+/// measured rows, which may end a day earlier. `totals.span_days` is still
+/// the measured one.
+pub fn measure_against(
+    path: &Path,
+    media_dir: Option<&Path>,
+    offset_at: OffsetAt<'_>,
+    reference: &Profile,
+) -> Result<Profile, GenError> {
+    measure_with_span(path, media_dir, offset_at, Some(reference.totals.span_days))
+}
+
+fn measure_with_span(
+    path: &Path,
+    media_dir: Option<&Path>,
+    offset_at: OffsetAt<'_>,
+    histogram_span: Option<u64>,
+) -> Result<Profile, GenError> {
     let clock = FixedClock::new(0, UtcOffset::UTC);
     let random = SeededRandom::new(0);
     let collection = open_collection(path, &OpenOptions::new(&clock, &random)).map_err(GenError::open)?;
@@ -525,7 +553,7 @@ pub fn measure(path: &Path, media_dir: Option<&Path>, offset_at: OffsetAt<'_>) -
 
     // Notes: creation, fields, media references, tags.
     let mut note_info: HashMap<i64, (usize, i64)> = HashMap::new();
-    let mut distinct_tags: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut distinct_tags: std::collections::BTreeSet<super::UnicaseTag> = std::collections::BTreeSet::new();
     let mut tag_depth = Histogram::linear(1, 8, 1);
     let mut tags_per_note = Histogram::linear(0, 16, 1);
     let mut note_count = 0u64;
@@ -558,8 +586,8 @@ pub fn measure(path: &Path, media_dir: Option<&Path>, offset_at: OffsetAt<'_>) -
             let tags: Vec<&str> = note.tags.split_whitespace().collect();
             tags_per_note.add(tags.len() as i64);
             for tag in tags {
-                let folded = tag.to_lowercase();
-                if distinct_tags.insert(folded) {
+                // Distinct under `unicase` (F2.3, `text/unicode-primitives` U2).
+                if distinct_tags.insert(super::UnicaseTag(tag.to_owned())) {
                     tag_depth.add(tag.split("::").count() as i64);
                 }
             }
@@ -653,16 +681,19 @@ pub fn measure(path: &Path, media_dir: Option<&Path>, offset_at: OffsetAt<'_>) -
     } else {
         day_of(last_activity_ms).max(0)
     };
-    let mut review_days = Histogram::linear(0, span_days, DAY_BUCKET);
+    let histogram_span = histogram_span.map_or(span_days, |span| i64::try_from(span).unwrap_or(i64::MAX / 2));
+    let mut review_days = Histogram::linear(0, histogram_span, DAY_BUCKET);
     let mut hour_of_day = Histogram::linear(0, 23, 1);
     for &ms in &review_ms {
         review_days.add(day_of(ms));
         let local = ms.div_euclid(1000) + i64::from(offset_at(ms));
         hour_of_day.add(local.rem_euclid(86_400) / 3600);
     }
-    let mut unreviewed = Histogram::linear(0, span_days, DAY_BUCKET);
-    for (note_id, (_, reviewed)) in &cards_of_note {
-        if !reviewed {
+    // Notes whose note type exists (the others count in the totals only),
+    // none of whose cards has a row; a note without cards is one.
+    let mut unreviewed = Histogram::linear(0, histogram_span, DAY_BUCKET);
+    for note_id in note_info.keys() {
+        if !cards_of_note.get(note_id).is_some_and(|&(_, reviewed)| reviewed) {
             unreviewed.add(day_of(*note_id));
         }
     }

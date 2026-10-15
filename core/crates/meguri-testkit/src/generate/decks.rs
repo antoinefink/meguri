@@ -81,12 +81,14 @@ pub fn presets(profile: &Profile, worst: Option<&WorstCase>, timeline: &Timeline
         .collect()
 }
 
-pub fn deck(id: DeckId, human_name: &str, preset: DeckConfigId, timeline: &Timeline) -> Deck {
+/// A normal deck (F6.4). `collapsed` sets `study_collapsed` and
+/// `browser_collapsed`: Anki creates every deck collapsed, and recipes
+/// expand theirs so UI fixtures show the whole tree. The studied-today
+/// counters stay at their defaults: no answer falls on the pinned day.
+pub fn deck(id: DeckId, human_name: &str, preset: DeckConfigId, timeline: &Timeline, collapsed: bool) -> Deck {
     let mut common = DeckCommon::default();
-    if id.0 == 1 {
-        common.study_collapsed = true;
-        common.browser_collapsed = true;
-    }
+    common.study_collapsed = collapsed;
+    common.browser_collapsed = collapsed;
     let mut normal = NormalDeck::default();
     normal.config_id = preset.0;
     Deck {
@@ -143,13 +145,13 @@ pub fn decks(
 ) -> DeckPlan {
     let default_preset = presets[0].id;
     let mut out = vec![GenDeck {
-        record: deck(DeckId(ids.claim(1)), "Default", default_preset, timeline),
+        record: deck(DeckId(ids.claim(1)), "Default", default_preset, timeline, true),
         weight: 0,
     }];
     if worst.is_some_and(|w| w.due_deck.is_some()) {
         let preset = presets.get(1).map_or(default_preset, |p| p.id);
         out.push(GenDeck {
-            record: deck(DeckId(ids.claim(timeline.crt_ms())), "Due", preset, timeline),
+            record: deck(DeckId(ids.claim(timeline.crt_ms() + 1)), "Due", preset, timeline, true),
             weight: 1,
         });
         return DeckPlan::new(out);
@@ -182,7 +184,7 @@ pub fn decks(
         let preset = presets[rng.weighted(&preset_weights).unwrap_or(0)].id;
         let id = DeckId(ids.claim(timeline.crt_ms() + n as i64));
         out.push(GenDeck {
-            record: deck(id, &name, preset, timeline),
+            record: deck(id, &name, preset, timeline, true),
             weight: profile.decks.cards_per_deck.sample(rng).unwrap_or(1).max(0) as u64,
         });
     }

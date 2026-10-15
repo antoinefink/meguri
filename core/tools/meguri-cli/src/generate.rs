@@ -10,8 +10,14 @@
 //!          --media references|files  --cache (reuse DIR when its manifest matches)
 //! ```
 //!
-//! Prints `{dir, cached, elapsed_ms, peak_rss_kb, manifest}` as JSON. Exit
-//! 0 on success, 1 when generation fails, 2 for a usage error.
+//! A recipe is generated again every time, `--cache` or not: its manifest
+//! does not identify the recipe's text, so an edited recipe would match an
+//! old directory, and a recipe takes well under a second.
+//!
+//! Prints `{dir, cached, elapsed_ms, peak_rss_kb, manifest}` as JSON, plus
+//! `large_field_notes` for a worst case with large fields: the ids of the
+//! notes holding one, which `tools/mg fixtures-check` renders in the oracle
+//! (F11). Exit 0 on success, 1 when generation fails, 2 for a usage error.
 
 use std::path::{Path, PathBuf};
 
@@ -114,6 +120,7 @@ fn cached(dir: &Path, wanted: &Manifest) -> Option<Manifest> {
         && have.seed == wanted.seed
         && have.cards_requested == wanted.cards_requested
         && have.now_ms == wanted.now_ms
+        && have.utc_offset_secs == wanted.utc_offset_secs
         && have.profile_sha256 == wanted.profile_sha256
         && have.media == wanted.media
         && dir.join("collection.anki2").is_file();
@@ -151,19 +158,7 @@ pub fn main(args: &[String]) -> i32 {
                 Ok(recipe) => recipe,
                 Err(message) => return usage(&message),
             };
-            let wanted = Manifest {
-                generator_version: GENERATOR_VERSION,
-                kind: "recipe".to_owned(),
-                name: recipe.recipe.clone(),
-                seed: options.seed,
-                cards_requested: 0,
-                now_ms: recipe.instant().map(|(ms, _)| ms).unwrap_or_default(),
-                profile_sha256: None,
-                media: MediaMode::Files,
-                counts: Default::default(),
-                dump_sha256: String::new(),
-            };
-            (wanted, None, Some(recipe))
+            (None, None, Some(recipe))
         }
         other => {
             let profile = match profile() {
@@ -197,24 +192,25 @@ pub fn main(args: &[String]) -> i32 {
                 seed: options.seed,
                 cards_requested: cards,
                 now_ms: options.now_ms,
+                utc_offset_secs: request.profile.utc_offset_secs,
                 profile_sha256: Some(request.profile.sha256()),
                 media,
                 counts: Default::default(),
                 dump_sha256: String::new(),
             };
-            (wanted, Some(request), None)
+            (Some(wanted), Some(request), None)
         }
     };
 
-    if options.cache {
-        let mut probe = wanted.clone();
-        if let Some(have) = Manifest::load(&options.out).ok().filter(|_| recipe.is_some()) {
-            // A recipe's card count is known only after generating it.
-            probe.cards_requested = have.cards_requested;
-        }
-        if let Some(have) = cached(&options.out, &probe) {
-            return report(&options.out, true, &watch, &have);
-        }
+    let large_fields = request
+        .as_ref()
+        .and_then(|r| r.worst_case.as_ref())
+        .and_then(|w| w.large_fields.as_ref())
+        .map(|large| large.bytes);
+    if options.cache
+        && let Some(have) = wanted.as_ref().and_then(|wanted| cached(&options.out, wanted))
+    {
+        return report(&options.out, true, &watch, &have, large_fields);
     }
     let result = match (request, recipe) {
         (Some(request), _) => generate::generate(&request, &options.out),
@@ -222,7 +218,7 @@ pub fn main(args: &[String]) -> i32 {
         (None, None) => unreachable!("one of them is set"),
     };
     match result {
-        Ok(manifest) => report(&options.out, false, &watch, &manifest),
+        Ok(manifest) => report(&options.out, false, &watch, &manifest, large_fields),
         Err(e) => {
             eprintln!("meguri-cli generate: {e}");
             1
@@ -230,14 +226,23 @@ pub fn main(args: &[String]) -> i32 {
     }
 }
 
-fn report(dir: &Path, cached: bool, watch: &Stopwatch, manifest: &Manifest) -> i32 {
-    let summary = json!({
+fn report(dir: &Path, cached: bool, watch: &Stopwatch, manifest: &Manifest, large_fields: Option<u64>) -> i32 {
+    let mut summary = json!({
         "dir": dir.display().to_string(),
         "cached": cached,
         "elapsed_ms": watch.elapsed_ms(),
         "peak_rss_kb": peak_rss_kb(),
         "manifest": manifest,
     });
+    if let Some(bytes) = large_fields {
+        match generate::notes_with_field_of(&dir.join("collection.anki2"), bytes) {
+            Ok(ids) => summary["large_field_notes"] = json!(ids),
+            Err(e) => {
+                eprintln!("meguri-cli generate: reading the large-field notes: {e}");
+                return 1;
+            }
+        }
+    }
     println!(
         "{}",
         serde_json::to_string_pretty(&summary).expect("a summary serializes")

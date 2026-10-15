@@ -18,7 +18,7 @@ fn main() {
         _ => {
             eprintln!("usage: meguri-cli conformance <command> ...   (meguri-cli conformance help)");
             eprintln!("       meguri-cli generate <size>|worst-case <name>|recipe <name> --out DIR [options]");
-            eprintln!("       meguri-cli profile-extract --collection PATH --out FILE [--media-dir DIR] [--tz IANA]");
+            eprintln!("       meguri-cli profile-extract <collection> --media-dir <dir> --tz <IANA zone> --out <file>");
             2
         }
     };

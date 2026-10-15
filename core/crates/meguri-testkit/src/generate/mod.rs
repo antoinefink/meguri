@@ -25,6 +25,7 @@ pub mod revlog;
 pub mod rng;
 pub mod worst_case;
 
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -36,7 +37,7 @@ use meguri_model::rng::SeededRandom;
 use meguri_model::tag::Tag;
 use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
-use meguri_storage::{CollectionBuilder, OpenOptions, Record, StampMode, StorageError, Table, WriteScope};
+use meguri_storage::{CollectionBuilder, OpenOptions, ReadRows, Record, StampMode, StorageError, Table, WriteScope};
 use serde::{Deserialize, Serialize};
 
 pub use profile::{Histogram, Profile};
@@ -46,11 +47,16 @@ use cards::Target;
 use rng::{Rng, Stream};
 
 /// Bumped whenever the same request would give other rows; cached outputs
-/// carry it in their manifest.
-pub const GENERATOR_VERSION: u32 = 1;
+/// carry it in their manifest. Version 2 is `fixtures/synthetic-collections`
+/// as specified (F10.4).
+pub const GENERATOR_VERSION: u32 = 2;
 
 /// The default pinned instant: 2030-01-15T10:00:00Z, the scenarios' clock.
 pub const DEFAULT_NOW_MS: i64 = 1_894_701_600_000;
+
+/// `now` must be before this: 2038-01-19T03:14:07Z minus one day, so every
+/// `due` in epoch seconds fits `i32` (F4.3).
+pub const LATEST_NOW_MS: i64 = (2_147_483_647 - 86_400) * 1000;
 
 /// The desired retention every generated preset uses and every card was
 /// scheduled with.
@@ -59,13 +65,23 @@ pub const DESIRED_RETENTION: f32 = 0.9;
 /// Notes per write transaction.
 const CHUNK_NOTES: usize = 2000;
 
+/// The most notes a request may need: positions stay below 1,000,000
+/// (F6.6).
+pub const MAX_NOTES: u64 = 999_999;
+
 #[derive(Debug)]
 pub enum GenError {
-    Io { path: PathBuf, detail: String },
+    Io {
+        path: PathBuf,
+        detail: String,
+    },
     Storage(String),
     Profile(String),
     Recipe(String),
     Request(String),
+    /// fsrs refused a generated history (F5.3): a generator bug, never
+    /// patched over.
+    Fsrs(String),
 }
 
 impl GenError {
@@ -93,6 +109,7 @@ impl fmt::Display for GenError {
             GenError::Profile(detail) => write!(f, "profile: {detail}"),
             GenError::Recipe(detail) => write!(f, "recipe: {detail}"),
             GenError::Request(detail) => write!(f, "request: {detail}"),
+            GenError::Fsrs(detail) => write!(f, "fsrs refused a history: {detail}"),
         }
     }
 }
@@ -181,6 +198,9 @@ pub struct Manifest {
     pub seed: u64,
     pub cards_requested: u64,
     pub now_ms: i64,
+    /// The UTC offset the collection was written in, seconds east of UTC
+    /// (F10.2): the oracle check picks its zone from it.
+    pub utc_offset_secs: i32,
     pub profile_sha256: Option<String>,
     pub media: MediaMode,
     pub counts: Counts,
@@ -270,7 +290,7 @@ impl Timeline {
 }
 
 /// Ids taken in one table. A candidate that is taken moves up by one until
-/// it is free, as the storage rule moves a taken one (`ids-usn-mtime` I2).
+/// it is free (F4.7, the generator's own rule).
 #[derive(Debug, Default)]
 pub struct Ids(HashSet<i64>);
 
@@ -317,19 +337,48 @@ pub(crate) struct Output<'a> {
     pub media_dir: PathBuf,
     pub media: MediaMode,
     pub counts: Counts,
-    tags: BTreeSet<String>,
-    tag_keys: HashSet<String>,
+    /// Distinct tags on notes, in `unicase` order, spelled as first seen.
+    tags: BTreeSet<UnicaseTag>,
+    /// `tags.collapsed` (F6.7).
+    tags_collapsed: bool,
     pending: Pending,
+}
+
+/// A tag ordered and compared by `unicase` (`text/unicode-primitives` U2),
+/// as the `tags` table's key is.
+#[derive(Debug)]
+pub(crate) struct UnicaseTag(pub(crate) String);
+
+impl PartialEq for UnicaseTag {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for UnicaseTag {}
+
+impl PartialOrd for UnicaseTag {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for UnicaseTag {
+    fn cmp(&self, other: &Self) -> Ordering {
+        meguri_text::fold::compare_folded(&self.0, &other.0)
+    }
 }
 
 impl<'a> Output<'a> {
     /// Creates the collection with its `col` row and config rows; it is
-    /// placed at `dir/collection.anki2` by [`Output::finish`].
+    /// placed at `dir/collection.anki2` by [`Output::finish`]. `collapsed`
+    /// is the tag rows' `collapsed` (F6.7).
     pub fn create(
         dir: &'a Path,
         timeline: &Timeline,
         config: &[ConfigEntry],
         media: MediaMode,
+        collapsed: bool,
     ) -> Result<Output<'a>, GenError> {
         std::fs::create_dir_all(dir).map_err(|e| GenError::io(dir, e))?;
         let path = dir.join("collection.anki2");
@@ -379,7 +428,7 @@ impl<'a> Output<'a> {
             media,
             counts: Counts::default(),
             tags: BTreeSet::new(),
-            tag_keys: HashSet::new(),
+            tags_collapsed: collapsed,
             pending: Pending::default(),
         })
     }
@@ -419,9 +468,8 @@ impl<'a> Output<'a> {
             }
         }
         for tag in rows.tags {
-            if self.tag_keys.insert(tag.to_lowercase()) {
-                self.tags.insert(tag);
-            }
+            // `insert` keeps the spelling already there.
+            self.tags.insert(UnicaseTag(tag));
         }
         self.pending.notes_in_batch += 1;
         if self.pending.notes_in_batch >= CHUNK_NOTES {
@@ -458,11 +506,11 @@ impl<'a> Output<'a> {
         let tags: Vec<_> = self
             .tags
             .iter()
-            .map(|name| {
+            .map(|UnicaseTag(name)| {
                 Tag {
                     name: name.clone(),
                     usn: Usn::PENDING,
-                    collapsed: false,
+                    collapsed: self.tags_collapsed,
                     config: None,
                 }
                 .to_cells()
@@ -514,17 +562,40 @@ pub(crate) fn config_entry(key: &str, json: &str, timeline: &Timeline) -> Config
     }
 }
 
-/// The config rows a generated collection starts with: the scheduler
-/// version the open gate requires, FSRS and the load balancer on (R1804),
-/// the rollover hour and the current deck.
+/// The config rows a generated collection starts with (F6.2): the keys of
+/// a new collection, FSRS and the load balancer on (R1804), the rollover
+/// hour, and `lastUnburied` today, which keeps buried cards buried at now.
+/// `curModel` and `nextPos` come with [`closing_config`].
 pub(crate) fn base_config(timeline: &Timeline) -> Vec<ConfigEntry> {
+    let creation_offset = -timeline.offset_secs / 60;
     vec![
         config_entry("activeDecks", "[1]", timeline),
+        config_entry("addToCur", "true", timeline),
+        config_entry("collapseTime", "1200", timeline),
+        config_entry("creationOffset", &creation_offset.to_string(), timeline),
         config_entry("curDeck", "1", timeline),
+        config_entry("dayLearnFirst", "false", timeline),
+        config_entry("dueCounts", "true", timeline),
+        config_entry("estTimes", "true", timeline),
         config_entry("fsrs", "true", timeline),
+        config_entry("lastUnburied", &timeline.today.to_string(), timeline),
         config_entry("loadBalancerEnabled", "true", timeline),
+        config_entry("newSpread", "0", timeline),
         config_entry("rollover", &timeline.rollover_hour.to_string(), timeline),
+        config_entry("sched2021", "true", timeline),
         config_entry("schedVer", "2", timeline),
+        config_entry("sortBackwards", "false", timeline),
+        config_entry("sortType", "\"noteFld\"", timeline),
+        config_entry("timeLim", "0", timeline),
+    ]
+}
+
+/// The config rows written last (F6.2): the first note type, and the next
+/// new-card position.
+pub(crate) fn closing_config(timeline: &Timeline, first_notetype: i64, notes: u64) -> Vec<ConfigEntry> {
+    vec![
+        config_entry("curModel", &first_notetype.to_string(), timeline),
+        config_entry("nextPos", &(notes + 1).to_string(), timeline),
     ]
 }
 
@@ -542,7 +613,12 @@ pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
     };
     let span = profile.totals.span_days.max(1);
     let timeline = Timeline::new(request.now_ms, profile.utc_offset_secs, profile.rollover_hour, span);
-    let mut out = Output::create(dir, &timeline, &base_config(&timeline), media)?;
+    if timeline.now_ms >= LATEST_NOW_MS {
+        return Err(GenError::Request(format!(
+            "now {} ms is too late: every due must fit i32 (F4.3)",
+            timeline.now_ms
+        )));
+    }
 
     let scale = request.cards as f64 / profile.totals.cards.max(1) as f64;
     let mut structure = Rng::stream(request.seed, Stream::Structure, 0);
@@ -551,6 +627,15 @@ pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
     let deck_plan = decks::decks(profile, worst, &presets, &timeline, &mut ids.decks, &mut structure);
     let types = notetypes::build(profile, worst, &timeline, &mut ids.notetypes, &mut structure);
     let tag_pool = notes::TagPool::build(profile, worst, scale, &mut structure);
+    let assignment = notes::assign_notetypes(profile, &types, request.cards, scale, &mut structure);
+    if assignment.len() as u64 > MAX_NOTES {
+        return Err(GenError::Request(format!(
+            "{} notes: positions must stay below 1,000,000, so at most {MAX_NOTES} notes (F6.6)",
+            assignment.len()
+        )));
+    }
+
+    let mut out = Output::create(dir, &timeline, &base_config(&timeline), media, true)?;
     out.counts.presets = presets.len() as u64;
     out.counts.decks = deck_plan.decks.len() as u64;
     out.counts.notetypes = types.len() as u64;
@@ -567,7 +652,6 @@ pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
         Ok(())
     })?;
 
-    let assignment = notes::assign_notetypes(profile, &types, request.cards, scale, &mut structure);
     let fsrs = revlog::Fsrs::new();
     let ctx = notes::NoteContext {
         profile,
@@ -581,14 +665,11 @@ pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
         total_notes: assignment.len() as u64,
     };
     for (index, &nt) in assignment.iter().enumerate() {
-        let rows = notes::generate_note(&ctx, index as u64, nt, &mut ids);
+        let rows = notes::generate_note(&ctx, index as u64, nt, &mut ids)?;
         out.push(rows)?;
     }
 
-    let closing = vec![
-        config_entry("curModel", &types[0].record.id.0.to_string(), &timeline),
-        config_entry("nextPos", &(assignment.len() as u64 + 1).to_string(), &timeline),
-    ];
+    let closing = closing_config(&timeline, types[0].record.id.0, assignment.len() as u64);
     let (kind, name) = match worst {
         Some(w) => ("worst-case", w.name.clone()),
         None => ("profile", request.cards.to_string()),
@@ -601,11 +682,37 @@ pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
         seed: request.seed,
         cards_requested: request.cards,
         now_ms: request.now_ms,
+        utc_offset_secs: profile.utc_offset_secs,
         profile_sha256: Some(profile_sha256),
         media,
         counts,
         dump_sha256: String::new(),
     })
+}
+
+/// The ids of the notes of the collection at `path` that hold a field of at
+/// least `bytes` UTF-8 bytes, in id order: the large-field worst case's
+/// notes, which the oracle collection check renders (F11).
+pub fn notes_with_field_of(path: &Path, bytes: u64) -> Result<Vec<i64>, GenError> {
+    let clock = FixedClock::new(0, UtcOffset::UTC);
+    let random = SeededRandom::new(0);
+    let collection =
+        meguri_storage::open_collection(path, &OpenOptions::new(&clock, &random)).map_err(GenError::open)?;
+    let rows = collection.writer();
+    let mut out = Vec::new();
+    let mut after = None;
+    loop {
+        let page = rows.notes_after(after, 1000).map_err(GenError::storage)?;
+        let Some(last) = page.last() else { break };
+        after = Some(last.id);
+        out.extend(
+            page.iter()
+                .filter(|note| note.field_values().any(|f| f.len() as u64 >= bytes))
+                .map(|note| note.id.0),
+        );
+    }
+    collection.close().map_err(GenError::storage)?;
+    Ok(out)
 }
 
 /// The id sets of the tables the generator allocates ids in.
