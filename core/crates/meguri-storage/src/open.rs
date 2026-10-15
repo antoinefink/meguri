@@ -5,8 +5,10 @@
 //! writes to a file that phase 2 refuses or creates a file next to it (C3,
 //! R1479).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
 
 use meguri_model::clock::Clock;
 use meguri_model::rng::RandomSource;
@@ -17,6 +19,7 @@ use crate::checkpoint::CheckpointOutcome;
 use crate::conn_init::{self, Initializers};
 use crate::connections::{READ_WRITE, Reader, ReaderRole, Writer, file_uri, sibling};
 use crate::error::{OpenError, StorageError, UpgradeStage};
+use crate::journal::JournalOptions;
 use crate::schema::expected_objects::{self, ExpectedObjects};
 use crate::schema::upgrade::{self, UpgradeContext};
 use crate::schema::version::{self, ProbeError, Probed};
@@ -84,6 +87,60 @@ pub struct OpenedCollection {
     upgraded_from: Option<i64>,
     pre_upgrade_copy: Option<PathBuf>,
     objects: ExpectedObjects,
+    _registered: Registered,
+}
+
+/// Paths of the collections open through the gate in this process, with how
+/// many times each is open: the storage-only builder refuses them.
+static OPEN_PATHS: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
+
+/// A path in one form whatever way it was given: its directory resolved.
+fn registry_key(path: &Path) -> PathBuf {
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    match (dir.canonicalize(), path.file_name()) {
+        (Ok(dir), Some(name)) => dir.join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Whether a collection is open at `path` in this process.
+pub(crate) fn is_open(path: &Path) -> bool {
+    let key = registry_key(path);
+    OPEN_PATHS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains_key(&key)
+}
+
+/// An open collection's place in [`OPEN_PATHS`], released when it drops.
+#[derive(Debug)]
+struct Registered(PathBuf);
+
+impl Registered {
+    fn new(path: &Path) -> Registered {
+        let key = registry_key(path);
+        *OPEN_PATHS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(key.clone())
+            .or_default() += 1;
+        Registered(key)
+    }
+}
+
+impl Drop for Registered {
+    fn drop(&mut self) {
+        let mut paths = OPEN_PATHS.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = paths.get_mut(&self.0) {
+            *count -= 1;
+            if *count == 0 {
+                paths.remove(&self.0);
+            }
+        }
+    }
 }
 
 impl OpenedCollection {
@@ -110,6 +167,15 @@ impl OpenedCollection {
     /// table is missing.
     pub fn expected_objects(&self) -> &ExpectedObjects {
         &self.objects
+    }
+
+    /// The write journal's options for this collection: the default spill
+    /// threshold, spilling into the collection's directory.
+    pub fn journal_options(&self) -> JournalOptions {
+        match self.path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => JournalOptions::spilling_into(dir),
+            _ => JournalOptions::spilling_into(Path::new(".")),
+        }
     }
 
     /// Opens a reader of `role` (C6). The caller keeps it until the
@@ -188,6 +254,7 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
         upgraded_from: upgrading.then_some(probed.version),
         pre_upgrade_copy,
         objects,
+        _registered: Registered::new(path),
     })
 }
 

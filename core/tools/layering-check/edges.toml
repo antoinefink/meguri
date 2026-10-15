@@ -100,3 +100,11 @@ allowed = ["meguri-sync", "meguri-servers"]
 [raw_open]
 ident = "open_raw"
 allowed = ["meguri-engine", "meguri-host"]
+
+# The storage-only builder (U23, meguri-storage write_scope.rs) writes new
+# collection files without the executor. The live collection is written only
+# through the executor's write scopes, so the engine and the FFI never name
+# it. layering-check flags this identifier anywhere in their Rust code.
+[storage_builder]
+ident = "CollectionBuilder"
+denied = ["meguri-engine", "meguri-ffi"]

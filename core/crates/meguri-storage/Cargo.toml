@@ -18,6 +18,8 @@ meguri-text.workspace = true
 rusqlite.workspace = true
 ryu.workspace = true
 serde.workspace = true
+# The write journal keeps a note's after-image as its SHA-256.
+sha2.workspace = true
 # raw_value: the upgrade reads the legacy JSON columns member by member, as
 # exact text (specs/model/json-numbers.md N7).
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -28,7 +30,6 @@ tempfile.workspace = true
 [dev-dependencies]
 # Turns on test-hooks for the tests (testkit depends on this crate with it).
 meguri-testkit.workspace = true
-sha2.workspace = true
 
 [[test]]
 name = "open_refuse"
@@ -52,4 +53,24 @@ required-features = ["test-hooks"]
 
 [[test]]
 name = "open_budget"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "ids"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "noop_writes"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "graves"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "config_bytes"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "journal"
 required-features = ["test-hooks"]

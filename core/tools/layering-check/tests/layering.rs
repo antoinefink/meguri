@@ -509,6 +509,37 @@ fn a_raw_identifier_spelling_of_raw_open_fails() {
 }
 
 #[test]
+fn the_storage_builder_named_in_the_engine_or_the_ffi_fails() {
+    let fx = Fixture::new();
+    fx.write(
+        "ws/crates/meguri-engine/src/lib.rs",
+        "//! CollectionBuilder in a comment is fine.\npub fn build() {\n    let _ = meguri_storage::CollectionBuilder::create;\n}\n",
+    );
+    fx.write(
+        "ws/crates/meguri-ffi/src/lib.rs",
+        "use meguri_storage::CollectionBuilder as B;\n",
+    );
+    fx.write(
+        "ws/crates/meguri-testkit/src/lib.rs",
+        "pub fn build() { let _ = meguri_storage::CollectionBuilder::create; }\n",
+    );
+
+    let run = fx.run();
+    assert_eq!(run.code, 1, "{}", run.stderr);
+    let mut rules = run.rules();
+    rules.sort();
+    assert_eq!(
+        rules,
+        [
+            ("storage-builder".to_owned(), "meguri-engine:src/lib.rs:3".to_owned()),
+            ("storage-builder".to_owned(), "meguri-ffi:src/lib.rs:1".to_owned()),
+        ]
+    );
+    let message = run.message("storage-builder", "meguri-ffi:src/lib.rs:1");
+    assert!(message.contains("CollectionBuilder"), "{message}");
+}
+
+#[test]
 fn human_output_names_each_violation_and_exits_non_zero() {
     let fx = Fixture::new();
     fx.depend("meguri-sched", "meguri-engine");

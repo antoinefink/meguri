@@ -1,7 +1,7 @@
 //! Checks for the Meguri Rust workspace:
 //! - [`layering`]: the KTD2 crate layering in `edges.toml` (allowed edges,
 //!   crates restricted to a few workspace crates, the engine's raw open entry
-//!   point), run by `tools/mg core-lint`;
+//!   point, the storage-only builder), run by `tools/mg core-lint`;
 //! - [`pins`]: the parity pins in `core/pins.toml` against `Cargo.toml` and
 //!   `Cargo.lock`, run first by `tools/mg core-test` as the pin canary.
 
@@ -22,6 +22,8 @@ pub enum Rule {
     Restricted,
     /// A crate other than the engine and meguri-host names the raw open entry point.
     RawOpen,
+    /// The engine or the FFI names the storage-only builder.
+    StorageBuilder,
     /// A workspace crate edges.toml does not place.
     UnknownCrate,
     /// edges.toml names a crate that is not in the workspace.
@@ -38,6 +40,7 @@ impl Rule {
             Rule::Edge => "edge",
             Rule::Restricted => "restricted",
             Rule::RawOpen => "raw-open",
+            Rule::StorageBuilder => "storage-builder",
             Rule::UnknownCrate => "unknown-crate",
             Rule::StaleEntry => "stale-entry",
             Rule::Pin => "pin",

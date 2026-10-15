@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+use crate::rows::RowError;
+
 /// Where an upgrade failed (`storage/schema-upgrade` U2, U10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UpgradeStage {
@@ -89,11 +91,20 @@ impl fmt::Display for OpenError {
 
 impl std::error::Error for OpenError {}
 
-/// Errors of an open collection's connections.
+/// Errors of an open collection's connections and of writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
     /// The checkpoint primitive ran inside a transaction (C7); nothing done.
     TransactionOpen,
+    /// A stored row cannot be read (`model/row-records` R10).
+    Row(RowError),
+    /// Every id from now + 1 ms to now + 1 day is in use in the table
+    /// (`storage/ids-usn-mtime` I3): the operation writes nothing.
+    IdsExhausted { table: &'static str },
+    /// The write is not one this scope's stamping mode makes.
+    Mode { detail: String },
+    /// The storage-only builder refuses the path.
+    BuilderRefused { reason: BuilderRefusal },
     /// The collation or an initializer could not be registered on a new
     /// reader (C5).
     ConnectionInit { detail: String },
@@ -106,6 +117,22 @@ pub enum StorageError {
     },
     /// A file-system operation failed.
     Io { detail: String },
+}
+
+/// Why the storage-only builder refuses a path (`write_scope`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BuilderRefusal {
+    /// A file is at the path, or a `-wal`, `-shm` or `-journal` file next to
+    /// it.
+    Exists,
+    /// The path is open as a collection in this process.
+    Open,
+}
+
+impl From<RowError> for StorageError {
+    fn from(error: RowError) -> StorageError {
+        StorageError::Row(error)
+    }
 }
 
 impl From<rusqlite::Error> for StorageError {
@@ -129,6 +156,15 @@ impl fmt::Display for StorageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StorageError::TransactionOpen => f.write_str("a transaction is open"),
+            StorageError::Row(error) => write!(f, "unreadable row: {error}"),
+            StorageError::IdsExhausted { table } => {
+                write!(f, "no free id within one day of now in table {table}")
+            }
+            StorageError::Mode { detail } => f.write_str(detail),
+            StorageError::BuilderRefused { reason } => match reason {
+                BuilderRefusal::Exists => f.write_str("the builder writes only new files; a file is at the path"),
+                BuilderRefusal::Open => f.write_str("the path is open as a collection"),
+            },
             StorageError::ConnectionInit { detail } => write!(f, "connection initialization failed: {detail}"),
             StorageError::Sqlite {
                 extended_code, message, ..

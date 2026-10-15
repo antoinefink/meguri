@@ -16,6 +16,8 @@ struct EdgesFile {
     #[serde(default)]
     restricted: BTreeMap<String, Restricted>,
     raw_open: RawOpen,
+    #[serde(default)]
+    storage_builder: Option<StorageBuilder>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +61,14 @@ pub struct RawOpen {
     pub allowed: Vec<String>,
 }
 
+/// The storage-only builder and the crates that must not name it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StorageBuilder {
+    pub ident: String,
+    pub denied: Vec<String>,
+}
+
 /// How a crate depends on another. An edge declared as several kinds counts
 /// as the first of normal, build and dev.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,6 +105,7 @@ pub struct Edges {
     row_dev: BTreeSet<String>,
     pub restricted: BTreeMap<String, Restricted>,
     pub raw_open: RawOpen,
+    pub storage_builder: Option<StorageBuilder>,
 }
 
 impl Edges {
@@ -140,6 +151,7 @@ impl Edges {
             row_dev: file.any.row_dev_dependencies.into_iter().collect(),
             restricted: file.restricted,
             raw_open: file.raw_open,
+            storage_builder: file.storage_builder,
         })
     }
 
@@ -157,6 +169,11 @@ impl Edges {
                 .flat_map(|r| r.allowed.iter().map(String::as_str)),
         );
         names.extend(self.raw_open.allowed.iter().map(String::as_str));
+        names.extend(
+            self.storage_builder
+                .iter()
+                .flat_map(|b| b.denied.iter().map(String::as_str)),
+        );
         names
     }
 

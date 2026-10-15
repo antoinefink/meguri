@@ -1,4 +1,6 @@
-//! Finds the engine's raw open entry point named in crates that may not call it.
+//! Finds identifiers named in crates that may not use them: the engine's raw
+//! open entry point outside the crates allowed to call it, and the
+//! storage-only builder in the crates denied it.
 //!
 //! Sources are tokenized, so the identifier in a comment or a string literal
 //! does not count. A file that does not tokenize is searched as plain text.
@@ -15,9 +17,57 @@ use crate::{Error, Rule, Violation};
 
 pub(crate) fn scan(meta: &Metadata, edges: &Edges) -> Result<Vec<Violation>, Error> {
     let rule = &edges.raw_open;
+    let mut out = scan_ident(
+        meta,
+        &rule.ident,
+        |name| !rule.allowed.iter().any(|a| a == name),
+        |package, rel, line| {
+            Violation::new(
+                Rule::RawOpen,
+                format!("{package}:{rel}:{line}"),
+                format!(
+                    "{package} names the engine's raw open entry point `{}` at {rel}:{line}; edges.toml [raw_open] \
+                     allows it only in {}. Open collections through meguri_host::CoreHost::open.",
+                    rule.ident,
+                    rule.allowed.join(", ")
+                ),
+            )
+        },
+    )?;
+    if let Some(builder) = &edges.storage_builder {
+        out.extend(scan_ident(
+            meta,
+            &builder.ident,
+            |name| builder.denied.iter().any(|d| d == name),
+            |package, rel, line| {
+                Violation::new(
+                    Rule::StorageBuilder,
+                    format!("{package}:{rel}:{line}"),
+                    format!(
+                        "{package} names the storage-only builder `{}` at {rel}:{line}; edges.toml \
+                         [storage_builder] keeps it out of {}. The live collection is written only through \
+                         the executor's write scopes.",
+                        builder.ident,
+                        builder.denied.join(", ")
+                    ),
+                )
+            },
+        )?);
+    }
+    Ok(out)
+}
+
+/// Every place `ident` appears as an identifier in the workspace crates
+/// `checked` selects.
+fn scan_ident(
+    meta: &Metadata,
+    ident: &str,
+    checked: impl Fn(&str) -> bool,
+    violation: impl Fn(&str, &str, usize) -> Violation,
+) -> Result<Vec<Violation>, Error> {
     let mut out = Vec::new();
     for package in &meta.packages {
-        if !meta.workspace_members.contains(&package.id) || rule.allowed.contains(&package.name) {
+        if !meta.workspace_members.contains(&package.id) || !checked(&package.name) {
             continue;
         }
         let Some(root) = package.manifest_path.parent() else {
@@ -29,18 +79,8 @@ pub(crate) fn scan(meta: &Metadata, edges: &Edges) -> Result<Vec<Violation>, Err
         for file in files {
             let text = fs::read_to_string(&file).map_err(|e| Error::new(format!("reading {}: {e}", file.display())))?;
             let rel = file.strip_prefix(root).unwrap_or(&file).display().to_string();
-            for line in ident_lines(&text, &rule.ident) {
-                out.push(Violation::new(
-                    Rule::RawOpen,
-                    format!("{}:{rel}:{line}", package.name),
-                    format!(
-                        "{} names the engine's raw open entry point `{}` at {rel}:{line}; edges.toml [raw_open] \
-                         allows it only in {}. Open collections through meguri_host::CoreHost::open.",
-                        package.name,
-                        rule.ident,
-                        rule.allowed.join(", ")
-                    ),
-                ));
+            for line in ident_lines(&text, ident) {
+                out.push(violation(&package.name, &rel, line));
             }
         }
     }

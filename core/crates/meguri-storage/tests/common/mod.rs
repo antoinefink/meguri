@@ -146,3 +146,195 @@ pub fn anki_made_objects() -> BTreeSet<(String, String)> {
 pub fn plain(path: &Path) -> meguri_storage::rusqlite::Connection {
     meguri_storage::rusqlite::Connection::open(path).unwrap()
 }
+
+/// `conformance/` of this checkout.
+pub fn conformance_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance")
+}
+
+/// The oracle's observations of a storage scenario (its golden), with the
+/// deviations of `conformance/deviations.yaml` applied: what Meguri must
+/// observe.
+pub fn expected_steps(scenario: &str) -> Vec<serde_json::Value> {
+    let dir = conformance_dir();
+    let text = fs::read_to_string(dir.join(format!("goldens/{scenario}.json"))).unwrap();
+    let golden = meguri_testkit::observe::parse_json(&text).unwrap();
+    let mut observations = golden["observations"].clone();
+    let suite = meguri_testkit::suite::Suite::open(&dir).unwrap();
+    for deviation in suite
+        .deviations
+        .iter()
+        .filter(|d| d.scenarios.iter().any(|s| s == scenario))
+    {
+        assert!(
+            meguri_testkit::diff::transforms::apply(deviation, &mut observations),
+            "deviation {} matches nothing",
+            deviation.id
+        );
+    }
+    observations["steps"].as_array().unwrap().clone()
+}
+
+/// A `col` row at schema 18 created and last changed at `now_ms`.
+pub fn new_col(now_ms: i64) -> meguri_model::col::Col {
+    use meguri_model::col::Col;
+    use meguri_model::time::{EpochMillis, EpochSecs};
+    Col {
+        version: 18,
+        created: EpochSecs(now_ms / 1000),
+        modified: EpochMillis(now_ms),
+        schema_modified: EpochMillis(now_ms),
+        ..Col::default()
+    }
+}
+
+/// The config rows a collection needs to open: `schedVer` 2 (the open
+/// gate refuses the v1 scheduler).
+pub fn new_config() -> Vec<meguri_model::config::ConfigEntry> {
+    vec![meguri_model::config::ConfigEntry {
+        key: "schedVer".to_owned(),
+        value: b"2".to_vec(),
+        ..meguri_model::config::ConfigEntry::default()
+    }]
+}
+
+/// A new, empty collection made by the storage-only builder, closed.
+pub fn empty_collection() -> (TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("collection.anki2");
+    let clock = clock();
+    let random = SeededRandom::new(7);
+    let builder = meguri_storage::CollectionBuilder::create(
+        &path,
+        &new_col(NOW_MS),
+        &new_config(),
+        &OpenOptions::new(&clock, &random),
+    )
+    .unwrap();
+    builder.finish().unwrap();
+    (dir, path)
+}
+
+/// A note of note type `mid` with these field values.
+pub fn note(mid: i64, fields: &[&str]) -> meguri_model::note::Note {
+    meguri_model::note::Note {
+        guid: format!("g{}", fields.join("")),
+        notetype_id: meguri_model::ids::NotetypeId(mid),
+        fields: fields.join("\u{1f}"),
+        sort_field: fields.first().copied().unwrap_or_default().to_owned(),
+        ..meguri_model::note::Note::default()
+    }
+}
+
+/// A new card of a note.
+pub fn card(note: meguri_model::ids::NoteId, ord: u16) -> meguri_model::card::Card {
+    use meguri_model::card::{Card, CardQueue, CardType};
+    use meguri_model::ids::{CardId, DeckId};
+    Card {
+        id: CardId(0),
+        note_id: note,
+        deck_id: DeckId(1),
+        ord,
+        mtime: meguri_model::time::EpochSecs(0),
+        usn: meguri_model::usn::Usn(0),
+        card_type: CardType::New,
+        queue: CardQueue::New,
+        due: 1,
+        interval: 0,
+        ease_factor: 0,
+        reps: 0,
+        lapses: 0,
+        remaining_steps: 0,
+        original_due: 0,
+        original_deck_id: DeckId(0),
+        flags: 0,
+        data: meguri_model::card_data::CardData::default(),
+    }
+}
+
+/// A review-log row of a card.
+pub fn revlog(card: meguri_model::ids::CardId, time: u32) -> meguri_model::revlog::RevlogEntry {
+    use meguri_model::revlog::{RevlogEntry, RevlogKind};
+    RevlogEntry {
+        id: meguri_model::ids::RevlogId(0),
+        card_id: card,
+        usn: meguri_model::usn::Usn(0),
+        button: 3,
+        interval: -600,
+        last_interval: 0,
+        ease_factor: 0,
+        answer_millis: time,
+        kind: RevlogKind::Learning,
+    }
+}
+
+/// A normal deck named `name` (native form).
+pub fn deck(name: &str) -> meguri_model::deck::Deck {
+    use meguri_model::proto::ProtoBlob;
+    use meguri_model::proto::deck::{DeckCommon, DeckKind, DeckKindMessage, NormalDeck};
+    meguri_model::deck::Deck {
+        id: meguri_model::ids::DeckId(0),
+        name: name.to_owned(),
+        mtime: meguri_model::time::EpochSecs(0),
+        usn: meguri_model::usn::Usn(0),
+        common: ProtoBlob::new(DeckCommon::default()),
+        kind: ProtoBlob::new(DeckKindMessage::new(DeckKind::Normal(NormalDeck::default()))),
+    }
+}
+
+/// A deck preset named `name`.
+pub fn preset(name: &str) -> meguri_model::deck_config::DeckConfig {
+    use meguri_model::proto::ProtoBlob;
+    use meguri_model::proto::deck_config::DeckConfigMessage;
+    meguri_model::deck_config::DeckConfig {
+        id: meguri_model::ids::DeckConfigId(0),
+        name: name.to_owned(),
+        mtime: meguri_model::time::EpochSecs(0),
+        usn: meguri_model::usn::Usn(0),
+        config: ProtoBlob::new(DeckConfigMessage::default()),
+    }
+}
+
+/// A standard note type with these fields and templates.
+pub fn notetype(name: &str, fields: &[&str], templates: &[&str]) -> meguri_model::notetype::Notetype {
+    use meguri_model::notetype::{Notetype, NotetypeField, NotetypeTemplate};
+    use meguri_model::proto::ProtoBlob;
+    use meguri_model::proto::notetype::{FieldConfig, NotetypeConfig, TemplateConfig};
+    Notetype {
+        id: meguri_model::ids::NotetypeId(0),
+        name: name.to_owned(),
+        mtime: meguri_model::time::EpochSecs(0),
+        usn: meguri_model::usn::Usn(0),
+        config: ProtoBlob::new(NotetypeConfig::default()),
+        fields: fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| NotetypeField {
+                ord: i as u32,
+                name: (*f).to_owned(),
+                config: ProtoBlob::new(FieldConfig::default()),
+                prior_ord: None,
+            })
+            .collect(),
+        templates: templates
+            .iter()
+            .enumerate()
+            .map(|(i, t)| NotetypeTemplate {
+                ord: i as u32,
+                name: (*t).to_owned(),
+                mtime: meguri_model::time::EpochSecs(0),
+                usn: meguri_model::usn::Usn(0),
+                config: ProtoBlob::new(TemplateConfig::default()),
+                prior_ord: None,
+            })
+            .collect(),
+    }
+}
+
+/// A tag row.
+pub fn tag(name: &str) -> meguri_model::tag::Tag {
+    meguri_model::tag::Tag {
+        name: name.to_owned(),
+        ..meguri_model::tag::Tag::default()
+    }
+}

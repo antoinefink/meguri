@@ -9,3 +9,9 @@
 - Step 14's compact JSON (`legacy_json::compact`) reads numbers with serde_json's own parser on purpose: the spec and goldens want `123456789012345678901` as `1.2345678901234567e20`. serde_json's `float_roundtrip` anywhere in the build would change it.
 - `raw` (feature `test-hooks`) is the conformance runner's and the tests' only raw SQL; product code gets typed calls.
 - Tests copy fixtures into temporary directories and never open `conformance/fixtures/` with SQLite. They get `test-hooks` through the dev-dependency on meguri-testkit; fault points are process-global, which nextest's process per test keeps apart.
+- Rows are written only through a `WriteScope` (`write_scope.rs`): it compares, stamps per `StampMode` and journals. Product code never writes rows with its own SQL; `raw` is test-only.
+- The no-op test is one SQL comparison (`rows::select_compare`: `col IS ?n COLLATE BINARY`), so new values get each column's affinity (`sfld` text stored as INTEGER) before comparing. Key lookups keep the column's collation: a tag differing only in letter case is the same row.
+- Template and field rows are never stamped (`ids-usn-mtime` S1); `put_notetype` stamps the `notetypes` row whenever one of them changes, and rewrites changed rows delete-then-insert because of the unique (name, ntid) indexes.
+- Config values go through `rows::config::ConfigValue`, never serde_json: exact numbers, integer vs float kept, nesting past 128 reads as invalid. A key whose stored value is the same value (C4) keeps its bytes.
+- `CollectionBuilder` must stay out of meguri-engine and meguri-ffi (edges.toml `[storage_builder]`). Its config rows must hold `schedVer` 2, or the open gate refuses the new file as v1.
+- Journal entries live in fixed chunks and before-images spill past the threshold: keep per-entry size small, the 150k-note rewrite test (`tests/journal.rs`) measures heap growth.
