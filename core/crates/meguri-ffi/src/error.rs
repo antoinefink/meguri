@@ -4,6 +4,8 @@
 
 use std::fmt;
 
+use meguri_engine::EngineError;
+
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
     /// The operation's `CancelToken` was cancelled before it finished.
@@ -37,8 +39,49 @@ impl fmt::Display for CoreError {
 
 impl std::error::Error for CoreError {}
 
+/// The engine's errors as Swift sees them. U37 adds variants for the op
+/// results Swift reacts to (`Stale`, `StaleGeneration`); until then they
+/// cross as `Unavailable` or `Internal`.
+impl From<EngineError> for CoreError {
+    fn from(error: EngineError) -> CoreError {
+        match error {
+            EngineError::Cancelled => CoreError::Cancelled,
+            EngineError::Busy { running_op } => CoreError::Busy { running_op },
+            EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
+            EngineError::StaleGeneration { .. } => CoreError::Unavailable {
+                reason: error.to_string(),
+            },
+            EngineError::Unsupported { feature } => CoreError::Unsupported { feature },
+            EngineError::InvalidArgument { message } => CoreError::InvalidArgument { message },
+            EngineError::Internal { message } => CoreError::Internal { message },
+            EngineError::Stale { .. }
+            | EngineError::Open(_)
+            | EngineError::Storage(_)
+            | EngineError::Panicked { .. } => CoreError::Internal {
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
+/// An export's error inside engine work (a job started over FFI), so it
+/// comes back unchanged in the job's outcome.
+impl From<CoreError> for EngineError {
+    fn from(error: CoreError) -> EngineError {
+        match error {
+            CoreError::Cancelled => EngineError::Cancelled,
+            CoreError::Busy { running_op } => EngineError::Busy { running_op },
+            CoreError::Unavailable { reason } => EngineError::CollectionUnavailable { reason },
+            CoreError::Unsupported { feature } => EngineError::Unsupported { feature },
+            CoreError::InvalidArgument { message } => EngineError::InvalidArgument { message },
+            CoreError::Internal { message } => EngineError::Internal { message },
+        }
+    }
+}
+
 impl CoreError {
     /// The message of a caught panic payload, for `Internal` errors.
+    #[cfg(feature = "test-hooks")]
     pub(crate) fn from_panic(payload: &(dyn std::any::Any + Send)) -> CoreError {
         let message = if let Some(s) = payload.downcast_ref::<&str>() {
             (*s).to_owned()
