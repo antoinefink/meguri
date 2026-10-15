@@ -112,4 +112,4 @@ When the check cannot produce a report, the job status is `error` with one failu
 
 ## K10. The `check_db` op
 
-In scenarios, `check_db` takes `{}` and runs step 7 on the scenario's collection. Its output is `{"check_db": <the K5 object>}`, or the rejection `{"check_db": {"error": "corrupt"}}` (nothing changed). It is draft until the oracle driver supports it (`dsl.md` D7.2).
+In scenarios, `check_db` takes `{}` and runs step 7 on the scenario's collection. Its output is `{"check_db": <the K5 object>}`, or the rejection `{"check_db": {"error": "corrupt"}}` (nothing changed). It is stable (`dsl.md` D7.2).

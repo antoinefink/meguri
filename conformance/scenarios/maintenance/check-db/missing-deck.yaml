@@ -1,0 +1,16 @@
+# A card in a deck that does not exist: Check Database counts the deck and
+# creates it under the name recovered<id> (collection-check.md K5
+# decks_missing).
+id: maintenance/check-db/missing-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [front, back]}]
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = 4242"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT name FROM decks WHERE id = 4242"}

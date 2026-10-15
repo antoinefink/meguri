@@ -4,7 +4,9 @@ Only spec writers and oracle maintainers work here. Implementers never read this
 
 - Add an area's ops and observations as a module under `driver/ops/` or `driver/observe/` with the `registry` decorators; `worker.py`, `session.py` and `harness.py` stay area-free. Write each vocabulary entry's meaning in `conformance/` (protocol.json now, the U4 specs later), never only here.
 - `observe/text.py` (pure text functions) works on one scratch collection per worker process, never the scenario's: whatever a function does there must not change a later output (it removes the media files it writes).
-- Never put Anki's message text in a response or observation (it is localized, R1887). Errors carry a kind, the step and the exception class name.
+- Never put Anki's message text in a response or observation (it is localized, R1887). Errors carry a kind, the step and the exception class name. Where Anki answers only in messages (Check Database), read them through the backend's own translations (`ops/maintenance.py`), never against literal text.
+- `check` (`collection_check.py`, `tools/mg oracle check`) runs outside any scenario on a copy of a mounted directory. Anki holds an open collection under an exclusive lock: anything reading the file with `sqlite3` does it while Anki has it closed, with a `unicase` collation registered.
+- The TAP runner (`tests/__main__.py`) runs tests one at a time, so `setUpClass` never runs: use `setUp`.
 - A refusal that is Anki's behavior (duplicate, invalid input) is an output, not an error: declare its kinds with `@op(name, rejects=(...))` (the op's list in dsl.md D7.2) and raise `errors.Rejected(kind)` only when nothing changed.
 - When the driver supports only some forms of a draft op (`export`: the legacy package form, `ops/package.py`), a `scenario_check` fails the other forms with `unsupported_op` before any collection, as for an op it does not have.
 - pylib raises JsonError, ProtoError and unmapped backend kinds as the same plain `BackendError`: to reject on one kind, read the kind from the backend error as `ops/model.py`'s `_KindProbe` does, never by exception class.

@@ -2,8 +2,8 @@
 """Protocol loop of one long-lived oracle worker (conformance/schema/protocol.json).
 
 One JSON request per stdin line, one JSON response per stdout line, in order.
-Requests: hello | run | begin | step | end, each with an optional `id` echoed
-back. A failing request gets {"ok": false, "error": {...}} and the worker keeps
+Requests: hello | run | begin | step | end | check, each with an optional `id`
+echoed back. A failing request gets {"ok": false, "error": {...}} and the worker keeps
 serving; so does a request with NaN or Infinity, or one whose response JSON
 cannot carry. stdout carries protocol lines only: everything else the process
 prints (Python or Anki's Rust backend) goes to stderr.
@@ -16,6 +16,9 @@ interactively: begin takes caller_actors and ids and answers with the setup's
 ids and the session resources' descriptions (sync: endpoints and account);
 step takes done for a step a caller-played actor ran and dumps with an op that
 takes them (converge), and answers with the real ids the step created.
+
+check (tools/mg oracle check, specs/conformance/collection-check.md) works on
+a copy of a collection directory outside any scenario: collection_check.py.
 
 At start the worker removes every proxy variable from its environment, so a
 stray one cannot reroute a sync client, and in a recording run
@@ -31,7 +34,7 @@ import sys
 import time
 from typing import Any, TextIO
 
-from . import meta, registry
+from . import collection_check, meta, registry
 from .clock import Clock, zone
 from .errors import DriverError, log_exception
 from .session import Session
@@ -127,6 +130,11 @@ class Worker:
             if session.is_actor_scenario:
                 resp["ids"] = session.ids_since(counts)
             return resp
+        if cmd == "check":
+            self._no_open_session()
+            started = time.perf_counter()
+            report = collection_check.run(req, self.tz, self.scratch, self.clock)
+            return {"check": report, "elapsed_ms": round((time.perf_counter() - started) * 1000, 3)}
         if cmd == "end":
             session = self._open_session()
             self.session = None

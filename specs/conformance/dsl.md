@@ -152,7 +152,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
 | `export` | `{format: apkg \| colpkg, name: <file name>, ...options}`; the legacy package form is exactly `{format: apkg, name, legacy: true}` (`model-ops.md` L6) | legacy form: `{notes: <count>}`; other forms: `{name, sha256}` of the file written | draft (package); the legacy form is stable (`model-ops.md` L6) |
-| `check_db` | `{}` | the problem counts of Anki's Check Database (`collection-check.md` K5, K10); rejection `corrupt` | draft (maintenance; output defined, driver pending) |
+| `check_db` | `{}` | the problem counts of Anki's Check Database (`collection-check.md` K5, K10); rejection `corrupt` | stable (`collection-check.md` K10) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |

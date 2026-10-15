@@ -532,7 +532,11 @@
             }
           ]
         },
-        "check_db": { "$ref": "#/$defs/draft_args" },
+        "check_db": {
+          "description": "Stable (collection-check.md K10): Anki's Check Database on the scenario's collection.",
+          "type": "object",
+          "maxProperties": 0
+        },
         "db_exec": {
           "description": "Stable (record-ops.md W1): one SQL statement; params bind to positional ? placeholders (string TEXT, integer INTEGER, other number REAL, null NULL; an integer outside the signed 64-bit range is invalid).",
           "type": "object",

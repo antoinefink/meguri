@@ -28,7 +28,7 @@
           }
         },
         "check_db": {
-          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt. Draft until the oracle driver supports the op (dsl.md D7.2).",
+          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt.",
           "anyOf": [
             { "$ref": "#/$defs/check_db_counts" },
             {
