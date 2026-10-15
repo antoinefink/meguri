@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The collection check (specs/conformance/collection-check.md K1-K9) and the
-check_db op (K10), through real workers and the harness entry point.
+"""The collection check (specs/conformance/collection-check.md K1-K9, K11) and
+the check_db op (K10), through real workers and the harness entry point.
 
 Each stored problem is planted here with SQL on a collection Anki made, so the
 expected count is the number of rows planted. Expected zones come from
-zoneinfo, expected render sizes from the templates' own text."""
+zoneinfo, expected render sizes from the templates' own text. K11's expected
+queue orders follow the default preset's gather and sort orders (deck by deck
+in name order, then position); its digests are recomputed here from K11.2's
+line form."""
 
 from __future__ import annotations
 
@@ -41,6 +44,8 @@ ZEROS = dict.fromkeys(
      "future_ids", "notetypes_recovered"],
     0,
 )
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+HEX64 = r"^[0-9a-f]{64}$"
 CARD_COPY = (
     "insert into cards select ?, ?, did, ?, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, "
     "odid, flags, data from cards where id = ?"
@@ -88,6 +93,43 @@ def corrupt_freelist(path: str) -> None:
         count = struct.unpack(">I", f.read(4))[0]
         f.seek(36)
         f.write(struct.pack(">I", count + 3))
+
+
+def plant_mixed(col, nids, cids) -> None:
+    """Deck D under a four-new-per-day preset with one review card due, one
+    learning card due now and four more new cards; D::S with two new cards."""
+    did = col.decks.id_for_name("D")
+    preset = col.decks.add_config_returning_id("Four")
+    conf = col.decks.get_config(preset)
+    conf["new"]["perDay"] = 4
+    col.decks.update_config(conf)
+    deck = col.decks.get(did)
+    deck["conf"] = preset
+    col.decks.save(deck)
+    sub = col.decks.id("D::S")
+    col.db.execute("update cards set did = ? where id in (?, ?)", sub, cids[6], cids[7])
+    col.db.execute("update cards set type = 2, queue = 2, ivl = 1, due = 0, factor = 2500 where id = ?", cids[0])
+    col.db.execute("update cards set type = 1, queue = 1, left = 1, due = ? where id = ?", NOW - 60, cids[1])
+
+
+def lines_sha256(lines: list[str]) -> str:
+    """K11.2: each line followed by LF."""
+    return hashlib.sha256("".join(line + "\n" for line in lines).encode("utf-8")).hexdigest()
+
+
+def sql(directory: str, *statements: str) -> None:
+    con = sqlite3.connect(os.path.join(directory, "collection.anki2"))
+    for statement in statements:
+        con.execute(statement)
+    con.commit()
+    con.close()
+
+
+def deck_ids(directory: str) -> list[int]:
+    con = sqlite3.connect(f"file:{os.path.join(directory, 'collection.anki2')}?immutable=1", uri=True)
+    ids = [row[0] for row in con.execute("select id from decks order by id")]
+    con.close()
+    return ids
 
 
 def files_digest(directory: str) -> dict[str, str]:
@@ -426,6 +468,152 @@ class CheckReport(CheckBase):
                 self.assertEqual(self.check_error(bad)["kind"], "protocol_error")
 
 
+class Schedule(CheckBase):
+    """K11: the schedule member, its digests and what changes them."""
+
+    tz = "Etc/GMT-1"
+
+    def schedule(self, directory: str) -> dict:
+        return self.check(directory, schedule=True)["schedule"]
+
+    def copy_of(self, directory: str, name: str) -> str:
+        copy = os.path.join(self.tmp, name)
+        shutil.copytree(directory, copy)
+        return copy
+
+    def test_schedule_is_present_only_with_the_flag(self):
+        directory = build(self.tmp, "plain", None)
+        self.assertNotIn("schedule", self.check(directory))
+        self.assertNotIn("schedule", self.check(directory, schedule=False))
+        self.assertIn("schedule", self.check(directory, schedule=True))
+        for bad in (1, "true", None):
+            with self.subTest(schedule=bad):
+                error = self.check_error({"dir": directory, "now": NOW, "schedule": bad})
+                self.assertEqual(error["kind"], "protocol_error")
+
+    def test_the_member_has_the_report_schema_shape(self):
+        """collection-check.schema.json's schedule, deck_counts and
+        schedule_deck (the host checks validate a report with jsonschema)."""
+        directory = build(self.tmp, "shape", plant_mixed, notes=8)
+        report = self.schedule(directory)
+        counts_keys = {"new", "learning", "review"}
+
+        def counts(value):
+            self.assertEqual(set(value), counts_keys)
+            for v in value.values():
+                self.assertIsInstance(v, int)
+                self.assertGreaterEqual(v, 0)
+
+        self.assertEqual(set(report), {"cards", "decks", "root", "sha256"})
+        self.assertEqual(report["cards"], 8)
+        counts(report["root"])
+        self.assertRegex(report["sha256"], HEX64)
+        self.assertEqual(sorted(int(k) for k in report["decks"]), deck_ids(directory))
+        for key, deck in report["decks"].items():
+            with self.subTest(deck=key):
+                self.assertRegex(key, r"^-?[0-9]+$")
+                self.assertEqual(set(deck), {"cards", "next_states_sha256", "queue", "tree"})
+                self.assertRegex(deck["next_states_sha256"], HEX64)
+                self.assertEqual(set(deck["queue"]), counts_keys | {"entries", "order_sha256"})
+                self.assertRegex(deck["queue"]["order_sha256"], HEX64)
+                counts({k: deck["queue"][k] for k in counts_keys})
+                if deck["tree"] is not None:
+                    counts(deck["tree"])
+        self.assertEqual(sum(d["cards"] for d in report["decks"].values()), 8)
+        body = {k: report[k] for k in ("cards", "decks", "root")}
+        compact = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        self.assertEqual(report["sha256"], hashlib.sha256(compact.encode("utf-8")).hexdigest())
+
+    def test_an_empty_default_deck_has_no_tree_and_empty_decks_have_empty_digests(self):
+        ids = {}
+
+        def plant(col, nids, cids):
+            ids["e"] = col.decks.id("E")
+
+        report = self.schedule(build(self.tmp, "empty", plant))
+        empty_queue = {"entries": 0, "new": 0, "learning": 0, "review": 0, "order_sha256": EMPTY_SHA256}
+        self.assertEqual(report["decks"]["1"], {
+            "cards": 0, "next_states_sha256": EMPTY_SHA256, "queue": empty_queue, "tree": None,
+        })
+        self.assertEqual(report["decks"][str(ids["e"])], {
+            "cards": 0, "next_states_sha256": EMPTY_SHA256, "queue": empty_queue,
+            "tree": {"new": 0, "learning": 0, "review": 0},
+        })
+
+    def test_queue_counts_equal_the_deck_list_without_siblings(self):
+        ids = {}
+
+        def plant(col, nids, cids):
+            plant_mixed(col, nids, cids)
+            ids.update(cids=cids, d=col.decks.id_for_name("D"), s=col.decks.id_for_name("D::S"))
+
+        directory = build(self.tmp, "counts", plant, notes=8)
+        report = self.schedule(directory)
+        for key, deck in report["decks"].items():
+            if deck["tree"] is not None:
+                with self.subTest(deck=key):
+                    self.assertEqual({k: deck["queue"][k] for k in ("new", "learning", "review")}, deck["tree"])
+        d, s = report["decks"][str(ids["d"])], report["decks"][str(ids["s"])]
+        self.assertEqual((d["cards"], d["tree"], d["queue"]["entries"]), (6, {"new": 4, "learning": 1, "review": 1}, 6))
+        self.assertEqual((s["cards"], s["tree"], s["queue"]["entries"]), (2, {"new": 2, "learning": 0, "review": 0}, 2))
+        self.assertEqual(report["root"], {"new": 4, "learning": 1, "review": 1})
+        cids = ids["cids"]
+        self.assertEqual(s["queue"]["order_sha256"], lines_sha256([f"{cids[6]}\tnew", f"{cids[7]}\tnew"]))
+        self.assertEqual(self.schedule(directory), report, "the frozen clock gives the same schedule twice")
+
+    def test_field_text_alone_leaves_the_schedule_unchanged(self):
+        directory = build(self.tmp, "text", plant_mixed, notes=8)
+        copy = self.copy_of(directory, "text-copy")
+        sql(copy, "update notes set flds = 'other ' || id || char(31) || 'text, longer than before'")
+        con = sqlite3.connect(f"file:{os.path.join(copy, 'collection.anki2')}?immutable=1", uri=True)
+        self.assertEqual(con.execute("select count() from notes where flds like 'other %'").fetchone()[0], 8)
+        con.close()
+        self.assertEqual(self.schedule(copy), self.schedule(directory))
+
+    def test_swapping_the_name_order_of_two_siblings_reorders_their_parents_queue(self):
+        ids = {}
+
+        def plant(col, nids, cids):
+            a, b = col.decks.id("P::A"), col.decks.id("P::B")
+            col.db.execute("update cards set did = ? where id in (?, ?)", a, cids[0], cids[1])
+            col.db.execute("update cards set did = ? where id in (?, ?)", b, cids[2], cids[3])
+            ids.update(cids=cids, p=col.decks.id_for_name("P"), a=a, b=b)
+
+        directory = build(self.tmp, "siblings", plant, notes=4)
+        copy = self.copy_of(directory, "siblings-renamed")
+        col = Collection(os.path.join(copy, "collection.anki2"))
+        col.decks.rename(ids["a"], "P::Y")
+        col.decks.rename(ids["b"], "P::X")
+        col.close(downgrade=False)
+        before, after = self.schedule(directory), self.schedule(copy)
+        c = [f"{cid}\tnew" for cid in ids["cids"]]
+        parent = str(ids["p"])
+        # Default preset: gathered deck by deck in name order, positions within.
+        self.assertEqual(before["decks"][parent]["queue"]["order_sha256"], lines_sha256(c))
+        self.assertEqual(after["decks"][parent]["queue"]["order_sha256"], lines_sha256(c[2:] + c[:2]))
+        for did in (ids["a"], ids["b"]):
+            self.assertEqual(after["decks"][str(did)], before["decks"][str(did)])
+        self.assertNotEqual(after["sha256"], before["sha256"])
+
+    def test_one_cards_due_changes_its_decks_next_states_and_the_whole_digest(self):
+        ids = {}
+
+        def plant(col, nids, cids):
+            plant_mixed(col, nids, cids)
+            ids.update(cids=cids, d=col.decks.id_for_name("D"))
+
+        directory = build(self.tmp, "due", plant, notes=8)
+        copy = self.copy_of(directory, "due-copy")
+        # The last new card of D (positions are the notes' order) stays last.
+        sql(copy, f"update cards set due = due + 100 where id = {ids['cids'][5]}")
+        before, after = self.schedule(directory), self.schedule(copy)
+        changed = sorted(k for k in before["decks"]
+                         if before["decks"][k]["next_states_sha256"] != after["decks"][k]["next_states_sha256"])
+        self.assertEqual(changed, [str(ids["d"])])
+        self.assertEqual(after["decks"][str(ids["d"])]["queue"], before["decks"][str(ids["d"])]["queue"])
+        self.assertNotEqual(after["sha256"], before["sha256"])
+
+
 class CheckDbOp(unittest.TestCase):
     """K10 in scenarios."""
 
@@ -530,6 +718,13 @@ class HarnessCheck(unittest.TestCase):
         self.assertEqual(set(report["decks"]), {"D"})
         self.assertEqual(sorted(report), sorted(["report_version", "oracle", "dir", "now", "tz", "timing", "counts",
                                                  "decks", "render", "check_db", "changed_tables"]))
+
+    def test_schedule_flag_adds_the_schedule_member(self):
+        rc, out = self.run_check(self.directory, "--tz", "UTC", "--now", "2030-01-15T10:00:00Z", "--schedule")
+        self.assertEqual(rc, 0)
+        report = json.loads((out / "check.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["schedule"]["cards"], 3)
+        self.assertEqual(report["report_version"], 1)
 
     def test_errors_are_written_with_their_k7_kind(self):
         empty = tempfile.mkdtemp(dir=self.tmp)

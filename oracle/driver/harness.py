@@ -6,7 +6,7 @@
   python -m driver.harness diff-report --old DIR --new DIR --report FILE [--markdown FILE]
   python -m driver.harness hash FILE...
   python -m driver.harness check --dir DIR --label TEXT --out DIR [--now INSTANT] [--tz ZONE]
-                                 [--deck NAME]... [--render-note ID]...
+                                 [--deck NAME]... [--render-note ID]... [--schedule]
 
 Runs inside the oracle image without libfaketime (entrypoint.sh harness). Each
 worker is a separate `entrypoint.sh worker` process with its own TZ, clock file
@@ -17,7 +17,7 @@ and scratch directory, so workers never share a clock, a zone or a collection
 relative path under --goldens, with a .json suffix. Exit status: 0 when every
 selected scenario recorded or matched, 1 otherwise, 2 for usage errors.
 
-`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9)
+`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9, K11)
 derives the clock and zone from the directory's manifest when they are not
 given, starts one worker in that zone and writes the report to <out>/check.json
 (exit 0), or {kind, detail} to <out>/check-error.json (exit 1) with a K7 kind.
@@ -558,7 +558,10 @@ def cmd_check(args) -> int:
         notes = [parse_note_id(text) for text in args.render_note or []]
     except CheckUsage as exc:
         return _check_error(out, "usage", str(exc))
-    request = {"cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes}
+    request = {
+        "cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes,
+        "schedule": args.schedule,
+    }
     try:
         with WorkerProcess(tz) as worker:
             resp = worker.request(request)
@@ -600,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--tz")
     c.add_argument("--deck", action="append")
     c.add_argument("--render-note", action="append")
+    c.add_argument("--schedule", action="store_true")
     args = p.parse_args(argv)
     if getattr(args, "jobs", 1) < 1:
         p.error("--jobs must be at least 1")

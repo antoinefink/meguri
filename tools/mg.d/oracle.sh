@@ -10,14 +10,14 @@
 # U2's deny rules. Copies they make are deleted when they finish.
 
 mg_job oracle host mg_oracle \
-  "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... | bump <version> | lock | test [pattern]"
+  "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock | test [pattern]"
 
 MG_ORACLE_UV_VERSION=0.12.24
 # uv resolves for this platform tag; the lock still hashes every published wheel.
 MG_ORACLE_LOCK_PLATFORM=x86_64-manylinux_2_40
 
 mg_oracle__usage() {
-  mg_failure usage "usage: tools/mg oracle build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... | bump <version> | lock | test [pattern]" "tools/mg oracle build"
+  mg_failure usage "usage: tools/mg oracle build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock | test [pattern]" "tools/mg oracle build"
   mg_message "oracle: $1"
   mg_status error
 }
@@ -549,7 +549,7 @@ mg_oracle__report() {
   fi
 }
 
-# check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]...
+# check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule]
 # (specs/conformance/collection-check.md): one worker checks a copy of <dir>'s
 # collection, the directory mounted read-only. The harness derives the clock
 # and zone from the manifest when they are not given and checks the values;
@@ -569,6 +569,7 @@ mg_oracle_check() {
         shift 2
         ;;
       --now=* | --tz=* | --deck=* | --render-note=*) args[${#args[@]}]="$1"; shift ;;
+      --schedule) args[${#args[@]}]="$1"; shift ;;
       -*) mg_oracle__usage "check: unknown option '$1'"; return 0 ;;
       *)
         [ -z "$dir" ] || { mg_oracle__usage "check takes one collection directory"; return 0; }
