@@ -11,6 +11,10 @@ publish.workspace = true
 # histories, and its seeded ChaCha streams (both parity pins).
 fsrs.workspace = true
 granit-parser.workspace = true
+# The anonymizer (U15, specs/fixtures/anonymizer.md): H3's entity grammar,
+# judged at one position (A5.3), and A5.1's character classes (both parity
+# pins, as meguri-text uses them).
+htmlescape.workspace = true
 # Benchmarks (U12): per-operation samples (bench::timing).
 hdrhistogram.workspace = true
 jiff.workspace = true
@@ -27,6 +31,7 @@ meguri-text.workspace = true
 # (phys_footprint) that bench::memory samples (R1864).
 libc.workspace = true
 rand.workspace = true
+regex.workspace = true
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:
