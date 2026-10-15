@@ -12,6 +12,9 @@ let package = Package(
     platforms: [.macOS("27.0"), .iOS("27.0")],
     products: [
         .library(name: "CoreBridge", targets: ["CoreBridge"]),
+        // The interval registry and signposts (U12, R1861), core-free so the
+        // UI test bundle and MeguriKit can use the same names.
+        .library(name: "Instrumentation", targets: ["Instrumentation"]),
     ],
     targets: [
         // The Rust static library, its C header and module map.
@@ -32,18 +35,30 @@ let package = Package(
                 .linkedLibrary("resolv"),
             ]
         ),
+        // Interval names, signposts (os_signpost and MetricKit) and the
+        // review loop's visible-confirmation contract. No core dependency.
+        .target(
+            name: "Instrumentation",
+            swiftSettings: [
+                .treatAllWarnings(as: .error),
+            ]
+        ),
         // The Swift 6 facade: lanes, cancel tokens, jobs, events. Nonisolated
         // by default; it never re-exports generated types.
         .target(
             name: "CoreBridge",
-            dependencies: ["MeguriCoreBindings"],
+            dependencies: ["MeguriCoreBindings", "Instrumentation"],
             swiftSettings: [
                 .treatAllWarnings(as: .error),
             ]
         ),
         .testTarget(
             name: "CoreBridgeTests",
-            dependencies: ["CoreBridge", "MeguriCoreBindings"]
+            dependencies: ["CoreBridge", "MeguriCoreBindings", "Instrumentation"]
+        ),
+        .testTarget(
+            name: "InstrumentationTests",
+            dependencies: ["Instrumentation"]
         ),
     ]
 )

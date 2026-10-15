@@ -1,4 +1,5 @@
 internal import MeguriCoreBindings
+import Instrumentation
 import Synchronization
 
 public struct JobID: Hashable, Sendable, CustomStringConvertible {
@@ -69,7 +70,7 @@ enum Jobs {
     /// returns it at once. The event stream is started first, so the job's
     /// `JobFinished` event cannot be missed.
     static func start(
-        _ name: StaticString,
+        _ name: BridgeCall,
         _ startExport: @escaping @Sendable () throws -> MeguriCoreBindings.JobHandle
     ) async throws(BridgeError) -> CoreJob {
         try await CoreEventStream.shared.start()

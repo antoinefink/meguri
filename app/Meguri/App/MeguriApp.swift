@@ -8,6 +8,8 @@ import SwiftUI
 @main
 struct MeguriApp: App {
     private let configuration: LaunchConfiguration
+    /// MetricKit's reports, kept on the device for Copy Debug Info (R1867).
+    private let fieldDiagnostics = FieldDiagnosticsSubscriber.start()
     #if MEGURI_TEST_HOOKS
     private let hooks: TestHooks.Session
     #endif

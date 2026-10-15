@@ -1,15 +1,16 @@
 internal import MeguriCoreBindings
+import Instrumentation
 
 /// Process-level core calls. Area services (U37 and the area units) live
 /// beside this, each on its KTD9 lane.
 public enum Core {
     /// The Rust workspace version.
     public static func version() async throws(BridgeError) -> String {
-        try await ControlLane.shared.call("core_version") { try coreVersion() }
+        try await ControlLane.shared.call(.coreVersion) { try coreVersion() }
     }
 
     public static func buildInfo() async throws(BridgeError) -> CoreBuildInfo {
-        try await ControlLane.shared.call("core_build_info") { CoreBuildInfo(try coreBuildInfo()) }
+        try await ControlLane.shared.call(.coreBuildInfo) { CoreBuildInfo(try coreBuildInfo()) }
     }
 }
 

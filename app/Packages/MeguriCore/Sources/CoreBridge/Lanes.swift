@@ -1,6 +1,6 @@
 import Dispatch
 import Foundation
-import os
+import Instrumentation
 
 /// The four core lanes (KTD9). Each is an actor whose serial executor is its
 /// own `DispatchSerialQueue`, so blocking FFI calls run there and never on the
@@ -36,24 +36,18 @@ public protocol CoreLane: Actor {
 }
 
 extension CoreLane {
-    /// Runs one blocking core call on this lane, inside an os_signpost
-    /// interval named `name` (R1861), and maps whatever it throws to
-    /// `BridgeError`. `name` is the call's registry name (U12).
-    func call<T: Sendable>(_ name: StaticString, _ body: () throws -> T) throws(BridgeError) -> T {
+    /// Runs one blocking core call on this lane, inside its os_signpost
+    /// interval in the CoreBridge category (R1861), and maps whatever it
+    /// throws to `BridgeError`. `name` comes from U12's registry
+    /// (`BridgeCall`, Instrumentation/IntervalNames.swift).
+    func call<T: Sendable>(_ name: BridgeCall, _ body: () throws -> T) throws(BridgeError) -> T {
         dispatchPrecondition(condition: .onQueue(queue))
-        let state = Signposts.bridge.beginInterval(name, id: Signposts.bridge.makeSignpostID(), "\(Self.lane.rawValue)")
-        defer { Signposts.bridge.endInterval(name, state) }
         do {
-            return try body()
+            return try Signposts.bridge(name, lane: Self.lane.rawValue, body)
         } catch {
             throw BridgeError(error)
         }
     }
-}
-
-enum Signposts {
-    /// Every bridge call is an interval in this log (R1861).
-    static let bridge = OSSignposter(subsystem: "com.antoinefink.meguri", category: "CoreBridge")
 }
 
 @globalActor public actor InteractiveLane: CoreLane {

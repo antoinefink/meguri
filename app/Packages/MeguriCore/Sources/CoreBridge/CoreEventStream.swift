@@ -1,4 +1,5 @@
 internal import MeguriCoreBindings
+import Instrumentation
 import Synchronization
 
 /// One event from the core (KTD9), in `seq` order.
@@ -68,7 +69,7 @@ public final class CoreEventStream: Sendable {
     /// Registers the relay with the core, replacing any other listener.
     func install() async throws(BridgeError) {
         let relay = relay
-        try await ControlLane.shared.call("set_event_listener") { try setEventListener(listener: relay) }
+        try await ControlLane.shared.call(.setEventListener) { try setEventListener(listener: relay) }
     }
 }
 
