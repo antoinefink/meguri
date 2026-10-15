@@ -22,7 +22,7 @@ use super::cards::{CardInput, Due, Target, card_rows};
 use super::decks::DeckPlan;
 use super::media::{MediaFile, MediaKind, base64, png_of_size};
 use super::notetypes::{GenNotetype, Kind};
-use super::profile::Profile;
+use super::profile::{NotetypeShape, Profile};
 use super::revlog::Fsrs;
 use super::rng::{Rng, Stream};
 use super::{AllIds, GenError, NoteRows, Timeline, WorstCase, draw_target};
@@ -251,10 +251,147 @@ impl NoteContext<'_> {
     }
 }
 
-/// The field values of a note: lengths from the note type's field
-/// histograms, clozes in the first field of a cloze note type, media
-/// references by the note type's per-field counts, and the worst cases'
-/// large fields and inline images.
+/// The bytes of the cloze deletions `{{c1::…}}` to `{{cN::…}}` with these
+/// answer lengths, joined by single spaces.
+fn deletions_bytes(answers: &[usize]) -> usize {
+    let digits = |k: usize| k.to_string().len();
+    let each: usize = answers
+        .iter()
+        .enumerate()
+        .map(|(i, answer)| "{{c::}}".len() + digits(i + 1) + answer)
+        .sum();
+    each + answers.len().saturating_sub(1)
+}
+
+/// The answer lengths of the cloze deletions of a field drawn at `len`
+/// bytes (F4.8): the drawn lengths, or 1 byte each when the deletions they
+/// make, joined by single spaces, are longer than `len`.
+pub fn answer_bytes(drawn: Vec<usize>, len: usize) -> Vec<usize> {
+    if deletions_bytes(&drawn) > len {
+        vec![1; drawn.len()]
+    } else {
+        drawn
+    }
+}
+
+/// The cloze deletions of a cloze note's first field drawn at `len` bytes
+/// (F4.8): `{{c1::…}}` to `{{cN::…}}` for its `cards` cards, each answer
+/// words of 3 to 14 bytes, or of 1 byte when they do not fit (`answer_bytes`).
+pub fn cloze_deletions(cards: usize, len: usize, rng: &mut Rng) -> Vec<String> {
+    let drawn = (0..cards).map(|_| 3 + rng.below(12) as usize).collect();
+    answer_bytes(drawn, len)
+        .into_iter()
+        .enumerate()
+        .map(|(i, answer)| format!("{{{{c{}::{}}}}}", i + 1, words(answer, rng)))
+        .collect()
+}
+
+/// A field's stored text as F4.8 builds it from its drawn length: the
+/// cloze deletions, then words, then the media references, joined by
+/// single spaces. The markup (deletions and references) counts inside
+/// `len`; the words fill what it leaves.
+#[derive(Clone, Debug)]
+pub struct FieldText {
+    len: usize,
+    deletions: Vec<String>,
+    references: Vec<String>,
+}
+
+impl FieldText {
+    /// A field drawn at `len` bytes, without markup yet.
+    pub fn new(len: usize) -> FieldText {
+        FieldText::with_deletions(len, Vec::new())
+    }
+
+    /// A cloze first field drawn at `len` bytes, holding `deletions`.
+    pub fn with_deletions(len: usize, deletions: Vec<String>) -> FieldText {
+        FieldText {
+            len,
+            deletions,
+            references: Vec::new(),
+        }
+    }
+
+    /// Bytes of the markup joined by single spaces.
+    fn markup_bytes(&self) -> usize {
+        let pieces = self.deletions.iter().chain(&self.references);
+        let (count, bytes) = pieces.fold((0usize, 0usize), |(n, b), p| (n + 1, b + p.len()));
+        bytes + count.saturating_sub(1)
+    }
+
+    fn has_markup(&self) -> bool {
+        !self.deletions.is_empty() || !self.references.is_empty()
+    }
+
+    /// Whether `reference` fits: the markup so far, a separating space
+    /// when there is markup, and the reference take at most the drawn
+    /// length together.
+    pub fn fits(&self, reference: &str) -> bool {
+        self.markup_bytes() + usize::from(self.has_markup()) + reference.len() <= self.len
+    }
+
+    /// Adds a reference after those already there, fitting or not (the
+    /// caller decides, `fits`).
+    pub fn push_reference(&mut self, reference: String) {
+        self.references.push(reference);
+    }
+
+    /// The stored text. Without markup it is `len` bytes of words. With
+    /// markup the words take `len` minus the markup minus one separating
+    /// space; when fewer than 2 bytes are left the field is the markup
+    /// alone, which may be one byte short of `len` or longer than it.
+    pub fn finish(self, rng: &mut Rng) -> String {
+        if !self.has_markup() {
+            return words(self.len, rng);
+        }
+        let left = self.len.saturating_sub(self.markup_bytes());
+        let mut pieces = self.deletions;
+        if left >= 2 {
+            pieces.push(words(left - 1, rng));
+        }
+        pieces.extend(self.references);
+        pieces.join(" ")
+    }
+}
+
+/// References per note a field takes when its drawn length is not 0
+/// (F4.8): the profile's references in that field over its notes with a
+/// value of 1 byte or more. 0 for a field without references.
+pub fn reference_rate(shape: &NotetypeShape, field: usize) -> f64 {
+    let [images, sounds] = shape.media_refs.get(field).copied().unwrap_or([0, 0]);
+    let Some(lengths) = shape.field_bytes.get(field) else {
+        return 0.0;
+    };
+    let total = lengths.total();
+    let non_empty = total - lengths.counts.first().copied().unwrap_or(0);
+    if images + sounds == 0 || shape.notes == 0 || non_empty == 0 {
+        return 0.0;
+    }
+    let share = non_empty as f64 / total as f64;
+    (images + sounds) as f64 / (shape.notes as f64 * share)
+}
+
+/// Media file `n` of note `index` (F4.8): `mg<index in hex>-<n>.png` or
+/// `.mp3`, its bytes from the run's seed.
+pub fn note_media(seed: u64, index: u64, n: u64, kind: MediaKind, bytes: u64) -> MediaFile {
+    let ext = match kind {
+        MediaKind::Image => "png",
+        MediaKind::Audio => "mp3",
+    };
+    MediaFile {
+        name: format!("mg{index:x}-{n}.{ext}"),
+        bytes,
+        kind,
+        seed,
+        index: index * 1024 + n,
+    }
+}
+
+/// The field values of a note (F4.8): each field's whole stored length
+/// drawn from the note type's field histograms, cloze deletions in a cloze
+/// note type's first field, media references by field where they fit (or,
+/// in the `media_files` worst case, the exact count, always written), and
+/// the worst cases' large fields and inline images.
 fn fields(
     ctx: &NoteContext<'_>,
     nt: &GenNotetype,
@@ -264,73 +401,98 @@ fn fields(
 ) -> (Vec<String>, Vec<MediaFile>) {
     let shape = &ctx.profile.notetypes[nt.shape];
     let count = nt.fields();
-    let mut values: Vec<String> = (0..count)
-        .map(|f| {
-            let len = shape.field_bytes[f].sample(rng).unwrap_or(0).max(0) as usize;
-            let len = if f == 0 { len.max(4) } else { len };
-            words(len, rng)
-        })
-        .collect();
-    if nt.kind == Kind::Cloze {
-        let mut text = String::new();
-        for n in 1..=clozes {
-            text.push_str(&format!("{{{{c{n}::{}}}}} ", words(3 + rng.below(12) as usize, rng)));
-        }
-        text.push_str(&values[0]);
-        values[0] = text;
-    }
+    let media_files = ctx.worst.and_then(|w| w.media_files.as_ref());
+    let large = ctx
+        .worst
+        .and_then(|w| w.large_fields.as_ref())
+        .filter(|large| index < large.notes);
+    let large_field = usize::from(count > 1);
+    let refs_of = |field: usize| shape.media_refs.get(field).copied().unwrap_or([0, 0]);
 
-    // Media references.
-    let mut media = Vec::new();
-    let refs = match ctx.worst.and_then(|w| w.media_files.as_ref()) {
-        Some(files) => {
-            let total = ctx.total_notes.max(1);
-            files.count / total + u64::from(index < files.count % total)
+    // The `media_files` worst case: the note's references by field, drawn
+    // up front so that they are numbered in field order.
+    let mut assigned: Vec<Vec<MediaKind>> = vec![Vec::new(); count];
+    if let Some(files) = media_files {
+        let total = ctx.total_notes.max(1);
+        let refs = files.count / total + u64::from(index < files.count % total);
+        let weights: Vec<u64> = (0..count).map(|f| refs_of(f).iter().sum()).collect();
+        for k in 0..refs {
+            let field = rng.weighted(&weights).unwrap_or(count - 1);
+            let [images, sounds] = refs_of(field);
+            let image = if images + sounds == 0 {
+                k % 2 == 0
+            } else {
+                rng.below(images + sounds) < images
+            };
+            assigned[field].push(if image { MediaKind::Image } else { MediaKind::Audio });
         }
-        None => shape.refs_per_note.sample(rng).unwrap_or(0).max(0) as u64,
-    };
-    let weights: Vec<u64> = shape.media_refs.iter().map(|[i, s]| i + s).collect();
-    for n in 0..refs {
-        let field = rng.weighted(&weights).unwrap_or(count - 1);
-        let [images, sounds] = shape.media_refs.get(field).copied().unwrap_or([1, 1]);
-        let image = if images + sounds == 0 {
-            n % 2 == 0
-        } else {
-            rng.below(images + sounds) < images
-        };
-        let bytes = match ctx.worst.and_then(|w| w.media_files.as_ref()) {
+    }
+    let file_bytes = |rng: &mut Rng| {
+        match media_files {
             Some(files) => files.bytes.sample(rng),
             None => ctx.profile.media.file_bytes.sample(rng),
         }
         .unwrap_or(4096)
-        .max(128) as u64;
-        let (kind, ext) = if image {
-            (MediaKind::Image, "png")
+        .max(128) as u64
+    };
+
+    let mut values = Vec::with_capacity(count);
+    let mut media: Vec<MediaFile> = Vec::new();
+    for (field, kinds) in assigned.iter().enumerate() {
+        let drawn = shape.field_bytes[field].sample(rng).unwrap_or(0).max(0) as usize;
+        // A normal front is never empty (F7).
+        let len = if field == 0 && nt.kind == Kind::Normal {
+            drawn.max(1)
         } else {
-            (MediaKind::Audio, "mp3")
+            drawn
         };
-        let file = MediaFile {
-            name: format!("mg{index:x}-{n}.{ext}"),
-            bytes,
-            kind,
-            seed: ctx.seed,
-            index: index * 1024 + n,
-        };
-        let value = &mut values[field];
-        if !value.is_empty() {
-            value.push(' ');
+        if let Some(large) = large
+            && field == large_field
+        {
+            // Exactly `bytes` bytes of words, without references.
+            values.push(words(large.bytes as usize, rng));
+            continue;
         }
-        value.push_str(&file.reference());
-        media.push(file);
+        let mut text = if field == 0 && nt.kind == Kind::Cloze {
+            FieldText::with_deletions(len, cloze_deletions(clozes, len, rng))
+        } else {
+            FieldText::new(len)
+        };
+        if media_files.is_some() {
+            for &kind in kinds {
+                let file = note_media(ctx.seed, index, media.len() as u64, kind, file_bytes(rng));
+                text.push_reference(file.reference());
+                media.push(file);
+            }
+        } else if len > 0 {
+            let rate = reference_rate(shape, field);
+            if rate > 0.0 {
+                let whole = rate.floor();
+                let draws = whole as u64 + u64::from(rng.chance(rate - whole));
+                let [images, sounds] = refs_of(field);
+                for _ in 0..draws {
+                    let kind = if rng.below(images + sounds) < images {
+                        MediaKind::Image
+                    } else {
+                        MediaKind::Audio
+                    };
+                    // Named as the next written reference; one that does
+                    // not fit is not written and has no file.
+                    let mut file = note_media(ctx.seed, index, media.len() as u64, kind, 0);
+                    let reference = file.reference();
+                    if text.fits(&reference) {
+                        file.bytes = file_bytes(rng);
+                        text.push_reference(reference);
+                        media.push(file);
+                    }
+                }
+            }
+        }
+        values.push(text.finish(rng));
     }
 
-    // Worst cases.
-    if let Some(large) = ctx.worst.and_then(|w| w.large_fields.as_ref())
-        && index < large.notes
-    {
-        let field = usize::from(count > 1);
-        values[field] = words(large.bytes as usize, rng);
-    }
+    // The inline-images worst case: after the first field's text, beyond
+    // its drawn length.
     if let Some(inline) = ctx.worst.and_then(|w| w.inline_images.as_ref())
         && index < inline.notes
     {
