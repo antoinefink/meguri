@@ -1701,6 +1701,45 @@ fn requests_needing_a_million_positions_are_refused() {
     assert!(matches!(result, Err(GenError::Request(_))), "{result:?}");
     assert!(watch.elapsed_ms() < 60_000, "refused before generating");
     assert!(!collection(dir.path()).exists());
+
+    // A recipe too: a million new notes.
+    let recipe = Recipe {
+        recipe: "huge".to_owned(),
+        description: "too many notes".to_owned(),
+        now: "2030-01-15T10:00:00Z".to_owned(),
+        rollover_hour: None,
+        presets: Vec::new(),
+        decks: vec![DeckSpec {
+            name: "All".to_owned(),
+            new: 1_000_000,
+            ..DeckSpec::default()
+        }],
+    };
+    let result = generate_recipe(&recipe, 1, dir.path());
+    assert!(matches!(result, Err(GenError::Recipe(_))), "{result:?}");
+    assert!(!collection(dir.path()).exists());
+}
+
+#[test]
+fn recipe_deck_names_are_unique_under_unicase() {
+    // F6.4: `STRASSE` is `Straße` once case is folded (lower-casing alone
+    // keeps them apart), so it is listed twice.
+    let deck = |name: &str| DeckSpec {
+        name: name.to_owned(),
+        new: 1,
+        ..DeckSpec::default()
+    };
+    let recipe = Recipe {
+        recipe: "twice".to_owned(),
+        description: "one deck under two spellings".to_owned(),
+        now: "2030-01-15T10:00:00Z".to_owned(),
+        rollover_hour: None,
+        presets: Vec::new(),
+        decks: vec![deck("Straße"), deck("STRASSE")],
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let error = generate_recipe(&recipe, 1, dir.path()).unwrap_err().to_string();
+    assert!(error.contains("listed twice"), "{error}");
 }
 
 #[test]

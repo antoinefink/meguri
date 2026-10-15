@@ -51,8 +51,8 @@ use super::profile::{Histogram, NotetypeShape, RevlogShape};
 use super::revlog::Fsrs;
 use super::rng::{Rng, Stream};
 use super::{
-    AllIds, GENERATOR_VERSION, GenError, LATEST_NOW_MS, Manifest, MediaMode, NoteRows, Output, Timeline, base_config,
-    closing_config,
+    AllIds, GENERATOR_VERSION, GenError, LATEST_NOW_MS, MAX_NOTES, Manifest, MediaMode, NoteRows, Output, Timeline,
+    base_config, closing_config,
 };
 
 #[derive(Clone, Debug, Deserialize)]
@@ -284,6 +284,24 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
     if rollover > 23 {
         return Err(GenError::Recipe(format!("rollover_hour {rollover} is not 0 to 23")));
     }
+    let mut notes = 0u64;
+    for spec in &recipe.decks {
+        let per_note = RecipeType::parse(spec.notetype.as_deref())?.cards_per_note();
+        let cards = [
+            spec.new,
+            spec.learning,
+            spec.due,
+            spec.later,
+            spec.suspended,
+            spec.buried,
+        ];
+        notes += cards.iter().map(|&n| u64::from(n / per_note)).sum::<u64>();
+    }
+    if notes > MAX_NOTES {
+        return Err(GenError::Recipe(format!(
+            "{notes} notes: positions must stay below 1,000,000, so at most {MAX_NOTES} notes (F6.6)"
+        )));
+    }
     let timeline = Timeline::new(now_ms, offset, rollover, SPAN_DAYS);
     // Recipe decks and tags are expanded: UI fixtures show their whole tree.
     let mut out = Output::create(dir, &timeline, &base_config(&timeline), MediaMode::Files, false)?;
@@ -327,7 +345,11 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         let parts: Vec<&str> = spec.name.split("::").collect();
         for depth in 1..=parts.len() {
             let name = parts[..depth].join("::");
-            if deck_ids.iter().any(|(n, _)| n.to_lowercase() == name.to_lowercase()) {
+            // Deck names are unique under unicase (F6.4).
+            if deck_ids
+                .iter()
+                .any(|(n, _)| meguri_text::fold::compare_folded(n, &name) == std::cmp::Ordering::Equal)
+            {
                 if depth == parts.len() {
                     return Err(GenError::Recipe(format!(
                         "deck {name:?} is listed twice or after its child"
