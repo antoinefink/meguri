@@ -836,13 +836,20 @@ fn worst_case_five_megabyte_template() {
 
 #[test]
 fn worst_case_one_megabyte_fields() {
-    let (dir, _, case) = worst("field-1mb", Some(2000));
+    let (dir, manifest, case) = worst("field-1mb", Some(2000));
     let wanted = case.large_fields.unwrap();
-    let large = all_notes(&collection(dir.path()))
+    let path = collection(dir.path());
+    let mut large: Vec<i64> = all_notes(&path)
         .iter()
         .filter(|n| n.field_values().any(|f| f.len() as u64 >= wanted.bytes))
-        .count() as u64;
-    assert_eq!(large, wanted.notes);
+        .map(|n| n.id.0)
+        .collect();
+    large.sort_unstable();
+    assert_eq!(large.len() as u64, wanted.notes);
+    // The notes the oracle check renders (meguri-cli generate's
+    // large_field_notes), read without changing a row.
+    assert_eq!(generate::notes_with_field_of(&path, wanted.bytes).unwrap(), large);
+    assert_eq!(generate::dump::logical_sha256(&path).unwrap(), manifest.dump_sha256);
 }
 
 /// Checks a PNG independently of the generator's encoder: signature, chunk
