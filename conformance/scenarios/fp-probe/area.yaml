@@ -1,0 +1,4 @@
+# specs/conformance/dsl.md D9.1. Nothing is active until the Meguri adapters
+# for fsrs_next and fuzz_table land (U14 implementer).
+area: fp-probe
+active: []
