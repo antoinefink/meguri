@@ -467,8 +467,9 @@ fn an_answer_submitted_while_a_background_op_plans_for_three_seconds_commits_fir
     let answer = add_note_with_card(&h.collection, OpSource::UserUndoable, &["answer while planning", "x"]);
     let committed = monotonic::now() - submitted;
     assert!(committed < Duration::from_secs(1), "the answer waited {committed:?}");
-    // Committed: another connection to the file sees it (synchronous=FULL
-    // makes a commit durable on return).
+    // Committed: another connection to the file sees it. The sync that makes
+    // it durable on the disk within 1 s is U32's flush
+    // (`storage/open-and-connections` C9.2).
     let seen = common::query_int(
         &h.collection,
         "SELECT count(*) FROM notes WHERE flds LIKE 'answer while planning%'",

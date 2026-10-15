@@ -32,10 +32,12 @@ pub(crate) fn writer(conn: &Connection) -> Result<(), WriterSettingsError> {
     Ok(())
 }
 
-/// C9: `synchronous=FULL`, and on Apple platforms a full fsync for commits
-/// and checkpoints, so each commit is durable on return.
+/// C9: `synchronous=NORMAL`: a commit returns without a sync, and U32's
+/// flush makes it durable within 1 s (C9.2). The syncs SQLite still issues
+/// (checkpoints, the WAL header on restart) are full ones on Apple, where a
+/// plain `fsync` does not flush the drive's cache.
 fn durability(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch("PRAGMA synchronous = FULL;")?;
+    conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
     #[cfg(target_vendor = "apple")]
     conn.execute_batch("PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON;")?;
     Ok(())
