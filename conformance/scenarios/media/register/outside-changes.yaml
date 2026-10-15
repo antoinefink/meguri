@@ -1,0 +1,20 @@
+# Changes made in the folder from outside (specs/media/media-files.md M7.2,
+# M7.3): after a registration, a rewrite, a removal and a new file are found
+# by the next one, and an add sees the new outside file. The clock moves
+# before the outside change so that the rewritten file's modification time
+# differs (specs/conformance/media-ops.md F12).
+id: media/register/outside-changes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: f.jpg, text: "f one"}
+    - {name: g.jpg, text: "g one"}
+steps:
+  - observe: [media_pending]
+  - advance: 1s
+  - media_outside:
+      - {name: f.jpg, text: "f two"}
+      - {name: g.jpg, remove: true}
+      - {name: h.jpg, text: "h one"}
+  - add_media: {name: H.JPG, text: "h one"}
+  - observe: [media_pending, media_dir]

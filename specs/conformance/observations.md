@@ -55,6 +55,9 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `blob_decode` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: "ok" \| "invalid_blob"}, decks?: {...}, presets?: {...}}`, whether each record's protobuf blobs decode now (`model-ops.md` L4) |
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
+| `media_dir` | none | draft (media): `{<name>: {sha1, size} \| {dir: true}}`: the media folder's entries as listed (`media-ops.md` F9) |
+| `media_trash` | none | draft (media): `[{name, sha1, size}]`: the media trash's entries, sorted by name, then sha1 (`media-ops.md` F10) |
+| `media_pending` | none | draft (media): `{<name>: <sha1> \| null}`: after a full registration of the folder, the entries pending for the next media sync, `null` for a deletion (`media-ops.md` F11) |
 
 ## O5. Scheduling states
 

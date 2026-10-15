@@ -74,3 +74,15 @@ lrt
 nextPos
 localOffset
 db-check
+# Media setup, ops, observations and rejections (media-ops.md, U31).
+media_files
+media_outside
+add_media
+trash_media
+restore_media_trash
+empty_media_trash
+media_dir
+media_trash
+media_pending
+invalid_name
+ignored_name

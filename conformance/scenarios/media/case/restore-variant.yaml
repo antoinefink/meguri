@@ -1,0 +1,17 @@
+# Restoring a trashed Pic.png while pic.png holds other bytes adds the old
+# bytes under the hash name, since the two names are case variants
+# (specs/media/media-files.md M10.2). Anki on the oracle's case-sensitive
+# volume moves Pic.png back beside pic.png: deviation
+# media-restore-case-variant. The first observation registers the outside
+# file, so both stores record its deletion.
+id: media/case/restore-variant
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: Pic.png, text: "first pic"}
+steps:
+  - observe: [media_pending]
+  - trash_media: {names: [Pic.png]}
+  - add_media: {name: pic.png, text: "second pic"}
+  - restore_media_trash: {}
+  - observe: [media_dir, media_trash, media_pending]

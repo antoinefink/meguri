@@ -1,0 +1,17 @@
+# AE36 (R980, R981, R982; specs/media/media-files.md M3): photo.jpg is in the
+# folder; Photo.JPG with the same bytes reuses it and writes nothing, with
+# other bytes it gets the hash name photo-<sha1>.jpg, and a new Diagram.PNG
+# is stored as diagram.png. Only the files written are pending, plus the
+# outside photo.jpg that the first add registers.
+id: media/add/ae36
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: photo.jpg, text: "photo bytes"}
+steps:
+  - add_media: {name: Photo.JPG, text: "photo bytes"}
+  - add_media: {name: photo.jpg, text: "photo bytes"}
+  - add_media: {name: Photo.JPG, text: "other photo bytes"}
+  - add_media: {name: Photo.JPG, text: "other photo bytes"}
+  - add_media: {name: Diagram.PNG, text: "diagram bytes"}
+  - observe: [media_dir, media_pending]

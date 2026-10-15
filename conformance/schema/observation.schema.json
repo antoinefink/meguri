@@ -39,6 +39,62 @@
             }
           ]
         },
+        "add_media": {
+          "description": "specs/conformance/media-ops.md F5: the stored name, or a Meguri-only rejection.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["name"],
+              "additionalProperties": false,
+              "properties": { "name": { "type": "string", "minLength": 1 } }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["invalid_name", "ignored_name"] } } }
+              ]
+            }
+          ]
+        },
+        "media_dir": {
+          "description": "media-ops.md F9: the media folder's entries by name: files as {sha1, size}, subdirectories as {dir: true}.",
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["sha1", "size"],
+                "additionalProperties": false,
+                "properties": { "sha1": { "$ref": "#/$defs/sha1" }, "size": { "type": "integer", "minimum": 0 } }
+              },
+              {
+                "type": "object",
+                "required": ["dir"],
+                "additionalProperties": false,
+                "properties": { "dir": { "const": true } }
+              }
+            ]
+          }
+        },
+        "media_trash": {
+          "description": "media-ops.md F10: trash entries sorted by name (UTF-8 bytes), then sha1.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "sha1", "size"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "sha1": { "$ref": "#/$defs/sha1" },
+              "size": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "media_pending": {
+          "description": "media-ops.md F11: entries pending for the next media sync; null for a deletion.",
+          "type": "object",
+          "additionalProperties": { "anyOf": [{ "$ref": "#/$defs/sha1" }, { "type": "null" }] }
+        },
         "db_exec": {
           "description": "specs/conformance/record-ops.md W1: the rows the statement returned; [] when none.",
           "type": "object",
@@ -227,6 +283,7 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "decode_status": { "enum": ["ok", "invalid_blob"] },
     "objects_by_id": {
       "description": "schema11-json S12: decimal id -> schema-11 object.",

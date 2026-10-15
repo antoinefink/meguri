@@ -173,6 +173,11 @@
               "type": { "type": "integer" }
             }
           }
+        },
+        "media_files": {
+          "description": "media-ops.md F3: files and empty subdirectories created directly in the media folder, after every other setup section; names must differ after NFC under the unicase comparison (checked when the scenario loads).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/media_entry" }
         }
       }
     },
@@ -276,6 +281,11 @@
           "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
+          "description": "media-ops.md F9-F11: media kinds take no references.",
+          "type": "string",
+          "pattern": "^\\s*(media_dir|media_trash|media_pending)\\s*$"
+        },
+        {
           "type": "object",
           "minProperties": 1,
           "maxProperties": 1,
@@ -316,6 +326,9 @@
               "properties": { "deck": { "type": "string" } }
             },
             "deck_tree": { "type": "null" },
+            "media_dir": { "description": "media-ops.md F9.", "type": "null" },
+            "media_trash": { "description": "media-ops.md F10.", "type": "null" },
+            "media_pending": { "description": "media-ops.md F11.", "type": "null" },
             "search": {
               "description": "Draft.",
               "type": "object",
@@ -409,6 +422,45 @@
           "additionalProperties": false
         }
       ]
+    },
+    "media_name": {
+      "description": "media-ops.md F3: an exact name in the media folder.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\x00]+$",
+      "not": { "enum": [".", ".."] }
+    },
+    "media_fill": {
+      "description": "media-ops.md F2: size bytes, all equal to byte (default 0).",
+      "type": "object",
+      "required": ["size"],
+      "additionalProperties": false,
+      "properties": {
+        "size": { "type": "integer", "minimum": 0, "maximum": 209715200 },
+        "byte": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    },
+    "media_file": {
+      "description": "media-ops.md F2: a name and its bytes, as text (UTF-8) or a fill.",
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/media_name" },
+        "text": { "type": "string" },
+        "fill": { "$ref": "#/$defs/media_fill" }
+      },
+      "oneOf": [{ "required": ["text"] }, { "required": ["fill"] }]
+    },
+    "media_dir_entry": {
+      "description": "media-ops.md F3: an empty subdirectory.",
+      "type": "object",
+      "required": ["name", "dir"],
+      "additionalProperties": false,
+      "properties": { "name": { "$ref": "#/$defs/media_name" }, "dir": { "const": true } }
+    },
+    "media_entry": {
+      "anyOf": [{ "$ref": "#/$defs/media_file" }, { "$ref": "#/$defs/media_dir_entry" }]
     },
     "draft_args": {
       "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
@@ -534,6 +586,51 @@
         },
         "check_db": {
           "description": "Stable (collection-check.md K10): Anki's Check Database on the scenario's collection.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "media_outside": {
+          "description": "Draft, final shape (media-ops.md F4): change the media folder directly, bypassing the store: create or rewrite files, create empty subdirectories, remove entries.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              { "$ref": "#/$defs/media_entry" },
+              {
+                "type": "object",
+                "required": ["name", "remove"],
+                "additionalProperties": false,
+                "properties": { "name": { "$ref": "#/$defs/media_name" }, "remove": { "const": true } }
+              }
+            ]
+          }
+        },
+        "add_media": {
+          "description": "Draft, final shape (media-ops.md F5): add a file through the media store; name is the desired name, any string.",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "text": { "type": "string" },
+            "fill": { "$ref": "#/$defs/media_fill" }
+          },
+          "oneOf": [{ "required": ["text"] }, { "required": ["fill"] }]
+        },
+        "trash_media": {
+          "description": "Draft, final shape (media-ops.md F6): move these files to the media trash.",
+          "type": "object",
+          "required": ["names"],
+          "additionalProperties": false,
+          "properties": { "names": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }
+        },
+        "restore_media_trash": {
+          "description": "Draft, final shape (media-ops.md F7): restore every media trash entry.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "empty_media_trash": {
+          "description": "Draft, final shape (media-ops.md F8): delete every media trash entry permanently.",
           "type": "object",
           "maxProperties": 0
         },

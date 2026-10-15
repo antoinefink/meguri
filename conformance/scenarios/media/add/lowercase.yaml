@@ -1,0 +1,35 @@
+# Lowercasing new names (specs/media/media-files.md M2, M3): the case key is
+# the full Unicode lowercase mapping with the final-sigma rule, and the
+# lowercase candidate goes through the name transform again, so a name that
+# lowercasing lengthens is cut back to 120 bytes. Case variants with the
+# same bytes reuse the stored name; other bytes get the hash name.
+id: media/add/lowercase
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_media: {name: "Stra\u00DFe.png", text: "first"}
+  - add_media: {name: "STRA\u00DFE.PNG", text: "second"}
+  - add_media: {name: "\u1E9E.png", text: "first"}
+  - add_media: {name: "ǅ.png", text: "first"}
+  - add_media: {name: "Ǆ.png", text: "first"}
+  - add_media: {name: "ǆ.png", text: "second"}
+  - add_media: {name: "\u212A.png", text: "first"}
+  - add_media: {name: "k.png", text: "second"}
+  - add_media: {name: "\u0130x.png", text: "first"}
+  - add_media: {name: "AB\u03A3.png", text: "first"}
+  - add_media: {name: "A\u03A3", text: "first"}
+  - add_media: {name: "A\u03A3", text: "second"}
+  - add_media: {name: "𐐀.png", text: "first"}
+  - add_media: {name: "Ꭰ.png", text: "first"}
+  - add_media: {name: "ꭰ.png", text: "second"}
+  - add_media: {name: "\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130", text: "first"}
+  - add_media: {name: "\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130.png", text: "first"}
+  - add_media: {name: "\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130\u0130.png", text: "second"}
+  - add_media: {name: "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ.jpg", text: "first"}
+  - add_media: {name: "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ.jpg", text: "second"}
+  - add_media: {name: "Café.JPG", text: "first"}
+  - add_media: {name: "CAFÉ.jpg", text: "first"}
+  - add_media: {name: "cafe\u0301.jpg", text: "second"}
+  - add_media: {name: "ΜΆΘΗΜΑ.mp3", text: "first"}
+  - add_media: {name: "ПРИВЕТ.ogg", text: "first"}
+  - add_media: {name: "ԱԲ.png", text: "first"}
+  - observe: [media_dir, media_pending]

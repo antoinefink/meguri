@@ -76,3 +76,106 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/media/media-files.md M14: Meguri treats media names
+  # case-insensitively on every volume (R984, R1570) and keeps every trashed
+  # version (R2018). Anki on the oracle's case-sensitive volume creates case
+  # variants and keeps one trashed version per name.
+  - id: media-case-variant-same-content
+    requirement: R984
+    summary: Adding mixedcase.png or MIXEDCASE.PNG with the bytes of the present MixedCase.png reuses MixedCase.png; Anki writes a second file mixedcase.png.
+    test: media/case/same-content-variant
+    scenarios: [media/case/same-content-variant]
+    pointer: /steps/*/add_media/name
+    transform: {replace: MixedCase.png}
+  - id: media-case-variant-same-content-dir
+    requirement: R984
+    summary: The folder keeps the single MixedCase.png.
+    test: media/case/same-content-variant
+    scenarios: [media/case/same-content-variant]
+    pointer: /steps/3/media_dir
+    transform: {replace: {MixedCase.png: {sha1: "b746d79201944bf54f6a239c59d0b4a71be42873", size: 5}}}
+  - id: media-case-variant-same-content-pending
+    requirement: R984
+    summary: Only MixedCase.png is pending for media sync.
+    test: media/case/same-content-variant
+    scenarios: [media/case/same-content-variant]
+    pointer: /steps/3/media_pending
+    transform: {replace: {MixedCase.png: "b746d79201944bf54f6a239c59d0b4a71be42873"}}
+  - id: media-case-variant-other-content
+    requirement: R1570
+    summary: Other bytes added as MixedCase.png get the hash name mixedcase-<sha1>.png, since mixedcase.png would be the same name on a case-insensitive volume; Anki writes mixedcase.png.
+    test: media/case/other-content-variant
+    scenarios: [media/case/other-content-variant]
+    pointer: /steps/0/add_media/name
+    transform: {replace: "mixedcase-37c6c57bedf4305ef41249c1794760b5cb8fad17.png"}
+  - id: media-case-variant-other-content-dir
+    requirement: R1570
+    summary: The folder holds MixedCase.png and the hash-named file.
+    test: media/case/other-content-variant
+    scenarios: [media/case/other-content-variant]
+    pointer: /steps/1/media_dir
+    transform:
+      replace:
+        MixedCase.png: {sha1: "b746d79201944bf54f6a239c59d0b4a71be42873", size: 5}
+        "mixedcase-37c6c57bedf4305ef41249c1794760b5cb8fad17.png": {sha1: "37c6c57bedf4305ef41249c1794760b5cb8fad17", size: 7}
+  - id: media-case-variant-other-content-pending
+    requirement: R1570
+    summary: MixedCase.png and the hash-named file are pending for media sync.
+    test: media/case/other-content-variant
+    scenarios: [media/case/other-content-variant]
+    pointer: /steps/1/media_pending
+    transform:
+      replace:
+        MixedCase.png: "b746d79201944bf54f6a239c59d0b4a71be42873"
+        "mixedcase-37c6c57bedf4305ef41249c1794760b5cb8fad17.png": "37c6c57bedf4305ef41249c1794760b5cb8fad17"
+  - id: media-restore-case-variant
+    requirement: R1570
+    summary: Restoring the trashed Pic.png while pic.png holds other bytes adds the old bytes as pic-<sha1>.png; Anki moves Pic.png back beside pic.png.
+    test: media/case/restore-variant
+    scenarios: [media/case/restore-variant]
+    pointer: /steps/4/media_dir
+    transform:
+      replace:
+        pic.png: {sha1: "55272cbcd7edc90cfa9a192aaba646deb9b7c438", size: 10}
+        "pic-c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20.png": {sha1: "c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20", size: 9}
+  - id: media-restore-case-variant-pending
+    requirement: R1570
+    summary: Pic.png stays deleted for media sync, and pic.png and the hash-named file are pending.
+    test: media/case/restore-variant
+    scenarios: [media/case/restore-variant]
+    pointer: /steps/4/media_pending
+    transform:
+      replace:
+        Pic.png: null
+        pic.png: "55272cbcd7edc90cfa9a192aaba646deb9b7c438"
+        "pic-c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20.png": "c278a732fd3e5d6b7d0cafa6b3a97fa45849ff20"
+  - id: media-trash-keeps-versions
+    requirement: R2018
+    summary: a.jpg trashed twice with different bytes leaves two trash entries; Anki keeps only the newer one.
+    test: media/trash/twice
+    scenarios: [media/trash/twice]
+    pointer: /steps/4/media_trash
+    transform:
+      replace:
+        - {name: a.jpg, sha1: "6d6efa518bdaba281c68518bd20ab7d447555bbd", size: 7}
+        - {name: a.jpg, sha1: "fa048a40dc97077f6ac1356629394ff2e566207c", size: 8}
+  - id: media-trash-keeps-versions-dir
+    requirement: R2018
+    summary: The restore puts the newer a.jpg back and adds the older bytes under their hash name.
+    test: media/trash/twice
+    scenarios: [media/trash/twice]
+    pointer: /steps/6/media_dir
+    transform:
+      replace:
+        a.jpg: {sha1: "fa048a40dc97077f6ac1356629394ff2e566207c", size: 8}
+        "a-6d6efa518bdaba281c68518bd20ab7d447555bbd.jpg": {sha1: "6d6efa518bdaba281c68518bd20ab7d447555bbd", size: 7}
+  - id: media-trash-keeps-versions-pending
+    requirement: R2018
+    summary: Both restored files are pending for media sync.
+    test: media/trash/twice
+    scenarios: [media/trash/twice]
+    pointer: /steps/6/media_pending
+    transform:
+      replace:
+        a.jpg: "fa048a40dc97077f6ac1356629394ff2e566207c"
+        "a-6d6efa518bdaba281c68518bd20ab7d447555bbd.jpg": "6d6efa518bdaba281c68518bd20ab7d447555bbd"

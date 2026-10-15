@@ -1,0 +1,36 @@
+# Hash names (specs/media/media-files.md M4): each name is added twice with
+# different bytes, so the second add needs the hash name of the lowercase
+# candidate: extension capped at 10 bytes, stem cut to 77 bytes minus the
+# extension on a character boundary, a trailing "." when there is no
+# extension, and no fix for a trailing space. The last two adds repeat
+# second adds: the hash name is reused and nothing is written.
+id: media/add/hash-names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_media: {name: "readme", text: "first"}
+  - add_media: {name: "README", text: "second"}
+  - add_media: {name: ".png", text: "first"}
+  - add_media: {name: ".PNG", text: "second"}
+  - add_media: {name: ".", text: "first"}
+  - add_media: {name: ".", text: "second"}
+  - add_media: {name: "a.b.c", text: "first"}
+  - add_media: {name: "A.B.C", text: "second"}
+  - add_media: {name: "q.abcdefghijklmnop", text: "first"}
+  - add_media: {name: "q.abcdefghijklmnop", text: "second"}
+  - add_media: {name: "x.abcdefghi jkl", text: "first"}
+  - add_media: {name: "x.abcdefghi jkl", text: "second"}
+  - add_media: {name: "x.éééééé", text: "first"}
+  - add_media: {name: "x.ÉÉÉÉÉÉ", text: "second"}
+  - add_media: {name: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.jpg", text: "first"}
+  - add_media: {name: "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.JPG", text: "second"}
+  - add_media: {name: "日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日.png", text: "first"}
+  - add_media: {name: "日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日日.png", text: "second"}
+  - add_media: {name: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b.png", text: "first"}
+  - add_media: {name: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b.png", text: "second"}
+  - add_media: {name: "CON.JPG", text: "first"}
+  - add_media: {name: "con.jpg", text: "second"}
+  - add_media: {name: "a:b?.png", text: "first"}
+  - add_media: {name: "AB.png", text: "second"}
+  - add_media: {name: "README", text: "second"}
+  - add_media: {name: "a.b.c", text: "second"}
+  - observe: [media_dir, media_pending]

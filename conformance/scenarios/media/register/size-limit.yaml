@@ -1,0 +1,11 @@
+# Media sync takes files of 1 byte to 100 MiB (specs/media/media-files.md
+# M7.1): a file of exactly 104857600 bytes is registered and pending, one of
+# 104857601 bytes is not.
+id: media/register/size-limit
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  media_files:
+    - {name: limit.bin, fill: {size: 104857600, byte: 7}}
+    - {name: over.bin, fill: {size: 104857601, byte: 7}}
+steps:
+  - observe: [media_pending]
