@@ -27,6 +27,18 @@
             "cards": { "type": "array", "items": { "$ref": "#/$defs/card_key" } }
           }
         },
+        "check_db": {
+          "description": "specs/conformance/collection-check.md K10: the K5 problem counts, or the rejection corrupt. Draft until the oracle driver supports the op (dsl.md D7.2).",
+          "anyOf": [
+            { "$ref": "#/$defs/check_db_counts" },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["corrupt"] } } }
+              ]
+            }
+          ]
+        },
         "db_exec": {
           "description": "specs/conformance/record-ops.md W1: the rows the statement returned; [] when none.",
           "type": "object",
@@ -353,6 +365,26 @@
           }
         }
       ]
+    },
+    "check_db_counts": {
+      "description": "collection-check.md K5: every kind present, 0 when Anki reported none of it; notetypes_recovered is 1 when reported (its message has no number).",
+      "type": "object",
+      "required": ["card_properties", "new_positions_too_high", "card_last_review_time", "cards_without_note", "decks_missing", "field_counts", "duplicate_card_ords", "cards_without_template", "revlog_properties", "notes_invalid_utf8", "future_ids", "notetypes_recovered"],
+      "additionalProperties": false,
+      "properties": {
+        "card_properties": { "type": "integer", "minimum": 0 },
+        "new_positions_too_high": { "type": "integer", "minimum": 0 },
+        "card_last_review_time": { "type": "integer", "minimum": 0 },
+        "cards_without_note": { "type": "integer", "minimum": 0 },
+        "decks_missing": { "type": "integer", "minimum": 0 },
+        "field_counts": { "type": "integer", "minimum": 0 },
+        "duplicate_card_ords": { "type": "integer", "minimum": 0 },
+        "cards_without_template": { "type": "integer", "minimum": 0 },
+        "revlog_properties": { "type": "integer", "minimum": 0 },
+        "notes_invalid_utf8": { "type": "integer", "minimum": 0 },
+        "future_ids": { "type": "integer", "minimum": 0 },
+        "notetypes_recovered": { "type": "integer", "minimum": 0, "maximum": 1 }
+      }
     },
     "sql_value": {
       "description": "record-ops.md W1, by SQLite storage class: INTEGER integer, REAL number, TEXT string, NULL null, BLOB {sha256}.",

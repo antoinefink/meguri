@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/collection-check.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/collection-check.md. Written only by tools/mg oracle check.",
+  "title": "Oracle check of a collection directory",
+  "type": "object",
+  "required": ["report_version", "oracle", "dir", "now", "tz", "timing", "counts", "decks", "render", "check_db", "changed_tables"],
+  "additionalProperties": false,
+  "properties": {
+    "report_version": { "const": 1 },
+    "oracle": {
+      "type": "object",
+      "required": ["anki_version", "lock_sha256", "driver_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "anki_version": { "type": "string" },
+        "lock_sha256": { "$ref": "#/$defs/sha256" },
+        "driver_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "dir": { "type": "string" },
+    "now": { "type": "integer", "description": "K2: the frozen instant, epoch seconds." },
+    "tz": { "type": "string", "description": "K1: the IANA zone the worker ran in." },
+    "timing": {
+      "type": "object",
+      "required": ["days_elapsed", "next_day_at", "now", "utc_offset_secs"],
+      "additionalProperties": false,
+      "properties": {
+        "days_elapsed": { "type": "integer" },
+        "next_day_at": { "type": "integer" },
+        "now": { "type": "integer" },
+        "utc_offset_secs": { "type": "integer" }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": ["notes", "cards", "revlog", "notetypes", "decks", "presets", "tags", "graves"],
+      "additionalProperties": false,
+      "properties": {
+        "notes": { "$ref": "#/$defs/count" },
+        "cards": { "$ref": "#/$defs/count" },
+        "revlog": { "$ref": "#/$defs/count" },
+        "notetypes": { "$ref": "#/$defs/count" },
+        "decks": { "$ref": "#/$defs/count" },
+        "presets": { "$ref": "#/$defs/count" },
+        "tags": { "$ref": "#/$defs/count" },
+        "graves": { "$ref": "#/$defs/count" }
+      }
+    },
+    "decks": {
+      "description": "K6: by deck name as given; null when no deck has that name.",
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "null" },
+          {
+            "type": "object",
+            "required": ["new", "learning", "review"],
+            "additionalProperties": false,
+            "properties": {
+              "new": { "$ref": "#/$defs/count" },
+              "learning": { "$ref": "#/$defs/count" },
+              "review": { "$ref": "#/$defs/count" }
+            }
+          }
+        ]
+      }
+    },
+    "render": {
+      "description": "K8: by note id in decimal; null when no note has that id.",
+      "type": "object",
+      "propertyNames": { "pattern": "^-?[0-9]+$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "null" },
+          {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["card", "ord", "status", "question_bytes", "answer_bytes"],
+              "additionalProperties": false,
+              "properties": {
+                "card": { "type": "integer" },
+                "ord": { "$ref": "#/$defs/count" },
+                "status": { "enum": ["ok", "empty", "template_error"] },
+                "question_bytes": { "$ref": "#/$defs/count" },
+                "answer_bytes": { "$ref": "#/$defs/count" }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "check_db": {
+      "oneOf": [
+        { "$ref": "#/$defs/check_db_counts" },
+        {
+          "type": "object",
+          "required": ["error"],
+          "additionalProperties": false,
+          "properties": { "error": { "const": "corrupt" } }
+        }
+      ]
+    },
+    "changed_tables": {
+      "description": "K3 step 8: tables whose rows Check Database changed, in observations.md O8 table order.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "enum": ["col", "notes", "cards", "revlog", "graves", "decks", "deck_config", "notetypes", "fields", "templates", "tags", "config"] }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "check_db_counts": {
+      "description": "collection-check.md K5: every kind present, 0 when Anki reported none of it.",
+      "type": "object",
+      "required": ["card_properties", "new_positions_too_high", "card_last_review_time", "cards_without_note", "decks_missing", "field_counts", "duplicate_card_ords", "cards_without_template", "revlog_properties", "notes_invalid_utf8", "future_ids", "notetypes_recovered"],
+      "additionalProperties": false,
+      "properties": {
+        "card_properties": { "$ref": "#/$defs/count" },
+        "new_positions_too_high": { "$ref": "#/$defs/count" },
+        "card_last_review_time": { "$ref": "#/$defs/count" },
+        "cards_without_note": { "$ref": "#/$defs/count" },
+        "decks_missing": { "$ref": "#/$defs/count" },
+        "field_counts": { "$ref": "#/$defs/count" },
+        "duplicate_card_ords": { "$ref": "#/$defs/count" },
+        "cards_without_template": { "$ref": "#/$defs/count" },
+        "revlog_properties": { "$ref": "#/$defs/count" },
+        "notes_invalid_utf8": { "$ref": "#/$defs/count" },
+        "future_ids": { "$ref": "#/$defs/count" },
+        "notetypes_recovered": { "type": "integer", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

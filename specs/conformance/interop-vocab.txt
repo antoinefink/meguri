@@ -69,3 +69,8 @@ SYNC_USER1
 apkg
 collection.anki21
 collection.anki2
+# collection-check.md: card data, config keys and the tag Check Database adds
+lrt
+nextPos
+localOffset
+db-check
