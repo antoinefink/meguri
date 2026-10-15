@@ -4,13 +4,14 @@
 //! `engine/change-stream` S3) is the one ordered queue; a single dispatcher
 //! thread, `meguri-events`, holds a subscription to it and delivers each
 //! envelope to the Swift listener in `seq` order, never from a producer
-//! thread and never while holding a lock. Events published before Swift
-//! attaches its listener wait in the subscription.
+//! thread and never while holding a lock. The runtime starts it with the
+//! process engine, so events published before Swift attaches its listener
+//! wait in the subscription.
 //!
 //! Variants are added by their owning units (KTD9 lists them). Stream kinds
 //! that have no `CoreEventKind` variant yet are skipped (U37 adds them).
 
-use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use meguri_engine::{ChangeStream, Event, EventKind, Generation, JobId, Qos, Seq, Subscription, ThreadRegistry};
 
@@ -53,14 +54,13 @@ pub trait CoreEventListener: Send + Sync {
 #[uniffi::export]
 pub fn set_event_listener(listener: Arc<dyn CoreEventListener>) -> Result<(), CoreError> {
     callback::enter("set_event_listener");
-    dispatcher()?.set_listener(listener);
+    runtime::dispatcher()?.set_listener(listener);
     Ok(())
 }
 
 /// Publishes an event into the process engine's change stream and returns
 /// its `seq`.
 pub fn publish(generation: u64, cause_seq: Option<u64>, kind: CoreEventKind) -> Result<u64, CoreError> {
-    dispatcher()?;
     let stream = runtime::engine()?.stream();
     Ok(stream
         .publish(Generation(generation), cause_seq.map(Seq), stream_kind(kind))
@@ -101,19 +101,9 @@ fn core_event(event: &Event) -> Option<CoreEvent> {
     })
 }
 
-/// The process dispatcher, subscribed to the process engine's stream.
-fn dispatcher() -> Result<&'static Arc<Dispatcher>, CoreError> {
-    static DISPATCHER: OnceLock<Result<Arc<Dispatcher>, CoreError>> = OnceLock::new();
-    DISPATCHER
-        .get_or_init(|| {
-            let engine = runtime::engine()?;
-            Dispatcher::start(engine.stream(), engine.threads())
-        })
-        .as_ref()
-        .map_err(Clone::clone)
-}
-
-struct Dispatcher {
+/// The delivery thread and its subscription; the process's one comes from
+/// `runtime::dispatcher()`.
+pub(crate) struct Dispatcher {
     subscription: Subscription,
     listener: Mutex<Option<Arc<dyn CoreEventListener>>>,
     attached: Condvar,
@@ -122,7 +112,7 @@ struct Dispatcher {
 impl Dispatcher {
     /// Subscribes to `stream`, then starts the delivery thread through
     /// `threads`.
-    fn start(stream: &ChangeStream, threads: &ThreadRegistry) -> Result<Arc<Dispatcher>, CoreError> {
+    pub(crate) fn start(stream: &ChangeStream, threads: &ThreadRegistry) -> Result<Arc<Dispatcher>, CoreError> {
         let dispatcher = Arc::new(Dispatcher {
             subscription: stream.subscribe(),
             listener: Mutex::new(None),
