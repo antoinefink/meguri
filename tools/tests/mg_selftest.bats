@@ -882,6 +882,100 @@ EOF
   ! grep -q ' fuzz run ' "$STUB_LOG"
 }
 
+# --- fixtures (cargo and meguri-cli stubbed; runs as if in the dev container) --
+
+# fixtures_sandbox: a user shape, worst case `wide`, recipe `tiny`, a cargo
+# stub whose build exits $STUB_BUILD_EXIT and whose metadata names a target
+# directory holding a meguri-cli stub. The stub logs its arguments, reports
+# $STUB_ELAPSED_MS and $STUB_PEAK_KB, exits $STUB_CLI_EXIT, and reports
+# `cached` when its --out directory holds a manifest.json.
+fixtures_sandbox() {
+  local stubs="$BATS_TEST_TMPDIR/fixtures-stubs" target="$BATS_TEST_TMPDIR/fixtures-target"
+  local testkit="$SB/core/crates/meguri-testkit"
+  mkdir -p "$stubs" "$target/fixtures" "$testkit/profiles/worst-cases" "$testkit/fixtures/recipes"
+  printf '{"format": 1}\n' >"$testkit/profiles/user-shape.json"
+  printf '{}\n' >"$testkit/profiles/worst-cases/wide.json"
+  printf 'recipe: tiny\n' >"$testkit/fixtures/recipes/tiny.yaml"
+  cat >"$stubs/cargo" <<STUB
+#!/bin/bash
+echo "cargo \$*" >>"\$STUB_LOG"
+case "\$1" in
+  build) exit "\${STUB_BUILD_EXIT:-0}" ;;
+  metadata) printf '{"target_directory": "%s"}\n' "$target" ;;
+  *) exit 97 ;;
+esac
+STUB
+  cat >"$target/fixtures/meguri-cli" <<'STUB'
+#!/bin/bash
+echo "meguri-cli $*" >>"$STUB_LOG"
+out=""
+while [ "$#" -gt 0 ]; do
+  [ "$1" = --out ] && out="$2"
+  shift
+done
+cached=false
+[ -f "$out/manifest.json" ] && cached=true
+mkdir -p "$out" && printf '{}\n' >"$out/manifest.json"
+printf '{"dir": "%s", "cached": %s, "elapsed_ms": %s, "peak_rss_kb": %s, "manifest": {"counts": {"cards": 1}}}\n' \
+  "$out" "$cached" "${STUB_ELAPSED_MS:-1000}" "${STUB_PEAK_KB:-50000}"
+exit "${STUB_CLI_EXIT:-0}"
+STUB
+  chmod +x "$stubs/cargo" "$target/fixtures/meguri-cli"
+  export PATH="$stubs:$PATH" MG_CONTAINER=dev STUB_LOG="$BATS_TEST_TMPDIR/fixtures.log"
+  : >"$STUB_LOG"
+}
+
+@test "fixtures rejects bad usage before building anything" {
+  fixtures_sandbox
+  local args
+  for args in "" "--seed" "--seed x 10k" "--media all 10k" "--frobnicate 10k" "lots" "10k nosuch"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg fixtures $args
+    [ "$status" -eq 2 ] || { echo "$args"; jq . "$result"; return 1; }
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    validate "$result"
+  done
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "fixtures generates sizes, worst cases and recipes into build/fixtures and reuses them" {
+  fixtures_sandbox
+  local shape
+  shape="$(sha256sum <"$SB/core/crates/meguri-testkit/profiles/user-shape.json" | cut -c1-16)"
+  mg fixtures 10k worst-cases recipes --seed 3
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  [ "$(field .summary.total)" -eq 3 ]
+  [ "$(field '[.details.fixtures[] | "\(.target)=\(.kind)"] | join(" ")')" = "10k=size wide=worst-case tiny=recipe" ]
+  grep -qx "meguri-cli generate 10k --seed 3 --out build/fixtures/$shape-3-10k --cache" "$STUB_LOG"
+  grep -qx "meguri-cli generate worst-case wide --seed 3 --out build/fixtures/$shape-3-wide --cache" "$STUB_LOG"
+  grep -qx "meguri-cli generate recipe tiny --seed 3 --out build/fixtures/recipes/tiny-3 --cache" "$STUB_LOG"
+  [ "$(grep -c '^cargo build --profile fixtures -p meguri-cli$' "$STUB_LOG")" -eq 1 ]
+  [ "$(field '[.artifacts[] | select(.kind == "fixture")] | length')" -eq 3 ]
+  validate "$result"
+
+  mg fixtures 10k --seed 3
+  [ "$status" -eq 0 ]
+  [ "$(field '.details.fixtures[0].cached')" = true ]
+}
+
+@test "fixtures fails a run over the 10-minute or 2 GB budget, a failed generation and a failed build" {
+  fixtures_sandbox
+  STUB_ELAPSED_MS=600001 mg fixtures 1m
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures/1m/time ]
+  rm -rf "$SB/build/fixtures"
+  STUB_PEAK_KB=2097153 mg fixtures 1m
+  [ "$(failure_ids)" = fixtures/1m/memory ]
+  STUB_CLI_EXIT=1 mg fixtures 500k
+  [ "$(failure_ids)" = fixtures/500k ]
+  : >"$STUB_LOG"
+  STUB_BUILD_EXIT=101 mg fixtures 10k
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures-build ]
+  ! grep -q '^meguri-cli' "$STUB_LOG"
+}
+
 # --- bridge ----------------------------------------------------------------
 
 @test "swift-test --package without a name stops with a usage error" {
