@@ -21,6 +21,9 @@ import Foundation
 ///    Meguri's isolated content world; the handler passes the body to
 ///    `receive(_:at:)`. The occluded page's pre-swap double rAF posts the
 ///    same shape with phase "settled" (U176's settle signal).
+/// 4. When the review session ends and its pages are released (no
+///    confirmation can arrive any more), `finish()` reports the swaps still
+///    waiting for one: the last swap of a session has no next swap to do it.
 public enum VisibleConfirmation {
     /// The script message handler name the card runtime posts to.
     public static let messageName = "meguriVisible"
@@ -93,7 +96,8 @@ public struct VisibleSample: Sendable, Equatable {
         case confirmed
         /// It named another card: a miss.
         case wrongCard(reported: Int64)
-        /// No confirmation came before the next swap: a miss.
+        /// No confirmation came before the next swap or the end of the
+        /// session: a miss.
         case unconfirmed
     }
 
@@ -159,10 +163,7 @@ public final class SwapRecorder {
     /// the interval and returns the token the page must echo. A presented
     /// swap still waiting for its confirmation becomes an unconfirmed miss.
     public func beginSwap(to cardID: Int64, inputTime: TimeInterval) -> SwapToken {
-        for (sequence, swap) in pending where swap.presentedTime != nil {
-            pending[sequence] = nil
-            report(swap, outcome: .unconfirmed)
-        }
+        reportUnconfirmed(pending.values.filter { $0.presentedTime != nil })
         let token = SwapToken(sequence: next, cardID: cardID)
         next += 1
         pending[token.sequence] = Pending(token: token, inputTime: inputTime, interval: emitter.begin(interval))
@@ -195,6 +196,26 @@ public final class SwapRecorder {
             completeIfReady(message.token)
         }
         return message
+    }
+
+    /// The session ended and its pages were released, so no confirmation
+    /// can arrive any more (U176 calls this): every presented swap still
+    /// waiting for its confirmation becomes an unconfirmed miss, in swap
+    /// order. A swap whose frame was never presented is no sample (nothing
+    /// ended its interval) and is forgotten. Later calls and messages about
+    /// these swaps do nothing; the recorder can begin new swaps.
+    public func finish() {
+        let waiting = pending.values.filter { $0.presentedTime != nil }
+        pending.removeAll()
+        reportUnconfirmed(waiting)
+    }
+
+    /// Reports `swaps` as unconfirmed misses, in swap order, and forgets them.
+    private func reportUnconfirmed(_ swaps: [Pending]) {
+        for swap in swaps.sorted(by: { $0.token.sequence < $1.token.sequence }) {
+            pending[swap.token.sequence] = nil
+            report(swap, outcome: .unconfirmed)
+        }
     }
 
     private func completeIfReady(_ sequence: UInt64) {

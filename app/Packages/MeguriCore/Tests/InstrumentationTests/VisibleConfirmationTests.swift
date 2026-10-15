@@ -106,6 +106,54 @@ import Testing
         #expect(second.sequence == first.sequence + 1)
     }
 
+    @Test func theLastSwapStillUnconfirmedWhenTheSessionFinishesIsAMiss() {
+        let samples = Samples()
+        let recorder = makeRecorder(Events(), samples)
+        let first = recorder.beginSwap(to: 1, inputTime: 1)
+        recorder.presented(first, frameTime: 1.008)
+        recorder.receive(["token": first.sequence, "card": 1, "phase": "visible"], at: 1.04)
+        let last = recorder.beginSwap(to: 2, inputTime: 2)
+        recorder.presented(last, frameTime: 2.008)
+        #expect(samples.all.map(\.outcome) == [.confirmed], "the last swap still waits for its confirmation")
+
+        recorder.finish()
+        #expect(samples.all.map(\.outcome) == [.confirmed, .unconfirmed])
+        #expect(samples.all[1].token == last)
+        #expect(samples.all[1].presentedTime == 2.008)
+        #expect(samples.all[1].confirmedTime == nil)
+
+        // The session is over: a late confirmation adds nothing, and a
+        // second finish reports nothing again.
+        recorder.receive(["token": last.sequence, "card": 2, "phase": "visible"], at: 2.05)
+        recorder.finish()
+        #expect(samples.all.count == 2)
+    }
+
+    @Test func finishReportsWaitingSwapsInSwapOrderAndForgetsOnesNeverPresented() {
+        let samples = Samples()
+        let recorder = makeRecorder(Events(), samples)
+        // Two swaps begun before either was presented: neither reports the
+        // other, so both are still waiting at the end.
+        let tokens = (1...2).map { recorder.beginSwap(to: Int64($0), inputTime: Double($0)) }
+        for token in tokens.reversed() {
+            recorder.presented(token, frameTime: Double(token.cardID) + 0.008)
+        }
+        let neverPresented = recorder.beginSwap(to: 3, inputTime: 3)
+        #expect(samples.all.map(\.token) == tokens, "the third swap reports both, in swap order")
+        samples.all.removeAll()
+
+        let more = (4...9).map { recorder.beginSwap(to: Int64($0), inputTime: Double($0)) }
+        for token in more.shuffled() {
+            recorder.presented(token, frameTime: Double(token.cardID) + 0.008)
+        }
+        recorder.finish()
+        #expect(samples.all.map(\.token) == more)
+        #expect(samples.all.allSatisfy { $0.outcome == .unconfirmed })
+        recorder.presented(neverPresented, frameTime: 3.008)
+        recorder.receive(["token": neverPresented.sequence, "card": 3, "phase": "visible"], at: 3.04)
+        #expect(samples.all.count == more.count, "a swap that never reached the screen is no sample, and finish forgot it")
+    }
+
     @Test func aConfirmationBeforeThePresentedCallbackCompletesAtIt() {
         let events = Events()
         let samples = Samples()
