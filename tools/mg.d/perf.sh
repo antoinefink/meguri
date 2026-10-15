@@ -502,11 +502,12 @@ mg_perf_ui() {
 # mg__metrics_record <template> <udid> <trace> <log> <note>: starts xctrace
 # recording every process of the simulator where it is (MG_SIM_RUNNER: this
 # Mac, or the test VM) into <trace>, after a waiter for its tracing-started
-# notification <note>. Sets MG_METRICS_PID (xctrace, or the SSH session that
-# runs it) and MG_METRICS_WAITER (notifyutil -1, or its SSH session), which
-# exits 0 once tracing has started. xctrace saves the trace when stopped with
-# SIGINT, so it starts with SIGINT at its default (a background command
-# ignores it; a command over SSH has it).
+# notification <note>, appending its output to <log>. Sets MG_METRICS_PID
+# (xctrace, or the SSH session that runs it) and MG_METRICS_WAITER
+# (notifyutil -1, or its SSH session), which exits 0 once tracing has
+# started. xctrace saves the trace when stopped with SIGINT, so it starts
+# with SIGINT at its default (a background command ignores it; a command
+# over SSH has it).
 mg__metrics_record() {
   local args=(record --template "$1" --instrument os_signpost --device "$2" --all-processes
     --output "$3" --no-prompt --notify-tracing-started "$5")
@@ -517,14 +518,68 @@ mg__metrics_record() {
     mg_mac_vm_ssh "exec notifyutil -1 $(mvl_q "$5")" >/dev/null 2>&1 &
     MG_METRICS_WAITER=$!
     mg_mac_vm_ssh "mkdir -p $(mvl_q "$(dirname "$3")") && rm -rf $(mvl_q "$3") && echo \$\$ >$(mvl_q "$3.pid") &&
-      exec xcrun xctrace $(mvl_q "${args[@]}")" >"$4" 2>&1 &
+      exec xcrun xctrace $(mvl_q "${args[@]}")" >>"$4" 2>&1 &
     MG_METRICS_PID=$!
     return 0
   fi
   notifyutil -1 "$5" >/dev/null 2>&1 &
   MG_METRICS_WAITER=$!
-  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' xcrun xctrace "${args[@]}" </dev/null >"$4" 2>&1 &
+  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' xcrun xctrace "${args[@]}" </dev/null >>"$4" 2>&1 &
   MG_METRICS_PID=$!
+}
+
+# mg__metrics_start <template> <udid> <trace> <log> <note>: one start of
+# xctrace and its waiter (mg__metrics_record), then a wait of up to
+# MEGURI_METRICS_START_SECONDS (60) for tracing to start. Returns 0 once it
+# has; otherwise 1, with MG_METRICS_WHY saying how it failed and both
+# processes left to mg__metrics_end_start.
+mg__metrics_start() {
+  local i limit="${MEGURI_METRICS_START_SECONDS:-60}"
+  mg__metrics_record "$@"
+  for i in $(seq 1 $((limit * 10))); do
+    if ! kill -0 "$MG_METRICS_WAITER" 2>/dev/null; then
+      # notifyutil got the notification; an SSH session that failed did not.
+      wait "$MG_METRICS_WAITER" && return 0
+      break
+    fi
+    kill -0 "$MG_METRICS_PID" 2>/dev/null || break
+    sleep 0.1
+  done
+  MG_METRICS_WHY="within $limit s"
+  kill -0 "$MG_METRICS_PID" 2>/dev/null || MG_METRICS_WHY="before it ended"
+  return 1
+}
+
+# mg__metrics_end_start <trace> <note>: after a start that failed, ends
+# xctrace and its waiter with SIGKILL (an xctrace stuck before tracing
+# ignores SIGINT), in the test VM there with the trace it began, and waits up
+# to 10 s until neither runs. Returns 1 when that is not seen.
+mg__metrics_end_start() {
+  local i
+  mg__metrics_kill_remote "$1" "$2" --drop
+  kill -9 "$MG_METRICS_PID" "$MG_METRICS_WAITER" 2>/dev/null
+  wait "$MG_METRICS_PID" "$MG_METRICS_WAITER" 2>/dev/null
+  rm -rf "$1"
+  for i in $(seq 1 20); do
+    mg__metrics_gone "$2" && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+# mg__metrics_gone <note>: whether neither an xctrace started for <note> nor
+# its waiter runs where they ran (this Mac, or the test VM). pgrep exits 1
+# when it finds none; an SSH session that fails proves nothing.
+mg__metrics_gone() {
+  # The brackets keep the shell that runs pgrep from matching itself.
+  local pattern="notifyutil[ ]-1 $1\$|xctrace[ ]record .*--notify-tracing-started $1\$" rc
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg_mac_vm_ssh "pgrep -f $(mvl_q "$pattern") >/dev/null"
+  else
+    pgrep -f "$pattern" >/dev/null
+  fi
+  rc=$?
+  [ "$rc" -eq 1 ]
 }
 
 # mg__metrics_signal_remote <INT|KILL> <trace>: in the test VM, sends the
@@ -619,38 +674,44 @@ mg_metrics() {
   # xctrace records every process of the simulator, with os_signpost added
   # to the template so the registered intervals show (R1861). It runs
   # headless and saves the trace when stopped with SIGINT.
-  local trace="$MG_RUN_DIR/metrics.trace" log="$MG_RUN_DIR/xctrace.log" note pid waiter i started=0
+  local trace="$MG_RUN_DIR/metrics.trace" log="$MG_RUN_DIR/xctrace.log" note detail
   note="com.antoinefink.meguri.mg.metrics.$MG_RUN_ID"
-  mg_detail xctrace "$(jq -nc --arg t "$template" --arg d "$udid" '{template: $t, device: $d, instruments: ["os_signpost"]}')"
-  mg__metrics_record "$template" "$udid" "$trace" "$log" "$note"
-  pid="$MG_METRICS_PID"
-  waiter="$MG_METRICS_WAITER"
+  detail="$(jq -nc --arg t "$template" --arg d "$udid" '{template: $t, device: $d, instruments: ["os_signpost"]}')"
+  mg_detail xctrace "$(jq -c '. + {starts: 1}' <<<"$detail")"
+  MG_METRICS_PID="" MG_METRICS_WAITER=""
   # Registered after the lease: it runs first, while the job still holds it.
-  mg_on_exit "kill -9 $pid $waiter 2>/dev/null; mg__metrics_kill_remote '$trace' '$note' --drop"
+  # It ends the processes of the last start.
+  mg_on_exit "kill -9 \$MG_METRICS_PID \$MG_METRICS_WAITER 2>/dev/null; mg__metrics_kill_remote '$trace' '$note' --drop"
   mg_artifact log "$log" "xctrace record"
-  for i in $(seq 1 600); do
-    if ! kill -0 "$waiter" 2>/dev/null; then
-      # notifyutil got the notification; an SSH session that failed did not.
-      wait "$waiter" && started=1
-      break
+  if ! mg__metrics_start "$template" "$udid" "$trace" "$log" "$note"; then
+    # In the test VM a start stalls when Instruments' DTServiceHub crashes
+    # starting ktrace (an assertion in authorized_ktrace_start_fd, a
+    # DTServiceHub-*.ips report there): xctrace logs "Device disconnected
+    # while trying to start tap" and waits for good. One more start, once
+    # this one's xctrace and waiter are gone, so that two never record the
+    # simulator at once.
+    echo "metrics: xctrace did not start recording $MG_METRICS_WHY; ending it and its waiter, then starting it once more" |
+      tee -a "$log" >&2
+    if ! mg__metrics_end_start "$trace" "$note"; then
+      mg_failure xctrace "xctrace did not start recording $MG_METRICS_WHY, and it or its waiter was not seen to end, so it was not started again; see $log" "tools/mg metrics $script"
+      mg_message "metrics: xctrace did not start recording; see $log"
+      mg_status error
+      return 0
     fi
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.1
-  done
-  if [ "$started" = 0 ]; then
-    local why="within 60 s"
-    kill -0 "$pid" 2>/dev/null || why="before it ended"
-    # Nothing to save: the exit cleanup kills xctrace and its waiter (an
-    # xctrace stuck before tracing ignores SIGINT).
-    mg_failure xctrace "xctrace did not start recording $why; see $log" "tools/mg metrics $script"
-    mg_message "metrics: xctrace did not start recording; see $log"
-    mg_status error
-    return 0
+    mg_detail xctrace "$(jq -c '. + {starts: 2}' <<<"$detail")"
+    if ! mg__metrics_start "$template" "$udid" "$trace" "$log" "$note"; then
+      # Nothing to save: the exit cleanup kills xctrace and its waiter (an
+      # xctrace stuck before tracing ignores SIGINT).
+      mg_failure xctrace "xctrace did not start recording $MG_METRICS_WHY, twice; see $log" "tools/mg metrics $script"
+      mg_message "metrics: xctrace did not start recording, twice; see $log"
+      mg_status error
+      return 0
+    fi
   fi
 
   mg_drive_run "$script" ios "$udid" "$MG_D_CONFIG" no "$MG_RUN_DIR/drive"
   local rc=$?
-  mg__metrics_stop "$pid" "$trace" "$note"
+  mg__metrics_stop "$MG_METRICS_PID" "$trace" "$note"
   # From the VM the trace comes back here, where it is read and kept; the VM
   # keeps no copy.
   if [ "$MG_SIM_RUNNER" = vm ] && ! mg_sim_fetch "$trace"; then

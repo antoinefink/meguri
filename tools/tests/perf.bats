@@ -170,9 +170,12 @@ vm_stub() { printf '#!/bin/bash\n%s\n' "$2" >"$FAKE_VM_BIN/$1" && chmod +x "$FAK
 # and the destination simulator (booted there), logs its arguments and
 # writes a result bundle. xctrace record makes the trace bundle, checks its
 # device, posts its tracing-started notification (FAKE_XCTRACE_FAILS=1: exits
-# 1 first), and on SIGINT saves the trace; notifyutil -1 waits for that
-# notification. Paths
-# are logged as the VM sees them (without the fake file system's prefix).
+# 1 first; FAKE_XCTRACE_STALLS=<n>: its first n starts never post it and
+# ignore SIGINT, like a real one stuck before tracing), and on SIGINT saves
+# the trace; notifyutil -1 waits for that notification. Both refuse to start
+# (exit 1, logged as overlap) while another of them for the same notification
+# still runs. Paths are logged as the VM sees them (without the fake file
+# system's prefix).
 vm_stubs() {
   vm_stub sudo 'exec "$@"'
   vm_stub stat "if [ \"\$*\" = '-f %Su /dev/console' ]; then echo meguri; exit 0; fi
@@ -198,6 +201,8 @@ EOF
 #!/bin/bash
 echo "vm-notifyutil $*" >>"$STUB_LOG"
 [ "$1" = -1 ] && [ -n "${2:-}" ] || exit 64
+pgrep -f "notifyutil[ ]-1 $2\$" >"$FAKE_VM/notifyutil.$$" || true
+if grep -vqx "$$" "$FAKE_VM/notifyutil.$$"; then echo "vm-notifyutil overlap $2" >>"$STUB_LOG"; exit 1; fi
 while [ ! -e "$FAKE_VM/notify/$2" ]; do sleep 0.1; done
 exit 0
 EOF
@@ -219,10 +224,19 @@ while [ $# -gt 0 ]; do
     *) shift ;;
   esac
 done
+pgrep -f "xctrace[ ]record .*--notify-tracing-started $note\$" >"$FAKE_VM/xctrace.$$" || true
+if grep -vqx "$$" "$FAKE_VM/xctrace.$$"; then echo "vm-xctrace overlap" >>"$STUB_LOG"; exit 1; fi
 # Like the real one, it makes the trace bundle before tracing starts.
 mkdir -p "$out/Trace1.run"
 [ "${FAKE_XCTRACE_FAILS:-}" != 1 ] || { echo "xctrace: error: the recording could not start"; exit 1; }
 [ "$(xcrun simctl __state "$udid")" = Booted ] || { echo "xctrace: error: no booted device $udid"; exit 1; }
+n=$(($(cat "$FAKE_VM/xctrace.starts" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$FAKE_VM/xctrace.starts"
+if [ "$n" -le "${FAKE_XCTRACE_STALLS:-0}" ]; then
+  trap '' INT
+  echo "vm-xctrace stalled" >>"$STUB_LOG"
+  while :; do sleep 0.1; done
+fi
 trap 'mkdir -p "$out" && echo trace >"$out/data" && echo "vm-xctrace saved $(unmap "$out")" >>"$STUB_LOG"; exit 0' INT
 mkdir -p "$FAKE_VM/notify" && : >"$FAKE_VM/notify/$note"
 echo "vm-xctrace recording" >>"$STUB_LOG"
@@ -575,23 +589,81 @@ esac'
   assert_host_untouched
 }
 
-@test "metrics in the test VM: an xctrace that cannot start is an error, and its waiter is ended there" {
+@test "metrics in the test VM: an xctrace that cannot start, also when started once more, is an error, and its waiter is ended there" {
   use_vm
   local dir
   FAKE_XCTRACE_FAILS=1 mg metrics "$SB/tools/drive-scripts/examples/perf-probe.json"
   [ "$status" -eq 2 ]
   [ "$(field .status)" = error ]
   [ "$(field '.failures[0].id')" = xctrace ]
-  [[ "$(field '.failures[0].message')" == "xctrace did not start recording before it ended; see "* ]]
-  [ "$(field .message)" = "metrics: xctrace did not start recording; see $(dirname "$result")/xctrace.log" ]
+  [[ "$(field '.failures[0].message')" == "xctrace did not start recording before it ended, twice; see "* ]]
+  [ "$(field .message)" = "metrics: xctrace did not start recording, twice; see $(dirname "$result")/xctrace.log" ]
+  [ "$(field .details.xctrace.starts)" = 2 ]
   dir="$(dirname "$result")"
-  grep -q 'the recording could not start' "$dir/xctrace.log"
+  # One retry, no more; both starts are in the log.
+  [ "$(grep -c '^vm-xctrace record ' "$STUB_LOG")" -eq 2 ]
+  [ "$(grep -c 'the recording could not start' "$dir/xctrace.log")" -eq 2 ]
   not_called '^fake drive'
   called "^vm-pkill -9 -f notifyutil\[ \]-1 com.antoinefink.meguri.mg.metrics.$(field .run_id)\$"
   # Neither the pid file nor the partial trace is left there.
   [ ! -e "$(vm_fs "$dir/metrics.trace.pid")" ]
   [ ! -e "$(vm_fs "$dir/metrics.trace")" ]
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+}
+
+@test "metrics in the test VM: a start that stalls is killed there with its waiter, both are checked gone, and one more start records" {
+  use_vm
+  grep -v review.notRegistered "$FX_SIGNPOSTS" >"$BATS_TEST_TMPDIR/os-signpost.xml"
+  export FX_SIGNPOSTS="$BATS_TEST_TMPDIR/os-signpost.xml"
+  local script="$SB/tools/drive-scripts/examples/perf-probe.json" u dir note stalled killed waiter gone again
+  FAKE_XCTRACE_STALLS=1 MEGURI_METRICS_START_SECONDS=2 mg metrics "$script"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.xctrace.starts)" = 2 ]
+  u="$(field .details.device.udid)"
+  dir="$(dirname "$result")"
+  note="com.antoinefink.meguri.mg.metrics.$(field .run_id)"
+  [ "$(grep -c "^vm-xctrace record --template Logging --instrument os_signpost --device $u .* --notify-tracing-started $note\$" "$STUB_LOG")" -eq 2 ]
+  [ "$(grep -c "^vm-notifyutil -1 $note\$" "$STUB_LOG")" -eq 2 ]
+  # The stalled xctrace ignores SIGINT: SIGKILL there by its pid file, its
+  # waiter by its command line, then both checked gone there, all before the
+  # second start (which would refuse to run beside them).
+  stalled="$(line '^vm-xctrace stalled')"
+  killed="$(line "^ssh meguri-mac p='$dir/metrics.trace.pid'; .* kill -KILL ")"
+  waiter="$(line "^vm-pkill -9 -f notifyutil\[ \]-1 $note\$")"
+  gone="$(line "^ssh meguri-mac pgrep -f 'notifyutil\[ \]-1 $note")"
+  again="$(grep -n '^vm-xctrace record ' "$STUB_LOG" | sed -n 2p | cut -d: -f1)"
+  [ "$stalled" -lt "$killed" ]
+  [ "$killed" -lt "$gone" ]
+  [ "$waiter" -lt "$gone" ]
+  [ "$gone" -lt "$again" ]
+  not_called 'overlap'
+  grep -q "did not start recording within 2 s; ending it and its waiter, then starting it once more" "$dir/xctrace.log"
+  # The second start records the drive, and its trace comes back.
+  [ "$(line '^vm-xctrace recording')" -lt "$(line '^fake drive')" ]
+  called "^fake drive $script ios $u Debug no runner=vm\$"
+  [ "$(cat "$dir/metrics.trace/data")" = trace ]
+  [ ! -e "$(vm_fs "$dir/metrics.trace")" ]
+  [ ! -e "$(vm_fs "$dir/metrics.trace.pid")" ]
+  assert_host_untouched
+}
+
+@test "metrics in the test VM: a stalled start whose end the VM does not confirm is an error, and xctrace is not started again" {
+  use_vm
+  local dir
+  FAKE_XCTRACE_STALLS=1 MEGURI_METRICS_START_SECONDS=1 FAKE_VM_SSH_FAIL="^pgrep -f 'notifyutil" \
+    mg metrics "$SB/tools/drive-scripts/examples/perf-probe.json"
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = xctrace ]
+  [[ "$(field '.failures[0].message')" == "xctrace did not start recording within 1 s, and it or its waiter was not seen to end, so it was not started again; see "* ]]
+  [ "$(field .details.xctrace.starts)" = 1 ]
+  [ "$(grep -c '^vm-xctrace record ' "$STUB_LOG")" -eq 1 ]
+  not_called '^fake drive'
+  dir="$(dirname "$result")"
+  [ ! -e "$(vm_fs "$dir/metrics.trace.pid")" ]
+  [ ! -e "$(vm_fs "$dir/metrics.trace")" ]
   assert_host_untouched
 }
 
