@@ -10,6 +10,12 @@
 # this Mac only with MEGURI_SIM_ALLOW_HOST=1 (a run Antoine starts himself),
 # and otherwise exits 5 (queued).
 #
+# The VM runs one job at a time (its lease, tools/mg.d/mac-vm.sh). acquire
+# and gc (but gc --list) create, boot and delete simulators there, so they
+# run under that lease: directly when the caller runs under the job that
+# holds it (a job's own leases and scripts), otherwise through `tools/mg sim
+# <command>`, which waits for the lease and runs this script again under it.
+#
 # A fresh simulator's first boot crashes system apps (PosterBoard, about 15 s
 # in) and a shutdown crashes simulator daemons; macOS shows each crash as a
 # dialog on Antoine's screen. So pool devices are never shut down, erased or
@@ -56,7 +62,9 @@
 # and MEGURI_SIM_DEVICES_DIR overrides set here go to the VM along.
 # Internal: MEGURI_SIM_POOL_IN_VM=1 (this run is the VM's), with
 # MEGURI_SIM_POOL_CALLER naming the caller's description (vm, worktree, cwd,
-# pid), which sets MEGURI_SIM_POOL_VM, _WORKTREE, _CWD and _PID.
+# pid), which sets MEGURI_SIM_POOL_VM, _WORKTREE, _CWD and _PID;
+# MEGURI_SIM_POOL_VIA_MG=1 (this run asked tools/mg sim to take the VM's
+# lease: the run it starts must find it held).
 #
 # Runs under macOS /bin/bash 3.2 with BSD tools, and with GNU tools in the
 # dev container (self-tests).
@@ -64,6 +72,7 @@
 set -u
 
 SP_SCRIPTS="$(cd "$(dirname "$0")" && pwd -P)"
+SP_ROOT="$(cd "$SP_SCRIPTS/../.." && pwd -P)"
 SP_DEVICES_JSON="${MEGURI_SIM_DEVICES_JSON:-$(cd "$(dirname "$0")/.." && pwd -P)/sim-devices.json}"
 SP_KINDS="" # set from SP_DEVICES_JSON before any command runs
 
@@ -757,6 +766,9 @@ sp_route() {
       ;;
   esac
   vm="$(jq -c '.[0]' <<<"$MVL_VMS")"
+  if sp_changes_pool "$@" && ! mvl_lease_held "$(mvl_lease_dir "$SP_ROOT" "$(jq -r .name <<<"$vm")")"; then
+    sp_via_mg "$@"
+  fi
   # The tart log of a VM this starts stays: tart keeps writing to it.
   logs="${TMPDIR:-/tmp}/meguri-sim-pool-vm"
   mkdir -p "$logs" || { sp_log "cannot create $logs"; exit 6; }
@@ -765,6 +777,43 @@ sp_route() {
     exit 6
   fi
   sp_forward "$vm" "$@"
+}
+
+# sp_changes_pool <command> [args]: whether the command creates, boots or
+# deletes simulators: acquire, and gc but gc --list.
+sp_changes_pool() {
+  local a
+  case "${1:-}" in
+    acquire) return 0 ;;
+    gc)
+      for a in "$@"; do [ "$a" != --list ] || return 1; done
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# sp_via_mg <command> [args]: the command under the VM's lease, through
+# `tools/mg sim <command>` (which takes it and runs this script again under
+# it). Prints what that run printed and exits with its code: 5 when the job
+# was queued, 6 when it did not run the pool (the VM's lease stayed busy, the
+# VM did not start or answer).
+sp_via_mg() {
+  local result rc
+  if [ -n "${MEGURI_SIM_POOL_VIA_MG:-}" ]; then
+    sp_log "tools/mg sim ran the pool without holding the test VM's lease"
+    exit 6
+  fi
+  sp_log "$1 changes the pool in the test VM: running it under the VM's lease (tools/mg sim $1)"
+  result="$(MEGURI_SIM_POOL_VIA_MG=1 "$SP_ROOT/tools/mg" sim "$@" </dev/null | tail -n 1)"
+  rc="$(jq -r '.details.pool.exit // empty' "$result" 2>/dev/null)"
+  if [ -z "$rc" ]; then
+    [ "$(jq -r '.details.queued // false' "$result" 2>/dev/null)" != true ] || exit 5
+    sp_log "the test VM could not run the pool under its lease: $(jq -r '.message // "no result"' "$result" 2>/dev/null || echo "tools/mg sim $1 left no result")"
+    exit 6
+  fi
+  jq -r '.details.pool.output | select(. != "")' "$result"
+  exit "$rc"
 }
 
 # sp_forward <vm JSON> <command> [args]: this script, the kinds file and the

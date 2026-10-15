@@ -39,9 +39,15 @@ mg_xcode_check() {
     mg_status error
     return 0
   fi
+  # The script's simulator runs in the VM outlive it when the job is
+  # cancelled: the job then stops them before it releases the VM's lease
+  # (mg__mac_vm_stop_orphans). A run whose SSH session was lost the script
+  # stops itself.
+  [ "$MG_SIM_RUNNER" != vm ] || MG_MAC_VM_TESTING=1
   /bin/bash tools/tests/xcode_project_check.sh build/xcode-check --phase devices \
     --continue-from "$(grep -cE '^(not )?ok ' "$tap")" ${sims[0]+"${sims[@]}"} ${1+"$@"} | tee -a "$tap"
   devices_rc=${PIPESTATUS[0]}
+  MG_MAC_VM_TESTING=""
   [ "$devices_rc" -eq 0 ] || rc="$devices_rc"
   mg_tap_report "$tap" "$rc" ""
   if [ -n "$queued" ] && [ "$(cat "$MG_STATE/status")" = pass ]; then

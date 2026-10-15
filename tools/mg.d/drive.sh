@@ -172,7 +172,7 @@ mg_drive__motion_inputs() {
 # runs the script (the app and UI tests are built; what mg_sim_take or, for
 # the Mac, mg_mac_ui_take takes is held), exports its captures, checks them
 # and writes <out>/manifest.json. A drive in the test VM first copies the
-# script and the fixtures its launch steps name to the same paths there.
+# script and the fixtures its launch steps name there (mg_vm_fixture).
 # With record, it also captures motion and makes a contact sheet for every
 # step marked with a transition:
 #   simulators: simctl io recordVideo around the drive (in the test VM, the
@@ -237,18 +237,40 @@ mg_drive_run() {
       ;;
   esac
 
+  # In the test VM, the script and every fixture its launch steps name
+  # (launch.fixture, relative to the checkout, and -MeguriFixture in their raw
+  # arguments) go where the driver and the app read them (mg_vm_fixture). A
+  # fixture outside the checkout lands elsewhere there, so the driver reads a
+  # copy of the script in the run directory that names it there; so it does
+  # for a script outside the checkout.
+  local run_script="$abs_script"
   if { [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; } || { [ "$platform" != mac ] && [ "$MG_SIM_RUNNER" = vm ]; }; then
-    local inputs=("$abs_script") fixture
-    while IFS= read -r fixture; do
-      case "$fixture" in /*) inputs[${#inputs[@]}]="$fixture" ;; *) inputs[${#inputs[@]}]="$MG_ROOT/$fixture" ;; esac
-    done < <(jq -r '.steps[] | objects | .launch? | objects | .fixture? | strings' "$abs_script")
-    mg_mac_vm_copy_in "${inputs[@]}" || return 2
+    local form fixture moved='{}'
+    while IFS="$(printf '\t')" read -r form fixture; do
+      # launch.fixture is relative to the checkout; -MeguriFixture must be
+      # absolute (the app refuses any other value).
+      if [ "$form" = fixture ]; then
+        case "$fixture" in /*) ;; *) fixture="$MG_ROOT/$fixture" ;; esac
+      fi
+      mg_vm_fixture "$fixture" || return 2
+      [ "$MG_VM_FIXTURE" = "$fixture" ] || moved="$(jq -c --arg h "$fixture" --arg v "$MG_VM_FIXTURE" '. + {($h): $v}' <<<"$moved")"
+    done < <(jq -r '.steps[] | objects | .launch? | objects | (.fixture? | strings | "fixture\t\(.)"),
+      (.arguments? | arrays | . as $a | range(1; length) as $i | select($a[$i - 1] == "-MeguriFixture") | $a[$i] | strings | "argument\t\(.)")' "$abs_script")
+    if [ "$moved" != '{}' ] || [ "${abs_script#"$MG_ROOT"/}" = "$abs_script" ]; then
+      run_script="$out/script-in-vm.json"
+      jq --argjson m "$moved" '.steps |= map(if type == "object" and (.launch | type) == "object" then .launch |= (
+          (if (.fixture | type) == "string" and $m[.fixture] != null then .fixture = $m[.fixture] else . end)
+          | (if (.arguments | type) == "array" then .arguments |= (. as $a | [range(0; length) as $i
+              | if $i > 0 and $a[$i - 1] == "-MeguriFixture" and ($a[$i] | type) == "string" and $m[$a[$i]] != null
+                then $m[$a[$i]] else $a[$i] end]) else . end)) else . end)' "$abs_script" >"$run_script" || return 2
+    fi
+    mg_mac_vm_copy_in "$run_script" || return 2
   fi
 
   echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid${MG_SIM_RUNNER:+ ($MG_SIM_RUNNER)}") ($config)${capture:+, capturing motion: $capture}" >&2
   local since refused=0
   since="$(mg_app_log_now)"
-  TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$abs_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
+  TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$run_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
     mg_app_xcodebuild_test "$out/drive" "$platform" "$dest" "$config" -only-testing:MeguriUITests/AgentDriverTests/testDriveScript
   rc=$?
   # A Mac drive whose input macOS dropped ran, but proves nothing about the

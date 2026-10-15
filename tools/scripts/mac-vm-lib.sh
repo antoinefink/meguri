@@ -1,11 +1,13 @@
 # shellcheck shell=bash
 # The macOS test VMs (U8b, U8c): the per-host config, tart's view of a VM, a
 # headless start, the wait for a logged-in session, quoting for the VM's
-# shell and copies by tar over SSH. Sourced by tools/mg.d/mac-vm.sh and by
-# the scripts that reach a VM outside tools/mg (sim-pool.sh,
-# xcode_project_check.sh). Runs under macOS /bin/bash 3.2 and in the dev
-# container. Functions report through MVL_* variables; only mvl_state,
-# mvl_q and mvl_epoch print on stdout.
+# shell, copies by tar over SSH, stopping a test run left in a VM, and where
+# a VM's lease is and whether this process runs under its holder. Sourced by
+# tools/mg.d/mac-vm.sh and by the scripts that reach a VM outside tools/mg
+# (sim-pool.sh, xcode_project_check.sh). Runs under macOS /bin/bash 3.2 and
+# in the dev container. Functions report through MVL_* variables; only
+# mvl_state, mvl_q, mvl_epoch, mvl_lease_base and mvl_lease_dir print on
+# stdout.
 #
 # Config: $MEGURI_MAC_VM_CONFIG, else ~/Library/Application Support/meguri/
 # mac-vm.json: {"tart": <wrapper>, "ssh": <wrapper>, "vms": [<name> |
@@ -238,4 +240,100 @@ mvl_copy_out() {
     fi
   done
   return 0
+}
+
+# mvl_copy_to <ssh> <vm name> <path> <VM dir>: copies a file or directory
+# into <VM dir> in the VM under its own name, replacing what is there there
+# (for inputs outside the checkout, which never go to their own path).
+# Returns 1 with MVL_REASON when the copy fails.
+mvl_copy_to() {
+  local ssh="$1" vm="$2" p="$3" dir="$4" base rcs
+  base="$(basename "$p")"
+  echo "mac-vm: copying $p into the VM, to $dir" >&2
+  COPYFILE_DISABLE=1 tar -C "$(dirname "$p")" -cf - "$base" |
+    "$ssh" "rm -rf $(mvl_q "$dir/$base") && mkdir -p $(mvl_q "$dir") && tar -C $(mvl_q "$dir") -xf -"
+  rcs="${PIPESTATUS[*]}"
+  if [ "$rcs" != "0 0" ]; then
+    MVL_REASON="copying $p into the VM $vm failed (tar and ssh exit codes: $rcs); see log.txt"
+    return 1
+  fi
+  return 0
+}
+
+# mvl_stop_tests <ssh>: stops every UI test run in the VM (xcodebuild
+# test-without-building and the test runner it drives: SIGTERM, then SIGKILL
+# halfway through MEGURI_MAC_VM_STOP_SECONDS, 20) and confirms none is left.
+# Only the lease holder runs tests in a VM, so for the holder any such
+# process is a run left behind (a lost SSH session, a killed job), and two
+# runs would share the VM's one login session. Returns 0 when none is left
+# (MVL_STOPPED=1 when it stopped one); 1 when one still runs or the VM did
+# not answer, with MVL_REASON.
+mvl_stop_tests() {
+  local t="${MEGURI_MAC_VM_STOP_SECONDS:-20}" out rc
+  MVL_STOPPED=""
+  MVL_REASON=""
+  # The brackets keep the shell that runs this command from matching itself.
+  out="$("$1" "p=$(mvl_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/')
+if pgrep -f \"\$p\" >/dev/null; then
+  echo 'mg-mac-vm: stopping'
+  pkill -f \"\$p\"
+  i=0
+  while pgrep -f \"\$p\" >/dev/null && [ \$i -lt $t ]; do
+    [ \$i -ne $((t / 2)) ] || pkill -9 -f \"\$p\"
+    sleep 1
+    i=\$((i + 1))
+  done
+fi
+if pgrep -f \"\$p\" >/dev/null; then echo 'mg-mac-vm: still running'; else echo 'mg-mac-vm: none'; fi" 2>&1 </dev/null)"
+  rc=$?
+  if grep -qx 'mg-mac-vm: none' <<<"$out"; then
+    ! grep -qx 'mg-mac-vm: stopping' <<<"$out" || MVL_STOPPED=1
+    return 0
+  fi
+  if grep -qx 'mg-mac-vm: still running' <<<"$out"; then
+    MVL_REASON="it was still running $t s after SIGTERM and SIGKILL"
+  else
+    MVL_REASON="the VM did not answer (ssh exit $rc: $(tail -n 1 <<<"$out"))"
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Leases: one job at a time per VM (tools/mg.d/mac-vm.sh), beside the host
+# lease (tools/mg.d/host.sh). A lease's holder.json names the pid of the
+# tools/mg run that holds it (or of a recording worker).
+
+# mvl_lease_base <checkout>: where the host lease and the VMs' leases live,
+# shared by every checkout of the repository: the main checkout's build/mg
+# (the directory of $MEGURI_HOST_LEASE_DIR when it is set).
+mvl_lease_base() {
+  local common
+  if [ -n "${MEGURI_HOST_LEASE_DIR:-}" ]; then
+    dirname "$MEGURI_HOST_LEASE_DIR"
+    return 0
+  fi
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
+  if [ -n "$common" ] && [ "$(basename "$common")" = .git ]; then
+    printf '%s/build/mg\n' "$(dirname "$common")"
+  else
+    printf '%s/build/mg\n' "$1"
+  fi
+}
+
+# mvl_lease_dir <checkout> <vm name>: that VM's lease.
+mvl_lease_dir() { printf '%s/mac-vm.%s.lock\n' "$(mvl_lease_base "$1")" "$2"; }
+
+# mvl_lease_held <lease dir>: whether this process runs under the holder of
+# the lease or of its nested slot (that pid is this shell's or one of its
+# ancestors'): a job's own scripts use what the job leased, and must not wait
+# for the lease the job holds.
+mvl_lease_held() {
+  local pid
+  for pid in "$(jq -r '.pid // empty' "$1/holder.json" 2>/dev/null)" "$(jq -r '.pid // empty' "$1/inner/holder.json" 2>/dev/null)"; do
+    [ -n "$pid" ] || continue
+    ps -A -o pid= -o ppid= 2>/dev/null | awk -v p="$$" -v want="$pid" '
+      { up[$1] = $2 }
+      END { for (i = 0; i < 200 && p + 0 > 0; i++) { if (p + 0 == want + 0) exit 0; p = up[p] } exit 1 }' && return 0
+  done
+  return 1
 }

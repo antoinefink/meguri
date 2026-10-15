@@ -298,12 +298,85 @@ mg_sim_fetch() {
   return 0
 }
 
+# mg_sim_pool_take: before the pool's own changes (sim acquire and gc,
+# sim-setup), the pool VM's lease (mg_sim_take --no-copy), so that no
+# simulator is created, booted or deleted in the VM while another job runs
+# there. Nothing to take when this process runs under the job that holds it
+# (mvl_lease_held), nor for this Mac's pool (MEGURI_SIM_ALLOW_HOST=1, as
+# before U8c). Returns 1 when the job cannot go on (recorded).
+mg_sim_pool_take() {
+  [ "$MG_SIM_RUNNER" = vm ] || return 0
+  if mvl_lease_held "$(mg__mac_vm_lease_dir "$(jq -r .name <<<"$MG_MAC_VM")")"; then
+    echo "$MG_JOB: runs under the job that holds the test VM's lease" >&2
+    return 0
+  fi
+  mg_sim_take --no-copy
+}
+
+# mg_vm_fixture <path>: puts a launch fixture (a -MeguriFixture value, or a
+# drive script's launch.fixture) where the app in the leased VM reads it,
+# and sets MG_VM_FIXTURE to the path the launch must name there: a fixture in
+# this checkout goes to its own path; one outside it goes under the run
+# directory (vm-fixtures/<n>/, left there: an app launched by `run` may read
+# it after the job ends), because the VM's paths outside a checkout are not
+# this Mac's. A value that is not absolute stays as it is (the app
+# refuses it, as on this Mac). Records a failure and returns 1 when the
+# fixture is not here or cannot be copied.
+mg_vm_fixture() {
+  local dir
+  MG_VM_FIXTURE="$1"
+  case "$1" in /*) ;; *) return 0 ;; esac
+  if [ ! -e "$1" ]; then
+    mg_failure fixture "the launch fixture $1 does not exist; nothing was launched with it"
+    return 1
+  fi
+  case "$1" in
+    "$MG_ROOT"/?*)
+      mg_mac_vm_copy_in "$1"
+      return
+      ;;
+  esac
+  MG_VM_FIXTURES=$((${MG_VM_FIXTURES:-0} + 1))
+  dir="$MG_RUN_DIR/vm-fixtures/$MG_VM_FIXTURES"
+  if ! mvl_copy_to "$(jq -r .ssh <<<"$MG_MAC_VM")" "$(jq -r .name <<<"$MG_MAC_VM")" "$1" "$dir"; then
+    mg_failure mac-vm-copy "$MVL_REASON"
+    return 1
+  fi
+  MG_VM_FIXTURE="$dir/$(basename "$1")"
+  echo "$MG_JOB: the fixture $1 is $MG_VM_FIXTURE in the test VM" >&2
+}
+
+# mg_vm_launch_args <launch argument>...: the app's launch arguments for the
+# leased VM, in MG_VM_ARGS: each -MeguriFixture value put there and named by
+# its path there (mg_vm_fixture). Read in pairs as the app reads them
+# (LaunchOptions.swift): a -Meguri<Name> argument takes the next one as its
+# value. Returns 1 when a fixture could not be put there (recorded).
+mg_vm_launch_args() {
+  MG_VM_ARGS=()
+  while [ "$#" -gt 0 ]; do
+    MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$1"
+    case "$1" in
+      -Meguri?*)
+        [ "$#" -ge 2 ] || break
+        if [ "$1" = -MeguriFixture ]; then
+          mg_vm_fixture "$2" || return 1
+          MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$MG_VM_FIXTURE"
+        else
+          MG_VM_ARGS[${#MG_VM_ARGS[@]}]="$2"
+        fi
+        shift
+        ;;
+    esac
+    shift
+  done
+}
+
 # ---------------------------------------------------------------------------
 # VM lease: one job at a time per VM, across every checkout. A recording of
 # this checkout keeps the lease between jobs (record start); this checkout's
 # jobs then run in its nested slot (mg__lease_try, host.sh).
 
-mg__mac_vm_lease_dir() { printf '%s/mac-vm.%s.lock\n' "$(dirname "$(mg_host_lease_dir)")" "$1"; }
+mg__mac_vm_lease_dir() { mvl_lease_dir "$MG_ROOT" "$1"; }
 
 # mg__mac_vm_lease: takes the first free VM of MG_MAC_VMS, waiting while all
 # are leased; a lease whose holder died is removed (under the lease's mutex,
@@ -510,41 +583,16 @@ mg_vm_xcodebuild_test() {
   return "$code"
 }
 
-# mg__mac_vm_stop_tests: stops every UI test run in the leased VM (xcodebuild
-# test-without-building and the test runner it drives: SIGTERM, then SIGKILL
-# halfway through MEGURI_MAC_VM_STOP_SECONDS) and confirms none is left. Only
-# the lease holder runs tests in the VM, so any such process is a run left
-# behind, and two runs would share the VM's one login session. Returns 0 when
-# none is left (MG_MAC_VM_STOPPED=1 when it stopped one); 1 when one still
-# runs or the VM did not answer, with MG_MAC_VM_STOP_REASON.
+# mg__mac_vm_stop_tests: stops every UI test run in the leased VM and
+# confirms none is left (mvl_stop_tests). Returns 0 when none is left
+# (MG_MAC_VM_STOPPED=1 when it stopped one); 1 when one still runs or the VM
+# did not answer, with MG_MAC_VM_STOP_REASON.
 mg__mac_vm_stop_tests() {
-  local t="${MEGURI_MAC_VM_STOP_SECONDS:-20}" out rc
-  MG_MAC_VM_STOPPED=""
-  MG_MAC_VM_STOP_REASON=""
-  # The brackets keep the shell that runs this command from matching itself.
-  out="$(mg_mac_vm_ssh "p=$(mg_mac_vm_q 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/Contents/MacOS/')
-if pgrep -f \"\$p\" >/dev/null; then
-  echo 'mg-mac-vm: stopping'
-  pkill -f \"\$p\"
-  i=0
-  while pgrep -f \"\$p\" >/dev/null && [ \$i -lt $t ]; do
-    [ \$i -ne $((t / 2)) ] || pkill -9 -f \"\$p\"
-    sleep 1
-    i=\$((i + 1))
-  done
-fi
-if pgrep -f \"\$p\" >/dev/null; then echo 'mg-mac-vm: still running'; else echo 'mg-mac-vm: none'; fi" 2>&1)"
-  rc=$?
-  if grep -qx 'mg-mac-vm: none' <<<"$out"; then
-    ! grep -qx 'mg-mac-vm: stopping' <<<"$out" || MG_MAC_VM_STOPPED=1
-    return 0
-  fi
-  if grep -qx 'mg-mac-vm: still running' <<<"$out"; then
-    MG_MAC_VM_STOP_REASON="it was still running $t s after SIGTERM and SIGKILL"
-  else
-    MG_MAC_VM_STOP_REASON="the VM did not answer (ssh exit $rc: $(tail -n 1 <<<"$out"))"
-  fi
-  return 1
+  local rc=0
+  mvl_stop_tests "$(jq -r .ssh <<<"$MG_MAC_VM")" || rc=1
+  MG_MAC_VM_STOPPED="$MVL_STOPPED"
+  MG_MAC_VM_STOP_REASON="$MVL_REASON"
+  return "$rc"
 }
 
 # mg__mac_vm_stop_orphans: when this job started a test run in the VM and

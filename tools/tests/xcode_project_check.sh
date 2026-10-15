@@ -32,10 +32,13 @@
 # --vm-ssh (the VM's SSH wrapper; the job holds its lease) the simulator
 # builds use the generic iOS Simulator destination here, and each simulator
 # test run is built for testing here, its products copied to the same path in
-# the VM, run there with test-without-building, and its result bundle copied
-# back. --no-sims (no VM: queued) builds the same and leases and tests no
-# simulator. Without either, simulators are this Mac's
-# (MEGURI_SIM_ALLOW_HOST=1).
+# the VM (with the sources the tests read at their repository paths, once per
+# run: VM_INPUTS), run there with test-without-building, and its result
+# bundle copied back. A run whose SSH session was lost may go on in the VM:
+# it is stopped there before the next run (mvl_stop_tests), and when it
+# cannot be, no further run starts there. --no-sims (no VM: queued) builds
+# the same and leases and tests no simulator. Without either, simulators are
+# this Mac's (MEGURI_SIM_ALLOW_HOST=1).
 
 set -u
 
@@ -96,12 +99,12 @@ sim_dest() { if [ -z "$VM_SSH" ] && [ "$SIMS" = true ]; then echo "id=$1"; else 
 N="$FIRST"
 FAILED=0
 ok() { N=$((N + 1)) && echo "ok $N $1"; }
-not_ok() {
+not_ok() { # not_ok <name> <diagnostic>...: each line of each diagnostic a TAP comment
   N=$((N + 1)) && FAILED=$((FAILED + 1))
   echo "not ok $N $1"
   shift
   local line
-  for line in "$@"; do printf '# %s\n' "$line"; done
+  for line in "$@"; do printf '%s\n' "$line" | sed 's/^/# /'; done
 }
 skip() { N=$((N + 1)) && echo "ok $N $1 # SKIP $2"; }
 check() { # check <name> <command...>: ok when the command succeeds; its output is the diagnostic
@@ -505,6 +508,15 @@ fi
 
 # --- Tests ------------------------------------------------------------------
 VM_MARK="mg-xcode-check: remote exit"
+# What the tests read in the repository, at their source paths, besides the
+# products: the snapshot baselines (HostedSnapshot.swift), the hook fixtures
+# (BuildUnderTest.hookFixture) and the example drive scripts
+# (DriveScriptTests). Copied into the VM before its first run.
+VM_INPUTS="app/Snapshots app/Fixtures tools/drive-scripts"
+VM_INPUTS_COPIED=""
+# Set (to the reason) when a run whose SSH session was lost could not be
+# stopped in the VM: no further run starts there.
+VM_LOST=""
 
 # xctestrun_for <scheme> <plan> <config>: the newest simulator xctestrun of
 # the scheme's plan whose test root is the configuration's.
@@ -522,11 +534,16 @@ xctestrun_for() {
 # test_in_vm <name> <scheme> <plan> <config> <destination> [args]: a simulator
 # run in the test VM: built for testing here, the products copied to the
 # same path in the VM, test-without-building there, the result bundle copied
-# back. Returns xcodebuild's exit code, or 70 when the run could not happen
-# (the reason is in <log>).
+# back. Returns xcodebuild's exit code, 70 when the run could not happen (the
+# reason is in <log>), or 71 when it did not start because a lost run may
+# still be going on in the VM (VM_LOST).
 test_in_vm() {
-  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code
+  local name="$1" scheme="$2" plan="$3" config="$4" dest="$5" result="$WORK/$1.xcresult" log="$LOGS/$1.log" xctestrun code p inputs=()
   shift 5
+  if [ -n "$VM_LOST" ]; then
+    echo "xcode_project_check: not run: $VM_LOST" >"$log"
+    return 71
+  fi
   if ! xcodebuild build-for-testing -project "$PROJECT" -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
     -destination "generic/platform=iOS Simulator" -derivedDataPath "$DD_TESTS" >"$log" 2>&1; then
     echo "xcode_project_check: the build for testing failed" >>"$log"
@@ -536,12 +553,27 @@ test_in_vm() {
   [ -n "$xctestrun" ] || { echo "xcode_project_check: no $scheme $plan xctestrun for $config in $DD_TESTS/Build/Products" >>"$log" && return 70; }
   mvl_copy_in "$VM_SSH" "$VM_NAME" "$WORK" "$DD_TESTS/Build/Products" 2>>"$log" ||
     { echo "xcode_project_check: $MVL_REASON" >>"$log" && return 70; }
+  if [ -z "$VM_INPUTS_COPIED" ]; then
+    for p in $VM_INPUTS; do inputs[${#inputs[@]}]="$REPO/$p"; done
+    mvl_copy_in "$VM_SSH" "$VM_NAME" "$REPO" "${inputs[@]}" 2>>"$log" ||
+      { echo "xcode_project_check: $MVL_REASON" >>"$log" && return 70; }
+    VM_INPUTS_COPIED=1
+  fi
   "$VM_SSH" "{ mkdir -p $(mvl_q "$WORK") && rm -rf $(mvl_q "$result") && xcodebuild test-without-building -xctestrun $(mvl_q "$xctestrun") \
     -destination $(mvl_q "$dest") -resultBundlePath $(mvl_q "$result") -collect-test-diagnostics never ${1+$(mvl_q "$@")}; };
     rc=\$?; echo \"$VM_MARK \$rc\"; exit \$rc" </dev/null >>"$log" 2>&1
   code="$(sed -n "s/^$VM_MARK \([0-9][0-9]*\)\$/\1/p" "$log" | tail -n 1)"
   if [ -z "$code" ]; then
     echo "xcode_project_check: the SSH session to $VM_NAME ended before xcodebuild did" >>"$log"
+    # xcodebuild may go on there: it must end before another run starts in
+    # the VM's one login session, or that run's product copy replaces files
+    # it uses.
+    if mvl_stop_tests "$VM_SSH"; then
+      echo "xcode_project_check: $([ -n "$MVL_STOPPED" ] && echo "stopped that run in $VM_NAME" || echo "that run had already ended in $VM_NAME")" >>"$log"
+    else
+      VM_LOST="the run $name lost its SSH session and may still be running in $VM_NAME ($MVL_REASON); the next job that takes the VM stops it first"
+      echo "xcode_project_check: $VM_LOST" >>"$log"
+    fi
     return 70
   fi
   if ! mvl_copy_out "$VM_SSH" "$VM_NAME" "$result"; then
@@ -571,6 +603,10 @@ run_tests() {
       ;;
   esac
   local rc=$? summary
+  if [ "$rc" -eq 71 ] && [ -n "$VM_LOST" ]; then
+    not_ok "$name: not run" "$VM_LOST"
+    return 0
+  fi
   summary="$(xcrun xcresulttool get test-results summary --path "$result" 2>/dev/null |
     jq -r '"\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"')"
   if [ "$rc" -eq 0 ]; then

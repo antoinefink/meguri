@@ -412,6 +412,15 @@ mg_run() {
   fi
   mg_app_build ios-sim "$MG_D_CONFIG" || return 0
   mg_sim_take || return 0
+  # A fixture the launch names must be in the VM, where the app reads it.
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    if ! mg_vm_launch_args "${launch[@]}"; then
+      mg_message "run: a launch fixture could not be put in the test VM; nothing was launched"
+      mg_status error
+      return 0
+    fi
+    launch=("${MG_VM_ARGS[@]}")
+  fi
   if [ -n "$udid" ]; then
     mg_sim_check_given "$udid" || return 0
   else

@@ -60,19 +60,15 @@ mg__iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" 
 # ---------------------------------------------------------------------------
 # Host lease
 
-# The lease directory, shared by every checkout of the repository.
+# The lease directory, shared by every checkout of the repository: the main
+# checkout's build/mg/host.lock, beside the test VMs' leases
+# (tools/scripts/mac-vm-lib.sh).
 mg_host_lease_dir() {
   if [ -n "${MEGURI_HOST_LEASE_DIR:-}" ]; then
     printf '%s\n' "$MEGURI_HOST_LEASE_DIR"
     return 0
   fi
-  local common
-  common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
-  if [ -n "$common" ] && [ "$(basename "$common")" = .git ]; then
-    printf '%s/build/mg/host.lock\n' "$(dirname "$common")"
-  else
-    printf '%s/build/mg/host.lock\n' "$MG_ROOT"
-  fi
+  printf '%s/host.lock\n' "$(mvl_lease_base "$MG_ROOT")"
 }
 
 # mg_host_session_state: ok, locked or display-asleep.

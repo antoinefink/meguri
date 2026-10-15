@@ -36,6 +36,9 @@ setup() {
   export MEGURI_HOST_LEASE_DIR="$BATS_TEST_TMPDIR/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1
   export MEGURI_MAC_UI_DIR="$BATS_TEST_TMPDIR/mac-ui"
   export MEGURI_MAC_VM_POLL_SECONDS=1 MEGURI_MAC_VM_BOOT_SECONDS=6 MEGURI_MAC_VM_STOP_SECONDS=2
+  # A job that waits for a lease it should not need fails within a minute
+  # instead of hanging the suite.
+  export MEGURI_MAC_VM_LEASE_WAIT_SECONDS=60
   unset MEGURI_MAC_UI_ALLOW_HOST MEGURI_SIM_ALLOW_HOST MEGURI_MAC_UI_INTERVAL_MINUTES
   export FAKE_VM_DIR="$BATS_TEST_TMPDIR/vms" FAKE_VM_MIRROR="$BATS_TEST_TMPDIR" FAKE_VM_BIN="$BATS_TEST_TMPDIR/vm-bin"
   # The VM's simulators. The pool's directories are given here and go to the
@@ -123,10 +126,13 @@ esac'
 # must have been copied there) and the destination simulator (booted in the
 # VM), logs its arguments, TEST_RUNNER_ environment and whether the host lease
 # is held, and writes a result bundle: a summary; for a drive script the
-# driver's attachments; for the Snapshot plan its output directory
-# (TEST_RUNNER_MEGURI_SNAPSHOT_OUT). FAKE_VM_XCODEBUILD_UNTIL=<file> makes it
-# touch <file>.started and wait for <file>. Paths are logged as the VM sees
-# them (without the fake file system's prefix).
+# driver's attachments, once it found every fixture the script's launch steps
+# name in the VM (logged as vm-fixture); for the Snapshot plan its output
+# directory (TEST_RUNNER_MEGURI_SNAPSHOT_OUT). FAKE_VM_XCODEBUILD_UNTIL=<file>
+# makes it touch <file>.started and wait for <file>; FAKE_VM_IGNORE_TERM=1
+# makes it ignore SIGTERM, as a real VM's run never gets the SIGTERM that
+# tools/mg sends the job's process tree when it cancels the job. Paths are
+# logged as the VM sees them (without the fake file system's prefix).
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
   stub "$FAKE_VM_BIN/pgrep" '
@@ -159,6 +165,7 @@ if [ "${1:-}" = -version ]; then printf "Xcode 27.0\nBuild version 27A266a\n"; e
 echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
 other="$(pgrep -f "xcodebuild[ ]test-without-building")" && echo "vm-overlap with $other" >>"$STUB_LOG"
 echo "$$" >>"$FAKE_VM/tests.pids"
+[ "${FAKE_VM_IGNORE_TERM:-}" != 1 ] || trap "" TERM
 env | grep "^TEST_RUNNER_" | sort | while IFS= read -r e; do echo "vm-env $(unmap "$e")" >>"$STUB_LOG"; done
 echo "vm-host-lease $([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" >>"$STUB_LOG"
 while [ $# -gt 0 ]; do
@@ -176,6 +183,17 @@ echo "vm-products $(unmap "$products") $(cat "$app")" >>"$STUB_LOG"
 udid="${dest#id=}"
 state="$(xcrun simctl __state "$udid" 2>/dev/null)"
 [ "$state" = Booted ] || { echo "xcodebuild: error: Unable to find a destination matching $dest"; exit 70; }
+# The driver launches the app with the fixtures its script names: they must
+# be in the VM (launch.fixture relative to the checkout).
+if [ -n "${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}" ] && [ -f "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT" ]; then
+  for f in $(jq -r ".steps[] | objects | .launch? | objects | (.fixture? | strings),
+      (.arguments? | arrays | . as \$a | range(1; length) as \$i | select(\$a[\$i - 1] == \"-MeguriFixture\") | \$a[\$i] | strings)" \
+      "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT"); do
+    case "$f" in /*) p="$FAKE_VM_FS$f" ;; *) p="${products%/build/app/DerivedData/Build/Products}/$f" ;; esac
+    [ -e "$p" ] || { echo "AgentDriverTests: the launch fixture $(unmap "$p") is not there"; exit 65; }
+    echo "vm-fixture $(unmap "$p")" >>"$STUB_LOG"
+  done
+fi
 if [ -n "${FAKE_VM_XCODEBUILD_UNTIL:-}" ]; then
   : >"$FAKE_VM_XCODEBUILD_UNTIL.started"
   while [ ! -e "$FAKE_VM_XCODEBUILD_UNTIL" ]; do sleep 0.1; done
@@ -223,11 +241,12 @@ exit 0'
 
 # Fakes that replace the real functions (the file sorts after the jobs): the
 # build writes a minimal Products directory with the plan's simulator
-# xctestrun, lint passes, and the image-tools scripts write their reports
-# here.
+# xctestrun, lint passes, the core XCFramework is up to date, and the
+# image-tools scripts write their reports here.
 add_fakes() {
   cat >"$1/tools/mg.d/zz-sim-vm-fakes.sh" <<'EOF'
 mg_lint_ui_first() { return 0; }
+mg__xcframework() { return 0; }
 mg_app_build() {
   echo "fake build $*" >>"$STUB_LOG"
   local p="$MG_ROOT/build/app/DerivedData/Build/Products" plan="${3:-UI}"
@@ -289,6 +308,14 @@ vm_fs() { printf '%s/%s/fs%s\n' "$FAKE_VM_DIR" "$1" "$2"; }
 # The VM's simulators and the pool's leases there.
 vm_sim() { FAKE_SIM_DB="$FAKE_VM_DIR/$1/sims.json" MEGURI_SIM_DEVICES_DIR="$(vm_fs "$1" "$MEGURI_SIM_DEVICES_DIR")" "$REPO_ROOT/tools/tests/sim_pool_fake_xcrun.sh" simctl "${@:2}"; }
 vm_lease() { printf '%s/leases/%s/lease.json\n' "$(vm_fs meguri-mac "$MEGURI_SIM_POOL_DIR")" "$1"; }
+vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebuild[ ]test-without-building' >/dev/null; }
+# wait_log <file> <ERE>: waits until a line of the file matches.
+wait_log() {
+  for _ in $(seq 1 150); do grep -Eq -- "$2" "$1" 2>/dev/null && return 0; sleep 0.1; done
+  echo "$1 has no line matching $2:"
+  cat "$1"
+  return 1
+}
 
 # lease_in_sandbox <kind>: a VM pool device leased from the sandbox checkout.
 lease_in_sandbox() { (cd "$SB" && "$SB/tools/scripts/sim-pool.sh" acquire "$1" --holder test 2>/dev/null); }
@@ -529,6 +556,180 @@ assert_host_untouched() {
   [ "$(jq -r .status "$(tail -n 1 "$BATS_TEST_TMPDIR/second.out")")" = pass ]
   [ "$(jq -r .details.mac_vm.lease.waited_s "$(tail -n 1 "$BATS_TEST_TMPDIR/second.out")")" -ge 1 ]
   not_called '^vm-overlap'
+}
+
+@test "sim acquire, sim-setup and a script's own acquire wait for the VM's lease while a suite runs there; the suite's own acquire does not" {
+  local sb2 suite acq setup direct u
+  sb2="$(new_checkout repo2)"
+  FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/suite-done" "$SB/tools/mg" a11y --platform iphone \
+    >"$BATS_TEST_TMPDIR/suite.out" 2>"$BATS_TEST_TMPDIR/suite.err" 3>&- &
+  suite=$!
+  bg_track "$suite"
+  wait_for "$BATS_TEST_TMPDIR/suite-done.started"
+  "$sb2/tools/mg" sim acquire ipad >"$BATS_TEST_TMPDIR/acquire.out" 2>"$BATS_TEST_TMPDIR/acquire.err" 3>&- &
+  acq=$!
+  bg_track "$acq"
+  "$sb2/tools/mg" sim-setup --kinds ipad-small >"$BATS_TEST_TMPDIR/setup.out" 2>"$BATS_TEST_TMPDIR/setup.err" 3>&- &
+  setup=$!
+  bg_track "$setup"
+  (cd "$sb2" && exec "$sb2/tools/scripts/sim-pool.sh" acquire iphone-small --holder script) \
+    >"$BATS_TEST_TMPDIR/direct.out" 2>"$BATS_TEST_TMPDIR/direct.err" 3>&- &
+  direct=$!
+  bg_track "$direct"
+  wait_log "$BATS_TEST_TMPDIR/acquire.err" "VM lease: waiting for the VM \(meguri-mac: a11y in $SB"
+  wait_log "$BATS_TEST_TMPDIR/setup.err" "VM lease: waiting for the VM \(meguri-mac: a11y in $SB"
+  wait_log "$BATS_TEST_TMPDIR/direct.err" "VM lease: waiting for the VM \(meguri-mac: a11y in $SB"
+  # Nothing was created or booted in the VM beside the suite: only the
+  # suite's own iPhone.
+  not_called '^xcrun simctl create Meguri-Pool-(ipad|ipad-small|iphone-small)-'
+  [ "$(grep -c '^xcrun simctl boot ' "$STUB_LOG")" = 1 ]
+
+  touch "$BATS_TEST_TMPDIR/suite-done"
+  wait "$suite"
+  wait "$acq"
+  wait "$setup"
+  wait "$direct" || { cat "$BATS_TEST_TMPDIR/direct.err"; return 1; }
+  [ "$(jq -r .status "$(tail -n 1 "$BATS_TEST_TMPDIR/suite.out")")" = pass ]
+  # The suite leased its iPhone under its own lease, not through tools/mg sim.
+  [ ! -e "$SB/build/mg/sim" ]
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/acquire.out")"
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.device.kind)" = ipad ]
+  [ "$(field .details.mac_vm.lease.waited_s)" -ge 1 ]
+  validate "$result"
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/setup.out")"
+  [ "$(field .status)" = pass ]
+  [ "$(field '.details.devices["ipad-small"].status')" = created ]
+  # The script's acquire went through tools/mg sim, under the lease, and
+  # printed only the UDID, leased to its checkout.
+  [ "$(wc -l <"$BATS_TEST_TMPDIR/direct.out" | tr -d ' ')" = 1 ]
+  u="$(cat "$BATS_TEST_TMPDIR/direct.out")"
+  [ "$(jq -r '"\(.kind) \(.holder) \(.worktree)"' "$(vm_lease "$u")")" = "iphone-small script $sb2" ]
+  grep -q "under the VM's lease" "$BATS_TEST_TMPDIR/direct.err"
+  [ "$(vm_sim meguri-mac __state "$u")" = Booted ]
+  not_called '^vm-overlap'
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  assert_host_untouched
+}
+
+@test "run puts a -MeguriFixture fixture in the VM: in the checkout at its own path, outside it under the run; a missing one launches nothing" {
+  local u inside outside dir
+  u="$(lease_in_sandbox iphone)"
+  [ -n "$u" ]
+  inside="$SB/build/fixtures/recipes/sample-1"
+  mkdir -p "$inside"
+  echo collection >"$inside/collection.anki2"
+  mg run --platform iphone --device "$u" --route sample/sheet -- -MeguriFixture "$inside"
+  [ "$(field .status)" = pass ]
+  diff -r "$inside" "$(vm_fs meguri-mac "$inside")"
+  called "^xcrun simctl launch --terminate-running-process $u com.antoinefink.meguri.dev -ApplePersistenceIgnoreState YES -MeguriRoute sample/sheet -MeguriFixture $(vm_fs meguri-mac "$inside")\$"
+
+  # Outside the checkout: the VM's paths there are not this Mac's.
+  outside="$BATS_TEST_TMPDIR/elsewhere/deck.anki2"
+  mkdir -p "$(dirname "$outside")"
+  echo other >"$outside"
+  mg run --platform iphone --device "$u" -- -MeguriFixture "$outside"
+  [ "$(field .status)" = pass ]
+  dir="$(dirname "$result")"
+  [ "$(cat "$(vm_fs meguri-mac "$dir/vm-fixtures/1/deck.anki2")")" = other ]
+  [ ! -e "$(vm_fs meguri-mac "$outside")" ]
+  called "^xcrun simctl launch --terminate-running-process $u com.antoinefink.meguri.dev -ApplePersistenceIgnoreState YES -MeguriFixture $(vm_fs meguri-mac "$dir")/vm-fixtures/1/deck.anki2\$"
+
+  : >"$STUB_LOG"
+  mg run --platform iphone --device "$u" -- -MeguriFixture "$SB/build/fixtures/missing"
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = fixture ]
+  not_called '^xcrun simctl (install|launch) '
+  assert_host_untouched
+  validate "$result"
+}
+
+@test "a drive's fixtures go to the VM from launch.fixture and from -MeguriFixture in its arguments; one outside the checkout is named by a copy of the script" {
+  local inside outside script dir
+  inside="$SB/build/fixtures/recipes/sample-1"
+  mkdir -p "$inside"
+  echo collection >"$inside/collection.anki2"
+  outside="$BATS_TEST_TMPDIR/elsewhere/deck.anki2"
+  mkdir -p "$(dirname "$outside")"
+  echo other >"$outside"
+  script="$SB/build/fixture-drive.json"
+  jq -n --arg o "$outside" '{name: "fixtures", steps: [
+    {launch: {fixture: "build/fixtures/recipes/sample-1", route: "sample/sheet"}},
+    {launch: {arguments: ["-MeguriFixture", $o]}}, {snapshot: "after"}]}' >"$script"
+  mg drive "$script" --platform iphone
+  [ "$(field .status)" = pass ]
+  dir="$(dirname "$result")"
+  diff -r "$inside" "$(vm_fs meguri-mac "$inside")"
+  [ "$(cat "$(vm_fs meguri-mac "$dir/vm-fixtures/1/deck.anki2")")" = other ]
+  called "^vm-fixture $inside\$"
+  called "^vm-fixture $dir/vm-fixtures/1/deck.anki2\$"
+  # The driver read a copy of the script naming the VM's path; the relative
+  # fixture stays as it was.
+  called "^vm-env TEST_RUNNER_MEGURI_DRIVE_SCRIPT=$dir/script-in-vm.json\$"
+  [ "$(jq -r '"\(.steps[0].launch.fixture) \(.steps[1].launch.arguments[1])"' "$dir/script-in-vm.json")" = \
+    "build/fixtures/recipes/sample-1 $dir/vm-fixtures/1/deck.anki2" ]
+
+  # ui-tree and screenshot pass their raw launch arguments the same way.
+  inside="$SB/build/fixtures/recipes/sample-2"
+  mkdir -p "$inside"
+  echo collection >"$inside/collection.anki2"
+  : >"$STUB_LOG"
+  mg ui-tree --route sample/sheet --platform iphone -- -MeguriFixture "$inside"
+  [ "$(field .status)" = pass ]
+  called "^vm-fixture $inside\$"
+
+  # A fixture that is not there: the drive does not run.
+  jq -n '{name: "missing", steps: [{launch: {fixture: "build/fixtures/none"}}]}' >"$script"
+  : >"$STUB_LOG"
+  mg drive "$script" --platform iphone
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = fixture ]
+  not_called '^vm-xcodebuild '
+  assert_host_untouched
+}
+
+@test "a cancelled xcode-check stops its simulator run in the VM before releasing the VM's lease" {
+  # The checks script is a fake whose devices phase, as the real one does,
+  # leases an iPhone from the pool under the job's lease, copies its test
+  # products into the VM and starts a test run there.
+  cat >"$SB/tools/tests/xcode_project_check.sh" <<'EOF'
+#!/bin/bash
+. "$(dirname "$0")/../scripts/mac-vm-lib.sh"
+mkdir -p "$1/logs"
+work="$(cd "$1" && pwd -P)"
+shift
+phase="" ssh=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in --phase) phase="$2" && shift ;; --vm-ssh) ssh="$2" && shift ;; esac
+  shift
+done
+[ "$phase" != builds ] || { echo "ok 1 builds"; exit 0; }
+udid="$("$(dirname "$0")/../scripts/sim-pool.sh" acquire iphone --holder xcode-check)" || { echo "not ok 2 lease"; exit 1; }
+p="$work/DerivedData-tests/Build/Products"
+mkdir -p "$p/Debug-iphonesimulator/Meguri.app"
+echo built >"$p/Debug-iphonesimulator/Meguri.app/Info.plist"
+echo run >"$p/Meguri_UI_iphonesimulator27.0-arm64.xctestrun"
+mvl_copy_in "$ssh" vm "$work" "$p" || { echo "not ok 2 copy"; exit 1; }
+"$ssh" "xcodebuild test-without-building -xctestrun $(mvl_q "$p/Meguri_UI_iphonesimulator27.0-arm64.xctestrun") -destination $(mvl_q "id=$udid") -resultBundlePath $(mvl_q "$work/t.xcresult")" \
+  </dev/null >>"$work/logs/iphone.log" 2>&1
+echo "ok 2 iphone test"
+EOF
+  local job
+  FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/never" FAKE_VM_IGNORE_TERM=1 "$SB/tools/mg" xcode-check \
+    >"$BATS_TEST_TMPDIR/job.out" 2>"$BATS_TEST_TMPDIR/job.err" 3>&- &
+  job=$!
+  bg_track "$job"
+  wait_for "$BATS_TEST_TMPDIR/never.started"
+  vm_tests_running meguri-mac
+  kill -TERM "$job"
+  wait "$job" || true
+  result="$(tail -n 1 "$BATS_TEST_TMPDIR/job.out")"
+  [ "$(field '[.failures[].id] | index("cancelled") != null')" = true ]
+  # SIGTERM does not end it; SIGKILL does.
+  called "^vm-pkill -f "
+  called "^vm-pkill -9 -f "
+  ! vm_tests_running meguri-mac
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
 }
 
 # --- the VM is missing or fails ------------------------------------------------------
