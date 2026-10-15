@@ -120,9 +120,13 @@ impl Collection {
         self.reader_at(ReaderRole::Server, index)
     }
 
+    /// The generation is checked while the reader is held, never before:
+    /// a replacement that completed in between would otherwise hand this
+    /// handle a reader of the new file (L3).
     fn reader_at(&self, role: ReaderRole, index: usize) -> Result<ReaderLease<'_>, EngineError> {
-        self.check_current()?;
-        let guard = self.core.readers.lease(role, index)?;
+        #[cfg(test)]
+        tests::before_lease();
+        let guard = self.core.readers.lease(role, index, || self.check_current())?;
         Ok(ReaderLease::new(guard, &self.core.exec, self.generation))
     }
 
@@ -136,5 +140,97 @@ impl Collection {
                 current,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::path::Path;
+    use std::sync::{Arc, mpsc};
+    use std::thread;
+    use std::time::Duration;
+
+    use meguri_model::clock::{StepClock, UtcOffset};
+    use meguri_model::rng::SeededRandom;
+    use meguri_storage::ReaderRole;
+
+    use crate::error::EngineError;
+    use crate::lifecycle::{Engine, EngineConfig, Generation, LongOp, OpenConfig};
+
+    thread_local! {
+        /// Runs on this thread just before a reader is leased, so a test can
+        /// hold a lease request there while a replacement runs.
+        static BEFORE_LEASE: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn before_lease() {
+        BEFORE_LEASE.with_borrow_mut(|hook| {
+            if let Some(hook) = hook {
+                hook();
+            }
+        });
+    }
+
+    fn fixture() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage/schema-18.anki2")
+    }
+
+    /// A reader request through a handle of generation 1 that is held up
+    /// until a replacement made generation 2 must not get a reader of the
+    /// new file under the old handle (L3).
+    #[test]
+    fn a_reader_request_overtaken_by_a_replacement_fails_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collection.anki2");
+        std::fs::copy(fixture(), &path).unwrap();
+        let replacement = dir.path().join("replacement.anki2");
+        std::fs::copy(fixture(), &replacement).unwrap();
+        let clock = Arc::new(StepClock::new(1_894_701_600_000, UtcOffset::UTC, "UTC"));
+        let engine = Engine::new(EngineConfig::default()).unwrap();
+        let old = engine
+            .open_raw(&path, OpenConfig::new(clock, Arc::new(SeededRandom::new(7))))
+            .unwrap();
+        assert_eq!(old.generation(), Generation(1));
+
+        let (paused_tx, paused_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel::<()>();
+        let requester = {
+            let old = old.clone();
+            thread::spawn(move || {
+                BEFORE_LEASE.with_borrow_mut(|hook| {
+                    *hook = Some(Box::new(move || {
+                        paused_tx.send(()).unwrap();
+                        resume_rx.recv().unwrap();
+                    }));
+                });
+                match old.reader(ReaderRole::Query) {
+                    // While a lease is held the generation cannot change, so
+                    // this is the generation the lease reads.
+                    Ok(_lease) => Ok(old.current_generation()),
+                    Err(error) => Err(error),
+                }
+            })
+        };
+        paused_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+
+        let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+        let mut exclusive = slot.enter_exclusive(false).unwrap();
+        let source = replacement.clone();
+        exclusive
+            .replace(move |live| std::fs::rename(&source, live).map_err(|e| EngineError::internal(e.to_string())))
+            .unwrap();
+        drop(exclusive);
+        drop(slot);
+        assert_eq!(engine.generation(), Generation(2));
+
+        resume_tx.send(()).unwrap();
+        assert_eq!(
+            requester.join().unwrap(),
+            Err(EngineError::StaleGeneration {
+                planned: Generation(1),
+                current: Generation(2)
+            })
+        );
     }
 }

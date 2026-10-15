@@ -53,8 +53,16 @@ impl Readers {
         }
     }
 
-    /// The reader of `role` number `index`, opened if it is not yet.
-    pub(crate) fn lease(&self, role: ReaderRole, index: usize) -> Result<MutexGuard<'_, Option<Reader>>, EngineError> {
+    /// The reader of `role` number `index`, opened if it is not yet, once
+    /// `check` passed. `check` runs while the reader is held: a replacement
+    /// closes every reader before it changes the generation (L8), so what
+    /// `check` saw holds until the lease drops.
+    pub(crate) fn lease(
+        &self,
+        role: ReaderRole,
+        index: usize,
+        check: impl FnOnce() -> Result<(), EngineError>,
+    ) -> Result<MutexGuard<'_, Option<Reader>>, EngineError> {
         let slot = self
             .slots
             .iter()
@@ -63,6 +71,7 @@ impl Readers {
                 message: format!("there is no {role:?} reader {index}"),
             })?;
         let mut reader = slot.reader.lock().unwrap_or_else(PoisonError::into_inner);
+        check()?;
         if reader.is_none() {
             let factory = self
                 .factory

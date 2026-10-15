@@ -33,6 +33,7 @@ A gate refusal or error, or an open step's error, leaves `Failed{reason}` with n
 
 - A generation is a number that names one opened collection: 0 before anything was opened, then one more at every successful open and every replacement (L8), for the life of the engine.
 - Every collection handle carries the generation it was made for. An op submitted through a handle carries it as its planned generation; an op, a reader request or a snapshot through a handle of an older generation fails with `StaleGeneration{planned, current}`. A handle for the current generation comes from the engine at any time.
+- A reader request checks the generation while it holds the reader, never before taking it. A replacement closes every reader before the generation changes (L8), so a request that waited while a replacement completed fails with `StaleGeneration`, and the generation cannot change while a reader is held.
 
 ## L4. Admission
 
