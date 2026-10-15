@@ -4,6 +4,7 @@
 //! result JSON (`tools/perf/perf-result.schema.json`).
 
 use std::hint::black_box;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use criterion::Criterion;
@@ -16,6 +17,22 @@ use serde_json::Value;
 
 #[global_allocator]
 static ALLOC: PeakAlloc = PeakAlloc;
+
+/// The counting allocator and the process footprint are process-wide.
+/// `cargo test` (the conformance job's testkit step) runs this file's tests
+/// on parallel threads of one process, so every test here holds this lock:
+/// one test's allocations would move another's measurements. nextest runs
+/// each test in its own process, where the lock is never contended.
+static PROCESS_MEMORY: Mutex<()> = Mutex::new(());
+
+/// What libtest's own thread may allocate or free while a test measures
+/// (results, progress output): far below the 8 MiB block the counting
+/// allocator test allocates.
+const HARNESS_NOISE: usize = 1 << 20;
+
+fn process_memory() -> MutexGuard<'static, ()> {
+    PROCESS_MEMORY.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// A criterion short enough for a test: a tenth of a second of warm-up,
 /// half a second of measurement.
@@ -42,6 +59,7 @@ fn about(read: Duration, recorded: Duration) -> bool {
 
 #[test]
 fn one_slow_sample_in_a_hundred_is_the_p99() {
+    let _process = process_memory();
     let mut samples = OpSamples::new();
     for i in 0..100 {
         samples.record(if i == 37 { ms(20) } else { micros(100) });
@@ -66,6 +84,7 @@ fn one_slow_sample_in_a_hundred_is_the_p99() {
 
 #[test]
 fn a_criterion_bench_with_one_20_ms_stall_in_100_operations_reports_it_at_p99() {
+    let _process = process_memory();
     let mut criterion = quick_criterion();
     let mut samples = OpSamples::new();
     let mut op = 0u64;
@@ -95,6 +114,7 @@ fn a_criterion_bench_with_one_20_ms_stall_in_100_operations_reports_it_at_p99() 
 
 #[test]
 fn the_counting_allocator_reports_the_peak_since_its_reset() {
+    let _process = process_memory();
     PeakAlloc::reset_peak();
     let before = PeakAlloc::current();
     let block = vec![7u8; 8 << 20];
@@ -102,7 +122,10 @@ fn the_counting_allocator_reports_the_peak_since_its_reset() {
     let peak = PeakAlloc::peak();
     drop(block);
     assert!(PeakAlloc::is_installed());
-    assert!(peak >= before + (8 << 20), "peak {peak}, before {before}");
+    assert!(
+        peak + HARNESS_NOISE >= before + (8 << 20),
+        "peak {peak}, before {before}"
+    );
     assert!(PeakAlloc::current() < before + (8 << 20));
     PeakAlloc::reset_peak();
     assert!(PeakAlloc::peak() < peak);
@@ -110,6 +133,7 @@ fn the_counting_allocator_reports_the_peak_since_its_reset() {
 
 #[test]
 fn the_memory_sampler_sees_touched_pages_while_they_live() {
+    let _process = process_memory();
     let base = memory::process_footprint_bytes().expect("this platform reports a footprint");
     let sampler = MemorySampler::start(Duration::from_millis(2));
     let mut block = vec![0u8; 64 << 20];
@@ -134,6 +158,7 @@ fn rows<'a>(doc: &'a Value, name: &str, metric: &str) -> Vec<&'a Value> {
 
 #[test]
 fn an_open_bench_on_the_10k_collection_reports_percentiles_and_peak_memory() {
+    let _process = process_memory();
     let root = tempfile::tempdir().unwrap();
     let collection = fixtures::profile_collection_in(root.path(), "10k").unwrap();
     assert!(!collection.reused);
