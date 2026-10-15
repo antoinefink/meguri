@@ -406,97 +406,97 @@ he3c37320b8ea,rust,tag,notes,unclassified,,,open
 hf306bec628a4,rust,tag,notes,unclassified,,,open
 hf580907ab941,rust,tag,notes,unclassified,,,open
 hfc559c975ab6,rust,tag,notes,unclassified,,,open
-h14ea0a8ef304,python,tag,notetypes,unclassified,,,open
-h1d25e53134b6,python,tag,notetypes,unclassified,,,open
-h29e9a6801163,python,tag,notetypes,unclassified,,,open
-h29fa8d30a069,python,tag,notetypes,unclassified,,,open
-h2ef9d9aa9a2d,python,tag,notetypes,unclassified,,,open
-h38373cc87211,python,tag,notetypes,unclassified,,,open
-h3db0bf46358b,python,tag,notetypes,unclassified,,,open
-h51425d9fe4e8,python,tag,notetypes,unclassified,,,open
-h6ace0b701063,python,tag,notetypes,unclassified,,,open
-h6ebbfe4093c4,python,tag,notetypes,unclassified,,,open
-h76dd5ce91b19,python,tag,notetypes,unclassified,,,open
-h7cd15bfd9337,python,tag,notetypes,unclassified,,,open
-h8057000b72f1,python,tag,notetypes,unclassified,,,open
-h93567ad3543f,python,tag,notetypes,unclassified,,,open
-haa6096a01726,python,tag,notetypes,unclassified,,,open
-haff749b319ca,python,tag,notetypes,unclassified,,,open
-hd3484a3787d3,python,tag,notetypes,unclassified,,,open
-he8993d36dc09,python,tag,notetypes,unclassified,,,open
-heb9c41d43b4a,python,tag,notetypes,unclassified,,,open
-h0477377c20e5,rust,tag,notetypes,unclassified,,,open
-h147c5a8d09f4,rust,tag,notetypes,unclassified,,,open
-h16006d8f10dd,rust,tag,notetypes,unclassified,,,open
-h166c2f8e68af,rust,tag,notetypes,unclassified,,,open
-h1bd8d77a66bd,rust,tag,notetypes,unclassified,,,open
-h1dcc09aa4435,rust,tag,notetypes,unclassified,,,open
-h1eb30503b690,rust,tag,notetypes,unclassified,,,open
-h1fa35be82523,rust,tag,notetypes,unclassified,,,open
-h224d46dc7428,rust,tag,notetypes,unclassified,,,open
-h2443a4d809ec,rust,tag,notetypes,unclassified,,,open
-h28dfe5355334,rust,tag,notetypes,unclassified,,,open
-h2a20e219bd99,rust,tag,notetypes,unclassified,,,open
-h41a12a3b4594,rust,tag,notetypes,unclassified,,,open
-h4503178aea0c,rust,tag,notetypes,unclassified,,,open
-h4a0f14238e91,rust,tag,notetypes,unclassified,,,open
-h4a6d6847cdd7,rust,tag,notetypes,unclassified,,,open
-h4bc311c17611,rust,tag,notetypes,unclassified,,,open
-h538b6bc82ab1,rust,tag,notetypes,unclassified,,,open
-h5c2b22e2f617,rust,tag,notetypes,unclassified,,,open
-h5d402c6f2c03,rust,tag,notetypes,unclassified,,,open
-h5dab017523ab,rust,tag,notetypes,unclassified,,,open
-h5f775d295960,rust,tag,notetypes,unclassified,,,open
-h5fa3b00a8f49,rust,tag,notetypes,unclassified,,,open
-h6288de9d6fb5,rust,tag,notetypes,unclassified,,,open
-h675f93f3e234,rust,tag,notetypes,unclassified,,,open
-h68d09bf06f67,rust,tag,notetypes,unclassified,,,open
-h6ac9613310a8,rust,tag,notetypes,unclassified,,,open
-h6df8b626e405,rust,tag,notetypes,unclassified,,,open
-h706cf39b03b8,rust,tag,notetypes,unclassified,,,open
-h74bea2ac61c6,rust,tag,notetypes,unclassified,,,open
-h82e783a37a13,rust,tag,notetypes,unclassified,,,open
+h14ea0a8ef304,python,tag,notetypes,in-scope,Stock note types are offered and created in a fixed order,notetypes/records/stock-new-collection notetypes/records/stock-structure,done
+h1d25e53134b6,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h29e9a6801163,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
+h29fa8d30a069,python,tag,notetypes,in-scope,Each template's stored list of fields its card needs,notetypes/records/stock-structure,done
+h2ef9d9aa9a2d,python,tag,notetypes,in-scope,A copied note type keeps its fields and templates under a new id and name,notetypes/records/clone,done
+h38373cc87211,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h51425d9fe4e8,python,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h6ace0b701063,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
+h6ebbfe4093c4,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+h76dd5ce91b19,python,tag,notetypes,in-scope,Type-in answers on cloze cards (U64),,deferred
+h7cd15bfd9337,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+h8057000b72f1,python,tag,notetypes,in-scope,Template filters when rendering (U60),,deferred
+h93567ad3543f,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
+haa6096a01726,python,tag,notetypes,in-scope,The typing stock kind asks for the Back field's answer on its front,notetypes/records/stock-structure,done
+haff749b319ca,python,tag,notetypes,in-scope,"Each stock kind's fields, templates and kind",notetypes/records/stock-new-collection notetypes/records/stock-structure,done
+hd3484a3787d3,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
+he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h0477377c20e5,rust,tag,notetypes,in-scope,A note type's field names in order,notetypes/records/stock-new-collection,done
+h147c5a8d09f4,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h16006d8f10dd,rust,tag,notetypes,in-scope,Per-note-type config keys such as the last deck used (U27),,deferred
+h166c2f8e68af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h1bd8d77a66bd,rust,tag,notetypes,in-scope,Renaming a note type is saved,notetypes/records/names,done
+h1dcc09aa4435,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h1eb30503b690,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h1fa35be82523,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h224d46dc7428,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
+h2443a4d809ec,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
+h28dfe5355334,rust,tag,notetypes,in-scope,Check Media's report of templates that reference media fields (U130),,deferred
+h2a20e219bd99,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h41a12a3b4594,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+h4503178aea0c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
+h4a0f14238e91,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h4a6d6847cdd7,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+h4bc311c17611,rust,tag,notetypes,in-scope,Every stock kind can be added to a collection,notetypes/records/stock-structure,done
+h538b6bc82ab1,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h5c2b22e2f617,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h5d402c6f2c03,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
+h5dab017523ab,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
+h5f775d295960,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h6288de9d6fb5,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
+h675f93f3e234,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h68d09bf06f67,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
+h6ac9613310a8,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h706cf39b03b8,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
+h74bea2ac61c6,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
+h82e783a37a13,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 h862557d9421e,rust,supplementary,notetypes,unclassified,,,open
-h87642d5d640c,rust,tag,notetypes,unclassified,,,open
-h8c43ce71aafa,rust,tag,notetypes,unclassified,,,open
-h8fe1bf6272d1,rust,tag,notetypes,unclassified,,,open
-h9032dd80f5a7,rust,tag,notetypes,unclassified,,,open
-h919a58a1a82a,rust,tag,notetypes,unclassified,,,open
-h91e61b0cbd90,rust,tag,notetypes,unclassified,,,open
-h95ef12a29223,rust,tag,notetypes,unclassified,,,open
+h87642d5d640c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h8c43ce71aafa,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
+h8fe1bf6272d1,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+h9032dd80f5a7,rust,tag,notetypes,in-scope,A new collection lists the stock note types,notetypes/records/stock-new-collection,done
+h919a58a1a82a,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h91e61b0cbd90,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h95ef12a29223,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 h9836b2bac499,rust,tag,notetypes,unclassified,,,open
-h9c3d56d899d8,rust,tag,notetypes,unclassified,,,open
-h9e510243ea25,rust,tag,notetypes,unclassified,,,open
-ha1bb31fa12da,rust,tag,notetypes,unclassified,,,open
+h9c3d56d899d8,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h9e510243ea25,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+ha1bb31fa12da,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 ha2b5da04d17c,rust,tag,notetypes,unclassified,,,open
-ha5a622e9741a,rust,tag,notetypes,unclassified,,,open
+ha5a622e9741a,rust,tag,notetypes,in-scope,Saving a note type without an id adds it,notetypes/records/names,done
 ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
-haa4b9cb7903d,rust,tag,notetypes,unclassified,,,open
-haf0842771063,rust,tag,notetypes,unclassified,,,open
-hb543398f1a4c,rust,tag,notetypes,unclassified,,,open
-hb560a619968b,rust,tag,notetypes,unclassified,,,open
-hb8d4e91cec36,rust,tag,notetypes,unclassified,,,open
-hbf1cae9dbfec,rust,tag,notetypes,unclassified,,,open
-hc08963e31ad1,rust,tag,notetypes,unclassified,,,open
-hc107f1d1cc3e,rust,tag,notetypes,unclassified,,,open
-hd276a7ef2889,rust,tag,notetypes,unclassified,,,open
-hd70ff7b8b5c8,rust,tag,notetypes,unclassified,,,open
+haa4b9cb7903d,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+haf0842771063,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+hb543398f1a4c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hb560a619968b,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hb8d4e91cec36,rust,tag,notetypes,in-scope,Restore to Default (U34),,deferred
+hbf1cae9dbfec,rust,tag,notetypes,in-scope,Field names lose forbidden characters and leading markers when saved,notetypes/records/names,done
+hc08963e31ad1,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hc107f1d1cc3e,rust,tag,notetypes,in-scope,A note type's legacy JSON object carries its stored name,model/schema11/notetype-values,done
+hd276a7ef2889,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
+hd70ff7b8b5c8,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 hdaeb4b410d26,rust,tag,notetypes,unclassified,,,open
-hdeaee1c610b2,rust,tag,notetypes,unclassified,,,open
-hdf581e6e5983,rust,tag,notetypes,unclassified,,,open
-he9ab9d659d6c,rust,tag,notetypes,unclassified,,,open
-hebcc44832da5,rust,tag,notetypes,unclassified,,,open
-heee51bc192e5,rust,tag,notetypes,unclassified,,,open
-hf0e8584063a7,rust,tag,notetypes,unclassified,,,open
-hf53f4d36434a,rust,tag,notetypes,unclassified,,,open
-hf6670629d7af,rust,tag,notetypes,unclassified,,,open
-hf8bc5a7dc25e,rust,tag,notetypes,unclassified,,,open
-hf96cb48a0ba8,rust,tag,notetypes,unclassified,,,open
-hfa6f221eb91d,rust,tag,notetypes,unclassified,,,open
-h12f7b83a0cdb,typescript,tag,notetypes,unclassified,,,open
-hcd2cb9d07eec,typescript,tag,notetypes,unclassified,,,open
-he3cfa1e1e429,typescript,tag,notetypes,unclassified,,,open
-hfe06705a799b,typescript,tag,notetypes,unclassified,,,open
+hdeaee1c610b2,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hdf581e6e5983,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+he9ab9d659d6c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
+hebcc44832da5,rust,tag,notetypes,in-scope,An added note type can be found by its name,notetypes/records/names,done
+heee51bc192e5,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+hf0e8584063a7,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+hf53f4d36434a,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hf6670629d7af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hf8bc5a7dc25e,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hf96cb48a0ba8,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
+hfa6f221eb91d,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
+h12f7b83a0cdb,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+hcd2cb9d07eec,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+he3cfa1e1e429,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+hfe06705a799b,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 h543bc62a3163,python,tag,package,unclassified,,,open
 h686eb06786f4,python,tag,package,unclassified,,,open
 h6bd4a40af394,python,tag,package,unclassified,,,open

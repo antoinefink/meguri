@@ -103,7 +103,7 @@ A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset u
 
 ### D6.4 notetypes
 
-A list of `{name, kind, fields, templates, css}`: `kind` is `standard` (default) or `cloze`; `fields` a non-empty list of field names; `templates` a non-empty list of `{name, front, back}` (template texts, empty when missing); `css` a string (empty when missing). Scenarios define their own note types and CSS; stock note types appear only in scenarios about interop with them (R1959).
+A list of `{name, kind, fields, templates, css}`: `kind` is `standard` (default) or `cloze`; `fields` a non-empty list of field names; `templates` a non-empty list of `{name, front, back}` (template texts, empty when missing); `css` a string (empty when missing). Scenarios define their own note types and CSS; stock note types appear only in scenarios about interop with them (R1959). Each entry is added, in list order, as `add_notetype` adds a note type (`notetype-ops.md` T2; `specs/notetypes/records.md` N5.1): `original_stock_kind` 1, the default LaTeX header and footer, Anki's new-field and new-template defaults with fresh random ids, `curModel` set to the last one added.
 
 ### D6.5 notes
 
@@ -136,7 +136,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 |---|---|---|---|
 | `advance` | duration | none | stable |
 | `set_clock` | date-time | none | stable |
-| `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
+| `add_note` | `{notetype, deck?, fields, tags?}`: `notetype` a note type the collection holds, by its stored name (`notetype-ops.md` T1); `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
 | `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing | none | stable |
 | `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
 | `observe` | list of observation requests (`observations.md` O2) | `{<kind>: <value>, ...}` | stable |
@@ -160,6 +160,11 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |
 | `converge` | `{}` | `{differences, dump}` (`sync-ops.md` S7.5) | stable (actor scenarios, `sync-ops.md` S7) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
+| `add_notetype` | `{name, kind?, fields, templates, css?}` as a `setup.notetypes` entry: a note type from scratch, with the template checks | `{name}`: the stored name; rejections `notetype-ops.md` T7 | draft (notetypes; `notetype-ops.md` T2) |
+| `add_stock_notetype` | `{kind, name?}`: one of the six stock kinds | `{name}`; rejections T7 | draft (notetypes; `notetype-ops.md` T3) |
+| `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | draft (notetypes; `notetype-ops.md` T4) |
+| `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | draft (notetypes; `notetype-ops.md` T5) |
+| `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | draft (notetypes; `notetype-ops.md` T6) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 
