@@ -15,11 +15,11 @@ use crate::schema::ddl18;
 pub(super) fn run(conn: &Connection) -> StepResult {
     let foreign = foreign_dependents(conn, "graves")?;
     conn.execute_batch(&format!(
-        "CREATE TEMP TABLE graves_old AS SELECT oid, type, usn FROM main.graves ORDER BY rowid;
+        "CREATE TEMP TABLE graves_before_18 AS SELECT oid, type, usn FROM main.graves ORDER BY rowid;
          DROP TABLE main.graves;
          {};
-         INSERT OR IGNORE INTO main.graves (oid, type, usn) SELECT oid, type, usn FROM temp.graves_old ORDER BY rowid;
-         DROP TABLE temp.graves_old;
+         INSERT OR IGNORE INTO main.graves (oid, type, usn) SELECT oid, type, usn FROM temp.graves_before_18 ORDER BY rowid;
+         DROP TABLE temp.graves_before_18;
          {};",
         ddl18("graves"),
         ddl18("idx_graves_pending"),
