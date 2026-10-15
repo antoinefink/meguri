@@ -89,26 +89,39 @@ mg_app_input_digest() {
 
 # mg_app_xcodebuild_test <out prefix> <mac|ios> <destination> <config> [xcodebuild args]:
 # test-without-building of the UI plan into <prefix>.xcresult and <prefix>.log.
-# Returns 0 pass, 1 test failures, 2 could not run (records a user step when
-# macOS has not allowed UI automation).
+# Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER): to the test VM
+# (mac-vm.sh) or this Mac. Returns 0 pass, 1 test failures, 2 could not run
+# (records a user step when macOS has not allowed UI automation).
 mg_app_xcodebuild_test() {
   local prefix="$1" platform="$2" dest="$3" config="$4" rc summary
   shift 4
   rm -rf "$prefix.xcresult"
   mkdir -p "$(dirname "$prefix")"
-  # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
-  # and, on the Mac, are a sysdiagnose of the user's machine.
-  xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan UI -configuration "$config" \
-    -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
-    "$@" >"$prefix.log" 2>&1
-  rc=$?
-  mg_artifact log "$prefix.log" "xcodebuild test ($platform)"
+  if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
+    mg_mac_vm_xcodebuild_test "$prefix" "$dest" "$config" "$@"
+    rc=$?
+    mg_artifact log "$prefix.log" "xcodebuild test ($platform, in the test VM)"
+    [ -z "$MG_MAC_VM_RUN_ERROR" ] || return 2
+  else
+    # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
+    # and, on the Mac, are a sysdiagnose of the user's machine.
+    xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan UI -configuration "$config" \
+      -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
+      "$@" >"$prefix.log" 2>&1
+    rc=$?
+    mg_artifact log "$prefix.log" "xcodebuild test ($platform)"
+  fi
   summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
     jq -r '"\(.result) passed=\(.passedTests) failed=\(.failedTests) skipped=\(.skippedTests)"')"
   echo "$MG_JOB: xcodebuild test ($platform): exit $rc ${summary:-no result}" >&2
   if grep -q 'failed to initialize for UI testing' "$prefix.log"; then
-    mg_user_step uitest-automation missing true "Let the Xcode UI-test runner control the Mac" \
-      "System Settings > Privacy & Security > Accessibility and Automation: allow the UI-test runner (docs/process/one-time-setup.md)."
+    if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
+      mg_user_step uitest-automation missing true "Let the Xcode UI-test runner control the test VM" \
+        "In the test VM: sudo automationmodetool enable-automationmode-without-authentication (tools/vm/setup-guest.sh)."
+    else
+      mg_user_step uitest-automation missing true "Let the Xcode UI-test runner control the Mac" \
+        "System Settings > Privacy & Security > Accessibility and Automation: allow the UI-test runner (docs/process/one-time-setup.md)."
+    fi
     mg_failure blocked-uitest-automation "macOS has not allowed UI automation; the tests did not run"
     return 2
   fi
@@ -118,27 +131,44 @@ mg_app_xcodebuild_test() {
   return 2
 }
 
-# mg_app_log_now: the local time, as `log show --start` takes it.
-mg_app_log_now() { date '+%Y-%m-%d %H:%M:%S'; }
+# mg_app_log_now: the local time where the Mac tests run (this Mac, or the
+# test VM), as `log show --start` takes it.
+mg_app_log_now() {
+  local t
+  if [ "$MG_MAC_RUNNER" = vm ]; then
+    t="$(mg_mac_vm_now 2>/dev/null)"
+    case "$t" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\ [0-9][0-9]:[0-9][0-9]:[0-9][0-9]) printf '%s\n' "$t" && return 0 ;; esac
+  fi
+  date '+%Y-%m-%d %H:%M:%S'
+}
 
 # mg_app_mac_input_refused <since>: whether macOS dropped input that XCUITest
-# synthesized since then. On macOS 27.0.1 (26A434) WindowServer refuses
-# testmanagerd's virtual input service ("missing the
-# 'com.apple.private.hid.client.event-dispatch' entitlement"), testmanagerd
-# times out on its "Recap playback", and no click, key press or drag reaches
-# the app: a Mac UI run with input then tests nothing it acts on. Records the
-# run as blocked (user step mac-input, once per job) and returns 0; returns 1
-# when the unified log shows no such drop, or cannot be read.
+# synthesized since then, on this Mac or in the test VM (MG_MAC_RUNNER). On
+# macOS 27.0.1 (26A434) WindowServer refuses testmanagerd's virtual input
+# service ("missing the 'com.apple.private.hid.client.event-dispatch'
+# entitlement"), testmanagerd times out on its "Recap playback", and no
+# click, key press or drag reaches the app: a Mac UI run with input then
+# tests nothing it acts on. Records the run as blocked (user step mac-input,
+# once per job) and returns 0; returns 1 when the unified log shows no such
+# drop, or cannot be read.
 mg_app_mac_input_refused() {
-  command -v log >/dev/null 2>&1 || return 1
-  log show --style compact --start "$1" --predicate 'process == "testmanagerd" AND eventMessage CONTAINS "Recap playback"' 2>/dev/null |
-    grep -q 'Timed out after waiting' || return 1
+  local pred='process == "testmanagerd" AND eventMessage CONTAINS "Recap playback"' where repro
+  if [ "$MG_MAC_RUNNER" = vm ]; then
+    mg_mac_vm_log_show "$1" "$pred" 2>/dev/null | grep -q 'Timed out after waiting' || return 1
+    where="in the test VM"
+    repro="$(jq -r .ssh <<<"$MG_MAC_VM")$(mg__quote_args "$(mg_mac_vm_q sudo log show --start "$1" --predicate "$pred")")"
+  else
+    command -v log >/dev/null 2>&1 || return 1
+    log show --style compact --start "$1" --predicate "$pred" 2>/dev/null | grep -q 'Timed out after waiting' || return 1
+    where="on this Mac"
+    repro="log show --start '$1' --predicate '$pred'"
+  fi
   [ -z "${MG_MAC_INPUT_REFUSED:-}" ] || return 0
   MG_MAC_INPUT_REFUSED=1
   mg_user_step mac-input missing true "Use a macOS and Xcode pair whose Mac UI tests can click and type" \
-    "macOS drops the input XCUITest synthesizes on this Mac (on 27.0.1, WindowServer refuses testmanagerd's input service), so taps, typing and drags never reach the app. Update macOS or Xcode (docs/process/one-time-setup.md)."
-  mg_failure blocked-mac-input "blocked: macOS dropped the input XCUITest synthesized (testmanagerd's Recap playback timed out); no tap, key press or drag of this run reached the app" \
-    "log show --start '$1' --predicate 'process == \"testmanagerd\" AND eventMessage CONTAINS \"Recap playback\"'"
+    "macOS drops the input XCUITest synthesizes $where (on 27.0.1, WindowServer refuses testmanagerd's input service), so taps, typing and drags never reach the app. Update macOS or Xcode (docs/process/one-time-setup.md)."
+  mg_failure blocked-mac-input "blocked: macOS dropped the input XCUITest synthesized $where (testmanagerd's Recap playback timed out); no tap, key press or drag of this run reached the app" \
+    "$repro"
   mg_detail blocked '"mac-input"'
   return 0
 }

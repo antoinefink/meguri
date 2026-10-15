@@ -1,8 +1,8 @@
 # Agent drive loop (U8, R1961, R1964, R1965, R1968). Sourced by tools/mg.
 #
 # `drive` runs a drive script (tools/drive-scripts/AGENTS.md) through the
-# XCUITest AgentDriverTests on a simulator from the pool or on the Mac (Mac
-# runs go through the Mac UI gate, host.sh), exports the hierarchy and
+# XCUITest AgentDriverTests on a simulator from the pool or for the Mac in
+# the macOS test VM (mac-vm.sh), exports the hierarchy and
 # screenshot taken before and after every step from the result bundle into
 # build/mg/<job>/<run>/steps/, runs hierarchy-check over every hierarchy, and
 # writes manifest.json. `ui-tree` and `screenshot` drive a one-step script
@@ -169,15 +169,20 @@ mg_drive__motion_inputs() {
 }
 
 # mg_drive_run <script> <mac|ios> <udid|""> <config> <record yes|no> <out dir>:
-# runs the script (the app and UI tests are built, the host lease and for the
-# Mac the Mac UI gate are held), exports its captures, checks them and writes
-# <out>/manifest.json. With record, it also captures motion and makes a
-# contact sheet for every step marked with a transition:
+# runs the script (the app and UI tests are built; the host lease, or for the
+# Mac what mg_mac_ui_take takes, is held), exports its captures, checks them
+# and writes <out>/manifest.json. A Mac drive in the test VM first copies the
+# script and the fixtures its launch steps name to the same paths there.
+# With record, it also captures motion and makes a contact sheet for every
+# step marked with a transition:
 #   simulators: simctl io recordVideo around the drive;
-#   the Mac with Screen Recording: screencapture -v of the main display, cut
-#     to the app's window in each marked step (the full movie is deleted);
-#   the Mac without it: the driver's FrameSampler screenshots (about 10 per
-#     second), with the screen-recording user step.
+#   the Mac in the test VM: the driver's FrameSampler screenshots (about 10
+#     per second); the host cannot record the VM's screen;
+#   the Mac with Screen Recording (MEGURI_MAC_UI_ALLOW_HOST=1 runs):
+#     screencapture -v of the main display, cut to the app's window in each
+#     marked step (the full movie is deleted);
+#   the Mac without it: FrameSampler screenshots, with the screen-recording
+#     user step.
 # Records artifacts and failures. Returns 0 pass, 1 fail (failed steps or
 # hierarchy issues), 2 error (the drive, a capture the log lists, the
 # hierarchy check or a requested sheet could not be made, or macOS dropped
@@ -197,6 +202,8 @@ mg_drive_run() {
   if [ "$record" = yes ]; then
     if [ "$platform" != mac ]; then
       capture=video
+    elif [ "$MG_MAC_RUNNER" = vm ]; then
+      capture=frames
     elif mg__screen_capture_allowed; then
       capture=screen
     else
@@ -229,7 +236,15 @@ mg_drive_run() {
       ;;
   esac
 
-  echo "drive: running $script on $([ "$platform" = mac ] && echo the Mac || echo "$udid") ($config)${capture:+, capturing motion: $capture}" >&2
+  if [ "$platform" = mac ] && [ "$MG_MAC_RUNNER" = vm ]; then
+    local inputs=("$abs_script") fixture
+    while IFS= read -r fixture; do
+      case "$fixture" in /*) inputs[${#inputs[@]}]="$fixture" ;; *) inputs[${#inputs[@]}]="$MG_ROOT/$fixture" ;; esac
+    done < <(jq -r '.steps[] | objects | .launch? | objects | .fixture? | strings' "$abs_script")
+    mg_mac_vm_copy_in "${inputs[@]}" || return 2
+  fi
+
+  echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid") ($config)${capture:+, capturing motion: $capture}" >&2
   local since refused=0
   since="$(mg_app_log_now)"
   TEST_RUNNER_MEGURI_DRIVE_SCRIPT="$abs_script" TEST_RUNNER_MEGURI_DRIVE_FRAMES="$([ "$capture" = frames ] && echo 1 || echo 0)" \
@@ -439,19 +454,15 @@ mg_drive_run() {
 # Jobs
 
 # mg_drive__job <script> <kind> <udid> <config> <record>: builds, takes the
-# lease (and the Mac UI gate or a pool simulator) and runs the script.
+# host lease and a pool simulator (or for the Mac the test VM, mac-vm.sh) and
+# runs the script.
 mg_drive__job() {
-  local script="$1" kind="$2" udid="$3" config="$4" record="$5" reason platform
+  local script="$1" kind="$2" udid="$3" config="$4" record="$5" platform
   if [ "$kind" = mac ]; then
     platform=mac
-    if ! reason="$(mg_mac_ui_gate_open)"; then
-      mg__mac_ui_queued "$reason"
-      return 0
-    fi
+    mg_mac_ui_begin || return 0
     mg_app_build mac "$config" || return 0
-    mg_host_lease || return 0
-    mg_app_mac_guard || return 0
-    mg_mac_ui_gate || return 0
+    mg_mac_ui_take || return 0
   else
     platform=ios
     if [ -n "$udid" ]; then

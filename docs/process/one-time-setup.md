@@ -31,11 +31,15 @@ Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Set
 
 ### `uitest-automation`
 
-Let the Xcode UI-test runner control the Mac. On the first macOS UI-test run, macOS asks; allow it in System Settings › Privacy & Security › Accessibility and Automation. Doctor cannot verify this.
+Let the Xcode UI-test runner control the Mac. On the first macOS UI-test run, macOS asks; allow it in System Settings › Privacy & Security › Accessibility and Automation. Doctor cannot verify this. Mac UI suites run in the test VM, where `tools/vm/setup-guest.sh` turns on automation mode without authentication; this Mac needs the step only for host runs (`MEGURI_MAC_UI_ALLOW_HOST=1`).
+
+### `mac-vm`
+
+Keep the T9 drive with the Mac UI test VM connected. Every Mac UI suite (`tools/mg mac-ui`, `a11y --platform mac`, `drive --platform mac`) runs in that macOS VM, never on this Mac's screen (`docs/process/mac-ui-vm.md`). The host names it in `~/Library/Application Support/meguri/mac-vm.json`. Without the config, the drive or the VM, the suites are queued (status warn). Doctor checks the config, the drive, the VM, SSH and the VM's Xcode.
 
 ### `mac-input`
 
-Use a macOS and Xcode pair whose Mac UI tests can click and type. On macOS 27.0.1 (26A434) with Xcode 27.0, WindowServer refuses the input service of `testmanagerd` (log: "missing the 'com.apple.private.hid.client.event-dispatch' entitlement"). The tests start, but no tap, key press or drag reaches the app. No permission fixes this: update macOS or Xcode. Until then, `tools/mg mac-ui` and `tools/mg drive --platform mac` report `blocked: mac-input` (status error) when the unified log shows the dropped input. Mac suites without input still pass. Doctor cannot verify this.
+Use a macOS and Xcode pair whose Mac UI tests can click and type. On macOS 27.0.1 (26A434) with Xcode 27.0, WindowServer refuses the input service of `testmanagerd` (log: "missing the 'com.apple.private.hid.client.event-dispatch' entitlement"). The tests start, but no tap, key press or drag reaches the app. No permission fixes this: update macOS or Xcode. The test VM runs the same macOS build and has the same bug. Until then, `tools/mg mac-ui` and `tools/mg drive --platform mac` report `blocked: mac-input` (status error) when the unified log shows the dropped input. Mac suites without input still pass. Doctor cannot verify this.
 
 ## Optional or later
 
@@ -45,7 +49,7 @@ Enable Developer Mode on each iPhone and iPad used for milestone device runs: Se
 
 ### `screen-recording`
 
-Allow Screen Recording for the app that runs `tools/mg` (the terminal, or Claude) in System Settings › Privacy & Security › Screen Recording. `tools/mg screenshot --platform mac` needs it to capture the hidden Mac app's window. Without it the job reports blocked, and Mac screenshots come only from `tools/mg drive --platform mac` in the hourly Mac UI slot. With it, `tools/mg drive --platform mac --record` records the screen as video for motion contact sheets; without it, the sheets come from XCUITest screenshots at about 10 per second. Doctor cannot verify this.
+Allow Screen Recording for the app that runs `tools/mg` (the terminal, or Claude) in System Settings › Privacy & Security › Screen Recording. `tools/mg screenshot --platform mac` needs it to capture the hidden Mac app's window. Without it the job reports blocked, and Mac screenshots come only from `tools/mg drive --platform mac` (in the test VM). Mac drives in the VM make motion contact sheets from XCUITest screenshots at about 10 per second; only a host run (`MEGURI_MAC_UI_ALLOW_HOST=1`) with this permission records the screen as video. Doctor cannot verify this.
 
 ### `xcode-external-agents`
 
@@ -63,7 +67,7 @@ Approve the scheduler entry for nightly jobs when `tools/mg nightly` (U19) asks 
 
 ### `host-session`
 
-Not a one-time step. App, simulator and Mac UI jobs (`build-app` excepted) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later, so UI gates wait too. While they run, they keep the display awake; a simulator recording (`tools/mg record start`) does so until it is stopped, at most 10 minutes. Mac UI-driving suites take the screen at most once an hour (`tools/mg mac-ui`).
+Not a one-time step. App and simulator jobs (`build-app` excepted) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later, so UI gates wait too. While they run, they keep the display awake; a simulator recording (`tools/mg record start`) does so until it is stopped, at most 10 minutes. Mac UI suites run in the test VM and need no unlocked session; only a host run (`MEGURI_MAC_UI_ALLOW_HOST=1`) waits, and takes the screen at most once an hour.
 
 ## Not user steps
 

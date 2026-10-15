@@ -1,25 +1,27 @@
-# Host lease, session check and the Mac UI gate (U8). Sourced by tools/mg.
+# Host lease, session check and the Mac UI gate (U8, U8b). Sourced by tools/mg.
 #
 # Host lease: every job that installs or launches the app, drives it or
-# records it takes one lease shared by every checkout of this repository (the
-# main checkout's build/mg/host.lock, a mkdir lock) and queues while another
-# job holds it. Holding it, the job checks that the macOS session is unlocked
-# and a display awake, and keeps the display awake (caffeinate) until it ends;
-# a locked or sleeping Mac makes the job report `blocked: host` (status
-# error, user step host-session), never fail.
+# records it on this Mac takes one lease shared by every checkout of this
+# repository (the main checkout's build/mg/host.lock, a mkdir lock) and
+# queues while another job holds it. Holding it, the job checks that the
+# macOS session is unlocked and a display awake, and keeps the display awake
+# (caffeinate) until it ends; a locked or sleeping Mac makes the job report
+# `blocked: host` (status error, user step host-session), never fail.
 #
-# Mac UI gate: anything that drives the Mac's real cursor or keyboard (Mac
-# XCUITest) runs only through it (root AGENTS.md): one run at a time, and
-# none within MEGURI_MAC_UI_INTERVAL_MINUTES (60) of the previous run's start.
-# A refused run is reported as queued (status warn); the hourly sweep
-# (`tools/mg mac-ui` on the integration branch) runs the suites later.
+# Mac UI suites (Mac XCUITest) run in the macOS test VM (mac-vm.sh), as often
+# as needed: they take the VM's lease, not the host lease, and never drive
+# this Mac's cursor or keyboard (root AGENTS.md). Without the VM they are
+# queued. MEGURI_MAC_UI_ALLOW_HOST=1 runs them on this Mac instead, for a run
+# Antoine starts himself, through the Mac UI gate: one run at a time, and none
+# within MEGURI_MAC_UI_INTERVAL_MINUTES (60) of the previous run's start; a
+# refused run is reported as queued (status warn).
 #
 # Overrides (self-tests): MEGURI_HOST_LEASE_DIR, MEGURI_HOST_LEASE_WAIT_SECONDS
 # (3600), MEGURI_HOST_LEASE_POLL_SECONDS (5), MEGURI_MAC_UI_DIR,
 # MEGURI_MAC_UI_INTERVAL_MINUTES.
 
 mg_job mac-ui host mg_mac_ui \
-  "Mac UI-driving suites, at most one run an hour (root AGENTS.md): [--suite test-hooks|agent-driver|a11y|drive:<script>]... (default: TestHooksTests, the agent driver's resize test, the accessibility suites (U10) and every example drive script for the Mac; scripts that mark a transition are recorded); refused runs are queued (warn)"
+  "Mac UI-driving suites in the macOS test VM, unthrottled (docs/process/mac-ui-vm.md): [--suite test-hooks|agent-driver|a11y|drive:<script>]... (default: TestHooksTests, the agent driver's resize test, the accessibility suites (U10) and every example drive script for the Mac; scripts that mark a transition are recorded); without the VM they are queued (warn, user step mac-vm), or with MEGURI_MAC_UI_ALLOW_HOST=1 run on this Mac through the hourly gate"
 
 # ---------------------------------------------------------------------------
 # Exit actions: a job runs in its own subshell; these run once when it ends,
@@ -254,7 +256,7 @@ mg_host_lease_transfer() {
 }
 
 # ---------------------------------------------------------------------------
-# Mac UI gate
+# Mac UI gate (host runs only, MEGURI_MAC_UI_ALLOW_HOST=1)
 
 mg__mac_ui_dir() { printf '%s\n' "${MEGURI_MAC_UI_DIR:-$HOME/Library/Caches/meguri/mac-ui}"; }
 
@@ -264,7 +266,7 @@ mg__mac_ui_queued() {
   local last
   last="$(jq -c . "$(mg__mac_ui_dir)/last-start.json" 2>/dev/null)" || last=null
   mg_detail mac_ui "$(jq -n --arg r "$1" --argjson last "${last:-null}" '{reason: $r, last_start: $last}')"
-  mg_message "$MG_JOB: queued for the hourly Mac UI sweep: $1"
+  mg_message "$MG_JOB: queued by the hourly Mac UI gate (runs on this Mac): $1"
   mg_status warn
 }
 
@@ -340,7 +342,7 @@ mg_mac_ui_gate() {
 # tools/mg mac-ui
 
 mg_mac_ui() {
-  local suites=() s reason
+  local suites=() s
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --suite)
@@ -362,20 +364,24 @@ mg_mac_ui() {
     done
   fi
   mg_detail suites "$(mg_json_array "${suites[@]}")"
-  if ! reason="$(mg_mac_ui_gate_open)"; then
-    mg__mac_ui_queued "$reason"
-    return 0
-  fi
+  mg_mac_ui_begin || return 0
   mg_app_build mac Debug || return 0
-  mg_host_lease || return 0
-  mg_app_mac_guard || return 0
-  mg_mac_ui_gate || return 0
+  mg_mac_ui_take || return 0
 
   local passed=0 failed=0 errors=0 name result record since only c
   for s in "${suites[@]}"; do
     case "$s" in
+      drive:*) name="drive-$(basename "${s#drive:}" .json)" ;;
+      *) name="$s" ;;
+    esac
+    # A lost run the VM could not stop: no run starts beside it.
+    if [ -n "$MG_MAC_VM_LOST" ]; then
+      errors=$((errors + 1))
+      mg_failure "suite/$name" "Mac UI suite $name was not run: $MG_MAC_VM_LOST" "tools/mg mac-ui --suite $s"
+      continue
+    fi
+    case "$s" in
       test-hooks | agent-driver | a11y)
-        name="$s"
         since="$(mg_app_log_now)"
         case "$s" in
           test-hooks) only=TestHooksTests ;;
@@ -390,7 +396,6 @@ mg_mac_ui() {
         ;;
       drive:*)
         # A script that marks a transition also records it (motion capture).
-        name="drive-$(basename "${s#drive:}" .json)"
         record=no
         jq -e 'any(.steps[]; has("transition"))' "${s#drive:}" >/dev/null 2>&1 && record=yes
         mg_drive_run "${s#drive:}" mac "" Debug "$record" "$MG_RUN_DIR/$name"

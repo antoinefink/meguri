@@ -4,7 +4,7 @@
 # lists what is missing in user_steps (docs/process/one-time-setup.md).
 
 mg_job doctor host mg_doctor \
-  "Check Xcode, iOS runtime, Docker, Rust targets and disk; list missing one-time user steps"
+  "Check Xcode, iOS runtime, Docker, Rust targets, disk and the Mac UI test VM; list missing one-time user steps"
 
 MG_DOCTOR_TEAM=DNQ34W43XX
 MG_DOCTOR_MIN_XCODE_MAJOR=27
@@ -30,6 +30,63 @@ mg__doctor_env() {
 # Reads `key = [ "a", "b" ]` or `key = "a"` from core/rust-toolchain.toml, one value per line.
 mg__doctor_toolchain_values() {
   sed -n "s/^$1 *= *//p" core/rust-toolchain.toml 2>/dev/null | tr -d '[]" ' | tr ',' '\n' | sed '/^$/d'
+}
+
+# mg__doctor_mac_vm <host Xcode version> <host Xcode build>: the Mac UI test
+# VM (mac-vm.sh, docs/process/mac-ui-vm.md): configured, its drive
+# connected, present, running, answering over SSH, with the host's Xcode. It
+# reads only: a stopped VM is not started (Mac UI jobs start it). Problems
+# warn; Mac UI suites queue without the VM.
+mg__doctor_mac_vm() {
+  local host_xcode="$1 ($2)" rc n i=0 vm name tart ssh state out vxv vxb status msg vms='[]' missing=0
+  mg__mac_vm_read_config
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    mg__doctor_check mac-vm warn "$MG_MAC_VM_REASON; Mac UI suites queue until there is one"
+    mg_mac_vm_user_step
+    mg_detail mac_vm "$(jq -nc --arg c "$(mg_mac_vm_config_path)" --argjson ok "$([ "$rc" -eq 1 ] && echo false || echo null)" '{config: $c, configured: $ok, vms: []}')"
+    return 0
+  fi
+  n="$(jq length <<<"$MG_MAC_VM_ALL")"
+  while [ "$i" -lt "$n" ]; do
+    vm="$(jq -c --argjson i "$i" '.[$i]' <<<"$MG_MAC_VM_ALL")"
+    i=$((i + 1))
+    name="$(jq -r .name <<<"$vm")"
+    tart="$(jq -r .tart <<<"$vm")"
+    ssh="$(jq -r .ssh <<<"$vm")"
+    state="" vxv="" vxb=""
+    if [ ! -x "$tart" ] || [ ! -x "$ssh" ]; then
+      status=warn missing=1
+      msg="$name: $([ -x "$tart" ] && echo "its SSH wrapper $ssh" || echo "the tart wrapper $tart") is not there; connect the drive that holds the VM"
+    else
+      state="$(mg__mac_vm_state "$tart" "$name")"
+      case "$state" in
+        "") status=warn msg="$name: '$tart list' failed" ;;
+        missing) status=warn missing=1 msg="$name: tart lists no such VM" ;;
+        running)
+          out="$("$ssh" "xcodebuild -version" </dev/null 2>/dev/null)"
+          vxv="$(printf '%s\n' "$out" | sed -n 's/^Xcode \([0-9.]*\).*/\1/p' | head -n 1)"
+          vxb="$(printf '%s\n' "$out" | sed -n 's/^Build version \(.*\)/\1/p' | head -n 1)"
+          if [ -z "$vxv" ]; then
+            status=warn msg="$name: running, but SSH does not answer ($ssh)"
+          elif [ "$vxv ($vxb)" != "$host_xcode" ]; then
+            status=warn msg="$name: Xcode $vxv ($vxb) in the VM, $host_xcode on this Mac; Mac UI results may differ"
+          else
+            status=pass msg="$name: running, SSH answers, Xcode $vxv ($vxb) as on this Mac"
+          fi
+          ;;
+        *) status=pass msg="$name: $state; Mac UI jobs start it headless when they need it" ;;
+      esac
+    fi
+    mg__doctor_check "mac-vm/$name" "$status" "$msg"
+    vms="$(jq -c --arg n "$name" --argjson d "$([ -x "$tart" ] && [ -x "$ssh" ] && echo true || echo false)" --arg s "$state" \
+      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" '. + [{name: $n, drive_connected: $d,
+        present: (if $s == "" then null else $s != "missing" end), state: (if $s == "" or $s == "missing" then null else $s end),
+        ssh: (if $s != "running" then null else $x != "" end),
+        xcode: (if $x == "" then null else "\($x) (\($b))" end), xcode_matches_host: (if $x == "" then null else "\($x) (\($b))" == $hx end)}]' <<<"$vms")"
+  done
+  [ "$missing" -eq 0 ] || mg_mac_vm_user_step
+  mg_detail mac_vm "$(jq -nc --arg c "$(mg_mac_vm_config_path)" --argjson v "$vms" '{config: $c, configured: true, vms: $v}')"
 }
 
 mg_doctor() {
@@ -196,6 +253,9 @@ mg_doctor() {
   else
     mg__doctor_check disk fail "$gib GiB free; need at least $MG_DOCTOR_FAIL_DISK_GIB GiB"
   fi
+
+  # The Mac UI test VM (U8b)
+  mg__doctor_mac_vm "$xversion" "$xbuild"
 
   # Steps doctor cannot verify from the command line
   mg_user_step uitest-automation unverified true "Let the Xcode UI-test runner control the Mac" \

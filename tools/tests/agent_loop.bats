@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # Self-tests for the agent build-run-verify loop (U8): sim-setup and sim-reset
-# against the fake simctl, the host lease and session check, the Mac UI gate,
-# record, and the drive jobs' argument checks. Each test runs tools/mg from a
+# against the fake simctl, the host lease and session check, the Mac UI gate
+# (host runs: MEGURI_MAC_UI_ALLOW_HOST=1 without a test VM; mac_vm.bats
+# covers the VM), record, and the drive jobs' argument checks. Each test runs tools/mg from a
 # throwaway copy of tools/ in its own git repo; macOS commands (simctl, ioreg,
 # system_profiler, caffeinate, xcodebuild, osascript) are stubs, and the pool,
 # lease and gate directories are per test.
@@ -33,6 +34,9 @@ setup() {
   export MEGURI_SIM_POOL_SETTLE_SECONDS=0 MEGURI_SIM_POOL_POLL_SECONDS=1 MEGURI_SIM_POOL_WAIT_SECONDS=2
   export MEGURI_HOST_LEASE_DIR="$BATS_TEST_TMPDIR/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1
   export MEGURI_MAC_UI_DIR="$BATS_TEST_TMPDIR/mac-ui"
+  # No test VM: these tests cover the host path of Mac UI jobs (U8);
+  # tests/mac_vm.bats covers the VM (U8b).
+  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/no-mac-vm.json" MEGURI_MAC_UI_ALLOW_HOST=1
   : >"$STUB_LOG"
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN" "$MEGURI_SIM_DEVICES_DIR"
@@ -537,7 +541,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(field .status)" = warn ]
   [ "$(field .details.queued)" = true ]
-  [[ "$(field .message)" == *"queued for the hourly Mac UI sweep: the previous Mac UI run started at"* ]]
+  [[ "$(field .message)" == *"queued by the hourly Mac UI gate (runs on this Mac): the previous Mac UI run started at"* ]]
   [ "$(wc -l <"$FX_LOG" | tr -d ' ')" = 1 ]
 
   jq '.epoch -= 3601' "$MEGURI_MAC_UI_DIR/last-start.json" >"$BATS_TEST_TMPDIR/l" && mv "$BATS_TEST_TMPDIR/l" "$MEGURI_MAC_UI_DIR/last-start.json"

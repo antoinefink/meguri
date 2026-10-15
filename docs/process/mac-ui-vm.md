@@ -32,8 +32,23 @@ Results on 2026-10-15, on feat/meguri-v1 at 5e24d8a:
 
   In the VM, `log show` needs `sudo` to see those messages.
 
+## How jobs use it (U8b)
+
+The host's config, `~/Library/Application Support/meguri/mac-vm.json`, names the wrappers and the VM:
+
+```json
+{"tart": "/Volumes/T9/meguri-vm/bin/tart", "ssh": "/Volumes/T9/meguri-vm/bin/vm-ssh", "vms": ["meguri-mac"]}
+```
+
+`tools/mg mac-ui`, `tools/mg a11y --platform mac` and `tools/mg drive --platform mac` build on the host, take the VM's lease (one run at a time per VM, across checkouts), start the VM headless when it is stopped, and then follow the steps above. They copy `app/Fixtures` and a drive's script and fixtures too. They run as often as needed, with the host locked or not. Their `result.json` has `details.mac_runner: "vm"`. `tools/mg doctor` shows the VM's state. Conventions and traps: `tools/vm/AGENTS.md`.
+
+On 2026-10-15, from the U8b worktree: `mac-ui --suite a11y` passed (11 passed, 1 skipped, 52 s with the incremental build), and so did `a11y --platform mac`. The full `mac-ui` passed agent-driver, a11y, mac-window-sizes and sample-routes. test-hooks (7 passed, 1 failed), open-sample-sheet and sample-transition ended `blocked: mac-input`, as on the host.
+
+A test run in the VM outlives a lost SSH session or a killed job. So a job stops any leftover run (`xcodebuild test-without-building` and the UI-test runner) when it takes the VM, and right after it loses a session. If the run cannot be stopped, the job runs no more suites, and the VM gets no new run until a later job stops it. Verified on the real VM on 2026-10-15: the local SSH client of a running a11y suite was killed, and the job stopped the run in the VM before test-hooks started; a leftover process with a test run's command line was stopped before `a11y --platform mac` ran (11 passed, 1 skipped).
+
 ## Limits
 
 - The T9 drive must be connected and mounted. Without it, there is no VM.
-- Timings in the VM do not represent the hardware: performance jobs (`ui-perf`, `bench-mac`) stay on the host.
+- Timings in the VM do not represent the hardware. Mac UI performance suites (`ui-perf --platform mac`, U12) run in the VM against baselines recorded there; CPU benchmarks without UI (`bench-mac`) stay on the host.
+- The host cannot record the VM's screen: Mac `drive --record` in the VM makes its contact sheets from screenshots the test runner samples.
 - Input-driving Mac tests fail in the VM until Apple fixes the macOS 27.0.1 bug, exactly as on the host.
