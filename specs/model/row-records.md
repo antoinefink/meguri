@@ -142,7 +142,7 @@ Rules for adding graves are the storage area's (U23).
 | `mtime_secs` | i64 | modification time, epoch seconds |
 | `val` | blob | the value as JSON bytes |
 
-How values are written and preserved is `specs/storage/config-table` (U23).
+How values are read, written and preserved is `specs/storage/config-table` (U23). A `val` that is not a BLOB or not the JSON a reader expects is an exception to R1: a typed read gives the reader's default and never fails (`specs/storage/config-table` C3).
 
 ## R10. Errors
 

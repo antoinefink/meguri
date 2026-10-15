@@ -18,7 +18,7 @@ How a row of `collection.anki2` gets its id when it is created, what a write doe
 | `deck_config` | `id` | epoch ms |
 | `notetypes` | `id` | epoch ms |
 
-- The default deck and the default deck preset have the fixed id 1. They come with the new collection and are never allocated (U22, U28).
+- The default deck and the default deck preset have the fixed id 1. They come with the new collection and are never allocated (U28).
 - The other tables have no allocated id: `graves` holds the deleted object's id (`graves.md`), `config` is keyed by name, `tags` by tag text, `fields` and `templates` by note type id and ordinal, and `col` is the single row with `id` 1.
 
 ## I2. Allocation rule
@@ -69,12 +69,14 @@ Rows that a sync, an import, an undo restore or a raw copy brings keep their giv
 | `decks` | `mtime_secs` | `usn` |
 | `deck_config` | `mtime_secs` | `usn` |
 | `notetypes` | `mtime_secs` | `usn` |
-| `templates` | `mtime_secs` | `usn` |
+| `templates` | none: `mtime_secs` is never stamped | none: `usn` is never stamped |
 | `fields` | none: changes with its note type | none |
 | `tags` | none | `usn` |
 | `config` | `mtime_secs` | `usn` |
 | `graves` | none | `usn` |
 | `col` | `mod`, epoch ms (S5) | `usn`: set only by a sync (S6) |
+
+A template row changes with its note type, whose `notetypes` row carries the stamps. Its own `mtime_secs` and `usn` are written as data: 0 for a template that is new or comes from a schema-11 note type (a sync, an import, a legacy update), and the stored values when a note type is saved again with its loaded templates (`specs/model/row-records.md` R7). No source in S3 sets them.
 
 ## S2. Local changes
 
@@ -90,6 +92,7 @@ A row that a local action creates or changes gets `usn` -1 and, where S1 lists a
 | `.apkg` update of an existing note (R1602) | -1 | the incoming note's | set to `now_ms` |
 | Undo or redo | the restored row's | the restored row's | restored (S5) |
 | Raw write: staging copies (U33, U122, U123), the unbury at day rollover (U40), scenario `db_exec` | as written | as written | unchanged |
+| Schema upgrade on open (`storage/schema-upgrade`, not an operation) | as that spec gives: -1 only for the decks and cards it changes (U9.1) | as that spec gives | unchanged |
 
 Day rollover's unbury rewrites `cards.queue` without touching `mod` or `usn`, and records the day in the `lastUnburied` config key with a local change.
 

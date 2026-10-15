@@ -36,7 +36,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 
 | Kind | Arguments | Value |
 |---|---|---|
-| `ids` | note and card references, or none for all | `{"#nN": <note id>, "#cN": <card id>}`: real ids, which come from the clock in milliseconds and are bumped by 1 on collision |
+| `ids` | note and card references, or none for all | `{"#nN": <note id>, "#cN": <card id>}`: real ids, allocated by `specs/storage/ids-usn-mtime.md` I2: the clock's instant in milliseconds, or the table's largest id plus one when that instant is taken |
 | `timing` | none | `{days_elapsed, next_day_at, now, utc_offset_secs}`: the scheduler's day number, the next day boundary and the current instant in epoch seconds, and the local UTC offset now |
 | `card` | card references or none | `{"#cN": <row> \| null}`: the stored card row with columns `id` (as `#cN`), `nid` (as `#nN`), `did` and `odid` (deck names; `null` for 0), `ord`, `mod`, `usn`, `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `flags` and `data` (parsed JSON object; `{}` when empty; the text when it is not JSON) |
 | `revlog` | card references or none | `{"#cN": [<row>, ...]}`: the card's review-log rows in id order, columns `id`, `cid` (as `#cN`), `usn`, `ease`, `ivl`, `lastIvl`, `factor`, `time`, `type` |
@@ -120,7 +120,7 @@ The runner compares the golden's observations (expected) with the executor's (ac
   - the digest of `fields.config` covers the stored bytes without the field's random id, top-level protobuf field 9, and the digest of `templates.config` covers them without the template's random id, top-level protobuf field 8. Removing a field removes every occurrence of that top-level field number, tag and value, and keeps the other bytes in their order. The blob parses when it is a sequence of fields, each a varint tag with a field number of at least 1 and a wire type of 0 (varint), 1 (8 bytes), 2 (a varint length, then that many bytes) or 5 (4 bytes), that ends exactly at the blob's end. A blob that does not parse is digested as stored.
 
   `converge` compares the raw values instead (`sync-ops.md` S7.2), so actors that disagree on a random value still differ there.
-- Real ids appear as stored. Meguri allocates ids as Anki does (U23), so a Meguri collection's dump has the same ids as the oracle's.
+- Real ids appear as stored. Meguri allocates ids as Anki does (`specs/storage/ids-usn-mtime.md` I2), so a Meguri collection's dump has the same ids as the oracle's, except where Meguri's one-day cap applies (I3, with its deviations).
 
 ## O9. Text functions
 
