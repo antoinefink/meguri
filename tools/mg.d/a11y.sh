@@ -2,8 +2,8 @@
 # sweep and VoiceOver scripts). Sourced by tools/mg; a host job.
 #
 # Runs the accessibility XCUITest suites (MeguriUITests/Accessibility) on a
-# pool simulator, or on the Mac through the Mac UI gate (root AGENTS.md: at
-# most one Mac UI run an hour; a refused run is queued, warn). Suites attach
+# pool simulator, or for the Mac in the macOS test VM (mac-vm.sh; queued,
+# warn, without it). Suites attach
 # `a11y-screen.<screen id>` JSON reports (AuditHelpers.screenReport), one
 # per screen with a result per state; the job lists them as per-screen
 # evidence of its platform (details.platform) in details.screens and
@@ -12,7 +12,7 @@
 # Mac window's own elements are listed as excluded, not counted.
 
 mg_job a11y host mg_a11y \
-  "Accessibility suites (R1977, R1978, R1980): [--platform iphone|ipad|mac] [--device <leased udid>] [--suite <test class>]... (default AccessibilityHelperTests): system audit at default and largest text size, light and dark, suppressions from Accessibility/suppressions.json, touch targets, VoiceOver order; Mac runs go through the Mac UI gate (queued when refused); per-screen results in screens.json"
+  "Accessibility suites (R1977, R1978, R1980): [--platform iphone|ipad|mac] [--device <leased udid>] [--suite <test class>]... (default AccessibilityHelperTests): system audit at default and largest text size, light and dark, suppressions from Accessibility/suppressions.json, touch targets, VoiceOver order; Mac runs go to the macOS test VM (queued without it); per-screen results in screens.json"
 
 MG_A11Y_SUITES="AccessibilityHelperTests"
 
@@ -50,15 +50,9 @@ mg_a11y() {
   MG_A11Y_PLATFORM="$platform"
   if [ "$platform" = mac ]; then
     [ -z "$device" ] || { mg_a11y__usage "--device is for simulators"; return 0; }
-    local reason
-    if ! reason="$(mg_mac_ui_gate_open)"; then
-      mg__mac_ui_queued "$reason"
-      return 0
-    fi
+    mg_mac_ui_begin || return 0
     mg_app_build mac Debug || return 0
-    mg_host_lease || return 0
-    mg_app_mac_guard || return 0
-    mg_mac_ui_gate || return 0
+    mg_mac_ui_take || return 0
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" Debug "${only[@]}"
     result=$?

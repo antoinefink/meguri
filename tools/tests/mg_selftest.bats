@@ -125,6 +125,11 @@ case "$name $*" in
       exit 1
     fi ;;
   "docker compose version --short") echo 5.5.0 ;;
+  "tart list --format json")
+    echo "[{\"Source\": \"local\", \"Name\": \"meguri-mac\", \"Running\": true, \"State\": \"${STUB_VM_STATE:-running}\"}]" ;;
+  "vm-ssh xcodebuild -version")
+    [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
+    printf 'Xcode %s\nBuild version %s\n' "${STUB_VM_XCODE:-27.0}" 27A266a ;;
   "rustup toolchain list") echo 1.99.0-aarch64-apple-darwin ;;
   "rustup +1.99.0 target list --installed")
     printf '%s\n' ${STUB_RUST_TARGETS-aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim} ;;
@@ -142,6 +147,13 @@ EOF
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
+  # The Mac UI test VM (U8b): its drive's tart and SSH wrappers, and the
+  # host's config naming them.
+  mkdir -p "$BATS_TEST_TMPDIR/T9/bin"
+  ln -s "$STUBS/_stub" "$BATS_TEST_TMPDIR/T9/bin/tart"
+  ln -s "$STUBS/_stub" "$BATS_TEST_TMPDIR/T9/bin/vm-ssh"
+  export MEGURI_MAC_VM_CONFIG="$BATS_TEST_TMPDIR/mac-vm.json"
+  jq -n --arg d "$BATS_TEST_TMPDIR/T9/bin" '{tart: "\($d)/tart", ssh: "\($d)/vm-ssh", vms: ["meguri-mac"]}' >"$MEGURI_MAC_VM_CONFIG"
 }
 
 # Doctor may only issue these read-only host commands.
@@ -159,6 +171,8 @@ assert_read_only_calls() {
     -e '^docker compose version --short$' \
     -e '^rustup (toolchain list|\+[0-9.]+ (target|component) list --installed)$' \
     -e '^df -Pk /' \
+    -e '^tart list --format json$' \
+    -e '^vm-ssh xcodebuild -version$' \
     "$STUB_LOG" || true)"
   if [ -n "$bad" ]; then
     echo "doctor issued commands outside the read-only allowlist:"
@@ -448,6 +462,54 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.user_steps[] | select(.id == "uitest-automation" and .state == "unverified")' "$result"
   jq -e '.user_steps[] | select(.id == "xcode-27-1" and .state == "missing" and .required == false)' "$result"
   [ "$(field .summary.total)" = "$(field '.details.checks | length')" ]
+  assert_read_only_calls
+  validate "$result"
+}
+
+@test "doctor reports the Mac UI test VM: configured, drive connected, present, running, SSH and the host's Xcode" {
+  make_stubs
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "pass" and (.message | contains("running, SSH answers, Xcode 27.0 (27A266a) as on this Mac")))' "$result"
+  [ "$(field -c '.details.mac_vm.vms[0] | [.drive_connected, .present, .state, .ssh, .xcode, .xcode_matches_host]')" = '[true,true,"running",true,"27.0 (27A266a)",true]' ]
+  [ "$(field '[.user_steps[] | select(.id == "mac-vm")] | length')" = 0 ]
+
+  # A stopped VM is fine: Mac UI jobs start it. Doctor never does.
+  : >"$STUB_LOG"
+  STUB_VM_STATE=stopped mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "pass" and (.message | contains("stopped")))' "$result"
+  [ -z "$(grep -E '^(tart run|vm-ssh)' "$STUB_LOG" || true)" ]
+
+  # SSH that does not answer, or another Xcode in the VM, warns.
+  STUB_VM_SSH=0 mg doctor
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("SSH does not answer")))' "$result"
+  STUB_VM_XCODE=27.1 mg doctor
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and (.message | contains("Xcode 27.1 (27A266a) in the VM, 27.0 (27A266a) on this Mac")))' "$result"
+  [ "$(field '.details.mac_vm.vms[0].xcode_matches_host')" = false ]
+  assert_read_only_calls
+  validate "$result"
+}
+
+@test "doctor without the VM, or with its drive disconnected, warns and lists the mac-vm step" {
+  make_stubs
+  rm "$MEGURI_MAC_VM_CONFIG"
+  mg doctor
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-vm" and .status == "warn" and (.message | contains("no Mac UI test VM is configured")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
+  [ "$(field .details.mac_vm.configured)" = false ]
+
+  jq -n --arg d "$BATS_TEST_TMPDIR/T9/bin" '{tart: "\($d)/tart", ssh: "\($d)/vm-ssh", vms: ["meguri-mac"]}' >"$MEGURI_MAC_VM_CONFIG"
+  rm -rf "$BATS_TEST_TMPDIR/T9"
+  mg doctor
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("connect the drive that holds the VM")))' "$result"
+  [ "$(field '.details.mac_vm.vms[0].drive_connected')" = false ]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
   assert_read_only_calls
   validate "$result"
 }
