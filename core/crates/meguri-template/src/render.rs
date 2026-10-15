@@ -44,8 +44,26 @@ pub struct CardSpecials<'a> {
 /// card's ordinal.
 #[derive(Debug, Clone, Default)]
 pub struct FieldMap {
-    values: HashMap<String, String>,
+    values: HashMap<String, Value>,
     ord: u32,
+}
+
+/// A value and whether it is empty (`text/field-emptiness#E1` on the value
+/// as given), judged once when the map is built. Sections and the blank
+/// check ask at every tag, and a whitespace-only value is empty only once
+/// all of it is read, so judging it per tag would cost its length per tag
+/// (T13).
+#[derive(Debug, Clone)]
+struct Value {
+    text: String,
+    empty: bool,
+}
+
+impl Value {
+    fn new(text: String) -> Value {
+        let empty = field_empty::counts_as_empty(&text);
+        Value { text, empty }
+    }
 }
 
 impl FieldMap {
@@ -56,9 +74,9 @@ impl FieldMap {
     where
         I: IntoIterator<Item = (&'f str, &'f str)>,
     {
-        let mut values: HashMap<String, String> = note_fields
+        let mut values: HashMap<String, Value> = note_fields
             .into_iter()
-            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .map(|(name, value)| (name.to_owned(), Value::new(value.to_owned())))
             .collect();
         let deck = specials.deck_name.unwrap_or(MISSING_DECK);
         let subdeck = deck.rsplit_once("::").map_or(deck, |(_, last)| last);
@@ -72,11 +90,11 @@ impl FieldMap {
             ("CardID", specials.card_id.to_string()),
         ];
         for (name, value) in derived {
-            values.entry(name.to_owned()).or_insert(value);
+            values.entry(name.to_owned()).or_insert_with(|| Value::new(value));
         }
         values
             .entry(format!("c{}", u64::from(specials.ord) + 1))
-            .or_insert_with(|| "1".to_owned());
+            .or_insert_with(|| Value::new("1".to_owned()));
         FieldMap {
             values,
             ord: specials.ord,
@@ -84,13 +102,18 @@ impl FieldMap {
     }
 
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.values.get(name).map(String::as_str)
+        self.values.get(name).map(|value| value.text.as_str())
+    }
+
+    /// Whether `name`'s value is empty; `None` when `name` is not in the map.
+    fn emptiness(&self, name: &str) -> Option<bool> {
+        self.values.get(name).map(|value| value.empty)
     }
 
     /// Whether `name` is in the map with a value that is not empty
     /// (`text/field-emptiness#E1` on the value as given).
     pub fn is_nonempty(&self, name: &str) -> bool {
-        self.get(name).is_some_and(|value| !field_empty::counts_as_empty(value))
+        self.emptiness(name) == Some(false)
     }
 
     pub fn ord(&self) -> u32 {
@@ -153,8 +176,8 @@ impl ParsedTemplate {
                     }
                 }
                 NodeKind::Open { key, negated } => {
-                    let empty = match fields.get(key) {
-                        Some(value) => field_empty::counts_as_empty(value),
+                    let empty = match fields.emptiness(key) {
+                        Some(empty) => empty,
                         None if is_card_number(key) => true,
                         None => return Err(error(ErrorKind::UnknownConditional, node, None)),
                     };

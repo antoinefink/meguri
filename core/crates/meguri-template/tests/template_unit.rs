@@ -750,35 +750,49 @@ fn awkward_templates_rebuild_from_their_nodes() {
 }
 
 /// T13, R1805: 5 MB templates of the shapes that make a naive scan
-/// quadratic take time close to linear. Each takes about 0.1 s in the test
+/// quadratic, and 1 MB fields (R1805's worst-case notes) under many sections,
+/// take time close to linear. Each case takes about 0.1 s in the test
 /// profile; the bound leaves room for a loaded machine and is far below a
-/// quadratic run, which takes minutes.
+/// quadratic run, which takes minutes to hours. Each case runs on its own
+/// thread, so a regression fails at the bound instead of running to its end.
 #[test]
-#[allow(clippy::disallowed_methods)] // times the engine, never fed to it
 fn five_megabyte_templates_parse_and_render_in_bounded_time() {
+    use std::sync::mpsc::{RecvTimeoutError, channel};
+    use std::time::Duration;
+
     const SIZE: usize = 5 * 1024 * 1024;
+    const BOUND: Duration = Duration::from_secs(2);
     let fill = |unit: &str| unit.repeat(SIZE / unit.len());
-    let f = new_card(&[("A", "a"), ("Front", "日本[にほん]")], 0, &[]);
-    for template in [
-        fill("{{"),
-        fill("<!--"),
-        fill("{{=<% %>=}}"),
-        fill("{{#A}}"),
-        fill("{{A}}<!--"),
-        format!("{}}}}}", fill("{{x")),
-        fill("{{furigana:Front}}x"),
-        fill("{{#A}}{{A}}{{/A}}"),
-        fill("<%{{-->"),
+    let small = new_card(&[("A", "a"), ("Front", "日本[にほん]")], 0, &[]);
+    // Empty (E1) only once every one of its bytes has been read: judging it
+    // again at each of the template's 400,000 section tags reads 400 GB.
+    let blank_mib = " ".repeat(1024 * 1024);
+    let big = new_card(&[("A", &blank_mib)], 0, &[]);
+    for (template, fields) in [
+        (fill("{{"), &small),
+        (fill("<!--"), &small),
+        (fill("{{=<% %>=}}"), &small),
+        (fill("{{#A}}"), &small),
+        (fill("{{A}}<!--"), &small),
+        (format!("{}}}}}", fill("{{x")), &small),
+        (fill("{{furigana:Front}}x"), &small),
+        (fill("{{#A}}{{A}}{{/A}}"), &small),
+        (fill("<%{{-->"), &small),
+        (fill("{{#A}}{{/A}}{{^A}}{{/A}}"), &big),
     ] {
-        let start = std::time::Instant::now();
-        let parsed = ParsedTemplate::parse(&template);
-        let _ = parsed.render(&f, Side::Question);
-        let _ = parsed.is_blank_question(&f);
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed < std::time::Duration::from_secs(2),
-            "{:?}…: {elapsed:?}",
-            &template[..12]
-        );
+        let label = template[..12].to_owned();
+        let fields = fields.clone();
+        let (done, finished) = channel();
+        std::thread::spawn(move || {
+            let parsed = ParsedTemplate::parse(&template);
+            let _ = parsed.render(&fields, Side::Question);
+            let _ = parsed.is_blank_question(&fields);
+            let _ = done.send(());
+        });
+        match finished.recv_timeout(BOUND) {
+            Ok(()) => {}
+            Err(RecvTimeoutError::Timeout) => panic!("{label:?}…: not done within {BOUND:?}"),
+            Err(RecvTimeoutError::Disconnected) => panic!("{label:?}…: the engine panicked"),
+        }
     }
 }
