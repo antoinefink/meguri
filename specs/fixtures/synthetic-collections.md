@@ -78,7 +78,7 @@ A note type shape:
 | `cards_per_note` | `linear(1, 64, 1)` |
 | `field_bytes` | per field, `log2(24)` of the field's UTF-8 bytes: the whole stored value, markup and media references included |
 | `media_refs` | per field, `[image references, sound references]`: media tags and `[sound:...]` tags naming a local file (a remote URL or a `data:` URL does not count) |
-| `refs_per_note` | `linear(0, 64, 1)`: local references per note; informational, the generator places references by field (F4.8) |
+| `refs_per_note` | `linear(0, 64, 1)`: local references per note; checked by F3.2 |
 
 Notes and cards whose note type is missing count in the totals only.
 
@@ -104,7 +104,7 @@ A generated collection follows its profile when, measured per F2.5:
 - The card count is within 5% of the request.
 - Exact: the preset count, and FSRS, load balancer and sibling burying on (F6.2, F6.3).
 
-The checks of the plan's test scenarios: at 10k cards, cards per note type (the mix of each note type shape's `cards`, keyed by its index), card states and reviews per card; at 100k cards, `review_days`, `hour_of_day` and `first_review_gap_secs`; at both sizes, field lengths (F3.1). Two seeds give the same aggregates within the same distances.
+The checks of the plan's test scenarios: at 10k cards, cards per note type (the mix of each note type shape's `cards`, keyed by its index), card states and reviews per card; at 100k cards, `review_days`, `hour_of_day` and `first_review_gap_secs`; at both sizes, field lengths (F3.1) and references per note (F3.2). Two seeds give the same aggregates within the same distances.
 
 ### F3.1 Field lengths
 
@@ -114,6 +114,18 @@ Field lengths are compared at 10k and at 100k cards. The generated collection's 
 - Per field: every field of every note type that has at least 2,000 notes in the generated collection, compared with its expected histogram.
 
 Smaller note types count only in the pooled comparison. Sampling alone puts about 0.03 of distance on a field of 1,000 notes, so among twenty such fields one passes 0.05 in about one seed in thirty; from 2,000 notes the worst field stays below about 0.035 in nineteen seeds of twenty. The cloze fields F4.8 lengthens (shorter than their cloze markup) stay in the expected histogram unchanged: they are few, and the distance absorbs them.
+
+### F3.2 References per note
+
+References per note are compared at 10k and at 100k cards. The generated collection is measured per F2.5 against the profile, and its note types in id order are the profile's shapes in order (as in F3.1):
+
+- Pooled: the sum, over every note type, of the profile's `refs_per_note` as shares times its `notes`, against the sum of the generated collection's measured `refs_per_note` counts, within a total variation distance of 0.05.
+- Per note type: every note type that has at least 2,000 notes in the generated collection, its `refs_per_note` against the profile's, within 0.05.
+- Mean: references per note (the sum of every field's `media_refs`, images and sounds, of every note type, over `totals.notes`) within a relative error of 5% of the profile's, computed the same way.
+
+No field is compared on its own: a field with about 0.05 references per note holds about 100 references at 2,000 notes, so sampling alone moves its count by about 10%.
+
+F4.8 places each field's references apart from the other fields' and only in fields at least as long as the generator's references (21 to 25 bytes). An extracted profile whose references are correlated across fields (the fields of one note holding references together, or apart, more often than independent fields would), or whose references sit in fields shorter than that (a real collection's file names may be shorter than the generator's), fails F3.2 while F3.1 passes. The model must then change, under a new generator version (F10.4).
 
 ## F4. Generation model
 
@@ -166,7 +178,15 @@ This section builds the fields of profile and worst-case notes; recipes build th
 - Words: 1 to 3 syllables from a fixed list of 24 two-letter syllables, separated by spaces, the whole cut to the number of bytes asked for (it may end with a space).
 - Markup: a cloze note's first field holds its cloze deletions `{{c1::<answer>}}` to `{{cN::<answer>}}` (N its card count), each answer words of a length drawn from 3 to 14 bytes. When the deletions with these answers, joined by single spaces, are longer than `L`, every answer is 1 byte instead. After the deletions come the field's media references (below), in the order they are written.
 - Text: the cloze deletions, then the words, then the references, joined by single spaces. The words take the bytes left: `L` minus the markup (its pieces and the single spaces between them) minus one separating space. When fewer than 2 bytes are left (no room for the space and one letter), the field is its markup alone, one byte short of `L` when exactly 1 was left. When the markup alone is longer than `L`, the field is still the markup, longer than drawn: this happens only to a cloze field shorter than its deletions with 1-byte answers and to the `media_files` worst case. A field without markup is `L` bytes of words.
-- References by field, in every profile and worst-case collection but the `media_files` worst case: a field whose `media_refs` is `[images, sounds]` with `images + sounds > 0` has the rate `r = (images + sounds) / (notes × q)`, `notes` being its shape's and `q` the share of its `field_bytes` outside the first bucket (lengths of 1 byte or more); a field with `q` = 0, or of a shape whose `notes` is 0, takes no reference. A note's field whose `L` is not 0 draws `floor(r)` references, and one more with probability `r - floor(r)`; each is an image with probability `images / (images + sounds)`, otherwise a sound. A reference is written only when it fits: the field's markup so far, one separating space when the field already holds markup, and the reference take at most `L` bytes together. A reference that does not fit is not written: no name, no file. So a non-empty media field holds references at the profile's rate and is never lengthened by them; the cloze deletions are placed before the references. The profile's `refs_per_note` is not drawn from: a per-note count drawn apart from the field lengths puts references into fields drawn empty or short, which either lengthens them or loses the references.
+- References by field, in every profile and worst-case collection but the `media_files` worst case. For a field whose `media_refs` is `[images, sounds]` with `images + sounds > 0`:
+  - Thresholds: an image needs 25 bytes and a sound 21, for every note. These are the longest reference 0 can be, `<img src="mg<5 hex digits>-0.png">` and `[sound:mg<5 hex digits>-0.mp3]`: positions stay below 1,000,000 (F6.6), so a note index has at most 5 hex digits.
+  - `s(m)`: the share of the field's `field_bytes` at `m` bytes or more, counted the way F2.2 draws. Each bucket `[e(i), e(i+1))` adds its count times the fraction of its integers that are at least `m`: all of it when `e(i) ≥ m`, none when `e(i+1) ≤ m`, otherwise `(e(i+1) - m) / (e(i+1) - e(i))` of it. The sum is divided by the histogram's total count.
+  - `q = (images × s(25) + sounds × s(21)) / (images + sounds)` and the rate `r = (images + sounds) / (notes × q)`, `notes` being its shape's. A field with `q` = 0, or of a shape whose `notes` is 0, takes no reference.
+  - Example: a field whose `field_bytes` holds 50 values in `[16, 32)`, 50 in `[32, 64)` and none elsewhere, with `media_refs` `[30, 10]`, in a shape of 100 notes: `s(25) = (50 × 7/16 + 50) / 100 = 0.71875`, `s(21) = (50 × 11/16 + 50) / 100 = 0.84375`, `q = (30 × 0.71875 + 10 × 0.84375) / 40 = 0.75`, `r = 40 / 75 ≈ 0.5333`.
+  - Each note's field draws the kind of its first reference: an image with probability `images / (images + sounds)`, otherwise a sound. When `L` is at least that kind's threshold, the field draws `floor(r)` references, and one more with probability `r - floor(r)`; the first has the drawn kind, and each later one draws its own kind the same way. When `L` is below the threshold, the field takes no reference.
+  - A reference is written only when it fits: the field's markup so far, one separating space when the field already holds markup, and the reference take at most `L` bytes together. A reference that does not fit is not written: no name, no file.
+
+  A field passes its threshold with probability `q` over its length and kind draws, so it holds `q × r = (images + sounds) / notes` references per note, the profile's, less the few that do not fit (a later reference, a reference numbered 10 or more, or one after cloze deletions). References never lengthen a field, so F3.1 is unchanged; the cloze deletions come before the references. Version 3 took the rate over every length of 1 byte or more, so references drawn for fields of 1 to 24 bytes did not fit and were lost: about 5.5% of them at 10k cards and 6.6% at 100k, and note type 0's `refs_per_note` was 0.10 away. Rejected in modelling against the committed profile: a per-note count drawn from `refs_per_note` and placed where the fields have room (mean 0.945 of the profile's, a note type 0.107 away), and independent image and sound rates per field (note types 8 and 16 0.05 to 0.09 away: a field with both kinds and about one reference per note gets an image and a sound in one note).
 - References in the `media_files` worst case (F8): each note holds the count F8 gives it. Each reference goes to a field drawn by the weights `images + sounds` of `media_refs` (the last field when every weight is 0) and is an image with probability `images / (images + sounds)` of that field (an image and a sound alternately, an image first, when both are 0). All are written, fitting or not.
 - A reference: fields in order and references in the order drawn, numbered `n` from 0 across the note, counting written references only. An image is the file `mg<note index in lower-case hex>-<n>.png` written `<img src="<file>">`; a sound is `mg<note index in lower-case hex>-<n>.mp3` written `[sound:<file>]`. Its size is drawn from `media.file_bytes` (from the worst case's `bytes` for `media_files`), at least 128 bytes.
 - Worst cases (F8): a large field is exactly `bytes` bytes of words and takes none of the references it would otherwise draw; inline images are appended to the first field after its text, beyond its drawn length.
@@ -178,9 +198,10 @@ Examples, for note index 7,978 (`1f2a`), so that reference 0 as an image, `<img 
 |---|---|---|---|---|
 | a normal note type's second field | 0 | none | empty | 0 |
 | a normal note type's first field | 0 | none | one letter | 1 |
-| a field with the image reference | 40 | the reference | 15 bytes of words, a space, the reference | 40 |
+| a field that drew an image as its first reference's kind | 40 | the reference | 15 bytes of words, a space, the reference | 40 |
 | the same | 25 | the reference | the reference alone (1 byte left) | 24 |
-| the same | 20 | none: the reference does not fit and is not written | 20 bytes of words | 20 |
+| the same | 20 | none: 20 is below the image threshold, 25 | 20 bytes of words | 20 |
+| the same, its second reference drawn a sound, `[sound:mg1f2a-1.mp3]` (20 bytes) | 44 | the image; the sound does not fit (24 + 1 + 20 = 45) and is not written | 19 bytes of words, a space, the image | 44 |
 | a cloze first field, N = 2, answers drawn 5 and 8 bytes | 60 | `{{c1::<5>}} {{c2::<8>}}`, 13 + 1 + 16 bytes | the deletions, a space, 29 bytes of words | 60 |
 | the same, answers drawn 5 and 8 bytes | 20 | 30 bytes is longer than 20, so `{{c1::<1>}} {{c2::<1>}}`, 9 + 1 + 9 bytes | the deletions alone (1 byte left) | 19 |
 | a cloze first field, N = 3 | 10 | `{{c1::<1>}} {{c2::<1>}} {{c3::<1>}}`, 29 bytes | the deletions alone | 29 |
@@ -413,10 +434,10 @@ SHA-256 over the twelve tables in the order `col`, `config`, `deck_config`, `dec
 
 ### F10.4 Generator version
 
-`generator_version` changes whenever the same request would write other rows. The rules of this file are version 3. Version 3 made the drawn field length the length of the whole stored field and placed media references by field (F4.8, F3.1).
+`generator_version` changes whenever the same request would write other rows. The rules of this file are version 4. Version 4 places references only in fields whose length can hold them (F4.8, F3.2). Version 3 made the drawn field length the length of the whole stored field and placed media references by field (F4.8, F3.1).
 
 ## F11. Checks
 
-- T0 (`core/crates/meguri-testkit/tests/generate_validity.rs`, in the dev container): same seed twice gives the same `dump_sha256`, another seed another one with the same aggregates (F3); F3 at 10k and 100k cards, field lengths (F3.1) included; the F4.8 examples; ids per F4.7; every worst case's stress present (counts, sizes, valid PNGs); recipes give their decks and counts; F2.6 privacy on an extraction of a hand-built collection with known private strings; 1M cards within 10 minutes and 2 GB peak memory in Docker on the M3 Max (run on demand).
+- T0 (`core/crates/meguri-testkit/tests/generate_validity.rs`, in the dev container): same seed twice gives the same `dump_sha256`, another seed another one with the same aggregates (F3); F3 at 10k and 100k cards, field lengths (F3.1) and references per note (F3.2) included; the F4.8 examples; ids per F4.7; every worst case's stress present (counts, sizes, valid PNGs); recipes give their decks and counts; F2.6 privacy on an extraction of a hand-built collection with known private strings; 1M cards within 10 minutes and 2 GB peak memory in Docker on the M3 Max (run on demand).
 - T1 (oracle, `tools/mg oracle check`): the 10k collection, `tools/mg fixtures 100k`, every worst case and every recipe: Check Database reports 0 for every kind, `changed_tables` lists nothing but `col` and `config`, and `counts` equal the manifest's; `timing.days_elapsed` is `today`. `due-500k` with `--deck Due`: `review` = min(review cards in `Due`, 9,999). `field-1mb` with `--render-note` on a large-field note: every card `ok`, its answer longer than 1,048,576 bytes.
 - No scenario files: the generated collections are too large and too numerous to commit as fixtures, and their checks need no golden.
