@@ -4429,6 +4429,67 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** An agent can go from a clean checkout to screenshots of the sample routes on iPhone 17 Pro, iPad and Mac, plus a contact sheet, using only `tools/mg` commands.
 
+### U8b. Mac UI suites in a macOS VM
+
+**Goal:** Run every Mac XCUITest suite in a macOS virtual machine on this Mac, unthrottled, so Mac UI verification never takes over Antoine's screen, runs as often as agents need and runs while the host is locked. Antoine's direction (2026-10-15): everything that would disturb his Mac runs in the VM, as soon and as often as useful. Amends U8's Mac UI gate (decided by Antoine on 2026-10-15); the VM as set up and verified is described in `docs/process/mac-ui-vm.md`.
+
+**Requirements:** R1961, R1962, R1969 (unattended runs on the shared Mac), and root AGENTS.md "Running tests and apps on this Mac".
+
+**Dependencies:** U8, U10.
+
+**Files:**
+- Create: `tools/mg.d/mac-vm.sh` (VM runner: config, start, lease, product sync, remote `xcodebuild test-without-building`, result copy-back), `tools/vm/setup-guest.sh` (the one-time provisioning script from `/Volumes/T9/meguri-vm/guest-setup/`), `tools/vm/AGENTS.md`, `tools/tests/mac_vm.bats` with a fake `tart` and `ssh`.
+- Modify: `tools/mg.d/host.sh` (mac-ui), `tools/mg.d/app.sh` (`mg_app_xcodebuild_test` and the dropped-input detector for Mac runs), `tools/mg.d/a11y.sh` and `tools/mg.d/drive.sh` (their Mac paths), `tools/mg.d/doctor.sh`, root `AGENTS.md`, `tools/AGENTS.md`, `docs/process/one-time-setup.md`.
+
+**Approach:**
+- Configuration is per host, never in the repository: `~/Library/Application Support/meguri/mac-vm.json` (or the file named by `MEGURI_MAC_VM_CONFIG`) names the tart wrapper, the ssh wrapper and the VM. When the file is absent, the drive is not mounted or the VM does not exist, Mac XCUITest does not run on the host screen: the job reports the suites as queued (status `warn`, user step `mac-vm`: connect the T9 drive), as the hourly gate did before. `MEGURI_MAC_UI_ALLOW_HOST=1` keeps the old host path (host lease and hourly gate) for a run Antoine starts himself.
+- With the VM available, every caller of Mac XCUITest (mac-ui suites, `a11y --platform mac`, `drive --platform mac`, the agent-driver resize test) keeps building on the host and then runs the tests in the VM. It takes a VM lease (one run at a time per VM across all worktrees, its own mkdir lock beside the host lease; the config lists one or more VMs and a run takes the first free one, so a second VM cloned with `tart clone` adds capacity without code changes) and starts the VM headless (`tart run --no-graphics`, detached) when it is stopped. It waits until SSH answers in a logged-in session, then copies `build/app/DerivedData/Build/Products` to the same absolute path in the VM (tar over SSH, replacing the previous copy for that worktree path), runs `xcodebuild test-without-building -xctestrun …` there, and copies the `.xcresult` and the log back into the run directory. It runs the dropped-input detector against the VM's log (`sudo log show`). VM runs take no host lease, skip the host session check and are not throttled. `result.json` records `mac_runner: "vm"` or `"host"`.
+- A VM run never falls back to the host screen within the same run. If the VM fails to boot, SSH times out or the copy fails, the job reports status `error` with the reason (never `fail`).
+- Mac UI performance suites (U12's `ui-perf --platform mac`, when it exists) run in the VM like any Mac XCUITest suite, against baselines recorded in the VM; CPU benchmarks without UI (`bench-mac`) stay on the host. Mac motion recording (`drive --platform mac --record`) in a VM run reports the recording as unavailable unless the XCUITest screenshot sampler covers it; record the gap in `tools/drive-scripts/AGENTS.md`.
+- `tools/mg doctor` reports the VM: configured, drive mounted, VM present, running, SSH reachable, Xcode version equal to the host's.
+- The hourly gate and its sweep are no longer used for Mac UI suites: queued suites run in the VM as soon as it is back. Root AGENTS.md: Mac UI suites run only in the VM; without it they queue; nothing drives the host's cursor or keyboard.
+
+**Test scenarios:**
+- Config present, fake VM reachable → `mac-ui --suite a11y` runs remotely; no host lease is taken, the hourly gate is not consulted, `mac_runner` is `vm`, and the result bundle lands in the run directory.
+- Config absent → the job reports the suites queued (`warn`, user step `mac-vm`) and does not touch the host screen; with `MEGURI_MAC_UI_ALLOW_HOST=1` it takes the old host path (existing host-path tests keep passing under that variable).
+- Repeated runs within minutes → each runs at once in the VM; no hourly refusal.
+- Two worktrees start Mac suites at once → the second waits for the VM lease, then runs.
+- Products are copied to the same absolute path in the VM; a second run from another worktree path does not delete the first worktree's copy while it runs.
+- SSH unreachable or the VM fails to start → status `error` with the reason; the host screen is not used.
+- The fake log shows the "Recap playback" timeout → the run is reported blocked (`mac-input`), as on the host.
+- Real run, recorded in the unit's review log: `tools/mg mac-ui --suite a11y` from a worktree goes through the VM and passes, with the host locked or unlocked.
+
+**Verification:** `tools/mg mac-ui --suite a11y` and `tools/mg a11y --platform mac` pass through the VM from a worktree without taking the host lease or the screen. `tools/mg selftest` (the bats suites) passes. `tools/mg doctor` shows the VM state.
+
+### U8c. Simulators in the macOS VM
+
+**Goal:** Run every simulator job in the macOS VM of U8b instead of on the host, so iPhone and iPad builds, runs, drives, captures and tests never boot a simulator on Antoine's Mac, never show its crash dialogs and keep running while the host is locked. Antoine's direction (2026-10-15): everything that would disturb his Mac runs in the VM, as soon and as often as useful.
+
+**Requirements:** R1961, R1962, R1965, R1966, R1969, and root AGENTS.md "Running tests and apps on this Mac".
+
+**Dependencies:** U8b.
+
+**Files:**
+- Modify: `tools/scripts/sim-pool.sh` and `tools/mg.d/sim.sh` (the pool lives in the VM), `tools/mg.d/app.sh`, `tools/mg.d/drive.sh`, `tools/mg.d/record.sh`, `tools/scripts/sim-record.sh`, `tools/mg.d/a11y.sh`, the snapshot job, `tools/mg.d/xcode.sh` (its simulator part), `tools/mg.d/doctor.sh`, `tools/mg.d/mac-vm.sh`, root `AGENTS.md`, `tools/AGENTS.md`, `docs/process/mac-ui-vm.md`; tests in `tools/tests/`.
+
+**Approach:**
+- Provisioning (scripted, run once by the orchestrator over SSH, recorded in `docs/process/mac-ui-vm.md`): copy the pinned iOS 27.0 (24A434) simulator runtime from the host into the VM and add it there (`xcrun simctl runtime add`); `tools/mg sim-setup` creates the pinned device types and the pool in the VM.
+- Every simulator call goes through one runner function that runs `xcrun simctl` (and the pool script) locally or in the VM over SSH. App and test products are built on the host as today and copied to the same absolute path in the VM, as in U8b. Screenshots, videos, hierarchies, result bundles and logs are written in the VM and copied back into the run directory, so result.json and its artifacts keep their paths and shape.
+- Simulator jobs take the same VM lease as Mac suites (one job per VM at a time). They need no host session: they run with the host locked. The host lease remains only for jobs that still use the host's screen or simulators (the host fallback below, and `bench-mac`).
+- Snapshot tests: before moving them, run the full snapshot matrix in the VM against the committed baselines. If every image matches, snapshot jobs move to the VM. If any image differs, they stay on the host: record the differing cells and their diff sizes in `docs/process/mac-ui-vm.md`, and do not re-record approved baselines. Re-recording needs Antoine's approval in the gallery flow (R1989). Mac snapshot tests render in-process on the host and stay there.
+- Without the VM (config absent, drive missing): simulator jobs report `warn`/queued with user step `mac-vm`, as Mac suites do in U8b. `MEGURI_SIM_ALLOW_HOST=1` keeps the host pool for a run Antoine starts himself.
+- iOS UI performance suites (U12's `ui-perf` for simulators, when it exists) run in the VM against VM baselines.
+
+**Test scenarios:**
+- With the fake VM: `sim acquire iphone` leases a VM simulator; `run`, `drive`, `screenshot`, `ui-tree`, `record` and `a11y --platform iphone` run their simctl and xcodebuild steps over SSH and return artifacts in the run directory, with the same result.json shape as host runs.
+- Host locked (fake session state) → simulator jobs still run in the VM.
+- Two worktrees start simulator jobs at once → the second waits for the VM lease.
+- VM unreachable → `error` with the reason; no host simulator boots.
+- Config absent → `warn`/queued; with `MEGURI_SIM_ALLOW_HOST=1` the host pool path works as before.
+- Real runs, recorded in the unit's review log: `tools/mg drive tools/drive-scripts/examples/open-sample-sheet.json --platform iphone`, `tools/mg a11y --platform iphone` and the snapshot comparison above, from a worktree, through the VM.
+
+**Verification:** From a worktree, with the host locked or unlocked, the iPhone drive example, the iPhone and iPad accessibility audits and (if they match) the snapshot matrix pass through the VM; `ps` on the host shows no booted simulator during the runs; `tools/mg selftest` passes.
+
 ### U9. DesignSystem package, design documents, UI lint gate and component gallery
 
 **Goal:** Provide the token-based design vocabulary, the written design brief and rubric, a deterministic lint gate that rejects off-token UI code and misplaced glass, a contrast test over every token pair, and a debug component gallery agents build from.

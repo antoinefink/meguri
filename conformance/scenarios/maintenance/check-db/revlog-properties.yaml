@@ -1,0 +1,8 @@
+# A review log row of type 0 with time 0 and ease 0: Check Database counts it
+# and sets its type to 5 (collection-check.md K5 revlog_properties).
+id: maintenance/check-db/revlog-properties
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec: {sql: "INSERT INTO revlog VALUES (1894701500000, 1, -1, 0, 0, 0, 0, 0, 0)"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT id, type, ease, time FROM revlog"}

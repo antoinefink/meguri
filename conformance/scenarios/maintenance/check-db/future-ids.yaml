@@ -1,0 +1,23 @@
+# One note id two days after the clock and one exactly a day after it: only
+# the first is after the cutoff (the clock plus one day), so Check Database
+# counts one and gives that note, and its card's note id, a new id
+# (collection-check.md K5 future_ids).
+id: maintenance/check-db/future-ids
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET nid = 1894788000000 WHERE nid = (SELECT max(id) FROM notes)"}
+  - db_exec: {sql: "UPDATE notes SET id = 1894788000000 WHERE id = (SELECT max(id) FROM notes)"}
+  - db_exec: {sql: "UPDATE cards SET nid = 1894874400000 WHERE nid = (SELECT min(id) FROM notes)"}
+  - db_exec: {sql: "UPDATE notes SET id = 1894874400000 WHERE id = (SELECT min(id) FROM notes)"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT id FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT nid FROM cards ORDER BY nid"}

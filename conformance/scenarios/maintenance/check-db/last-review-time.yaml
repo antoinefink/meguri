@@ -1,0 +1,19 @@
+# A review card whose stored last review time is not its last rated review:
+# Check Database counts it and writes that review's instant in seconds; a
+# second run finds nothing (collection-check.md K5 card_last_review_time).
+id: maintenance/check-db/last-review-time
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes: [{notetype: Single, deck: Inbox, fields: [front, back]}]
+steps:
+  - answer: {card: "#c1", rating: easy}
+  - advance: 1d
+  - db_exec: {sql: "UPDATE cards SET data = json_set(data, '$.lrt', 1)"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT type, json_extract(data, '$.lrt') FROM cards"}
+  - check_db: {}

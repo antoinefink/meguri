@@ -1,0 +1,19 @@
+# New cards at positions 2,000,000 and 1,500,000: only the first counts, and
+# it moves to 1,000,000 plus its position modulo 1,000,000
+# (collection-check.md K5 new_positions_too_high).
+id: maintenance/check-db/new-positions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET due = 2000000 WHERE nid = (SELECT min(id) FROM notes)"}
+  - db_exec: {sql: "UPDATE cards SET due = 1500000 WHERE nid = (SELECT max(id) FROM notes)"}
+  - check_db: {}
+  - db_exec: {sql: "SELECT due FROM cards ORDER BY id"}

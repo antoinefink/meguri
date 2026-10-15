@@ -5,6 +5,8 @@
   python -m driver.harness compare --scenarios DIR --goldens DIR [--filter F]... [--jobs N] [--report FILE]
   python -m driver.harness diff-report --old DIR --new DIR --report FILE [--markdown FILE]
   python -m driver.harness hash FILE...
+  python -m driver.harness check --dir DIR --label TEXT --out DIR [--now INSTANT] [--tz ZONE]
+                                 [--deck NAME]... [--render-note ID]...
 
 Runs inside the oracle image without libfaketime (entrypoint.sh harness). Each
 worker is a separate `entrypoint.sh worker` process with its own TZ, clock file
@@ -14,6 +16,11 @@ and scratch directory, so workers never share a clock, a zone or a collection
 `record` is the only writer of goldens: one file per scenario at the same
 relative path under --goldens, with a .json suffix. Exit status: 0 when every
 selected scenario recorded or matched, 1 otherwise, 2 for usage errors.
+
+`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9)
+derives the clock and zone from the directory's manifest when they are not
+given, starts one worker in that zone and writes the report to <out>/check.json
+(exit 0), or {kind, detail} to <out>/check-error.json (exit 1) with a K7 kind.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,8 +39,10 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .canon import SCENARIO_SUFFIXES, ScenarioFormatError, golden_text, load_scenario_file, scenario_sha256
 from .errors import install_excepthook
@@ -456,6 +466,115 @@ def cmd_hash(args) -> int:
     return rc
 
 
+# --- check (specs/conformance/collection-check.md) ------------------------------
+
+CHECK_NOW = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$")
+NOTE_ID = re.compile(r"^-?[0-9]+$")
+CHECK_ERROR_KINDS = ("usage", "no_collection", "open_failed", "oracle_error")
+
+
+class CheckUsage(ValueError):
+    pass
+
+
+def _is_int(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def zone_for_offset(offset_secs: Any) -> str:
+    """K1: the zone for a manifest's utc_offset_secs. IANA's Etc zones invert
+    the sign: one hour east of UTC is Etc/GMT-1."""
+    if not _is_int(offset_secs):
+        raise CheckUsage("the manifest's utc_offset_secs is not an integer; give --tz")
+    if offset_secs == 0:
+        return "UTC"
+    hours, rest = divmod(offset_secs, 3600)
+    if rest or not -12 <= hours <= 14:
+        raise CheckUsage(f"utc_offset_secs {offset_secs} is not a whole number of hours from -12 to +14; give --tz")
+    return f"Etc/GMT{'-' if hours > 0 else '+'}{abs(hours)}"
+
+
+def parse_check_now(text: str) -> int:
+    """K1: --now as clock.start with an offset or Z, whole seconds."""
+    if not CHECK_NOW.match(text):
+        raise CheckUsage(f"--now {text!r} is not YYYY-MM-DDTHH:MM:SS followed by Z or +HH:MM")
+    try:
+        secs = int(datetime.fromisoformat(text).timestamp())
+    except ValueError:
+        raise CheckUsage(f"--now {text!r} is not a date-time") from None
+    if secs < 0:
+        raise CheckUsage("--now is before 1970")
+    return secs
+
+
+def parse_note_id(text: str) -> int:
+    if not NOTE_ID.match(text) or not -(2**63) <= int(text) < 2**63:
+        raise CheckUsage(f"--render-note {text!r} is not a note id in decimal")
+    return int(text)
+
+
+def check_defaults(directory: Path, now: str | None, tz: str | None) -> tuple[int, str]:
+    """K1: (epoch seconds, zone) from --now and --tz, or from manifest.json."""
+    manifest: dict = {}
+    path = directory / "manifest.json"
+    if (now is None or tz is None) and path.is_file():
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raise CheckUsage("manifest.json is not JSON; give --now and --tz") from None
+        if not isinstance(manifest, dict):
+            raise CheckUsage("manifest.json is not an object; give --now and --tz")
+    if now is not None:
+        secs = parse_check_now(now)
+    elif _is_int(manifest.get("now_ms")) and manifest["now_ms"] >= 0:
+        secs = manifest["now_ms"] // 1000
+    else:
+        raise CheckUsage("give --now: the directory has no manifest now_ms")
+    if tz is not None:
+        zone = tz
+    elif "utc_offset_secs" in manifest:
+        zone = zone_for_offset(manifest["utc_offset_secs"])
+    else:
+        raise CheckUsage("give --tz: the directory has no manifest utc_offset_secs")
+    try:
+        ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise CheckUsage(f"--tz {zone!r} is not in the worker's time zone database") from None
+    return secs, zone
+
+
+def _check_error(out: Path, kind: str, detail: str) -> int:
+    _write_atomic(out / "check-error.json", json.dumps({"detail": detail, "kind": kind}, sort_keys=True) + "\n")
+    print(f"harness: check {kind}: {detail}", file=sys.stderr)
+    return 1
+
+
+def cmd_check(args) -> int:
+    out, directory = Path(args.out), Path(args.dir)
+    if not (directory / "collection.anki2").is_file():
+        return _check_error(out, "no_collection", f"{args.label}/collection.anki2 does not exist")
+    try:
+        now, tz = check_defaults(directory, args.now, args.tz)
+        notes = [parse_note_id(text) for text in args.render_note or []]
+    except CheckUsage as exc:
+        return _check_error(out, "usage", str(exc))
+    request = {"cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes}
+    try:
+        with WorkerProcess(tz) as worker:
+            resp = worker.request(request)
+            hello = worker.hello
+    except WorkerDied as exc:
+        return _check_error(out, "oracle_error", str(exc))
+    if not resp.get("ok"):
+        error = resp.get("error") or {}
+        kind = error.get("kind") if error.get("kind") in ("no_collection", "open_failed") else "oracle_error"
+        return _check_error(out, kind, json.dumps(error, sort_keys=True))
+    report = {"report_version": 1, "oracle": {k: hello[k] for k in ORACLE_KEYS}, "dir": args.label, **resp["check"]}
+    _write_atomic(out / "check.json", golden_text(report))
+    print(f"harness: check done in {resp.get('elapsed_ms')} ms in the worker", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="driver.harness")
     sub = p.add_subparsers(dest="command", required=True)
@@ -473,12 +592,21 @@ def main(argv: list[str] | None = None) -> int:
     dr.add_argument("--markdown")
     h = sub.add_parser("hash")
     h.add_argument("files", nargs="+")
+    c = sub.add_parser("check")
+    c.add_argument("--dir", required=True)
+    c.add_argument("--label", required=True)
+    c.add_argument("--out", required=True)
+    c.add_argument("--now")
+    c.add_argument("--tz")
+    c.add_argument("--deck", action="append")
+    c.add_argument("--render-note", action="append")
     args = p.parse_args(argv)
     if getattr(args, "jobs", 1) < 1:
         p.error("--jobs must be at least 1")
-    return {"record": cmd_record, "compare": cmd_compare, "diff-report": cmd_diff_report, "hash": cmd_hash}[
-        args.command
-    ](args)
+    return {
+        "record": cmd_record, "compare": cmd_compare, "diff-report": cmd_diff_report, "hash": cmd_hash,
+        "check": cmd_check,
+    }[args.command](args)
 
 
 if __name__ == "__main__":
