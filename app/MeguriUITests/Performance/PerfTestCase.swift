@@ -22,8 +22,7 @@ import notify
 /// - `tools/mg perf-ui` turns the result bundle's metrics into a perf result
 ///   (tools/scripts/perf-compare) for U241's gate.
 ///
-/// A new subclass joins the Performance plan's selected tests and the UI
-/// plan's skipped tests (app/TestPlans).
+/// A new subclass joins the UI plan's skipped tests (app/TestPlans).
 @MainActor
 class PerfTestCase: XCTestCase {
     /// The registered intervals the test measures, by name.

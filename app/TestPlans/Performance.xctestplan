@@ -26,10 +26,6 @@
   "testTargets" : [
     {
       "parallelizable" : false,
-      "selectedTests" : [
-        "PerfTestCaseTests",
-        "SmokePerfTests"
-      ],
       "target" : {
         "containerPath" : "container:Meguri.xcodeproj",
         "identifier" : "4D4547555249000000000300",
