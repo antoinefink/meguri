@@ -43,6 +43,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `next_states` | card references or none | `{"#cN": {current, again, hard, good, easy}}`: the scheduling state now and after each rating (O5) |
 | `fuzz_table` | `{card: #cN, pairs: [[card_id, reps], ...], intervals: [days, ...]}` | `{intervals, rows: [[card_id, reps, delta, ...], ...]}`: the interval fuzz applied when answering a card with that id and review count (reviews before the answer), one delta in days per interval, bounded by the card's preset |
 | `net_probe` | `{host, port, timeout_ms?}` | `{connected, error}` (diagnostic, oracle only: proves the worker has no route out) |
+| `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
 | `render` | card references or none | draft (render): question and answer HTML, AV tags and error kind per card |

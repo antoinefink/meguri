@@ -29,6 +29,15 @@ leeched
 memory_state
 stability
 difficulty
+# Storage ops and observations (storage-ops.md, U22).
+db_exec
+schema_objects
+sqlite_master
+tbl_name
+file_too_old
+file_too_new
+v1_scheduler
+# Collection config keys.
 fsrs
 loadBalancerEnabled
 rollover

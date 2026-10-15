@@ -27,6 +27,13 @@
             "cards": { "type": "array", "items": { "$ref": "#/$defs/card_key" } }
           }
         },
+        "db_exec": {
+          "description": "specs/conformance/record-ops.md W1: the rows the statement returned; [] when none.",
+          "type": "object",
+          "required": ["rows"],
+          "additionalProperties": false,
+          "properties": { "rows": { "type": "array", "items": { "type": "array", "items": { "$ref": "#/$defs/sql_value" } } } }
+        },
         "ids": {
           "type": "object",
           "propertyNames": { "pattern": "^#[nc][1-9][0-9]*$" },
@@ -41,6 +48,28 @@
             "next_day_at": { "type": "integer" },
             "now": { "type": "integer" },
             "utc_offset_secs": { "type": "integer" }
+          }
+        },
+        "open": {
+          "description": "specs/conformance/storage-ops.md P1.2: a successful open records {}, so this member holds only a rejection.",
+          "allOf": [
+            { "$ref": "#/$defs/rejection" },
+            { "properties": { "error": { "enum": ["file_too_old", "file_too_new", "v1_scheduler"] } } }
+          ]
+        },
+        "schema_objects": {
+          "description": "storage-ops.md P3: sqlite_master rows sorted by type, then name; sql normalized.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "name", "tbl_name", "sql"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "enum": ["table", "index", "view", "trigger"] },
+              "name": { "type": "string" },
+              "tbl_name": { "type": "string" },
+              "sql": { "type": ["string", "null"] }
+            }
           }
         },
         "card": {
@@ -322,6 +351,18 @@
             "required": ["learning", "review"],
             "properties": { "learning": { "$ref": "#/$defs/learning_fields" }, "review": { "$ref": "#/$defs/review_fields" } }
           }
+        }
+      ]
+    },
+    "sql_value": {
+      "description": "record-ops.md W1, by SQLite storage class: INTEGER integer, REAL number, TEXT string, NULL null, BLOB {sha256}.",
+      "anyOf": [
+        { "type": ["integer", "number", "string", "null"] },
+        {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
         }
       ]
     }

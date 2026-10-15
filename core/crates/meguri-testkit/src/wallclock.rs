@@ -20,4 +20,9 @@ impl Stopwatch {
     pub fn elapsed_ms(&self) -> u64 {
         u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
     }
+
+    /// The time since `start`, for budgets below a millisecond's resolution.
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
 }

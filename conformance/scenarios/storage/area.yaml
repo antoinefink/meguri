@@ -1,0 +1,6 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 (T1 for
+# the live chain) through the testkit's storage adapters (meguri-storage).
+area: storage
+active:
+  - "open/*"
+  - "upgrade/*"

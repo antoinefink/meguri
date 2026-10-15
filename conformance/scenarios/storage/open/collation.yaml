@@ -1,0 +1,23 @@
+# specs/storage/schema-18.md S3, S4; specs/text/unicode-primitives.md U2.
+# Order through the unicase collation (ties broken by code point), then
+# inserts that collide with stored names under case folding. db_exec records
+# no rejection (specs/conformance/storage-ops.md P2.3), so the colliding
+# inserts use OR IGNORE and the reads show which rows the unique indexes kept;
+# tests/collation_order.rs asserts the constraint error of a plain insert.
+id: storage/open/collation
+description: Names sort and collide under the unicase collation of every connection.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "SELECT column1 FROM (VALUES ('Straße'), ('STRASSE'), ('ä'), ('Ä'), ('Ω'), ('ω'), ('b'), ('Z'), ('_x')) ORDER BY column1 COLLATE unicase, column1"}
+  - db_exec: {sql: "SELECT column1 = column2 COLLATE unicase FROM (VALUES ('Straße', 'STRASSE'), ('ä', 'Ä'), ('Ω', 'ω'), ('ß', 's'), ('ı', 'I'))"}
+  - db_exec: {sql: "INSERT OR IGNORE INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 4000000001, 'Straße', 0, 0, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT OR IGNORE INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 4000000002, 'STRASSE', 0, 0, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT OR IGNORE INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 4000000003, 'Ω', 0, 0, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT OR IGNORE INTO decks (id, name, mtime_secs, usn, common, kind) SELECT 4000000004, 'ω', 0, 0, common, kind FROM decks WHERE id = 1"}
+  - db_exec: {sql: "INSERT OR IGNORE INTO tags (tag, usn, collapsed) VALUES ('ä', 0, 0)"}
+  - db_exec: {sql: "INSERT OR IGNORE INTO tags (tag, usn, collapsed) VALUES ('Ä', 0, 0)"}
+  - db_exec: {sql: "SELECT id, name FROM decks WHERE id > 4000000000 ORDER BY id"}
+  - db_exec: {sql: "SELECT id FROM decks WHERE name = 'STRASSE' ORDER BY id"}
+  - db_exec: {sql: "SELECT hex(tag) FROM tags WHERE tag = 'Ä' ORDER BY hex(tag)"}
+  - observe: [schema_objects]

@@ -26,12 +26,18 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let out = cli(&["conformance", "capabilities"]);
     assert!(out.status.success());
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(json["supports"]["ops"], serde_json::json!(["advance", "set_clock"]));
-    assert_eq!(json["supports"]["observations"], serde_json::json!(["text"]));
-    // dsl.md D7.2: 24 ops besides observe, the actor ops of sync-ops.md and
-    // the model ops of model-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 24);
-    for op in ["actor", "sync", "net_fault", "converge", "reopen"] {
+    assert_eq!(
+        json["supports"]["ops"],
+        serde_json::json!(["advance", "db_exec", "handoff", "open", "set_clock"])
+    );
+    assert_eq!(
+        json["supports"]["observations"],
+        serde_json::json!(["db_dump", "schema_objects", "text"])
+    );
+    // dsl.md D7.2: 25 ops besides observe, the actor ops of sync-ops.md, the
+    // model ops of model-ops.md and storage-ops.md's open among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 25);
+    for op in ["actor", "sync", "net_fault", "converge", "reopen", "open"] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"

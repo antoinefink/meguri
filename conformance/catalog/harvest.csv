@@ -964,35 +964,35 @@ h5889068b7624,typescript,supplementary,stats,unclassified,,,open
 h5ba60fc7cbbf,typescript,supplementary,stats,unclassified,,,open
 ha75aa66eb13f,typescript,supplementary,stats,unclassified,,,open
 hf27c621cefe8,typescript,tag,stats,unclassified,,,open
-h0c40b44b59b9,rust,supplementary,storage,unclassified,,,open
-h0ee1aefb70dc,rust,supplementary,storage,unclassified,,,open
-h0f974b774542,rust,tag,storage,unclassified,,,open
+h0c40b44b59b9,rust,supplementary,storage,in-scope,schemas below 11 are refused,storage/open/refuse-versions,done
+h0ee1aefb70dc,rust,supplementary,storage,in-scope,schemas 12 and 13 are refused as made by a newer or unclean client,storage/open/refuse-versions,done
+h0f974b774542,rust,tag,storage,in-scope,Check Database repair of invalid note ids and their cards; specified with Check Database (U128),,deferred
 h1586af627542,rust,supplementary,storage,unclassified,,,open
 h16db5ee73722,rust,supplementary,storage,unclassified,,,open
 h1dc4ce816f33,rust,supplementary,storage,unclassified,,,open
 h209248bdfb33,rust,supplementary,storage,unclassified,,,open
-h26a287aeabf4,rust,supplementary,storage,unclassified,,,open
-h286ef51887e7,rust,supplementary,storage,unclassified,,,open
-h294205b39ddd,rust,supplementary,storage,unclassified,,,open
+h26a287aeabf4,rust,supplementary,storage,in-scope,the downgrade to schema 11 on close; specified with the schema-11 writer (U33),,deferred
+h286ef51887e7,rust,supplementary,storage,in-scope,a refused file keeps its version and data; Meguri also keeps its bytes (Meguri test),storage/open/refuse-versions,done
+h294205b39ddd,rust,supplementary,storage,in-scope,new collections are created at schema 18; specified with the new-collection bootstrap (U28),,deferred
 h2dc788fb8e1b,rust,supplementary,storage,unclassified,,,open
 h37999c439a16,rust,supplementary,storage,unclassified,,,open
-h4293e426bb44,rust,supplementary,storage,unclassified,,,open
+h4293e426bb44,rust,supplementary,storage,in-scope,schemas above 18 are refused,storage/open/refuse-versions,done
 h4442659ae131,rust,supplementary,storage,unclassified,,,open
-h4556ee55f37f,rust,tag,storage,unclassified,,,open
-h47132fac7656,rust,tag,storage,unclassified,,,open
+h4556ee55f37f,rust,tag,storage,in-scope,a card ease below 2000 survives the downgrade to 11 and the upgrade back when its preset is not reset,storage/upgrade/from-11 storage/upgrade/initial-ease,done
+h47132fac7656,rust,tag,storage,in-scope,Check Database repair of invalid card ids; specified with Check Database (U128),,deferred
 h493cbb0fdf6b,rust,supplementary,storage,unclassified,,,open
-h4c7fe3f35b39,rust,tag,storage,unclassified,,,open
+h4c7fe3f35b39,rust,tag,storage,in-scope,review-order SQL ordering when FSRS data is missing; specified with queue building (U41),,deferred
 h51930b326444,rust,supplementary,storage,unclassified,,,open
-h589819e41760,rust,tag,storage,unclassified,,,open
+h589819e41760,rust,tag,storage,in-scope,Check Database repair of card properties; specified with Check Database (U128),,deferred
 h5a31d6105048,rust,supplementary,storage,unclassified,,,open
-h6b2af222819b,rust,tag,storage,unclassified,,,open
-h6c9e358dc5b8,rust,tag,storage,unclassified,,,open
+h6b2af222819b,rust,tag,storage,in-scope,18 is the newest schema opened; newer files are refused,storage/open/refuse-versions,done
+h6c9e358dc5b8,rust,tag,storage,in-scope,adding a card row; specified with record I/O and ids (U23),,deferred
 h6efeaad807ac,rust,supplementary,storage,unclassified,,,open
 h802f402a566b,rust,supplementary,storage,unclassified,,,open
 h8deea0884574,rust,tag,storage,in-scope,card data numbers rounded per key and written in shortest form,model/card-data/rewrite,done
-h945f75ebb7a8,rust,tag,storage,unclassified,,,open
+h945f75ebb7a8,rust,tag,storage,not-applicable,internal helper that formats id lists into SQL text; no observable behavior,,done
 h94c7daf74c2e,rust,supplementary,storage,unclassified,,,open
-ha74ff67e3c1f,rust,tag,storage,unclassified,,,open
+ha74ff67e3c1f,rust,tag,storage,in-scope,Check Database detection of invalid ids; specified with Check Database (U128),,deferred
 hb30e802d8f2f,rust,supplementary,storage,unclassified,,,open
 hc0fc7c23426d,rust,supplementary,storage,unclassified,,,open
 hc4d781660d05,rust,supplementary,storage,unclassified,,,open
@@ -1000,9 +1000,9 @@ hc4e797f560a0,rust,supplementary,storage,unclassified,,,open
 he559261b12d3,rust,tag,storage,out-of-scope,custom scheduling data limits apply only when custom scheduler code sets the data; Meguri never sets it,,done
 he69093b72b82,rust,supplementary,storage,unclassified,,,open
 he9f3ecd2d21f,rust,supplementary,storage,unclassified,,,open
-heba033e5deec,rust,supplementary,storage,unclassified,,,open
-hebd3170b0ca5,rust,tag,storage,unclassified,,,open
-hf00ddf9dbca8,rust,supplementary,storage,unclassified,,,open
+heba033e5deec,rust,supplementary,storage,in-scope,closing without a downgrade keeps schema 18,storage/open/oracle-made-reopen,done
+hebd3170b0ca5,rust,tag,storage,in-scope,Check Database keeps review logs with repaired card ids; specified with Check Database (U128),,deferred
+hf00ddf9dbca8,rust,supplementary,storage,in-scope,"notes, cards, decks, presets and note types survive the downgrade to 11 and the upgrade back",storage/upgrade/from-11,done
 hf613c9b636bd,rust,supplementary,storage,unclassified,,,open
 hf7664c5a108b,rust,supplementary,storage,unclassified,,,open
 hfb0061ec0b9b,rust,supplementary,storage,unclassified,,,open

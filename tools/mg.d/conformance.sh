@@ -247,11 +247,11 @@ mg_conf__live_replay() {
   if [ -z "${MG_ORACLE_TAG:-}" ]; then
     mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 1
   fi
-  mkdir -p "$handoff"
+  mkdir -p "$handoff" "$MG_ROOT/conformance/fixtures"
   cmd="$(jq -nc --arg p "$(mg_compose_project)" --arg f "$MG_ROOT/docker/compose.yml" --arg l "meguri.mg.run-id=$MG_RUN_ID" \
-    --arg h "$handoff:/handoff" --arg faults "$MG_ORACLE_SYNC_FAULTS" \
+    --arg h "$handoff:/handoff" --arg x "$MG_ROOT/conformance/fixtures:/fixtures:ro" --arg faults "$MG_ORACLE_SYNC_FAULTS" \
     '["docker", "compose", "-p", $p, "-f", $f, "run", "--rm", "-T", "--no-deps", "--label", $l, "-e", "TZ={tz}",
-      "-v", $h, "-e", "ORACLE_HANDOFF=/handoff"]
+      "-v", $h, "-e", "ORACLE_HANDOFF=/handoff", "-v", $x, "-e", "ORACLE_FIXTURES=/fixtures"]
      + (if $faults == "" then [] else ["-e", "ORACLE_SYNC_FAULTS=" + $faults] end) + ["oracle"]')"
   MEGURI_ORACLE_TAG="$MG_ORACLE_TAG" MEGURI_ORACLE_CONTEXT="$MG_ORACLE_DIR" ORACLE_SYNC_FAULTS="$MG_ORACLE_SYNC_FAULTS" \
     mg_conf__cli_native conformance run --live --conformance "$MG_ROOT/conformance" --lane live-oracle \

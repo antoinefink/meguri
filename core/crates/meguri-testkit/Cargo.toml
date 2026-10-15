@@ -11,6 +11,8 @@ granit-parser.workspace = true
 jiff.workspace = true
 # test-hooks: armed fault points and the steppable clock (KTD18).
 meguri-model = { workspace = true, features = ["test-hooks"] }
+# test-hooks: the raw SQL of db_exec and db_dump, and the storage fault points.
+meguri-storage = { workspace = true, features = ["test-hooks"] }
 # The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
 meguri-sync = { workspace = true, features = ["test-hooks"] }
@@ -23,10 +25,11 @@ serde.workspace = true
 # in every test build that links testkit (feature unification).
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
+# The session directory of a scenario that opens a collection.
+tempfile.workspace = true
 
 [dev-dependencies]
 datatest-stable.workspace = true
-tempfile.workspace = true
 
 # One test per scenario file under conformance/scenarios (T0).
 [[test]]

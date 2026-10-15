@@ -98,6 +98,9 @@ def dump_table(col, table: str, raw: bool) -> dict[str, dict[str, Any]]:
     exprs = ", ".join(
         f"typeof(\"{c}\"), case typeof(\"{c}\") when 'blob' then hex(\"{c}\") else \"{c}\" end" for c in columns
     )
+    # Column names as the stored definition spells them: a table an old release
+    # created keeps its letter case (config's `key` at schemas 14 to 16).
+    keys = [next(c for c in columns if c.lower() == k.lower()) for k in KEYS[table]]
     rows: dict[str, dict[str, Any]] = {}
     for flat in col.db.all(f"select {exprs} from \"{table}\""):
         row: dict[str, Any] = {}
@@ -113,7 +116,7 @@ def dump_table(col, table: str, raw: bool) -> dict[str, dict[str, Any]]:
             if not raw and (table, name) in RANDOM_TEXT:
                 value = RANDOM_TEXT[(table, name)]
             row[name] = value
-        rows[",".join(str(row[k]) for k in KEYS[table])] = row
+        rows[",".join(str(row[k]) for k in keys)] = row
     return rows
 
 

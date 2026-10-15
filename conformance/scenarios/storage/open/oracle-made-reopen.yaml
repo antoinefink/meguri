@@ -1,0 +1,29 @@
+# A live chain (specs/conformance/dsl.md D9.2; specs/storage/open-and-connections.md
+# C2, C10; R1449): Anki makes a collection, Meguri opens it, writes through
+# its writer and closes it, and Anki then finds it sound, unchanged apart
+# from that write, and writes to it again.
+id: storage/open/oracle-made-reopen
+description: An Anki-made schema-18 collection opened, written and closed by Meguri opens in Anki with integrity_check ok.
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words, "Words::Rare"]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Front}} = {{Back}}"}]
+      css: ".card { color: navy; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [moon, luna], tags: [sky]}
+    - {notetype: Pair, deck: "Words::Rare", fields: [comet, cometa]}
+steps:
+  - answer: {card: "#c1", rating: good}
+  - handoff: meguri
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - db_exec: {sql: "UPDATE cards SET flags = 1"}
+  - observe: [schema_objects]
+  - handoff: oracle
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - db_exec: {sql: "SELECT ver FROM col"}
+  - db_exec: {sql: "SELECT * FROM pragma_journal_mode"}
+  - answer: {card: "#c2", rating: good}
+  - observe: [schema_objects, db_dump, "card(#c1, #c2)", "revlog(#c1, #c2)"]
