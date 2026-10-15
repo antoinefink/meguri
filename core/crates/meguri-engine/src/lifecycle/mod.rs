@@ -219,8 +219,13 @@ impl Engine {
         self.update_availability(guard);
     }
 
-    pub(crate) fn set_exclusive_phase(&self, phase: ExclusivePhase) {
+    /// Moves the exclusive phase of `core` to `phase`; nothing when `core`
+    /// is no longer the open collection (it closed meanwhile).
+    pub(crate) fn set_exclusive_phase(&self, core: &Arc<CollectionCore>, phase: ExclusivePhase) {
         let mut guard = self.lock_state();
+        if !is_open(&guard, core) {
+            return;
+        }
         if let LifecycleState::ExclusiveBusy { op, cancellable, .. } = guard.state {
             self.set_state_locked(&mut guard, LifecycleState::ExclusiveBusy { op, phase, cancellable });
         }
@@ -357,11 +362,14 @@ impl Engine {
 
     /// Closes the collection (`engine/lifecycle` L10): queued ops commit,
     /// parked ops fail, readers close, the writer checkpoints and closes.
+    /// The long-operation slot is freed: its guard, and an exclusive phase
+    /// entered through it, no longer act (L5).
     pub fn close(&self) -> Result<(), EngineError> {
         let current = {
             let mut guard = self.lock_state();
             let current = guard.current.take();
             if current.is_some() {
+                guard.slot = None;
                 self.update_availability(&mut guard);
             }
             current
@@ -404,6 +412,14 @@ impl Engine {
         };
         Ok(self.inner.jobs.start(kind.name(), self.generation(), slot, work))
     }
+}
+
+/// Whether `core` is the open collection.
+fn is_open(state: &LcState, core: &Arc<CollectionCore>) -> bool {
+    state
+        .current
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(&current.core, core))
 }
 
 /// Stops admission, drains the queue, closes the readers and the writer, and
@@ -461,6 +477,23 @@ impl fmt::Debug for Exclusive<'_> {
 }
 
 impl<'s> Exclusive<'s> {
+    /// The open collection `slot` may take over now: its core, ports and
+    /// state.
+    fn entry(slot: &SlotGuard, state: &LcState) -> Result<(Arc<CollectionCore>, Ports, LifecycleState), EngineError> {
+        slot.check_held(state)?;
+        let allowed = match &state.state {
+            LifecycleState::Ready { .. } => true,
+            LifecycleState::Failed {
+                reason: FailedReason::Corrupt { .. },
+            } => slot.op.allowed_when_corrupt(),
+            _ => false,
+        };
+        match (&state.current, allowed) {
+            (Some(current), true) => Ok((Arc::clone(&current.core), current.ports.clone(), state.state.clone())),
+            _ => Err(EngineError::unavailable(state.state.describe())),
+        }
+    }
+
     fn enter(slot: &'s SlotGuard, cancellable: bool) -> Result<Exclusive<'s>, EngineError> {
         let engine = &slot.engine;
         if !slot.op.replaces_collection() {
@@ -468,26 +501,19 @@ impl<'s> Exclusive<'s> {
                 message: format!("{} does not replace the collection", slot.op.name()),
             });
         }
-        let (core, ports, prior) = {
-            let guard = engine.lock_state();
-            let allowed = match &guard.state {
-                LifecycleState::Ready { .. } => true,
-                LifecycleState::Failed {
-                    reason: FailedReason::Corrupt { .. },
-                } => slot.op.allowed_when_corrupt(),
-                _ => false,
-            };
-            match (&guard.current, allowed) {
-                (Some(current), true) => (Arc::clone(&current.core), current.ports.clone(), guard.state.clone()),
-                _ => return Err(EngineError::unavailable(guard.state.describe())),
-            }
-        };
+        let (core, ports, _) = Exclusive::entry(slot, &engine.lock_state())?;
         for participant in &ports.suspend_participants {
             participant.flush()?;
         }
         let privilege = Privilege(engine.new_token());
-        {
+        let prior = {
             let mut guard = engine.lock_state();
+            // Checked again: the collection may have closed or failed while
+            // the participants flushed.
+            let (again, _, prior) = Exclusive::entry(slot, &guard)?;
+            if !Arc::ptr_eq(&again, &core) {
+                return Err(EngineError::unavailable("the collection closed"));
+            }
             core.exec.set_admission(Admission::Privileged {
                 privilege,
                 reason: format!("{} is running", slot.op.name()),
@@ -500,9 +526,10 @@ impl<'s> Exclusive<'s> {
                     cancellable,
                 },
             );
-        }
+            prior
+        };
         core.exec.wait_idle();
-        engine.set_exclusive_phase(ExclusivePhase::Working);
+        engine.set_exclusive_phase(&core, ExclusivePhase::Working);
         let collection = Collection {
             core: Arc::clone(&core),
             generation: engine.generation(),
@@ -525,15 +552,39 @@ impl<'s> Exclusive<'s> {
 
     /// Swaps the collection file (`engine/lifecycle` L8): `swap` runs with
     /// every connection closed (U124's verified replace). Returns the new
-    /// generation's privileged handle.
+    /// generation's privileged handle. `CollectionUnavailable`, without
+    /// running `swap`, once the phase has ended (the collection closed).
     pub fn replace(
         &mut self,
         swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
     ) -> Result<Collection, EngineError> {
-        let collection = generation::replace(&self.slot.engine, &self.core, self.privilege, Box::new(swap))?;
+        let engine = &self.slot.engine;
+        self.check_active(&engine.lock_state())?;
+        let collection = generation::replace(engine, &self.core, self.privilege, Box::new(swap))?;
         self.replaced = true;
         self.collection = collection.clone();
+        // The slot now belongs to the new generation.
+        if let Some(holder) = engine.lock_state().slot.as_mut()
+            && holder.id == self.slot.id
+        {
+            holder.generation = collection.generation;
+        }
         Ok(collection)
+    }
+
+    /// Whether the phase still runs: its slot is held, its collection is
+    /// open and in `ExclusiveBusy`.
+    fn check_active(&self, state: &LcState) -> Result<(), EngineError> {
+        self.slot.check_held(state)?;
+        if is_open(state, &self.core) && matches!(state.state, LifecycleState::ExclusiveBusy { .. }) {
+            Ok(())
+        } else {
+            Err(EngineError::unavailable(format!(
+                "the exclusive phase of {} has ended: {}",
+                self.slot.op.name(),
+                state.state.describe()
+            )))
+        }
     }
 }
 
@@ -541,8 +592,9 @@ impl Drop for Exclusive<'_> {
     fn drop(&mut self) {
         let engine = &self.slot.engine;
         let mut guard = engine.lock_state();
-        if !matches!(guard.state, LifecycleState::ExclusiveBusy { .. }) {
-            // The swap failed and left the collection closed.
+        if self.check_active(&guard).is_err() {
+            // The collection closed, or the swap failed and left it closed:
+            // the state is no longer this phase's.
             return;
         }
         let back = if self.replaced {

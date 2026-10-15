@@ -56,6 +56,7 @@ When an op is submitted, the executor decides by the current state:
 - Holding the slot leaves the state `Ready`: answers and edits still commit, normal and media sync still run.
 - Only the replacement ops (one-way sync, restore, `.colpkg` import) may then enter `ExclusiveBusy` (L7) (KTD17).
 - The slot can be taken in `Ready`; in `NoCollection` or `Failed` only by a replacement op (it creates or replaces the collection); in `Failed{Corrupt}` only by restore and one-way sync.
+- The slot belongs to one generation: the current one when it was taken (with nothing open, the last one), then the one its holder's own replacement makes (L8). Closing the collection frees the slot (L10). A holder whose slot a close freed gets `CollectionUnavailable` when it tries to enter the exclusive phase; a holder whose generation is no longer current (another collection was opened) gets `StaleGeneration`. Such a holder never acts on another collection, and dropping it does not free a slot taken since.
 - Releasing the slot (the holder drops it) may make the collection available (L6).
 
 ## L6. Availability and waits
@@ -72,6 +73,7 @@ The core half of KTD17. A replacement op holding the slot enters it:
 2. The state becomes `ExclusiveBusy{op, Draining, cancellable}`: from now on only the exclusive job's ops are admitted (L4).
 3. Every op queued before the switch commits (the drain). Then the phase is `Working` and the job gets its privileged handle. The job's safety backup (U127) and any `VACUUM INTO` snapshot come only after this point.
 4. The phase ends either by a replacement (L8) or by the job dropping it (cancel or failure). Either way the state returns to `Ready` and parked ops are checked again (L4).
+5. Closing the collection also ends the phase (L10). A replace after that fails at once with `CollectionUnavailable` and never runs the swap; dropping the phase then changes nothing.
 
 ## L8. Generation change
 
@@ -97,7 +99,7 @@ Every swap of the collection file goes through this procedure; U124's verified-r
 
 ## L10. Close
 
-Admission stops (queued ops still commit), parked ops fail with `CollectionUnavailable`, readers close, the writer checkpoints and closes (C10), the writer thread ends and the state becomes `NoCollection`.
+Admission stops (queued ops still commit), parked ops fail with `CollectionUnavailable`, readers close, the writer checkpoints and closes (C10), the writer thread ends and the state becomes `NoCollection`. The long-operation slot is freed and an exclusive phase ends (L5, L7). Once the writer is stopping, every task submitted to it fails at once with `CollectionUnavailable`, a replace's included, so nothing waits on a writer that is gone.
 
 ## L11. Readers
 

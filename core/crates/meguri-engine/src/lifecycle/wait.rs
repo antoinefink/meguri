@@ -9,11 +9,13 @@ use std::time::Duration;
 use crate::collection::Collection;
 use crate::error::EngineError;
 use crate::lifecycle::state::{FailedReason, LifecycleState, LongOp};
-use crate::lifecycle::{Engine, Exclusive, LcState};
+use crate::lifecycle::{Engine, Exclusive, Generation, LcState};
 use crate::monotonic;
 
 /// The long-operation slot while one operation holds it. Dropping it frees
-/// the slot (and ends an exclusive phase it entered).
+/// the slot (and ends an exclusive phase it entered). It belongs to the
+/// collection it was taken on (L5): once that one closes, or another is
+/// opened, it can no longer enter an exclusive phase.
 pub struct SlotGuard {
     pub(crate) engine: Engine,
     pub(crate) id: u64,
@@ -30,6 +32,9 @@ impl fmt::Debug for SlotGuard {
 pub(crate) struct SlotHolder {
     pub id: u64,
     pub op: LongOp,
+    /// The generation the holder belongs to: the current one when it took
+    /// the slot, then the one its own replacement made (L5, L8).
+    pub generation: Generation,
 }
 
 impl SlotGuard {
@@ -40,6 +45,29 @@ impl SlotGuard {
     /// Enters the exclusive phase (L7); only for the replacement ops.
     pub fn enter_exclusive(&self, cancellable: bool) -> Result<Exclusive<'_>, EngineError> {
         Exclusive::enter(self, cancellable)
+    }
+
+    /// Whether this guard still holds the slot for the current collection:
+    /// `CollectionUnavailable` once a close freed the slot, `StaleGeneration`
+    /// once another collection was opened (L5).
+    pub(crate) fn check_held(&self, state: &LcState) -> Result<(), EngineError> {
+        match state.slot {
+            Some(holder) if holder.id == self.id => {
+                let current = self.engine.generation();
+                if holder.generation == current {
+                    Ok(())
+                } else {
+                    Err(EngineError::StaleGeneration {
+                        planned: holder.generation,
+                        current,
+                    })
+                }
+            }
+            _ => Err(EngineError::unavailable(format!(
+                "the slot of {} was freed when its collection closed",
+                self.op.name()
+            ))),
+        }
     }
 }
 
@@ -74,7 +102,11 @@ impl Engine {
             return Err(EngineError::unavailable(state.state.describe()));
         }
         let id = self.new_token();
-        state.slot = Some(SlotHolder { id, op });
+        state.slot = Some(SlotHolder {
+            id,
+            op,
+            generation: self.generation(),
+        });
         self.update_availability(&mut state);
         Ok(SlotGuard {
             engine: self.clone(),

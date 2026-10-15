@@ -2,13 +2,14 @@
 //! collection swap (L8).
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::collection::{Collection, CollectionCore};
 use crate::error::EngineError;
 use crate::executor::exclusive::{Admission, Privilege};
 use crate::executor::writer::Swap;
-use crate::lifecycle::Engine;
 use crate::lifecycle::state::{ExclusivePhase, FailedReason, LifecycleState};
+use crate::lifecycle::{Engine, is_open};
 
 /// Names one opened collection: 0 before anything was opened, then one more
 /// at every open and every replacement, for the life of the engine.
@@ -26,11 +27,11 @@ impl fmt::Display for Generation {
 /// `CollectionReplaced` once and tells every `GenerationListener`.
 pub(crate) fn replace(
     engine: &Engine,
-    core: &std::sync::Arc<CollectionCore>,
+    core: &Arc<CollectionCore>,
     privilege: Privilege,
     swap: Swap,
 ) -> Result<Collection, EngineError> {
-    engine.set_exclusive_phase(ExclusivePhase::Replacing);
+    engine.set_exclusive_phase(core, ExclusivePhase::Replacing);
     core.exec.wait_idle();
     core.readers.close_all();
     let old = core.exec.generation();
@@ -44,9 +45,9 @@ pub(crate) fn replace(
             for listener in engine.ports().generation_listeners {
                 listener.collection_replaced(old, new);
             }
-            engine.set_exclusive_phase(ExclusivePhase::Working);
+            engine.set_exclusive_phase(core, ExclusivePhase::Working);
             Ok(Collection {
-                core: std::sync::Arc::clone(core),
+                core: Arc::clone(core),
                 generation: new,
                 privilege: Some(privilege),
             })
@@ -57,13 +58,20 @@ pub(crate) fn replace(
                 core.exec.set_admission(Admission::Closed {
                     reason: "the collection could not be reopened after a swap".to_owned(),
                 });
-                engine.set_state(LifecycleState::Failed {
-                    reason: FailedReason::Replace {
-                        detail: error.to_string(),
-                    },
-                });
+                let mut state = engine.lock_state();
+                // Unless it was closed meanwhile (the writer refused the swap).
+                if is_open(&state, core) {
+                    engine.set_state_locked(
+                        &mut state,
+                        LifecycleState::Failed {
+                            reason: FailedReason::Replace {
+                                detail: error.to_string(),
+                            },
+                        },
+                    );
+                }
             } else {
-                engine.set_exclusive_phase(ExclusivePhase::Working);
+                engine.set_exclusive_phase(core, ExclusivePhase::Working);
             }
             Err(error)
         }

@@ -1,20 +1,22 @@
 //! The long-operation slot, availability waits and the exclusive phase
-//! (`engine/lifecycle` L4 to L8; R171, R1706, R1797; KTD17).
+//! (`engine/lifecycle` L4 to L8, L10; R171, R1706, R1797; KTD17).
 
 mod common;
 
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use common::{Harness, add_note_with_card, drain, note};
+use common::{Harness, add_note_with_card, copy_fixture, drain, note, open_config};
 use meguri_engine::{
-    EngineError, EventKind, ExclusivePhase, Generation, LifecycleState, LongOp, OpSpec, Ports, SuspendParticipant,
-    monotonic,
+    Engine, EngineConfig, EngineError, EventKind, ExclusivePhase, Generation, LifecycleState, LongOp, OpSpec, Ports,
+    SuspendParticipant, monotonic,
 };
 use meguri_model::changes::OpSource;
-use meguri_storage::ReaderRole;
+use meguri_model::clock::{StepClock, UtcOffset};
 use meguri_storage::raw::SqlValue;
+use meguri_storage::{ReadRows, ReaderRole};
 
 #[test]
 fn a_held_slot_refuses_a_second_request_and_a_waiter_times_out_unavailable() {
@@ -279,4 +281,110 @@ fn only_replacement_ops_enter_the_exclusive_phase_and_dropping_it_restores_ready
     assert!(!h.engine.is_available(), "the slot is still held");
     drop(slot);
     assert!(h.engine.is_available());
+}
+
+#[test]
+fn closing_frees_the_slot_and_its_guard_never_enters_the_exclusive_phase_of_a_collection_opened_later() {
+    let h = Harness::open();
+    let (nid, _) = add_note_with_card(&h.collection, OpSource::UserUndoable, &["in A", "x"]).value;
+    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+    h.engine.close().unwrap();
+    assert_eq!(h.engine.slot_holder(), None, "closing frees the slot");
+    assert!(matches!(
+        slot.enter_exclusive(false),
+        Err(EngineError::CollectionUnavailable { .. })
+    ));
+
+    // Collection B on the same engine.
+    let (_dir_b, path_b) = copy_fixture("schema-18.anki2");
+    let b = h.engine.open_raw(&path_b, open_config(&h.clock)).unwrap();
+    assert_eq!(b.generation(), Generation(2));
+    let error = slot.enter_exclusive(false).unwrap_err();
+    assert!(
+        matches!(error, EngineError::CollectionUnavailable { .. }),
+        "A's restore must not take over B: {error:?}"
+    );
+    assert_eq!(
+        h.engine.state(),
+        LifecycleState::Ready {
+            generation: Generation(2)
+        }
+    );
+    assert!(h.engine.is_available(), "a dead guard does not hold B's slot");
+    add_note_with_card(&b, OpSource::UserUndoable, &["in B", "x"]);
+    let check = h.engine.acquire_slot(LongOp::CheckDatabase).unwrap();
+    drop(slot);
+    assert_eq!(
+        h.engine.slot_holder(),
+        Some(LongOp::CheckDatabase),
+        "dropping A's guard leaves B's holder"
+    );
+    drop(check);
+    // A's file is A's: its note is still there.
+    h.engine.close().unwrap();
+    let a = Harness::open_path(h.dir, h.path);
+    let reader = a.collection.reader(ReaderRole::Query).unwrap();
+    assert!(reader.note(nid).unwrap().is_some());
+}
+
+#[test]
+fn a_slot_taken_with_nothing_open_never_enters_the_exclusive_phase_of_a_collection_opened_after_it() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let clock = Arc::new(StepClock::new(common::NOW_MS, UtcOffset::UTC, "UTC"));
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    // A replacement op may take the slot with nothing open (L5).
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    let collection = engine.open_raw(&path, open_config(&clock)).unwrap();
+    assert_eq!(
+        slot.enter_exclusive(false).unwrap_err(),
+        EngineError::StaleGeneration {
+            planned: Generation(0),
+            current: Generation(1)
+        }
+    );
+    assert_eq!(
+        engine.state(),
+        LifecycleState::Ready {
+            generation: Generation(1)
+        }
+    );
+    add_note_with_card(&collection, OpSource::UserUndoable, &["still open", "x"]);
+}
+
+#[test]
+fn closing_during_an_exclusive_phase_ends_it_and_a_later_replace_fails_at_once_without_swapping() {
+    let h = Harness::open();
+    let (nid, _) = add_note_with_card(&h.collection, OpSource::UserUndoable, &["kept", "x"]).value;
+    // 'static, so the phase can move to a thread the test does not join.
+    let slot: &'static _ = Box::leak(Box::new(h.engine.acquire_slot(LongOp::Restore).unwrap()));
+    let mut exclusive = slot.enter_exclusive(false).unwrap();
+    h.engine.close().unwrap();
+    assert_eq!(h.engine.state(), LifecycleState::NoCollection);
+
+    let swapped = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel();
+    let flag = Arc::clone(&swapped);
+    thread::spawn(move || {
+        let result = exclusive.replace(move |_| {
+            flag.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+        drop(exclusive);
+        let _ = tx.send(result.map(|c| c.generation()));
+    });
+    let result = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the replace waits forever on the stopped writer");
+    assert!(
+        matches!(result, Err(EngineError::CollectionUnavailable { .. })),
+        "{result:?}"
+    );
+    assert!(!swapped.load(Ordering::SeqCst), "the swap never ran");
+    assert_eq!(h.engine.state(), LifecycleState::NoCollection);
+    assert_eq!(h.engine.generation(), Generation(1));
+
+    // The file was never touched, and the engine opens it again.
+    let reopened = h.engine.open_raw(&h.path, open_config(&h.clock)).unwrap();
+    let reader = reopened.reader(ReaderRole::Query).unwrap();
+    assert!(reader.note(nid).unwrap().is_some());
 }

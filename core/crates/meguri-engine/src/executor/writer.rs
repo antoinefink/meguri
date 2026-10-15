@@ -361,9 +361,16 @@ impl TaskBody for ReplaceTask {
     fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
         let ReplaceTask { swap, reply } = *self;
         let shared = env.shared;
-        if let Some(collection) = env.collection.take()
-            && let Err(error) = collection.close()
-        {
+        // Closed before the replace got here: there is nothing to replace,
+        // and the swap must not touch a file nobody holds any more.
+        let Some(collection) = env.collection.take() else {
+            let _ = reply.send(Replaced {
+                result: Err(EngineError::unavailable("the collection is closed")),
+                factory: None,
+            });
+            return;
+        };
+        if let Err(error) = collection.close() {
             tracing::warn!(%error, "closing the collection before a swap");
         }
         let swapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))

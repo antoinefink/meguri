@@ -108,10 +108,18 @@ impl ExecShared {
         *self.lock_delay()
     }
 
-    /// Queues, parks or refuses a task (`engine/lifecycle` L3, L4).
+    /// Queues, parks or refuses a task (`engine/lifecycle` L3, L4). Once the
+    /// writer is stopping every task is refused, control tasks too: nothing
+    /// would ever run it (L10).
     pub(crate) fn submit(&self, task: Task) {
         let refused = {
             let mut queue = self.lock_queue();
+            if queue.stop {
+                let error = EngineError::unavailable("the collection is closed");
+                drop(queue);
+                task.body.fail(error);
+                return;
+            }
             let current = self.generation();
             match task.meta.planned {
                 Some(planned) if !task.meta.control && planned != current => {
