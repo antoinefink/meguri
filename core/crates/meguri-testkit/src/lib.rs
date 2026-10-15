@@ -11,6 +11,7 @@ pub mod diff;
 pub mod exec;
 pub mod generate;
 pub mod observe;
+pub mod private;
 pub mod report;
 pub mod scenario;
 pub mod suite;

@@ -22,6 +22,10 @@ meguri-storage = { workspace = true, features = ["test-hooks"] }
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
 meguri-sync = { workspace = true, features = ["test-hooks"] }
 meguri-text.workspace = true
+# statvfs: the private vault refuses a source that is not on a read-only
+# mount (U15, R1938); on Apple hosts also the process footprint
+# (phys_footprint) that bench::memory samples (R1864).
+libc.workspace = true
 rand.workspace = true
 ryu.workspace = true
 serde.workspace = true
@@ -33,11 +37,6 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 # The session directory of a scenario that opens a collection.
 tempfile.workspace = true
-
-# The process footprint (phys_footprint) that bench::memory samples on Apple
-# hosts (R1864).
-[target.'cfg(target_vendor = "apple")'.dependencies]
-libc.workspace = true
 
 [dev-dependencies]
 # Wall-clock suites (benches/*.rs) and the harness tests that drive them.
