@@ -2,6 +2,8 @@
 //! to a collection file registers it before touching any table, because the
 //! name indexes and the `tags` key are ordered by it.
 
+use std::cmp::Ordering;
+
 use rusqlite::Connection;
 
 /// The collation's name, as the schema's `COLLATE unicase` clauses use it.
@@ -13,4 +15,10 @@ pub(crate) fn register(conn: &Connection) -> Result<(), String> {
     meguri_model::faultpoint!("storage.conn_init.unicase").map_err(|e| e.to_string())?;
     conn.create_collation(UNICASE, meguri_text::fold::compare_folded)
         .map_err(|e| e.to_string())
+}
+
+/// `unicase` on two stored texts as SQLite runs it: rusqlite hands the
+/// collation each text with bytes that are not UTF-8 replaced.
+pub(crate) fn compare_stored(a: &[u8], b: &[u8]) -> Ordering {
+    meguri_text::fold::compare_folded(&String::from_utf8_lossy(a), &String::from_utf8_lossy(b))
 }

@@ -143,6 +143,12 @@ impl Table {
         Stamps { usn, mtime }
     }
 
+    /// Whether the key compares with `unicase` rather than byte for byte
+    /// (`storage/schema-18` S2: `tags`, whose key is `COLLATE unicase`).
+    pub(crate) fn unicase_key(self) -> bool {
+        self == Table::Tags
+    }
+
     /// The column holding a row's `usn`, for the tables whose rows carry
     /// one as their own (S1: not `col`, whose `usn` is the sync's, nor
     /// `templates`, which change with their note type).
@@ -243,6 +249,15 @@ impl RowKey {
             // never collides with the typed keys above.
             (_, cells) => RowKey::Text(format!("{:?}", &cells[..table.key_len().min(cells.len())]).into_bytes()),
         }
+    }
+}
+
+/// Whether two keys name the same row, as the table's primary key compares
+/// them: a `tags` key with `unicase`, every other key byte for byte.
+pub(crate) fn same_key(table: Table, a: &RowKey, b: &RowKey) -> bool {
+    match (a, b) {
+        (RowKey::Text(a), RowKey::Text(b)) if table.unicase_key() => crate::collation::compare_stored(a, b).is_eq(),
+        _ => a == b,
     }
 }
 
@@ -387,19 +402,19 @@ fn key_condition(table: Table, first_param: usize) -> String {
 
 /// The stored row with `key`, every column by storage class.
 pub(crate) fn select_image(conn: &Connection, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
+    Ok(select_by_key(conn, table, &key.cells()).optional()?)
+}
+
+/// The stored row whose key columns equal `key`, as the key compares them.
+fn select_by_key(conn: &Connection, table: Table, key: &[Cell]) -> rusqlite::Result<RowImage> {
     let sql = format!(
         "SELECT {} FROM {} WHERE {}",
         column_list(table),
         table.name(),
         key_condition(table, 1)
     );
-    let mut statement = conn.prepare_cached(&sql)?;
-    let width = table.columns().len();
-    Ok(statement
-        .query_row(params_from_iter(key.cells()), |row| {
-            (0..width).map(|i| row.get_ref(i).map(Cell::from_ref)).collect()
-        })
-        .optional()?)
+    conn.prepare_cached(&sql)?
+        .query_row(params_from_iter(key), |row| row_image(row, table))
 }
 
 /// The stored row with the key of `new`, and whether it equals `new` in
@@ -428,13 +443,32 @@ pub(crate) fn select_compare(
     let width = table.columns().len();
     Ok(statement
         .query_row(params_from_iter(new.iter()), |row| {
-            let image = (0..width)
-                .map(|i| row.get_ref(i).map(Cell::from_ref))
-                .collect::<rusqlite::Result<RowImage>>()?;
+            let image = row_image(row, table)?;
             let same: Option<i64> = row.get(width)?;
             Ok((image, same == Some(1)))
         })
         .optional()?)
+}
+
+/// The cells of a result row with one column per column of `table`.
+pub(crate) fn row_image(row: &rusqlite::Row<'_>, table: Table) -> rusqlite::Result<RowImage> {
+    (0..table.columns().len())
+        .map(|i| row.get_ref(i).map(Cell::from_ref))
+        .collect()
+}
+
+/// The row a write just stored, read back by the key it was written with:
+/// each column's affinity applies to what was written (an `sfld` written as
+/// the text `123` is stored as the INTEGER 123), so the stored row may
+/// differ from the cells written. A keyed read, because a `RETURNING`
+/// clause costs about three times as much on a note rewrite.
+pub(crate) fn stored(conn: &Connection, table: Table, key: &[Cell]) -> Result<RowImage, StorageError> {
+    Ok(select_by_key(conn, table, key)?)
+}
+
+/// The leading key cells of a whole row.
+pub(crate) fn key_cells(table: Table, cells: &[Cell]) -> &[Cell] {
+    cells.get(..table.key_len()).unwrap_or(cells)
 }
 
 pub(crate) fn insert(conn: &Connection, table: Table, cells: &[Cell]) -> Result<(), StorageError> {
@@ -451,9 +485,21 @@ pub(crate) fn insert(conn: &Connection, table: Table, cells: &[Cell]) -> Result<
     Ok(())
 }
 
+/// Inserts a row and returns it as stored.
+pub(crate) fn insert_stored(conn: &Connection, table: Table, cells: &[Cell]) -> Result<RowImage, StorageError> {
+    insert(conn, table, cells)?;
+    stored(conn, table, key_cells(table, cells))
+}
+
 /// Rewrites every column of the row whose key is `key` (the stored key:
-/// for `tags`, a key that differs only in letter case is the same row).
-pub(crate) fn update(conn: &Connection, table: Table, key: &RowKey, cells: &[Cell]) -> Result<(), StorageError> {
+/// for `tags`, a key that differs only in letter case is the same row) and
+/// returns the row as stored.
+pub(crate) fn update_stored(
+    conn: &Connection,
+    table: Table,
+    key: &RowKey,
+    cells: &[Cell],
+) -> Result<RowImage, StorageError> {
     let set = table
         .columns()
         .iter()
@@ -466,9 +512,10 @@ pub(crate) fn update(conn: &Connection, table: Table, key: &RowKey, cells: &[Cel
         table.name(),
         key_condition(table, cells.len() + 1)
     );
-    let params = cells.iter().cloned().chain(key.cells());
-    conn.prepare_cached(&sql)?.execute(params_from_iter(params))?;
-    Ok(())
+    let key = key.cells();
+    conn.prepare_cached(&sql)?
+        .execute(params_from_iter(cells.iter().chain(&key)))?;
+    stored(conn, table, &key)
 }
 
 pub(crate) fn delete(conn: &Connection, table: Table, key: &RowKey) -> Result<(), StorageError> {
@@ -496,10 +543,7 @@ pub(crate) fn select_where(
         table.name()
     );
     let mut statement = conn.prepare_cached(&sql)?;
-    let width = table.columns().len();
-    let rows = statement.query_map(params_from_iter(params.iter()), |row| {
-        (0..width).map(|i| row.get_ref(i).map(Cell::from_ref)).collect()
-    })?;
+    let rows = statement.query_map(params_from_iter(params.iter()), |row| row_image(row, table))?;
     Ok(rows.collect::<rusqlite::Result<Vec<RowImage>>>()?)
 }
 

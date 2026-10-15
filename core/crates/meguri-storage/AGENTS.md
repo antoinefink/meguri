@@ -14,4 +14,6 @@
 - Template and field rows are never stamped (`ids-usn-mtime` S1); `put_notetype` stamps the `notetypes` row whenever one of them changes, and rewrites changed rows delete-then-insert because of the unique (name, ntid) indexes.
 - Config values go through `rows::config::ConfigValue`, never serde_json: exact numbers, integer vs float kept, nesting past 128 reads as invalid. A key whose stored value is the same value (C4) keeps its bytes.
 - `CollectionBuilder` must stay out of meguri-engine and meguri-ffi (edges.toml `[storage_builder]`). Its config rows must hold `schedVer` 2, or the open gate refuses the new file as v1.
-- Journal entries live in fixed chunks and before-images spill past the threshold: keep per-entry size small, the 150k-note rewrite test (`tests/journal.rs`) measures heap growth.
+- Journal entries live in fixed chunks and before-images spill past the threshold: keep per-entry size small, the 150k-note rewrite test (`tests/journal.rs`) measures heap growth. Bulk paths never collect a whole batch of row images; with no journal they read none.
+- Journal after-images are the rows as stored, read back by key after the write (`rows::stored`; `RETURNING` costs three times as much), never the cells written. Journal keys and `restore` match keys with the key's collation (`rows::same_key`): a renamed tag is one entry.
+- `CollectionBuilder` claims its path with `O_EXCL` and, on failure, removes only the file it created (same inode) and the sidecars that appeared after.

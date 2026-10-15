@@ -8,14 +8,19 @@
 //!   and an insert-or-ignore that finds its row (graves G2) leave no entry.
 //! - The first before-image of a key wins: a row written twice in one
 //!   operation has one entry, whose before-image is the row as it was
-//!   before the operation and whose after-image is the last write.
+//!   before the operation and whose after-image is the last write. Keys
+//!   match as the table's key compares them: a `tags` key with `unicase`,
+//!   so a tag renamed from `Foo` to `foo` stays one entry under `Foo`.
+//! - After-images are the rows as SQLite stored them (the write scope reads
+//!   them back), so a column's affinity is applied.
 //! - Memory is bounded (R1851): a note's after-image is its digest and the
 //!   columns that changed (observers that need the content read it after
 //!   commit), and once the before-images held in memory pass the spill
 //!   threshold, further before-images go to an unnamed temporary file in
 //!   the collection's directory, removed when the journal drops.
 
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs::File;
 use std::os::unix::fs::FileExt;
@@ -23,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
+use crate::collation;
 use crate::error::StorageError;
 use crate::rows::{Cell, RowImage, RowKey, Table};
 
@@ -162,12 +168,40 @@ impl Entry {
 /// journal never holds a doubled copy of itself while it grows.
 const CHUNK: usize = 4096;
 
+/// A text key of a table whose key compares with `unicase`, ordered and
+/// equal as SQLite compares it.
+#[derive(Clone, Debug)]
+struct UnicaseKey(Vec<u8>);
+
+impl Ord for UnicaseKey {
+    fn cmp(&self, other: &UnicaseKey) -> Ordering {
+        collation::compare_stored(&self.0, &other.0)
+    }
+}
+
+impl PartialOrd for UnicaseKey {
+    fn partial_cmp(&self, other: &UnicaseKey) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for UnicaseKey {
+    fn eq(&self, other: &UnicaseKey) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for UnicaseKey {}
+
 /// The journal of one write scope.
 pub struct Journal {
     options: JournalOptions,
     chunks: Vec<Vec<Entry>>,
     len: usize,
+    /// Entries by key, for keys that compare byte for byte.
     index: HashMap<(Table, RowKey), usize>,
+    /// Entries of `unicase` keys (`tags`), by that comparison.
+    unicase: BTreeMap<UnicaseKey, usize>,
     /// Bytes of before-images held in memory.
     held: usize,
     spill: Option<Spill>,
@@ -195,6 +229,7 @@ impl Journal {
             chunks: Vec::new(),
             len: 0,
             index: HashMap::new(),
+            unicase: BTreeMap::new(),
             held: 0,
             spill: None,
         }
@@ -213,9 +248,28 @@ impl Journal {
         self.len == 0
     }
 
-    /// The entry of a key, if the operation changed it.
+    /// The entry of a key, if the operation changed it; the key matches as
+    /// the table's key compares (`tags` with `unicase`).
     pub fn entry(&self, table: Table, key: &RowKey) -> Option<&Entry> {
-        self.index.get(&(table, key.clone())).map(|&i| self.at(i))
+        self.slot(table, key).map(|i| self.at(i))
+    }
+
+    fn slot(&self, table: Table, key: &RowKey) -> Option<usize> {
+        match key {
+            RowKey::Text(text) if table.unicase_key() => self.unicase.get(&UnicaseKey(text.clone())).copied(),
+            _ => self.index.get(&(table, key.clone())).copied(),
+        }
+    }
+
+    fn add_slot(&mut self, table: Table, key: &RowKey, at: usize) {
+        match key {
+            RowKey::Text(text) if table.unicase_key() => {
+                self.unicase.insert(UnicaseKey(text.clone()), at);
+            }
+            _ => {
+                self.index.insert((table, key.clone()), at);
+            }
+        }
     }
 
     fn at(&self, index: usize) -> &Entry {
@@ -263,7 +317,7 @@ impl Journal {
         before: Option<RowImage>,
         after: Option<RowImage>,
     ) -> Result<(), StorageError> {
-        if let Some(&at) = self.index.get(&(table, key.clone())) {
+        if let Some(at) = self.slot(table, &key) {
             let after = match after {
                 Some(image) if table == Table::Notes => {
                     let original = self.before(self.at(at))?;
@@ -284,7 +338,7 @@ impl Journal {
             None => Before::Absent,
             Some(image) => self.keep(image)?,
         };
-        self.index.insert((table, key.clone()), self.len);
+        self.add_slot(table, &key, self.len);
         if self.chunks.last().is_none_or(|chunk| chunk.len() == CHUNK) {
             self.chunks.push(Vec::with_capacity(CHUNK));
         }

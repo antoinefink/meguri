@@ -12,6 +12,7 @@
 //! scopes without the executor, journal off; layering-check keeps it out of
 //! meguri-engine and meguri-ffi (edges.toml `[storage_builder]`).
 
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use meguri_model::card::Card;
@@ -159,10 +160,18 @@ impl<'c> WriteScope<'c> {
         }
     }
 
+    /// Records a change that keeps no journal entry: a bulk path with no
+    /// journal does not read the rows it changes.
+    pub(crate) fn note_change(&mut self) {
+        self.changed = true;
+    }
+
     /// Writes a whole row: skipped when the stored row with its key equals
     /// it in every column; otherwise stamped per the mode and inserted or
     /// updated. `force` stamps and writes a row equal to the stored one (a
-    /// note type whose fields or templates changed, S1).
+    /// note type whose fields or templates changed, S1). The after-image
+    /// journalled is the row as SQLite stored it, not `cells`: a column's
+    /// affinity may change a value's storage class.
     pub(crate) fn put_cells(
         &mut self,
         table: Table,
@@ -180,13 +189,13 @@ impl<'c> WriteScope<'c> {
         match stored {
             Some((before, _)) => {
                 let key = RowKey::of(table, &before);
-                rows::update(self.conn, table, &key, &cells)?;
-                self.journal_change(table, key, Some(before), Some(cells))?;
+                let after = rows::update_stored(self.conn, table, &key, &cells)?;
+                self.journal_change(table, key, Some(before), Some(after))?;
                 Ok(Written::Updated)
             }
             None => {
-                rows::insert(self.conn, table, &cells)?;
-                self.journal_change(table, RowKey::of(table, &cells), None, Some(cells))?;
+                let after = rows::insert_stored(self.conn, table, &cells)?;
+                self.journal_change(table, RowKey::of(table, &after), None, Some(after))?;
                 Ok(Written::Inserted)
             }
         }
@@ -215,12 +224,13 @@ impl<'c> WriteScope<'c> {
     /// Writes a journalled image back exactly as it was, `usn` and
     /// modification time included, or removes the row when `image` is
     /// `None`: undo and redo restores (S3). Only in a `CallerSupplied` or
-    /// `Raw` scope.
+    /// `Raw` scope. `image` must fit `key` as the table's key compares them:
+    /// a `tags` entry's after-image may differ from its key in letter case.
     pub fn restore(&mut self, table: Table, key: &RowKey, image: Option<&RowImage>) -> Result<Written, StorageError> {
         self.require_as_given("restore")?;
         match image {
             Some(image) => {
-                if image.len() != table.columns().len() || &RowKey::of(table, image) != key {
+                if image.len() != table.columns().len() || !rows::same_key(table, &RowKey::of(table, image), key) {
                     return Err(StorageError::Mode {
                         detail: format!("an image of {table} that does not fit key {key}"),
                     });
@@ -528,11 +538,96 @@ pub struct CollectionBuilder {
     collection: OpenedCollection,
 }
 
+/// The files next to a collection that SQLite makes.
+const SIDECARS: [&str; 3] = ["-wal", "-shm", "-journal"];
+
+/// A path a builder claimed by creating its file exclusively. Dropped
+/// before [`Claim::keep`], it removes the files of this attempt: the file it
+/// created, while that file is still the one it created, and the sidecars,
+/// none of which was there when it claimed the path. It never removes a
+/// file another caller made.
+struct Claim<'p> {
+    path: &'p Path,
+    /// Device and inode of the file the claim created.
+    file: (u64, u64),
+    settled: bool,
+}
+
+impl<'p> Claim<'p> {
+    /// Creates the empty file at `path` with `O_CREAT | O_EXCL`, so of
+    /// callers racing for one path exactly one gets it. Refused when the
+    /// file exists or a sidecar is next to it (SQLite would read a stale
+    /// `-wal` into the new file).
+    fn take(path: &'p Path) -> Result<Claim<'p>, StorageError> {
+        let exists = StorageError::BuilderRefused {
+            reason: BuilderRefusal::Exists,
+        };
+        let io = |e: std::io::Error| StorageError::Io {
+            detail: format!("creating the new collection: {e}"),
+        };
+        let file = match std::fs::OpenOptions::new().write(true).create_new(true).open(path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(exists),
+            Err(e) => return Err(io(e)),
+        };
+        let mut claim = Claim {
+            path,
+            file: (0, 0),
+            settled: false,
+        };
+        let metadata = match file.metadata() {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                // Unknown identity: the file is left rather than risk
+                // removing another caller's.
+                claim.settled = true;
+                return Err(io(e));
+            }
+        };
+        claim.file = (metadata.dev(), metadata.ino());
+        if SIDECARS
+            .iter()
+            .any(|suffix| sibling(path, suffix).symlink_metadata().is_ok())
+        {
+            // Only the file this claim created goes; the sidecars stay.
+            if claim.still_ours() {
+                let _ = std::fs::remove_file(path);
+            }
+            claim.settled = true;
+            return Err(exists);
+        }
+        Ok(claim)
+    }
+
+    /// Whether the file at the path is still the one this claim created.
+    fn still_ours(&self) -> bool {
+        self.path
+            .symlink_metadata()
+            .is_ok_and(|m| (m.dev(), m.ino()) == self.file)
+    }
+
+    fn keep(mut self) {
+        self.settled = true;
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        if self.settled || !self.still_ours() {
+            return;
+        }
+        for suffix in SIDECARS {
+            let _ = std::fs::remove_file(sibling(self.path, suffix));
+        }
+        let _ = std::fs::remove_file(self.path);
+    }
+}
+
 impl CollectionBuilder {
     /// Creates the file at `path`. `col` must be at schema 18, and `config`
     /// must hold `schedVer` 2: the open gate refuses a collection without it
-    /// (`storage/open-and-connections` C2.2). When the gate refuses the new
-    /// file, it is removed.
+    /// (`storage/open-and-connections` C2.2). When creating or opening the
+    /// new file fails, the files this call made are removed.
     pub fn create(
         path: &Path,
         col: &Col,
@@ -544,31 +639,17 @@ impl CollectionBuilder {
                 reason: BuilderRefusal::Open,
             });
         }
-        let exists = ["", "-wal", "-shm", "-journal"]
-            .iter()
-            .any(|suffix| sibling(path, suffix).symlink_metadata().is_ok());
-        if exists {
-            return Err(StorageError::BuilderRefused {
-                reason: BuilderRefusal::Exists,
-            });
-        }
         if col.version != SCHEMA_VERSION {
             return Err(StorageError::Mode {
                 detail: format!("the builder writes schema 18, not {}", col.version),
             });
         }
-        let remove = || {
-            for suffix in ["", "-wal", "-shm", "-journal"] {
-                let _ = std::fs::remove_file(sibling(path, suffix));
-            }
-        };
-        create_file(path, col, config).inspect_err(|_| remove())?;
-        let collection = open::open_collection(path, options).map_err(|e| {
-            remove();
-            StorageError::Io {
-                detail: format!("opening the new collection: {e}"),
-            }
+        let claim = Claim::take(path)?;
+        create_file(path, col, config)?;
+        let collection = open::open_collection(path, options).map_err(|e| StorageError::Io {
+            detail: format!("opening the new collection: {e}"),
         })?;
+        claim.keep();
         Ok(CollectionBuilder { collection })
     }
 
@@ -595,13 +676,12 @@ impl CollectionBuilder {
     }
 }
 
-/// A new file: page size 4096, then the schema-18 statements, the `col` row
-/// and the config rows in one transaction.
+/// The new file a [`Claim`] created, still empty: page size 4096, then the
+/// schema-18 statements, the `col` row and the config rows in one
+/// transaction. Opened without create: if the claimed file is gone, this
+/// fails rather than make another.
 fn create_file(path: &Path, col: &Col, config: &[ConfigEntry]) -> Result<(), StorageError> {
-    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
-        | OpenFlags::SQLITE_OPEN_CREATE
-        | OpenFlags::SQLITE_OPEN_URI
-        | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX;
     let conn = Connection::open_with_flags(file_uri(path, None), flags)?;
     crate::conn_init::probe(&conn).map_err(|detail| StorageError::ConnectionInit { detail })?;
     conn.execute_batch("PRAGMA page_size = 4096")?;
