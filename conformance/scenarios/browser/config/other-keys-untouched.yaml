@@ -1,0 +1,34 @@
+# Writing one browser key touches no other key (specs/browser/config-keys.md
+# K9, K10.1; R1138, R1266): after a flagLabels write, the browser keys set at
+# setup, the two Reposition keys Meguri never uses, an add-on key and browser
+# keys another client stored with its own spacing all keep their bytes, usn
+# and mtime_secs; only flagLabels is stamped with the time of the write, and
+# col.mod moves once. Needs browser_config_set
+# (specs/conformance/browser-config-ops.md B1) and db_exec (record-ops.md W1).
+id: browser/config/other-keys-untouched
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    activeCols: [noteFld, addonX, deck]
+    sortType: noteCrt
+    savedFilters: {Leeches: "tag:leech"}
+    collapseTags: true
+    setDueBrowser: "3"
+    randomOrderReposition: true
+    shiftPositionOfExistingCards: false
+    myAddon_state: {b: 1, a: [1, 2.5]}
+steps:
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, CAST(? AS BLOB)), (?, 3, 1700000500, CAST(? AS BLOB)), (?, 0, 1700000900, CAST(? AS BLOB))"
+      params:
+        - activeNoteCols
+        - '[ "noteFld" , "addonY" ]'
+        - previewBothSides
+        - ' false '
+        - otherClient_layout
+        - '{"z": 1, "a" :[1, 2.50]}'
+  - advance: 1h
+  - browser_config_set: {key: flagLabels, value: {"3": Important}}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), typeof(val) FROM config WHERE KEY IN ('activeCols', 'activeNoteCols', 'sortType', 'savedFilters', 'collapseTags', 'setDueBrowser', 'randomOrderReposition', 'shiftPositionOfExistingCards', 'myAddon_state', 'previewBothSides', 'otherClient_layout', 'flagLabels') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT KEY FROM config WHERE mtime_secs >= 1894705200 ORDER BY KEY"}
+  - db_exec: {sql: "SELECT count(*) FROM col WHERE mod >= 1894705200000"}

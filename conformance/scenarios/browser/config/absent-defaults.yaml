@@ -1,0 +1,14 @@
+# With every browser and search config key absent, Anki's own reads give the
+# defaults of specs/browser/config-keys.md K1 (restorePositionBrowser and
+# normalize_note_text true, setDueBrowser "0", the default column lists, no
+# sort column), and reading writes nothing (K2, R1138): no key appears, no row
+# is stamped after the advance, col.mod does not move. Needs db_exec
+# (record-ops.md W1) and the browser_config observation
+# (browser-config-ops.md B2).
+id: browser/config/absent-defaults
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec: {sql: "DELETE FROM config WHERE KEY IN ('activeCols', 'activeNoteCols', 'sortType', 'noteSortType', 'sortBackwards', 'browserNoteSortBackwards', 'browserTableShowNotesMode', 'savedFilters', 'flagLabels', 'collapseSavedSearches', 'collapseToday', 'collapseFlags', 'collapseCardState', 'collapseDecks', 'collapseNotetypes', 'collapseTags', 'previewBothSides', 'setDueBrowser', 'defaultSearchText', 'ignoreAccentsInSearch', 'restorePositionBrowser', 'resetCountsBrowser', 'normalize_note_text', 'randomOrderReposition', 'shiftPositionOfExistingCards')"}
+  - advance: 1h
+  - observe: [browser_config]
+  - db_exec: {sql: "SELECT (SELECT count(*) FROM config WHERE KEY IN ('activeCols', 'activeNoteCols', 'sortType', 'noteSortType', 'sortBackwards', 'browserNoteSortBackwards', 'browserTableShowNotesMode', 'savedFilters', 'flagLabels', 'collapseSavedSearches', 'collapseToday', 'collapseFlags', 'collapseCardState', 'collapseDecks', 'collapseNotetypes', 'collapseTags', 'previewBothSides', 'setDueBrowser', 'defaultSearchText', 'ignoreAccentsInSearch', 'restorePositionBrowser', 'resetCountsBrowser', 'normalize_note_text', 'randomOrderReposition', 'shiftPositionOfExistingCards')), (SELECT count(*) FROM config WHERE mtime_secs >= 1894705200), (SELECT count(*) FROM col WHERE mod >= 1894705200000)"}

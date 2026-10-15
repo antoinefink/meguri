@@ -335,7 +335,7 @@ hec37a4cc2d38,rust,tag,media,unclassified,,,open
 hfc5d2785b867,rust,tag,media,unclassified,,,open
 hfe84eb8e5a8e,rust,tag,media,unclassified,,,open
 h1617b31103f7,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
-h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,,deferred
+h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,browser/config/absent-defaults,done
 h32c56ad2dd75,python,tag,model,in-scope,"Config values keep their JSON kind through a write: integers, floats, booleans, null, strings, lists and objects",storage/config/rewrite-same-value,done
 h41cb2879dea9,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h7f33038d26bd,python,tag,model,in-scope,"Removing a config key deletes its row; scenarios come with deck and note type removal, which remove key families (U28, U29)",,deferred
@@ -347,7 +347,7 @@ hdadc818e52d7,python,tag,model,in-scope,A config value written through the confi
 he051a468be4b,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong type takes the default,model/card-data/lenient model/schema11/notetype-values model/schema11/deck-values model/schema11/preset-values,done
 h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
-had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",,deferred
+had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",browser/config/absent-defaults browser/config/wrong-shapes,done
 hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes restores the earlier row, removes an added key and restores a removed one; scenarios come with the undo op (U25)",,deferred
 h00dd7a3ecf58,python,tag,notes,unclassified,,,open
 h086997a07e68,python,tag,notes,unclassified,,,open

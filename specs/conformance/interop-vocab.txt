@@ -74,3 +74,6 @@ lrt
 nextPos
 localOffset
 db-check
+# browser-config-ops.md: the browser config op and observation kind
+browser_config_set
+browser_config
