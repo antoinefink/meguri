@@ -1,0 +1,53 @@
+# specs/search/grammar.md G3: quoted, partly quoted and unquoted terms and where
+# they end; spaces are optional where the boundary is clear.
+id: search/lexing/terms
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # term boundaries
+          - 'a"b"(c)'
+          - '"f o o"bar'
+          - 'a(b)'
+          - '(x)(y)'
+          - '"x""y"'
+          - '"x"(y)'
+          - 'a "b" c'
+          - 'a b'
+          # quoted terms
+          - '"a b"'
+          - '"a"'
+          - '"(a)"'
+          - '"a-b"'
+          - '"-"'
+          - '"a\"b"'
+          - 'a\"b'
+          - '"\("'
+          - '"\)\("'
+          - '")("'
+          - '"a:b c"'
+          - '"a\:b c"'
+          - '"日本 語"'
+          - 'ü'
+          - '"foo" "b a r"'
+          - '"field:va\"lue"'
+          # partly quoted terms: the quote must follow the first colon directly
+          - 'key:"value with spaces"'
+          - 'key: "value"'
+          - 'a:"b"c'
+          - 'deck:"a b"c'
+          - 'x:"a" y'
+          - 'a:b:"c"'
+          - 'field:"foo"'
+          - 'field:"va\"lue"'
+          - 'DECK:"a b"'
+          - 'a\":"b"'
+          # keys inside quotes are still keys
+          - '"deck:a b"'
+          - 'deck:a b'
+          - '"my field:x"'
+          - '"f:"'
+          - '"and"'
+          - '"OR"'
+          - '"Or"'
+          - '"aNd" "oR"'

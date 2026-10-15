@@ -1,0 +1,71 @@
+# specs/search/grammar.md G7: the valid escapes of plain text, what each value
+# kind (U, Q, D, R) keeps, and raw contexts where any escape passes.
+id: search/lexing/escapes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # plain text: the eight valid escapes
+          - '\\'
+          - '\"'
+          - '\:'
+          - '\('
+          - '\)'
+          - '\-'
+          - '\*'
+          - '\_'
+          - '\"\:\(\)\-'
+          - '\\\*\_'
+          - '\*\:\_'
+          - 'a\\b'
+          - 'a\\\\b'
+          - 'a\\\:b'
+          # R1029, R1030
+          - '3\:30'
+          - '\-term'
+          - '\-'
+          - '-\-'
+          - '\( \)'
+          - 'A\-'
+          - '\-A'
+          # U values of keys
+          - 'deck:\:'
+          - 'deck:a\-b'
+          - 'deck:\-a'
+          - 'deck:a\(b'
+          - 'deck:a\"b'
+          - 'deck:a\*b'
+          - 'deck:a\:b'
+          - 'deck:a\\b'
+          - 'note:a\-b'
+          - 'tag:a\_b'
+          - 'w:a\:b'
+          - 'nc:a\(b'
+          - 'sc:a\)b'
+          - 'has-cd:a\-b'
+          - 'field:val\:ue'
+          - 'field:va\"lue'
+          # Q values: regex patterns keep every escape but \"
+          - 're:\d'
+          - 're:a\x'
+          - '"re:\btest\%"'
+          - 're:te\"st'
+          - 're:\('
+          - 'f:re:a\x'
+          - 'f:re:a\"b'
+          - 'tag:re:a\x'
+          - 'tag:re:\\'
+          - 'f:nc:a\x'
+          - 'f:nc:a\:b'
+          # R values keep everything
+          - 'preset:a\x'
+          - 'preset:a\:b'
+          - 'preset:a\-b'
+          - 'prop:cds:k=a\:b'
+          - 'prop:cds:k=a\x'
+          # D values (dupe text)
+          - 'dupe:1,a\\b'
+          - 'dupe:1,a\"b'
+          - 'dupe:1,\\\"'
+          - 'dupe:1,a\x'
+          - 'dupe:1,a\:b'

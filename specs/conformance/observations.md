@@ -47,7 +47,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
 | `render` | card references or none | draft (render): question and answer HTML, AV tags and error kind per card |
-| `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
+| `search` | list of `{query, kind?: cards \| notes}` | draft (`search-ops.md` S1): one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
+| `canonical_search` | list of search texts | draft (`search-ops.md` S2): one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |

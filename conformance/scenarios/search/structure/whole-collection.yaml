@@ -1,0 +1,34 @@
+# specs/search/query-model.md Q2, Q5, Q6: the empty search returns every card
+# in cards mode and every note in notes mode, also cards whose note row is gone
+# and notes without cards. #c3 loses its note (#n3), #n2 loses its card (#c2).
+# Needs only the whole-collection term.
+id: search/structure/whole-collection
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog, x]}
+    - {notetype: Single, fields: [cat, x]}
+    - {notetype: Single, fields: [fish, x]}
+steps:
+  - observe:
+      - search:
+          - {query: ''}
+          - {query: '', kind: notes}
+          - {query: '   '}
+          - {query: '   ', kind: notes}
+          - {query: "\u0009\u000a"}
+          - {query: "\u0009\u000a", kind: notes}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - search:
+          - {query: ''}
+          - {query: '', kind: notes}
+          - {query: "\u3000"}
+          - {query: "\u3000", kind: notes}
+      - canonical_search: ["", " \u3000 "]

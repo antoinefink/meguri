@@ -1,0 +1,47 @@
+# specs/search/errors.md E2 and grammar.md G3, G7: unknown escapes and the
+# text each one reports, backticks shown as apostrophes (search-ops.md S3).
+id: search/errors/escapes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # lexical
+          - '\'
+          - 'abc\'
+          - 'a \'
+          - '\ '
+          - 'a\ b'
+          - 'foo\ bar baz'
+          - '(a\ b) c'
+          - "a\\\u3000b"
+          - "a\\\u0009b  c"
+          - '"\ "'
+          - '"a\ b"'
+          # in U values
+          - '\x'
+          - '\%'
+          - '\foo'
+          - '\x\y'
+          - 'a\\\x'
+          - 'a\\x\y'
+          - '"\x"'
+          - 'deck:a\x'
+          - 'tag:nc:a\x'
+          - 'w:a\x'
+          - 'nc:a\x'
+          - 'sc:a\x'
+          - 'has-cd:\x'
+          - 'note:\x'
+          - 'card:\x'
+          - 'k\x:"v"'
+          - 'fi\eld:x'
+          - 'field:\x'
+          - 'f:a\%'
+          - 'x:\'
+          - '\`'
+          - 'a\`b'
+          # backticks in reported texts
+          - 'is:a`b'
+          - 'prop:a`b'
+          - 'prop:ivl>`'
+          - 'added:`'

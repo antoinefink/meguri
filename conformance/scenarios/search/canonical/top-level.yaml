@@ -1,0 +1,21 @@
+# specs/search/canonical-form.md F2: one group that is the whole search is
+# written without its brackets (one level only); other searches keep theirs.
+id: search/canonical/top-level
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          - '(a b)'
+          - '((a b))'
+          - '(a)'
+          - '((a))'
+          - '(a) (b)'
+          - '-(a b)'
+          - '(a) b'
+          - 'a (b)'
+          - '(a or b)'
+          - '(-a)'
+          - '(deck:*)'
+          - '("a b")'
+          - '(is:due or is:new) flag:1'
+          - '((is:due or is:new) (flag:1 or flag:2))'

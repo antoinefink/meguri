@@ -1,0 +1,45 @@
+# AE41, R1024, R1025: AND before OR, grouping and negation, in cards and notes
+# mode. Needs the plain-text term (U81); one card per note.
+id: search/structure/precedence-results
+tags: [needs-text]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog cat, x]}
+    - {notetype: Single, fields: [dog, x]}
+    - {notetype: Single, fields: [cat, x]}
+    - {notetype: Single, fields: [fish, x]}
+    - {notetype: Single, fields: [dog fish, x]}
+steps:
+  - observe:
+      - canonical_search: ["dog cat or  fish"]
+      - search:
+          - {query: 'dog cat or  fish'}
+          - {query: 'dog cat or  fish', kind: notes}
+          - {query: 'dog (cat or fish)'}
+          - {query: 'dog (cat or fish)', kind: notes}
+          - {query: '(dog cat) or fish'}
+          - {query: '(dog cat) or fish', kind: notes}
+          - {query: 'cat or dog fish'}
+          - {query: 'cat or dog fish', kind: notes}
+          - {query: 'dog and cat or fish and dog'}
+          - {query: 'dog and cat or fish and dog', kind: notes}
+          - {query: '-dog'}
+          - {query: '-dog', kind: notes}
+          - {query: '-(dog or cat)'}
+          - {query: '-(dog or cat)', kind: notes}
+          - {query: 'dog -cat'}
+          - {query: 'dog -cat', kind: notes}
+          - {query: '-dog -cat'}
+          - {query: '-dog -cat', kind: notes}
+          - {query: '(dog)'}
+          - {query: '(dog)', kind: notes}
+          - {query: '((dog))'}
+          - {query: '((dog))', kind: notes}
+          - {query: '-(-dog)'}
+          - {query: '-(-dog)', kind: notes}

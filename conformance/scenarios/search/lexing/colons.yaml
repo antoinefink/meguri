@@ -1,0 +1,52 @@
+# specs/search/grammar.md G6: the first unescaped colon splits key and value;
+# later colons need no escape; an unreserved key is a field search (R1032).
+id: search/lexing/colons
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # colons after the first
+          - 'w:3:30'
+          - 'a:b:c'
+          - 'a::'
+          - 'rid:1:2'
+          - 'field:val:ue'
+          - '"field:val:ue"'
+          - 'field:"val:ue"'
+          - 'tag:a::b'
+          - 'deck:a::b'
+          # escaped colons
+          - '\::x'
+          - 'de\:ck:x'
+          - 'a\:b:c'
+          - 'deck\:x'
+          - '3\:30'
+          # mode prefixes of field and tag searches
+          - 'f:re:x'
+          - 'f:nc:x'
+          - 'f:re\:x'
+          - 'f:nc\:x'
+          - 'f:RE:x'
+          - 'tag:re:x'
+          - 'tag:nc:x'
+          - 'tag:re\:x'
+          - 'tag:NC:x'
+          # field names
+          - '\-f:x'
+          - 'f*:x'
+          - '*:x'
+          - '_*:x'
+          - 'or:x'
+          - 'AND:x'
+          - 'not:x'
+          - 'has\-cd:x'
+          - 'has-cd:x'
+          - 'f\(x\):y'
+          - 'f\"x:y'
+          # empty values
+          - 'f:'
+          - '"f:"'
+          - 'f:re:'
+          - 'f:nc:'
+          - 'tag:re:'
+          - 'tag:nc:'

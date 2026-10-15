@@ -1,0 +1,39 @@
+# specs/search/errors.md E1, E2: one or more inputs per parse error kind
+# (R1075), with the provided and context texts.
+id: search/errors/kinds
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # R1075 list
+          - 'and a'
+          - 'a or'
+          - '()'
+          - ')'
+          - '(a'
+          - '""'
+          - '"abc'
+          - ':x'
+          - 'is:foo'
+          - 'flag:9'
+          - 'prop:foo>1'
+          - 'prop:ivl~1'
+          - 'prop:ivl>x'
+          - 'rated:1:5'
+          - 'nid:1,a'
+          # the other kinds
+          - '\x'
+          - 'abc\'
+          - 'prop:ease>x'
+          - 'prop:due=0.5'
+          - 'prop:rated=1'
+          - 'mid:x'
+          - 'added:x'
+          - 'dupe:1'
+          # operator words alone
+          - 'and'
+          - 'or'
+          - 'AND'
+          - 'Or'
+          - 'and and'
+          - 'or or'

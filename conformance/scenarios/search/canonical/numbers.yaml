@@ -1,0 +1,51 @@
+# specs/search/canonical-form.md F6 and grammar.md G9: whole numbers lose `+`
+# and leading zeros; floats are written as Rust's f32 Display writes them.
+id: search/canonical/numbers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # floats
+          - 'prop:ease>1.0'
+          - 'prop:ease>1.'
+          - 'prop:ease>1E0'
+          - 'prop:ease>2.50'
+          - 'prop:ease>1e3'
+          - 'prop:ease>1E3'
+          - 'prop:ease>.5'
+          - 'prop:ease>+.5'
+          - 'prop:ease>0.1'
+          - 'prop:ease>0.3333333333'
+          - 'prop:ease>1e-10'
+          - 'prop:ease>16777217'
+          - 'prop:ease>123456789'
+          - 'prop:ease>1e39'
+          - 'prop:ease>1e400'
+          - 'prop:ease>infinity'
+          - 'prop:ease>inf'
+          - 'prop:ease>INF'
+          - 'prop:ease>-inf'
+          - 'prop:ease>nan'
+          - 'prop:ease>NaN'
+          - 'prop:ease>1e-50'
+          - 'prop:ease>-1e-50'
+          - 'prop:ease>-0'
+          - 'prop:s>3.4e38'
+          - 'prop:d<0.000001'
+          - 'prop:r>=0.5e1'
+          - 'prop:cdn:k=-2.25'
+          # whole numbers
+          - 'prop:ivl>=+5'
+          - 'prop:ivl>007'
+          - 'prop:due=-0'
+          - 'prop:due>+3'
+          - 'prop:due<-2147483648'
+          - 'prop:reps=4294967295'
+          - 'mid:+5'
+          - 'mid:007'
+          - 'dupe:+1,a'
+          - 'dupe:-0,a'
+          - 'flag:007'
+          - 'card:007'
+          - 'added:007'
+          - 'rated:007:+4'
