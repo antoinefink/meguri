@@ -1,0 +1,21 @@
+# Old Anki releases (2.1.26, 2.1.33, 2.1.40, 2.1.44) for the storage upgrade
+# fixtures (specs/storage/schema-upgrade.md U16). AGPL-3.0-or-later (oracle/LICENSE).
+# Their wheels are x86_64 only and need Python 3.8, so the image is linux/amd64
+# (emulated on Apple silicon): make.sh builds and runs it with --platform
+# linux/amd64. Never pushed.
+
+FROM python:3.8-slim-bullseye@sha256:e191a71397fd61fbddb6712cd43ef9a2c17df0b5e7ba67607128554cd6bff267
+
+# libfaketime freezes the clock; the maker moves it through a timestamp file.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libfaketime \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG RELEASE
+COPY locks/anki-${RELEASE}.lock /opt/fixtures/requirements.lock
+RUN pip install --no-cache-dir --disable-pip-version-check --root-user-action=ignore \
+      --require-hashes --no-deps -r /opt/fixtures/requirements.lock \
+ && python -c "import anki"
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=UTC
+WORKDIR /work

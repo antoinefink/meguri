@@ -5,3 +5,51 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[features]
+# Test-only hooks (KTD18): fault points fire (meguri-model's feature decides)
+# and the raw SQL of the conformance runner (`raw`). Never on by default or in
+# Release; meguri-testkit turns it on.
+test-hooks = ["meguri-model/test-hooks"]
+
+[dependencies]
+meguri-model.workspace = true
+meguri-text.workspace = true
+rusqlite.workspace = true
+ryu.workspace = true
+serde.workspace = true
+# raw_value: the upgrade reads the legacy JSON columns member by member, as
+# exact text (specs/model/json-numbers.md N7).
+serde_json = { workspace = true, features = ["raw_value"] }
+# The open gate decides whether a file behind a hot rollback journal is
+# refused on a copy in a temporary directory (open-and-connections C3).
+tempfile.workspace = true
+
+[dev-dependencies]
+# Turns on test-hooks for the tests (testkit depends on this crate with it).
+meguri-testkit.workspace = true
+sha2.workspace = true
+
+[[test]]
+name = "open_refuse"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "upgrade"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "schema_objects"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "connections"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "collation_order"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "open_budget"
+required-features = ["test-hooks"]

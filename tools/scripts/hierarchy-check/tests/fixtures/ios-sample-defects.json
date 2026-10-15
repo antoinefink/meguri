@@ -1,0 +1,466 @@
+{
+  "captured_at" : 1791887398.370364,
+  "platform" : "ios",
+  "root" : {
+    "children" : [
+      {
+        "children" : [
+          {
+            "children" : [
+              {
+                "children" : [
+                  {
+                    "children" : [
+                      {
+                        "children" : [
+                          {
+                            "children" : [
+                              {
+                                "children" : [
+                                  {
+                                    "children" : [
+
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 44,
+                                      "width" : 44,
+                                      "x" : 16,
+                                      "y" : 62
+                                    },
+                                    "hit_point" : {
+                                      "x" : 38,
+                                      "y" : 84
+                                    },
+                                    "identifier" : "BackButton",
+                                    "label" : "Back",
+                                    "selected" : false,
+                                    "type" : "button",
+                                    "value" : null
+                                  }
+                                ],
+                                "enabled" : true,
+                                "focused" : false,
+                                "frame" : {
+                                  "height" : 54,
+                                  "width" : 402,
+                                  "x" : 0,
+                                  "y" : 62
+                                },
+                                "hit_point" : {
+                                  "x" : 201,
+                                  "y" : 89
+                                },
+                                "identifier" : "_TtGC7SwiftUI32NavigationStackHosting",
+                                "label" : "",
+                                "selected" : false,
+                                "type" : "navigationBar",
+                                "value" : null
+                              },
+                              {
+                                "children" : [
+                                  {
+                                    "children" : [
+                                      {
+                                        "children" : [
+                                          {
+                                            "children" : [
+                                              {
+                                                "children" : [
+
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 20.33,
+                                                  "width" : 143.67,
+                                                  "x" : 16,
+                                                  "y" : 132
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 87.83,
+                                                  "y" : 142.17
+                                                },
+                                                "identifier" : "",
+                                                "label" : "Unidentified action",
+                                                "selected" : false,
+                                                "type" : "button",
+                                                "value" : null
+                                              },
+                                              {
+                                                "children" : [
+
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 20.33,
+                                                  "width" : 126.33,
+                                                  "x" : 16,
+                                                  "y" : 184.33
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 79.17,
+                                                  "y" : 194.5
+                                                },
+                                                "identifier" : "sample.defects.first",
+                                                "label" : "Overlapping first",
+                                                "selected" : false,
+                                                "type" : "staticText",
+                                                "value" : null
+                                              },
+                                              {
+                                                "children" : [
+
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 20.33,
+                                                  "width" : 152.67,
+                                                  "x" : 56,
+                                                  "y" : 192.33
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 132.33,
+                                                  "y" : 202.5
+                                                },
+                                                "identifier" : "sample.defects.second",
+                                                "label" : "Overlapping second",
+                                                "selected" : false,
+                                                "type" : "staticText",
+                                                "value" : null
+                                              },
+                                              {
+                                                "children" : [
+
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 20.33,
+                                                  "width" : 142.67,
+                                                  "x" : 16,
+                                                  "y" : 244.67
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 87.33,
+                                                  "y" : 254.83
+                                                },
+                                                "identifier" : "sample.defects.spinnerLabel",
+                                                "label" : "Behind the spinner",
+                                                "selected" : false,
+                                                "type" : "staticText",
+                                                "value" : null
+                                              },
+                                              {
+                                                "children" : [
+                                                  {
+                                                    "children" : [
+
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 20,
+                                                      "width" : 20,
+                                                      "x" : 77.33,
+                                                      "y" : 245
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 87.33,
+                                                      "y" : 255
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "activityIndicator",
+                                                    "value" : "1"
+                                                  }
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 20,
+                                                  "width" : 20,
+                                                  "x" : 77.33,
+                                                  "y" : 245
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 87.33,
+                                                  "y" : 255
+                                                },
+                                                "identifier" : "sample.defects.spinner",
+                                                "label" : "",
+                                                "selected" : false,
+                                                "type" : "activityIndicator",
+                                                "value" : "1"
+                                              }
+                                            ],
+                                            "enabled" : true,
+                                            "focused" : false,
+                                            "frame" : {
+                                              "height" : 874,
+                                              "width" : 402,
+                                              "x" : 0,
+                                              "y" : 0
+                                            },
+                                            "hit_point" : {
+                                              "x" : 201,
+                                              "y" : 437
+                                            },
+                                            "identifier" : "",
+                                            "label" : "",
+                                            "selected" : false,
+                                            "type" : "other",
+                                            "value" : null
+                                          }
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 874,
+                                          "width" : 402,
+                                          "x" : 0,
+                                          "y" : 0
+                                        },
+                                        "hit_point" : {
+                                          "x" : 201,
+                                          "y" : 437
+                                        },
+                                        "identifier" : "",
+                                        "label" : "",
+                                        "selected" : false,
+                                        "type" : "other",
+                                        "value" : null
+                                      }
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 874,
+                                      "width" : 402,
+                                      "x" : 0,
+                                      "y" : 0
+                                    },
+                                    "hit_point" : {
+                                      "x" : 201,
+                                      "y" : 437
+                                    },
+                                    "identifier" : "",
+                                    "label" : "",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : null
+                                  }
+                                ],
+                                "enabled" : true,
+                                "focused" : false,
+                                "frame" : {
+                                  "height" : 874,
+                                  "width" : 402,
+                                  "x" : 0,
+                                  "y" : 0
+                                },
+                                "hit_point" : {
+                                  "x" : 201,
+                                  "y" : 437
+                                },
+                                "identifier" : "",
+                                "label" : "",
+                                "selected" : false,
+                                "type" : "other",
+                                "value" : null
+                              },
+                              {
+                                "children" : [
+                                  {
+                                    "children" : [
+
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 874,
+                                      "width" : 402,
+                                      "x" : 0,
+                                      "y" : 0
+                                    },
+                                    "hit_point" : {
+                                      "x" : 201,
+                                      "y" : 437
+                                    },
+                                    "identifier" : "",
+                                    "label" : "",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : null
+                                  }
+                                ],
+                                "enabled" : true,
+                                "focused" : false,
+                                "frame" : {
+                                  "height" : 874,
+                                  "width" : 402,
+                                  "x" : 0,
+                                  "y" : 0
+                                },
+                                "hit_point" : {
+                                  "x" : 201,
+                                  "y" : 437
+                                },
+                                "identifier" : "Toolbar",
+                                "label" : "Toolbar",
+                                "selected" : false,
+                                "type" : "toolbar",
+                                "value" : null
+                              }
+                            ],
+                            "enabled" : true,
+                            "focused" : false,
+                            "frame" : {
+                              "height" : 874,
+                              "width" : 402,
+                              "x" : 0,
+                              "y" : 0
+                            },
+                            "hit_point" : {
+                              "x" : 201,
+                              "y" : 437
+                            },
+                            "identifier" : "",
+                            "label" : "",
+                            "selected" : false,
+                            "type" : "other",
+                            "value" : null
+                          }
+                        ],
+                        "enabled" : true,
+                        "focused" : false,
+                        "frame" : {
+                          "height" : 874,
+                          "width" : 402,
+                          "x" : 0,
+                          "y" : 0
+                        },
+                        "hit_point" : {
+                          "x" : 201,
+                          "y" : 437
+                        },
+                        "identifier" : "",
+                        "label" : "",
+                        "selected" : false,
+                        "type" : "other",
+                        "value" : null
+                      }
+                    ],
+                    "enabled" : true,
+                    "focused" : false,
+                    "frame" : {
+                      "height" : 874,
+                      "width" : 402,
+                      "x" : 0,
+                      "y" : 0
+                    },
+                    "hit_point" : {
+                      "x" : 201,
+                      "y" : 437
+                    },
+                    "identifier" : "",
+                    "label" : "",
+                    "selected" : false,
+                    "type" : "other",
+                    "value" : null
+                  }
+                ],
+                "enabled" : true,
+                "focused" : false,
+                "frame" : {
+                  "height" : 874,
+                  "width" : 402,
+                  "x" : 0,
+                  "y" : 0
+                },
+                "hit_point" : {
+                  "x" : 201,
+                  "y" : 437
+                },
+                "identifier" : "",
+                "label" : "",
+                "selected" : false,
+                "type" : "other",
+                "value" : null
+              }
+            ],
+            "enabled" : true,
+            "focused" : false,
+            "frame" : {
+              "height" : 874,
+              "width" : 402,
+              "x" : 0,
+              "y" : 0
+            },
+            "hit_point" : {
+              "x" : 201,
+              "y" : 437
+            },
+            "identifier" : "",
+            "label" : "",
+            "selected" : false,
+            "type" : "other",
+            "value" : null
+          }
+        ],
+        "enabled" : true,
+        "focused" : false,
+        "frame" : {
+          "height" : 874,
+          "width" : 402,
+          "x" : 0,
+          "y" : 0
+        },
+        "hit_point" : {
+          "x" : 201,
+          "y" : 437
+        },
+        "identifier" : "",
+        "label" : "",
+        "selected" : false,
+        "type" : "window",
+        "value" : null
+      }
+    ],
+    "enabled" : true,
+    "focused" : false,
+    "frame" : {
+      "height" : 874,
+      "width" : 402,
+      "x" : 0,
+      "y" : 0
+    },
+    "hit_point" : {
+      "x" : 201,
+      "y" : 437
+    },
+    "identifier" : "",
+    "label" : "Meguri",
+    "selected" : false,
+    "type" : "application",
+    "value" : null
+  },
+  "schema" : 1,
+  "screenshot" : {
+    "origin" : {
+      "x" : 0,
+      "y" : 0
+    },
+    "scale" : 3
+  },
+  "window" : {
+    "height" : 874,
+    "width" : 402,
+    "x" : 0,
+    "y" : 0
+  }
+}

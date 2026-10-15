@@ -1,0 +1,23 @@
+# specs/storage/schema-upgrade.md U6, U7, U4.4, U11. Anki walks note types,
+# decks and tags in a random order, so every query here gives the same result
+# whichever duplicate gets the suffix or survives, and the new id of the note
+# type stored under 0 is only checked for its range.
+id: storage/upgrade/names-11
+description: Duplicate and unnormalized names, a note type with id 0 and case-duplicate tags in a schema-11 file upgrade as Anki upgrades them.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-11-names.anki2}
+  - db_exec: {sql: "SELECT lower(name) FROM notetypes WHERE lower(name) LIKE 'pair%' ORDER BY 1"}
+  - db_exec: {sql: "SELECT count(*) FROM notetypes WHERE id = 0"}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE id BETWEEN 1 AND 4294967295"}
+  - db_exec: {sql: "SELECT count(*) FROM notes WHERE mid = 0"}
+  - db_exec: {sql: "SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid WHERE n.name = 'Dupes' ORDER BY f.ord"}
+  - db_exec: {sql: "SELECT t.ord, t.name, t.mtime_secs, t.usn FROM templates t JOIN notetypes n ON n.id = t.ntid WHERE n.name = 'Dupes' ORDER BY t.ord"}
+  - db_exec: {sql: "SELECT hex(name) FROM notetypes WHERE hex(name) LIKE '436166%'"}
+  - db_exec: {sql: "SELECT id, hex(name), mtime_secs, usn FROM decks WHERE id BETWEEN 12 AND 15 ORDER BY id"}
+  - db_exec: {sql: "SELECT lower(name) FROM decks WHERE id IN (10, 11) ORDER BY 1"}
+  - db_exec: {sql: "SELECT count(*) FROM decks WHERE id IN (10, 11) AND usn = -1 AND mtime_secs = 1894701600"}
+  - db_exec: {sql: "SELECT count(*) FROM decks WHERE id IN (10, 11) AND usn = 5 AND mtime_secs = 1000"}
+  - db_exec: {sql: "SELECT lower(tag), count(*) FROM tags GROUP BY lower(tag) ORDER BY 1"}
+  - db_exec: {sql: "SELECT count(*) FROM tags WHERE usn IN (3, 4)"}
+  - observe: [schema_objects]

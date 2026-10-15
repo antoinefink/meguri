@@ -13,10 +13,11 @@ use serde_json::Value;
 
 use crate::diff::{self, CompareOptions, Difference, pointer};
 use crate::exec::live::Chain;
-use crate::exec::{Executor, Needs, SegmentExecutor};
+use crate::exec::parties::Parties;
+use crate::exec::{Executor, MeguriExecutor, Needs, SegmentExecutor};
 use crate::observe;
 use crate::report::{Report, Tier};
-use crate::scenario::{self, LoadedScenario, Side};
+use crate::scenario::{self, ActorName, LoadedScenario, Side};
 use crate::wallclock::Stopwatch;
 
 #[derive(Debug, Clone)]
@@ -279,12 +280,16 @@ impl Outcome {
 }
 
 /// What T1 runs scenarios with: oracle workers, Meguri for its side of live
-/// chains, and the handoff directory both see (dsl.md D9, D10).
+/// chains and its actors of actor scenarios, and the handoff directory both
+/// see (dsl.md D9, D10; sync-ops.md S10).
 pub struct LiveRun<'a> {
     pub oracle: &'a dyn SegmentExecutor,
-    pub meguri: &'a dyn SegmentExecutor,
-    /// `None`: live scenarios are errors (no directory to hand over through).
+    pub meguri: &'a MeguriExecutor,
+    /// `None`: live chains are errors (no directory to hand over through).
     pub handoff_root: Option<&'a Path>,
+    /// The Meguri edge of mixed runs (sync-ops.md S8.1); `None` until the
+    /// first Meguri sync adapter wires it (U105).
+    pub meguri_edge: Option<&'a str>,
 }
 
 /// Options of the freshness check.
@@ -577,10 +582,13 @@ impl Suite {
             Ok(prepared) => prepared,
             Err(outcome) => return *outcome,
         };
-        let needs = if outcome.live {
-            loaded.scenario.needs_on(Side::Meguri)
+        let scenario = &loaded.scenario;
+        let needs = if scenario.has_actors() {
+            scenario.needs_of_meguri_actors()
+        } else if outcome.live {
+            scenario.needs_on(Side::Meguri)
         } else {
-            loaded.scenario.needs()
+            scenario.needs()
         };
         let missing = meguri.missing(&needs);
         if !missing.is_empty() {
@@ -589,7 +597,12 @@ impl Suite {
             return outcome;
         }
         if outcome.live {
-            let mut outcome = outcome.with(Status::Live, "a live chain: tools/mg conformance --live runs it");
+            let what = if scenario.has_actors() {
+                "an actor scenario"
+            } else {
+                "a live chain"
+            };
+            let mut outcome = outcome.with(Status::Live, format!("{what}: tools/mg conformance --live runs it"));
             outcome.repro = format!("tools/mg conformance --live {}", file.rel);
             return outcome;
         }
@@ -616,6 +629,9 @@ impl Suite {
             Ok(prepared) => prepared,
             Err(outcome) => return *outcome,
         };
+        if loaded.scenario.has_actors() {
+            return self.check_t1_actors(outcome, &loaded, &golden, live);
+        }
         let drift = match live.oracle.run(&loaded) {
             Ok(actual) => self.judge(
                 outcome.clone(),
@@ -650,6 +666,49 @@ impl Suite {
         match chain.run(&loaded) {
             Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, "the live chain: "),
             Err(e) => outcome.with(Status::Error, format!("live chain: {e}")),
+        }
+    }
+
+    /// T1 of an actor scenario (sync-ops.md S10.3), in the parties executor:
+    /// the replay, the oracle playing every actor, against the golden with no
+    /// deviation; then, when the scenario has Meguri actors and Meguri has
+    /// what they need, the mixed run, deviations applied.
+    fn check_t1_actors(
+        &self,
+        outcome: Outcome,
+        loaded: &LoadedScenario,
+        golden: &Golden,
+        live: &LiveRun<'_>,
+    ) -> Outcome {
+        let parties = Parties {
+            oracle: live.oracle,
+            meguri: live.meguri,
+            meguri_edge: live.meguri_edge,
+        };
+        let replay = match parties.replay(loaded) {
+            Ok(actual) => self.judge(
+                outcome.clone(),
+                loaded,
+                golden,
+                &actual,
+                false,
+                "the oracle no longer reproduces its golden: ",
+            ),
+            Err(e) => return outcome.with(Status::Error, format!("oracle replay: {e}")),
+        };
+        let scenario = &loaded.scenario;
+        if replay.status != Status::Pass || !scenario.actors().iter().any(ActorName::is_meguri) {
+            return replay;
+        }
+        let missing = live.meguri.missing(&scenario.needs_of_meguri_actors());
+        if !missing.is_empty() {
+            let mut outcome = outcome.with(Status::Pending, format!("needs {}", missing.summary()));
+            outcome.missing = Some(missing);
+            return outcome;
+        }
+        match parties.mixed(loaded) {
+            Ok(actual) => self.judge(outcome, loaded, golden, &actual, true, "the mixed run: "),
+            Err(e) => outcome.with(Status::Error, format!("mixed run: {e}")),
         }
     }
 

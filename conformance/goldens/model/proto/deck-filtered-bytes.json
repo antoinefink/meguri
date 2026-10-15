@@ -1,0 +1,92 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Cram": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "delays": null,
+              "desc": "",
+              "dyn": 1,
+              "id": 1500000000000,
+              "lrnToday": [0, 0],
+              "mod": 1500000000,
+              "name": "Cram",
+              "newToday": [0, 0],
+              "previewAgainSecs": 60,
+              "previewDelay": 0,
+              "previewGoodSecs": 0,
+              "previewHardSecs": 600,
+              "resched": true,
+              "revToday": [0, 0],
+              "separate": true,
+              "terms": [
+                ["is:due", 50, 6]
+              ],
+              "timeToday": [0, 0],
+              "usn": 0
+            }
+          }
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1500000000000, "Cram", 1500000000, 0, "08011001", "1230120C0A0669733A6475651032180612100A0A6465636B3A576F726473101418011A080000C03F00002041200A3078381E"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Cram": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "delays": [1.5, 10.0],
+              "desc": "",
+              "dyn": 1,
+              "id": 1500000000000,
+              "lrnToday": [0, 0],
+              "mod": 1500000000,
+              "name": "Cram",
+              "newToday": [0, 0],
+              "previewAgainSecs": 30,
+              "previewDelay": 10,
+              "previewGoodSecs": 120,
+              "previewHardSecs": 0,
+              "resched": false,
+              "revToday": [0, 0],
+              "separate": true,
+              "terms": [
+                ["is:due", 50, 6],
+                ["deck:Words", 20, 1]
+              ],
+              "timeToday": [0, 0],
+              "usn": 0
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/proto/deck-filtered-bytes",
+  "scenario_sha256": "2e4dbeb9b751d3e4148a21781523a4fa81d900fc53283ef7f4617202e2e4e6f6",
+  "tz": "UTC"
+}

@@ -16,6 +16,7 @@ The `config` table holds the collection's synced settings: Anki's own keys, keys
 | `mtime_secs` | epoch seconds of the last write |
 | `val` | the value: JSON text as bytes (C2) |
 
+- The DDL is `storage/schema-18` S2. Files that releases at schemas 14 to 16 created spell the key column `key`, and the upgrade keeps that text; SQLite matches column names in any letter case, so statements naming `KEY` work on both, but code that reads column names from the schema must not expect `KEY`.
 - Keys compare byte for byte: `curDeck` and `curdeck` are two keys. A key appears once.
 - A key's name says who owns it. Anki's keys include `curDeck`, `curModel`, `activeDecks`, `lastUnburied`, `nextPos` and `creationOffset`. Per-object families are `_nt_<note type id>_<name>` (for example `_nt_<id>_lastDeck`, the deck a note of that type was last added to) and `_deck_<deck id>_<name>` (for example `_deck_<id>_lastNotetype`, the note type last used in that deck), with the id in decimal. Meguri's keys are in C8. Every other key belongs to someone else (C7).
 
@@ -61,7 +62,7 @@ A value stored with the TEXT storage class is never the same value: Meguri repla
 
 ## C5. The compact form
 
-Meguri encodes a value exactly as Anki does, so the same value always gives the same bytes:
+Meguri encodes a value exactly as Anki does, so the same value always gives the same bytes. It is the same encoding as the schema upgrade's for `config.val` (`storage/schema-upgrade` U9.2):
 
 - no whitespace between tokens;
 - object members sorted by name, comparing names by Unicode code point (which is the byte order of their UTF-8): `{"B":2,"_x":3,"a":5,"a1":4,"b":1}`; each name once;

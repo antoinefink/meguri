@@ -1,0 +1,99 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Words": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Words",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1,
+              "x_addon": [
+                1,
+                {
+                  "a": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["08011001FA0F1A7B22785F6164646F6E223A5B312C7B2261223A747275657D5D7D", "0A020801"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Words": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Words",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1,
+              "x_addon": [
+                1,
+                {
+                  "a": true
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/schema11/deck-other-roundtrip",
+  "scenario_sha256": "730027940e757b9f14bf95dd796ec7a3501a198d78c8d566ebcdb4c6320e9fcb",
+  "tz": "UTC"
+}

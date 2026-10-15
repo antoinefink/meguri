@@ -10,7 +10,7 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 
 use serde_json::{Map, Value, json};
 
-use super::{ExecError, Executor, Handoff, Needs, SegmentExecutor, SegmentOutput, SegmentRequest};
+use super::{ExecError, Executor, Handoff, Interactive, Needs, SegmentExecutor, SegmentOutput, SegmentRequest};
 use crate::observe;
 use crate::scenario::LoadedScenario;
 use crate::suite::OraclePin;
@@ -314,6 +314,59 @@ impl SegmentExecutor for OracleExecutor {
             (Some(_), None) => return Err(ExecError::new("protocol_error", "a handoff without a state")),
         };
         Ok(SegmentOutput { steps, handoff })
+    }
+
+    fn interactive(&self, tz: &str) -> Result<Box<dyn Interactive + '_>, ExecError> {
+        let worker = self.checkout(tz)?;
+        Ok(Box::new(Session {
+            pool: self,
+            worker: Some(worker),
+            ended: false,
+        }))
+    }
+}
+
+/// A worker held for one interactive session (protocol.json `begin`, `step`,
+/// `end`). It goes back to the pool only after a successful `end`; otherwise
+/// it is stopped, so no session stays open on a pooled worker.
+struct Session<'a> {
+    pool: &'a OracleExecutor,
+    worker: Option<Worker>,
+    ended: bool,
+}
+
+impl Interactive for Session<'_> {
+    fn request(&mut self, request: &Value) -> Result<Value, ExecError> {
+        let worker = self
+            .worker
+            .as_mut()
+            .ok_or_else(|| ExecError::new("worker_died", "the session's worker is gone"))?;
+        self.ended = false;
+        let response = match worker.request(request) {
+            Ok(response) => response,
+            Err(e) => {
+                self.worker = None;
+                self.pool.release_slot();
+                return Err(e);
+            }
+        };
+        if response.get("ok") != Some(&Value::Bool(true)) {
+            return Err(protocol_error(response.get("error").and_then(Value::as_object)));
+        }
+        self.ended = request.get("cmd").and_then(Value::as_str) == Some("end");
+        Ok(response)
+    }
+}
+
+impl Drop for Session<'_> {
+    fn drop(&mut self) {
+        let Some(worker) = self.worker.take() else { return };
+        if self.ended {
+            self.pool.checkin(worker);
+        } else {
+            drop(worker);
+            self.pool.release_slot();
+        }
     }
 }
 

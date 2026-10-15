@@ -1,0 +1,30 @@
+{
+  "comment": "Pinned simulators (U8, R1966, KTD19). tools/scripts/sim-pool.sh creates pool devices Meguri-Pool-<kind>-<n> of these types on the newest installed iOS runtime, which must be this one: tools/mg sim-setup fails when its identifier or build differs. Update the pin and re-record baselines together (R1974).",
+  "runtime": {
+    "identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0",
+    "version": "27.0",
+    "build": "24A434"
+  },
+  "devices": [
+    {"kind": "iphone", "device_type": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "device_type_name": "iPhone 17 Pro", "role": "standard iPhone"},
+    {"kind": "iphone-small", "device_type": "com.apple.CoreSimulator.SimDeviceType.iPhone-17e", "device_type_name": "iPhone 17e", "role": "small iPhone"},
+    {"kind": "ipad", "device_type": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB", "device_type_name": "iPad Pro 13-inch (M5)", "role": "large iPad, regular widths"},
+    {"kind": "ipad-small", "device_type": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro", "device_type_name": "iPad mini (A17 Pro)", "role": "small iPad, compact widths in split view"}
+  ],
+  "foldable": {
+    "kind": "foldable",
+    "device_type_name_pattern": "fold",
+    "comment": "No foldable iPhone simulator in Xcode 27.0 (expected with 27.1); the lane reports unavailable: toolchain until an iPhone device type matches the pattern."
+  },
+  "status_bar": {
+    "time": "9:41",
+    "dataNetwork": "wifi",
+    "wifiMode": "active",
+    "wifiBars": 3,
+    "cellularMode": "active",
+    "cellularBars": 4,
+    "operatorName": "",
+    "batteryState": "charged",
+    "batteryLevel": 100
+  }
+}

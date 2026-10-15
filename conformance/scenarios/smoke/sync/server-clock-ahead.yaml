@@ -1,0 +1,20 @@
+# The scenario's sync server runs 301 s ahead of the client (R1932,
+# specs/conformance/sync-ops.md S3.2): logging in works, the status check of a
+# normal sync refuses with clock_incorrect, and the collection is unchanged.
+id: smoke/sync/server-clock-ahead
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a]
+server: {clock_offset_secs: 301}
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - observe: [db_dump]
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - observe: [db_dump]

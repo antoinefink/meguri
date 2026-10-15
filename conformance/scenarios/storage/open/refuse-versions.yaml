@@ -1,0 +1,16 @@
+# specs/storage/open-and-connections.md C1, C3; specs/conformance/storage-ops.md P1.
+# Every open is refused and the next one replaces it. Only the kind is
+# compared: Anki rewrites the header of a refused rollback-journal file, which
+# Meguri must not do (tests/open_refuse.rs checks the bytes and the directory).
+id: storage/open/refuse-versions
+description: Collections at schema 10, 12, 13 and 19, rollback-journal and WAL files, are refused with the right kind.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/ver-10-delete.anki2}
+  - open: {fixture: storage/ver-10-wal.anki2}
+  - open: {fixture: storage/ver-12-delete.anki2}
+  - open: {fixture: storage/ver-12-wal.anki2}
+  - open: {fixture: storage/ver-13-delete.anki2}
+  - open: {fixture: storage/ver-13-wal.anki2}
+  - open: {fixture: storage/ver-19-delete.anki2}
+  - open: {fixture: storage/ver-19-wal.anki2}

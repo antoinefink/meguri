@@ -15,7 +15,7 @@ A grave records that a card, note or deck was deleted, so the next sync can dele
 | `type` | 0 card, 1 note, 2 deck |
 | `usn` | -1 while pending; the server's USN once synced |
 
-- The primary key is (`oid`, `type`); the table has no row id, and an index on `usn` serves the pending query. Its DDL is U22's.
+- The primary key is (`oid`, `type`); the table has no row id, and the index `idx_graves_pending` on `usn` serves the pending query. The DDL is `storage/schema-18` S2 and S3.
 - Only cards, notes and decks get graves. Deleting a note type, a deck preset, a review-log row, a tag or a config key leaves none. Note type and preset deletions are schema changes that force a one-way sync. A sync only ever adds tags, so a tag removed on one device stays on the others. Config travels whole (`config-table.md` C9).
 
 ## G2. Insert or ignore

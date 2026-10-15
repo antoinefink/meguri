@@ -1,0 +1,108 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "legacy_update": {
+          "error": "invalid_json"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600, -1, "08011001", "0A020801"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Words": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Words",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/schema11/deck-rejections",
+  "scenario_sha256": "b9b8a13ab997ee4707f7c60a605bc6f88c8773b4b0f5932358242c50425d0231",
+  "tz": "UTC"
+}

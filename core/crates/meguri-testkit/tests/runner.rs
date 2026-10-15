@@ -104,6 +104,7 @@ fn t1<'a>(oracle: &'a dyn SegmentExecutor, meguri: &'a MeguriExecutor) -> LiveRu
         oracle,
         meguri,
         handoff_root: None,
+        meguri_edge: None,
     }
 }
 
@@ -916,8 +917,9 @@ fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
     write(root, "scenarios/smoke/chain.yaml", chain);
     golden_for(root, "smoke/chain", json!({"steps": [{}, {}, {"timing": {}}]}));
     let suite = Suite::open(root).unwrap();
-    // Meguri has no handoff adapters yet: pending.
-    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    // Without the storage area, Meguri has no handoff adapters: pending.
+    let without_storage = || MeguriExecutor::area_registry(&["clock", "text"]);
+    let report = suite.run(&[], &MeguriExecutor::with(without_storage()), "test");
     assert_eq!(report.outcomes[0].status, Status::Pending);
     assert!(report.outcomes[0].live);
     assert!(report.outcomes[0].missing.as_ref().unwrap().ops.contains("handoff"));
@@ -931,9 +933,12 @@ fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
             .contains("timing")
     );
 
-    let mut registry = MeguriExecutor::core_registry();
+    let mut registry = without_storage();
     registry.handoff(|_, _| Ok(()), |_, _| Ok(()));
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
+    // With the storage area's own handoff adapters too.
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
     assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
     assert_eq!(report.outcomes[0].repro, "tools/mg conformance --live smoke/chain");
     assert!(report.failures().is_empty());
@@ -978,4 +983,108 @@ fn an_op_anki_refuses_is_recorded_and_the_run_goes_on() {
         "{}",
         report.outcomes[0].message
     );
+}
+
+/// Copies a committed actor scenario under smoke/sync into the tree, with a
+/// stand-in golden: T0 never compares an actor scenario's observations.
+fn copy_sync_scenario(root: &Path, name: &str) {
+    let rel = format!("smoke/sync/{name}");
+    let from = repo_conformance().join(format!("scenarios/{rel}.yaml"));
+    write(
+        root,
+        &format!("scenarios/{rel}.yaml"),
+        &fs::read_to_string(from).unwrap(),
+    );
+    golden_for(root, &rel, json!({"steps": []}));
+}
+
+#[test]
+fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
+    use meguri_testkit::exec::{OpResult, Session};
+    use meguri_testkit::scenario::{ObservationRequest, Step};
+
+    fn never_op(_: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+        Err(ExecError::new("internal_error", "T0 ran an actor scenario"))
+    }
+    fn never_observe(_: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
+        Err(ExecError::new("internal_error", "T0 ran an actor scenario"))
+    }
+    fn never_dump(_: &mut Session<'_>) -> Result<Value, ExecError> {
+        Err(ExecError::new("internal_error", "T0 ran an actor scenario"))
+    }
+
+    let dir = tree();
+    let root = dir.path();
+    copy_sync_scenario(root, "two-party");
+    copy_sync_scenario(root, "meguri-downloads");
+    write(
+        root,
+        "scenarios/smoke/area.yaml",
+        "area: smoke\nactive: [sync/two-party]\n",
+    );
+    let suite = Suite::open(root).unwrap();
+    let find = |report: &meguri_testkit::report::Report, id: &str| {
+        report.outcomes.iter().find(|o| o.scenario == id).cloned().unwrap()
+    };
+
+    // No Meguri actor: live, active or not (sync-ops.md S10.2).
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    let two = find(&report, "smoke/sync/two-party");
+    assert_eq!(two.status, Status::Live, "{}", report.render_text());
+    assert!(two.live && two.active);
+    assert_eq!(two.repro, "tools/mg conformance --live smoke/sync/two-party");
+    // A Meguri actor that syncs: pending until Meguri plays actors and
+    // syncs, never invalid or failed.
+    let downloads = find(&report, "smoke/sync/meguri-downloads");
+    assert_eq!(downloads.status, Status::Pending, "{}", report.render_text());
+    assert!(downloads.live);
+    let missing = downloads.missing.unwrap();
+    assert_eq!(
+        missing.ops.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["actor", "sync"]
+    );
+    assert_eq!(
+        missing.observations.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["card"]
+    );
+    assert!(report.failures().is_empty(), "{}", report.render_text());
+
+    // Once Meguri has what its actor needs, the scenario is live: T0 still
+    // runs none of it (every adapter here would fail the run).
+    let mut registry = MeguriExecutor::area_registry(&["clock", "text"]);
+    registry.actor(never_dump);
+    registry.op_rejecting("sync", &["clock_incorrect", "network"], never_op);
+    registry.observation("card", never_observe);
+    registry.observation("db_dump", never_observe);
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    let downloads = find(&report, "smoke/sync/meguri-downloads");
+    assert_eq!(downloads.status, Status::Live, "{}", report.render_text());
+    assert!(report.failures().is_empty(), "{}", report.render_text());
+
+    // Meguri's executor alone refuses an actor scenario.
+    let loaded = meguri_testkit::scenario::load(&root.join("scenarios/smoke/sync/two-party.yaml")).unwrap();
+    let err = MeguriExecutor::new().run(&loaded).unwrap_err();
+    assert_eq!(err.kind, "invalid_scenario");
+    assert!(err.detail.contains("parties"), "{err}");
+}
+
+#[test]
+fn every_committed_actor_scenario_loads_and_is_never_invalid_in_t0() {
+    let suite = Suite::open(&repo_conformance()).unwrap();
+    let report = suite.run(&["smoke/sync".to_owned()], &MeguriExecutor::new(), "test");
+    assert_eq!(report.outcomes.len(), 5, "{}", report.render_text());
+    for outcome in &report.outcomes {
+        assert!(outcome.live, "{}", outcome.scenario);
+        assert!(
+            matches!(outcome.status, Status::Live | Status::Pending | Status::Missing),
+            "{}",
+            report.render_text()
+        );
+    }
+    let downloads = report
+        .outcomes
+        .iter()
+        .find(|o| o.scenario == "smoke/sync/meguri-downloads")
+        .unwrap();
+    assert_ne!(downloads.status, Status::Live, "Meguri cannot play an actor yet");
 }

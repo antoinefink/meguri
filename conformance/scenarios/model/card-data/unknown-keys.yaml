@@ -1,0 +1,28 @@
+# Unknown card data keys (specs/model/card-data-json.md C3 rule 7, R1461):
+# Anki drops them when it rewrites a card; Meguri keeps them after the known
+# keys with their exact value text. The golden holds Anki's output; the
+# deviation card-data-unknown-keys in conformance/deviations.yaml holds Meguri's.
+id: model/card-data/unknown-keys
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [card01, back]}
+    - {notetype: Pair, fields: [card02, back]}
+    - {notetype: Pair, fields: [card03, back]}
+    - {notetype: Pair, fields: [card04, back]}
+    - {notetype: Pair, fields: [card05, back]}
+    - {notetype: Pair, fields: [card06, back]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)", params: ['{"zz":1,"cd":"{}","lrt":5,"decay":0.212,"dr":0.212,"d":0.212,"s":0.212,"pos":0}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)", params: ['{"pos":3,"s":1.0,"d":5,"dr":0.9,"decay":0.1542,"lrt":1894701600,"cd":"{\"x\":1}","zz":7}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)", params: ['{"zz":1,"zz":2,"s":1,"d":2}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)", params: ['{"xyz":[1,2],"s":3.5,"d":6.25,"cd":"{\"k\":true}"}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)", params: ['{"zz":{"b":1,"a":[1, 2]},"pos":1}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)", params: ['{"s":1.5,"zz":null}']}
+  - suspend: {cards: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6"]}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}

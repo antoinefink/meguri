@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/observation.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/observations.md.",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/observations.md, and specs/conformance/sync-ops.md for the outputs of sync and converge.",
   "title": "Observations of one scenario run",
   "description": "One output per scenario step, in step order (O1). Draft kinds accept any value until their area defines it.",
   "type": "object",
@@ -50,6 +50,28 @@
             "utc_offset_secs": { "type": "integer" }
           }
         },
+        "open": {
+          "description": "specs/conformance/storage-ops.md P1.2: a successful open records {}, so this member holds only a rejection.",
+          "allOf": [
+            { "$ref": "#/$defs/rejection" },
+            { "properties": { "error": { "enum": ["file_too_old", "file_too_new", "v1_scheduler"] } } }
+          ]
+        },
+        "schema_objects": {
+          "description": "storage-ops.md P3: sqlite_master rows sorted by type, then name; sql normalized.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type", "name", "tbl_name", "sql"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "enum": ["table", "index", "view", "trigger"] },
+              "name": { "type": "string" },
+              "tbl_name": { "type": "string" },
+              "sql": { "type": ["string", "null"] }
+            }
+          }
+        },
         "card": {
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/card_key" },
@@ -90,8 +112,142 @@
           "required": ["connected", "error"],
           "additionalProperties": false,
           "properties": { "connected": { "type": "boolean" }, "error": { "type": ["string", "null"] } }
+        },
+        "legacy_json": {
+          "description": "model-ops.md L1: schema-11 objects keyed by record name.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notetypes": { "type": "object", "additionalProperties": { "type": "object" } },
+            "decks": { "type": "object", "additionalProperties": { "type": "object" } },
+            "presets": { "type": "object", "additionalProperties": { "type": "object" } }
+          }
+        },
+        "legacy_update": {
+          "description": "model-ops.md L2: the op has no output, so only a rejection appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
+        },
+        "blob_decode": {
+          "description": "model-ops.md L4: per record, ok or invalid_blob.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notetypes": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } },
+            "decks": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } },
+            "presets": { "type": "object", "additionalProperties": { "$ref": "#/$defs/decode_status" } }
+          }
+        },
+        "export": {
+          "description": "dsl.md D7.2: the legacy package form outputs {notes} (model-ops.md L6); the other forms are draft (package).",
+          "type": "object",
+          "properties": { "notes": { "type": "integer", "minimum": 0 } }
+        },
+        "package_col": {
+          "description": "model-ops.md L7: the requested col columns of a legacy package's collection; ver an integer, the JSON columns parsed.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "ver": { "type": "integer" },
+            "conf": { "type": "object" },
+            "models": { "$ref": "#/$defs/objects_by_id" },
+            "decks": { "$ref": "#/$defs/objects_by_id" },
+            "dconf": { "$ref": "#/$defs/objects_by_id" },
+            "tags": { "type": "object", "additionalProperties": { "type": "integer" } }
+          }
+        },
+        "text": {
+          "description": "O4 text: one array per requested function, one output per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "strip_markup": { "$ref": "#/$defs/text_strings" },
+            "strip_markup_keep_media": { "$ref": "#/$defs/text_strings" },
+            "text_line": { "$ref": "#/$defs/text_strings" },
+            "text_line_keep_media": { "$ref": "#/$defs/text_strings" },
+            "media_refs": { "type": "array", "items": { "$ref": "#/$defs/text_strings" } },
+            "iri_encode": { "$ref": "#/$defs/text_strings" },
+            "iri_decode": { "$ref": "#/$defs/text_strings" },
+            "media_filename": { "$ref": "#/$defs/text_strings" },
+            "sort_field": { "$ref": "#/$defs/text_strings" },
+            "checksum": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+            "field_empty": { "type": "array", "items": { "type": "boolean" } },
+            "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
+          }
+        },
+        "db_dump": { "$ref": "#/$defs/db_dump" },
+        "sync": {
+          "description": "specs/conformance/sync-ops.md S4: a result, or a rejection of the op's closed list.",
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["result"],
+              "additionalProperties": false,
+              "properties": { "result": { "enum": ["ok", "no_changes", "full_sync", "full_upload", "full_download"] } }
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["clock_incorrect", "network"] } } }
+              ]
+            }
+          ]
+        },
+        "converge": {
+          "description": "sync-ops.md S7.5.",
+          "type": "object",
+          "required": ["differences", "dump"],
+          "additionalProperties": false,
+          "properties": {
+            "differences": {
+              "description": "Per actor, the pointers into the dump where the actor's raw dump differs from the fresh client's; [] when it converged.",
+              "type": "object",
+              "propertyNames": { "$ref": "#/$defs/actor_name" },
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(/[^/]*)+$" }
+              }
+            },
+            "dump": { "$ref": "#/$defs/db_dump" }
+          }
         }
       }
+    },
+    "text_strings": { "type": "array", "items": { "type": "string" } },
+    "decode_status": { "enum": ["ok", "invalid_blob"] },
+    "objects_by_id": {
+      "description": "schema11-json S12: decimal id -> schema-11 object.",
+      "type": "object",
+      "propertyNames": { "pattern": "^-?[0-9]+$" },
+      "additionalProperties": { "type": "object" }
+    },
+    "actor_name": { "type": "string", "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$" },
+    "db_dump": {
+      "description": "observations.md O8: table -> primary key text -> column -> value.",
+      "type": "object",
+      "propertyNames": {
+        "enum": ["col", "notes", "cards", "revlog", "graves", "decks", "deck_config", "notetypes", "fields", "templates", "tags", "config"]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/dump_value" }
+        }
+      }
+    },
+    "dump_value": {
+      "description": "By SQLite storage class: INTEGER integer, REAL number, TEXT string, NULL null, BLOB {sha256}.",
+      "anyOf": [
+        { "type": ["integer", "number", "string", "null"] },
+        {
+          "type": "object",
+          "required": ["sha256"],
+          "additionalProperties": false,
+          "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+        }
+      ]
     },
     "rejection": {
       "description": "An op Anki refused (dsl.md D7.3). An op whose D7.2 row lists rejection kinds takes anyOf [its output, this with error restricted to those kinds]; the others record none.",

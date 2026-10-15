@@ -1,0 +1,53 @@
+# Note type objects in a legacy package's col row (schema11-json S12, S14;
+# model-ops L6, L7). A standard and a cloze note type, each with one add-on
+# member in the other of the note type, of a field and of the template (one
+# surviving top-level member each, so the blob reads are fixed bytes), get a
+# note each and are exported as a legacy package. The blob reads are the
+# records, legacy_json is their objects in the collection, and package_col's
+# models holds the objects the package carries under each note type's id.
+id: model/schema11/apkg-notetypes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}} {{Extra}}"}]
+      css: ".card { margin: 1px; }"
+steps:
+  - legacy_update:
+      notetype: Pair
+      patch:
+        latexPre: "% pre"
+        latexPost: "% post"
+        zz_addon: {b: 1, a: [true, "x", 2.5]}
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1001, zz_fld: "keep"}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2001, zz_tmpl: [1, {d: 0, c: [null]}]}
+  - legacy_update:
+      notetype: Gap
+      patch:
+        latexPre: "% gap pre"
+        latexPost: "% gap post"
+        zz_cloze: {z: "last", y: [-3, 0.5]}
+        flds:
+          - {name: Text, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1101}
+          - {name: Extra, ord: 1, sticky: true, rtl: false, font: Arial, size: 16, id: 1102, zz_fld2: false}
+        tmpls:
+          - {name: Gap, ord: 0, qfmt: "{{cloze:Text}}", afmt: "{{cloze:Text}} {{Extra}}", id: 2101, zz_tmpl2: {k: "v"}}
+  - add_note: {notetype: Pair, fields: [one, two]}
+  - add_note: {notetype: Gap, fields: ["{{c1::three}}", four]}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM notetypes WHERE name IN ('Pair', 'Gap') ORDER BY name"}
+  - db_exec: {sql: "SELECT n.name, f.ord, f.name, hex(f.config) FROM fields f JOIN notetypes n ON n.id = f.ntid WHERE n.name IN ('Pair', 'Gap') ORDER BY n.name, f.ord"}
+  - db_exec: {sql: "SELECT n.name, t.ord, t.name, t.mtime_secs, t.usn, hex(t.config) FROM templates t JOIN notetypes n ON n.id = t.ntid WHERE n.name IN ('Pair', 'Gap') ORDER BY n.name, t.ord"}
+  - observe:
+      - legacy_json: {notetypes: [Pair, Gap]}
+  - export: {format: apkg, name: notetypes.apkg, legacy: true}
+  - observe:
+      - package_col: {name: notetypes.apkg, columns: [ver, models]}

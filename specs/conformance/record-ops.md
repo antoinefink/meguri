@@ -12,8 +12,8 @@ Four scenario ops (`dsl.md` D7.2) that the storage scenarios need: `db_exec` pre
 Runs one SQL statement directly on the collection database.
 
 - **Argument** `{sql, params?}`:
-  - `sql`: exactly one SQL statement, optionally ending with `;`, on the tables of the schema-18 collection file (`col`, `notes`, `cards`, `revlog`, `graves`, `decks`, `deck_config`, `notetypes`, `fields`, `templates`, `tags`, `config`). Placeholders are positional `?` only.
-  - `params`: the values bound to the placeholders in order. A string binds as TEXT, an integer as INTEGER, any other number as REAL, `null` as NULL. Booleans, arrays and objects are invalid (`invalid_scenario`). Bytes are written with `CAST(? AS BLOB)` in the SQL.
+  - `sql`: exactly one SQL statement, optionally ending with `;`. It reads and writes the tables of the schema-18 collection file (`col`, `notes`, `cards`, `revlog`, `graves`, `decks`, `deck_config`, `notetypes`, `fields`, `templates`, `tags`, `config`), and may read what SQLite itself provides: `sqlite_master`, table-valued pragma functions (`SELECT * FROM pragma_integrity_check`), `VALUES` lists, the `unicase` collation and the SQL functions registered on the connection. Placeholders are positional `?` only.
+  - `params`: the values bound to the placeholders in order. A string binds as TEXT, an integer as INTEGER, any other number as REAL, `null` as NULL. An integer outside the signed 64-bit range, a boolean, an array or an object is invalid (`invalid_scenario`). Bytes are written with `CAST(? AS BLOB)` in the SQL.
 - **Output** `{db_exec: {rows: [[<value>, ...], ...]}}`: the rows the statement returns, in the order SQLite returns them, each a list of its column values. A statement that returns no rows, which includes every statement that is not a query, gives `{rows: []}`. A value follows the SQLite storage class of the returned value, not the column's declared type:
 
   | Storage class | Value |
@@ -24,10 +24,10 @@ Runs one SQL statement directly on the collection database.
   | BLOB | `{"sha256": "<lower-case hex SHA-256 of the bytes>"}` |
   | NULL | `null` |
 
-  Scenarios read bytes they want to compare as text, for example `CAST(val AS TEXT)`, and give an `ORDER BY` whenever a query can return more than one row.
-- **Effect.** The statement runs between operations, outside any of them, and commits at once. It stamps nothing: no `usn`, modification time or `col.mod` changes except what the statement itself writes, and it records no change. After a statement whose text does not begin with `select` (ignoring leading whitespace and letter case), the executor forgets every cached view of the collection (study queues, caches, derived data) and clears the undo history, as Anki does after a raw write.
+  Scenarios read a BLOB they want to compare as text, for example `CAST(val AS TEXT)`, read text whose exact bytes matter with `hex(...)`, and give an `ORDER BY` whenever a query can return more than one row.
+- **Effect.** The statement runs between operations, outside any of them, on the collection's own read-write connection (on Meguri the writer of `specs/storage/open-and-connections.md` C4 with C5's registrations; on the oracle Anki's connection, with its `unicase` collation and SQL functions), and commits at once. It stamps nothing: no `usn`, modification time or `col.mod` changes except what the statement itself writes, and it records no change. After a statement whose text does not begin with `select` (ignoring leading whitespace and letter case), the executor forgets every cached view of the collection (study queues, caches, derived data) and clears the undo history, as Anki does after a raw write.
 - **Errors.** An SQL error (syntax, constraint, unknown table) is a run error, not a rejection: `anki_error` on the oracle, an executor error on Meguri. Scenarios use statements that succeed.
-- **Uses.** Preparing states that another client or an older sync could leave (a server `usn`, config bytes in another layout, an existing grave), injecting corruption, and reading stored rows that no observation kind reports. Anki keeps note types, decks and deck presets cached across operations and may go on using its copy after a raw write, so a scenario that rewrites those rows observes them only through `db_exec` afterwards.
+- **Uses.** Preparing states that another client or an older sync could leave (a server `usn`, config bytes in another layout, an existing grave, an add-on's table), injecting corruption, and reading stored rows that no observation kind reports. A statement may add or change schema objects; Meguri's schema guard takes its baseline again after every `db_exec` step (`specs/storage/schema-18.md` S6.2). Anki keeps note types, decks and deck presets cached across operations and may go on using its copy after a raw write, so a scenario that rewrites those rows observes them only through `db_exec` afterwards.
 
 ## W2. `edit_note`
 
@@ -57,6 +57,14 @@ Writes one collection config key through the collection's config API, without an
 - **Output**: none (`{}`).
 - **Effect.** As `specs/storage/config-table.md` C4, as one operation that keeps no undo entry: a real change stamps the row and moves `col.mod`. The oracle writes the value whenever its compact bytes differ from the stored bytes; Meguri writes only when the value differs (deviation `config-same-value-other-bytes`).
 
-## W5. Driver status
+## W5. Driver and executor status
 
-The oracle driver implements these four ops and `dsl.md` D7.2 marks them stable; scenarios that use them have goldens. The schema shapes (`scenario.schema.json`: `additionalProperties: false` with the arguments above) and the testkit model change together in U23's implementer step, as `conformance/AGENTS.md` asks; until then the schema keeps `edit_note`, `delete_notes` and `db_exec` on `draft_args`. Until Meguri's executor implements an op, scenarios that use it are `pending` (`dsl.md` D10): U23's adapters implement `db_exec` and `set_config`, the notes area's (U27) `edit_note` and `delete_notes`. `set_config` is new: until the testkit model reads it, T0 reports the scenarios that use it as `invalid`.
+The oracle driver implements these four ops and `dsl.md` D7.2 marks them stable; scenarios that use them have goldens. `storage-ops.md` P2 restates the parts of W1 that the storage open and upgrade scenarios rely on; W1 is the definition.
+
+Meguri's executor has had a `db_exec` adapter since U22 (`storage-ops.md` P2), which reads its arguments through `draft_args`. U23's implementer step changes these together, as `conformance/AGENTS.md` asks:
+
+- `scenario.schema.json`: `edit_note`, `delete_notes` and `db_exec` leave `draft_args` for their exact shapes (`additionalProperties: false` with the arguments above); `set_config` already has its shape.
+- The testkit model: typed arguments for the four ops, `set_config` included.
+- The `db_exec` adapter reads the typed arguments. Once Meguri keeps cached views or an undo history (U24, U25), it clears them after a statement that does not begin with `select` (W1).
+
+Until Meguri's executor implements an op, scenarios that use it are `pending` (`dsl.md` D10): U23's adapters implement `set_config`, the notes area's (U27) `edit_note` and `delete_notes`. Until the testkit model reads `set_config`, T0 reports the scenarios that use it as `invalid`.

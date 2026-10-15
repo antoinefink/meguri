@@ -1,0 +1,14 @@
+# specs/storage/schema-upgrade.md U1-U15 (R1478). The oracle upgrades the same
+# fixture; the schema objects and the dump of every table must match.
+id: storage/upgrade/from-11
+description: A collection at schema 11 (fixture storage/schema-11.anki2) upgrades to schema 18 exactly as Anki upgrades it.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-11.anki2}
+  - db_exec: {sql: "SELECT ver, crt, mod, scm, dty, usn, ls, conf, models, decks, dconf, tags FROM col"}
+  - db_exec: {sql: "SELECT * FROM pragma_journal_mode"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'meguriFixture'"}
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY oid, type"}
+  - db_exec: {sql: "SELECT id, factor, usn, mod FROM cards WHERE factor = 1400 ORDER BY id"}
+  - db_exec: {sql: "SELECT tag, usn, collapsed, config FROM tags ORDER BY tag"}
+  - observe: [schema_objects, db_dump]

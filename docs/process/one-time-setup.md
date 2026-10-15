@@ -33,6 +33,10 @@ Give Docker Desktop at least 12 CPUs and 16 GB of memory: Docker Desktop › Set
 
 Let the Xcode UI-test runner control the Mac. On the first macOS UI-test run, macOS asks; allow it in System Settings › Privacy & Security › Accessibility and Automation. Doctor cannot verify this.
 
+### `mac-input`
+
+Use a macOS and Xcode pair whose Mac UI tests can click and type. On macOS 27.0.1 (26A434) with Xcode 27.0, WindowServer refuses the input service of `testmanagerd` (log: "missing the 'com.apple.private.hid.client.event-dispatch' entitlement"). The tests start, but no tap, key press or drag reaches the app. No permission fixes this: update macOS or Xcode. Until then, `tools/mg mac-ui` and `tools/mg drive --platform mac` report `blocked: mac-input` (status error) when the unified log shows the dropped input. Mac suites without input still pass. Doctor cannot verify this.
+
 ## Optional or later
 
 ### `device-developer-mode`
@@ -41,7 +45,7 @@ Enable Developer Mode on each iPhone and iPad used for milestone device runs: Se
 
 ### `screen-recording`
 
-Only if macOS motion capture is wanted: allow Screen Recording for the capture tool in System Settings › Privacy & Security › Screen Recording. Doctor cannot verify this.
+Allow Screen Recording for the app that runs `tools/mg` (the terminal, or Claude) in System Settings › Privacy & Security › Screen Recording. `tools/mg screenshot --platform mac` needs it to capture the hidden Mac app's window. Without it the job reports blocked, and Mac screenshots come only from `tools/mg drive --platform mac` in the hourly Mac UI slot. With it, `tools/mg drive --platform mac --record` records the screen as video for motion contact sheets; without it, the sheets come from XCUITest screenshots at about 10 per second. Doctor cannot verify this.
 
 ### `xcode-external-agents`
 
@@ -54,6 +58,12 @@ Install Xcode 27.1 when it ships. It adds the foldable iPhone simulator (R1962);
 ### `nightly-scheduler`
 
 Approve the scheduler entry for nightly jobs when `tools/mg nightly` (U19) asks for it. There is no git remote, so nightly runs happen on this Mac only. Doctor cannot verify this.
+
+## While agents run
+
+### `host-session`
+
+Not a one-time step. App, simulator and Mac UI jobs (`build-app` excepted) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later, so UI gates wait too. While they run, they keep the display awake; a simulator recording (`tools/mg record start`) does so until it is stopped, at most 10 minutes. Mac UI-driving suites take the screen at most once an hour (`tools/mg mac-ui`).
 
 ## Not user steps
 

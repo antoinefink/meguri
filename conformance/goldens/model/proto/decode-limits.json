@@ -1,0 +1,218 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "blob_decode": {
+          "decks": {
+            "limit-groups-98": "ok",
+            "limit-groups-99": "invalid_blob",
+            "normal-empty": "ok",
+            "normal-group-empty": "ok",
+            "normal-group-ends-outside": "invalid_blob",
+            "normal-group-open": "invalid_blob",
+            "normal-groups-100": "invalid_blob",
+            "normal-groups-98-field": "ok",
+            "normal-groups-99": "ok",
+            "normal-groups-99-field": "invalid_blob",
+            "normal-string-runs-outside": "invalid_blob"
+          },
+          "presets": {
+            "end-other-number": "invalid_blob",
+            "end-without-start": "invalid_blob",
+            "field-zero": "invalid_blob",
+            "group-empty": "ok",
+            "group-open-at-end": "invalid_blob",
+            "groups-100": "ok",
+            "groups-100-field": "invalid_blob",
+            "groups-101": "invalid_blob",
+            "groups-99-field": "ok",
+            "key-33-bits": "invalid_blob",
+            "key-max-field": "ok",
+            "other-not-utf8": "ok",
+            "short-floats": "invalid_blob",
+            "short-key": "invalid_blob",
+            "short-payload": "invalid_blob",
+            "varint-10-01": "ok",
+            "varint-10-02": "invalid_blob",
+            "varint-10-7f": "invalid_blob",
+            "varint-11": "invalid_blob",
+            "varint-for-floats": "invalid_blob",
+            "wire-type-7": "invalid_blob"
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "bb699a20bdd71ed61fc3f8474ffa2c1254a5b38adbc2b658ce8fe653ceb7b708",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/proto/decode-limits",
+  "scenario_sha256": "75b0436a3d24eb162d9f74a59d362a25b34e850b11db75827b3fbaf4a2a477a5",
+  "tz": "UTC"
+}

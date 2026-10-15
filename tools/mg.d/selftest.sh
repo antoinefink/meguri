@@ -79,3 +79,36 @@ mg_selftest_xcframework() {
   mg_artifact log build/selftest-xcframework/sandbox/build.log "build-core-xcframework.sh output"
   mg_tap_report "$tap" "$rc" ""
 }
+
+mg_job image-tools-selftest docker:image-tools mg_image_tools_selftest \
+  "Tests of the contact-sheet and hierarchy-check scripts in the image-tools container (fixture videos made with ffmpeg); args go to unittest, e.g. -k overlap"
+
+mg_image_tools_selftest() {
+  local dir rc=0 log failed=0 ran=0 n f
+  for dir in tools/scripts/hierarchy-check tools/scripts/contact-sheet; do
+    log="$MG_RUN_DIR/$(basename "$dir").log"
+    # A filter (-k) may match nothing in one directory: unittest then exits 5.
+    (cd "$dir" && python3 -m unittest discover -s tests -v ${1+"$@"}) >"$log" 2>&1 ||
+      { [ "$#" -gt 0 ] && grep -q '^NO TESTS RAN' "$log"; } || rc=1
+    cat "$log" >&2
+    mg_artifact log "$log" "$dir tests"
+    n="$(sed -n 's/^Ran \([0-9]*\) tests\{0,1\} in .*/\1/p' "$log" | tail -n 1)"
+    ran=$((ran + ${n:-0}))
+    f="$(grep -cE '^(FAIL|ERROR): ' "$log")"
+    failed=$((failed + f))
+    grep -E '^(FAIL|ERROR): ' "$log" | while IFS= read -r line; do
+      mg_failure "$(basename "$dir")/${line#*: }" "$line; see $(basename "$log")" "tools/mg image-tools-selftest -k '$(printf '%s' "$line" | sed -E 's/^(FAIL|ERROR): ([^ ]+).*/\2/')'"
+    done
+  done
+  mg_count total "$ran"
+  mg_count failed "$failed"
+  mg_count passed $((ran - failed))
+  if [ "$rc" -eq 0 ] && [ "$ran" -gt 0 ]; then
+    mg_message "image-tools-selftest: $ran passed"
+    mg_status pass
+  else
+    [ "$ran" -gt 0 ] || mg_failure no-tests "unittest ran no tests"
+    mg_message "image-tools-selftest: $failed failed of $ran"
+    mg_status fail
+  fi
+}
