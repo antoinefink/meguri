@@ -12,6 +12,10 @@ publish.workspace = true
 crate-type = ["staticlib", "lib"]
 
 [dependencies]
+# The process's engine (U24): its change stream feeds the event dispatcher,
+# its job registry runs jobs, its cancel token and progress sink back the
+# exported objects.
+meguri-engine.workspace = true
 uniffi.workspace = true
 
 [features]

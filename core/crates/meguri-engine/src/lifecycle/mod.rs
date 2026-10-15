@@ -1,0 +1,565 @@
+//! The engine and the collection lifecycle (C7, `specs/engine/lifecycle.md`):
+//! open and close, generations, admission per state, the long-operation
+//! slot, availability waits and the exclusive phase. One [`Engine`] lives for
+//! the whole process (meguri-ffi holds it); it owns the change stream, the
+//! thread registry and the job registry, and at most one open collection.
+
+pub mod generation;
+pub mod state;
+pub mod wait;
+
+use std::fmt;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::JoinHandle;
+use std::time::Duration;
+
+use meguri_model::clock::Clock;
+use meguri_model::rng::RandomSource;
+use meguri_storage::{Initializers, OpenEvent, OpenOptions, open_collection};
+
+use crate::changes::stream::{ChangeStream, EventKind, Seq};
+use crate::collection::{Collection, CollectionCore};
+use crate::error::EngineError;
+use crate::executor::ExecShared;
+use crate::executor::exclusive::{Admission, Privilege};
+use crate::executor::writer::{self, Reopen};
+use crate::jobs::registry::JobRegistry;
+use crate::jobs::{JobContext, JobHandle, JobKind};
+use crate::ports::Ports;
+use crate::readers::Readers;
+use crate::threads::{Qos, ThreadRegistry};
+
+pub use generation::Generation;
+pub use state::{ExclusivePhase, FailedReason, LifecycleState, LongOp};
+pub use wait::SlotGuard;
+
+/// What an engine is made with.
+#[derive(Clone, Debug)]
+pub struct EngineConfig {
+    /// Worker threads of the job pool (`engine/jobs` J2).
+    pub job_workers: usize,
+}
+
+impl Default for EngineConfig {
+    fn default() -> EngineConfig {
+        EngineConfig { job_workers: 4 }
+    }
+}
+
+/// What opening a collection needs besides its path.
+#[derive(Clone)]
+pub struct OpenConfig {
+    pub clock: Arc<dyn Clock>,
+    pub random: Arc<dyn RandomSource>,
+    /// The SQL functions every connection of the collection registers
+    /// (`storage/open-and-connections` C5).
+    pub initializers: Initializers,
+    pub ports: Ports,
+}
+
+impl fmt::Debug for OpenConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenConfig")
+            .field("clock", &self.clock)
+            .field("ports", &self.ports)
+            .finish_non_exhaustive()
+    }
+}
+
+impl OpenConfig {
+    pub fn new(clock: Arc<dyn Clock>, random: Arc<dyn RandomSource>) -> OpenConfig {
+        OpenConfig {
+            clock,
+            random,
+            initializers: Initializers::default(),
+            ports: Ports::default(),
+        }
+    }
+
+    pub fn ports(mut self, ports: Ports) -> OpenConfig {
+        self.ports = ports;
+        self
+    }
+
+    pub fn initializers(mut self, initializers: Initializers) -> OpenConfig {
+        self.initializers = initializers;
+        self
+    }
+}
+
+/// The engine. Clones share it.
+#[derive(Clone)]
+pub struct Engine {
+    pub(crate) inner: Arc<EngineInner>,
+}
+
+impl fmt::Debug for Engine {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Engine")
+            .field("state", &self.state())
+            .field("generation", &self.generation())
+            .finish()
+    }
+}
+
+pub(crate) struct EngineInner {
+    pub(crate) stream: ChangeStream,
+    pub(crate) threads: ThreadRegistry,
+    pub(crate) jobs: JobRegistry,
+    generation: Arc<AtomicU64>,
+    state: Mutex<LcState>,
+    pub(crate) changed: Condvar,
+    next_token: AtomicU64,
+}
+
+pub(crate) struct LcState {
+    pub(crate) state: LifecycleState,
+    pub(crate) slot: Option<wait::SlotHolder>,
+    /// Whether `Available` was last published as true.
+    pub(crate) available: bool,
+    pub(crate) current: Option<Current>,
+}
+
+/// The open collection.
+pub(crate) struct Current {
+    pub(crate) core: Arc<CollectionCore>,
+    writer: Option<JoinHandle<()>>,
+    ports: Ports,
+}
+
+impl Engine {
+    pub fn new(config: EngineConfig) -> Result<Engine, EngineError> {
+        let stream = ChangeStream::new();
+        let threads = ThreadRegistry::new();
+        let jobs = JobRegistry::new(&threads, stream.clone(), config.job_workers.max(1))
+            .map_err(|e| EngineError::internal(format!("cannot start the job pool: {e}")))?;
+        Ok(Engine {
+            inner: Arc::new(EngineInner {
+                stream,
+                threads,
+                jobs,
+                generation: Arc::new(AtomicU64::new(0)),
+                state: Mutex::new(LcState {
+                    state: LifecycleState::NoCollection,
+                    slot: None,
+                    available: false,
+                    current: None,
+                }),
+                changed: Condvar::new(),
+                next_token: AtomicU64::new(1),
+            }),
+        })
+    }
+
+    pub fn stream(&self) -> &ChangeStream {
+        &self.inner.stream
+    }
+
+    pub fn threads(&self) -> &ThreadRegistry {
+        &self.inner.threads
+    }
+
+    pub fn jobs(&self) -> &JobRegistry {
+        &self.inner.jobs
+    }
+
+    pub fn state(&self) -> LifecycleState {
+        self.lock_state().state.clone()
+    }
+
+    /// The current generation; 0 before anything was opened.
+    pub fn generation(&self) -> Generation {
+        Generation(self.inner.generation.load(Ordering::SeqCst))
+    }
+
+    pub(crate) fn lock_state(&self) -> MutexGuard<'_, LcState> {
+        self.inner.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn wait_changed<'a>(
+        &self,
+        guard: MutexGuard<'a, LcState>,
+        timeout: Duration,
+    ) -> MutexGuard<'a, LcState> {
+        self.inner
+            .changed
+            .wait_timeout(guard, timeout)
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+    }
+
+    pub(crate) fn new_token(&self) -> u64 {
+        self.inner.next_token.fetch_add(1, Ordering::SeqCst)
+    }
+
+    pub(crate) fn ports(&self) -> Ports {
+        self.lock_state()
+            .current
+            .as_ref()
+            .map(|current| current.ports.clone())
+            .unwrap_or_default()
+    }
+
+    /// Moves to `state`, publishes it, and updates availability.
+    pub(crate) fn set_state(&self, state: LifecycleState) {
+        let mut guard = self.lock_state();
+        self.set_state_locked(&mut guard, state);
+    }
+
+    fn set_state_locked(&self, guard: &mut LcState, state: LifecycleState) {
+        if guard.state == state {
+            return;
+        }
+        guard.state = state.clone();
+        self.inner
+            .stream
+            .publish(self.generation(), None, EventKind::Lifecycle(state));
+        self.update_availability(guard);
+    }
+
+    pub(crate) fn set_exclusive_phase(&self, phase: ExclusivePhase) {
+        let mut guard = self.lock_state();
+        if let LifecycleState::ExclusiveBusy { op, cancellable, .. } = guard.state {
+            self.set_state_locked(&mut guard, LifecycleState::ExclusiveBusy { op, phase, cancellable });
+        }
+    }
+
+    /// A handle of the current generation, whenever a collection is open.
+    pub fn collection(&self) -> Result<Collection, EngineError> {
+        let state = self.lock_state();
+        match &state.current {
+            Some(current) => Ok(Collection {
+                core: Arc::clone(&current.core),
+                generation: self.generation(),
+                privilege: None,
+            }),
+            None => Err(EngineError::unavailable(state.state.describe())),
+        }
+    }
+
+    /// Opens the collection at `path` (`engine/lifecycle` L2). The engine's
+    /// raw open entry point: only meguri-host calls it (`CoreHost::open`
+    /// wires the ports), so layering-check refuses the name elsewhere.
+    pub fn open_raw(&self, path: &Path, config: OpenConfig) -> Result<Collection, EngineError> {
+        {
+            let mut guard = self.lock_state();
+            match guard.state {
+                LifecycleState::NoCollection | LifecycleState::Failed { .. } if guard.current.is_none() => {}
+                _ => {
+                    return Err(EngineError::InvalidArgument {
+                        message: format!("cannot open a collection: {}", guard.state.describe()),
+                    });
+                }
+            }
+            self.set_state_locked(&mut guard, LifecycleState::Opening);
+        }
+        let progress = |event: OpenEvent| {
+            let state = match event {
+                OpenEvent::Opening => LifecycleState::Opening,
+                OpenEvent::Upgrading { from, step } => LifecycleState::Upgrading { from, step },
+            };
+            self.set_state(state);
+        };
+        let options = OpenOptions::new(config.clock.as_ref(), config.random.as_ref())
+            .initializers(config.initializers.clone())
+            .progress(&progress);
+        let opened = match open_collection(path, &options) {
+            Ok(opened) => opened,
+            Err(error) => {
+                self.set_state(LifecycleState::Failed {
+                    reason: FailedReason::Open(error.clone()),
+                });
+                return Err(EngineError::Open(error));
+            }
+        };
+        self.set_state(LifecycleState::Opening);
+
+        let generation = Generation(self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1);
+        let privilege = Privilege(self.new_token());
+        let last_seq = Seq(self.inner.stream.next_seq().0 - 1);
+        let exec = Arc::new(ExecShared::new(
+            Admission::Privileged {
+                privilege,
+                reason: "the collection is opening".to_owned(),
+            },
+            Arc::clone(&self.inner.generation),
+            self.inner.stream.clone(),
+            config.ports.observers.clone(),
+            Arc::clone(&config.clock),
+            path,
+            last_seq,
+        ));
+        let core = Arc::new(CollectionCore {
+            exec: Arc::clone(&exec),
+            readers: Readers::new(opened.reader_factory()),
+        });
+        let reopen = Reopen {
+            clock: Arc::clone(&config.clock),
+            random: Arc::clone(&config.random),
+            initializers: config.initializers.clone(),
+        };
+        let writer_exec = Arc::clone(&exec);
+        let writer = self
+            .inner
+            .threads
+            .spawn("meguri-writer", Qos::UserInitiated, move |activity| {
+                writer::run(writer_exec, opened, reopen, last_seq, activity);
+            })
+            .map_err(|e| EngineError::internal(format!("cannot start the writer thread: {e}")));
+        let writer = match writer {
+            Ok(writer) => writer,
+            Err(error) => {
+                self.set_state(LifecycleState::Failed {
+                    reason: FailedReason::OpenStep {
+                        step: "writer".to_owned(),
+                        detail: error.to_string(),
+                    },
+                });
+                return Err(error);
+            }
+        };
+
+        let privileged = Collection {
+            core: Arc::clone(&core),
+            generation,
+            privilege: Some(privilege),
+        };
+        for step in &config.ports.open_steps {
+            if let Err(error) = step.run(&privileged) {
+                if let Err(close_error) = shut_down(&core, Some(writer)) {
+                    tracing::warn!(error = %close_error, "closing the collection after a failed open step");
+                }
+                self.set_state(LifecycleState::Failed {
+                    reason: FailedReason::OpenStep {
+                        step: step.name().to_owned(),
+                        detail: error.to_string(),
+                    },
+                });
+                return Err(error);
+            }
+        }
+        exec.set_admission(Admission::Open);
+        let mut guard = self.lock_state();
+        guard.current = Some(Current {
+            core: Arc::clone(&core),
+            writer: Some(writer),
+            ports: config.ports,
+        });
+        self.set_state_locked(&mut guard, LifecycleState::Ready { generation });
+        Ok(Collection {
+            core,
+            generation,
+            privilege: None,
+        })
+    }
+
+    /// Closes the collection (`engine/lifecycle` L10): queued ops commit,
+    /// parked ops fail, readers close, the writer checkpoints and closes.
+    pub fn close(&self) -> Result<(), EngineError> {
+        let current = {
+            let mut guard = self.lock_state();
+            let current = guard.current.take();
+            if current.is_some() {
+                self.update_availability(&mut guard);
+            }
+            current
+        };
+        let Some(mut current) = current else {
+            return Ok(());
+        };
+        let result = shut_down(&current.core, current.writer.take());
+        self.set_state(LifecycleState::NoCollection);
+        result
+    }
+
+    /// Marks the open collection corrupt (U132): every op is refused, and
+    /// only restore and the recovery download may take the slot.
+    pub fn mark_corrupt(&self, detail: impl Into<String>) {
+        let mut guard = self.lock_state();
+        if let Some(current) = &guard.current {
+            current.core.exec.set_admission(Admission::Closed {
+                reason: "the collection is corrupt".to_owned(),
+            });
+        }
+        self.set_state_locked(
+            &mut guard,
+            LifecycleState::Failed {
+                reason: FailedReason::Corrupt { detail: detail.into() },
+            },
+        );
+    }
+
+    /// Starts a job (`engine/jobs` J1, J3): one of the kinds that take the
+    /// long-operation slot gets `Busy` at once while another holds it.
+    pub fn start_job(
+        &self,
+        kind: JobKind,
+        work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<JobHandle, EngineError> {
+        let slot = match kind.long_op() {
+            Some(op) => Some(self.acquire_slot(op)?),
+            None => None,
+        };
+        Ok(self.inner.jobs.start(kind.name(), self.generation(), slot, work))
+    }
+}
+
+/// Stops admission, drains the queue, closes the readers and the writer, and
+/// ends the writer thread.
+fn shut_down(core: &CollectionCore, writer: Option<JoinHandle<()>>) -> Result<(), EngineError> {
+    core.exec.set_admission(Admission::Closed {
+        reason: "the collection is closing".to_owned(),
+    });
+    core.exec.wait_idle();
+    core.readers.close_all();
+    let result = core.exec.close();
+    core.exec.stop();
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
+    result
+}
+
+impl Drop for EngineInner {
+    fn drop(&mut self) {
+        let current = self
+            .state
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .current
+            .take();
+        if let Some(mut current) = current
+            && let Err(error) = shut_down(&current.core, current.writer.take())
+        {
+            tracing::warn!(%error, "closing the collection when the engine dropped");
+        }
+    }
+}
+
+/// An exclusive phase (`engine/lifecycle` L7): while it lasts only the ops
+/// submitted through [`Exclusive::collection`] commit. Dropping it ends the
+/// phase.
+pub struct Exclusive<'s> {
+    slot: &'s SlotGuard,
+    privilege: Privilege,
+    core: Arc<CollectionCore>,
+    collection: Collection,
+    /// The state to go back to when the phase ends without a replacement.
+    prior: LifecycleState,
+    replaced: bool,
+}
+
+impl fmt::Debug for Exclusive<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Exclusive")
+            .field("op", &self.slot.op)
+            .field("generation", &self.collection.generation)
+            .finish()
+    }
+}
+
+impl<'s> Exclusive<'s> {
+    fn enter(slot: &'s SlotGuard, cancellable: bool) -> Result<Exclusive<'s>, EngineError> {
+        let engine = &slot.engine;
+        if !slot.op.replaces_collection() {
+            return Err(EngineError::InvalidArgument {
+                message: format!("{} does not replace the collection", slot.op.name()),
+            });
+        }
+        let (core, ports, prior) = {
+            let guard = engine.lock_state();
+            let allowed = match &guard.state {
+                LifecycleState::Ready { .. } => true,
+                LifecycleState::Failed {
+                    reason: FailedReason::Corrupt { .. },
+                } => slot.op.allowed_when_corrupt(),
+                _ => false,
+            };
+            match (&guard.current, allowed) {
+                (Some(current), true) => (Arc::clone(&current.core), current.ports.clone(), guard.state.clone()),
+                _ => return Err(EngineError::unavailable(guard.state.describe())),
+            }
+        };
+        for participant in &ports.suspend_participants {
+            participant.flush()?;
+        }
+        let privilege = Privilege(engine.new_token());
+        {
+            let mut guard = engine.lock_state();
+            core.exec.set_admission(Admission::Privileged {
+                privilege,
+                reason: format!("{} is running", slot.op.name()),
+            });
+            engine.set_state_locked(
+                &mut guard,
+                LifecycleState::ExclusiveBusy {
+                    op: slot.op,
+                    phase: ExclusivePhase::Draining,
+                    cancellable,
+                },
+            );
+        }
+        core.exec.wait_idle();
+        engine.set_exclusive_phase(ExclusivePhase::Working);
+        let collection = Collection {
+            core: Arc::clone(&core),
+            generation: engine.generation(),
+            privilege: Some(privilege),
+        };
+        Ok(Exclusive {
+            slot,
+            privilege,
+            core,
+            collection,
+            prior,
+            replaced: false,
+        })
+    }
+
+    /// The privileged handle: the only one whose ops commit during the phase.
+    pub fn collection(&self) -> &Collection {
+        &self.collection
+    }
+
+    /// Swaps the collection file (`engine/lifecycle` L8): `swap` runs with
+    /// every connection closed (U124's verified replace). Returns the new
+    /// generation's privileged handle.
+    pub fn replace(
+        &mut self,
+        swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<Collection, EngineError> {
+        let collection = generation::replace(&self.slot.engine, &self.core, self.privilege, Box::new(swap))?;
+        self.replaced = true;
+        self.collection = collection.clone();
+        Ok(collection)
+    }
+}
+
+impl Drop for Exclusive<'_> {
+    fn drop(&mut self) {
+        let engine = &self.slot.engine;
+        let mut guard = engine.lock_state();
+        if !matches!(guard.state, LifecycleState::ExclusiveBusy { .. }) {
+            // The swap failed and left the collection closed.
+            return;
+        }
+        let back = if self.replaced {
+            LifecycleState::Ready {
+                generation: engine.generation(),
+            }
+        } else {
+            self.prior.clone()
+        };
+        let admission = match back {
+            LifecycleState::Ready { .. } => Admission::Open,
+            _ => Admission::Closed {
+                reason: back.describe(),
+            },
+        };
+        // Admit first, so nobody woken by the state change is refused.
+        self.core.exec.set_admission(admission);
+        engine.set_state_locked(&mut guard, back);
+    }
+}
