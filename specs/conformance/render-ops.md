@@ -83,5 +83,5 @@ Nothing in the scenario's collection changes. New-note cases never read it.
 
 ## Q3. Status
 
-- The oracle driver has no `template` kind yet. The oracle maintainer adds it (U60's role work); until then the scenarios that use it have no golden. Driver hints are spec-side, in `oracle/provenance/render.md`.
+- The oracle driver implements the kind: every scenario under `conformance/scenarios/render/` has its golden, recorded with `tools/mg oracle record render`.
 - Meguri's executor implements new-note cases with U60's engine and a field map built as Q1.2 says; card cases also need notes and cards in a collection (U27, U29), so scenarios with card cases stay `pending` until then. Until the testkit model (`core/crates/meguri-testkit/src/scenario/`) reads the kind, T0 reports the scenarios that use it as `invalid`; U60's implementer adds the typed request with the adapter.

@@ -22,6 +22,8 @@ collection, nodes composed as below), which agree with every scenario under
 
 ## Driver hints for the `template` kind (oracle maintainer)
 
+Implemented in `driver/observe/template.py`; the driver's own reads are in `driver-render.md`.
+
 - New-note cases: in a scratch collection per worker (as `observe/text.py`), save a note type with exactly `notetype.name`, `kind` and `fields` (remove any note type of that name first, stock ones included, since names must stay exact for the `Type` special; check the saved field names equal the given ones, else `invalid_scenario`), with one valid dummy template (`{{<first field>}}`, or `{{cloze:<first field>}}` for cloze). Per case, build a new note of it (fields and tags as given, unsaved) and call the backend's legacy uncommitted render with a schema-11 template object `{name, ord: null, qfmt, afmt}`, the case's `ord`, `fill_empty` false and `partial_render` true. Never save the case's template: a save validates it.
 - Card cases: the stored note, `card_ord` = the card's ord, template object `{name: <stored template name at that ord, first template for cloze>, ord: <card ord>, qfmt, afmt}` so the stored card is found by ordinal.
 - Composing nodes, as pylib does with no add-on hooks: text nodes as they are; a replacement node contributes its current text, except `FrontSide`, which contributes nothing on the question side and the composed question text on the answer side. When the response's empty flag is set, drop the last question node (the blank notice) and report `answer` null.
