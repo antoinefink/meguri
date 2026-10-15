@@ -1,0 +1,24 @@
+# Alternate delimiters (specs/render/template-syntax.md T2, R958): the
+# {{=<% %>=}} directive at the start, after white space, repeated; tags in
+# <% %>; braces as text; the directive elsewhere or misspelled is a field name.
+id: render/template/delimiters
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Delimiter Probe, fields: [Front, Back]}
+          cases:
+            - {front: "{{=<% %>=}}<%Front%>{{Front}}", fields: [front, back]}
+            - {front: "  \n\t{{=<% %>=}}<% Front %>", fields: [front, back]}
+            - {front: "{{=<% %>=}}{{=<% %>=}}<%{Front%>|<%Back%>", fields: [front, back]}
+            - {front: "{{=<% %>=}} {{=<% %>=}}<%Front%>", fields: [front, back]}
+            - {front: "{{=<% %>=}}<%#Back%>B<%/Back%><%^Back%>N<%/Back%><%Front%>", fields: [front, back]}
+            - {front: "{{=<% %>=}}<!--<%Nope%>--><%Front%>", fields: [front, back]}
+            - {front: "{{=<% %>=}}<%text:Front%> %> <% <%Back", fields: ["<i>front</i>", back]}
+            - {front: "{{=<% %>=}}<%Front%>", back: "{{FrontSide}}|{{Back}}|<%Back%>", fields: [front, back]}
+            - {front: "{{Front}}", back: "{{=<% %>=}}<%FrontSide%>|<%Back%>|{{Back}}", fields: [front, back]}
+            - {front: "{{=<% %>=}}<%#Front%>", fields: [front, back]}
+            - {front: "x{{=<% %>=}}<%Front%>", fields: [front, back]}
+            - {front: "{{=<%  %>=}}<%Front%>", fields: [front, back]}
+            - {front: "{{=[[ ]]=}}{{Front}}", fields: [front, back]}
+            - {front: "{{= <% %>=}}{{Front}}", fields: [front, back]}

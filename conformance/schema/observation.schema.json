@@ -188,6 +188,50 @@
             "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
           }
         },
+        "template": {
+          "description": "specs/conformance/render-ops.md Q1.5: one result per case, in case order.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["question", "answer", "empty"],
+                "additionalProperties": false,
+                "properties": {
+                  "question": { "type": "string" },
+                  "answer": { "type": "string" },
+                  "empty": { "const": false }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["question", "answer", "empty"],
+                "additionalProperties": false,
+                "properties": {
+                  "question": { "type": "string" },
+                  "answer": { "type": "null" },
+                  "empty": { "const": true }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["error"],
+                "additionalProperties": false,
+                "properties": {
+                  "error": {
+                    "type": "object",
+                    "required": ["kind", "side"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": { "enum": ["unclosed_conditional", "unopened_conditional", "mismatched_conditional", "unknown_field", "unknown_conditional"] },
+                      "side": { "enum": ["question", "answer"] }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
         "db_dump": { "$ref": "#/$defs/db_dump" },
         "sync": {
           "description": "specs/conformance/sync-ops.md S4: a result, or a rejection of the op's closed list.",

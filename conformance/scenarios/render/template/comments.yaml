@@ -1,0 +1,21 @@
+# HTML comments (specs/render/template-syntax.md T3, T7, R957): output verbatim,
+# never evaluated, hiding opens and closes; unterminated openers are text.
+id: render/template/comments
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Comment Probe, fields: [Front, Back]}
+          cases:
+            - {front: "{{Front}}<!-- {{#Missing}} -->", fields: [front, back]}
+            - {front: "<!--{{Front}}-->{{Back}}", fields: [front, back]}
+            - {front: "<!-- {{Front}}-->", fields: [front, back]}
+            - {front: "{{Front}}<!-- {{Back}}", fields: [front, back]}
+            - {front: "{{Front}}<!---->|<!-- a --> --> ", fields: [front, back]}
+            - {front: "{{Front}}<!-->x-->", fields: [front, back]}
+            - {front: "<!--{{#A}}{{/B}}{{Nope}}-->{{Front}}", fields: [front, back]}
+            - {front: "{{Front}}{{#Back}}<!--{{/Back}}-->{{/Back}}", fields: [front, back]}
+            - {front: "{{#Front}}<!-- {{Nope}} -->{{Back}}{{/Front}}", fields: [front, back]}
+            - {front: "{{Front}}<!--{{#Back}}-->{{/Back}}", fields: [front, back]}
+            - {front: "{{Front}}<!-- 日本 <!-- nested? --> tail -->", fields: [front, back]}
+            - {front: "{{Front}}<!--\n{{Back}}\n-->", back: "{{FrontSide}}<!--{{Back}}-->{{Back}}", fields: [front, back]}

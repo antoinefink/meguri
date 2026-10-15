@@ -1,0 +1,35 @@
+# Tags and their kinds (specs/render/template-syntax.md T3-T5): extra opening
+# braces, white space inside tags, unclosed tags as text, one-character names,
+# empty keys with and without filters, untrimmed filter pieces.
+id: render/template/tags
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Tag Probe, fields: [Front, Back]}
+          cases:
+            - {front: "{{Front}}", fields: [front, back]}
+            - {front: "{{ Front }}", fields: [front, back]}
+            - {front: "{{{Front}}}", fields: [front, back]}
+            - {front: "{{{{Front}}}}", fields: [front, back]}
+            - {front: "{{\t Front\n}}", fields: [front, back]}
+            - {front: "{{　Front }}", fields: [front, back]}
+            - {front: "{{Front}}\r\n{{\nBack\n}}", fields: [front, back]}
+            - {front: "{{Back}} and {{Front", fields: [front, back]}
+            - {front: "x{{Front", fields: [front, back]}
+            - {front: "text }} more {{Front}} {", fields: [front, back]}
+            - {front: "{{:Front}}|{{::Front}}|{{Front}}{{:}}", fields: [front, back]}
+            - {front: "{{Front}}[{{text:}}][{{type:}}][{{hint:}}]", fields: [front, back]}
+            - {front: "{{ #Back }}shown{{/Back}}{{Front}}", fields: [front, back]}
+            - {front: "{{#  Back}}a{{/ Back}}{{^Back }}b{{/Back}}{{Front}}", fields: [front, back]}
+            - {front: "{{Front}}{{}}", fields: [front, back]}
+            - {front: "{{Front}}{{ }}", fields: [front, back]}
+            - {front: "{{Front}}{{#}}", fields: [front, back]}
+            - {front: "{{Front}}{{/}}", fields: [front, back]}
+            - {front: "{{Front}}{{^}}", fields: [front, back]}
+            - {front: "{{text: Front}}", fields: [front, back]}
+            - {front: "{{Front}}{{a{{Back}}", fields: [front, back]}
+            - {front: "{{ {Front}}", fields: [front, back]}
+            - {front: "{{Front <!-- }} -->", fields: [front, back]}
+            - {front: "{{Front}}{{a}b}}", fields: [front, back]}
+            - {front: "{{Front}}", back: "{{{Back}}}{{Back}}}}", fields: [front, back]}
