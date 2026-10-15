@@ -74,3 +74,11 @@ required-features = ["test-hooks"]
 [[test]]
 name = "journal"
 required-features = ["test-hooks"]
+
+[[test]]
+name = "savepoints"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "snapshots"
+required-features = ["test-hooks"]
