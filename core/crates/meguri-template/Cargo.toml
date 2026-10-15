@@ -7,5 +7,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Hint ids (specs/render/filters.md F5): a parity pin.
 blake3.workspace = true
 difflib.workspace = true
+# The text filter (strip-html H4) and section emptiness (field-emptiness E1).
+meguri-text.workspace = true
+# Ruby groups of the furigana filters (filters.md F4): leftmost-first.
+regex.workspace = true
+
+[dev-dependencies]
+# Reads the template corpus scenarios for the source-span round trip (T12).
+serde_json.workspace = true

@@ -1127,6 +1127,9 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "difflib",
+ "meguri-text",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]
