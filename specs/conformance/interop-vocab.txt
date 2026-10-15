@@ -74,3 +74,7 @@ lrt
 nextPos
 localOffset
 db-check
+# collection-check.md K11: config keys the schedule step reads or writes
+curDeck
+activeDecks
+collapseTime
