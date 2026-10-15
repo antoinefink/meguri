@@ -205,6 +205,19 @@ pub struct Journal {
     /// Bytes of before-images held in memory.
     held: usize,
     spill: Option<Spill>,
+    /// Open savepoints, innermost last (`WriteScope::savepoint`).
+    marks: Vec<Mark>,
+}
+
+/// The journal's state when a savepoint was taken, and the after-images of
+/// older entries replaced since, oldest first, so that rolling back to the
+/// savepoint restores both.
+#[derive(Debug)]
+struct Mark {
+    len: usize,
+    held: usize,
+    spill_len: u64,
+    replaced: Vec<(usize, After)>,
 }
 
 struct Spill {
@@ -232,6 +245,7 @@ impl Journal {
             unicase: BTreeMap::new(),
             held: 0,
             spill: None,
+            marks: Vec::new(),
         }
     }
 
@@ -326,7 +340,12 @@ impl Journal {
                 Some(image) => After::Row(image),
                 None => After::Absent,
             };
-            self.at_mut(at).after = after;
+            let replaced = std::mem::replace(&mut self.at_mut(at).after, after);
+            if let Some(mark) = self.marks.last_mut()
+                && at < mark.len
+            {
+                mark.replaced.push((at, replaced));
+            }
             return Ok(());
         }
         let after = match after {
@@ -352,6 +371,62 @@ impl Journal {
         }
         self.len += 1;
         Ok(())
+    }
+
+    /// Remembers the journal's state for a savepoint.
+    pub(crate) fn push_mark(&mut self) {
+        self.marks.push(Mark {
+            len: self.len,
+            held: self.held,
+            spill_len: self.spilled_bytes(),
+            replaced: Vec::new(),
+        });
+    }
+
+    /// Releases the innermost savepoint: its entries stay. After-images it
+    /// replaced of entries older than the enclosing savepoint are kept for
+    /// that one, which may still roll back.
+    pub(crate) fn release_mark(&mut self) {
+        let Some(mark) = self.marks.pop() else { return };
+        if let Some(outer) = self.marks.last_mut() {
+            let len = outer.len;
+            outer
+                .replaced
+                .extend(mark.replaced.into_iter().filter(|(at, _)| *at < len));
+        }
+    }
+
+    /// Rolls the journal back to the innermost savepoint: the entries added
+    /// since are dropped (their spilled images become unused space in the
+    /// spill file) and older entries get back their after-images.
+    pub(crate) fn rollback_mark(&mut self) {
+        let Some(mark) = self.marks.pop() else { return };
+        for (at, after) in mark.replaced.into_iter().rev() {
+            self.at_mut(at).after = after;
+        }
+        while self.len > mark.len {
+            self.len -= 1;
+            let entry = self
+                .chunks
+                .last_mut()
+                .and_then(Vec::pop)
+                .expect("the journal holds `len` entries");
+            if self.chunks.last().is_some_and(Vec::is_empty) {
+                self.chunks.pop();
+            }
+            match &entry.key {
+                RowKey::Text(text) if entry.table.unicase_key() => {
+                    self.unicase.remove(&UnicaseKey(text.clone()));
+                }
+                key => {
+                    self.index.remove(&(entry.table, key.clone()));
+                }
+            }
+        }
+        self.held = mark.held;
+        if let Some(spill) = &mut self.spill {
+            spill.len = mark.spill_len;
+        }
     }
 
     fn keep(&mut self, image: RowImage) -> Result<Before, StorageError> {
@@ -386,8 +461,14 @@ fn io(error: std::io::Error) -> StorageError {
     }
 }
 
+/// The SHA-256 of a row image in the journal's own encoding: a note's
+/// after-image digest, and the row digests of `engine/op-model` O7.
+pub fn digest(image: &[Cell]) -> [u8; 32] {
+    Sha256::digest(encode(image)).into()
+}
+
 fn note_digest(before: Option<&[Cell]>, after: &[Cell]) -> NoteDigest {
-    let sha256: [u8; 32] = Sha256::digest(encode(after)).into();
+    let sha256 = digest(after);
     let changed = match before {
         Some(before) => ColumnSet::changed(before, after),
         None => ColumnSet::all(Table::Notes),

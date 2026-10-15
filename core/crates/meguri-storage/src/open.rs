@@ -17,7 +17,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::checkpoint::CheckpointOutcome;
 use crate::conn_init::{self, Initializers};
-use crate::connections::{READ_WRITE, Reader, ReaderRole, Writer, file_uri, sibling};
+use crate::connections::{READ_WRITE, Reader, ReaderFactory, ReaderRole, Writer, file_uri, sibling};
 use crate::error::{OpenError, StorageError, UpgradeStage};
 use crate::journal::JournalOptions;
 use crate::schema::expected_objects::{self, ExpectedObjects};
@@ -182,6 +182,12 @@ impl OpenedCollection {
     /// collection closes and closes it before [`OpenedCollection::close`].
     pub fn open_reader(&self, role: ReaderRole) -> Result<Reader, StorageError> {
         Reader::open(&self.path, role, &self.initializers)
+    }
+
+    /// What opens this collection's readers on other threads: the writer's
+    /// thread owns the collection (U24).
+    pub fn reader_factory(&self) -> ReaderFactory {
+        ReaderFactory::new(&self.path, &self.initializers)
     }
 
     /// The storage side of closing (C10), once every reader is closed: the

@@ -16,7 +16,7 @@ opens of WAL and hot-journal files, `VACUUM INTO` and `query_only`).
 | schema-18 S5 | `rslib/src/storage/upgrades/schema15_upgrade.sql`, `rslib/src/storage/sqlite.rs` (create path, optimize) | where `ANALYZE` runs |
 | open C1, C2.2 | `rslib/src/storage/sqlite.rs`, `rslib/src/storage/upgrades/mod.rs`, `rslib/src/error/db.rs`, `rslib/src/config/mod.rs`, `pylib/anki/collection.py` | accepted and refused versions and their kinds; how the scheduler version is read and defaulted |
 | open C3 | `rslib/src/storage/sqlite.rs` | Anki sets journal mode before checking the version (probe confirmed the header change) |
-| open C4, C9 | `rslib/src/storage/sqlite.rs` | Anki's pragmas (exclusive locking, WAL, busy timeout 0, page size, cache size, statement cache) and that it never sets `fullfsync` |
+| open C4, C9.1 | `rslib/src/storage/sqlite.rs` | Anki's pragmas (exclusive locking, WAL, busy timeout 0, page size, cache size, statement cache) and that it sets none of `synchronous`, `fullfsync`, `checkpoint_fullfsync` (re-read at 26.09.3 for the C9 decision, spec/U24), so it runs with SQLite's defaults |
 | open C7, C10 | `rslib/src/storage/sqlite.rs`, `rslib/src/collection/mod.rs`, `rslib/src/backend/collection.rs` | Anki's TRUNCATE checkpoint and its close |
 | open C2.6 | `rslib/src/collection/mod.rs`, `rslib/src/sync/collection/upload.rs`, `download.rs` | integrity checks only on full-sync staging files |
 | upgrade U1, U3 | `rslib/src/storage/upgrades/mod.rs`, `rslib/src/storage/sqlite.rs` | step order, one exclusive transaction for the whole upgrade |
