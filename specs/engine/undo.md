@@ -53,7 +53,7 @@ Each op source has one undo effect, applied on the writer right after the op com
 
 ## M4. Undo
 
-Undo is an op (catalog `undo`, `engine/op-model` O9) of source `UserUndoable`, written in the `CallerSupplied` stamping mode, so every restored row keeps its own `usn` and modification time (`storage/ids-usn-mtime` S3). Inside its transaction, on the writer:
+Undo is an op (catalog `undo`, or `undo_long_write` for a step whose op declared a long write; `engine/op-model` O9) of source `UserUndoable`, written in the `CallerSupplied` stamping mode, so every restored row keeps its own `usn` and modification time (`storage/ids-usn-mtime` S3). Inside its transaction, on the writer:
 
 1. **Target.** The top step for the scope (M3). None: refused with `UndoUnavailable` and the reason peek reports (`None`, or why the history was emptied). Upload state `Uploaded` or `Pending`: refused with `AlreadyUploaded` or `UploadPending` (M9); the core refuses whatever the caller. A refusal writes nothing.
 2. **Check.** Every row of the step's journal must still equal the step's after-image: the same digest (`storage` journal digest), or absent where the step removed it. For the `col` row only the columns the step changed other than `mod` are compared. If any row differs, the step and every older step are dropped, the reason becomes `ChangedExternally`, and the undo is refused with that reason, writing nothing.
@@ -67,7 +67,7 @@ A step whose op declared a long write (a job-run op, KTD9: bulk ops, large struc
 
 ## M5. Redo
 
-Redo is an op (catalog `redo`) like undo, on the top redo step: refused with `None` when there is none; the same check (M4.2: here a failure drops that redo step and every redo step below it) and restore (M4.3, M4.4). Its journal becomes a new step at the top of the history, with the redo step's name, kind, session, declared write and restorer state, and `col.mod` values swapped back; the other redo steps stay. Any newly recorded step clears redo (R720).
+Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo step: refused with `None` when there is none; the same check (M4.2: here a failure drops that redo step and every redo step below it) and restore (M4.3, M4.4). Its journal becomes a new step at the top of the history, with the redo step's name, kind, session, declared write and restorer state, and `col.mod` values swapped back; the other redo steps stay. Any newly recorded step clears redo (R720).
 
 ## M6. Clearing without an op
 
@@ -113,6 +113,9 @@ State outside the collection that an undo or redo must put back (U44's load-bala
 ## M12. Budget
 
 Undo of an answer (one card row, one review-log row and `col`) returns within R1811's 50 ms with a wide margin: the `undo` criterion suite (`core/crates/meguri-engine/benches/undo.rs`) times the undo op's round trip at 10k and 150k cards and fails on Apple hosts when its p95 reaches 5 ms.
+
+- Measured 2026-10-16, undo and redo of an answer alternating: `tools/mg bench-mac --bench undo` (M3 Max) p50 77 µs (10k) and 92 µs (150k), p95 0.20 ms and 0.25 ms; `tools/mg bench --bench undo` (Docker, tmpfs) p50 29 µs and 32 µs, p95 63 µs and 91 µs.
+- A first Mac run, with undo and redo as ops that may declare a long write, measured p50 4.0 ms and p95 4.96 ms: the writer syncs a pending WAL flush before such an op (C9.2's full sync, about 4 ms). Plain `undo` and `redo` are therefore short catalog ops, and only a step of a long write uses `undo_long_write` and `redo_long_write`.
 
 ## Observable results of undoing each op
 

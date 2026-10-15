@@ -98,7 +98,7 @@ The precondition kinds:
 
 ## O9. Op catalog
 
-The list of named engine ops with their undo class (`engine/undo` M11, R2020), the one list of ops that may declare a long write, and the list of maintenance tasks. Units add their entry here and in `executor/catalog.rs` together. An op that is not listed is a plain op: it may not declare a long write.
+The list of named engine ops with their undo class (`engine/undo` M11, R2020), the one list of ops that may declare a long write, and the list of maintenance tasks. Units add their entry here and in `executor/catalog.rs` together. An op that is not listed is a plain op: it may not declare a long write. The writer syncs a pending WAL flush (`storage/open-and-connections` C9.2) before any op that may declare a long write, so an op that is short gets an entry that may not.
 
 | Name | Unit | Undo class | Long write | Write cancellable between batches |
 |---|---|---|---|---|
@@ -107,8 +107,9 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 | `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | not destructive | yes | yes |
 | `notetype_structure_change` (on large note types) | U34 | undoable | yes | no |
 | `bulk_op` (bulk ops over large selections) | U86 | undoable | yes | no |
-| `undo` (`engine/undo` M4: long when the step's op was) | U25 | undoable | yes | no |
-| `redo` (`engine/undo` M5) | U25 | undoable | yes | no |
+| `undo` (`engine/undo` M4) | U25 | undoable | no | |
+| `redo` (`engine/undo` M5) | U25 | undoable | no | |
+| `undo_long_write`, `redo_long_write` (undo and redo of a step whose op declared a long write) | U25 | undoable | yes | no |
 | `vacuum` | U128, U132 | not destructive | maintenance task | |
 | `reindex` | U128 | not destructive | maintenance task | |
 | `analyze` | U132 | not destructive | maintenance task | |

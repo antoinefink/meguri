@@ -344,15 +344,20 @@ impl Collection {
     }
 
     fn submit_restore(&self, action: UndoAction) -> Pending<OpResult<StepInfo>> {
-        let def = match action {
-            UndoAction::Undo(_) => catalog::UNDO,
-            UndoAction::Redo(_) => catalog::REDO,
+        // A step of a job-run op is undone with its declared write (M4);
+        // only then is the op a catalog long write.
+        let declared = match self.core.exec.undo.peek(action.side(), action.scope()) {
+            UndoStatus::Available(step) => step.long_write,
+            UndoStatus::Unavailable(_) => None,
+        };
+        let def = match (action, declared.is_some()) {
+            (UndoAction::Undo(_), false) => catalog::UNDO,
+            (UndoAction::Redo(_), false) => catalog::REDO,
+            (UndoAction::Undo(_), true) => catalog::UNDO_LONG_WRITE,
+            (UndoAction::Redo(_), true) => catalog::REDO_LONG_WRITE,
         };
         let mut spec = OpSpec::new(def, OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
-        // A step of a job-run op is undone with its declared write (M4).
-        if let UndoStatus::Available(step) = self.core.exec.undo.peek(action.side(), action.scope())
-            && let Some(declared) = step.long_write
-        {
+        if let Some(declared) = declared {
             spec = spec.declare_long_write(declared);
         }
         spec.undo.action = Some(action);

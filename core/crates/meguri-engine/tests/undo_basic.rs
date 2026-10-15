@@ -602,7 +602,7 @@ fn a_step_of_a_long_write_reports_it_and_its_undo_and_redo_declare_it() {
             _ => None,
         })
         .collect();
-    assert_eq!(delays, ["undo", "redo"]);
+    assert_eq!(delays, ["undo_long_write", "redo_long_write"]);
 }
 
 /// One call a restorer got: direction, step name, state, cards changed.

@@ -63,6 +63,17 @@ impl OpDef {
         }
     }
 
+    /// A catalog op whose write phase stays short.
+    const fn short(name: &'static str, undo: UndoClass) -> OpDef {
+        OpDef {
+            name,
+            undo: Some(undo),
+            long_write: false,
+            cancellable_write: false,
+            maintenance_task: false,
+        }
+    }
+
     const fn maintenance(name: &'static str) -> OpDef {
         OpDef {
             name,
@@ -111,10 +122,14 @@ pub const SYNC_INCOMING_MERGE: OpDef = OpDef::long_write("sync_incoming_merge", 
 pub const NOTETYPE_STRUCTURE_CHANGE: OpDef = OpDef::long_write("notetype_structure_change", UndoClass::Undoable, false);
 /// A bulk op over a large selection (U86): one undo step named after it.
 pub const BULK_OP: OpDef = OpDef::long_write("bulk_op", UndoClass::Undoable, false);
-/// Undo of a step (`engine/undo` M4): a long write when the step's op was.
-pub const UNDO: OpDef = OpDef::long_write("undo", UndoClass::Undoable, false);
+/// Undo of a step (`engine/undo` M4).
+pub const UNDO: OpDef = OpDef::short("undo", UndoClass::Undoable);
 /// Redo of a step (`engine/undo` M5).
-pub const REDO: OpDef = OpDef::long_write("redo", UndoClass::Undoable, false);
+pub const REDO: OpDef = OpDef::short("redo", UndoClass::Undoable);
+/// Undo of a step whose op declared a long write: it declares the same.
+pub const UNDO_LONG_WRITE: OpDef = OpDef::long_write("undo_long_write", UndoClass::Undoable, false);
+/// Redo of a step whose op declared a long write.
+pub const REDO_LONG_WRITE: OpDef = OpDef::long_write("redo_long_write", UndoClass::Undoable, false);
 
 /// `VACUUM` (U128, U132).
 pub const VACUUM: OpDef = OpDef::maintenance("vacuum");
@@ -126,7 +141,7 @@ pub const ANALYZE: OpDef = OpDef::maintenance("analyze");
 pub const WAL_CHECKPOINT: OpDef = OpDef::maintenance("wal_checkpoint");
 
 /// Every catalog entry, in the spec's order.
-pub const CATALOG: [OpDef; 11] = [
+pub const CATALOG: [OpDef; 13] = [
     CHECK_DATABASE,
     APKG_APPLY,
     SYNC_INCOMING_MERGE,
@@ -134,6 +149,8 @@ pub const CATALOG: [OpDef; 11] = [
     BULK_OP,
     UNDO,
     REDO,
+    UNDO_LONG_WRITE,
+    REDO_LONG_WRITE,
     VACUUM,
     REINDEX,
     ANALYZE,
