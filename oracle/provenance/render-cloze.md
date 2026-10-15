@@ -27,3 +27,11 @@ Harvest rows classified for U61: the `rslib/src/cloze.rs` tests, the `cloze` tes
 of `template_filters.rs`, the type-in extraction and cloze render tests of the
 card-rendering service, and nine supplementary main-branch MathJax tests (not
 applicable at the tag).
+
+Driver `observe/cloze.py` (oracle maintainer, same tag): read
+`rslib/src/template.rs` (the blank-front check looks only at whether a
+referenced field is non-empty, hence the sentinel field),
+`rslib/src/notetype/render.rs` (a template with a null `ord` renders a
+synthesized card with `template_idx` = `card_ord`), `rslib/src/notetype/schema11.rs`
+(legacy template JSON), `rslib/src/notes/service.rs` (cloze numbers come back
+unordered) and `pylib/anki/template.py` (the legacy uncommitted-card call).

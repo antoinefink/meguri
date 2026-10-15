@@ -3,7 +3,7 @@
 Only spec writers and oracle maintainers work here. Implementers never read this tree (R1956); they run it through `tools/mg oracle ...` as a black box. Nothing outside `oracle/` imports, copies or ships its code (R1869, R1873).
 
 - Add an area's ops and observations as a module under `driver/ops/` or `driver/observe/` with the `registry` decorators; `worker.py`, `session.py` and `harness.py` stay area-free. Write each vocabulary entry's meaning in `conformance/` (protocol.json now, the U4 specs later), never only here.
-- `observe/text.py` (pure text functions) works on one scratch collection per worker process, never the scenario's: whatever a function does there must not change a later output (it removes the media files it writes).
+- `observe/text.py` and `observe/cloze.py` (pure functions) work on one scratch collection per worker process each, never the scenario's: whatever a function does there must not change a later output (text removes the media files it writes; cloze renders uncommitted cards only).
 - Never put Anki's message text in a response or observation (it is localized, R1887). Errors carry a kind, the step and the exception class name. Where Anki answers only in messages (Check Database), read them through the backend's own translations (`ops/maintenance.py`), never against literal text.
 - `check` (`collection_check.py`, `tools/mg oracle check`) runs outside any scenario on a copy of a mounted directory. Anki holds an open collection under an exclusive lock: anything reading the file with `sqlite3` does it while Anki has it closed, with a `unicase` collation registered.
 - The TAP runner (`tests/__main__.py`) runs tests one at a time, so `setUpClass` never runs: use `setUp`.

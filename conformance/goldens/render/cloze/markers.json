@@ -1,0 +1,24 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "cloze": {
+          "back": ["{{c::a}} <span class=\"cloze\" data-ordinal=\"1\">b</span> <span class=\"cloze\" data-ordinal=\"1\">c</span> {{c99999::d}} <span class=\"cloze-inactive\" data-ordinal=\"65535\">e</span> <span class=\"cloze\" data-ordinal=\"1\">f</span>", "{{C1::x}} {{ c1::x}} {{c1 ::x}} {{c1:x}} {c1::x} <span class=\"cloze\" data-ordinal=\"1\">y</span>", "<span class=\"cloze\" data-ordinal=\"65535\">last</span>", "{{c65536::none}} <span class=\"cloze\" data-ordinal=\"1\">one</span>", "<span class=\"cloze-inactive\" data-ordinal=\"0\">zero</span> <span class=\"cloze\" data-ordinal=\"1\">one</span>", "", "{<span class=\"cloze\" data-ordinal=\"1\">brace</span>}", "<span class=\"cloze-inactive\" data-ordinal=\"1\">a</span><span class=\"cloze\" data-ordinal=\"2\">b</span>", "<span class=\"cloze\" data-ordinal=\"2,5\">x</span>", "<span class=\"cloze\" data-ordinal=\"7\">seven</span>", "<span class=\"cloze\" data-ordinal=\"1\">:x</span>", "<span class=\"cloze\" data-ordinal=\"1\">a</span>{{", "<span class=\"cloze\" data-ordinal=\"1\">a</span> {{c,::b}}"],
+          "front": ["{{c::a}} <span class=\"cloze\" data-cloze=\"b\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"c\" data-ordinal=\"1\">[...]</span> {{c99999::d}} <span class=\"cloze-inactive\" data-ordinal=\"65535\">e</span> <span class=\"cloze\" data-cloze=\"f\" data-ordinal=\"1\">[...]</span>", "{{C1::x}} {{ c1::x}} {{c1 ::x}} {{c1:x}} {c1::x} <span class=\"cloze\" data-cloze=\"y\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"last\" data-ordinal=\"65535\">[...]</span>", "{{c65536::none}} <span class=\"cloze\" data-cloze=\"one\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze-inactive\" data-ordinal=\"0\">zero</span> <span class=\"cloze\" data-cloze=\"one\" data-ordinal=\"1\">[...]</span>", "", "{<span class=\"cloze\" data-cloze=\"brace\" data-ordinal=\"1\">[...]</span>}", "<span class=\"cloze-inactive\" data-ordinal=\"1\">a</span><span class=\"cloze\" data-cloze=\"b\" data-ordinal=\"2\">[...]</span>", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"2,5\">[...]</span>", "<span class=\"cloze\" data-cloze=\"seven\" data-ordinal=\"7\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&#x3A;x\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span>{{", "<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span> {{c,::b}}"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "09cd906bf8cf0daa13a1dcb841fcc42e97f2d7f3c5c2e43585d32f2d457aa10f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/markers",
+  "scenario_sha256": "eb792b150beaaf4676cd259700e5b745b42b824e6248e181e405aad1a9031783",
+  "tz": "UTC"
+}
