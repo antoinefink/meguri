@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:meguri:perf-result:1",
+  "title": "Meguri performance result",
+  "description": "One run of one performance suite (U12, R1863, R1864): UI performance tests (tools/scripts/perf-compare from an xcresult), criterion wall-clock benches (meguri-testkit bench::report) and gungraun instruction counts (perf-compare from gungraun's JSON). U241's perf-gate reads it. Bump schema_version on any incompatible change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "suite", "kind", "configuration", "runner", "results"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "suite": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What ran: a UI test class (SmokePerfTests), a bench target (open) or a gungraun bench file (icount_open)."
+    },
+    "kind": {
+      "enum": ["ui", "wall-clock", "instruction-count"],
+      "description": "ui: XCTest metrics from a simulator, device or Mac run; wall-clock: criterion with per-operation samples; instruction-count: gungraun under valgrind."
+    },
+    "configuration": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The build: the Xcode configuration for ui (only Profile counts, R1866), the cargo profile for core benches (bench)."
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "description": "Where it ran. Baselines are keyed by id (U241).",
+      "properties": {
+        "kind": { "enum": ["simulator", "device", "mac", "docker"] },
+        "id": { "type": "string", "minLength": 1, "description": "The baseline key: model and OS build for simulators and devices, CPU and OS for hosts." },
+        "model": { "type": "string" },
+        "os": { "type": "string" },
+        "os_build": { "type": "string" },
+        "cpu": { "type": "string" },
+        "arch": { "type": "string" },
+        "memory_measure": {
+          "enum": ["phys_footprint", "peak_rss"],
+          "description": "What memory rows measure: the process's phys_footprint on Apple hosts and devices, its resident set in Docker."
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/result" }
+    }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "metric", "unit", "value", "samples"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The interval (IntervalNames, R1861) or benchmark the value belongs to; for XCTest's own metrics, xctest.<metric>."
+        },
+        "test": { "type": "string", "description": "The test that measured it (ui): Class/testMethod()." },
+        "metric": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "duration, instructions, memory, hitch-ratio, hitch-time, launch, cpu-time, clock, or another XCTest metric in kebab case."
+        },
+        "unit": { "enum": ["ms", "s", "count", "MB", "kB", "ms/s", "%", "frames"] },
+        "percentile": {
+          "enum": ["p50", "p95", "p99", "max"],
+          "description": "Absent for a single exact value (an instruction count). pN is the smallest sample with fewer than (100 - N)% of the samples above it, so a percentile never hides the slow tail."
+        },
+        "value": { "type": "number" },
+        "samples": { "type": "integer", "minimum": 1, "description": "How many measurements the value comes from: operations for core benches, iterations for UI tests." },
+        "fixture": { "type": "string", "description": "The generated collection measured on (10k, 150k, ...), when there is one." },
+        "measurements": {
+          "type": "array",
+          "items": { "type": "number" },
+          "description": "Every measurement in unit, for UI metrics (one per iteration)."
+        },
+        "breakdown": {
+          "type": "object",
+          "additionalProperties": { "type": "number" },
+          "description": "Parts reported beside a memory row, in its unit; never gated (R1864: SQLite allocates outside Rust's allocator)."
+        }
+      }
+    }
+  }
+}

@@ -34,6 +34,14 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3-yaml \
  && rm -rf /var/lib/apt/lists/*
 
+# gungraun's runner for the instruction-count benches (tools/mg bench-icount,
+# U12). It must be exactly the version of the gungraun crate in
+# core/Cargo.toml, or every bench exits with a version error.
+ARG GUNGRAUN_RUNNER_VERSION=0.20.0
+RUN --mount=type=cache,id=meguri-dev-cargo-registry,target=/usr/local/cargo/registry \
+    cargo install --locked --version "${GUNGRAUN_RUNNER_VERSION}" gungraun-runner \
+ && gungraun-runner --version
+
 ENV MG_CONTAINER=dev
 
 FROM dev AS fuzz

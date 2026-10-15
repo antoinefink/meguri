@@ -72,6 +72,15 @@ jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-
 ryu = "1.0.23"
 sha2 = "0.11.1"
 
+# Benchmarks (U12, R1864): criterion for wall-clock suites, hdrhistogram for
+# their per-operation samples, gungraun for instruction counts under valgrind
+# in Docker (its runner, installed in docker/dev.Dockerfile, must be the same
+# version), libc for the process footprint on Apple hosts.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+gungraun = "=0.20.0"
+hdrhistogram = { version = "7.6.0", default-features = false }
+libc = "0.2.190"
+
 [profile.dev]
 opt-level = 1
 

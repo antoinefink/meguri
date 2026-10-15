@@ -5,6 +5,7 @@
 //! The scenario language, observations and statuses are specified in
 //! `specs/conformance/dsl.md` and `specs/conformance/observations.md`.
 
+pub mod bench;
 pub mod catalog;
 pub mod diff;
 pub mod exec;
