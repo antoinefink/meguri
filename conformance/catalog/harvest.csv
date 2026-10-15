@@ -705,17 +705,17 @@ hf2d2c23247a1,rust,tag,render,unclassified,,,open
 hf2f1c863cdca,rust,tag,render,unclassified,,,open
 hf6db24b439e4,rust,tag,render,unclassified,,,open
 hf8d1651d6b66,rust,tag,render,unclassified,,,open
-h0b343b3380e0,typescript,tag,review,unclassified,,,open
-h14162d344ef9,typescript,tag,review,unclassified,,,open
-h145698acc12f,typescript,tag,review,unclassified,,,open
-h3ad6e171d247,typescript,tag,review,unclassified,,,open
-h6d11dd559ac4,typescript,tag,review,unclassified,,,open
-h8d2949298ebc,typescript,tag,review,unclassified,,,open
-h94ade20fdbd8,typescript,tag,review,unclassified,,,open
-hd03c2e9b5063,typescript,tag,review,unclassified,,,open
-he1f7c4ce9bf3,typescript,tag,review,unclassified,,,open
-he5cb8d3fb44b,typescript,tag,review,unclassified,,,open
-hfe671bb51af8,typescript,tag,review,unclassified,,,open
+h0b343b3380e0,typescript,tag,review,out-of-scope,MathJax loading and typesetting in the card page; Meguri never typesets math and keeps its source text (R563),,done
+h14162d344ef9,typescript,tag,review,out-of-scope,MathJax loading and typesetting in the card page; Meguri never typesets math and keeps its source text (R563),,done
+h145698acc12f,typescript,tag,review,out-of-scope,custom scheduling scripts that rewrite the next card states; in Meguri the card page call is a no-op that leaves states unchanged (R512),,done
+h3ad6e171d247,typescript,tag,review,out-of-scope,custom scheduling scripts that rewrite the next card states; in Meguri the card page call is a no-op that leaves states unchanged (R512),,done
+h6d11dd559ac4,typescript,tag,review,out-of-scope,MathJax loading and typesetting in the card page; Meguri never typesets math and keeps its source text (R563),,done
+h8d2949298ebc,typescript,tag,review,out-of-scope,custom scheduling scripts that rewrite the next card states; in Meguri the card page call is a no-op that leaves states unchanged (R512),,done
+h94ade20fdbd8,typescript,tag,review,out-of-scope,MathJax loading and typesetting in the card page; Meguri never typesets math and keeps its source text (R563),,done
+hd03c2e9b5063,typescript,tag,review,out-of-scope,MathJax loading and typesetting in the card page; Meguri never typesets math and keeps its source text (R563),,done
+he1f7c4ce9bf3,typescript,tag,review,out-of-scope,MathJax loading and typesetting in the card page; Meguri never typesets math and keeps its source text (R563),,done
+he5cb8d3fb44b,typescript,tag,review,out-of-scope,custom scheduling scripts that rewrite the next card states; in Meguri the card page call is a no-op that leaves states unchanged (R512),,done
+hfe671bb51af8,typescript,tag,review,out-of-scope,custom scheduling scripts that rewrite the next card states; in Meguri the card page call is a no-op that leaves states unchanged (R512),,done
 h07a0e8e761e3,python,tag,sched,unclassified,,,open
 h10adc68e72c5,python,tag,sched,unclassified,,,open
 h1b8a7b774a45,python,tag,sched,unclassified,,,open
