@@ -1,0 +1,22 @@
+# The tag tree (specs/tags/tags.md T13): rows and implicit parents, the
+# spelling an implicit parent takes from the first row below it, collapsed
+# states, and the order of children (`one::two` under `one`, before
+# `one1`). Rows inserted by another client join the tree like any row.
+id: tags/tree/structure
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - observe: [tag_tree]
+  - add_note: {notetype: Plain, fields: ["n1"], tags: ["foo::BAR::a"]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["FOO::bar::b"]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: [one, one1, "one::two"]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: ["Bar::x"]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: ["bar::y"]}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('a!', 0, 1, NULL), ('B2', 0, 0, NULL), ('b2::c', 0, 0, NULL)"}
+  - set_tag_collapsed: {tags: ["foo::BAR"], collapsed: false}
+  - observe: [tag_tree]
+  - observe: [{db_dump: {tables: [tags]}}]

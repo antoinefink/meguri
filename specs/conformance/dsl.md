@@ -143,6 +143,13 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
 | `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
 | `set_config` | `{key, value}`: one collection config key and its JSON value | none | stable (`record-ops.md` W4) |
+| `add_note_tags`, `remove_note_tags` | `{notes: [#nN, ...], tags: <text>}`: add the tags of the text to the notes, or remove the matching tags from them | `{count}` | shape fixed (`tag-ops.md` G1, G2); driver pending (G11) |
+| `delete_tags` | `{tags: <text>}`: remove the tags and their descendants from every note and from the registry | `{count}` | shape fixed (`tag-ops.md` G3); driver pending |
+| `rename_tag` | `{from: <name>, to: <text>}` | `{count}`; rejection `invalid_name` | shape fixed (`tag-ops.md` G4); driver pending |
+| `reparent_tags` | `{tags: [<name>, ...], parent: <name or "">}` | `{count}` | shape fixed (`tag-ops.md` G5); driver pending |
+| `clear_unused_tags` | `{}` | `{count}` | shape fixed (`tag-ops.md` G6); driver pending |
+| `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | shape fixed (`tag-ops.md` G7); driver pending |
+| `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | shape fixed (`tag-ops.md` G8); driver pending |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
