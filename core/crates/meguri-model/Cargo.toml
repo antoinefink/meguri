@@ -5,3 +5,28 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[features]
+# Test-only hooks (KTD18): fault points that fire and the steppable clock.
+# Never on by default or in Release; meguri-testkit turns it on.
+test-hooks = []
+
+[dependencies]
+ryu.workspace = true
+serde.workspace = true
+# raw_value keeps untyped JSON values as their exact text
+# (specs/model/json-numbers.md N7). Numbers are parsed from that text with
+# std's exact parsers, so the model does not need float_roundtrip.
+serde_json = { workspace = true, features = ["raw_value"] }
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+meguri-testkit.workspace = true
+
+[[test]]
+name = "faultpoint"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "step_clock"
+required-features = ["test-hooks"]

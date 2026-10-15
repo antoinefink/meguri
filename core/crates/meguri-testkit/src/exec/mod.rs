@@ -1,13 +1,17 @@
 //! Executors run scenarios and return their observations (dsl.md D8). The
 //! oracle executor drives oracle workers; Meguri's runs the core in-process
 //! through per-area adapters registered in a capabilities registry. Live
-//! scenarios run as a chain of segments on both (dsl.md D9, `live`).
+//! scenarios run as a chain of segments on both (dsl.md D9, `live`), actor
+//! scenarios through the parties executor (sync-ops.md S10, `parties`).
 
 pub mod clock;
 pub mod live;
 mod meguri;
 mod oracle;
+pub mod parties;
+mod storage;
 pub mod sync_guard;
+mod text;
 
 use std::fmt;
 use std::ops::Range;
@@ -18,8 +22,12 @@ use serde_json::Value;
 
 use crate::scenario::LoadedScenario;
 pub use crate::scenario::Needs;
-pub use meguri::{HandoffFn, MeguriExecutor, ObserveFn, OpFn, OpResult, Registry, Session, SetupFn};
+pub use meguri::{
+    FinishFn, HandoffFn, MeguriExecutor, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat, Session,
+    SetupFn, SyncAccount, actor_seed,
+};
 pub use oracle::{Hello, OracleExecutor};
+pub use storage::{Storage, normalize_sql};
 
 /// A failed run: a protocol error kind (`unknown_ref`, `invalid_scenario`,
 /// `unsupported_op`, `anki_error`, `worker_died`, ...), the step when known and
@@ -116,4 +124,22 @@ pub struct SegmentOutput {
 /// An executor that can run one segment of a live scenario.
 pub trait SegmentExecutor: Executor {
     fn segment(&self, scenario: &LoadedScenario, request: &SegmentRequest) -> Result<SegmentOutput, ExecError>;
+
+    /// A worker of the zone `tz`, held for one interactive session
+    /// (protocol.json `begin`, `step`, `end`): how the parties executor runs
+    /// actor scenarios (sync-ops.md S10.4). Only the oracle has them.
+    fn interactive(&self, tz: &str) -> Result<Box<dyn Interactive + '_>, ExecError> {
+        Err(ExecError::new(
+            "unsupported_op",
+            format!("the {} executor runs no interactive sessions ({tz})", self.name()),
+        ))
+    }
+}
+
+/// One worker for one interactive session. Dropping it before a successful
+/// `end` stops the worker instead of reusing it, so no session stays open.
+pub trait Interactive {
+    /// Sends one request; an error response is an [`ExecError`] with the
+    /// protocol's kind and step.
+    fn request(&mut self, request: &Value) -> Result<Value, ExecError>;
 }

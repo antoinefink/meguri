@@ -1,0 +1,28 @@
+# smoke/sync/two-party with a Meguri actor as the downloader
+# (specs/conformance/sync-ops.md S10.2): `pending`, never `fail`, until a Meguri
+# adapter syncs. The oracle plays `meguri` when it records the golden.
+# Meguri downloads, so the converged collection is client_a's (S12).
+id: smoke/sync/meguri-downloads
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - advance: 1m
+  - actor: meguri
+  - observe: ["card(#c1)"]
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - sync: {kind: normal}
+  - observe: ["card(#c1)"]
+  - converge: {}

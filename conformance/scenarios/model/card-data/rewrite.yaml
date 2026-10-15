@@ -1,0 +1,48 @@
+# Card data rebuilt when a card row is written (specs/model/card-data-json.md C4):
+# per-key rounding in f32 arithmetic with halves away from zero, shortest f32
+# text, null for a non-finite value, canonical key order, whitespace removed,
+# cd carried as is. Each card gets one input; suspending rewrites every row.
+id: model/card-data/rewrite
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [card01, back]}
+    - {notetype: Pair, fields: [card02, back]}
+    - {notetype: Pair, fields: [card03, back]}
+    - {notetype: Pair, fields: [card04, back]}
+    - {notetype: Pair, fields: [card05, back]}
+    - {notetype: Pair, fields: [card06, back]}
+    - {notetype: Pair, fields: [card07, back]}
+    - {notetype: Pair, fields: [card08, back]}
+    - {notetype: Pair, fields: [card09, back]}
+    - {notetype: Pair, fields: [card10, back]}
+    - {notetype: Pair, fields: [card11, back]}
+    - {notetype: Pair, fields: [card12, back]}
+    - {notetype: Pair, fields: [card13, back]}
+    - {notetype: Pair, fields: [card14, back]}
+    - {notetype: Pair, fields: [card15, back]}
+    - {notetype: Pair, fields: [card16, back]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)", params: ['{"s":123.45678,"d":1.234567,"dr":0.987654,"decay":0.123456}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)", params: ['{"s":2.5,"d":0.0015,"dr":0.125,"decay":0.0005}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)", params: ['{"s":0.00015,"d":0.0025,"dr":0.005,"decay":1.0005}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)", params: ['{"s":0.00005,"d":0.0005}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)", params: ['{"s":1e-7,"d":1e10}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)", params: ['{"s":12345678.9,"d":1}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)", params: ['{"s":1e40,"d":1}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)", params: ['{"s":-0.00004,"d":-0.0004}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)", params: ['{"s": 1 , "d" : 2}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)", params: ['{"dr":1,"decay":1}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)", params: ['{"lrt":-5,"pos":0}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 11)", params: ['{"lrt":9223372036854775807}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12)", params: ['{"cd":"[1]"}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 13)", params: ['{"cd":"{\"a\": 1}"}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 14)", params: ['{"decay":0.212,"dr":0.212,"d":0.212,"s":0.212,"pos":0,"lrt":1894701600,"cd":"{\"x\":1}"}']}
+  - db_exec: {sql: "UPDATE cards SET data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 15)", params: ['{"s":0.9,"d":5.5,"dr":0.9,"decay":0.1542}']}
+  - suspend: {cards: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6", "#c7", "#c8", "#c9", "#c10", "#c11", "#c12", "#c13", "#c14", "#c15", "#c16"]}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}

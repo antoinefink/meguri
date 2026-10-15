@@ -1,0 +1,20 @@
+# Preset objects Anki refuses (schema11-json S10): each step is rejected with
+# invalid_json and changes nothing.
+id: model/schema11/preset-rejections
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Daily, new_per_day: 15}]
+steps:
+  - legacy_update: {preset: Daily, patch: {maxTaken: "60"}}
+  - legacy_update: {preset: Daily, patch: {maxTaken: null}}
+  - legacy_update: {preset: Daily, patch: {autoplay: null}}
+  - legacy_update: {preset: Daily, patch: {timer: null}}
+  - legacy_update: {preset: Daily, patch: {questionAction: 5}}
+  - legacy_update: {preset: Daily, patch: {answerAction: 9}}
+  - legacy_update: {preset: Daily, patch: {new: null}}
+  - legacy_update: {preset: Daily, patch: {fsrsParams6: ["x"]}}
+  - legacy_update: {preset: Daily, patch: {mod: null}}
+  - legacy_update: {preset: Daily, patch: {usn: "1"}}
+  - db_exec: {sql: "SELECT mtime_secs, usn, hex(config) FROM deck_config WHERE name = 'Daily'"}
+  - observe:
+      - legacy_json: {presets: [Daily]}

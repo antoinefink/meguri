@@ -10,6 +10,14 @@
 #   xcrun simctl __app <udid> <bundle id> <User|System>
 #   xcrun simctl __state <udid>
 #   xcrun simctl __apps <udid>                                  bundle ids, one per line
+#
+# FAKE_SIM_RT27_BUILD sets the iOS 27.0 runtime's build (default 24A434);
+# FAKE_SIM_FOLDABLE=1 adds a foldable iPhone device type. `io <udid>
+# recordVideo ... <file>` writes the file and runs until SIGINT (with
+# FAKE_SIM_RECORD_EMPTY=1 the file is empty; FAKE_SIM_RECORD_EXIT_AFTER=<s>
+# makes it fail after that long); `io <udid> screenshot <file>` writes a
+# stand-in PNG. FAKE_SIM_STATUS_BAR_FAIL=1 makes `status_bar <udid> override`
+# fail.
 
 set -u
 [ "${1:-}" = simctl ] || { echo "fake xcrun: only simctl is faked" >&2; exit 97; }
@@ -51,24 +59,31 @@ add() { # add <name> <state> <type> <runtime>: prints the UDID
 lock
 case "${1:-} ${2:-}" in
   "list runtimes")
-    cat <<'EOF'
+    cat <<EOF
 {"runtimes": [
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2", "version": "18.2", "isAvailable": true, "platform": "iOS"},
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "isAvailable": true, "platform": "iOS"},
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "isAvailable": false, "platform": "iOS"},
-  {"identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-28-0", "version": "28.0", "isAvailable": true, "platform": "watchOS"}
+  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2", "version": "18.2", "buildversion": "22C150", "isAvailable": true, "platform": "iOS"},
+  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-0", "version": "27.0", "buildversion": "${FAKE_SIM_RT27_BUILD:-24A434}", "isAvailable": true, "platform": "iOS"},
+  {"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-27-1", "version": "27.1", "buildversion": "24B5", "isAvailable": false, "platform": "iOS"},
+  {"identifier": "com.apple.CoreSimulator.SimRuntime.watchOS-28-0", "version": "28.0", "buildversion": "23R1", "isAvailable": true, "platform": "watchOS"}
 ]}
 EOF
     ;;
   "list devicetypes")
-    cat <<'EOF'
+    {
+      cat <<'EOF'
 {"devicetypes": [
-  {"name": "iPhone 17 Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"},
-  {"name": "iPhone 17 Pro Max", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max"},
-  {"name": "iPad Pro 13-inch (M5) (16GB)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB"},
-  {"name": "iPad Pro 13-inch (M5)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB"}
-]}
+  {"name": "iPhone 17 Pro", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro", "productFamily": "iPhone"},
+  {"name": "iPhone 17 Pro Max", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max", "productFamily": "iPhone"},
+  {"name": "iPhone 17e", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-17e", "productFamily": "iPhone"},
+  {"name": "iPad Pro 13-inch (M5) (16GB)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-16GB", "productFamily": "iPad"},
+  {"name": "iPad Pro 13-inch (M5)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB", "productFamily": "iPad"},
+  {"name": "iPad mini (A17 Pro)", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPad-mini-A17-Pro", "productFamily": "iPad"},
+  {"name": "Apple Watch Ultra 3 (49mm)", "identifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Watch-Ultra-3-49mm", "productFamily": "Apple Watch"}
 EOF
+      [ "${FAKE_SIM_FOLDABLE:-}" != 1 ] ||
+        echo ', {"name": "iPhone Fold", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-Fold", "productFamily": "iPhone"}'
+      echo ']}'
+    }
     ;;
   "list devices")
     jq '{devices: (reduce .devices[] as $d ({}; .[$d.runtime] += [{
@@ -127,8 +142,33 @@ EOF
     need_booted "$2" uninstall
     upd --arg u "$2" --arg b "$3" '(.devices[] | select(.udid == $u) | .apps) |= map(select(.id != $b))'
     ;;
-  privacy\ * | keychain\ * | ui\ * | status_bar\ *)
+  privacy\ * | keychain\ * | ui\ * | status_bar\ * | install\ * | launch\ *)
     need_booted "$2" "$1"
+    if [ "$1 ${3:-}" = "status_bar override" ] && [ "${FAKE_SIM_STATUS_BAR_FAIL:-}" = 1 ]; then
+      echo "fake simctl: status_bar override failed" >&2
+      exit 1
+    fi
+    ;;
+  io\ *)
+    need_booted "$2" io
+    for file; do :; done # the last argument
+    case "$3" in
+      screenshot) printf '\211PNG\r\n\032\nfake' >"$file" ;;
+      recordVideo)
+        rmdir "$DB.lock" 2>/dev/null
+        trap - EXIT
+        if [ "${FAKE_SIM_RECORD_EMPTY:-}" = 1 ]; then : >"$file"; else printf 'fake video\n' >"$file"; fi
+        trap 'echo "Recording completed" >&2; exit 0' INT
+        echo "Recording started" >&2
+        if [ -n "${FAKE_SIM_RECORD_EXIT_AFTER:-}" ]; then
+          sleep "$FAKE_SIM_RECORD_EXIT_AFTER"
+          echo "Recording failed: the device went away" >&2
+          exit 1
+        fi
+        while :; do sleep 0.1; done
+        ;;
+      *) echo "fake simctl io: unexpected $3" >&2; exit 97 ;;
+    esac
     ;;
   erase\ *)
     need "$2"

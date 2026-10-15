@@ -1,0 +1,27 @@
+# Record -> object for a preset whose other holds extra keys
+# (schema11-json S10.5): reserved top-level and sub-object keys are dropped,
+# new.keep joins the new object, keep2 the top level. other that is not JSON,
+# or JSON but not an object, adds nothing. Then a synthetic add-on block in
+# the style of a scheduling add-on (nested objects and zeros, written for this
+# scenario) appears whole at the top level (R1464).
+id: model/schema11/preset-other
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Daily, new_per_day: 15}]
+steps:
+  - db_exec:
+      sql: "UPDATE deck_config SET config = CAST(config || X'fa0f347b226d617854616b656e223a352c226e6577223a7b22706572446179223a332c226b656570223a317d2c226b65657032223a327d' AS BLOB) WHERE name = 'Daily'"
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - db_exec:
+      sql: "UPDATE deck_config SET config = CAST(config || X'fa0f086e6f74206a736f6e' AS BLOB) WHERE name = 'Daily'"
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - db_exec:
+      sql: "UPDATE deck_config SET config = CAST(config || X'fa0f055b312c325d' AS BLOB) WHERE name = 'Daily'"
+  - observe:
+      - legacy_json: {presets: [Daily]}
+  - db_exec:
+      sql: "UPDATE deck_config SET config = CAST(config || X'fa0f88017b226164646f6e5f70726f6d6f74696f6e223a7b22656e61626c6564223a66616c73652c227468726573686f6c645f64617973223a307d2c226164646f6e5f62616c616e6365223a7b227765656b223a5b302c302c302c302c302c302c305d2c22656e61626c6564223a66616c73657d2c226164646f6e5f7265746972655f6166746572223a307d' AS BLOB) WHERE name = 'Daily'"
+  - observe:
+      - legacy_json: {presets: [Daily]}

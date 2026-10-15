@@ -1,0 +1,29 @@
+# One-line text for tables (specs/text/strip-html.md H6): line breaks and plain
+# <div> become spaces, type-answer markers go, sound tags keep or drop their
+# name, then stripping and trimming.
+id: text/strip/text-line
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [text_line, text_line_keep_media]
+          inputs:
+            - "<br>a<BR/>b<br />c<br\t/>d<br  >e<div>f<DIV>g<div class=x>h</div>i\nj\rk"
+            - "[[type:Back]]q[[type:cloze:Text]]"
+            - "[[type:]]x"
+            - "[sound:a b.mp3]c"
+            - "[sound:]x]"
+            - "[sound:one.mp3][sound:two.mp3]"
+            - "<img src=\"pic.png\">[sound:say.mp3]"
+            - "  \u3000 x \u00A0 "
+            - "\u00A0x\u00A0"
+            - "a\u2028b"
+            - "<b>&lt;i&gt;</b>"
+            - "first\n\nsecond"
+            - "<br\u00A0>nb"
+            - "<p>para</p><p>two</p>"
+            - "<div>block</div><div>block</div>"
+            - "\r\nwindows"
+            - "[SOUND:upper.mp3]"
+            - "x<br/>"
+            - "<img src=\"a&amp;b.png\">&amp;"

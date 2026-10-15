@@ -1,0 +1,140 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", "44656661756C74"],
+            ["A\u001fB: x\u001fblank", "411F423A20781F626C616E6B"],
+            ["a\u001fb", "611F62"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "A::B: x::blank": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "A::B: x::blank",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            },
+            "a::b": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "a::b",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", "44656661756C74"],
+            ["Café\u001f日本語\u001f😀 Emoji", "436166C3A91FE697A5E69CACE8AA9E1FF09F988020456D6F6A69"],
+            ["blank\u001fTail\u001fblank", "626C616E6B1F5461696C1F626C616E6B"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Café::日本語::😀 Emoji": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Café::日本語::😀 Emoji",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            },
+            "blank::Tail::blank": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "blank::Tail::blank",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/schema11/deck-names",
+  "scenario_sha256": "f85c6a51ea8faa0893f489bc49b02004fe451e7b0bbef0aa3ad8a2439b46eef0",
+  "tz": "UTC"
+}

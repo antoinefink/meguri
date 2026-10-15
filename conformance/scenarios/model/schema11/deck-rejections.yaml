@@ -1,0 +1,21 @@
+# Deck objects Anki refuses (schema11-json S1 "refuse", S7, S7.2): each step is
+# rejected with invalid_json and changes nothing.
+id: model/schema11/deck-rejections
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+steps:
+  - legacy_update: {deck: Words, patch: {dyn: "0"}}
+  - legacy_update: {deck: Words, patch: {dyn: true}}
+  - legacy_update: {deck: Words, patch: {dyn: -1}}
+  - legacy_update: {deck: Words, patch: {collapsed: 1}}
+  - legacy_update: {deck: Words, patch: {collapsed: null}}
+  - legacy_update: {deck: Words, patch: {lrnToday: "x"}}
+  - legacy_update: {deck: Words, patch: {timeToday: null}}
+  - legacy_update: {deck: Words, patch: {usn: "5"}}
+  - legacy_update: {deck: Words, patch: {conf: 1.5}}
+  - legacy_update: {deck: Words, patch: {conf: null}}
+  - legacy_update: {deck: Words, patch: {name: 5}}
+  - db_exec: {sql: "SELECT mtime_secs, usn, hex(common), hex(kind) FROM decks WHERE name = 'Words'"}
+  - observe:
+      - legacy_json: {decks: [Words]}

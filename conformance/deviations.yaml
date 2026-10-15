@@ -3,6 +3,38 @@
 # here; any other difference from a golden fails. Every entry names the
 # requirement and a scenario or test that asserts Meguri's own behavior.
 deviations:
+  - id: card-data-unknown-keys
+    requirement: R1461
+    summary: When a card row is rewritten, Meguri keeps unknown keys of the card data JSON after the known keys, with their exact value text; Anki drops them (specs/model/card-data-json.md C3, C4).
+    test: core/crates/meguri-model/tests/card_data_json.rs unknown_keys_survive_rewrite
+    scenarios: [model/card-data/unknown-keys]
+    pointer: /steps/7/db_exec/rows
+    transform:
+      replace:
+        - ['{"pos":0,"s":0.212,"d":0.212,"dr":0.21,"decay":0.212,"lrt":5,"zz":1}']
+        - ['{"pos":3,"s":1.0,"d":5.0,"dr":0.9,"decay":0.154,"lrt":1894701600,"cd":"{\"x\":1}","zz":7}']
+        - ['{"s":1.0,"d":2.0,"zz":2}']
+        - ['{"s":3.5,"d":6.25,"cd":"{\"k\":true}","xyz":[1,2]}']
+        - ['{"pos":1,"zz":{"b":1,"a":[1, 2]}}']
+        - ['{"zz":null}']
+  - id: card-data-unknown-keys-range
+    requirement: R1461
+    summary: An unknown card data key whose value holds a number beyond the 64-bit float range is kept with its exact text, as any unknown key; Anki skips such values and drops the key (specs/model/card-data-json.md C3 rule 7, specs/model/json-numbers.md N10).
+    test: core/crates/meguri-model/tests/card_data_json.rs unknown_keys_skip_range_check
+    scenarios: [model/card-data/out-of-range]
+    pointer: /steps/26/db_exec/rows
+    transform:
+      replace:
+        - ['{"pos":5,"zz":1e400}']
+        - ['{"pos":5,"s":1.5,"d":2.0,"zz":1e400}']
+        - ['{"pos":5,"s":1.0,"d":2.0,"zz":[1,{"b":-1e400}]}']
+  - id: storage-v1-scheduler-refused
+    requirement: R1482
+    summary: Meguri refuses to open a collection still on the v1 scheduler (specs/storage/open-and-connections.md C2.2); Anki opens it and upgrades the scheduler in place.
+    test: core/crates/meguri-storage/tests/open_refuse.rs v1_scheduler_refused_and_untouched
+    scenarios: [storage/open/v1-scheduler]
+    pointer: /steps/*
+    transform: {replace: {open: {error: v1_scheduler}}}
   # specs/storage/ids-usn-mtime.md I3: no id more than one day ahead. Where
   # Anki's largest-plus-one passes now + 1 day, Meguri takes the smallest free
   # id above now.

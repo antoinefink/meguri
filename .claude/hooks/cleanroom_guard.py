@@ -145,10 +145,53 @@ def at_main_root(path, cwd):
     return path == MAIN
 
 
+HOLD = os.environ.get("MEGURI_HOLD_FILE", os.path.join(MAIN, ".git", "meguri-hold-agents"))  # content: epoch seconds when the hold began
+HELD_LOG = os.path.join(MAIN, ".git", "meguri-held-agents.log")
+
+
+def started_at(data):
+    agent = data.get("agent_id", "")
+    stem = agent if agent.startswith("agent-") else "agent-" + agent
+    session_dir = os.path.splitext(data.get("transcript_path", ""))[0]
+    metas = glob.glob(os.path.join(session_dir, "subagents", "**", stem + ".meta.json"), recursive=True)
+    if not metas:
+        return None
+    st = os.stat(metas[0])
+    return getattr(st, "st_birthtime", st.st_mtime)
+
+
+def hold_new_agents(data):
+    """Usage pause: agents that started after the hold began wait here, idle, until it is lifted."""
+    if not os.path.exists(HOLD):
+        return
+    try:
+        with open(HOLD) as f:
+            since = float(f.read().strip() or 0)
+    except (OSError, ValueError):
+        since = 0
+    born = started_at(data)
+    if born is None or born < since:
+        return  # agents already running when the hold began finish their work
+    import time
+    with open(HELD_LOG, "a") as f:
+        f.write("%d %s %s\n" % (time.time(), data.get("agent_id", ""), data.get("tool_name", "")))
+    deadline = time.time() + 540
+    while os.path.exists(HOLD) and time.time() < deadline:
+        time.sleep(10)
+    if os.path.exists(HOLD):
+        deny_raw("Paused for Antoine's Claude usage limit: new work waits until it resets. Repeat exactly the same tool call to keep waiting, and do nothing else meanwhile.")
+
+
+def deny_raw(reason):
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}))
+    sys.exit(0)
+
+
 def main():
     data = json.load(sys.stdin)
     if not data.get("agent_id"):
         return
+    hold_new_agents(data)
     if role_of(data) != "guarded":
         return
     tool = data.get("tool_name", "")

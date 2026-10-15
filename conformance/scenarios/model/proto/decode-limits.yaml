@@ -1,0 +1,50 @@
+# Which blobs the collection can decode (specs/model/protobuf-records.md P2,
+# P9), observed with blob_decode (specs/conformance/model-ops.md L4). Presets
+# get a whole deck-config blob each; decks are inserted with an empty common
+# blob and the kind blob under test. Covered: varint length and its tenth byte,
+# keys above 32 bits and field number 0, the P9 examples, groups left open at
+# the end of the blob or of a nested message's payload (a group end or string
+# bytes after the payload do not complete it), and the nesting limit: a field
+# at depth 100 or more is refused, for unknown groups at the top level, inside
+# the normal deck message and inside its day-limit message.
+id: model/proto/decode-limits
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: varint-10-01}, {name: varint-10-02}, {name: varint-10-7f}, {name: varint-11}, {name: key-max-field}, {name: key-33-bits}, {name: field-zero}, {name: short-payload}, {name: short-key}, {name: short-floats}, {name: varint-for-floats}, {name: wire-type-7}, {name: end-without-start}, {name: end-other-number}, {name: other-not-utf8}, {name: group-open-at-end}, {name: group-empty}, {name: groups-100}, {name: groups-101}, {name: groups-99-field}, {name: groups-100-field}]
+steps:
+  - db_exec: {sql: "UPDATE deck_config SET config = X'38ffffffffffffffffff01' WHERE name = 'varint-10-01'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'38ffffffffffffffffff02' WHERE name = 'varint-10-02'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'38ffffffffffffffffff7f' WHERE name = 'varint-10-7f'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'38ffffffffffffffffff8001' WHERE name = 'varint-11'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'f8ffffff0f00' WHERE name = 'key-max-field'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'808080801000' WHERE name = 'key-33-bits'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0000' WHERE name = 'field-zero'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0a05' WHERE name = 'short-payload'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'ff' WHERE name = 'short-key'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0a020000' WHERE name = 'short-floats'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0800' WHERE name = 'varint-for-floats'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0f' WHERE name = 'wire-type-7'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0c' WHERE name = 'end-without-start'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b44' WHERE name = 'end-other-number'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'fa0f02ffff' WHERE name = 'other-not-utf8'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b' WHERE name = 'group-open-at-end'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b3c' WHERE name = 'group-empty'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c' WHERE name = 'groups-100'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c' WHERE name = 'groups-101'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b08003c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c' WHERE name = 'groups-99-field'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b08003c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c' WHERE name = 'groups-100-field'"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000001, 'normal-empty', 1500000000, 0, X'', X'0a00')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000002, 'normal-group-empty', 1500000000, 0, X'', X'0a025b5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000003, 'normal-group-open', 1500000000, 0, X'', X'0a015b')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000004, 'normal-group-ends-outside', 1500000000, 0, X'', X'0a015b5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000005, 'normal-string-runs-outside', 1500000000, 0, X'', X'0a032202414242')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000006, 'normal-groups-99', 1500000000, 0, X'', X'0ac6015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000007, 'normal-groups-100', 1500000000, 0, X'', X'0ac8015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000008, 'normal-groups-98-field', 1500000000, 0, X'', X'0ac6015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b08005c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000009, 'normal-groups-99-field', 1500000000, 0, X'', X'0ac8015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b08005c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000010, 'limit-groups-98', 1500000000, 0, X'', X'0ac70142c4015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1500000000011, 'limit-groups-99', 1500000000, 0, X'', X'0ac90142c6015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c')"}
+  - observe:
+      - blob_decode:
+          presets: [varint-10-01, varint-10-02, varint-10-7f, varint-11, key-max-field, key-33-bits, field-zero, short-payload, short-key, short-floats, varint-for-floats, wire-type-7, end-without-start, end-other-number, other-not-utf8, group-open-at-end, group-empty, groups-100, groups-101, groups-99-field, groups-100-field]
+          decks: [normal-empty, normal-group-empty, normal-group-open, normal-group-ends-outside, normal-string-runs-outside, normal-groups-99, normal-groups-100, normal-groups-98-field, normal-groups-99-field, limit-groups-98, limit-groups-99]

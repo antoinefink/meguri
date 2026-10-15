@@ -1,0 +1,9 @@
+# specs/storage/open-and-connections.md C2.2 (R1482). Anki opens both files;
+# Meguri refuses both (deviation storage-v1-scheduler-refused in
+# conformance/deviations.yaml), so the scenario holds nothing but the opens.
+id: storage/open/v1-scheduler
+description: Collections still on the v1 scheduler, at schema 18 and at schema 11, are refused by Meguri and opened by Anki.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/v1-scheduler-18.anki2}
+  - open: {fixture: storage/v1-scheduler-11.anki2}

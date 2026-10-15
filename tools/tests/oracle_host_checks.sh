@@ -196,6 +196,9 @@ t_no_meguri_code_refers_to_oracle() {
 # An implementer worktree has no oracle/ (U2's sparse checkout). tools/mg there
 # builds from the main worktree's oracle/ and compares as usual. Throwaway
 # repo: a main checkout with a copy of the tree, and a sparse linked worktree.
+# It holds core/ too: compare reads the selected scenarios with meguri-cli to
+# find the actor scenarios, built in this checkout's target directory so that
+# only the workspace crates compile again.
 t_compare_runs_in_a_worktree_without_oracle() {
   local rc
   compare_in_a_sparse_worktree "$SPARSE"
@@ -209,7 +212,7 @@ compare_in_a_sparse_worktree() {
   main="$base/main"
   impl="$base/impl"
   rm -rf "$base" && mkdir -p "$main/oracle" || return 1
-  (cd "$REPO" && tar -cf - tools docker conformance) | tar -xf - -C "$main" &&
+  (cd "$REPO" && tar -cf - --exclude core/target tools docker conformance core) | tar -xf - -C "$main" &&
     (cd "$ORACLE" && tar -cf - --exclude __pycache__ --exclude '*.pyc' .) | tar -xf - -C "$main/oracle" || return 1
   git -C "$main" init -q && git -C "$main" add -A &&
     git -C "$main" -c user.name=hostcheck -c user.email=hostcheck@localhost -c commit.gpgsign=false commit -qm main &&
@@ -220,11 +223,14 @@ compare_in_a_sparse_worktree() {
     echo "the sparse worktree has oracle/"
     return 1
   fi
-  out="$(/bin/bash "$impl/tools/mg" oracle compare smoke 2>"$base/compare.log")"
+  out="$(CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO/core/target}" /bin/bash "$impl/tools/mg" oracle compare smoke 2>"$base/compare.log")"
   rc=$?
   result="$(printf '%s\n' "$out" | tail -n 1)"
   project="meguri-impl-$(printf '%s' "$(cd "$impl" && pwd -P)" | cksum | cut -d' ' -f1)"
-  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f "$impl/docker/compose.yml" down >/dev/null 2>&1
+  # compare starts the profiled sync-faults for actor scenarios; down without
+  # its profile would leave it and the network up.
+  BUILDX_NO_DEFAULT_ATTESTATIONS=1 docker compose -p "$project" -f "$impl/docker/compose.yml" \
+    --profile oracle-sync --profile oracle-record down >/dev/null 2>&1
   if [ "$rc" -ne 0 ] || [ ! -f "$result" ]; then
     echo "tools/mg oracle compare smoke exited $rc in the sparse worktree:"
     tail -n 20 "$base/compare.log"
@@ -234,7 +240,9 @@ compare_in_a_sparse_worktree() {
   expect "status" "$(jq -r .status "$result")" pass &&
     expect "image tag" "$(jq -r .details.image.tag "$result")" "meguri-oracle:$MG_ORACLE_TAG" &&
     expect "every scenario passed" "$(jq -r '.summary.passed > 0 and .summary.passed == .summary.total' "$result")" true &&
-    expect "oracle/ in the sparse worktree after the run" "$([ -e "$impl/oracle" ] && echo present || echo absent)" absent
+    expect "oracle/ in the sparse worktree after the run" "$([ -e "$impl/oracle" ] && echo present || echo absent)" absent &&
+    expect "containers left by the run" \
+      "$(docker ps -aq --filter "label=com.docker.compose.project=$project" | wc -l | tr -d ' ')" 0
 }
 
 # Runs last. The checks above copy oracle/ into the run directory, under this

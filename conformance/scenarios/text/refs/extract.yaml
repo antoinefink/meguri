@@ -1,0 +1,66 @@
+# Media reference extraction (specs/text/media-references.md M2-M5): media tags
+# in every quote style, the src and data attributes, which tag and attribute
+# names count, tag references before sound references, per-name entity decoding,
+# and how encoding (M6) can change the matches (M8).
+id: text/refs/extract
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [media_refs, strip_markup_keep_media]
+          inputs:
+            - "<img src='x.png'>"
+            - "<audio src=y.mp3>"
+            - "[sound:z.mp3]"
+            - "<source src=\"a&amp;b.ogg\">"
+            - "<img src=\"https://e.com/a.png\">"
+            - "<img data-src=\"lazy.png\">"
+            - "<img srcset=\"set.png 2x\">"
+            - "<img src = \"spaced.png\">"
+            - "<img\u00A0src=nbsp.png>"
+            - "<imgx src=a.png>"
+            - "<img2 src=b.png>"
+            - "<imgé src=c.png>"
+            - "<image src=\"d.png\">"
+            - "<IMG SRC=\"e.png\">"
+            - "<\u017Fource \u017Frc=f.mp3>"
+            - "<video poster=\"p.jpg\" src=\"v.mp4\">"
+            - "<object data=\"o.svg\"></object>"
+            - "<img DATA=\"g.png\">"
+            - "<img alt=\"q>r\" src=\"s.png\">"
+            - "<img alt='t' > src='u.png'>"
+            - "<img alt='\"quoted>\"' src='w.png'>"
+            - "<img src='a'b'>"
+            - "<img src=\"never closed.png\""
+            - "<img src=unq.png/>"
+            - "<img src=unq.png title=t>"
+            - "<img src=a.png\nalt=x>"
+            - "<img src=a\tb.png>"
+            - "<img src=\"one two.png\" class=x>"
+            - "<img x src=y.png z>"
+            - "<img src=\"1.png\"><img src='2.png'>[sound:3.mp3]<img src=4.png>"
+            - "[sound:5.mp3]<img src=6.png>"
+            - "<img src=\"[sound:7.mp3]\">"
+            - "[sound:a]b]"
+            - "[sound:\nx]"
+            - "[Sound:no.mp3]"
+            - "[sound:]"
+            - "[sound:]]"
+            - "[sound:&amp;.mp3]"
+            - "<img src=\"a&b.png\">"
+            - "<img src=\"a&amp;b&c.png\">"
+            - "<img src=\"&nbsp;n.png\">"
+            - "<img src=\"http&#58;//x.org/a.png\">"
+            - "<img src=\"data:image/png;base64,iVBORw0K\">"
+            - "<audio controls><source type=\"audio/mpeg\" src=\"voice.mp3\"><source src=\"voice.ogg\"></audio>"
+            - "<picture><source srcset=\"x.webp\"><img src=\"y.gif\"></picture>"
+            - "<img src=\"\">"
+            - "<img src=''>"
+            - "<img src=\"x.png\"/><img src=\"y.png\" />"
+            - "<img alt=\"src=x y.png\" src=\"z.png\">"
+            - ""
+            # M8 condition 4: a text and its encoding (M6) with different
+            # matches; in the second the video tag's match runs on to the
+            # audio tag's name.
+            - "<video title=\"a\">x<img src=\"a>b.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">"
+            - "<video title=\"a\">x<img src=\"a%3Eb.png\"> <audio title=\"t\" src=\"https://e.org/p.png\">"

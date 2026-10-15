@@ -8,6 +8,7 @@
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
+    "uiTestingScreenshotsLifetime" : "keepNever",
     "targetForVariableExpansion" : {
       "containerPath" : "container:Meguri.xcodeproj",
       "identifier" : "4D4547555249000000000100",

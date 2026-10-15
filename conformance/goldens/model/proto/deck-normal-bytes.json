@@ -1,0 +1,130 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1, "Default", 0, 0, "08011001", "0A020801"],
+            [1894701600000, "Words", 1894701600, -1, "100118052003280C30013890BF05", "0A2D08809A90A8923710051807220B4461696C7920776F7264732801306438004204081E10054A021005559A99593F"],
+            [1894701600001, "Words\u001fVerbs", 1894701600, -1, "08011001", "0A020801"],
+            [1894701600002, "Grammar", 1894701600, -1, "08011001", "0A020801"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Default": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1,
+              "lrnToday": [0, 0],
+              "mod": 0,
+              "name": "Default",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": 0
+            },
+            "Grammar": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600002,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Grammar",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            },
+            "Words": {
+              "browserCollapsed": true,
+              "collapsed": false,
+              "conf": 1894701600000,
+              "desc": "Daily words",
+              "desiredRetention": 85,
+              "dyn": 0,
+              "extendNew": 5,
+              "extendRev": 7,
+              "id": 1894701600000,
+              "lrnToday": [5, 1],
+              "md": true,
+              "mod": 1894701600,
+              "name": "Words",
+              "newLimit": 0,
+              "newLimitToday": {
+                "limit": 0,
+                "today": 5
+              },
+              "newToday": [5, 3],
+              "revToday": [5, 12],
+              "reviewLimit": 100,
+              "reviewLimitToday": {
+                "limit": 30,
+                "today": 5
+              },
+              "timeToday": [5, 90000],
+              "usn": -1
+            },
+            "Words::Verbs": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Words::Verbs",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/proto/deck-normal-bytes",
+  "scenario_sha256": "330b7871006c31f35919e682a2ae32c37712a03b7b0a15b8ba0b8fd58f908a83",
+  "tz": "UTC"
+}

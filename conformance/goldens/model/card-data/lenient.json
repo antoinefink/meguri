@@ -1,0 +1,175 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{}"],
+            ["{\"pos\":1}"],
+            ["{\"pos\":1,\"s\":2.0,\"d\":3.0}"],
+            ["{\"s\":2.0,\"d\":3.0}"],
+            ["{\"pos\":1,\"s\":2.0,\"d\":3.0,\"dr\":4.0,\"decay\":5.0,\"lrt\":6,\"cd\":\"{\\\"a\\\":1}\"}"],
+            ["{}"],
+            ["{}"],
+            ["{}"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "22b1e6c16931ecc95eea8014e9f8b07a90cb20dd39fe38cd0dc75bca28da4e61",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "model/card-data/lenient",
+  "scenario_sha256": "2883b2028fec2f3f4e5abcea7002d3ea1f54a8c61a2637faff8b70f4d7de7124",
+  "tz": "UTC"
+}
