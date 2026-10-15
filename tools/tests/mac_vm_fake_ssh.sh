@@ -9,14 +9,23 @@
 # The command gets a clean environment, as over SSH: only the fakes' own
 # variables (FAKE_*, STUB_LOG, MEGURI_HOST_LEASE_DIR), HOME and PATH, so a
 # variable the job forgot to pass never reaches it. A VM that is not running,
-# or $FAKE_VM_DIR/ssh-down, refuses the connection (exit 255). Every call is
-# logged to $STUB_LOG.
+# or $FAKE_VM_DIR/ssh-down, refuses the connection (exit 255). A command that
+# matches the ERE in FAKE_VM_SSH_FAIL loses its connection (exit 255); one
+# that matches FAKE_VM_SSH_EMPTY_TAR prints an empty tar archive and exits 0.
+# Every call is logged to $STUB_LOG.
 set -u
 vm="$FAKE_VM_DIR/$FAKE_VM_NAME"
 printf 'ssh %s %s\n' "$FAKE_VM_NAME" "$*" >>"${STUB_LOG:-/dev/null}"
 if [ "$(cat "$vm/state" 2>/dev/null)" != running ] || [ -e "$FAKE_VM_DIR/ssh-down" ]; then
   echo "ssh: connect to host 192.168.64.2 port 22: Connection refused" >&2
   exit 255
+fi
+if [ -n "${FAKE_VM_SSH_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$FAKE_VM_SSH_FAIL"; then
+  echo "Connection to 192.168.64.2 closed by remote host." >&2
+  exit 255
+fi
+if [ -n "${FAKE_VM_SSH_EMPTY_TAR:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$FAKE_VM_SSH_EMPTY_TAR"; then
+  exec tar -cf - -T /dev/null
 fi
 mkdir -p "$vm/fs"
 cmd="$*"

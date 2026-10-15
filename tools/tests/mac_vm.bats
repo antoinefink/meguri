@@ -30,7 +30,7 @@ setup() {
   export STUB_LOG="$BATS_TEST_TMPDIR/stub.log"
   export MEGURI_HOST_LEASE_DIR="$BATS_TEST_TMPDIR/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1
   export MEGURI_MAC_UI_DIR="$BATS_TEST_TMPDIR/mac-ui"
-  export MEGURI_MAC_VM_POLL_SECONDS=1 MEGURI_MAC_VM_BOOT_SECONDS=6
+  export MEGURI_MAC_VM_POLL_SECONDS=1 MEGURI_MAC_VM_BOOT_SECONDS=6 MEGURI_MAC_VM_STOP_SECONDS=2
   unset MEGURI_MAC_UI_ALLOW_HOST MEGURI_MAC_UI_INTERVAL_MINUTES
   export FAKE_VM_DIR="$BATS_TEST_TMPDIR/vms" FAKE_VM_MIRROR="$BATS_TEST_TMPDIR" FAKE_VM_BIN="$BATS_TEST_TMPDIR/vm-bin"
   : >"$STUB_LOG"
@@ -51,6 +51,7 @@ setup() {
 teardown() {
   [ ! -f "$FAKE_VM_DIR/run.pids" ] || xargs kill <"$FAKE_VM_DIR/run.pids" 2>/dev/null || true
   [ ! -f "$BATS_TEST_TMPDIR/bg.pids" ] || xargs kill <"$BATS_TEST_TMPDIR/bg.pids" 2>/dev/null || true
+  cat "$FAKE_VM_DIR"/*/tests.pids 2>/dev/null | xargs kill -9 2>/dev/null || true
   pkill -f "$BATS_TEST_TMPDIR/bin/caffeinate" 2>/dev/null || true
   # Shown only when the test failed.
   [ -z "${result:-}" ] || [ ! -f "$result" ] || jq -c '{status, message, failures, details}' "$result"
@@ -119,11 +120,36 @@ esac'
 # result bundle: a summary, and for a drive script the driver's attachments
 # (with FAKE_VM_FRAMES sampled frames when TEST_RUNNER_MEGURI_DRIVE_FRAMES=1).
 # FAKE_VM_XCODEBUILD_UNTIL=<file> makes it touch <file>.started and wait for
-# <file>; FAKE_VM_XCODEBUILD_RC sets its exit code. Paths are logged as the
-# VM sees them (without the fake file system's prefix).
+# <file>; FAKE_VM_XCODEBUILD_RC sets its exit code; FAKE_VM_NO_BUNDLE=1 makes
+# it pass without writing a result bundle. Each run is a process of the VM
+# ($FAKE_VM/tests.pids) that the fake pgrep and pkill see, and one that starts
+# while another is alive logs vm-overlap. FAKE_VM_SSH_DROP=1: the VM's first
+# run loses its SSH session and goes on running there until it is stopped;
+# =down: SSH stops answering as it does. FAKE_VM_UNKILLABLE=1: the VM's test
+# runs ignore every signal; FAKE_VM_IGNORE_TERM=1: they ignore SIGTERM, as a
+# real VM's run never gets the SIGTERM that tools/mg sends the job's process
+# tree when it cancels the job (the fake VM's processes are in that tree).
+# Paths are logged as the VM sees them (without the fake file system's
+# prefix).
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
-  stub "$FAKE_VM_BIN/pkill" 'echo "vm-pkill $*" >>"$STUB_LOG"'
+  # pgrep -f and pkill [-9] -f, among this VM's test runs only: never the
+  # host's processes.
+  stub "$FAKE_VM_BIN/pgrep" '
+rc=1
+for pid in $(cat "$FAKE_VM/tests.pids" 2>/dev/null); do
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null)" || continue
+  if printf "%s\n" "$cmd" | grep -Eq -- "${!#}"; then echo "$pid"; rc=0; fi
+done
+exit "$rc"'
+  stub "$FAKE_VM_BIN/pkill" '
+echo "vm-pkill $*" >>"$STUB_LOG"
+sig=TERM
+[ "$1" != -9 ] || sig=KILL
+[ "${FAKE_VM_UNKILLABLE:-}" != 1 ] || exit 0
+pids="$(pgrep -f "${!#}")" || exit 1
+kill -s "$sig" $pids 2>/dev/null
+exit 0'
   stub "$FAKE_VM_BIN/log" '
 s="$*"
 echo "vm-log ${s//"$FAKE_VM_FS"/}" >>"$STUB_LOG"
@@ -140,6 +166,9 @@ exec '"$(command -v stat)"' "$@"'
 unmap() { local s="$*"; printf "%s" "${s//"$FAKE_VM_FS"/}"; }
 if [ "${1:-}" = -version ]; then printf "Xcode 27.0\nBuild version 27A266a\n"; exit 0; fi
 echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
+other="$(pgrep -f "xcodebuild[ ]test-without-building")" && echo "vm-overlap with $other" >>"$STUB_LOG"
+echo "$$" >>"$FAKE_VM/tests.pids"
+[ "${FAKE_VM_IGNORE_TERM:-}" != 1 ] || trap "" TERM
 env | grep "^TEST_RUNNER_" | sort | while IFS= read -r e; do echo "vm-env $(unmap "$e")" >>"$STUB_LOG"; done
 echo "vm-host-lease $([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" >>"$STUB_LOG"
 while [ $# -gt 0 ]; do
@@ -154,9 +183,17 @@ if [ -n "${FAKE_VM_XCODEBUILD_UNTIL:-}" ]; then
   while [ ! -e "$FAKE_VM_XCODEBUILD_UNTIL" ]; do sleep 0.1; done
   [ -f "$app" ] || { echo "xcodebuild: error: the test products went away during the run"; exit 70; }
 fi
-# FAKE_VM_SSH_DROP=1: the SSH session dies during the run.
-[ -z "${FAKE_VM_SSH_DROP:-}" ] || { echo "Testing started"; kill -9 "$PPID"; exit 1; }
+if [ -n "${FAKE_VM_SSH_DROP:-}" ] && [ ! -e "$FAKE_VM/ssh-dropped" ]; then
+  : >"$FAKE_VM/ssh-dropped"
+  echo "Testing started"
+  [ "$FAKE_VM_SSH_DROP" != down ] || : >"$FAKE_VM_DIR/ssh-down"
+  kill -9 "$PPID"
+  exec </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
+  for _ in $(seq 1 6000); do sleep 0.1; done
+  exit 0
+fi
 rc="${FAKE_VM_XCODEBUILD_RC:-0}"
+[ "${FAKE_VM_NO_BUNDLE:-}" != 1 ] || { echo "** TEST SUCCEEDED **"; exit 0; }
 mkdir -p "$bundle"
 jq -n --argjson f "$([ "$rc" = 0 ] && echo 0 || echo 1)" \
   "{result: (if \$f == 0 then \"Passed\" else \"Failed\" end), passedTests: 11, failedTests: \$f, skippedTests: 1}" >"$bundle/summary.json"
@@ -261,6 +298,9 @@ close_the_hourly_gate() {
 }
 
 vm_fs() { printf '%s/%s/fs%s\n' "$FAKE_VM_DIR" "$1" "$2"; }
+
+# vm_tests_running <vm>: whether a test run is still alive in that fake VM.
+vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebuild[ ]test-without-building' >/dev/null; }
 
 # --- runs in the VM ---------------------------------------------------------------
 
@@ -556,11 +596,20 @@ vm_fs() { printf '%s/%s/fs%s\n' "$FAKE_VM_DIR" "$1" "$2"; }
   not_called "^host-xcodebuild"
 }
 
-@test "an SSH session lost during the test run is an error, not a test failure, and the run left in the VM is stopped" {
-  FAKE_VM_SSH_DROP=1 mg mac-ui --suite a11y
+@test "an SSH session lost during a suite is an error, and that run is stopped in the VM at once: the next suite runs alone" {
+  FAKE_VM_SSH_DROP=1 mg mac-ui --suite a11y --suite test-hooks
   [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
   [ "$(field '[.failures[].id] | join(" ")')" = "mac-vm-ssh suite/a11y" ]
-  called "^vm-pkill -f xcodebuild test-without-building\$"
+  [ "$(field '.summary | "\(.passed) \(.errors)"')" = "1 1" ]
+  called "^vm-xcodebuild .* -only-testing:MeguriUITests/TestHooksTests\$"
+  # The lost run was stopped before the next suite started, never beside it.
+  local stop second
+  stop="$(grep -n '^vm-pkill -f ' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  second="$(grep -n '^vm-xcodebuild ' "$STUB_LOG" | sed -n 2p | cut -d: -f1)"
+  [ -n "$stop" ] && [ -n "$second" ] && [ "$stop" -lt "$second" ] || { cat "$STUB_LOG"; return 1; }
+  not_called "^vm-overlap"
+  ! vm_tests_running meguri-mac
   not_called "^host-xcodebuild"
 
   # A run that ends normally leaves nothing to stop.
@@ -570,9 +619,65 @@ vm_fs() { printf '%s/%s/fs%s\n' "$FAKE_VM_DIR" "$1" "$2"; }
   not_called "^vm-pkill"
 }
 
+@test "a lost run that cannot be stopped aborts the remaining suites, and the VM gets no new run until it is stopped" {
+  # The session drops and SSH stops answering: the run cannot be stopped.
+  FAKE_VM_SSH_DROP=down mg mac-ui --suite a11y --suite test-hooks --suite agent-driver
+  [ "$status" -eq 2 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "mac-vm-ssh mac-vm-stop suite/a11y suite/test-hooks suite/agent-driver" ]
+  [[ "$(field '.failures[] | select(.id == "suite/test-hooks") | .message')" == *"was not run"* ]]
+  [ "$(field .summary.errors)" = 3 ]
+  [ "$(grep -c '^vm-xcodebuild ' "$STUB_LOG")" = 1 ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+  vm_tests_running meguri-mac
+
+  # SSH is back, but the run left there ignores every signal: the next job
+  # starts no run beside it.
+  rm "$FAKE_VM_DIR/ssh-down"
+  : >"$STUB_LOG"
+  FAKE_VM_UNKILLABLE=1 mg a11y --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = mac-vm-stop ]
+  [[ "$(field '.failures[0].message')" == *"still running"* ]]
+  called "^vm-pkill -9 -f "
+  not_called "^vm-xcodebuild"
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+
+  # Once it can be stopped, the next job stops it first, then runs alone.
+  : >"$STUB_LOG"
+  mg mac-ui --suite a11y
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.mac_vm.stopped_left_run)" = true ]
+  called "^vm-pkill -f "
+  not_called "^vm-overlap"
+}
+
+@test "a passing run whose result bundle does not come back from the VM is an error, never a pass" {
+  # The SSH call that looks for the bundle fails.
+  FAKE_VM_SSH_FAIL='^test -d ' mg mac-ui --suite a11y
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "mac-vm-copy suite/a11y" ]
+  [[ "$(field '.failures[0].message')" == *"could not check for "*"/a11y.xcresult in the VM meguri-mac (ssh exit 255"*"closed by remote host"* ]]
+
+  # xcodebuild exits 0 but leaves no result bundle.
+  FAKE_VM_NO_BUNDLE=1 mg a11y --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = mac-vm-copy ]
+  [[ "$(field '.failures[0].message')" == *"xcodebuild passed in the VM meguri-mac but left no result bundle"* ]]
+
+  # The copy back exits 0 but brings no bundle.
+  FAKE_VM_SSH_EMPTY_TAR='^tar -C ' mg a11y --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = mac-vm-copy ]
+  [[ "$(field '.failures[0].message')" == *"brought no result bundle back"* ]]
+  not_called "^host-xcodebuild"
+}
+
 @test "a cancelled Mac UI run stops its test run in the VM before releasing the VM lease" {
   local job
-  FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/never" "$SB/tools/mg" mac-ui --suite a11y \
+  FAKE_VM_XCODEBUILD_UNTIL="$BATS_TEST_TMPDIR/never" FAKE_VM_IGNORE_TERM=1 "$SB/tools/mg" mac-ui --suite a11y \
     >"$BATS_TEST_TMPDIR/job.out" 2>"$BATS_TEST_TMPDIR/job.err" 3>&- &
   job=$!
   bg_track "$job"
@@ -581,6 +686,9 @@ vm_fs() { printf '%s/%s/fs%s\n' "$FAKE_VM_DIR" "$1" "$2"; }
   wait "$job" || true
   result="$(tail -n 1 "$BATS_TEST_TMPDIR/job.out")"
   [ "$(field '.failures[0].id')" = cancelled ]
-  called "^vm-pkill -f xcodebuild test-without-building\$"
+  # SIGTERM does not end it; SIGKILL does.
+  called "^vm-pkill -f "
+  called "^vm-pkill -9 -f "
+  ! vm_tests_running meguri-mac
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
 }

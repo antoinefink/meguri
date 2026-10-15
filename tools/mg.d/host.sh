@@ -371,8 +371,17 @@ mg_mac_ui() {
   local passed=0 failed=0 errors=0 name result record since only c
   for s in "${suites[@]}"; do
     case "$s" in
+      drive:*) name="drive-$(basename "${s#drive:}" .json)" ;;
+      *) name="$s" ;;
+    esac
+    # A lost run the VM could not stop: no run starts beside it.
+    if [ -n "$MG_MAC_VM_LOST" ]; then
+      errors=$((errors + 1))
+      mg_failure "suite/$name" "Mac UI suite $name was not run: $MG_MAC_VM_LOST" "tools/mg mac-ui --suite $s"
+      continue
+    fi
+    case "$s" in
       test-hooks | agent-driver | a11y)
-        name="$s"
         since="$(mg_app_log_now)"
         case "$s" in
           test-hooks) only=TestHooksTests ;;
@@ -387,7 +396,6 @@ mg_mac_ui() {
         ;;
       drive:*)
         # A script that marks a transition also records it (motion capture).
-        name="drive-$(basename "${s#drive:}" .json)"
         record=no
         jq -e 'any(.steps[]; has("transition"))' "${s#drive:}" >/dev/null 2>&1 && record=yes
         mg_drive_run "${s#drive:}" mac "" Debug "$record" "$MG_RUN_DIR/$name"

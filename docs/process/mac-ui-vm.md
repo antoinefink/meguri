@@ -44,6 +44,8 @@ The host's config, `~/Library/Application Support/meguri/mac-vm.json`, names the
 
 On 2026-10-15, from the U8b worktree: `mac-ui --suite a11y` passed (11 passed, 1 skipped, 52 s with the incremental build), and so did `a11y --platform mac`. The full `mac-ui` passed agent-driver, a11y, mac-window-sizes and sample-routes. test-hooks (7 passed, 1 failed), open-sample-sheet and sample-transition ended `blocked: mac-input`, as on the host.
 
+A test run in the VM outlives a lost SSH session or a killed job. So a job stops any leftover run (`xcodebuild test-without-building` and the UI-test runner) when it takes the VM, and right after it loses a session. If the run cannot be stopped, the job runs no more suites, and the VM gets no new run until a later job stops it. Verified on the real VM on 2026-10-15: the local SSH client of a running a11y suite was killed, and the job stopped the run in the VM before test-hooks started; a leftover process with a test run's command line was stopped before `a11y --platform mac` ran (11 passed, 1 skipped).
+
 ## Limits
 
 - The T9 drive must be connected and mounted. Without it, there is no VM.
