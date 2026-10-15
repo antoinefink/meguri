@@ -196,7 +196,7 @@
               "type": "object",
               "required": ["result"],
               "additionalProperties": false,
-              "properties": { "result": { "enum": ["ok", "no_changes", "full_sync", "full_upload", "full_download"] } }
+              "properties": { "result": { "enum": ["ok", "no_changes", "normal_sync", "full_sync", "full_upload", "full_download"] } }
             },
             {
               "allOf": [
