@@ -1961,6 +1961,30 @@ harness_report() {
   done
 }
 
+@test "fp-probe rejects bad usage, and any host but an arm64 Mac, before touching Docker" {
+  local stubs="$BATS_TEST_TMPDIR/fp-stubs" args
+  mkdir -p "$stubs"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  printf '#!/bin/sh\necho "cargo must not run" >&2\nexit 97\n' >"$stubs/cargo"
+  chmod +x "$stubs/docker" "$stubs/cargo"
+  export PATH="$stubs:$PATH"
+  for args in "--jobs 0" "--jobs" "--jobs x" "extra"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg fp-probe $args
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = usage ]
+    [[ "$stderr" != *"must not run"* ]]
+    validate "$result"
+  done
+  # The self-tests run in the Linux dev container: no native Apple sides.
+  mg fp-probe
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = platform ]
+  [[ "$stderr" != *"must not run"* ]]
+  validate "$result"
+}
+
 @test "harvest-inventory refuses in a checkout without oracle/" {
   local stubs="$BATS_TEST_TMPDIR/conf-stubs"
   mkdir -p "$stubs"
