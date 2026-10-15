@@ -1498,7 +1498,8 @@ dockerfiles() {
   chmod +x "$stubs/docker"
   export PATH="$stubs:$PATH"
   for args in "" "frobnicate" "bump" "bump 26.x" "record --jobs 0" "hello --verbose" "build extra" \
-    "check" "check a b" "check --bogus a" "check a --now"; do
+    "check" "check a b" "check --bogus a" "check a --now" "hello --platform linux" "compare --platform x" \
+    "lock --platform" "lock --platform windows" "lock extra"; do
     # shellcheck disable=SC2086 # each case is a word list
     mg oracle $args
     [ "$status" -eq 2 ]
@@ -1641,7 +1642,12 @@ done
 case "$1" in
   info | ps) exit 0 ;;
   image) echo sha256:new; exit 0 ;;
-  run) printf 'anki==26.10.0 \\\n    --hash=sha256:%064d\n' 1 >"$lock/requirements.lock"; exit 0 ;;
+  run)
+    case " $* " in
+      *aarch64-apple-darwin*) mkdir -p "$lock/macos" && printf 'anki==26.10.0 \\\n    --hash=sha256:%064d\n' 2 >"$lock/macos/requirements-macos.lock" ;;
+      *) printf 'anki==26.10.0 \\\n    --hash=sha256:%064d\n' 1 >"$lock/requirements.lock" ;;
+    esac
+    exit 0 ;;
   compose) ;;
   *) exit 97 ;;
 esac
@@ -1687,8 +1693,12 @@ diff_report() {
   run_dir="$(dirname "$result")"
   # The staged requirements stay for adoption; no copy of the driver does.
   [ -f "$run_dir/staging/oracle/requirements.lock" ] && [ -f "$run_dir/staging/oracle/requirements.in" ]
-  # The conformance pin is staged from the new oracle's hello.
+  # The conformance pin is staged from the new oracle's hello, with the
+  # native lane's lock resolved for the same versions.
   [ "$(jq -r '.anki_version + " " + .lock_sha256' "$run_dir/staging/conformance/oracle.json")" = "26.10.0 l" ]
+  [ -f "$run_dir/staging/oracle/macos/requirements-macos.lock" ]
+  [ "$(jq -r .macos_lock_sha256 "$run_dir/staging/conformance/oracle.json")" = \
+    "$(sha256sum "$run_dir/staging/oracle/macos/requirements-macos.lock" | cut -d' ' -f1)" ]
   [ -z "$(find "$run_dir" -name worker.py -o -name Dockerfile -o -name entrypoint.sh)" ]
 
   # No scenario recorded: nothing proves the new oracle works.

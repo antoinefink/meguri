@@ -19,7 +19,7 @@ mkdir -p "$WORK"
 # check deletes its own; this covers a cancelled run.
 EDITED="$WORK/edited-oracle"
 SPARSE="$WORK/sparse"
-trap 'rm -rf "$EDITED" "$SPARSE"' EXIT
+trap 'rm -rf "$EDITED" "$SPARSE" "$WORK/native"' EXIT
 trap 'exit 143' TERM INT HUP
 
 # The helpers of tools/mg.d/oracle.sh, without its job registration.
@@ -121,6 +121,7 @@ t_protocol_transcript_matches_the_schema() {
 {"cmd":"hello","id":1}
 {"cmd":"run","id":"ok","scenario":{"id":"t/schema","clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},"setup":{"notetypes":[{"name":"QA","fields":["Q","A"],"templates":[{"name":"C1","front":"{{Q}}","back":"{{A}}"}]}],"notes":[{"notetype":"QA","fields":["q","a"]}]},"steps":[{"answer":{"card":"#c1","rating":"good"}},{"observe":["ids","timing","card(#c1)","revlog(#c1)","next_states(#c1)"]}]}}
 {"cmd":"run","id":"bad","scenario":{"id":"t/bad","clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},"steps":[{"frobnicate":1}]}}
+{"cmd":"run","id":"ctx","fsrs_context":true,"scenario":{"id":"t/ctx","clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},"setup":{"config":{"fsrs":true},"notetypes":[{"name":"QA","fields":["Q","A"],"templates":[{"name":"C1","front":"{{Q}}","back":"{{A}}"}]}],"notes":[{"notetype":"QA","fields":["q","a"]}]},"steps":[{"observe":["next_states(#c1)",{"fsrs_next":{"param_sets":{"default":[]},"inputs":[{"id":0,"card_id":1894698000000,"reps":2,"s":2.3065,"d":2.111,"elapsed_days":3,"scheduled_days":2,"dr":0.9,"params":"default","max_ivl":36500}]}}]}]}}
 {"cmd":"begin","scenario":{"id":"t/i","clock":{"tz":"UTC","start":"2030-01-15T10:00:00"},"steps":[{"advance":"1d"}]}}
 {"cmd":"step"}
 {"cmd":"step","step":{"observe":["timing"]}}
@@ -129,7 +130,7 @@ t_protocol_transcript_matches_the_schema() {
 EOF
   mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" oracle <"$req" >"$resp" || return 1
   printf 'not json\n' | mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" oracle >>"$resp" || return 1
-  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 9 || return 1
+  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 10 || return 1
   local rel_req="${req#"$REPO"/}" rel_resp="${resp#"$REPO"/}"
   mg_compose build dev >"$WORK/dev-build.log" 2>&1 || {
     tail -20 "$WORK/dev-build.log"
@@ -153,7 +154,13 @@ for name, v, path in (("request", req, sys.argv[1]), ("response", resp, sys.argv
             continue
         for err in v.iter_errors(msg):
             print(f"{name} {n}: {err.json_path}: {err.message}"); bad += 1
-kinds = [json.loads(l).get("error", {}).get("kind") for l in open(sys.argv[2])]
+responses = [json.loads(l) for l in open(sys.argv[2])]
+hello, ctx = responses[0], next(r for r in responses if r.get("id") == "ctx")
+if hello.get("time_control") != "faketime" or not hello.get("platform", "").startswith("linux-"):
+    print(f"hello of a container worker: {hello}"); bad += 1
+if list(ctx.get("fsrs_context", {})) != ["/steps/0/next_states/#c1"]:
+    print(f"fsrs_context: {ctx.get('fsrs_context')}"); bad += 1
+kinds = [r.get("error", {}).get("kind") for r in responses]
 for kind in ("unsupported_op", "unknown_cmd", "protocol_error"):
     if kind not in kinds:
         print(f"no {kind} response in the transcript"); bad += 1
@@ -353,6 +360,166 @@ compare_in_a_sparse_worktree() {
       "$(docker ps -aq --filter "label=com.docker.compose.project=$project" | wc -l | tr -d ' ')" 0
 }
 
+# --- the macOS native lane (specs/conformance/float-determinism.md F6, F7) ----
+# Only on an arm64 Mac: oracle/macos/run-native.sh with its venv under this
+# checkout's build/oracle-macos-venv/ (bootstrapped by the first check).
+NATIVE="$ORACLE/macos/run-native.sh"
+NATIVE_DIR="$WORK/native"
+
+native_or_skip() {
+  if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
+    echo "SKIP the native oracle lane runs only on an arm64 Mac"
+    return 2
+  fi
+}
+
+native_hello_run() { # <out var> [env...]: the result.json of tools/mg oracle hello --platform apple
+  local var="$1" out
+  shift
+  out="$(env "$@" /bin/bash "$REPO/tools/mg" oracle hello --platform apple --tz Asia/Kathmandu 2>>"$WORK/native.log" | tail -n 1)"
+  [ -f "$out" ] || {
+    echo "tools/mg oracle hello --platform apple wrote no result:"
+    tail -n 20 "$WORK/native.log"
+    return 1
+  }
+  printf -v "$var" '%s' "$out"
+}
+
+t_the_native_lane_says_hello_with_its_platform_lock_and_time_control() {
+  native_or_skip || return $?
+  local r container="$WORK/hello-container.json"
+  hello_on "$MG_ORACLE_TAG" "$ORACLE" UTC "$container" || return 1
+  native_hello_run r || return 1
+  expect "status" "$(jq -r .status "$r")" pass &&
+    expect "platform" "$(jq -r .details.hello.platform "$r")" macos-arm64 &&
+    expect "time control" "$(jq -r .details.hello.time_control "$r")" faketime &&
+    expect "tz" "$(jq -r .details.hello.tz "$r")" Asia/Kathmandu &&
+    expect "lock: the macOS lock" "$(jq -r .details.hello.lock_sha256 "$r")" \
+      "$(mg_oracle__sha256 <"$ORACLE/macos/requirements-macos.lock")" &&
+    expect "lock: the pin" "$(jq -r .details.hello.lock_sha256 "$r")" "$(jq -r .macos_lock_sha256 "$REPO/conformance/oracle.json")" &&
+    expect "the same driver as the container" "$(jq -r .details.hello.driver_sha256 "$r")" "$(jq -r .driver_sha256 "$container")" &&
+    expect "the same anki" "$(jq -r .details.hello.anki_version "$r")" "$(jq -r .anki_version "$container")" || return 1
+  # Without libfaketime the worker runs on the real clock (F6.3).
+  native_hello_run r ORACLE_NATIVE_FAKETIME=0 || return 1
+  expect "status without faketime" "$(jq -r .status "$r")" warn &&
+    expect "time control without faketime" "$(jq -r .details.hello.time_control "$r")" none
+}
+
+# native_run <scenario file> <out>: one native worker's run response.
+native_run() {
+  local scratch
+  scratch="$(mktemp -d "$NATIVE_DIR/run-XXXXXX")"
+  jq -c '{cmd: "run", scenario: .}' "$1" | TZ=UTC ORACLE_SCRATCH="$scratch" "$NATIVE" worker >"$2" 2>>"$WORK/native.log"
+  rm -rf "$scratch"
+  jq -e .ok "$2" >/dev/null
+}
+
+native_harness() { # <record-apple|compare-apple> <report> [args...]
+  local cmd="$1" report="$2"
+  shift 2
+  ORACLE_SCRATCH_ROOT="$NATIVE_DIR/scratch" "$NATIVE" harness "$cmd" --scenarios "$NATIVE_DIR/scenarios" \
+    --goldens "$NATIVE_DIR/goldens" --overlays "$NATIVE_DIR/overlays" --pin "$NATIVE_DIR/oracle.json" \
+    --jobs 2 --report "$report" "$@" 2>>"$WORK/native.log"
+}
+
+# native_golden <id> <jq edit>: a golden for a scenario of the throwaway
+# tree, as the Linux oracle would write it (the pin's Linux lock), from a
+# native run with the edit applied.
+native_golden() {
+  local id="$1" resp="$NATIVE_DIR/run.json" sha
+  native_run "$NATIVE_DIR/scenarios/$id.json" "$resp" || {
+    cat "$resp"
+    return 1
+  }
+  sha="$("$NATIVE" harness hash "$NATIVE_DIR/scenarios/$id.json" | cut -d' ' -f1)"
+  jq -S --arg id "$id" --arg sha "$sha" --slurpfile pin "$NATIVE_DIR/oracle.json" '
+    {scenario_id: $id, scenario_sha256: $sha,
+     oracle: {anki_version: "26.9.3", lock_sha256: $pin[0].lock_sha256, driver_sha256: ("0" * 64)},
+     tz: "UTC", clock: {start: "2030-01-15T10:00:00", mode: "frozen"}, observations: .observations} | '"$2" \
+    "$resp" >"$NATIVE_DIR/goldens/$id.json"
+}
+
+t_the_native_harness_records_compares_and_refuses_overlays() {
+  native_or_skip || return $?
+  local rc
+  native_overlays
+  rc=$?
+  rm -rf "$NATIVE_DIR"
+  return "$rc"
+}
+
+native_overlays() {
+  local dir="$NATIVE_DIR" report="$NATIVE_DIR/report.json" overlay="$NATIVE_DIR/overlays/t/probe.json" before rc rel
+  rm -rf "$dir" && mkdir -p "$dir/scenarios/t" "$dir/goldens/t" "$dir/scratch" || return 1
+  jq '{anki_version, lock_sha256, macos_lock_sha256}' "$REPO/conformance/oracle.json" >"$dir/oracle.json"
+  cat >"$dir/scenarios/t/probe.json" <<'JSON'
+{"id": "t/probe", "tags": ["clock-free"], "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"},
+ "steps": [{"observe": [{"fsrs_next": {"param_sets": {"default": []}, "inputs": [
+   {"id": 0, "card_id": 1894698000000, "reps": 2, "s": 2.3065, "d": 2.111, "elapsed_days": 3, "scheduled_days": 2, "dr": 0.9, "params": "default", "max_ivl": 36500},
+   {"id": 1, "card_id": 1700000000001, "reps": 5, "s": 40.0, "d": 4.0, "elapsed_days": 41, "scheduled_days": 40, "dr": 0.9, "params": "default", "max_ivl": 36500}]}}]}]}
+JSON
+  cat >"$dir/scenarios/t/timed.json" <<'JSON'
+{"id": "t/timed", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": [{"observe": ["timing"]}]}
+JSON
+  native_golden t/probe . && native_golden t/timed . || return 1
+
+  # The Apple oracle reproduces its own output: no overlay.
+  native_harness record-apple "$report"
+  expect "no difference" "$(jq -c '[.scenarios[] | [.scenario, .status]]' "$report")" \
+    '[["t/probe","no_difference"],["t/timed","no_difference"]]' &&
+    expect "no overlay" "$([ -e "$overlay" ] && echo written || echo none)" none || return 1
+
+  # Good's days 3 apart: an entry outside the class, written and reported (F7.2, F8).
+  native_golden t/probe '.observations.steps[0].fsrs_next.rows[1][6] -= 3' || return 1
+  native_harness record-apple "$report" --filter t/probe
+  rc=$?
+  expect "exit" "$rc" 1 &&
+    expect "outside the class" "$(jq -c '.scenarios[0] | [.status, [.outside_class[].pointer], .day_entries]' "$report")" \
+      '["outside_class",["/steps/0/fsrs_next/rows/1/6"],1]' &&
+    expect "overlay entry" "$(jq -c '[.entries[] | [.pointer, .apple - .linux, (.unrounded | keys)]]' "$overlay")" \
+      '[["/steps/0/fsrs_next/rows/1/6",3,["apple","linux"]]]' &&
+    expect "overlay oracle" "$(jq -r '.oracle | "\(.platform) \(.lock_sha256)"' "$overlay")" \
+      "macos-arm64 $(jq -r .macos_lock_sha256 "$dir/oracle.json")" || return 1
+  rel="${overlay#"$REPO"/}"
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel" <<'PY' || return 1
+import json, sys
+from jsonschema import Draft202012Validator
+schema = json.load(open("conformance/schema/overlay.schema.json"))
+errors = list(Draft202012Validator(schema).iter_errors(json.load(open(sys.argv[1]))))
+for e in errors:
+    print(f"overlay: {e.json_path}: {e.message}")
+sys.exit(1 if errors else 0)
+PY
+
+  # Golden plus overlay is what the Apple oracle observes (F9 step 2).
+  native_harness compare-apple "$report" --filter t/probe
+  expect "compare with the overlay" "$(jq -c '.scenarios[0] | [.status, .overlay_applied]' "$report")" '["pass",1]' || return 1
+
+  # A structural difference writes nothing and keeps the overlay.
+  before="$(mg_oracle__sha256 <"$overlay")"
+  native_golden t/probe '.observations.steps[0].fsrs_next.rows[1][6] -= 3 | .observations.steps[0].fsrs_next.rows += [[1]]' || return 1
+  native_harness record-apple "$report" --filter t/probe
+  expect "structural" "$(jq -r '.scenarios[0].status' "$report")" structural &&
+    expect "overlay kept" "$(mg_oracle__sha256 <"$overlay")" "$before" || return 1
+
+  # The golden matches again: the overlay is deleted.
+  native_golden t/probe . || return 1
+  native_harness record-apple "$report" --filter t/probe
+  expect "deleted" "$(jq -c '.scenarios[0] | [.status, .deleted]' "$report")" '["no_difference",true]' &&
+    expect "overlay gone" "$([ -e "$overlay" ] && echo kept || echo gone)" gone || return 1
+
+  # Without faketime only clock-free scenarios run (F6.3).
+  ORACLE_NATIVE_FAKETIME=0 native_harness compare-apple "$report"
+  expect "clock-free only" "$(jq -c '[.scenarios[] | [.scenario, .status]]' "$report")" \
+    '[["t/probe","pass"],["t/timed","clock_unsupported"]]' || return 1
+
+  # A worker from another lock than the pin's is refused.
+  jq '.macos_lock_sha256 = ("f" * 64)' "$dir/oracle.json" >"$dir/other.json" && mv "$dir/other.json" "$dir/oracle.json"
+  native_harness compare-apple "$report" --filter t/probe
+  expect "refused" "$(jq -c '.scenarios[0] | [.status, .error.kind]' "$report")" '["error","oracle_mismatch"]' &&
+    expect "scratch left behind" "$(find "$dir/scratch" -mindepth 1 | head -n 3)" ""
+}
+
 # Runs last. The checks above copy oracle/ into the run directory, under this
 # checkout's build/, where U2's deny rules for oracle/ do not reach.
 t_no_copy_of_oracle_files_is_left_behind() {
@@ -370,7 +537,8 @@ t_editing_a_driver_file_changes_tag_and_driver_hash t_a_compose_worker_says_hell
 t_protocol_transcript_matches_the_schema t_check_job_reports_problems_and_errors
 t_check_transcript_and_report_match_the_schemas t_the_oracle_service_has_no_route_out
 t_the_network_probe_connects_when_a_route_exists t_no_meguri_code_refers_to_oracle
-t_compare_runs_in_a_worktree_without_oracle t_no_copy_of_oracle_files_is_left_behind"
+t_compare_runs_in_a_worktree_without_oracle t_the_native_lane_says_hello_with_its_platform_lock_and_time_control
+t_the_native_harness_records_compares_and_refuses_overlays t_no_copy_of_oracle_files_is_left_behind"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 n=0
