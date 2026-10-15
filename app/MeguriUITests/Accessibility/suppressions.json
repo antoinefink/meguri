@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "suppressions": [
+    {
+      "identifier": "sample.deckOverview.counts",
+      "auditType": "contrast",
+      "reason": "At the largest text sizes in the overflow state the counts line runs on under the Study Now bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the counts' whole frame, faded part included (sample/deck-overview/overflow, 2026-10-14). The count colours are token pairings ContrastTests checks (R1979)."
+    }
+  ]
+}

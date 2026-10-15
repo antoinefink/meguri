@@ -17,12 +17,17 @@ extension TestHooks {
     /// | `-MeguriAnimations` | `on` or `off` |
     /// | `-MeguriReduceMotion`, `-MeguriReduceTransparency` | `on` or `off` |
     /// | `-MeguriWindowSize` | Mac only: `minimum`, `default`, `large` or `<width>x<height>`; a launch with any other hook option and without this one gets `default` |
+    /// | `-MeguriAppearance` | Mac only: `light` or `dark`, the app's appearance whatever the system's (NSApp.appearance; launched with `-AppleInterfaceStyle Light` on a Mac in dark mode, the app showed its dark background); iOS takes the device's |
     /// | `-MeguriAnkiConnectPort`, `-MeguriMigakuPort` | 1–65535 |
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
             case minimum, standard, large
             case explicit(width: Int, height: Int)
+        }
+
+        enum Appearance: String, Equatable {
+            case light, dark
         }
 
         var fixture: URL?
@@ -33,6 +38,7 @@ extension TestHooks {
         var reduceMotion: Bool?
         var reduceTransparency: Bool?
         var windowSize: WindowSize?
+        var appearance: Appearance?
         var ankiConnectPort: UInt16?
         var migakuPort: UInt16?
         var route: Route?
@@ -40,7 +46,7 @@ extension TestHooks {
         static let prefix = "-Meguri"
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
-            "ReduceTransparency", "WindowSize", "AnkiConnectPort", "MigakuPort", "Route",
+            "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "Route",
         ]
 
         init() {}
@@ -96,6 +102,12 @@ extension TestHooks {
             if let value = values["WindowSize"] {
                 windowSize = try Self.windowSize(value)
             }
+            if let value = values["Appearance"] {
+                guard let named = Appearance(rawValue: value) else {
+                    throw TestHookError("-MeguriAppearance takes light or dark, got '\(value)'")
+                }
+                appearance = named
+            }
             ankiConnectPort = try values["AnkiConnectPort"].map { value throws(TestHookError) in try Self.port(value, "AnkiConnectPort") }
             migakuPort = try values["MigakuPort"].map { value throws(TestHookError) in try Self.port(value, "MigakuPort") }
             if let value = values["Route"] {
@@ -113,6 +125,9 @@ extension TestHooks {
             #if !os(macOS)
             if windowSize != nil {
                 throw TestHookError("-MeguriWindowSize applies to the Mac only")
+            }
+            if appearance != nil {
+                throw TestHookError("-MeguriAppearance applies to the Mac only")
             }
             #endif
             if let fixture {

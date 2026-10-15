@@ -23,11 +23,11 @@ mg_app_products() {
   esac
 }
 
-# mg_app_build <mac|ios-sim> <config>: UI lint first (AE90), core
-# XCFramework and build-for-testing of the UI plan. On failure records it
-# and returns 1.
+# mg_app_build <mac|ios-sim> <config> [plan]: UI lint first (AE90), core
+# XCFramework and build-for-testing of the plan (UI by default; snapshots
+# build Snapshot). On failure records it and returns 1.
 mg_app_build() {
-  local platform="$1" config="$2" dest result log rc counts
+  local platform="$1" config="$2" plan="${3:-UI}" dest result log rc counts
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
@@ -44,14 +44,14 @@ mg_app_build() {
     mac) dest="platform=macOS,arch=arm64" ;;
     *) dest="generic/platform=iOS Simulator" ;;
   esac
-  result="$MG_RUN_DIR/build-$platform-$config.xcresult"
-  log="$MG_RUN_DIR/build-$platform-$config.log"
+  result="$MG_RUN_DIR/build-$platform-$config-$plan.xcresult"
+  log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
   rm -rf "$result"
-  echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config)" >&2
-  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme Meguri -testPlan UI -configuration "$config" \
+  echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config, $plan plan)" >&2
+  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme Meguri -testPlan "$plan" -configuration "$config" \
     -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" >"$log" 2>&1
   rc=$?
-  mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config)"
+  mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config, $plan plan)"
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |
     jq -c '{errors: .errorCount, warnings: .warningCount, messages: [(.errors[]?, .warnings[]?) | .message] | .[:10]}')" || counts=null
   mg_detail build "$(jq -nc --arg p "$platform" --arg c "$config" --arg app "$(mg_app_products "$platform" "$config")/Meguri.app" \
@@ -64,6 +64,27 @@ mg_app_build() {
     return 1
   fi
   return 0
+}
+
+# mg_app_input_digest: a sha256 of the sources an app build is made from,
+# app/ and core/ as the working tree holds them (committed or not; ignored
+# files and app/Snapshots/, whose baselines are no input, left out). Jobs that
+# build the same sources print the same digest: snapshots and a11y record it
+# (details.input), and the status ledger counts an audit only for the
+# sources its snapshots rendered. Uses a copy of the index, so the real one
+# and the staging area are untouched; prints nothing when git cannot.
+mg_app_input_digest() {
+  local index paths=() p tree
+  for p in app core; do [ ! -e "$MG_ROOT/$p" ] || paths[${#paths[@]}]="$p"; done
+  index="$(mktemp "${TMPDIR:-/tmp}/mg-input-index.XXXXXX")" || return 0
+  cp "$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-path index 2>/dev/null)" "$index" 2>/dev/null || rm -f "$index"
+  if [ "${#paths[@]}" -gt 0 ]; then
+    GIT_INDEX_FILE="$index" git -C "$MG_ROOT" add -A -- "${paths[@]}" ':(exclude)app/Snapshots' >/dev/null 2>&1 || { rm -f "$index"; return 0; }
+  fi
+  tree="$(GIT_INDEX_FILE="$index" git -C "$MG_ROOT" write-tree 2>/dev/null)"
+  rm -f "$index"
+  [ -n "$tree" ] || return 0
+  git -C "$MG_ROOT" ls-tree -r "$tree" -- app core 2>/dev/null | grep -v "$(printf '\t')app/Snapshots/" | shasum -a 256 | cut -c1-64
 }
 
 # mg_app_xcodebuild_test <out prefix> <mac|ios> <destination> <config> [xcodebuild args]:

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.invalid/design/critic-issue.schema.json",
+  "title": "Critic report (U10, R1983)",
+  "description": "What a critic session answers with: the screens it graded and one issue per problem it sees, each citing a rubric rule (docs/design/rubric.md) and a region of one packet image. tools/mg critic rejects output that does not match this schema, cites a rule or image the packet does not have, or puts a region outside its image.",
+  "type": "object",
+  "required": ["rubric_version", "screens", "issues"],
+  "additionalProperties": false,
+  "properties": {
+    "rubric_version": {
+      "description": "The rubric version the packet holds (rubric.md, 'Version N').",
+      "type": "integer",
+      "minimum": 1
+    },
+    "screens": {
+      "description": "Every screen id the packet lists, each graded.",
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$"},
+      "uniqueItems": true
+    },
+    "issues": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/issue"}
+    },
+    "notes": {
+      "description": "Anything the grading could not cover (a missing reference, an unreadable image).",
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "$defs": {
+    "issue": {
+      "type": "object",
+      "required": ["screen", "state", "variant", "image", "rule", "severity", "region", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "screen": {"type": "string", "pattern": "^[a-z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$"},
+        "state": {"enum": ["empty", "typical", "overflow", "error", "loading"]},
+        "variant": {
+          "description": "The image's variant as packet.json names it, e.g. dark-ax5-iphoneSmall+hc.",
+          "type": "string",
+          "minLength": 1
+        },
+        "image": {
+          "description": "The packet path of the image the issue is seen in.",
+          "type": "string",
+          "pattern": "^screens/.+\\.png$"
+        },
+        "rule": {
+          "description": "A rule id of rubric.md, e.g. text-truncation.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "severity": {
+          "description": "high keeps the screen out of verified; medium becomes a task; low is taste, recorded for the gallery (rubric.md, Severity).",
+          "enum": ["high", "medium", "low"]
+        },
+        "region": {
+          "description": "The area of the image, in image pixels from its top-left corner.",
+          "type": "object",
+          "required": ["x", "y", "width", "height"],
+          "additionalProperties": false,
+          "properties": {
+            "x": {"type": "number", "minimum": 0},
+            "y": {"type": "number", "minimum": 0},
+            "width": {"type": "number", "exclusiveMinimum": 0},
+            "height": {"type": "number", "exclusiveMinimum": 0}
+          }
+        },
+        "summary": {
+          "description": "What is wrong, in one sentence a designer can act on.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "evidence": {
+          "description": "What in the image shows it.",
+          "type": "string",
+          "maxLength": 600
+        }
+      }
+    }
+  }
+}

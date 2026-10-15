@@ -94,6 +94,7 @@ extension ComponentGallery {
             GalleryEntry("emptyState", "typical") {
                 EmptyStateView(Text(verbatim: "No Decks"), systemImage: "rectangle.stack", description: Text(verbatim: "Create a deck or import a package to start studying.")) {
                     Button { } label: { Text(verbatim: "Create Deck") }
+                        .accessibilityIdentifier("designsystem.gallery.emptyState.typical.create")
                 }
             },
             GalleryEntry("emptyState", "overflow") {
@@ -105,7 +106,10 @@ extension ComponentGallery {
             },
 
             GalleryEntry("errorState", "typical") {
-                ErrorStateView(Text(verbatim: "Couldn’t Load Decks"), message: Text(verbatim: "The collection is busy. Try again in a moment."), retry: {})
+                ErrorStateView(
+                    Text(verbatim: "Couldn’t Load Decks"), message: Text(verbatim: "The collection is busy. Try again in a moment."),
+                    retryIdentifier: "designsystem.gallery.errorState.typical.retry", retry: {}
+                )
             },
             GalleryEntry("errorState", "overflow") {
                 ErrorStateView(

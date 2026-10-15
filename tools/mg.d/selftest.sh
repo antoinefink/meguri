@@ -81,11 +81,15 @@ mg_selftest_xcframework() {
 }
 
 mg_job image-tools-selftest docker:image-tools mg_image_tools_selftest \
-  "Tests of the contact-sheet and hierarchy-check scripts in the image-tools container (fixture videos made with ffmpeg); args go to unittest, e.g. -k overlap"
+  "Tests of the image-tools scripts in their container: contact-sheet, hierarchy-check (U8), image-diff, screen-status, critic and gallery (U10); args go to unittest, e.g. -k overlap"
+
+# Every script directory with a tests/ folder that runs in image-tools.
+MG_IMAGE_TOOLS_TESTED="tools/scripts/hierarchy-check tools/scripts/contact-sheet tools/scripts/image-diff tools/scripts/screen-status tools/scripts/critic tools/scripts/gallery"
 
 mg_image_tools_selftest() {
   local dir rc=0 log failed=0 ran=0 n f
-  for dir in tools/scripts/hierarchy-check tools/scripts/contact-sheet; do
+  for dir in $MG_IMAGE_TOOLS_TESTED; do
+    [ -d "$dir/tests" ] || continue
     log="$MG_RUN_DIR/$(basename "$dir").log"
     # A filter (-k) may match nothing in one directory: unittest then exits 5.
     (cd "$dir" && python3 -m unittest discover -s tests -v ${1+"$@"}) >"$log" 2>&1 ||

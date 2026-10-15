@@ -11,6 +11,8 @@ struct MeguriLaunch {
     var reduceMotion: Bool?
     var reduceTransparency: Bool?
     var windowSize: String?
+    /// Mac only: "light" or "dark".
+    var appearance: String?
     var ankiConnectPort: Int?
     var migakuPort: Int?
     var route: String?
@@ -39,6 +41,7 @@ struct MeguriLaunch {
         add("ReduceMotion", onOff(reduceMotion))
         add("ReduceTransparency", onOff(reduceTransparency))
         add("WindowSize", windowSize)
+        add("Appearance", appearance)
         add("AnkiConnectPort", ankiConnectPort.map(String.init))
         add("MigakuPort", migakuPort.map(String.init))
         add("Route", route)

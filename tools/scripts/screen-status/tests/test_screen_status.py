@@ -1,0 +1,221 @@
+"""Tests for the screen status ledger writer (U10, R1985): the transitions a
+critic check makes, sample screens, tasks and explicit transitions."""
+
+import copy
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+sys.path.insert(0, os.path.dirname(HERE))
+
+import screen_status  # noqa: E402
+
+PASS = {"run": "r", "status": "pass", "commit": "c"}
+
+
+def a11y(status="pass", source="src1", run="a"):
+    """An a11y run's evidence: it audited the app built from `source`."""
+    return {"run": run, "status": status, "commit": "c", "input": source}
+
+
+def snapshots(status="pass", digest="d1", source="src1"):
+    """A snapshot run's evidence: its images (digest) of the app built from `source`."""
+    return {"run": "s", "status": status, "commit": "c", "digest": digest, "input": source}
+
+
+def evidence(platforms=("iphone",), a11y=True, snap=None, **per_platform):
+    """A report's evidence: snapshots on every platform, a11y on each unless
+    a11y is False; per_platform overrides one platform's gates."""
+    result = {"platforms": list(platforms), "lint": PASS}
+    for platform in platforms:
+        result[platform] = {"snapshots": snap or snapshots()}
+        if a11y:
+            result[platform]["a11y"] = globals()["a11y"]()
+        result[platform].update(per_platform.get(platform, {}))
+    return result
+
+
+def issue(severity, rule="text-truncation", screen="sample.deckOverview", variant="dark-ax5-iphoneSmall", summary="Deck name cut off", platform="iphone"):
+    return {"screen": screen, "state": "overflow", "variant": variant, "image": "screens/x.png", "rule": rule,
+            "severity": severity, "region": {"x": 0, "y": 0, "width": 10, "height": 10}, "summary": summary, "platform": platform}
+
+
+class ScreenStatusTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.ledger_path = os.path.join(self.dir, "screen-status.yaml")
+        self.ledger = screen_status.load(self.ledger_path)
+
+    def report(self, run, issues, evidence=None):
+        return {"run": run, "issues": issues, "dropped": [], "evidence": evidence or globals()["evidence"]()}
+
+    def test_a_high_issue_keeps_the_screen_out_of_verified_until_a_new_check_passes(self):
+        # AE90: the truncated deck name keeps the screen built...
+        status = screen_status.record_critic(self.ledger, "sample.deckOverview", self.report("critic-1", [issue("high")]))
+        self.assertEqual(status, "built")
+        entry = self.ledger["screens"]["sample.deckOverview"]
+        self.assertEqual(entry["evidence"]["iphone"]["critic"]["status"], "fail")
+        self.assertEqual(entry["issues"][0]["rule"], "text-truncation")
+        self.assertEqual(entry["issues"][0]["region"], {"x": 0, "y": 0, "width": 10, "height": 10})
+        # ...and a later check by a new critic with no high issue verifies it.
+        status = screen_status.record_critic(self.ledger, "sample.deckOverview", self.report("critic-2", []))
+        self.assertEqual(status, "verified")
+        self.assertNotIn("issues", entry)
+        self.assertEqual([h["to"] for h in entry["history"]], ["built", "verified"])
+
+    def test_verified_needs_passing_snapshots_and_accessibility_runs(self):
+        report = self.report("critic-1", [], evidence(iphone={"a11y": a11y("fail")}))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        report = self.report("critic-2", [], evidence(a11y=False, snap=snapshots(digest="d2")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("critic-3", [])), "verified")
+
+    def test_verified_needs_every_registered_platform(self):
+        # The iPad and the Mac have snapshots and a clean critic check but no
+        # accessibility run: not verified, and the reason names them.
+        report = self.report("c1", [], evidence(("iphone", "ipad", "mac"), a11y=False, iphone={"a11y": a11y()}))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        entry = self.ledger["screens"]["sample.x"]
+        self.assertEqual(entry["platforms"], ["iphone", "ipad", "mac"])
+        reasons = screen_status.verified_ready(entry)
+        self.assertEqual(reasons, ["ipad a11y: no run", "mac a11y: no run"])
+        # A high issue on one platform fails that platform's critic check only.
+        report = self.report("c2", [issue("high", screen="sample.x", platform="mac")], evidence(("iphone", "ipad", "mac")))
+        screen_status.record_critic(self.ledger, "sample.x", report)
+        self.assertEqual(entry["evidence"]["iphone"]["critic"]["status"], "pass")
+        self.assertEqual(entry["evidence"]["mac"]["critic"]["status"], "fail")
+        self.assertEqual(entry["status"], "built")
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [], evidence(("iphone", "ipad", "mac")))), "verified")
+
+    def test_a_failed_prerequisite_demotes_a_verified_screen(self):
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
+        # A clean critic check over a failed snapshot run.
+        report = self.report("c2", [], evidence(snap=snapshots("fail")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        entry = self.ledger["screens"]["sample.x"]
+        self.assertEqual(entry["history"][-1]["from"], "verified")
+        self.assertIn("iphone snapshots: fail", entry["history"][-1]["reason"])
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [])), "verified")
+        # A failed accessibility run.
+        report = self.report("c4", [], evidence(iphone={"a11y": a11y("fail")}))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+
+    def test_an_approved_screen_whose_prerequisite_fails_is_demoted(self):
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c1", []))
+        self.ledger["screens"]["sample.x"]["status"] = "approved"
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [], evidence(snap=snapshots("fail")))), "built")
+
+    def test_retained_accessibility_evidence_lasts_only_while_the_app_sources_are_the_same(self):
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
+        # No accessibility run this time, snapshots of the same sources: the
+        # earlier run stands, whatever the images (a re-recorded baseline).
+        report = self.report("c2", [], evidence(a11y=False, snap=snapshots(digest="d2")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "verified")
+        self.assertEqual(self.ledger["screens"]["sample.x"]["evidence"]["iphone"]["a11y"], a11y())
+        # The app changed and no accessibility run came with the check: the
+        # earlier run audited other code and no longer counts.
+        report = self.report("c3", [], evidence(a11y=False, snap=snapshots(source="src2")))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", report), "built")
+        self.assertNotIn("a11y", self.ledger["screens"]["sample.x"]["evidence"]["iphone"])
+
+    def test_an_accessibility_run_counts_only_for_the_app_sources_it_audited(self):
+        # The run keeps the sources it audited; nothing overwrites them.
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [])), "verified")
+        entry = self.ledger["screens"]["sample.x"]
+        self.assertEqual(entry["evidence"]["iphone"]["a11y"]["input"], "src1")
+        self.assertNotIn("digest", entry["evidence"]["iphone"]["a11y"])
+        # A check that brings snapshots of new sources with an audit of the
+        # old ones is refused, and records nothing.
+        before = copy.deepcopy(self.ledger)
+        report = self.report("c2", [], evidence(snap=snapshots(source="src2")))
+        with self.assertRaises(screen_status.LedgerError) as caught:
+            screen_status.record_critic(self.ledger, "sample.x", report)
+        self.assertIn("audited app sources src1", str(caught.exception))
+        self.assertIn("rendered src2", str(caught.exception))
+        self.assertEqual(self.ledger, before)
+        # So is one whose snapshot run does not say what it rendered.
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.record_critic(self.ledger, "sample.x", self.report("c3", [], evidence(snap=snapshots(source=None))))
+        # A ledger whose audit and snapshots disagree is not verified evidence.
+        entry["evidence"]["iphone"]["a11y"]["input"] = "src0"
+        self.assertEqual(screen_status.evidence_gaps(entry), ["iphone a11y: audited app sources src0, its snapshots rendered src1"])
+
+    def test_a_report_without_platforms_is_refused(self):
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.record_critic(self.ledger, "sample.x", {"run": "c1", "issues": [], "dropped": [], "evidence": {}})
+
+    def test_a_high_issue_demotes_a_verified_screen(self):
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c1", []))
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [issue("high", screen="sample.x")])), "built")
+
+    def test_medium_issues_become_tasks_once_and_do_not_block(self):
+        medium = issue("medium", rule="layout-alignment", screen="sample.x", summary="Counts not aligned with the title")
+        self.assertEqual(screen_status.record_critic(self.ledger, "sample.x", self.report("c1", [medium, issue("low", rule="copy-plain", screen="sample.x")])), "verified")
+        reworded = issue("medium", rule="layout-alignment", screen="sample.x", summary="The counts drift right of the title")
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c2", [reworded]))
+        tasks = self.ledger["screens"]["sample.x"]["tasks"]
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["rule"], "layout-alignment")
+        self.assertEqual(tasks[0]["summary"], "The counts drift right of the title")
+        self.assertEqual((tasks[0]["since"], tasks[0]["from"]), ("c1", "c2"))
+
+    def test_the_canonical_ledger_takes_inventory_screens_only(self):
+        inventory = {"home.deckList": {"states": ["typical"], "signature": True}}
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.check_screen_id("sample.deckOverview", inventory, canonical=True)
+        screen_status.check_screen_id("sample.deckOverview", inventory, canonical=False)
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.check_screen_id("home.unknown", inventory, canonical=False)
+
+    def test_problems_flag_a_verified_screen_with_a_high_issue(self):
+        self.ledger["screens"]["home.deckList"] = {"status": "verified", "fix_rounds": 0, "platforms": ["iphone"],
+                                                   "issues": [issue("high", screen="home.deckList")]}
+        found = screen_status.problems(self.ledger, {"home.deckList": {}}, canonical=True)
+        self.assertTrue(any("high-severity" in p for p in found), found)
+        self.assertTrue(any("without passing evidence: iphone snapshots: no run" in p for p in found), found)
+
+    def test_approval_needs_a_verified_screen_a_logged_pick_and_an_approved_baseline(self):
+        decisions = os.path.join(self.dir, "decisions.md")
+        with open(decisions, "w") as handle:
+            handle.write("| Date | Screen | Decision | Reason | Source |\n|---|---|---|---|---|\n")
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.transition(self.ledger, "sample.x", "approved", "antoine", 1, decisions)
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c1", []))
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.transition(self.ledger, "sample.x", "approved", "antoine", 1, decisions)
+        with open(decisions, "a") as handle:
+            handle.write("| 2026-10-14 | sample.x | Picked B | Calmer | gallery |\n")
+        with self.assertRaises(screen_status.LedgerError):
+            screen_status.transition(self.ledger, "sample.x", "approved", "antoine", 0, decisions)
+        self.assertEqual(screen_status.transition(self.ledger, "sample.x", "approved", "antoine", 1, decisions), "approved")
+
+    def test_the_ledger_round_trips_with_its_header(self):
+        screen_status.record_critic(self.ledger, "sample.x", self.report("c1", []))
+        screen_status.dump(self.ledger, self.ledger_path)
+        with open(self.ledger_path) as handle:
+            self.assertTrue(handle.read().startswith("# Screen status ledger"))
+        self.assertEqual(screen_status.load(self.ledger_path)["screens"]["sample.x"]["status"], "verified")
+
+    def test_the_committed_ledger_lists_every_inventory_screen_and_is_valid(self):
+        os.chdir(REPO)
+        proc = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "screen_status.py"), "check"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        ledger = screen_status.load()
+        inventory = screen_status.load_inventory()
+        self.assertEqual(sorted(ledger["screens"]), sorted(inventory))
+
+    def test_inventory_json_lists_ids_and_states(self):
+        os.chdir(REPO)
+        proc = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "screen_status.py"), "inventory-json"], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        screens = {s["id"]: s for s in json.loads(proc.stdout)["screens"]}
+        self.assertEqual(screens["home.deckList"]["states"], ["empty", "typical", "overflow", "error", "loading"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -100,7 +100,7 @@ final class TestHooksTests: XCTestCase {
     func testBadLaunchOptionsReplaceTheAppWithTheHookError() throws {
         let build = try requireHooks()
         let cases: [(MeguriLaunch, String)] = [
-            (MeguriLaunch(route: "nope/missing"), "no route 'nope/missing'; registered: designsystem/gallery, sample/alert, sample/defects, sample/screen, sample/sheet"),
+            (MeguriLaunch(route: "nope/missing"), "no route 'nope/missing'; registered: designsystem/gallery, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets"),
             (MeguriLaunch(extra: ["-MeguriBogus", "1"]), "unknown launch option -MeguriBogus"),
             (MeguriLaunch(now: "2030-02-30T10:00:00Z"), "-MeguriNow takes YYYY-MM-DDTHH:MM:SS"),
             (MeguriLaunch(timeZone: "Mars/Olympus"), "unknown time zone 'Mars/Olympus'"),

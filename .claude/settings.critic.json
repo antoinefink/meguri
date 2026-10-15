@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": ["Read", "Glob", "Grep"],
+    "deny": [
+      "Bash",
+      "Edit",
+      "Write",
+      "MultiEdit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Task",
+      "Skill",
+      "Read(~/**)",
+      "Glob(~/**)",
+      "Grep(~/**)",
+      "Read(//Users/**)",
+      "Glob(//Users/**)",
+      "Grep(//Users/**)"
+    ]
+  }
+}

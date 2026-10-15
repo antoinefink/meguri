@@ -1012,8 +1012,8 @@ lint-ui" ]
 
 # --- design-docs -------------------------------------------------------------
 
-# design_fixture: a valid inventory, one reference pattern, and the screens.md
-# it generates.
+# design_fixture: a valid inventory, one reference pattern, and the
+# screens.md and status ledger it generates.
 design_fixture() {
   mkdir -p "$SB/docs/design/references"
   printf '| Pattern | What |\n|---|---|\n| `list-counts` | rows with counts |\n' >"$SB/docs/design/references/index.md"
@@ -1031,6 +1031,7 @@ screens:
     purpose: The deck tree with counts.
 YAML
   python3 "$SB/tools/scripts/design-screens.py" write --root "$SB"
+  (cd "$SB" && python3 tools/scripts/screen-status/screen_status.py init)
 }
 
 @test "design-docs passes when screens.md is generated from the inventory" {
@@ -1054,6 +1055,19 @@ YAML
   [ "$status" -eq 0 ]
   mg design-docs
   [ "$status" -eq 0 ]
+}
+
+@test "design-docs fails when the status ledger lacks an inventory screen and --write adds it" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  design_fixture
+  printf 'version: 1\nscreens: {}\n' >"$SB/docs/design/screen-status.yaml"
+  mg design-docs
+  [ "$status" -eq 1 ]
+  field '.failures[].message' | grep -qF 'home.deckList is in screen-inventory.yaml but not in docs/design/screen-status.yaml'
+  mg design-docs --write
+  [ "$status" -eq 0 ]
+  grep -q '^  home.deckList:$' "$SB/docs/design/screen-status.yaml"
+  grep -q '^    status: sketch$' "$SB/docs/design/screen-status.yaml"
 }
 
 @test "design-docs rejects a status, an unknown state, an unknown reference and a pairwise signature screen" {

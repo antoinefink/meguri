@@ -1,0 +1,140 @@
+# Screen status ledger (U10 created it, U254 operates it; R1985, R1987).
+# The only place a screen's status lives: sketch, built, verified, approved.
+# Written only by tools/scripts/screen-status/screen_status.py, through
+# tools/mg critic and tools/mg gallery; never edit it by hand.
+#
+# Per screen (ids from screen-inventory.yaml):
+#   status      sketch | built | verified | approved
+#   fix_rounds  agent render-and-fix rounds since the last merge (R1987, U254)
+#   platforms   where the snapshot matrix registers the screen
+#   evidence    the runs behind the status, per platform: snapshots (the
+#               digest of the screen's images, the app sources rendered:
+#               input), a11y (the app sources audited: input), critic; and
+#               lint (run id, status, commit)
+#   issues      open critic issues from the latest check (screen, variant,
+#               rubric rule, severity, region)
+#   tasks       medium critic issues to work on (R1985)
+#   history     status changes: date, from, to, by, reason
+
+version: 1
+screens:
+  shell.root:
+    status: sketch
+    fix_rounds: 0
+  shell.keyboardShortcuts:
+    status: sketch
+    fix_rounds: 0
+  onboarding.welcome:
+    status: sketch
+    fix_rounds: 0
+  home.deckList:
+    status: sketch
+    fix_rounds: 0
+  home.deckPage:
+    status: sketch
+    fix_rounds: 0
+  home.goToDeck:
+    status: sketch
+    fix_rounds: 0
+  home.sessionSummary:
+    status: sketch
+    fix_rounds: 0
+  home.fsrsSheet:
+    status: sketch
+    fix_rounds: 0
+  review.question:
+    status: sketch
+    fix_rounds: 0
+  review.answer:
+    status: sketch
+    fix_rounds: 0
+  review.menu:
+    status: sketch
+    fix_rounds: 0
+  review.setDueDate:
+    status: sketch
+    fix_rounds: 0
+  review.forget:
+    status: sketch
+    fix_rounds: 0
+  review.editCurrent:
+    status: sketch
+    fix_rounds: 0
+  review.congratulations:
+    status: sketch
+    fix_rounds: 0
+  editor.add:
+    status: sketch
+    fix_rounds: 0
+  editor.edit:
+    status: sketch
+    fix_rounds: 0
+  noteTypes.list:
+    status: sketch
+    fix_rounds: 0
+  noteTypes.templates:
+    status: sketch
+    fix_rounds: 0
+  noteTypes.fields:
+    status: sketch
+    fix_rounds: 0
+  noteTypes.preview:
+    status: sketch
+    fix_rounds: 0
+  noteTypes.changeNoteType:
+    status: sketch
+    fix_rounds: 0
+  imageOcclusion.editor:
+    status: sketch
+    fix_rounds: 0
+  browse.browser:
+    status: sketch
+    fix_rounds: 0
+  browse.findReplace:
+    status: sketch
+    fix_rounds: 0
+  browse.editField:
+    status: sketch
+    fix_rounds: 0
+  cardInfo.card:
+    status: sketch
+    fix_rounds: 0
+  stats.overview:
+    status: sketch
+    fix_rounds: 0
+  stats.heatmapSettings:
+    status: sketch
+    fix_rounds: 0
+  deckOptions.options:
+    status: sketch
+    fix_rounds: 0
+  settings.root:
+    status: sketch
+    fix_rounds: 0
+  settings.sync:
+    status: sketch
+    fix_rounds: 0
+  settings.importExport:
+    status: sketch
+    fix_rounds: 0
+  settings.backups:
+    status: sketch
+    fix_rounds: 0
+  settings.maintenance:
+    status: sketch
+    fix_rounds: 0
+  settings.diagnostics:
+    status: sketch
+    fix_rounds: 0
+  settings.integrations:
+    status: sketch
+    fix_rounds: 0
+  settings.migakuProfiles:
+    status: sketch
+    fix_rounds: 0
+  settings.recentlyReceived:
+    status: sketch
+    fix_rounds: 0
+  widget.heatmap:
+    status: sketch
+    fix_rounds: 0

@@ -53,6 +53,15 @@ import DesignSystem
         #expect(Radius.scale == Radius.scale.sorted() && Set(Radius.scale).count == Radius.scale.count)
     }
 
+    /// A primary action fits in the readable column, and both widths sit
+    /// on the spacing grid.
+    @Test func contentWidthsNest() {
+        #expect(ContentWidth.primaryAction > 0 && ContentWidth.primaryAction < ContentWidth.readable)
+        for width in [ContentWidth.readable, ContentWidth.primaryAction] {
+            #expect(width.truncatingRemainder(dividingBy: 4) == 0, "\(width) is not on the 4-pt grid")
+        }
+    }
+
     @Test(arguments: Motion.all)
     func everyMotionTokenHasAReduceMotionAlternative(token: MotionToken) {
         #expect(token.duration > 0)
