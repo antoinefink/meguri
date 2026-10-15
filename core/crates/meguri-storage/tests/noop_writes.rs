@@ -398,13 +398,13 @@ fn identical_rewrites_never_stamp_over_ten_thousand_random_operations() {
         let mut scope = writer
             .begin_write(StampMode::Local, &clock, Some(JournalOptions::in_memory()))
             .unwrap();
-        let mut real = false;
         let mut outcomes = Vec::new();
         for (target, change) in &planned {
-            let written = rewrite(&mut scope, *target, *change, case, &ids);
-            real |= written.changed();
-            outcomes.push(written);
+            outcomes.push(rewrite(&mut scope, *target, *change, case, &ids));
         }
+        // A planned change always changes its row the first time in an
+        // operation: its value is new to this case, or a toggle.
+        let real = planned.iter().any(|(_, change)| *change);
         let committed = scope.commit().unwrap();
         assert_eq!(committed.changed, real, "case {case}");
         let journal = committed.journal.unwrap();
@@ -416,14 +416,13 @@ fn identical_rewrites_never_stamp_over_ten_thousand_random_operations() {
         }
         for (((target, change), written), was) in planned.iter().zip(&outcomes).zip(&before) {
             let after = stamps(writer, *target, &ids);
-            // A target written for real earlier in the same operation is
-            // stamped by that write.
-            let touched = planned
-                .iter()
-                .zip(&outcomes)
-                .any(|((t, _), w)| same_target(*t, *target) && w.changed());
-            if !*change && !touched {
+            if !*change {
+                // Rewriting the row as stored is never a write, also after a
+                // real change of it in the same operation.
                 assert_eq!(*written, Written::Unchanged, "case {case}: {target:?}");
+            }
+            let changed_in_op = planned.iter().any(|(t, c)| *c && same_target(*t, *target));
+            if !changed_in_op {
                 assert_eq!(after, *was, "case {case}: {target:?} stamped by an identical rewrite");
             }
             if written.changed() {
