@@ -1,0 +1,57 @@
+#!/bin/bash
+# pre-commit hook: the private-token scan (U15, R1940). `tools/mg hooks
+# install` and `tools/mg worktree new` install a shim that runs this file
+# from the checkout being committed in.
+#
+# The token set is built from the user's collection by `tools/mg private
+# copy` and lives in the main checkout's build/private/tokens/ (a checkout's
+# own build/private/tokens/ counts too). Without one the hook does nothing.
+# With one, the lines this commit adds (binary files whole) must hold none of
+# its tokens; tools/scripts/private-scan/private_scan.py scans them. The hook
+# names files and line numbers, never a token. Merge commits are not scanned
+# (their lines were scanned where they were committed), as the commit-msg
+# hook skips them. Runs under macOS /bin/bash 3.2.
+
+set -u
+
+reject() {
+  echo "pre-commit: $*" >&2
+  exit 1
+}
+
+top="$(git rev-parse --show-toplevel)" || exit 1
+git_dir="$(git rev-parse --absolute-git-dir)" || exit 1
+[ -f "$git_dir/MERGE_HEAD" ] && exit 0
+common="$(git rev-parse --path-format=absolute --git-common-dir)" || exit 1
+main="$(dirname "$common")"
+
+args=()
+for dir in "$main" "$top"; do
+  f="$dir/build/private/tokens/tokens.txt"
+  [ -f "$f" ] || continue
+  [ "${#args[@]}" -gt 0 ] && [ "${args[1]}" = "$f" ] && continue
+  args[${#args[@]}]=--tokens
+  args[${#args[@]}]="$f"
+done
+[ "${#args[@]}" -gt 0 ] || exit 0
+
+command -v python3 >/dev/null 2>&1 ||
+  reject "a private token set exists but python3 is not on PATH, so the staged lines cannot be scanned (R1940)"
+command -v jq >/dev/null 2>&1 ||
+  reject "a private token set exists but jq is not on PATH, so the scan cannot be reported (R1940)"
+
+out="$(python3 -I -B "$top/tools/scripts/private-scan/private_scan.py" scan "${args[@]}" --staged --repo "$top")"
+rc=$?
+case "$rc" in
+  0) exit 0 ;;
+  1)
+    {
+      echo "pre-commit: staged lines hold a word, deck name, tag or media name from the user's private collection (R1940):"
+      jq -r '.files[] | "  " + .path + (if .binary then " (binary file)" else " (line " + (.lines | map(tostring) | join(", ")) + ")" end)' <<<"$out"
+      echo "Remove that text: committed results from the private collection hold only aggregates and logical ids."
+      echo "The hook never names the token. Check again with: tools/mg private scan-outputs"
+    } >&2
+    exit 1
+    ;;
+  *) reject "the private-token scan failed (exit $rc); the commit is blocked until it runs" ;;
+esac
