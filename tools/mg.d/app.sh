@@ -23,11 +23,12 @@ mg_app_products() {
   esac
 }
 
-# mg_app_build <mac|ios-sim> <config> [plan]: UI lint first (AE90), core
-# XCFramework and build-for-testing of the plan (UI by default; snapshots
-# build Snapshot). On failure records it and returns 1.
+# mg_app_build <mac|ios-sim> <config> [plan] [scheme]: UI lint first (AE90),
+# core XCFramework and build-for-testing of the plan (UI by default;
+# snapshots build Snapshot; perf-ui builds Performance with the
+# Meguri-Profile scheme). On failure records it and returns 1.
 mg_app_build() {
-  local platform="$1" config="$2" plan="${3:-UI}" dest result log rc counts
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
@@ -48,7 +49,7 @@ mg_app_build() {
   log="$MG_RUN_DIR/build-$platform-$config-$plan.log"
   rm -rf "$result"
   echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config, $plan plan)" >&2
-  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme Meguri -testPlan "$plan" -configuration "$config" \
+  xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
     -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" >"$log" 2>&1
   rc=$?
   mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config, $plan plan)"
@@ -88,7 +89,8 @@ mg_app_input_digest() {
 }
 
 # mg_app_xcodebuild_test <out prefix> <mac|ios> <destination> <config> [xcodebuild args]:
-# test-without-building of the UI plan into <prefix>.xcresult and <prefix>.log.
+# test-without-building of the UI plan (or MG_APP_TEST_PLAN with the scheme
+# MG_APP_TEST_SCHEME, as perf-ui sets them) into <prefix>.xcresult and <prefix>.log.
 # Mac runs go where mg_mac_ui_begin sent them (MG_MAC_RUNNER): to the test VM
 # (mac-vm.sh) or this Mac. Returns 0 pass, 1 test failures, 2 could not run
 # (records a user step when macOS has not allowed UI automation).
@@ -105,7 +107,8 @@ mg_app_xcodebuild_test() {
   else
     # No diagnostics on failure: they take up to 10 minutes (simctl diagnose)
     # and, on the Mac, are a sysdiagnose of the user's machine.
-    xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri -testPlan UI -configuration "$config" \
+    xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme "${MG_APP_TEST_SCHEME:-Meguri}" \
+      -testPlan "${MG_APP_TEST_PLAN:-UI}" -configuration "$config" \
       -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$prefix.xcresult" -collect-test-diagnostics never \
       "$@" >"$prefix.log" 2>&1
     rc=$?

@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		4D4547555249000000000110 /* MeguriKit in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000510 /* MeguriKit */; };
 		4D4547555249000000000111 /* CoreBridge in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000511 /* CoreBridge */; };
+		4D4547555249000000000113 /* Instrumentation in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000513 /* Instrumentation */; };
+		4D4547555249000000000310 /* Instrumentation in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000514 /* Instrumentation */; };
 		4D4547555249000000000410 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = 4D4547555249000000000512 /* SnapshotTesting */; };
 		4D4547555249000000000112 /* MeguriWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4D4547555249000000000021 /* MeguriWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -139,6 +141,7 @@
 			files = (
 				4D4547555249000000000110 /* MeguriKit in Frameworks */,
 				4D4547555249000000000111 /* CoreBridge in Frameworks */,
+				4D4547555249000000000113 /* Instrumentation in Frameworks */,
 			);
 		};
 		4D4547555249000000000203 /* Frameworks */ = {
@@ -149,6 +152,7 @@
 		4D4547555249000000000303 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				4D4547555249000000000310 /* Instrumentation in Frameworks */,
 			);
 		};
 		4D4547555249000000000403 /* Frameworks */ = {
@@ -235,6 +239,7 @@
 			packageProductDependencies = (
 				4D4547555249000000000510 /* MeguriKit */,
 				4D4547555249000000000511 /* CoreBridge */,
+				4D4547555249000000000513 /* Instrumentation */,
 			);
 			productName = Meguri;
 			productReference = 4D4547555249000000000020 /* Meguri.app */;
@@ -277,6 +282,9 @@
 				4D4547555249000000000012 /* MeguriUITests */,
 			);
 			name = MeguriUITests;
+			packageProductDependencies = (
+				4D4547555249000000000514 /* Instrumentation */,
+			);
 			productName = MeguriUITests;
 			productReference = 4D4547555249000000000022 /* MeguriUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
@@ -672,6 +680,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
 			productName = CoreBridge;
+		};
+		4D4547555249000000000513 /* Instrumentation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
+			productName = Instrumentation;
+		};
+		4D4547555249000000000514 /* Instrumentation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D4547555249000000000501 /* XCLocalSwiftPackageReference "Packages/MeguriCore" */;
+			productName = Instrumentation;
 		};
 		4D4547555249000000000512 /* SnapshotTesting */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -395,13 +395,14 @@ mg_mac_vm_copy_in() {
   return 0
 }
 
-# mg__mac_vm_xctestrun <config>: this checkout's UI-plan xctestrun built for
-# the configuration (the newest, when several SDKs left one). Debug and
-# Profile builds write the same file name; its test root says which.
+# mg__mac_vm_xctestrun <config>: this checkout's UI-plan xctestrun (or
+# MG_APP_TEST_PLAN's, built with MG_APP_TEST_SCHEME) built for the
+# configuration (the newest, when several SDKs left one). Debug and Profile
+# builds write the same file name; its test root says which.
 mg__mac_vm_xctestrun() {
   local f
   # shellcheck disable=SC2012 # newest first; the names are Xcode's
-  ls -t "$MG_ROOT/$MG_APP_DD/Build/Products"/Meguri_UI_macosx*-arm64.xctestrun 2>/dev/null | while IFS= read -r f; do
+  ls -t "$MG_ROOT/$MG_APP_DD/Build/Products"/"${MG_APP_TEST_SCHEME:-Meguri}_${MG_APP_TEST_PLAN:-UI}"_macosx*-arm64.xctestrun 2>/dev/null | while IFS= read -r f; do
     if grep -q "__TESTROOT__/$1/" "$f"; then
       printf '%s\n' "$f"
       break
@@ -427,8 +428,8 @@ mg_mac_vm_xcodebuild_test() {
   base="$(basename "$prefix")"
   xctestrun="$(mg__mac_vm_xctestrun "$config")"
   if [ -z "$xctestrun" ]; then
-    echo "no $config UI-plan xctestrun in $MG_APP_DD/Build/Products" >"$prefix.log"
-    mg_failure mac-vm-xctestrun "no UI-plan xctestrun for $config in $MG_APP_DD/Build/Products; build it first" \
+    echo "no $config ${MG_APP_TEST_PLAN:-UI}-plan xctestrun in $MG_APP_DD/Build/Products" >"$prefix.log"
+    mg_failure mac-vm-xctestrun "no ${MG_APP_TEST_PLAN:-UI}-plan xctestrun for $config in $MG_APP_DD/Build/Products; build it first" \
       "tools/mg build-app --platform mac --config $config"
     MG_MAC_VM_RUN_ERROR=1
     return 1

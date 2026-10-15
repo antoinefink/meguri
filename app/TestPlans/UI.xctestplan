@@ -8,17 +8,21 @@
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
-    "uiTestingScreenshotsLifetime" : "keepNever",
     "targetForVariableExpansion" : {
       "containerPath" : "container:Meguri.xcodeproj",
       "identifier" : "4D4547555249000000000100",
       "name" : "Meguri"
     },
-    "testRepetitionMode" : "none"
+    "testRepetitionMode" : "none",
+    "uiTestingScreenshotsLifetime" : "keepNever"
   },
   "testTargets" : [
     {
       "parallelizable" : false,
+      "skippedTests" : [
+        "PerfTestCaseTests",
+        "SmokePerfTests"
+      ],
       "target" : {
         "containerPath" : "container:Meguri.xcodeproj",
         "identifier" : "4D4547555249000000000300",

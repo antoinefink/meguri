@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<!-- The shape of `xctrace export` of an os-signpost table (Xcode 27.0): the
+schema and the rows in separate nodes, each value defined once with an id
+(nested ones too) and pointed at with ref. Columns trimmed to what the
+summary reads, in the export's order. -->
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[4]'><schema name="os-signpost"><col><mnemonic>time</mnemonic></col><col><mnemonic>process</mnemonic></col><col><mnemonic>event-type</mnemonic></col><col><mnemonic>name</mnemonic></col><col><mnemonic>subsystem</mnemonic></col><col><mnemonic>category</mnemonic></col></schema></node>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[6]'>
+<row><event-time id="1" fmt="00:00.620.783">620783583</event-time><process id="2" fmt="SpringBoard (92747)"><pid id="3" fmt="92747">92747</pid></process><event-type id="4" fmt="Begin">Begin</event-type><signpost-name id="5" fmt="UpdateSequence">UpdateSequence</signpost-name><subsystem id="6" fmt="com.apple.UIKit">com.apple.UIKit</subsystem><category id="7" fmt="UpdateCycle">UpdateCycle</category></row>
+<row><event-time id="8" fmt="00:01.000.000">1000000000</event-time><process id="9" fmt="Meguri (1234)"><pid id="10" fmt="1234">1234</pid></process><event-type ref="4"/><signpost-name id="11" fmt="probe.syntheticDelay">probe.syntheticDelay</signpost-name><subsystem id="12" fmt="com.antoinefink.meguri">com.antoinefink.meguri</subsystem><category id="13" fmt="Probe">Probe</category></row>
+<row><event-time id="14" fmt="00:01.033.000">1033000000</event-time><process ref="9"/><event-type id="15" fmt="End">End</event-type><signpost-name ref="11"/><subsystem ref="12"/><category ref="13"/></row>
+<row><event-time id="16" fmt="00:02.000.000">2000000000</event-time><process ref="9"/><event-type ref="4"/><signpost-name ref="11"/><subsystem ref="12"/><category ref="13"/></row>
+<row><event-time id="17" fmt="00:02.033.000">2033000000</event-time><process ref="9"/><event-type ref="15"/><signpost-name ref="11"/><subsystem ref="12"/><category ref="13"/></row>
+<row><event-time id="18" fmt="00:03.000.000">3000000000</event-time><process ref="9"/><event-type ref="4"/><signpost-name id="19" fmt="core_build_info">core_build_info</signpost-name><subsystem ref="12"/><category id="20" fmt="CoreBridge">CoreBridge</category></row>
+<row><event-time id="21" fmt="00:04.000.000">4000000000</event-time><process ref="9"/><event-type ref="4"/><signpost-name id="22" fmt="review.notRegistered">review.notRegistered</signpost-name><subsystem ref="12"/><category id="23" fmt="Review">Review</category></row>
+<row><event-time id="24" fmt="00:05.000.000">5000000000</event-time><process ref="2"/><event-type ref="4"/><signpost-name ref="5"/><subsystem ref="6"/><category ref="7"/></row>
+</node>
+</trace-query-result>

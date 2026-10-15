@@ -39,6 +39,7 @@ extension TestHooks {
             var registry = RouteRegistry()
             SampleRoutes.register(in: &registry)
             DesignSystemRoutes.register(in: &registry)
+            PerfRoutes.register(in: &registry)
             return registry
         }
 

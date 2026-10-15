@@ -1,0 +1,15 @@
+{
+  "name": "perf-probe",
+  "description": "Run the performance probe three times: each run is one probe.syntheticDelay interval (U12). tools/mg metrics records it in Instruments.",
+  "platforms": ["ios"],
+  "steps": [
+    {"launch": {"route": "perf/probe", "locale": "en_US", "animations": false}},
+    {"wait": "perf.probe.run"},
+    {"tap": "perf.probe.run"},
+    {"snapshot": "first"},
+    {"tap": "perf.probe.run"},
+    {"snapshot": "second"},
+    {"tap": "perf.probe.run"},
+    {"snapshot": "third"}
+  ]
+}

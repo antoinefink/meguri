@@ -10,3 +10,9 @@ INFOPLIST_FILE = MeguriUITests/Info.plist
 
 LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @loader_path/Frameworks
 LD_RUNPATH_SEARCH_PATHS[sdk=macosx*] = $(inherited) @executable_path/../Frameworks @loader_path/../Frameworks
+
+// Release and Profile turn the hardened runtime on for the Mac. On the
+// UI-test runner its library validation refuses this ad-hoc signed bundle
+// ("different Team IDs"), so the Profile performance tests (U12) could not
+// load. Test bundles never ship.
+ENABLE_HARDENED_RUNTIME = NO

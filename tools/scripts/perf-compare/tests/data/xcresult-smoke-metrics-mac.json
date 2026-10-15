@@ -1,0 +1,186 @@
+[
+  {
+    "testIdentifier": "SmokePerfTests/testLaunch()",
+    "testIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testLaunch",
+    "testRuns": [
+      {
+        "device": {
+          "deviceId": "5813040408fee4ad8e42c77fc19fb1ed8f922fc6",
+          "deviceName": "My Mac"
+        },
+        "metrics": [
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Duration (ApplicationFirstFramePresentationResponsive)",
+            "identifier": "com.apple.dt.XCTMetric_ApplicationLaunch-ApplicationFirstFramePresentationResponsive.duration",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              0.31793662500000003
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          }
+        ],
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Default"
+        }
+      }
+    ]
+  },
+  {
+    "testIdentifier": "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()",
+    "testIdentifierURL": "test://com.apple.xcode/Meguri/MeguriUITests/SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay",
+    "testRuns": [
+      {
+        "device": {
+          "deviceId": "5813040408fee4ad8e42c77fc19fb1ed8f922fc6",
+          "deviceName": "My Mac"
+        },
+        "metrics": [
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Memory Physical (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.antoinefink.meguri.dev.physical",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              -950.272,
+              -98.304,
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Absolute Memory Physical (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.antoinefink.meguri.dev.physical_absolute",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              29411.712,
+              29313.408,
+              29313.408,
+              29313.408,
+              29313.408
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Hitch Time Ratio (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Hitch-dev.time.ratio",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "ms per s"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Memory Peak Physical (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Memory-com.antoinefink.meguri.dev.physical_peak",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              30443.904,
+              29444.48,
+              29428.096,
+              29411.712,
+              29395.328
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "kB"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Duration (probe.syntheticDelay)",
+            "identifier": "com.apple.dt.XCTMetric_OSSignpost-probe.syntheticDelay.duration",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              0.034155041000000004,
+              0.034740875000000004,
+              0.032942458,
+              0.037227708000000005,
+              0.036088542
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Number of Hitches (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Hitch-dev.number",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "hitches"
+          },
+          {
+            "baselineAverage": 0,
+            "baselineName": "",
+            "displayName": "Hitches Total Duration (dev)",
+            "identifier": "com.apple.dt.XCTMetric_Hitch-dev.total.duration",
+            "maxPercentRegression": 10,
+            "maxPercentRelativeStandardDeviation": 10,
+            "maxRegression": 0,
+            "maxStandardDeviation": 10,
+            "measurements": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "polarity": "prefers smaller",
+            "unitOfMeasurement": "s"
+          }
+        ],
+        "testPlanConfiguration": {
+          "configurationId": "1",
+          "configurationName": "Default"
+        }
+      }
+    ]
+  }
+]
