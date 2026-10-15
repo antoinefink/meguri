@@ -72,5 +72,5 @@ The scenario ops (`dsl.md` D7.2) and the observation kind (`observations.md` O4)
 
 ## G11. Status
 
-- The oracle driver has none of these ops or the kind yet. The oracle maintainer adds them (U30's role work); until then the scenarios that use them have no golden. Driver hints are spec-side, in `oracle/provenance/tags.md`.
+- The oracle driver runs every op and the kind; the scenarios under `conformance/scenarios/tags/` have goldens.
 - Meguri's executor implements them with U30's tag, flag and tree operations; until then the scenarios are `pending` (`dsl.md` D10). Until the testkit model (`core/crates/meguri-testkit/src/scenario/`) reads these ops and the kind, T0 reports the scenarios that use them as `invalid`; U30's implementer adds the typed arguments with the adapters.

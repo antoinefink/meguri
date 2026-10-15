@@ -1,0 +1,232 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n5"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "add_note_tags": {
+          "count": 4
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" aaa abc deF newone XYZ ", 1894705200, -1],
+            [" abc deF newone XYZ ", 1894705200, -1],
+            [" abc deF newone XYZ ", 1894705200, -1],
+            [" a abc deF newone XYZ zz ", 1894705200, -1],
+            [" b a ", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "XYZ": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "XYZ",
+              "usn": -1
+            },
+            "a": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "a",
+              "usn": -1
+            },
+            "aaa": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "aaa",
+              "usn": -1
+            },
+            "abc": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "abc",
+              "usn": -1
+            },
+            "b": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "b",
+              "usn": -1
+            },
+            "deF": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "deF",
+              "usn": -1
+            },
+            "newone": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "newone",
+              "usn": -1
+            },
+            "zz": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zz",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "add_note_tags": {
+          "count": 0
+        }
+      },
+      {
+        "add_note_tags": {
+          "count": 0
+        }
+      },
+      {
+        "add_note_tags": {
+          "count": 0
+        }
+      },
+      {
+        "add_note_tags": {
+          "count": 1
+        }
+      },
+      {
+        "add_note_tags": {
+          "count": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" aaa abc deF newone XYZ ", 1894705200, -1],
+            [" abc deF newone q r::blank XYZ ", 1894708800, -1],
+            [" abc deF newone XYZ ", 1894705200, -1],
+            [" a abc deF newone XYZ zz ", 1894705200, -1],
+            [" b a ", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "XYZ": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "XYZ",
+              "usn": -1
+            },
+            "a": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "a",
+              "usn": -1
+            },
+            "aaa": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "aaa",
+              "usn": -1
+            },
+            "abc": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "abc",
+              "usn": -1
+            },
+            "b": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "b",
+              "usn": -1
+            },
+            "deF": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "deF",
+              "usn": -1
+            },
+            "newone": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "newone",
+              "usn": -1
+            },
+            "q": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "q",
+              "usn": -1
+            },
+            "r::blank": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "r::blank",
+              "usn": -1
+            },
+            "zz": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zz",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/bulk/add",
+  "scenario_sha256": "93f6a4916a23670347f10668369404e0d8915fd51dfde5f3a08683648ad402f3",
+  "tz": "UTC"
+}

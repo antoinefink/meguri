@@ -1,0 +1,203 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "tag_tree": []
+      },
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n5"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "tag_tree": [
+          {
+            "children": [],
+            "collapsed": true,
+            "name": "a!"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "collapsed": false,
+                "name": "c"
+              }
+            ],
+            "collapsed": false,
+            "name": "B2"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "collapsed": true,
+                "name": "x"
+              },
+              {
+                "children": [],
+                "collapsed": true,
+                "name": "y"
+              }
+            ],
+            "collapsed": true,
+            "name": "Bar"
+          },
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "collapsed": true,
+                    "name": "a"
+                  },
+                  {
+                    "children": [],
+                    "collapsed": true,
+                    "name": "b"
+                  }
+                ],
+                "collapsed": false,
+                "name": "BAR"
+              }
+            ],
+            "collapsed": true,
+            "name": "foo"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "collapsed": true,
+                "name": "two"
+              }
+            ],
+            "collapsed": true,
+            "name": "one"
+          },
+          {
+            "children": [],
+            "collapsed": true,
+            "name": "one1"
+          }
+        ]
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "B2": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "B2",
+              "usn": 0
+            },
+            "Bar::x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Bar::x",
+              "usn": -1
+            },
+            "FOO::bar::b": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "FOO::bar::b",
+              "usn": -1
+            },
+            "a!": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "a!",
+              "usn": 0
+            },
+            "b2::c": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "b2::c",
+              "usn": 0
+            },
+            "bar::y": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::y",
+              "usn": -1
+            },
+            "foo::BAR": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "foo::BAR",
+              "usn": -1
+            },
+            "foo::BAR::a": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "foo::BAR::a",
+              "usn": -1
+            },
+            "one": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "one",
+              "usn": -1
+            },
+            "one1": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "one1",
+              "usn": -1
+            },
+            "one::two": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "one::two",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/tree/structure",
+  "scenario_sha256": "a8ceed81d933532e2d947fd3b29ec02cdbbe33b16571d5181e64622b6abd36e0",
+  "tz": "UTC"
+}
