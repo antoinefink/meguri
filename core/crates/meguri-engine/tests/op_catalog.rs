@@ -1,0 +1,88 @@
+//! The op catalog's undo classes and every op source's undo effect
+//! (`specs/engine/undo.md` M2, M11; R2020).
+
+use std::collections::BTreeSet;
+
+use meguri_engine::executor::catalog::{self, CATALOG};
+use meguri_engine::{DisabledReason, SourceEffect, UndoClass, source_effect};
+use meguri_model::changes::OpSource;
+
+#[test]
+fn every_catalog_op_declares_an_undo_class_and_destructive_ones_confirmation_and_backup() {
+    let mut names = BTreeSet::new();
+    for def in CATALOG {
+        assert!(names.insert(def.name()), "{} is listed twice", def.name());
+        let class = def
+            .undo_class()
+            .unwrap_or_else(|| panic!("{} declares no undo class", def.name()));
+        match class {
+            UndoClass::DestructiveNonUndoable => {
+                assert!(
+                    class.requires_confirmation() && class.requires_backup(),
+                    "{} is destructive and not undoable: it needs confirmation and the pre-op backup",
+                    def.name()
+                );
+            }
+            UndoClass::Undoable | UndoClass::NonDestructive => {
+                assert!(
+                    !class.requires_confirmation() && !class.requires_backup(),
+                    "{}",
+                    def.name()
+                );
+            }
+        }
+        if def.is_maintenance_task() {
+            assert_eq!(
+                class,
+                UndoClass::NonDestructive,
+                "{}: a maintenance task changes no row",
+                def.name()
+            );
+        }
+    }
+    // The classes the spec gives (op-model O9, undo M11).
+    let class = |name: &str| catalog::lookup(name).and_then(|def| def.undo_class());
+    assert_eq!(class("check_database"), Some(UndoClass::DestructiveNonUndoable));
+    assert_eq!(class("apkg_apply"), Some(UndoClass::Undoable));
+    assert_eq!(class("notetype_structure_change"), Some(UndoClass::Undoable));
+    assert_eq!(class("bulk_op"), Some(UndoClass::Undoable));
+    assert_eq!(class("sync_incoming_merge"), Some(UndoClass::NonDestructive));
+    assert_eq!(class("undo"), Some(UndoClass::Undoable));
+    assert_eq!(class("redo"), Some(UndoClass::Undoable));
+    // Undo and redo may declare the long write of the step they restore.
+    assert!(catalog::UNDO.may_declare_long_write() && catalog::REDO.may_declare_long_write());
+    assert_eq!(
+        meguri_engine::OpDef::new("plain").undo_class(),
+        None,
+        "a plain op is no catalog op"
+    );
+}
+
+#[test]
+fn every_op_source_declares_its_undo_effect() {
+    let effects: Vec<(OpSource, SourceEffect)> = OpSource::ALL.iter().map(|s| (*s, source_effect(*s))).collect();
+    assert_eq!(
+        effects,
+        [
+            (OpSource::UserUndoable, SourceEffect::Recorded),
+            (
+                OpSource::UserNonUndoable,
+                SourceEffect::ClearAll(DisabledReason::ClearedByNonUndoableOp)
+            ),
+            (OpSource::SyncIncoming, SourceEffect::SyncMerge),
+            (OpSource::LocalApi, SourceEffect::TruncateIntersecting),
+            (
+                OpSource::Optimizer,
+                SourceEffect::ClearAll(DisabledReason::ClearedByNonUndoableOp)
+            ),
+            (
+                OpSource::Rollover,
+                SourceEffect::ClearAll(DisabledReason::ClearedByRollover)
+            ),
+            (
+                OpSource::Maintenance,
+                SourceEffect::ClearAll(DisabledReason::ClearedByNonUndoableOp)
+            ),
+        ]
+    );
+}

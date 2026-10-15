@@ -37,6 +37,12 @@ tempfile.workspace = true
 name = "executor"
 harness = false
 
+# Criterion wall-clock suite: undo of an answer (`specs/engine/undo.md` M12,
+# R1811).
+[[bench]]
+name = "undo"
+harness = false
+
 [[test]]
 name = "wal_durability"
 required-features = ["test-hooks"]

@@ -18,6 +18,8 @@ use crate::executor::catalog::OpDef;
 use crate::executor::preconditions::Precondition;
 use crate::lifecycle::Generation;
 use crate::progress::ProgressSink;
+use crate::undo::entry::{SessionId, StepKind};
+use crate::undo::{UndoManager, UndoNotes, UndoSpec};
 
 /// How an op is to run.
 #[derive(Clone, Debug)]
@@ -32,6 +34,7 @@ pub struct OpSpec {
     pub(crate) declared: Option<Duration>,
     pub(crate) plan_time: Option<Duration>,
     pub(crate) any_generation: bool,
+    pub(crate) undo: UndoSpec,
 }
 
 impl OpSpec {
@@ -47,6 +50,7 @@ impl OpSpec {
             declared: None,
             plan_time: None,
             any_generation: false,
+            undo: UndoSpec::default(),
         }
     }
 
@@ -113,6 +117,28 @@ impl OpSpec {
         self
     }
 
+    /// The name and kind of the undo step a `UserUndoable` op records
+    /// (`engine/undo` M1): Anki's op name ("Answer Card", R370). Without it
+    /// the step takes the op's name and kind `Other`.
+    pub fn undo_step(mut self, name: &'static str, kind: StepKind) -> OpSpec {
+        self.undo.step = Some((name, kind));
+        self
+    }
+
+    /// The review session the op belongs to (`engine/undo` M3, M8).
+    pub fn session(mut self, session: SessionId) -> OpSpec {
+        self.undo.session = Some(session);
+        self
+    }
+
+    /// Neither recorded nor clearing the history (`engine/undo` M2): only for
+    /// `UserNonUndoable` ops such as selecting a deck (R42). Other sources are
+    /// refused with `InvalidArgument` at submit.
+    pub fn skip_undo(mut self) -> OpSpec {
+        self.undo.skip = true;
+        self
+    }
+
     pub(crate) fn stamp_mode(&self) -> StampMode {
         self.stamp
             .unwrap_or_else(|| crate::executor::source::default_stamp(self.source))
@@ -130,6 +156,10 @@ pub struct OpContext<'s, 'c> {
     pub(crate) progress: Option<ProgressSink>,
     pub(crate) media_added: Vec<String>,
     pub(crate) media_removed: Vec<String>,
+    pub(crate) undo: &'c UndoManager,
+    pub(crate) undo_notes: UndoNotes,
+    /// The seq of the last committed op: what a snapshot begun now sees.
+    pub(crate) last_seq: Seq,
 }
 
 impl fmt::Debug for OpContext<'_, '_> {
@@ -207,7 +237,8 @@ impl<'c> OpContext<'_, 'c> {
     }
 }
 
-/// What U25 records for an undoable op that changed something.
+/// The undo step an op recorded (`engine/undo` M1): set for a `UserUndoable`
+/// op that changed something and for a redo. The step's id is the op's seq.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UndoMeta {
     pub name: &'static str,

@@ -28,6 +28,9 @@ use crate::lifecycle::Generation;
 use crate::monotonic;
 use crate::progress::ProgressPhase;
 use crate::threads::ThreadActivity;
+use crate::undo::reasons::DisabledReason;
+use crate::undo::restorers::Direction;
+use crate::undo::{Applied, CommitInfo, UndoNotes};
 
 /// One item of the writer's queues.
 pub(crate) struct Task {
@@ -296,12 +299,16 @@ fn run_op<T>(
         progress: spec.progress.clone(),
         media_added: Vec::new(),
         media_removed: Vec::new(),
+        undo: &shared.undo,
+        undo_notes: UndoNotes::default(),
+        last_seq: shared.last_seq(),
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&mut context)));
     let media = MediaNotes {
         added: std::mem::take(&mut context.media_added),
         removed: std::mem::take(&mut context.media_removed),
     };
+    let undo_notes = std::mem::take(&mut context.undo_notes);
     let value = match outcome {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -332,6 +339,18 @@ fn run_op<T>(
             .record(seq, journal.entries().map(|e| (e.table(), e.key())), journal.len());
     }
     let change_set = Arc::new(derived.changes);
+    // The history changes before anyone sees the commit (engine/undo M2).
+    let applied = shared.undo.after_commit(CommitInfo {
+        seq,
+        name: meta.name,
+        source: spec.source,
+        spec: &spec.undo,
+        declared: spec.declared,
+        journal: committed.journal.map(Arc::new),
+        changes: &change_set,
+        notes: undo_notes,
+    });
+    shared.undo.notify_restorers(&applied, &change_set);
     if change_set.is_empty() {
         reservation.give_up();
     } else {
@@ -366,10 +385,21 @@ fn run_op<T>(
     if let Some(plan) = spec.plan_time {
         span.record("plan_ms", plan.as_secs_f64() * 1000.0);
     }
-    let undo = (spec.source == OpSource::UserUndoable && !change_set.is_empty()).then_some(UndoMeta {
-        name: meta.name,
-        source: spec.source,
-    });
+    let undo = match applied {
+        Applied::Recorded(step) => Some(UndoMeta {
+            name: step.name,
+            source: spec.source,
+        }),
+        Applied::Restored {
+            direction: Direction::Redo,
+            step,
+            ..
+        } => Some(UndoMeta {
+            name: step.name,
+            source: spec.source,
+        }),
+        Applied::Restored { .. } | Applied::Nothing => None,
+    };
     Ok(OpResult {
         value,
         seq,
@@ -504,6 +534,8 @@ impl TaskBody for ReplaceTask {
                         factory,
                     },
                     Ok(()) => {
+                        // Before any op of the new generation (engine/undo M6).
+                        shared.undo.reset(DisabledReason::ClearedByOneWay);
                         let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
                         shared
                             .stream
@@ -534,6 +566,8 @@ pub(crate) struct CloseTask {
 
 impl TaskBody for CloseTask {
     fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
+        // Steps live only while the collection is open (engine/undo M1, M6).
+        env.shared.undo.reset(DisabledReason::None);
         let result = match env.collection.take() {
             Some(collection) => collection.close().map(|_| ()).map_err(EngineError::from),
             None => Ok(()),

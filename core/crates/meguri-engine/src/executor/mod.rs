@@ -26,6 +26,7 @@ use crate::changes::stream::{ChangeStream, Seq};
 use crate::error::EngineError;
 use crate::lifecycle::Generation;
 use crate::ports::ChangeObserver;
+use crate::undo::UndoManager;
 use exclusive::{Admission, Decision, Privilege};
 use op::{OpContext, OpResult, OpSpec, Pending, WriteDelay};
 use priority::Queues;
@@ -52,6 +53,9 @@ pub(crate) struct ExecShared {
     pub(crate) observers: Vec<Arc<dyn ChangeObserver>>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) path: PathBuf,
+    /// The undo history (`engine/undo`), changed on the writer after each
+    /// commit.
+    pub(crate) undo: UndoManager,
 }
 
 struct QueueState {
@@ -97,6 +101,7 @@ impl ExecShared {
             observers,
             clock,
             path: path.to_path_buf(),
+            undo: UndoManager::default(),
         }
     }
 
@@ -306,6 +311,16 @@ impl ExecShared {
                 message: format!(
                     "op {} may not declare a long write: it is not in the op catalog (engine/op-model O9)",
                     spec.def.name()
+                ),
+            }));
+            return Pending { rx };
+        }
+        if spec.undo.skip && spec.source != meguri_model::changes::OpSource::UserNonUndoable {
+            let _ = reply.send(Err(EngineError::InvalidArgument {
+                message: format!(
+                    "op {} of source {} may not skip undo: only UserNonUndoable ops may (engine/undo M2)",
+                    spec.def.name(),
+                    spec.source
                 ),
             }));
             return Pending { rx };
