@@ -156,6 +156,30 @@ class Harness(unittest.TestCase):
         )
         self.assertIn("| smoke | card | 1 |", md.read_text())
 
+    def apple(self, cmd, pin, *extra):
+        pin_path = Path(self.tmp.name) / "oracle.json"
+        pin_path.write_text(json.dumps(pin))
+        overlays = Path(self.tmp.name) / "goldens-apple"
+        return self.common(cmd, "--overlays", str(overlays), "--pin", str(pin_path), *extra), overlays
+
+    def test_the_apple_commands_need_fresh_goldens_and_native_workers(self):
+        rc, report = self.common("record", "--filter", "smoke")
+        self.assertEqual(rc, 0)
+        lock = report["oracle"]["lock_sha256"]
+        pin = {"anki_version": "26.9.3", "lock_sha256": lock, "macos_lock_sha256": "b" * 64}
+        for cmd in ("record-apple", "compare-apple"):
+            (rc, report), overlays = self.apple(cmd, pin)
+            by_name = {s["scenario"]: s for s in report["scenarios"]}
+            with self.subTest(cmd=cmd):
+                self.assertEqual(rc, 1)
+                self.assertEqual(by_name["other/utc"]["status"], "missing_golden")
+                # A container worker is not the macOS native oracle (F6.2).
+                self.assertEqual(by_name["smoke/fsrs"]["status"], "error")
+                self.assertEqual(by_name["smoke/fsrs"]["error"]["kind"], "oracle_mismatch")
+                self.assertFalse(overlays.exists())
+        (rc, report), _ = self.apple("record-apple", dict(pin, lock_sha256="0" * 64), "--filter", "smoke")
+        self.assertEqual((rc, report["scenarios"][0]["status"]), (1, "stale_golden"))
+
 
 if __name__ == "__main__":
     unittest.main()
