@@ -211,6 +211,69 @@ fn assert_field_lengths(what: &str, measured: &Profile, p: &Profile) -> usize {
     per_field.len()
 }
 
+/// References per note of a whole profile (F3.2's mean): every field's
+/// `media_refs`, images and sounds, of every note type, over
+/// `totals.notes`.
+fn references_per_note(x: &Profile) -> f64 {
+    let refs: u64 = x
+        .notetypes
+        .iter()
+        .flat_map(|nt| &nt.media_refs)
+        .map(|[images, sounds]| images + sounds)
+        .sum();
+    refs as f64 / x.totals.notes as f64
+}
+
+/// F3.2: generated references per note follow the profile, pooled over
+/// every note type (the profile's shares weighted by its notes, against
+/// the generated counts summed), per note type with at least 2,000
+/// generated notes, and as a mean. Returns how many note types were
+/// compared one by one.
+fn assert_references_per_note(what: &str, measured: &Profile, p: &Profile) -> usize {
+    assert_eq!(measured.notetypes.len(), p.notetypes.len(), "{what}: note types");
+    let buckets = p.notetypes[0].refs_per_note.counts.len();
+    let (mut pooled_measured, mut pooled_expected) = (vec![0.0; buckets], vec![0.0; buckets]);
+    let mut per_type = Vec::new();
+    for (i, (generated, shape)) in measured.notetypes.iter().zip(&p.notetypes).enumerate() {
+        assert_eq!(generated.refs_per_note.edges, shape.refs_per_note.edges);
+        for (slot, &c) in pooled_measured.iter_mut().zip(&generated.refs_per_note.counts) {
+            *slot += c as f64;
+        }
+        for (slot, share) in pooled_expected.iter_mut().zip(shape.refs_per_note.shares()) {
+            *slot += share * shape.notes as f64;
+        }
+        if generated.notes >= 2000 {
+            let d = generated.refs_per_note.distance(&shape.refs_per_note).unwrap();
+            per_type.push((i, d));
+        }
+    }
+    let pooled = variation_distance(&pooled_measured, &pooled_expected);
+    let (got, want) = (references_per_note(measured), references_per_note(p));
+    let relative = (got - want).abs() / want;
+    let worst = per_type.iter().fold((0, 0.0f64), |w, &d| if d.1 > w.1 { d } else { w });
+    eprintln!(
+        "{what}: references per note pooled {pooled:.4}, mean {got:.4} vs {want:.4} ({relative:.4}); {} note types compared, the farthest note type {} at {:.4}",
+        per_type.len(),
+        worst.0,
+        worst.1
+    );
+    assert!(
+        pooled <= 0.05,
+        "{what}: pooled references per note at distance {pooled:.4} > 0.05"
+    );
+    assert!(
+        relative <= 0.05,
+        "{what}: references per note {got:.4} vs the profile's {want:.4}, {relative:.4} > 5%"
+    );
+    for (i, d) in &per_type {
+        assert!(
+            *d <= 0.05,
+            "{what}: note type {i} references per note at distance {d:.4} > 0.05"
+        );
+    }
+    per_type.len()
+}
+
 /// A media reference in a field: `<img src="name">` or `[sound:name]`.
 #[derive(Debug)]
 struct FieldRef {
@@ -820,11 +883,23 @@ fn ten_thousand_cards_are_reproducible_and_follow_the_profile() {
     // compared field by field.
     assert!(assert_field_lengths("10k", &ma, &p) > 0, "a field compared one by one");
     assert_field_lengths("10k, seed 2", &mc, &p);
-    // F4.8: the stored fields' structure.
+    // F3.2 at 10k, both seeds.
     assert!(
-        check_note_fields(&collection(dir_a.path()), &p) > 0,
-        "references written"
+        assert_references_per_note("10k", &ma, &p) > 0,
+        "a note type compared one by one"
     );
+    assert_references_per_note("10k, seed 2", &mc, &p);
+    // F4.8: the stored fields' structure. The references this test's own
+    // parser finds are the ones `measure` counted.
+    let seen = check_note_fields(&collection(dir_a.path()), &p);
+    assert!(seen > 0, "references written");
+    let counted: u64 = ma
+        .notetypes
+        .iter()
+        .flat_map(|nt| &nt.media_refs)
+        .map(|r| r[0] + r[1])
+        .sum();
+    assert_eq!(seen as u64, counted, "references parsed and measured");
 
     // FSRS and the load balancer on, sibling burying on in every preset.
     let collection = open(&collection(dir_a.path()));
@@ -871,8 +946,12 @@ fn hundred_thousand_cards_follow_the_temporal_shape_and_keep_ids_historical() {
         m.revlog.first_review_gap_secs.distance(&p.revlog.first_review_gap_secs),
         0.05,
     );
-    // F3.1 at 100k.
+    // F3.1 and F3.2 at 100k.
     assert!(assert_field_lengths("100k", &m, &p) > 0, "fields compared one by one");
+    assert!(
+        assert_references_per_note("100k", &m, &p) > 0,
+        "note types compared one by one"
+    );
 
     let path = collection(dir.path());
     let first_reviews = reviews_by_card(&path);
@@ -1524,7 +1603,7 @@ fn one_million_cards_within_budget() {
 /// markup counts inside the drawn length; words fill the rest.
 #[test]
 fn fields_follow_the_f4_8_examples() {
-    use generate::notes::{FieldText, answer_bytes, cloze_deletions, note_media};
+    use generate::notes::{FieldText, answer_bytes, cloze_deletions, note_media, reference_threshold};
     let mut rng = generate::rng::Rng::stream(5, generate::rng::Stream::Note, 7978);
     let rng = &mut rng;
     let image = note_media(5, 7978, 0, media::MediaKind::Image, 1000).reference();
@@ -1557,7 +1636,19 @@ fn fields_follow_the_f4_8_examples() {
     field.push_reference(image.clone());
     assert_eq!(field.finish(rng), image);
 
-    // 20: the reference does not fit and is not written: 20 bytes of words.
+    // The thresholds are the longest reference 0 can be: the largest note
+    // index is 999,998 (`f423e`), positions staying below 1,000,000.
+    let longest_image = note_media(5, 999_998, 0, media::MediaKind::Image, 1000).reference();
+    let longest_sound = note_media(5, 999_998, 0, media::MediaKind::Audio, 1000).reference();
+    assert_eq!(longest_image, "<img src=\"mgf423e-0.png\">");
+    assert_eq!(longest_sound, "[sound:mgf423e-0.mp3]");
+    assert_eq!((longest_image.len(), longest_sound.len()), (25, 21));
+    assert_eq!(reference_threshold(media::MediaKind::Image), 25);
+    assert_eq!(reference_threshold(media::MediaKind::Audio), 21);
+
+    // 20: below the image threshold, so no reference is drawn (it would
+    // not fit either): 20 bytes of words.
+    assert!(20 < reference_threshold(media::MediaKind::Image));
     let field = FieldText::new(20);
     assert!(!field.fits(&image));
     let text = field.finish(rng);
@@ -1567,9 +1658,18 @@ fn fields_follow_the_f4_8_examples() {
     let mut field = FieldText::new(45);
     field.push_reference(image.clone());
     assert!(field.fits(&sound));
+    // 44: the sound does not fit and is not written: 19 bytes of words, a
+    // space, the image.
     let mut field = FieldText::new(44);
     field.push_reference(image.clone());
     assert!(!field.fits(&sound));
+    let text = field.finish(rng);
+    assert_eq!(text.len(), 44);
+    let words = text.strip_suffix(&format!(" {image}")).unwrap();
+    assert!(
+        words.len() == 19 && is_words(words) && !words.starts_with(' '),
+        "{text:?}"
+    );
 
     // A cloze first field, N = 2, answers drawn 5 and 8 bytes, at 60:
     // 13 + 1 + 16 bytes of deletions, a space, 29 bytes of words.
@@ -1621,6 +1721,54 @@ fn fields_follow_the_f4_8_examples() {
     // + 11 + 9 spaces = 110 bytes.
     assert_eq!(answer_bytes(vec![2; 10], 110), [2; 10]);
     assert_eq!(answer_bytes(vec![2; 10], 109), [1; 10]);
+}
+
+/// F4.8's worked example of a field's reference rate: 50 lengths in
+/// `[16, 32)`, 50 in `[32, 64)`, `media_refs` `[30, 10]`, 100 notes. The
+/// values are the spec's, worked out by hand.
+#[test]
+fn the_reference_rate_follows_the_f4_8_example() {
+    use generate::notes::{length_share, reference_rate};
+    let mut lengths = Histogram::log2(24);
+    lengths.add_n(16, 50);
+    lengths.add_n(32, 50);
+    let close = |what: &str, got: f64, want: f64| {
+        assert!((got - want).abs() < 1e-12, "{what}: {got} vs {want}");
+    };
+    close("s(25)", length_share(&lengths, 25), 0.71875);
+    close("s(21)", length_share(&lengths, 21), 0.84375);
+    // Bucket edges: all of `[32, 64)` is at 32 or more, none of `[16, 32)`.
+    close("s(32)", length_share(&lengths, 32), 0.5);
+    close("s(16)", length_share(&lengths, 16), 1.0);
+    close("s(64)", length_share(&lengths, 64), 0.0);
+
+    let mut shape = profile::NotetypeShape {
+        kind: "normal".to_owned(),
+        stock_kind: 0,
+        fields: 2,
+        templates: 1,
+        notes: 100,
+        cards: 100,
+        css_bytes: 0,
+        template_bytes: vec![[0, 0]],
+        script_bytes: 0,
+        cards_per_note: Histogram::linear(1, 64, 1),
+        field_bytes: vec![lengths.clone(), lengths.clone()],
+        media_refs: vec![[0, 0], [30, 10]],
+        refs_per_note: Histogram::linear(0, 64, 1),
+    };
+    // q = (30 × 0.71875 + 10 × 0.84375) / 40 = 0.75; r = 40 / 75.
+    close("r", reference_rate(&shape, 1), 40.0 / 75.0);
+    close("a field without references", reference_rate(&shape, 0), 0.0);
+    // q = 0: every length is below both thresholds.
+    let mut short = Histogram::log2(24);
+    short.add_n(10, 100);
+    shape.field_bytes[1] = short;
+    close("q = 0", reference_rate(&shape, 1), 0.0);
+    // A shape without notes.
+    shape.field_bytes[1] = lengths;
+    shape.notes = 0;
+    close("no notes", reference_rate(&shape, 1), 0.0);
 }
 
 #[test]
@@ -2060,7 +2208,7 @@ fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u
 fn collection_rows_are_those_of_a_new_collection() {
     let p = shape();
     let (dir, manifest) = run(&Request::new(p.clone(), 1500, 31));
-    assert_eq!(manifest.generator_version, 3, "F10.4");
+    assert_eq!(manifest.generator_version, 4, "F10.4");
     assert_eq!(manifest.utc_offset_secs, p.utc_offset_secs);
     check_collection_rows(
         &collection(dir.path()),

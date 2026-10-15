@@ -354,21 +354,63 @@ impl FieldText {
     }
 }
 
-/// References per note a field takes when its drawn length is not 0
-/// (F4.8): the profile's references in that field over its notes with a
-/// value of 1 byte or more. 0 for a field without references.
+/// The drawn length a field needs before it takes a reference whose first
+/// is of `kind` (F4.8): the longest reference 0 can be, with a 5-digit hex
+/// note index (positions stay below 1,000,000, F6.6).
+pub fn reference_threshold(kind: MediaKind) -> usize {
+    match kind {
+        MediaKind::Image => 25,
+        MediaKind::Audio => 21,
+    }
+}
+
+/// `s(m)` of F4.8: the share of a field's drawn lengths at `min` bytes or
+/// more, each bucket counting the fraction of its integers (drawn
+/// uniformly, F2.2) that are at least `min`.
+pub fn length_share(lengths: &super::Histogram, min: i64) -> f64 {
+    let total = lengths.total();
+    if total == 0 {
+        return 0.0;
+    }
+    let reaching: f64 = lengths
+        .counts
+        .iter()
+        .zip(lengths.edges.windows(2))
+        .map(|(&count, edge)| {
+            let (lo, hi) = (edge[0], edge[1]);
+            let fraction = if lo >= min {
+                1.0
+            } else if hi <= min {
+                0.0
+            } else {
+                (hi - min) as f64 / (hi - lo) as f64
+            };
+            count as f64 * fraction
+        })
+        .sum();
+    reaching / total as f64
+}
+
+/// References per note a field takes when its drawn length reaches the
+/// threshold of its first reference's kind (F4.8): `r = (images + sounds)
+/// / (notes × q)`, `q` the share of drawn lengths reaching the threshold,
+/// each kind weighted by its references. 0 for a field without
+/// references, of a shape without notes, or whose `q` is 0.
 pub fn reference_rate(shape: &NotetypeShape, field: usize) -> f64 {
     let [images, sounds] = shape.media_refs.get(field).copied().unwrap_or([0, 0]);
     let Some(lengths) = shape.field_bytes.get(field) else {
         return 0.0;
     };
-    let total = lengths.total();
-    let non_empty = total - lengths.counts.first().copied().unwrap_or(0);
-    if images + sounds == 0 || shape.notes == 0 || non_empty == 0 {
+    if images + sounds == 0 || shape.notes == 0 {
         return 0.0;
     }
-    let share = non_empty as f64 / total as f64;
-    (images + sounds) as f64 / (shape.notes as f64 * share)
+    let reaching = |kind| length_share(lengths, reference_threshold(kind) as i64);
+    let q = (images as f64 * reaching(MediaKind::Image) + sounds as f64 * reaching(MediaKind::Audio))
+        / (images + sounds) as f64;
+    if q == 0.0 {
+        return 0.0;
+    }
+    (images + sounds) as f64 / (shape.notes as f64 * q)
 }
 
 /// Media file `n` of note `index` (F4.8): `mg<index in hex>-<n>.png` or
@@ -389,8 +431,9 @@ pub fn note_media(seed: u64, index: u64, n: u64, kind: MediaKind, bytes: u64) ->
 
 /// The field values of a note (F4.8): each field's whole stored length
 /// drawn from the note type's field histograms, cloze deletions in a cloze
-/// note type's first field, media references by field where they fit (or,
-/// in the `media_files` worst case, the exact count, always written), and
+/// note type's first field, media references by field in fields drawn long
+/// enough for them and where they fit (or, in the `media_files` worst
+/// case, the exact count, always written), and
 /// the worst cases' large fields and inline images.
 fn fields(
     ctx: &NoteContext<'_>,
@@ -464,18 +507,26 @@ fn fields(
                 text.push_reference(file.reference());
                 media.push(file);
             }
-        } else if len > 0 {
+        } else {
             let rate = reference_rate(shape, field);
-            if rate > 0.0 {
+            let [images, sounds] = refs_of(field);
+            let kind = |rng: &mut Rng| {
+                if rng.below(images + sounds) < images {
+                    MediaKind::Image
+                } else {
+                    MediaKind::Audio
+                }
+            };
+            // The first reference's kind decides whether the field is long
+            // enough to take references at all.
+            let first = (rate > 0.0).then(|| kind(rng));
+            if let Some(first) = first
+                && len >= reference_threshold(first)
+            {
                 let whole = rate.floor();
                 let draws = whole as u64 + u64::from(rng.chance(rate - whole));
-                let [images, sounds] = refs_of(field);
-                for _ in 0..draws {
-                    let kind = if rng.below(images + sounds) < images {
-                        MediaKind::Image
-                    } else {
-                        MediaKind::Audio
-                    };
+                for k in 0..draws {
+                    let kind = if k == 0 { first } else { kind(rng) };
                     // Named as the next written reference; one that does
                     // not fit is not written and has no file.
                     let mut file = note_media(ctx.seed, index, media.len() as u64, kind, 0);
