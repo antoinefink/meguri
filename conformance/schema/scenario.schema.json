@@ -373,6 +373,37 @@
                 }
               }
             },
+            "cloze": {
+              "description": "specs/conformance/cloze-ops.md Z1: pure cloze functions over a list of inputs; [text, card] pairs (card 1-65535), or strings for numbers, which shares a request with no other function.",
+              "type": "object",
+              "required": ["fns", "inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "fns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["numbers", "front", "back", "only_front", "only_back", "typing"] }
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      { "type": "string" },
+                      {
+                        "type": "array",
+                        "prefixItems": [{ "type": "string" }, { "type": "integer", "minimum": 1, "maximum": 65535 }],
+                        "minItems": 2,
+                        "maxItems": 2
+                      }
+                    ]
+                  }
+                }
+              },
+              "if": { "properties": { "fns": { "contains": { "const": "numbers" } } } },
+              "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "string" } } } },
+              "else": { "properties": { "inputs": { "items": { "type": "array" } } } }
+            },
             "text": {
               "description": "observations.md O4 text: pure text functions over a list of inputs; pairs for unicase_compare, which shares a request with no other function.",
               "type": "object",

@@ -1,0 +1,12 @@
+# Interface names the render specs use: template filter names, the
+# image-occlusion field prefix, and the element, class and attribute names
+# Anki writes into card HTML (note type CSS and card scripts depend on them).
+# render/cloze
+cloze
+cloze-only
+cloze-inactive
+cloze-highlight
+data-cloze
+data-ordinal
+image-occlusion
+span
