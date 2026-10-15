@@ -29,6 +29,10 @@ extension TestHooks {
 
         var body: some View {
             scrollingContent
+                // Read before the bar: the bar's content comes first in the
+                // accessibility children, and the Mac reads in that order
+                // (iOS VoiceOver reads by position).
+                .accessibilitySortPriority(1)
                 // The primary action stays in reach whatever the title's
                 // length, in a bar the content scrolls under: the system's
                 // scroll edge effect shows that the content goes on (a hard
@@ -49,6 +53,7 @@ extension TestHooks {
                     }
                 }
                 .background(.token(.backgroundPrimary))
+                .accessibilityElement(children: .contain)
         }
 
         private var scrollingContent: some View {
