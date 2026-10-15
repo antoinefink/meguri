@@ -487,6 +487,7 @@ pub fn generate_recipe(recipe: &Recipe, seed: u64, dir: &Path) -> Result<Manifes
         now_ms,
         utc_offset_secs: offset,
         profile_sha256: None,
+        worst_case_sha256: None,
         media: MediaMode::Files,
         counts,
         dump_sha256: String::new(),

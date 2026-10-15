@@ -97,6 +97,126 @@ fn generate_a_worst_case_and_a_recipe() {
     assert_eq!(recipe["manifest"]["counts"]["cards"], 47);
 }
 
+/// A worst case is reused only while its definition is unchanged: a stress
+/// value edited in its file makes it again.
+#[test]
+fn an_edited_worst_case_is_made_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("wide.json");
+    let write = |decks: u64| {
+        let case = serde_json::json!({
+            "name": "wide",
+            "description": "Many decks.",
+            "cards": 300,
+            "decks": decks,
+        });
+        std::fs::write(&file, case.to_string()).unwrap();
+    };
+    let out = dir.path().join("out");
+    let generate = || {
+        json(&cli(&[
+            "generate",
+            "worst-case",
+            path(&file),
+            "--out",
+            path(&out),
+            "--cache",
+        ]))
+    };
+    write(40);
+    let first = generate();
+    assert_eq!(first["cached"], false);
+    assert_eq!(first["manifest"]["name"], "wide");
+    assert_eq!(first["manifest"]["counts"]["decks"], 40);
+    assert_eq!(generate()["cached"], true, "an unchanged worst case is reused");
+    write(60);
+    let edited = generate();
+    assert_eq!(edited["cached"], false, "an edited worst case is made again");
+    assert_eq!(edited["manifest"]["counts"]["decks"], 60);
+}
+
+/// A run waits while another holds its directory's lock, and publishes
+/// nothing before it gets it.
+#[test]
+fn a_run_waits_for_its_directory_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("r");
+    let lock = meguri_testkit::generate::OutputLock::acquire(&out).unwrap();
+    let mut run = Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+        .args(["generate", "recipe", "review-ready", "--out", path(&out)])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // A recipe takes well under a second once the lock is free.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    assert!(run.try_wait().unwrap().is_none(), "the run waits for the lock");
+    assert!(!out.exists(), "nothing is published while the lock is held");
+    drop(lock);
+    let summary = json(&run.wait_with_output().unwrap());
+    assert_eq!(summary["manifest"]["kind"], "recipe");
+    assert!(out.join("manifest.json").is_file());
+}
+
+/// The entries next to `dir` that runs into it left (`.<name>.…`), its lock
+/// file aside.
+fn leftovers(dir: &Path) -> Vec<String> {
+    let prefix = format!(".{}.", dir.file_name().unwrap().to_string_lossy());
+    std::fs::read_dir(dir.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(&prefix) && !name.ends_with(".lock"))
+        .collect()
+}
+
+/// Runs into one directory at the same time, each asking for another
+/// collection: every run succeeds, and what is left is one run's whole
+/// output (its manifest describes the collection and media beside it).
+#[test]
+fn concurrent_runs_into_one_directory_leave_one_whole_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("shared");
+    for round in 0..3 {
+        let seed = round.to_string();
+        let runs: Vec<_> = ["1000", "1500", "2000", "2500"]
+            .iter()
+            .map(|size| {
+                Command::new(env!("CARGO_BIN_EXE_meguri-cli"))
+                    .args([
+                        "generate",
+                        size,
+                        "--seed",
+                        &seed,
+                        "--media",
+                        "files",
+                        "--out",
+                        path(&out),
+                        "--cache",
+                    ])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        for run in runs {
+            json(&run.wait_with_output().unwrap());
+        }
+        let manifest = meguri_testkit::generate::Manifest::load(&out).unwrap();
+        assert_eq!(
+            meguri_testkit::generate::dump::logical_sha256(&out.join("collection.anki2")).unwrap(),
+            manifest.dump_sha256,
+            "round {round}: the manifest describes the collection beside it"
+        );
+        assert_eq!(
+            std::fs::read_dir(out.join("collection.media")).unwrap().count() as u64,
+            manifest.counts.media_files,
+            "round {round}: the media beside it"
+        );
+        assert_eq!(leftovers(&out), Vec::<String>::new(), "round {round}");
+    }
+}
+
 #[test]
 fn profile_extract_writes_a_profile_from_a_copy() {
     let dir = tempfile::tempdir().unwrap();

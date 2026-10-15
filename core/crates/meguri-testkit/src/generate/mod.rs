@@ -202,6 +202,10 @@ pub struct Manifest {
     /// (F10.2): the oracle check picks its zone from it.
     pub utc_offset_secs: i32,
     pub profile_sha256: Option<String>,
+    /// [`WorstCase::sha256`] of a worst case's definition; `None` for
+    /// profiles and recipes. An output is reused only for the same
+    /// definition, so an edited stress value makes it again.
+    pub worst_case_sha256: Option<String>,
     pub media: MediaMode,
     pub counts: Counts,
     /// [`dump::logical_sha256`] of the collection.
@@ -240,6 +244,80 @@ pub(crate) fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(suffix);
     PathBuf::from(name)
+}
+
+/// The directory holding `dir` (`.` for a bare name) and `dir`'s own name.
+/// A run's lock, staging and trash directories sit there, named
+/// `.<name>.…`, so they share `dir`'s file system and a rename publishes.
+fn parent_and_name(dir: &Path) -> Result<(PathBuf, String), GenError> {
+    let name = dir
+        .file_name()
+        .ok_or_else(|| GenError::io(dir, "an output directory needs a name"))?
+        .to_string_lossy()
+        .into_owned();
+    let parent = match dir.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+    std::fs::create_dir_all(&parent).map_err(|e| GenError::io(&parent, e))?;
+    Ok((parent, name))
+}
+
+/// An exclusive lock on an output directory, held from a cache check to
+/// the end of the generation it decides on, so runs into one directory
+/// take turns. It is the file `.<name>.lock` next to the directory, which
+/// stays; the lock is released when this is dropped (or the process ends).
+#[derive(Debug)]
+pub struct OutputLock {
+    _file: std::fs::File,
+}
+
+impl OutputLock {
+    /// Waits until no other holder has `dir`'s lock, then takes it.
+    pub fn acquire(dir: &Path) -> Result<OutputLock, GenError> {
+        let (parent, name) = parent_and_name(dir)?;
+        let path = parent.join(format!(".{name}.lock"));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .map_err(|e| GenError::io(&path, e))?;
+        file.lock().map_err(|e| GenError::io(&path, e))?;
+        Ok(OutputLock { _file: file })
+    }
+}
+
+/// Replaces `dir` with the staged output in one rename. A `dir` already
+/// there is first moved into a trash directory beside it, put back if the
+/// rename fails, and deleted after it succeeds. Readers therefore find
+/// one run's whole output or, for that instant, none.
+fn publish(stage: tempfile::TempDir, dir: &Path) -> Result<(), GenError> {
+    let (parent, name) = parent_and_name(dir)?;
+    let staged = stage.keep();
+    let discard = |e: GenError| {
+        let _ = std::fs::remove_dir_all(&staged);
+        e
+    };
+    let trash = if std::fs::symlink_metadata(dir).is_ok() {
+        let trash = tempfile::Builder::new()
+            .prefix(&format!(".{name}.old-"))
+            .tempdir_in(&parent)
+            .map_err(|e| discard(GenError::io(&parent, e)))?;
+        std::fs::rename(dir, trash.path().join(&name)).map_err(|e| discard(GenError::io(dir, e)))?;
+        Some(trash)
+    } else {
+        None
+    };
+    if let Err(e) = std::fs::rename(&staged, dir) {
+        if let Some(trash) = &trash {
+            let _ = std::fs::rename(trash.path().join(&name), dir);
+        }
+        return Err(discard(GenError::io(dir, e)));
+    }
+    // Dropping the trash deletes the previous output.
+    drop(trash);
+    Ok(())
 }
 
 /// The day structure of a generated collection: `col.crt` at the rollover
@@ -330,10 +408,15 @@ pub(crate) struct Output<'a> {
     /// Where the collection is built: the system's temporary directory.
     /// Random-key inserts into a file on a shared mount (Docker Desktop's
     /// bind mounts) cost a round trip per page, which made 1M cards take
-    /// longer than their budget; the finished file is moved into `dir`.
+    /// longer than their budget; the finished file is moved into `stage`.
     work: tempfile::TempDir,
+    /// The output directory being assembled: `.<name>.staging-…` next to
+    /// `dir`, renamed to `dir` once whole ([`Output::finish`]). Until then
+    /// `dir` keeps the previous output; a failed run deletes the stage.
+    stage: tempfile::TempDir,
     pub clock: FixedClock,
     pub dir: &'a Path,
+    /// `collection.media` in the stage.
     pub media_dir: PathBuf,
     pub media: MediaMode,
     pub counts: Counts,
@@ -370,9 +453,10 @@ impl Ord for UnicaseTag {
 }
 
 impl<'a> Output<'a> {
-    /// Creates the collection with its `col` row and config rows; it is
-    /// placed at `dir/collection.anki2` by [`Output::finish`]. `collapsed`
-    /// is the tag rows' `collapsed` (F6.7).
+    /// Creates the collection with its `col` row and config rows; with its
+    /// media and manifest it replaces `dir` in [`Output::finish`], and `dir`
+    /// is left as it was until then. `collapsed` is the tag rows'
+    /// `collapsed` (F6.7).
     pub fn create(
         dir: &'a Path,
         timeline: &Timeline,
@@ -380,27 +464,17 @@ impl<'a> Output<'a> {
         media: MediaMode,
         collapsed: bool,
     ) -> Result<Output<'a>, GenError> {
-        std::fs::create_dir_all(dir).map_err(|e| GenError::io(dir, e))?;
-        let path = dir.join("collection.anki2");
+        let (parent, name) = parent_and_name(dir)?;
+        let stage = tempfile::Builder::new()
+            .prefix(&format!(".{name}.staging-"))
+            .tempdir_in(&parent)
+            .map_err(|e| GenError::io(&parent, e))?;
         let work = tempfile::Builder::new()
             .prefix("meguri-generate-")
             .tempdir()
             .map_err(|e| GenError::io(&std::env::temp_dir(), e))?;
-        for stale in [
-            path.clone(),
-            sibling(&path, "-wal"),
-            sibling(&path, "-shm"),
-            dir.join("manifest.json"),
-        ] {
-            if stale.exists() {
-                std::fs::remove_file(&stale).map_err(|e| GenError::io(&stale, e))?;
-            }
-        }
-        let media_dir = dir.join("collection.media");
-        if media_dir.exists() {
-            std::fs::remove_dir_all(&media_dir).map_err(|e| GenError::io(&media_dir, e))?;
-        }
-        std::fs::create_dir_all(&media_dir).map_err(|e| GenError::io(&media_dir, e))?;
+        let media_dir = stage.path().join("collection.media");
+        std::fs::create_dir(&media_dir).map_err(|e| GenError::io(&media_dir, e))?;
         let clock = FixedClock::new(
             timeline.now_ms,
             UtcOffset::from_seconds(timeline.offset_secs as i32).unwrap_or(UtcOffset::UTC),
@@ -422,6 +496,7 @@ impl<'a> Output<'a> {
         Ok(Output {
             builder,
             work,
+            stage,
             clock,
             dir,
             media_dir,
@@ -495,8 +570,8 @@ impl<'a> Output<'a> {
         })
     }
 
-    /// Writes the tag rows, the closing config rows and the manifest, and
-    /// closes the collection.
+    /// Writes the tag rows, the closing config rows and the manifest,
+    /// closes the collection and publishes the whole output at `dir`.
     pub fn finish(
         mut self,
         closing_config: &[ConfigEntry],
@@ -524,19 +599,20 @@ impl<'a> Output<'a> {
             }
             Ok(())
         })?;
-        let dir = self.dir;
         let counts = self.counts.clone();
         let built = self.builder.finish().map_err(GenError::storage)?;
         let mut manifest = manifest(counts);
         manifest.dump_sha256 = dump::logical_sha256(&built)?;
+        let staged = self.stage.path().join("collection.anki2");
         for suffix in ["", "-wal"] {
             let from = sibling(&built, suffix);
             if from.exists() {
-                move_file(&from, &sibling(&dir.join("collection.anki2"), suffix))?;
+                move_file(&from, &sibling(&staged, suffix))?;
             }
         }
         drop(self.work);
-        manifest.write(dir)?;
+        manifest.write(self.stage.path())?;
+        publish(self.stage, self.dir)?;
         Ok(manifest)
     }
 }
@@ -599,7 +675,10 @@ pub(crate) fn closing_config(timeline: &Timeline, first_notetype: i64, notes: u6
     ]
 }
 
-/// Generates a collection into `dir` (replacing what is there).
+/// Generates a collection into `dir`, replacing what is there. The output
+/// is assembled beside `dir` and published whole by a rename, so a failed
+/// run leaves `dir` as it was. Runs that may overlap on one `dir` hold its
+/// [`OutputLock`] from their cache check to the end.
 pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
     request.profile.check()?;
     if request.cards == 0 {
@@ -684,6 +763,7 @@ pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
         now_ms: request.now_ms,
         utc_offset_secs: profile.utc_offset_secs,
         profile_sha256: Some(profile_sha256),
+        worst_case_sha256: worst.map(WorstCase::sha256),
         media,
         counts,
         dump_sha256: String::new(),

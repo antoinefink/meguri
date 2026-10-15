@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! meguri-cli generate <size> --out DIR [options]           10k, 100k, 150k, 500k, 1m or a card count
-//! meguri-cli generate worst-case <name> --out DIR [options]
+//! meguri-cli generate worst-case <name|path.json> --out DIR [options]
 //! meguri-cli generate recipe <name|path.yaml> --out DIR [--seed N] [--cache]
 //!
 //! options: --seed N (default 1)  --profile PATH (default the user shape)
@@ -12,7 +12,12 @@
 //!
 //! A recipe is generated again every time, `--cache` or not: its manifest
 //! does not identify the recipe's text, so an edited recipe would match an
-//! old directory, and a recipe takes well under a second.
+//! old directory, and a recipe takes well under a second. A worst case's
+//! manifest does identify its definition (`worst_case_sha256`).
+//!
+//! A run holds DIR's lock (`.<name>.lock` beside it) from the cache check
+//! to the end, so runs into one directory take turns, and the output is
+//! published whole (`generate::OutputLock`, `generate::generate`).
 //!
 //! Prints `{dir, cached, elapsed_ms, peak_rss_kb, manifest}` as JSON, plus
 //! `large_field_notes` for a worst case with large fields: the ids of the
@@ -23,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use meguri_testkit::generate::recipe::{Recipe, generate_recipe};
 use meguri_testkit::generate::{
-    self, DEFAULT_NOW_MS, GENERATOR_VERSION, Manifest, MediaMode, Profile, Request, WorstCase, parse_size,
+    self, DEFAULT_NOW_MS, GENERATOR_VERSION, Manifest, MediaMode, OutputLock, Profile, Request, WorstCase, parse_size,
 };
 use meguri_testkit::wallclock::Stopwatch;
 use serde_json::json;
@@ -48,8 +53,8 @@ struct Options {
 fn usage(message: &str) -> i32 {
     eprintln!("meguri-cli generate: {message}");
     eprintln!(
-        "usage: meguri-cli generate <size>|worst-case <name>|recipe <name> --out DIR [--seed N] [--profile PATH] \
-         [--cards N] [--now RFC3339] [--media references|files] [--cache]"
+        "usage: meguri-cli generate <size>|worst-case <name|path.json>|recipe <name|path.yaml> --out DIR \
+         [--seed N] [--profile PATH] [--cards N] [--now RFC3339] [--media references|files] [--cache]"
     );
     2
 }
@@ -122,9 +127,21 @@ fn cached(dir: &Path, wanted: &Manifest) -> Option<Manifest> {
         && have.now_ms == wanted.now_ms
         && have.utc_offset_secs == wanted.utc_offset_secs
         && have.profile_sha256 == wanted.profile_sha256
+        && have.worst_case_sha256 == wanted.worst_case_sha256
         && have.media == wanted.media
         && dir.join("collection.anki2").is_file();
     same.then_some(have)
+}
+
+/// A committed worst case by name, or a worst-case file (`.json`).
+fn worst_case(name: &str) -> Result<WorstCase, String> {
+    let path = Path::new(name);
+    let loaded = if path.extension().is_some_and(|e| e == "json") {
+        WorstCase::load(path)
+    } else {
+        WorstCase::named(name)
+    };
+    loaded.map_err(|e| format!("worst case {name}: {e}"))
 }
 
 fn recipe(name: &str) -> Result<Recipe, String> {
@@ -167,12 +184,13 @@ pub fn main(args: &[String]) -> i32 {
             };
             let (worst, cards, kind, name) = match other {
                 What::WorstCase(name) => {
-                    let case = match WorstCase::named(name) {
+                    let case = match worst_case(name) {
                         Ok(case) => case,
-                        Err(e) => return usage(&format!("worst case {name}: {e}")),
+                        Err(message) => return usage(&message),
                     };
                     let cards = options.cards.unwrap_or(case.cards);
-                    (Some(case), cards, "worst-case", name.clone())
+                    let name = case.name.clone();
+                    (Some(case), cards, "worst-case", name)
                 }
                 What::Size(cards) => (None, *cards, "profile", cards.to_string()),
                 What::Recipe(_) => unreachable!("handled above"),
@@ -194,6 +212,7 @@ pub fn main(args: &[String]) -> i32 {
                 now_ms: options.now_ms,
                 utc_offset_secs: request.profile.utc_offset_secs,
                 profile_sha256: Some(request.profile.sha256()),
+                worst_case_sha256: request.worst_case.as_ref().map(WorstCase::sha256),
                 media,
                 counts: Default::default(),
                 dump_sha256: String::new(),
@@ -207,6 +226,15 @@ pub fn main(args: &[String]) -> i32 {
         .and_then(|r| r.worst_case.as_ref())
         .and_then(|w| w.large_fields.as_ref())
         .map(|large| large.bytes);
+    // Held until this returns: the cache check, the generation and the
+    // report's read of the output see one run's whole output.
+    let _lock = match OutputLock::acquire(&options.out) {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("meguri-cli generate: locking the output: {e}");
+            return 1;
+        }
+    };
     if options.cache
         && let Some(have) = wanted.as_ref().and_then(|wanted| cached(&options.out, wanted))
     {

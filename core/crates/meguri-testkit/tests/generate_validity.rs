@@ -1162,6 +1162,55 @@ fn recipes_are_reproducible() {
     assert_eq!(ma, Manifest::load(a.path()).unwrap());
 }
 
+/// The entries next to `dir` that a run into `dir` made (`.<name>.…`),
+/// its lock file aside.
+fn run_leftovers(dir: &Path) -> Vec<String> {
+    let prefix = format!(".{}.", dir.file_name().unwrap().to_string_lossy());
+    std::fs::read_dir(dir.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(&prefix) && !name.ends_with(".lock"))
+        .collect()
+}
+
+/// A run that fails part-way leaves the directory's previous output whole:
+/// the collection, its media and the manifest of one run, never a mix.
+#[test]
+fn a_failed_generation_leaves_the_previous_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = generate_recipe(&Recipe::named("review-ready").unwrap(), 1, dir.path()).unwrap();
+    let media: Vec<_> = std::fs::read_dir(dir.path().join("collection.media"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert!(!media.is_empty());
+    // A deck listed twice is found once the collection is being written.
+    let deck = |name: &str| DeckSpec {
+        name: name.to_owned(),
+        new: 1,
+        ..DeckSpec::default()
+    };
+    let bad = Recipe {
+        recipe: "twice".to_owned(),
+        description: "fails part-way".to_owned(),
+        now: "2030-01-15T10:00:00Z".to_owned(),
+        rollover_hour: None,
+        presets: Vec::new(),
+        decks: vec![deck("A"), deck("A")],
+    };
+    assert!(generate_recipe(&bad, 1, dir.path()).is_err());
+    assert_eq!(Manifest::load(dir.path()).unwrap(), good);
+    assert_eq!(
+        generate::dump::logical_sha256(&collection(dir.path())).unwrap(),
+        good.dump_sha256
+    );
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("collection.media")).unwrap().count(),
+        media.len()
+    );
+    assert_eq!(run_leftovers(dir.path()), Vec::<String>::new());
+}
+
 #[test]
 fn media_files_mode_writes_every_reference() {
     let mut request = Request::new(shape(), 1500, 4);

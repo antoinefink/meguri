@@ -74,6 +74,14 @@ impl WorstCase {
         serde_json::from_str(&text).map_err(|e| GenError::io(path, e))
     }
 
+    /// The SHA-256 of the definition in the goldens' text layout, as the
+    /// manifest records it: the same for any spelling of the same JSON.
+    pub fn sha256(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let text = crate::observe::golden_text(&serde_json::to_value(self).expect("a worst case serializes"));
+        super::hex(&Sha256::digest(text.as_bytes()))
+    }
+
     /// The committed worst case `name` (`profiles/worst-cases/<name>.json`).
     pub fn named(name: &str) -> Result<WorstCase, GenError> {
         WorstCase::load(&dir().join(format!("{name}.json")))
