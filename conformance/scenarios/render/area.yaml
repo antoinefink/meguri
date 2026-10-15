@@ -1,7 +1,10 @@
 # specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
-# the testkit's `template` adapter (meguri-template, U60). Pending until notes,
-# note types and cards exist in Meguri's executor (U27, U29):
-# special-fields/cards (template card cases) and template/legacy-req.
+# the testkit's `template` adapter (meguri-template, U60). Pending, and added
+# here by the units that build what they need (plan amendment A2,
+# docs/process/review-log/U60.md): special-fields/cards by U62 (template card
+# cases on stored notes and cards) and template/legacy-req by U36
+# (legacy_update and legacy_json). Until then meguri-template's
+# tests/golden_pairs.rs checks the engine against both goldens.
 area: render
 active:
   - "corpus/*"

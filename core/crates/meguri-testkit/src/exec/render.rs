@@ -1,9 +1,9 @@
 //! The render area's observation kinds. `template` (render-ops.md Q1)
 //! evaluates meguri-template on given template texts for a note not yet
 //! added; it never reads or changes the scenario's collection. Card cases
-//! need notes and cards in Meguri's collection (U27, U29) and are refused
-//! until then; so are cloze note types and the cloze filters, whose
-//! behavior is U61's.
+//! need notes and cards in Meguri's collection (U27, U29); U62 adds them, and
+//! they are refused until then. So are cloze note types and the cloze
+//! filters, whose behavior is U61's.
 
 use meguri_template::{CardSpecials, FieldMap, NodeKind, ParsedTemplate, Side, TemplateError};
 use serde_json::{Value, json};
