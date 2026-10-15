@@ -432,7 +432,8 @@ def deterministic_result(checks, issue):
 def a11y_evidence(run_dirs):
     """{platform: {screen: {run, status, commit, input, states}}} from tools/mg
     a11y runs; each run audits one platform (details.platform), in the app
-    built from the sources its details.input names."""
+    built from the sources its details.input names. A non-passing job fails
+    every screen, including checks not reflected in screens.json."""
     found = {}
     for run_dir in run_dirs or []:
         result = read_json(os.path.join(run_dir, "result.json"))
@@ -443,8 +444,11 @@ def a11y_evidence(run_dirs):
             raise PacketError("the a11y run %s does not say which platform it audited (details.platform); run tools/mg a11y again" % run_dir)
         run = result.get("run_id") or os.path.basename(os.path.normpath(run_dir))
         for screen in read_json(os.path.join(run_dir, "screens.json"), []) or []:
+            status = screen.get("status") or "not-audited"
+            if result.get("status") != "pass":
+                status = "fail"
             found.setdefault(platform, {})[screen["screen"]] = {
-                "run": run, "status": screen.get("status") or "not-audited", "commit": (result.get("commit") or {}).get("sha"),
+                "run": run, "status": status, "commit": (result.get("commit") or {}).get("sha"),
                 "input": (result.get("details") or {}).get("input"), "states": screen.get("states")}
         # A run that did not audit a screen gives it no evidence (a later
         # run of the same platform replaces an earlier one).

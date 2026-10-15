@@ -64,14 +64,15 @@ class CriticTest(unittest.TestCase):
             json.dump({"screens": {s: {"platforms": p, "cells": (cells or {}).get(s) or {q: rendered(s, q) for q in p}}
                                    for s, p in platforms.items()}}, handle)
 
-    def a11y_run(self, name, platform, status="pass", screen=SCREEN, source="src1"):
+    def a11y_run(self, name, platform, status="pass", screen=SCREEN, source="src1", screen_status=None):
         run = os.path.join(self.dir, name)
         os.makedirs(run)
         with open(os.path.join(run, "result.json"), "w") as handle:
             json.dump({"job": "a11y", "run_id": name, "status": status, "commit": {"sha": "abc"},
                        "details": {"platform": platform, "input": source}}, handle)
         with open(os.path.join(run, "screens.json"), "w") as handle:
-            json.dump([{"screen": screen, "platform": platform, "status": status}], handle)
+            json.dump([{"screen": screen, "platform": platform,
+                        "status": status if screen_status is None else screen_status}], handle)
         return run
 
     def png(self, name, size=(780, 1688)):
@@ -275,6 +276,13 @@ class CriticTest(unittest.TestCase):
         self.assertIn("src1", str(caught.exception))
         self.assertEqual(len(self.build(a11y=[self.a11y_run("a11y-new", "iphone")])["images"]), 2)
 
+    def test_a_nonpassing_a11y_job_cannot_supply_passing_screen_evidence(self):
+        for status in ("fail", "error", "warn", None):
+            with self.subTest(status=status):
+                run = self.a11y_run("a11y-%s" % status, "mac", status=status, screen_status="pass")
+                evidence = critic.a11y_evidence([run])["mac"][SCREEN]
+                self.assertEqual(evidence["status"], "fail")
+
     def test_the_packet_records_each_platforms_snapshot_evidence_and_issues_name_their_platform(self):
         manifest = self.build()
         [screen] = manifest["screens"]
@@ -325,8 +333,8 @@ class CriticTest(unittest.TestCase):
         mac = self.a11y_run("a11y-mac", "mac", status="fail")
         self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", mac, "--ledger", ledger]), 0)
         self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["evidence"]["iphone"]["a11y"]["run"], "a11y-1")
-        # A failed a11y run demotes it.
-        failed = self.a11y_run("a11y-2", "iphone", status="fail")
+        # A failed a11y job demotes it even when its screen entry passed.
+        failed = self.a11y_run("a11y-2", "iphone", status="fail", screen_status="pass")
         self.assertEqual(critic.main(["apply", "--report", report_path, "--packet", self.packet, "--a11y", failed, "--ledger", ledger]), 0)
         self.assertEqual(screen_status.load(ledger)["screens"][SCREEN]["status"], "built")
         # An a11y run of other sources is refused and records nothing.
