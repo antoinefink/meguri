@@ -21,12 +21,7 @@ use super::model::{
 enum Arg {
     Str,
     Int,
-    Array,
-    Strings,
-    NoteRef,
-    NoteRefs,
     CardRefs,
-    Fields,
     OneOf(&'static [&'static str]),
 }
 
@@ -35,16 +30,7 @@ type ArgSpec = (&'static str, bool, Arg);
 
 /// (op, its arguments): the schema's draft-op arguments. Other keys are
 /// allowed: the owning area fixes the full shape (D7.2).
-const DRAFT_ARGS: [(&str, &[ArgSpec]); 13] = [
-    (
-        "edit_note",
-        &[
-            ("note", true, Arg::NoteRef),
-            ("fields", false, Arg::Fields),
-            ("tags", false, Arg::Strings),
-        ],
-    ),
-    ("delete_notes", &[("notes", true, Arg::NoteRefs)]),
+const DRAFT_ARGS: [(&str, &[ArgSpec]); 10] = [
     ("bury", &[("cards", true, Arg::CardRefs)]),
     ("suspend", &[("cards", true, Arg::CardRefs)]),
     ("forget", &[("cards", true, Arg::CardRefs)]),
@@ -67,7 +53,6 @@ const DRAFT_ARGS: [(&str, &[ArgSpec]); 13] = [
         ],
     ),
     ("check_db", &[]),
-    ("db_exec", &[("sql", true, Arg::Str), ("params", false, Arg::Array)]),
 ];
 
 pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
@@ -118,6 +103,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Step::LegacyUpdate(update) = step {
             legacy_update(update).map_err(at)?;
         }
+        record_op(step).map_err(at)?;
         if let Step::Export(args) = step {
             legacy_export(args).map_err(at)?;
         }
@@ -250,23 +236,23 @@ fn check(shape: Arg, value: &Value) -> Result<(), String> {
     match shape {
         Arg::Str => ok(value.is_string(), "a string"),
         Arg::Int => ok(value.is_i64() || value.is_u64(), "an integer"),
-        Arg::Array => ok(value.is_array(), "a list"),
-        Arg::Strings => ok(
-            value.as_array().is_some_and(|a| a.iter().all(Value::is_string)),
-            "a list of strings",
-        ),
-        Arg::NoteRef => reference(value, RefKind::Note),
-        Arg::NoteRefs => references(value, RefKind::Note),
         Arg::CardRefs => references(value, RefKind::Card),
-        Arg::Fields => ok(
-            value.as_array().is_some_and(|a| a.iter().all(Value::is_string))
-                || value.as_object().is_some_and(|m| m.values().all(Value::is_string)),
-            "a list of strings or a mapping of field names to strings",
-        ),
         Arg::OneOf(values) => ok(
             value.as_str().is_some_and(|v| values.contains(&v)),
             &format!("one of {}", values.join(", ")),
         ),
+    }
+}
+
+/// record-ops.md W1, W3, W4: what the schema requires beyond the types.
+fn record_op(step: &Step) -> Result<(), FormatError> {
+    match step {
+        Step::DbExec(args) if args.sql.is_empty() => Err(FormatError::new("db_exec needs a non-empty sql")),
+        Step::DeleteNotes(args) if args.notes.is_empty() => {
+            Err(FormatError::new("delete_notes needs at least one note"))
+        }
+        Step::SetConfig(args) if args.key.is_empty() => Err(FormatError::new("set_config needs a non-empty key")),
+        _ => Ok(()),
     }
 }
 

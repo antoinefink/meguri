@@ -1,8 +1,9 @@
-//! The storage area's adapters (U22): `open` (storage-ops.md P1), `db_exec`
-//! (P2, record-ops.md W1), the observations `schema_objects` (P3) and
-//! `db_dump` (observations.md O8), the handoff adapters that make Meguri a
-//! side of live chains (dsl.md D9.2), and the schema guard the runner
-//! asserts around every Meguri operation (`storage/schema-18` S6.2).
+//! The storage area's adapters (U22, U23): `open` (storage-ops.md P1),
+//! `db_exec` and `set_config` (record-ops.md W1, W4), the observations
+//! `schema_objects` (P3) and `db_dump` (observations.md O8), the handoff
+//! adapters that make Meguri a side of live chains (dsl.md D9.2), and the
+//! schema guard the runner asserts around every Meguri operation
+//! (`storage/schema-18` S6.2).
 //!
 //! A session's collection lives in a temporary session directory as
 //! `collection.anki2`, opened through meguri-storage's open gate. While the
@@ -15,17 +16,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use meguri_storage::raw::{RawRows, SqlValue};
-use meguri_storage::{OpenError, OpenOptions, OpenedCollection, open_collection};
+use meguri_storage::{ConfigValue, OpenError, OpenOptions, OpenedCollection, StampMode, open_collection};
 use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use super::{ExecError, OpResult, Registry, Session};
-use crate::scenario::{DUMP_TABLES, LoadedScenario, ObservationArgs, ObservationRequest, Step};
+use crate::scenario::{DUMP_TABLES, LoadedScenario, ObservationArgs, ObservationRequest, SqlParam, Step};
 
 pub(super) fn register(registry: &mut Registry) {
     registry.op_rejecting("open", &["file_too_old", "file_too_new", "v1_scheduler"], open);
     registry.op("db_exec", db_exec);
+    registry.op("set_config", set_config);
     registry.observation("schema_objects", schema_objects);
     registry.observation("db_dump", db_dump);
     registry.handoff(hand_out, hand_in);
@@ -196,49 +198,84 @@ fn open(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     }
 }
 
-/// A `db_exec` parameter (P2.1).
-fn param(value: &Value) -> Result<SqlValue, ExecError> {
-    Ok(match value {
-        Value::Null => SqlValue::Null,
-        Value::String(s) => SqlValue::Text(s.clone()),
-        Value::Number(n) => match (n.as_i64(), n.as_f64()) {
-            (Some(i), _) => SqlValue::Integer(i),
-            (None, Some(_)) if n.is_u64() => return Err(invalid(format!("db_exec parameter {n} is beyond 64 bits"))),
-            (None, Some(f)) => SqlValue::Real(f),
-            (None, None) => return Err(invalid(format!("db_exec parameter {n}"))),
-        },
-        other => {
-            return Err(invalid(format!(
-                "db_exec parameters are strings, numbers or null, found {other}"
-            )));
-        }
-    })
-}
-
-/// P2: one statement on the collection's writer, committed at once.
+/// W1: one statement on the collection's writer, committed at once.
 fn db_exec(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
-    let args = step
-        .draft_args()
-        .ok_or_else(|| ExecError::new("internal_error", "db_exec adapter called for another op"))?;
-    let sql = args
-        .0
-        .get("sql")
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid("db_exec needs sql"))?;
-    let params = match args.0.get("params") {
-        None => Vec::new(),
-        Some(Value::Array(items)) => items.iter().map(param).collect::<Result<_, _>>()?,
-        Some(other) => return Err(invalid(format!("db_exec params is a list, found {other}"))),
+    let Step::DbExec(args) = step else {
+        return Err(ExecError::new(
+            "internal_error",
+            "db_exec adapter called for another op",
+        ));
     };
+    let params: Vec<SqlValue> = args
+        .params
+        .iter()
+        .flatten()
+        .map(|param| match param {
+            SqlParam::Text(text) => SqlValue::Text(text.clone()),
+            SqlParam::Integer(value) => SqlValue::Integer(*value),
+            SqlParam::Real(value) => SqlValue::Real(*value),
+            SqlParam::Null => SqlValue::Null,
+        })
+        .collect();
     // A statement may change the schema; Meguri's operations before it may
     // not.
     session.storage.guard()?;
-    let rows = collection(session)?.writer().execute_raw(sql, &params).map_err(core)?;
+    let rows = collection(session)?
+        .writer()
+        .execute_raw(&args.sql, &params)
+        .map_err(core)?;
     let baseline = object_set(collection(session)?)?;
     session.storage.baseline = baseline;
     // Meguri keeps no cached view of the collection or undo history yet
-    // (W1's reset after a write has nothing to clear).
+    // (W1's reset after a write has nothing to clear until U24 and U25).
     Ok(OpResult::Output(json!({ "rows": rows_value(&rows) })))
+}
+
+/// A scenario's JSON value as a config value (W4): a number with a fraction
+/// or an exponent is a float, one without an integer.
+fn config_value(value: &Value) -> Result<ConfigValue, ExecError> {
+    Ok(match value {
+        Value::Null => ConfigValue::Null,
+        Value::Bool(b) => ConfigValue::Bool(*b),
+        Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+            (Some(i), _, _) => ConfigValue::from(i),
+            (None, Some(u), _) => ConfigValue::from(u),
+            (None, None, Some(f)) => {
+                ConfigValue::float(f).ok_or_else(|| invalid(format!("set_config value {n} is not finite")))?
+            }
+            _ => return Err(invalid(format!("set_config value {n}"))),
+        },
+        Value::String(text) => ConfigValue::String(text.clone()),
+        Value::Array(items) => ConfigValue::Array(items.iter().map(config_value).collect::<Result<_, _>>()?),
+        Value::Object(members) => ConfigValue::Object(
+            members
+                .iter()
+                .map(|(name, member)| Ok((name.clone(), config_value(member)?)))
+                .collect::<Result<_, ExecError>>()?,
+        ),
+    })
+}
+
+/// W4: one config key through the config API (`storage/config-table` C4),
+/// as an operation of its own that keeps no undo entry: a local change,
+/// written only when the value differs.
+fn set_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::SetConfig(args) = step else {
+        return Err(ExecError::new(
+            "internal_error",
+            "set_config adapter called for another op",
+        ));
+    };
+    let value = config_value(&args.value)?;
+    let clock = session.clock.clone();
+    let collection = collection(session)?;
+    let mut scope = collection
+        .writer()
+        .begin_write(StampMode::Local, &*clock, None)
+        .map_err(core)?;
+    scope.set_config(&args.key, &value).map_err(core)?;
+    scope.commit().map_err(core)?;
+    Ok(OpResult::Done)
 }
 
 /// A stored value by its storage class (P2.2, O8).

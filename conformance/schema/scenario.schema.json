@@ -451,25 +451,22 @@
         },
         "observe": { "type": "array", "items": { "$ref": "#/$defs/observation_request" } },
         "edit_note": {
-          "description": "Stable (specs/conformance/record-ops.md W2); the arguments stay on draft_args until U23's implementer step gives them this shape with the testkit model (W5).",
-          "allOf": [
-            { "$ref": "#/$defs/draft_args" },
-            {
-              "required": ["note"],
-              "properties": {
-                "note": { "$ref": "#/$defs/note_ref" },
-                "fields": { "$ref": "#/$defs/fields" },
-                "tags": { "type": "array", "items": { "type": "string" } }
-              }
-            }
-          ]
+          "description": "Stable (specs/conformance/record-ops.md W2): a note's fields (a list replaces from the first field, a mapping the named ones) and its tags (replaced, in order); the note area may add arguments with their driver support.",
+          "type": "object",
+          "required": ["note"],
+          "additionalProperties": false,
+          "properties": {
+            "note": { "$ref": "#/$defs/note_ref" },
+            "fields": { "$ref": "#/$defs/fields" },
+            "tags": { "type": "array", "items": { "type": "string" } }
+          }
         },
         "delete_notes": {
-          "description": "Stable (record-ops.md W3); the arguments stay on draft_args until U23's implementer step gives them this shape with the testkit model (W5).",
-          "allOf": [
-            { "$ref": "#/$defs/draft_args" },
-            { "required": ["notes"], "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } } }
-          ]
+          "description": "Stable (record-ops.md W3): notes to remove; those that no longer exist are skipped.",
+          "type": "object",
+          "required": ["notes"],
+          "additionalProperties": false,
+          "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } }
         },
         "set_config": {
           "description": "Stable, with its final shape (record-ops.md W4): one collection config key and its JSON value (null included).",
@@ -537,17 +534,14 @@
         },
         "check_db": { "$ref": "#/$defs/draft_args" },
         "db_exec": {
-          "description": "Stable (record-ops.md W1); the arguments stay on draft_args until U23's implementer step makes this shape exact with the testkit model (W5): one SQL statement; params bind to positional ? placeholders (string TEXT, integer INTEGER, other number REAL, null NULL).",
-          "allOf": [
-            { "$ref": "#/$defs/draft_args" },
-            {
-              "required": ["sql"],
-              "properties": {
-                "sql": { "type": "string", "minLength": 1 },
-                "params": { "type": "array", "items": { "type": ["string", "number", "null"] } }
-              }
-            }
-          ]
+          "description": "Stable (record-ops.md W1): one SQL statement; params bind to positional ? placeholders (string TEXT, integer INTEGER, other number REAL, null NULL; an integer outside the signed 64-bit range is invalid).",
+          "type": "object",
+          "required": ["sql"],
+          "additionalProperties": false,
+          "properties": {
+            "sql": { "type": "string", "minLength": 1 },
+            "params": { "type": "array", "items": { "type": ["string", "number", "null"] } }
+          }
         },
         "reopen": {
           "description": "Close the collection and open it again from its file (sync-ops.md S6).",

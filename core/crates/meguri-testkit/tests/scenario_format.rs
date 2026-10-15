@@ -344,8 +344,6 @@ fn schema_draft_requirements() -> Vec<(String, Vec<String>, Vec<String>)> {
 /// A valid argument mapping for each draft op.
 fn valid_draft_args(op: &str) -> Value {
     match op {
-        "edit_note" => json!({"note": "#n1", "fields": ["x"], "tags": ["t"]}),
-        "delete_notes" => json!({"notes": ["#n1"]}),
         "bury" | "suspend" | "forget" => json!({"cards": ["#c1"]}),
         "set_due" => json!({"cards": ["#c1"], "days": "1-7"}),
         "reposition" => json!({"cards": ["#c1"], "start": 5}),
@@ -354,7 +352,6 @@ fn valid_draft_args(op: &str) -> Value {
         "import" => json!({"fixture": "package/x.apkg"}),
         "export" => json!({"format": "apkg", "name": "out.apkg"}),
         "check_db" => json!({}),
-        "db_exec" => json!({"sql": "select 1", "params": []}),
         other => panic!("no valid example for draft op {other}: add one with the schema change"),
     }
 }
@@ -369,8 +366,15 @@ fn model_accepts(step: Value) -> Result<(), String> {
 #[test]
 fn the_model_requires_what_the_schema_requires_of_draft_ops() {
     let from_schema = schema_draft_requirements();
-    // Thirteen draft ops: `sync` left them when sync-ops.md fixed its shape.
-    assert!(from_schema.len() >= 13, "{from_schema:?}");
+    // Ten draft ops: `sync` left them when sync-ops.md fixed its shape, and
+    // `edit_note`, `delete_notes` and `db_exec` with record-ops.md W5.
+    assert!(from_schema.len() >= 10, "{from_schema:?}");
+    for exact in ["edit_note", "delete_notes", "db_exec", "set_config"] {
+        assert!(
+            !from_schema.iter().any(|(op, _, _)| op == exact),
+            "{exact} is not a draft op"
+        );
+    }
     assert!(!from_schema.iter().any(|(op, _, _)| op == "sync"), "{from_schema:?}");
     assert!(!scenario::draft_requirements().iter().any(|(op, _)| *op == "sync"));
     let in_model: Vec<(String, Vec<String>)> = scenario::draft_requirements()

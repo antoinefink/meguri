@@ -103,6 +103,85 @@ fn db_exec_binds_parameters_by_type_and_reports_values_by_storage_class() {
     assert!(notes.values().all(|n| n["guid"] == "#random"));
 }
 
+/// record-ops.md W4 on Meguri: `set_config` writes through the config API
+/// as a local change, only when the value differs (config-table C4), in
+/// compact form (C5), and moves `col.mod`; a value another client stored
+/// with its own spacing is kept.
+#[test]
+fn set_config_writes_only_changed_values_in_compact_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let select =
+        "SELECT usn, mtime_secs, CAST(val AS TEXT), typeof(val), (SELECT mod FROM col) FROM config WHERE KEY = 'probe'";
+    let loaded = load(
+        dir.path(),
+        "storage/set-config",
+        &format!(
+            concat!(
+                "steps:\n  - open: {{fixture: storage/schema-18.anki2}}\n",
+                "  - db_exec: {{sql: \"UPDATE col SET mod = 5\"}}\n",
+                "  - db_exec: {{sql: \"INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('probe', 3, 1700000000, CAST(? AS BLOB))\", params: ['{{\"b\": 1,  \"a\": [1.0, null]}}']}}\n",
+                "  - advance: 1h\n",
+                "  - set_config: {{key: probe, value: {{a: [1.0, null], b: 1}}}}\n",
+                "  - db_exec: {{sql: \"{select}\"}}\n",
+                "  - set_config: {{key: probe, value: {{a: [1, null], b: 1}}}}\n",
+                "  - db_exec: {{sql: \"{select}\"}}\n",
+                "  - set_config: {{key: fresh, value: null}}\n",
+                "  - db_exec: {{sql: \"SELECT usn, CAST(val AS TEXT) FROM config WHERE KEY = 'fresh'\"}}\n",
+            ),
+            select = select
+        ),
+        &["schema-18.anki2"],
+    );
+    let out = MeguriExecutor::new().run(&loaded).unwrap();
+    // 2030-01-15T11:00:00Z.
+    let now_s: i64 = 1_894_705_200;
+    assert_eq!(out["steps"][4], json!({}));
+    assert_eq!(
+        out["steps"][5]["db_exec"]["rows"],
+        json!([[3, 1_700_000_000, "{\"b\": 1,  \"a\": [1.0, null]}", "blob", 5]])
+    );
+    // 1 is an integer, 1.0 a float: another value.
+    assert_eq!(
+        out["steps"][7]["db_exec"]["rows"],
+        json!([[-1, now_s, "{\"a\":[1,null],\"b\":1}", "blob", now_s * 1000]])
+    );
+    assert_eq!(out["steps"][9]["db_exec"]["rows"], json!([[-1, "null"]]));
+}
+
+#[test]
+fn record_ops_take_exactly_their_arguments() {
+    let base =
+        |step: &str| format!("id: storage/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{step}]\n");
+    for good in [
+        "{db_exec: {sql: \"SELECT ?\", params: [1]}}",
+        "{edit_note: {note: \"#n1\", fields: {Front: x}, tags: [a]}}",
+        "{edit_note: {note: \"#n1\", fields: [x, y]}}",
+        "{delete_notes: {notes: [\"#n1\", \"#n2\"]}}",
+        "{set_config: {key: k, value: null}}",
+    ] {
+        let value = scenario::parse_yaml(&base(good)).unwrap();
+        assert!(scenario::Scenario::from_value(&value).is_ok(), "{good}");
+    }
+    for bad in [
+        "{db_exec: {sql: \"\"}}",
+        "{db_exec: {sql: x, extra: 1}}",
+        "{db_exec: {sql: x, params: [true]}}",
+        "{db_exec: {sql: x, params: [[1]]}}",
+        "{db_exec: {sql: x, params: null}}",
+        "{edit_note: {note: \"#c1\"}}",
+        "{edit_note: {note: \"#n1\", fields: [1]}}",
+        "{edit_note: {note: \"#n1\", other: 1}}",
+        "{delete_notes: {notes: []}}",
+        "{delete_notes: {notes: [\"#c1\"]}}",
+        "{set_config: {key: \"\", value: 1}}",
+        "{set_config: {key: k}}",
+        "{set_config: {key: k, value: 1, more: 2}}",
+    ] {
+        let value = scenario::parse_yaml(&base(bad)).unwrap();
+        assert!(scenario::Scenario::from_value(&value).is_err(), "accepted {bad}");
+    }
+}
+
 /// An op of a later area that creates a table: the guard must stop the run.
 fn add_table(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
     let collection = session.storage.collection().unwrap();

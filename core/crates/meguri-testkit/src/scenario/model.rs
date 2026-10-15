@@ -599,8 +599,12 @@ pub enum Step {
     AddNote(NoteSpec),
     Answer(AnswerSpec),
     Observe(Vec<ObservationRequest>),
-    EditNote(DraftArgs),
-    DeleteNotes(DraftArgs),
+    /// record-ops.md W2.
+    EditNote(EditNoteArgs),
+    /// record-ops.md W3.
+    DeleteNotes(DeleteNotesArgs),
+    /// record-ops.md W4.
+    SetConfig(SetConfigArgs),
     Bury(DraftArgs),
     Suspend(DraftArgs),
     Forget(DraftArgs),
@@ -613,7 +617,8 @@ pub enum Step {
     Import(DraftArgs),
     Export(DraftArgs),
     CheckDb(DraftArgs),
-    DbExec(DraftArgs),
+    /// record-ops.md W1.
+    DbExec(DbExecArgs),
     /// Closes the collection and opens it again (sync-ops.md S6).
     Reopen(NoArgs),
     /// storage-ops.md P1: replaces the collection with a copy of a fixture
@@ -633,7 +638,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 26] = [
+    pub const NAMES: [&'static str; 27] = [
         "advance",
         "set_clock",
         "add_note",
@@ -641,6 +646,7 @@ impl Step {
         "observe",
         "edit_note",
         "delete_notes",
+        "set_config",
         "bury",
         "suspend",
         "forget",
@@ -675,6 +681,7 @@ impl Step {
             Step::Observe(_) => "observe",
             Step::EditNote(_) => "edit_note",
             Step::DeleteNotes(_) => "delete_notes",
+            Step::SetConfig(_) => "set_config",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
             Step::Forget(_) => "forget",
@@ -711,9 +718,7 @@ impl Step {
     /// The arguments of a draft op.
     pub fn draft_args(&self) -> Option<&DraftArgs> {
         match self {
-            Step::EditNote(a)
-            | Step::DeleteNotes(a)
-            | Step::Bury(a)
+            Step::Bury(a)
             | Step::Suspend(a)
             | Step::Forget(a)
             | Step::SetDue(a)
@@ -722,8 +727,7 @@ impl Step {
             | Step::BuildFiltered(a)
             | Step::Import(a)
             | Step::Export(a)
-            | Step::CheckDb(a)
-            | Step::DbExec(a) => Some(a),
+            | Step::CheckDb(a) => Some(a),
             _ => None,
         }
     }
@@ -791,6 +795,77 @@ pub struct AnswerSpec {
     pub rating: Rating,
     #[serde(default)]
     pub time_ms: u64,
+}
+
+/// `db_exec: {sql, params?}` (record-ops.md W1).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DbExecArgs {
+    /// Exactly one statement; not empty (checked on load).
+    pub sql: String,
+    #[serde(default, deserialize_with = "present")]
+    pub params: Option<Vec<SqlParam>>,
+}
+
+/// A `db_exec` parameter (W1): a string binds as TEXT, an integer as
+/// INTEGER, any other number as REAL, null as NULL. Booleans, lists,
+/// mappings and integers outside the signed 64-bit range are invalid.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SqlParam {
+    Text(String),
+    Integer(i64),
+    Real(f64),
+    Null,
+}
+
+impl<'de> Deserialize<'de> for SqlParam {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<SqlParam, D::Error> {
+        match Value::deserialize(deserializer)? {
+            Value::Null => Ok(SqlParam::Null),
+            Value::String(s) => Ok(SqlParam::Text(s)),
+            Value::Number(n) => match (n.as_i64(), n.is_f64(), n.as_f64()) {
+                (Some(i), _, _) => Ok(SqlParam::Integer(i)),
+                (None, true, Some(f)) => Ok(SqlParam::Real(f)),
+                _ => Err(de::Error::custom(format!(
+                    "db_exec parameter {n} is outside the signed 64-bit range"
+                ))),
+            },
+            other => Err(de::Error::custom(format!(
+                "db_exec parameters are strings, numbers or null, found {other}"
+            ))),
+        }
+    }
+}
+
+/// `edit_note: {note, fields?, tags?}` (record-ops.md W2).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditNoteArgs {
+    pub note: NoteRef,
+    /// A list replaces the fields from the first one; a mapping the named
+    /// ones.
+    #[serde(default, deserialize_with = "present")]
+    pub fields: Option<Fields>,
+    /// Replaces every tag, in this order.
+    #[serde(default, deserialize_with = "present")]
+    pub tags: Option<Vec<String>>,
+}
+
+/// `delete_notes: {notes}` (record-ops.md W3); at least one (checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteNotesArgs {
+    pub notes: Vec<NoteRef>,
+}
+
+/// `set_config: {key, value}` (record-ops.md W4): `key` not empty (checked
+/// on load), `value` any JSON value, null included.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetConfigArgs {
+    pub key: String,
+    pub value: Value,
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes
@@ -980,6 +1055,20 @@ impl<'de> Deserialize<'de> for CardRef {
             return Err(de::Error::custom(format!("{r} is not a card reference")));
         }
         Ok(CardRef(r))
+    }
+}
+
+/// A `#nN` reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NoteRef(pub LogicalRef);
+
+impl<'de> Deserialize<'de> for NoteRef {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<NoteRef, D::Error> {
+        let r = LogicalRef::deserialize(deserializer)?;
+        if r.kind != RefKind::Note {
+            return Err(de::Error::custom(format!("{r} is not a note reference")));
+        }
+        Ok(NoteRef(r))
     }
 }
 

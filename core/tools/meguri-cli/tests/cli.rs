@@ -28,16 +28,17 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
         json["supports"]["ops"],
-        serde_json::json!(["advance", "db_exec", "handoff", "open", "set_clock"])
+        serde_json::json!(["advance", "db_exec", "handoff", "open", "set_clock", "set_config"])
     );
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!(["db_dump", "schema_objects", "text"])
     );
-    // dsl.md D7.2: 25 ops besides observe, the actor ops of sync-ops.md, the
-    // model ops of model-ops.md and storage-ops.md's open among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 25);
-    for op in ["actor", "sync", "net_fault", "converge", "reopen", "open"] {
+    // dsl.md D7.2: 26 ops besides observe, the actor ops of sync-ops.md, the
+    // model ops of model-ops.md, storage-ops.md's open and record-ops.md's
+    // set_config among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 26);
+    for op in ["actor", "sync", "net_fault", "converge", "reopen", "open", "set_config"] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
