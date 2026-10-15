@@ -55,7 +55,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `blob_decode` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: "ok" \| "invalid_blob"}, decks?: {...}, presets?: {...}}`, whether each record's protobuf blobs decode now (`model-ops.md` L4) |
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
-| `browser_config` | none | `{<key>: <value>, ...}`: the 23 browser and search config keys as Anki's own reads give them, defaults included (`browser-config-ops.md` B2); driver pending |
+| `browser_config` | none | `{<key>: <value>, ...}`: the 23 browser and search config keys as Anki's own reads give them, defaults included (`browser-config-ops.md` B2) |
 
 ## O5. Scheduling states
 

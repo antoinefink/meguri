@@ -1,0 +1,117 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck"],
+          "activeNoteCols": ["note", 5, null],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": true,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": [],
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": true,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {
+            "a": "y",
+            "b": 3
+          },
+          "setDueBrowser": "0",
+          "sortBackwards": 1,
+          "sortType": "question"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["activeCols", 0, 1700000000, "[\"question\"]", "text"],
+            ["activeNoteCols", 0, 1700000000, "[ \"note\" , 5, null ]", "blob"],
+            ["browserNoteSortBackwards", 0, 1700000000, "true", "text"],
+            ["browserTableShowNotesMode", 0, 1700000000, "1", "blob"],
+            ["collapseCardState", 0, 1700000000, "true", "text"],
+            ["collapseDecks", 0, 1700000000, " true ", "blob"],
+            ["collapseFlags", 0, 1700000000, "{", "blob"],
+            ["collapseNotetypes", 0, 1700000000, "[true]", "blob"],
+            ["collapseSavedSearches", 0, 1700000000, "\"true\"", "blob"],
+            ["collapseTags", 0, 1700000000, "1.0", "blob"],
+            ["collapseToday", 0, 1700000000, "null", "blob"],
+            ["defaultSearchText", 0, 1700000000, "null", "blob"],
+            ["flagLabels", 0, 1700000000, "[]", "blob"],
+            ["ignoreAccentsInSearch", 0, 1700000000, "\"yes\"", "blob"],
+            ["normalize_note_text", 0, 1700000000, "\"false\"", "blob"],
+            ["noteSortType", 0, 1700000000, "\"noteCrt", "blob"],
+            ["previewBothSides", 0, 1700000000, "true", "blob"],
+            ["resetCountsBrowser", 0, 1700000000, "{}", "blob"],
+            ["restorePositionBrowser", 0, 1700000000, "0", "blob"],
+            ["savedFilters", 0, 1700000000, "{\"a\":\"x\",\"a\":\"y\",\"b\":3}", "blob"],
+            ["setDueBrowser", 0, 1700000000, "5", "blob"],
+            ["sortBackwards", 0, 1700000000, "1", "blob"],
+            ["sortType", 0, 1700000000, "\"question\"", "blob"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck"],
+          "activeNoteCols": ["note", 5, null],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": true,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "  deck:x ",
+          "flagLabels": [],
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": true,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {
+            "a": "y",
+            "b": 3
+          },
+          "setDueBrowser": "",
+          "sortBackwards": 1,
+          "sortType": "question"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0c564359de72f4dd507414a66cf201603c8259f152cc16d631bd4f78b7841060",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/config/wrong-shapes",
+  "scenario_sha256": "2e45c8267bdf7ce5e678ff34ee51621df02ab2e1b9c6efb036431631865f163b",
+  "tz": "UTC"
+}

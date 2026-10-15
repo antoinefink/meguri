@@ -1,0 +1,57 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["activeCols", -1, 1894701600, "[\"noteFld\",\"addonX\",\"deck\"]", "blob"],
+            ["activeNoteCols", 0, 1700000000, "[ \"noteFld\" , \"addonY\" ]", "blob"],
+            ["collapseTags", -1, 1894701600, "true", "blob"],
+            ["flagLabels", -1, 1894705200, "{\"3\":\"Important\"}", "blob"],
+            ["myAddon_state", -1, 1894701600, "{\"a\":[1,2.5],\"b\":1}", "blob"],
+            ["otherClient_layout", 0, 1700000900, "{\"z\": 1, \"a\" :[1, 2.50]}", "blob"],
+            ["previewBothSides", 3, 1700000500, " false ", "blob"],
+            ["randomOrderReposition", -1, 1894701600, "true", "blob"],
+            ["savedFilters", -1, 1894701600, "{\"Leeches\":\"tag:leech\"}", "blob"],
+            ["setDueBrowser", -1, 1894701600, "\"3\"", "blob"],
+            ["shiftPositionOfExistingCards", -1, 1894701600, "false", "blob"],
+            ["sortType", -1, 1894701600, "\"noteCrt\"", "blob"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["flagLabels"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0c564359de72f4dd507414a66cf201603c8259f152cc16d631bd4f78b7841060",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/config/other-keys-untouched",
+  "scenario_sha256": "425522ad9423c84862a5d8433817775788b1dd8f4c65daabe436e16d258e9c71",
+  "tz": "UTC"
+}

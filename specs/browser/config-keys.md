@@ -303,10 +303,10 @@ The keys travel with the whole config table (`storage/config-table` C9). A sync 
 | Scenario | Covers | Golden |
 |---|---|---|
 | `browser/config/new-collection` | K1: the browser keys a new collection holds | recorded |
-| `browser/config/absent-defaults` | K1 defaults through Anki's reads, K2: reading writes nothing | awaits the `browser_config` observation |
-| `browser/config/wrong-shapes` | K2.1, K2.2 and `storage/config-table` C3 per key; the stored bytes are kept | awaits the `browser_config` observation |
-| `browser/config/write-shapes` | K1 shapes in compact form, K10.1 (same value writes nothing) | awaits `browser_config_set` and `browser_config` |
-| `browser/config/other-keys-untouched` | K9, K10.1: a `flagLabels` write changes no other key | awaits `browser_config_set` |
-| `browser/config/live-roundtrip` | values written by Anki read in Meguri, values written by Meguri read in Anki (T1) | awaits `browser_config_set` and `browser_config` |
+| `browser/config/absent-defaults` | K1 defaults through Anki's reads, K2: reading writes nothing | recorded |
+| `browser/config/wrong-shapes` | K2.1, K2.2 and `storage/config-table` C3 per key; the stored bytes are kept | recorded |
+| `browser/config/write-shapes` | K1 shapes in compact form, K10.1 (same value writes nothing) | recorded |
+| `browser/config/other-keys-untouched` | K9, K10.1: a `flagLabels` write changes no other key | recorded |
+| `browser/config/live-roundtrip` | values written by Anki read in Meguri, values written by Meguri read in Anki (T1) | recorded |
 
 The oracle runs Anki's collection library, not its desktop browser, so the scenarios observe stored values and Anki's own reads of them (`browser-config-ops.md` B2). Meguri's interpretation of those values (K4, K5.1, K6.4, K7.1) and its actions (K4.2, K4.3, K5.2, K7.2, K10.2) are tested in U83's Rust tests with the tables of this file: every K4.4, K5.1, K5.2, K6.4 and K7.2 row, the refusals, a read of every key on an empty config leaving the file's bytes unchanged, a notes-mode toggle making one write and no undo entry, and an undoable test-hooks operation followed by a Save Search, after which undo names "Save Search" and two undos restore the saved searches and then the earlier rows.

@@ -41,5 +41,5 @@ One scenario op (`dsl.md` D7.2) and one observation kind (`observations.md` O4) 
 
 ## B3. Status
 
-- The oracle driver does not have B1 and B2 yet (oracle maintainer work, U83). Until it does, the scenarios that use them have no golden: `tools/mg goldens-check` reports them `missing`.
+- The oracle driver implements B1 and B2 (stable in `dsl.md` D7.2 and `observations.md` O4). Every scenario under `conformance/scenarios/browser/config/` has a golden; the oracle ran every segment of `browser/config/live-roundtrip` to record it.
 - Meguri's executor implements them with U83's accessor (`core/crates/meguri-search/src/config.rs`) and write ops; until then the scenarios are `pending` (`dsl.md` D10). Until the testkit model (`core/crates/meguri-testkit/src/scenario/`) reads the op and the kind, T0 reports the scenarios that use them as `invalid`; U83's implementer adds the typed arguments with the adapter.

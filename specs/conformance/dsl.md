@@ -143,7 +143,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
 | `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
 | `set_config` | `{key, value}`: one collection config key and its JSON value | none | stable (`record-ops.md` W4) |
-| `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | shape fixed (`browser-config-ops.md` B1); driver pending (B3) |
+| `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | stable (`browser-config-ops.md` B1) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
