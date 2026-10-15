@@ -1,0 +1,11 @@
+# A Meguri actor logs in to the scenario's account, twice
+# (specs/sync/login-endpoints.md L5): each login gets a host key from the
+# server; the second replaces the first (specs/conformance/sync-ops.md S4.1).
+# Pending until a Meguri adapter plays actors and syncs (sync-ops.md S10.2).
+id: sync/transport/login
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [meguri]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: login}
