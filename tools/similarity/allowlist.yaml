@@ -10,4 +10,9 @@
 #   reason: why the match is an interop fact, not copied code
 #   approved_by: antoine                 required
 #   approved_on: YYYY-MM-DD              optional
-entries: []
+entries:
+  - path: core/crates/meguri-storage/src/schema/ddl18.sql
+    channels: [struct]
+    reason: schema-18 DDL in the normalized form of specs/storage/schema-18.md S2/S3 (the exact text SQLite stores; compared by schema_objects goldens). Escalation U22-E1.
+    approved_by: antoine
+    approved_on: 2026-10-15
