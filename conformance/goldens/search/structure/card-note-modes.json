@@ -1,0 +1,104 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "search": [
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c1", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1", "#c2"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c2", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": ["#c1", "#c3"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          },
+          {
+            "ids": ["#c2"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": []
+          },
+          {
+            "ids": ["#c1"]
+          },
+          {
+            "ids": ["#n1"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c3", "#c4"]
+          },
+          {
+            "ids": ["#n1", "#n2"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/structure/card-note-modes",
+  "scenario_sha256": "4a8c437770e5242a5e1658a73a3aa8b40d47ba47c610fbbffb72d31ae38b6529",
+  "tz": "UTC"
+}

@@ -1,0 +1,564 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "error": "invalid_state",
+            "provided": ""
+          },
+          {
+            "error": "invalid_state",
+            "provided": "NEW"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "New"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "DUE"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "learn "
+          },
+          {
+            "error": "invalid_state",
+            "provided": "ne\\w"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "buried\\-manually"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "suspend"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "buried-"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "-1"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "1.1"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "4294967296"
+          },
+          {
+            "context": "edited:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "edited:",
+            "error": "invalid_positive_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "introduced:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "introduced:",
+            "error": "invalid_positive_whole_number",
+            "provided": "-1"
+          },
+          {
+            "context": "resched:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "resched:",
+            "error": "invalid_positive_whole_number",
+            "provided": "-1"
+          },
+          {
+            "context": "resched:",
+            "error": "invalid_positive_whole_number",
+            "provided": "1:2"
+          },
+          {
+            "context": "rated:",
+            "error": "invalid_positive_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "rated:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "rated:",
+            "error": "invalid_positive_whole_number",
+            "provided": "-1"
+          },
+          {
+            "context": "1:",
+            "error": "invalid_answer_button",
+            "provided": ""
+          },
+          {
+            "context": "2:-1",
+            "error": "invalid_answer_button",
+            "provided": "-1"
+          },
+          {
+            "context": "3:1.1",
+            "error": "invalid_answer_button",
+            "provided": "1.1"
+          },
+          {
+            "context": "0:foo",
+            "error": "invalid_answer_button",
+            "provided": "foo"
+          },
+          {
+            "context": "1:5",
+            "error": "invalid_answer_button",
+            "provided": "5"
+          },
+          {
+            "context": "1:2:3",
+            "error": "invalid_answer_button",
+            "provided": "2:3"
+          },
+          {
+            "context": "2:0",
+            "error": "invalid_answer_button",
+            "provided": "0"
+          },
+          {
+            "context": "rated:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "mid:",
+            "error": "invalid_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "mid:",
+            "error": "invalid_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "mid:",
+            "error": "invalid_whole_number",
+            "provided": "1.5"
+          },
+          {
+            "context": "mid:",
+            "error": "invalid_whole_number",
+            "provided": "9223372036854775808"
+          },
+          {
+            "context": "",
+            "error": "invalid_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "1.1",
+            "error": "invalid_whole_number",
+            "provided": "1.1"
+          },
+          {
+            "context": "foo",
+            "error": "invalid_whole_number",
+            "provided": "foo"
+          },
+          {
+            "context": "x,a",
+            "error": "invalid_whole_number",
+            "provided": "x"
+          },
+          {
+            "error": "invalid_dupe"
+          },
+          {
+            "context": ",",
+            "error": "invalid_whole_number",
+            "provided": ""
+          },
+          {
+            "context": ",a",
+            "error": "invalid_whole_number",
+            "provided": ""
+          },
+          {
+            "error": "invalid_property",
+            "provided": ""
+          },
+          {
+            "error": "invalid_property",
+            "provided": "=1"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "DUE<5"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cdn=5"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cdn:=5"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cds=s"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cds:=s"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cdn:é=1"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "x"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cdn"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "cdn:"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "lapses"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "pos"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "reps"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "rated"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "r"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "d"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "due"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "s"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "cdn:abc"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "cds:x"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "ease"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "rated"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "resched"
+          },
+          {
+            "context": "ivl>",
+            "error": "invalid_positive_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "ivl=0.5",
+            "error": "invalid_positive_whole_number",
+            "provided": "0.5"
+          },
+          {
+            "context": "ivl!=-1",
+            "error": "invalid_positive_whole_number",
+            "provided": "-1"
+          },
+          {
+            "context": "ivl<foo",
+            "error": "invalid_positive_whole_number",
+            "provided": "foo"
+          },
+          {
+            "context": "reps>x",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "lapses>x",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "pos>x",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "ivl==1",
+            "error": "invalid_positive_whole_number",
+            "provided": "=1"
+          },
+          {
+            "context": "ivl=>1",
+            "error": "invalid_positive_whole_number",
+            "provided": ">1"
+          },
+          {
+            "context": "ivl<>1",
+            "error": "invalid_positive_whole_number",
+            "provided": ">1"
+          },
+          {
+            "context": "due>",
+            "error": "invalid_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "due=0.5",
+            "error": "invalid_whole_number",
+            "provided": "0.5"
+          },
+          {
+            "context": "due=2147483648",
+            "error": "invalid_whole_number",
+            "provided": "2147483648"
+          },
+          {
+            "context": "ease>",
+            "error": "invalid_number",
+            "provided": ""
+          },
+          {
+            "context": "ease=",
+            "error": "invalid_number",
+            "provided": ""
+          },
+          {
+            "context": "ease!=one",
+            "error": "invalid_number",
+            "provided": "one"
+          },
+          {
+            "context": "ease<1,3",
+            "error": "invalid_number",
+            "provided": "1,3"
+          },
+          {
+            "context": "ease>0x10",
+            "error": "invalid_number",
+            "provided": "0x10"
+          },
+          {
+            "context": "ease>1_0",
+            "error": "invalid_number",
+            "provided": "1_0"
+          },
+          {
+            "context": "ease=1.5.2",
+            "error": "invalid_number",
+            "provided": "1.5.2"
+          },
+          {
+            "context": "s>x",
+            "error": "invalid_number",
+            "provided": "x"
+          },
+          {
+            "context": "d>x",
+            "error": "invalid_number",
+            "provided": "x"
+          },
+          {
+            "context": "r=",
+            "error": "invalid_number",
+            "provided": ""
+          },
+          {
+            "context": "r=x",
+            "error": "invalid_number",
+            "provided": "x"
+          },
+          {
+            "context": "cdn:k>x",
+            "error": "invalid_number",
+            "provided": "x"
+          },
+          {
+            "context": "rated=1",
+            "error": "invalid_negative_whole_number",
+            "provided": "1"
+          },
+          {
+            "context": "rated<",
+            "error": "invalid_negative_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "rated=-1:5",
+            "error": "invalid_answer_button",
+            "provided": "5"
+          },
+          {
+            "context": "rated=-1:",
+            "error": "invalid_answer_button",
+            "provided": ""
+          },
+          {
+            "context": "rated<=-1:4:",
+            "error": "invalid_answer_button",
+            "provided": "4:"
+          },
+          {
+            "context": "rated=x:1",
+            "error": "invalid_negative_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "resched=1",
+            "error": "invalid_negative_whole_number",
+            "provided": "1"
+          },
+          {
+            "context": "resched=-1:2",
+            "error": "invalid_negative_whole_number",
+            "provided": "-1:2"
+          },
+          {
+            "context": "resched=",
+            "error": "invalid_negative_whole_number",
+            "provided": ""
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "cid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "cid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "did:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "did:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "NID:",
+            "error": "invalid_id_list"
+          },
+          {
+            "context": "Nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "text": "cid:1 2"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/errors/arguments",
+  "scenario_sha256": "e445ab35de1f0ef63d315124266bc420f6bc9ed313fd2001535b2979d435bedb",
+  "tz": "UTC"
+}

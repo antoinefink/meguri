@@ -1,0 +1,118 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "dog cat OR fish"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "\"key:value with spaces\""
+          },
+          {
+            "text": "key: value"
+          },
+          {
+            "text": "\"(\" \")\""
+          },
+          {
+            "text": "\"-foo\""
+          },
+          {
+            "text": "deck::"
+          },
+          {
+            "text": "-\"-a\""
+          },
+          {
+            "text": "-"
+          },
+          {
+            "text": "--"
+          },
+          {
+            "text": "\\*\\:\\_"
+          },
+          {
+            "text": "\"aNd\" \"oR\""
+          },
+          {
+            "text": "\"f o o\" bar"
+          },
+          {
+            "text": "tag:re\\:x"
+          },
+          {
+            "text": "\"re:\\(\""
+          },
+          {
+            "text": "prop:ease>1"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "rated:1"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "-(a OR b)"
+          },
+          {
+            "text": "a\\\\\\:b"
+          },
+          {
+            "text": "dupe:1,\\\\\\\""
+          },
+          {
+            "text": "re:a\\\\\\\""
+          },
+          {
+            "text": "-"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "text": "- "
+          },
+          {
+            "text": "a - b"
+          },
+          {
+            "text": "preset:a\\\\\"b"
+          },
+          {
+            "error": "unclosed_quote"
+          },
+          {
+            "text": "prop:cds:k=a\\\\\"b"
+          },
+          {
+            "text": "has-cd:x"
+          },
+          {
+            "text": "has-cd:x"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/canonical/round-trips",
+  "scenario_sha256": "5a1fcbdb7529c0d8ccbb2d25c9c62b9467f64a2909d73ec0308bd6e47275ceeb",
+  "tz": "UTC"
+}

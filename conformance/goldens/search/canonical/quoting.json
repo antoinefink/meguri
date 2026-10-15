@@ -1,0 +1,121 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "\"and\""
+          },
+          {
+            "text": "\"OR\""
+          },
+          {
+            "text": "\"aNd\""
+          },
+          {
+            "text": "-"
+          },
+          {
+            "text": "\"-a\""
+          },
+          {
+            "text": "a-b"
+          },
+          {
+            "text": "\"(a)\""
+          },
+          {
+            "text": "\"a(b\""
+          },
+          {
+            "text": "\"a)b\""
+          },
+          {
+            "text": "\"a b\""
+          },
+          {
+            "text": "\"(\""
+          },
+          {
+            "text": "\")\""
+          },
+          {
+            "text": "a\\\"b"
+          },
+          {
+            "text": "\\\""
+          },
+          {
+            "text": "deck:-a"
+          },
+          {
+            "text": "\"deck:a(b\""
+          },
+          {
+            "text": "\"deck:a)b\""
+          },
+          {
+            "text": "\"a:b c\""
+          },
+          {
+            "text": "\"-f:x\""
+          },
+          {
+            "text": "tag:and"
+          },
+          {
+            "text": "tag:-x"
+          },
+          {
+            "text": "\"note:a b\""
+          },
+          {
+            "text": "\"card:Card 1\""
+          },
+          {
+            "text": "\"w:a b\""
+          },
+          {
+            "text": "\"nc:(x)\""
+          },
+          {
+            "text": "\"has-cd:a b\""
+          },
+          {
+            "text": "\"preset:a b\""
+          },
+          {
+            "text": "\"dupe:1,a b\""
+          },
+          {
+            "text": "\"prop:cds:k=a b\""
+          },
+          {
+            "text": "\"re:a b\""
+          },
+          {
+            "text": "\\*\\_"
+          },
+          {
+            "text": "a*b"
+          },
+          {
+            "text": "a_b"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/canonical/quoting",
+  "scenario_sha256": "39e47d7e581d58e0dda8b5c5e46dec2ba18f3e9e7a92a5d81566ead93a604e60",
+  "tz": "UTC"
+}

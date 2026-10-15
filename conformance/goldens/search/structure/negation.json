@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "-(a OR b)"
+          },
+          {
+            "text": "-\"x y\""
+          },
+          {
+            "text": "-deck:a"
+          },
+          {
+            "text": "-a"
+          },
+          {
+            "text": "-a -b"
+          },
+          {
+            "text": "-(-a)"
+          },
+          {
+            "text": "-\"-a\""
+          },
+          {
+            "text": "- "
+          },
+          {
+            "text": "- OR "
+          },
+          {
+            "text": "- "
+          },
+          {
+            "text": "- OR "
+          },
+          {
+            "text": "a -  b"
+          },
+          {
+            "text": "a - OR  b"
+          },
+          {
+            "text": "-\"and\""
+          },
+          {
+            "text": "-  a"
+          },
+          {
+            "text": "a - "
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/structure/negation",
+  "scenario_sha256": "9c6dfde811c50331f921026f1e114a5697df4dbbe502219c9aa4bad304681c2c",
+  "tz": "UTC"
+}

@@ -34,6 +34,6 @@ The two observation kinds the search scenarios use: `search` (results and errors
 
 ## S4. Status
 
-Draft until the oracle driver implements both kinds; the scenarios under `conformance/scenarios/search/` have no goldens before then. Meguri's executor implements them in the search adapter of the testkit (U80).
+Stable: the oracle driver implements both kinds, and every scenario under `conformance/scenarios/search/` has its golden. Meguri's executor implements them in the search adapter of the testkit (U80).
 
 Result scenarios name the term families they need beyond the whole collection in their `tags`: `needs-text` (U81), `needs-state`, `needs-template`, `needs-deck` (U82). Executors ignore tags (`dsl.md` D4); they tell the area which scenarios can become active (`dsl.md` D9.1) as each unit lands. Scenarios without such a tag need only U80.

@@ -1,0 +1,181 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "error": "invalid_state",
+            "provided": "foo"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unclosed_quote"
+          },
+          {
+            "error": "unclosed_quote"
+          },
+          {
+            "error": "empty_quote"
+          },
+          {
+            "error": "empty_quote"
+          },
+          {
+            "error": "empty_quote"
+          },
+          {
+            "error": "missing_key"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "foo"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\e"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "context": "rated:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "x",
+            "error": "invalid_whole_number",
+            "provided": "x"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "IVL"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "ivl"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "empty_quote"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "foo"
+          },
+          {
+            "error": "unopened_group"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/errors/order",
+  "scenario_sha256": "819c2780ce408f1eb8340473391513854ac80d51135dd05d89bdbef1bf1f9c0b",
+  "tz": "UTC"
+}

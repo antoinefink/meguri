@@ -1,0 +1,196 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "\\\\"
+          },
+          {
+            "text": "\\\""
+          },
+          {
+            "text": "\\:"
+          },
+          {
+            "text": "\"(\""
+          },
+          {
+            "text": "\")\""
+          },
+          {
+            "text": "-"
+          },
+          {
+            "text": "\\*"
+          },
+          {
+            "text": "\\_"
+          },
+          {
+            "text": "\"\\\"\\:()-\""
+          },
+          {
+            "text": "\\\\\\*\\_"
+          },
+          {
+            "text": "\\*\\:\\_"
+          },
+          {
+            "text": "a\\\\b"
+          },
+          {
+            "text": "a\\\\\\\\b"
+          },
+          {
+            "text": "a\\\\\\:b"
+          },
+          {
+            "text": "3\\:30"
+          },
+          {
+            "text": "\"-term\""
+          },
+          {
+            "text": "-"
+          },
+          {
+            "text": "--"
+          },
+          {
+            "text": "\"(\" \")\""
+          },
+          {
+            "text": "A-"
+          },
+          {
+            "text": "\"-A\""
+          },
+          {
+            "text": "deck::"
+          },
+          {
+            "text": "deck:a-b"
+          },
+          {
+            "text": "deck:-a"
+          },
+          {
+            "text": "\"deck:a(b\""
+          },
+          {
+            "text": "deck:a\\\"b"
+          },
+          {
+            "text": "deck:a\\*b"
+          },
+          {
+            "text": "deck:a:b"
+          },
+          {
+            "text": "deck:a\\\\b"
+          },
+          {
+            "text": "note:a-b"
+          },
+          {
+            "text": "tag:a\\_b"
+          },
+          {
+            "text": "w:a:b"
+          },
+          {
+            "text": "\"nc:a(b\""
+          },
+          {
+            "text": "\"sc:a)b\""
+          },
+          {
+            "text": "has-cd:a-b"
+          },
+          {
+            "text": "field:val:ue"
+          },
+          {
+            "text": "field:va\\\"lue"
+          },
+          {
+            "text": "re:\\d"
+          },
+          {
+            "text": "re:a\\x"
+          },
+          {
+            "text": "re:\\btest\\%"
+          },
+          {
+            "text": "re:te\\\"st"
+          },
+          {
+            "text": "\"re:\\(\""
+          },
+          {
+            "text": "f:re:a\\x"
+          },
+          {
+            "text": "f:re:a\\\"b"
+          },
+          {
+            "text": "tag:re:a\\x"
+          },
+          {
+            "text": "tag:re:\\\\"
+          },
+          {
+            "text": "f:nc:a\\x"
+          },
+          {
+            "text": "f:nc:a\\:b"
+          },
+          {
+            "text": "preset:a\\x"
+          },
+          {
+            "text": "preset:a\\:b"
+          },
+          {
+            "text": "preset:a\\-b"
+          },
+          {
+            "text": "prop:cds:k=a\\:b"
+          },
+          {
+            "text": "prop:cds:k=a\\x"
+          },
+          {
+            "text": "dupe:1,a\\\\b"
+          },
+          {
+            "text": "dupe:1,a\\\"b"
+          },
+          {
+            "text": "dupe:1,\\\\\\\""
+          },
+          {
+            "text": "dupe:1,a\\\\x"
+          },
+          {
+            "text": "dupe:1,a\\\\:b"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/lexing/escapes",
+  "scenario_sha256": "e3ce5216be6170b325bb03ab1c4701ce1c74fc9d8faef835db2cec60f2a57b9d",
+  "tz": "UTC"
+}
