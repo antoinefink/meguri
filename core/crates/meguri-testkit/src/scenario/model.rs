@@ -130,7 +130,8 @@ fn mapping<'de, D: Deserializer<'de>>(deserializer: D, what: &str) -> Result<Map
     }
 }
 
-/// The argument `{}` of `reopen` and `converge`: a mapping with no keys.
+/// The argument `{}` of `reopen`, `converge` and `check_db`: a mapping with
+/// no keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoArgs;
 
@@ -616,7 +617,8 @@ pub enum Step {
     BuildFiltered(DraftArgs),
     Import(DraftArgs),
     Export(DraftArgs),
-    CheckDb(DraftArgs),
+    /// collection-check.md K10: Anki's Check Database, its K5 counts.
+    CheckDb(NoArgs),
     /// record-ops.md W1.
     DbExec(DbExecArgs),
     /// Closes the collection and opens it again (sync-ops.md S6).
@@ -726,8 +728,7 @@ impl Step {
             | Step::UpdatePreset(a)
             | Step::BuildFiltered(a)
             | Step::Import(a)
-            | Step::Export(a)
-            | Step::CheckDb(a) => Some(a),
+            | Step::Export(a) => Some(a),
             _ => None,
         }
     }

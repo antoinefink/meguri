@@ -30,7 +30,7 @@ type ArgSpec = (&'static str, bool, Arg);
 
 /// (op, its arguments): the schema's draft-op arguments. Other keys are
 /// allowed: the owning area fixes the full shape (D7.2).
-const DRAFT_ARGS: [(&str, &[ArgSpec]); 10] = [
+const DRAFT_ARGS: [(&str, &[ArgSpec]); 9] = [
     ("bury", &[("cards", true, Arg::CardRefs)]),
     ("suspend", &[("cards", true, Arg::CardRefs)]),
     ("forget", &[("cards", true, Arg::CardRefs)]),
@@ -52,7 +52,6 @@ const DRAFT_ARGS: [(&str, &[ArgSpec]); 10] = [
             ("name", true, Arg::Str),
         ],
     ),
-    ("check_db", &[]),
 ];
 
 pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
