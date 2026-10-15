@@ -83,7 +83,7 @@ deviations:
   # transform does nothing.
   - id: fp-libm-boundary
     requirement: R1889
-    summary: On macOS, an FSRS next-state interval may differ from the Linux oracle's golden by one day at a rounding boundary, and a memory state by up to relative 1e-5, as Anki on macOS does; the runner expects the Apple oracle's value there.
+    summary: On macOS, an FSRS next-state interval may differ from the Linux oracle's golden by one day at a rounding boundary, a stability by up to relative 1e-4 or 1e-5 days, and a difficulty by up to relative 1e-5, as Anki on macOS does; the runner expects the Apple oracle's value there.
     test: core/crates/meguri-testkit/tests/overlay.rs overlay_applies_on_macos_only
     scenarios: ["*"]
     pointer: /steps/*
