@@ -1,0 +1,6 @@
+{
+  "cards": 10000,
+  "description": "R1805: the first note type's first front template is 5 MiB.",
+  "name": "template-5mb",
+  "template_bytes": 5242880
+}

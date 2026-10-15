@@ -1,0 +1,9 @@
+{
+  "cards": 10000,
+  "description": "R1805: 20 notes whose second field (the first when the note type has one) holds 1 MiB of text.",
+  "large_fields": {
+    "bytes": 1048576,
+    "notes": 20
+  },
+  "name": "field-1mb"
+}

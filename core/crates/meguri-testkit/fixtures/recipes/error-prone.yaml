@@ -1,0 +1,24 @@
+# States that lead to errors and warnings: references to missing media, a
+# back template naming a field the note type lacks, an empty deck, a deck
+# with only suspended cards, a preset whose limits are zero.
+recipe: error-prone
+description: "Missing media, a broken template, empty and all-suspended decks, zero limits."
+now: "2030-01-15T10:00:00+09:00"
+presets:
+  - {name: "Zero limits", new_per_day: 0, reviews_per_day: 0}
+decks:
+  - name: "Missing media"
+    new: 2
+    due: 3
+    media: {images: 1, sounds: 0, missing: 2}
+  - name: "Broken template"
+    notetype: "broken"
+    new: 1
+    due: 2
+  - name: "Empty deck"
+  - name: "Only suspended"
+    suspended: 4
+  - name: "Nothing today"
+    preset: "Zero limits"
+    new: 5
+    due: 5

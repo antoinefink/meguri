@@ -1,0 +1,12 @@
+{
+  "cards": 10000,
+  "description": "R1805: exactly 30,000 media files in collection.media, each referenced once, written whatever the media mode.",
+  "media_files": {
+    "bytes": {
+      "counts": [10, 40, 40, 10],
+      "edges": [512, 1024, 2048, 4096, 8192]
+    },
+    "count": 30000
+  },
+  "name": "media-30k"
+}

@@ -1,0 +1,6 @@
+{
+  "cards": 20000,
+  "description": "R1805: a tag hierarchy of 10,000 nodes, ten children per node, every node a tag on at least one note.",
+  "name": "tags-10k",
+  "tag_nodes": 10000
+}

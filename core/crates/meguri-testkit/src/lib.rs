@@ -8,6 +8,7 @@
 pub mod catalog;
 pub mod diff;
 pub mod exec;
+pub mod generate;
 pub mod observe;
 pub mod report;
 pub mod scenario;

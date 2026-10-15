@@ -835,6 +835,7 @@ dependencies = [
 name = "meguri-cli"
 version = "0.0.0"
 dependencies = [
+ "jiff",
  "meguri-testkit",
  "serde_json",
  "tempfile",
@@ -922,12 +923,14 @@ name = "meguri-testkit"
 version = "0.0.0"
 dependencies = [
  "datatest-stable",
+ "fsrs",
  "granit-parser",
  "jiff",
  "meguri-model",
  "meguri-storage",
  "meguri-sync",
  "meguri-text",
+ "rand 0.9.4",
  "ryu",
  "serde",
  "serde_json",

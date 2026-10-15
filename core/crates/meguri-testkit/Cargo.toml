@@ -7,6 +7,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The generator (U11): memory states derived from generated review
+# histories, and its seeded ChaCha streams (both parity pins).
+fsrs.workspace = true
 granit-parser.workspace = true
 jiff.workspace = true
 # test-hooks: armed fault points and the steppable clock (KTD18).
@@ -17,6 +20,7 @@ meguri-storage = { workspace = true, features = ["test-hooks"] }
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
 meguri-sync = { workspace = true, features = ["test-hooks"] }
 meguri-text.workspace = true
+rand.workspace = true
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:

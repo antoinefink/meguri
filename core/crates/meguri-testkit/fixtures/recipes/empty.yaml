@@ -1,0 +1,6 @@
+# A collection with nothing to study: the default deck, the default preset
+# and one note type, no notes. First launch, empty states.
+recipe: empty
+description: "No notes: the default deck only."
+now: "2030-01-15T10:00:00+01:00"
+decks: []

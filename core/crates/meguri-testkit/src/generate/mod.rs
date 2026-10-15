@@ -1,0 +1,632 @@
+//! The synthetic collection generator (U11, R1804, R1805): seeded, valid
+//! collections whose shape follows a [`Profile`], the worst-case shapes,
+//! and the small named UI fixtures ([`recipe`]).
+//!
+//! Every row goes through meguri-storage's storage-only `CollectionBuilder`
+//! and meguri-model's records, in `Raw` scopes (rows as given, historical
+//! ids and stamps); the generator issues no SQL of its own and needs no
+//! executor. Randomness comes from the seam through [`rng`] (one ChaCha
+//! stream per part), time from the request's pinned instant, so the same
+//! request always gives the same rows: [`dump::logical_sha256`] is the
+//! check, recorded in the manifest.
+//!
+//! The output directory holds `collection.anki2`, `collection.media/` and
+//! `manifest.json`.
+
+pub mod cards;
+pub mod decks;
+pub mod dump;
+pub mod media;
+pub mod notes;
+pub mod notetypes;
+pub mod profile;
+pub mod recipe;
+pub mod revlog;
+pub mod rng;
+pub mod worst_case;
+
+use std::collections::{BTreeSet, HashSet};
+use std::fmt;
+use std::path::{Path, PathBuf};
+
+use meguri_model::clock::{FixedClock, UtcOffset};
+use meguri_model::col::Col;
+use meguri_model::config::ConfigEntry;
+use meguri_model::rng::SeededRandom;
+use meguri_model::tag::Tag;
+use meguri_model::time::{EpochMillis, EpochSecs};
+use meguri_model::usn::Usn;
+use meguri_storage::{CollectionBuilder, OpenOptions, Record, StampMode, StorageError, Table, WriteScope};
+use serde::{Deserialize, Serialize};
+
+pub use profile::{Histogram, Profile};
+pub use worst_case::WorstCase;
+
+use cards::Target;
+use rng::{Rng, Stream};
+
+/// Bumped whenever the same request would give other rows; cached outputs
+/// carry it in their manifest.
+pub const GENERATOR_VERSION: u32 = 1;
+
+/// The default pinned instant: 2030-01-15T10:00:00Z, the scenarios' clock.
+pub const DEFAULT_NOW_MS: i64 = 1_894_701_600_000;
+
+/// The desired retention every generated preset uses and every card was
+/// scheduled with.
+pub const DESIRED_RETENTION: f32 = 0.9;
+
+/// Notes per write transaction.
+const CHUNK_NOTES: usize = 2000;
+
+#[derive(Debug)]
+pub enum GenError {
+    Io { path: PathBuf, detail: String },
+    Storage(String),
+    Profile(String),
+    Recipe(String),
+    Request(String),
+}
+
+impl GenError {
+    pub(crate) fn io(path: &Path, e: impl fmt::Display) -> GenError {
+        GenError::Io {
+            path: path.to_path_buf(),
+            detail: e.to_string(),
+        }
+    }
+
+    pub(crate) fn storage(e: StorageError) -> GenError {
+        GenError::Storage(e.to_string())
+    }
+
+    pub(crate) fn open(e: impl fmt::Display) -> GenError {
+        GenError::Storage(e.to_string())
+    }
+}
+
+impl fmt::Display for GenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GenError::Io { path, detail } => write!(f, "{}: {detail}", path.display()),
+            GenError::Storage(detail) => write!(f, "storage: {detail}"),
+            GenError::Profile(detail) => write!(f, "profile: {detail}"),
+            GenError::Recipe(detail) => write!(f, "recipe: {detail}"),
+            GenError::Request(detail) => write!(f, "request: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for GenError {}
+
+/// Whether media files are written or only referenced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MediaMode {
+    /// Fields reference media; no file is written (sizes at 100k cards and
+    /// above would reach tens of gigabytes).
+    References,
+    /// Every referenced file is written, with deterministic bytes of its
+    /// sampled size; images are valid PNGs.
+    Files,
+}
+
+/// What to generate.
+#[derive(Clone, Debug)]
+pub struct Request {
+    pub profile: Profile,
+    /// Cards wanted; the result has about this many (the cards per note of
+    /// cloze note types are drawn).
+    pub cards: u64,
+    pub seed: u64,
+    /// The pinned "now": every id and stamp is at or before it.
+    pub now_ms: i64,
+    pub media: MediaMode,
+    pub worst_case: Option<WorstCase>,
+}
+
+impl Request {
+    pub fn new(profile: Profile, cards: u64, seed: u64) -> Request {
+        Request {
+            profile,
+            cards,
+            seed,
+            now_ms: DEFAULT_NOW_MS,
+            media: MediaMode::References,
+            worst_case: None,
+        }
+    }
+}
+
+/// `10k`, `100k`, `150k`, `500k`, `1m`, or a number of cards.
+pub fn parse_size(text: &str) -> Option<u64> {
+    let lower = text.trim().to_ascii_lowercase();
+    let (digits, factor) = if let Some(d) = lower.strip_suffix('k') {
+        (d, 1_000)
+    } else if let Some(d) = lower.strip_suffix('m') {
+        (d, 1_000_000)
+    } else {
+        (lower.as_str(), 1)
+    };
+    digits
+        .parse::<u64>()
+        .ok()
+        .and_then(|n| n.checked_mul(factor))
+        .filter(|&n| n > 0)
+}
+
+/// Rows written, for the manifest.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Counts {
+    pub notes: u64,
+    pub cards: u64,
+    pub revlog: u64,
+    pub notetypes: u64,
+    pub decks: u64,
+    pub presets: u64,
+    pub tags: u64,
+    pub media_refs: u64,
+    pub media_files: u64,
+    pub media_bytes: u64,
+}
+
+/// `manifest.json` of an output directory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Manifest {
+    pub generator_version: u32,
+    /// `profile`, `worst-case` or `recipe`.
+    pub kind: String,
+    /// The worst case or recipe name; the size for a profile run.
+    pub name: String,
+    pub seed: u64,
+    pub cards_requested: u64,
+    pub now_ms: i64,
+    pub profile_sha256: Option<String>,
+    pub media: MediaMode,
+    pub counts: Counts,
+    /// [`dump::logical_sha256`] of the collection.
+    pub dump_sha256: String,
+}
+
+impl Manifest {
+    pub fn load(dir: &Path) -> Result<Manifest, GenError> {
+        let path = dir.join("manifest.json");
+        let text = std::fs::read_to_string(&path).map_err(|e| GenError::io(&path, e))?;
+        serde_json::from_str(&text).map_err(|e| GenError::io(&path, e))
+    }
+
+    fn write(&self, dir: &Path) -> Result<(), GenError> {
+        let path = dir.join("manifest.json");
+        let text = crate::observe::golden_text(&serde_json::to_value(self).expect("a manifest serializes"));
+        std::fs::write(&path, text).map_err(|e| GenError::io(&path, e))
+    }
+}
+
+/// `core/crates/meguri-testkit/profiles`.
+pub fn profiles_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("profiles")
+}
+
+/// The committed shape of the user's collection, `profiles/user-shape.json`.
+pub fn user_shape() -> Result<Profile, GenError> {
+    Profile::load(&profiles_dir().join("user-shape.json"))
+}
+
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub(crate) fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// The day structure of a generated collection: `col.crt` at the rollover
+/// hour of the first day, `today` the day number of the pinned instant.
+#[derive(Clone, Copy, Debug)]
+pub struct Timeline {
+    pub now_ms: i64,
+    pub offset_secs: i64,
+    pub rollover_hour: i64,
+    /// `col.crt`, epoch seconds.
+    pub crt: i64,
+    /// Day number of `now_ms`.
+    pub today: i64,
+}
+
+impl Timeline {
+    pub fn new(now_ms: i64, offset_secs: i32, rollover_hour: u8, span_days: u64) -> Timeline {
+        let offset = i64::from(offset_secs);
+        let rollover = i64::from(rollover_hour);
+        let local = now_ms.div_euclid(1000) + offset - rollover * 3600;
+        let today_start = local.div_euclid(86_400) * 86_400 + rollover * 3600 - offset;
+        let span = i64::try_from(span_days).unwrap_or(i64::MAX / 2).min(36_500);
+        Timeline {
+            now_ms,
+            offset_secs: offset,
+            rollover_hour: rollover,
+            crt: today_start - span * 86_400,
+            today: span,
+        }
+    }
+
+    pub fn crt_ms(&self) -> i64 {
+        self.crt * 1000
+    }
+
+    /// The day number holding an instant.
+    pub fn day_of(&self, ms: i64) -> i64 {
+        (ms.div_euclid(1000) - self.crt).div_euclid(86_400)
+    }
+
+    /// An instant in day `day` at local hour `hour`, uniform within the
+    /// hour; `None` when it falls after now.
+    pub fn instant(&self, day: i64, hour: i64, rng: &mut Rng) -> Option<i64> {
+        let into_day = (hour - self.rollover_hour).rem_euclid(24) * 3600 + rng.below(3600) as i64;
+        let ms = (self.crt + day * 86_400 + into_day) * 1000 + rng.below(1000) as i64;
+        (ms <= self.now_ms).then_some(ms)
+    }
+}
+
+/// Ids taken in one table. A candidate that is taken moves up by one until
+/// it is free, as the storage rule moves a taken one (`ids-usn-mtime` I2).
+#[derive(Debug, Default)]
+pub struct Ids(HashSet<i64>);
+
+impl Ids {
+    pub fn claim(&mut self, candidate: i64) -> i64 {
+        let mut id = candidate;
+        while !self.0.insert(id) {
+            id += 1;
+        }
+        id
+    }
+}
+
+/// The rows of one note, ready to write.
+#[derive(Debug, Default)]
+pub struct NoteRows {
+    pub note: Option<meguri_model::note::Note>,
+    pub cards: Vec<meguri_model::card::Card>,
+    pub revlog: Vec<meguri_model::revlog::RevlogEntry>,
+    pub media: Vec<media::MediaFile>,
+    pub tags: Vec<String>,
+}
+
+/// Rows waiting for the next write transaction.
+#[derive(Default)]
+pub(crate) struct Pending {
+    notes: Vec<meguri_storage::RowImage>,
+    cards: Vec<meguri_storage::RowImage>,
+    revlog: Vec<meguri_storage::RowImage>,
+    notes_in_batch: usize,
+}
+
+/// The output being written: the builder, the clock its scopes stamp
+/// with, counts and the tags seen.
+pub(crate) struct Output<'a> {
+    pub builder: CollectionBuilder,
+    /// Where the collection is built: the system's temporary directory.
+    /// Random-key inserts into a file on a shared mount (Docker Desktop's
+    /// bind mounts) cost a round trip per page, which made 1M cards take
+    /// longer than their budget; the finished file is moved into `dir`.
+    work: tempfile::TempDir,
+    pub clock: FixedClock,
+    pub dir: &'a Path,
+    pub media_dir: PathBuf,
+    pub media: MediaMode,
+    pub counts: Counts,
+    tags: BTreeSet<String>,
+    tag_keys: HashSet<String>,
+    pending: Pending,
+}
+
+impl<'a> Output<'a> {
+    /// Creates the collection with its `col` row and config rows; it is
+    /// placed at `dir/collection.anki2` by [`Output::finish`].
+    pub fn create(
+        dir: &'a Path,
+        timeline: &Timeline,
+        config: &[ConfigEntry],
+        media: MediaMode,
+    ) -> Result<Output<'a>, GenError> {
+        std::fs::create_dir_all(dir).map_err(|e| GenError::io(dir, e))?;
+        let path = dir.join("collection.anki2");
+        let work = tempfile::Builder::new()
+            .prefix("meguri-generate-")
+            .tempdir()
+            .map_err(|e| GenError::io(&std::env::temp_dir(), e))?;
+        for stale in [
+            path.clone(),
+            sibling(&path, "-wal"),
+            sibling(&path, "-shm"),
+            dir.join("manifest.json"),
+        ] {
+            if stale.exists() {
+                std::fs::remove_file(&stale).map_err(|e| GenError::io(&stale, e))?;
+            }
+        }
+        let media_dir = dir.join("collection.media");
+        if media_dir.exists() {
+            std::fs::remove_dir_all(&media_dir).map_err(|e| GenError::io(&media_dir, e))?;
+        }
+        std::fs::create_dir_all(&media_dir).map_err(|e| GenError::io(&media_dir, e))?;
+        let clock = FixedClock::new(
+            timeline.now_ms,
+            UtcOffset::from_seconds(timeline.offset_secs as i32).unwrap_or(UtcOffset::UTC),
+        );
+        let random = SeededRandom::new(0);
+        let col = Col {
+            version: Col::SCHEMA_VERSION,
+            created: EpochSecs(timeline.crt),
+            modified: EpochMillis(timeline.now_ms),
+            schema_modified: EpochMillis(timeline.crt_ms()),
+            last_sync: EpochMillis(0),
+            usn: Usn(0),
+            dirty: 0,
+            legacy: Default::default(),
+        };
+        let building = work.path().join("collection.anki2");
+        let builder = CollectionBuilder::create(&building, &col, config, &OpenOptions::new(&clock, &random))
+            .map_err(GenError::storage)?;
+        Ok(Output {
+            builder,
+            work,
+            clock,
+            dir,
+            media_dir,
+            media,
+            counts: Counts::default(),
+            tags: BTreeSet::new(),
+            tag_keys: HashSet::new(),
+            pending: Pending::default(),
+        })
+    }
+
+    /// Runs `f` in one `Raw` scope and commits it.
+    pub fn scope<T>(&self, f: impl FnOnce(&mut WriteScope<'_>) -> Result<T, StorageError>) -> Result<T, GenError> {
+        let mut scope = self
+            .builder
+            .begin(StampMode::Raw, &self.clock)
+            .map_err(GenError::storage)?;
+        let value = f(&mut scope).map_err(GenError::storage)?;
+        scope.commit().map_err(GenError::storage)?;
+        Ok(value)
+    }
+
+    /// Queues a note's rows (and writes its media files); writes a batch
+    /// when it is full.
+    pub fn push(&mut self, rows: NoteRows) -> Result<(), GenError> {
+        if let Some(note) = &rows.note {
+            self.pending.notes.push(note.to_cells());
+            self.counts.notes += 1;
+        }
+        for card in &rows.cards {
+            self.pending.cards.push(card.to_cells());
+        }
+        for entry in &rows.revlog {
+            self.pending.revlog.push(entry.to_cells());
+        }
+        self.counts.cards += rows.cards.len() as u64;
+        self.counts.revlog += rows.revlog.len() as u64;
+        for file in &rows.media {
+            self.counts.media_refs += 1;
+            if self.media == MediaMode::Files {
+                media::write_file(&self.media_dir, file)?;
+                self.counts.media_files += 1;
+                self.counts.media_bytes += file.bytes;
+            }
+        }
+        for tag in rows.tags {
+            if self.tag_keys.insert(tag.to_lowercase()) {
+                self.tags.insert(tag);
+            }
+        }
+        self.pending.notes_in_batch += 1;
+        if self.pending.notes_in_batch >= CHUNK_NOTES {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    pub fn flush(&mut self) -> Result<(), GenError> {
+        let mut pending = std::mem::take(&mut self.pending);
+        if pending.notes.is_empty() && pending.cards.is_empty() && pending.revlog.is_empty() {
+            return Ok(());
+        }
+        // In id order, so the batch's inserts touch neighbouring pages.
+        for rows in [&mut pending.notes, &mut pending.cards, &mut pending.revlog] {
+            rows.sort_unstable_by_key(|row| row[0].as_i64());
+        }
+        self.scope(|scope| {
+            scope.insert_rows(Table::Notes, &pending.notes)?;
+            scope.insert_rows(Table::Cards, &pending.cards)?;
+            scope.insert_rows(Table::Revlog, &pending.revlog)?;
+            Ok(())
+        })
+    }
+
+    /// Writes the tag rows, the closing config rows and the manifest, and
+    /// closes the collection.
+    pub fn finish(
+        mut self,
+        closing_config: &[ConfigEntry],
+        manifest: impl FnOnce(Counts) -> Manifest,
+    ) -> Result<Manifest, GenError> {
+        self.flush()?;
+        let tags: Vec<_> = self
+            .tags
+            .iter()
+            .map(|name| {
+                Tag {
+                    name: name.clone(),
+                    usn: Usn::PENDING,
+                    collapsed: false,
+                    config: None,
+                }
+                .to_cells()
+            })
+            .collect();
+        self.counts.tags = tags.len() as u64;
+        self.scope(|scope| {
+            scope.insert_rows(Table::Tags, &tags)?;
+            for entry in closing_config {
+                scope.put_config_entry(entry)?;
+            }
+            Ok(())
+        })?;
+        let dir = self.dir;
+        let counts = self.counts.clone();
+        let built = self.builder.finish().map_err(GenError::storage)?;
+        let mut manifest = manifest(counts);
+        manifest.dump_sha256 = dump::logical_sha256(&built)?;
+        for suffix in ["", "-wal"] {
+            let from = sibling(&built, suffix);
+            if from.exists() {
+                move_file(&from, &sibling(&dir.join("collection.anki2"), suffix))?;
+            }
+        }
+        drop(self.work);
+        manifest.write(dir)?;
+        Ok(manifest)
+    }
+}
+
+/// Renames `from` to `to`, or copies it when they are on different file
+/// systems.
+fn move_file(from: &Path, to: &Path) -> Result<(), GenError> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to).map_err(|e| GenError::io(to, e))?;
+    std::fs::remove_file(from).map_err(|e| GenError::io(from, e))
+}
+
+/// A config row as the generator writes it: JSON text, pending usn, the
+/// collection's creation second.
+pub(crate) fn config_entry(key: &str, json: &str, timeline: &Timeline) -> ConfigEntry {
+    ConfigEntry {
+        key: key.to_owned(),
+        usn: Usn::PENDING,
+        mtime: EpochSecs(timeline.crt),
+        value: json.as_bytes().to_vec(),
+    }
+}
+
+/// The config rows a generated collection starts with: the scheduler
+/// version the open gate requires, FSRS and the load balancer on (R1804),
+/// the rollover hour and the current deck.
+pub(crate) fn base_config(timeline: &Timeline) -> Vec<ConfigEntry> {
+    vec![
+        config_entry("activeDecks", "[1]", timeline),
+        config_entry("curDeck", "1", timeline),
+        config_entry("fsrs", "true", timeline),
+        config_entry("loadBalancerEnabled", "true", timeline),
+        config_entry("rollover", &timeline.rollover_hour.to_string(), timeline),
+        config_entry("schedVer", "2", timeline),
+    ]
+}
+
+/// Generates a collection into `dir` (replacing what is there).
+pub fn generate(request: &Request, dir: &Path) -> Result<Manifest, GenError> {
+    request.profile.check()?;
+    if request.cards == 0 {
+        return Err(GenError::Request("no cards requested".to_owned()));
+    }
+    let profile = &request.profile;
+    let worst = request.worst_case.as_ref();
+    let media = match worst {
+        Some(w) if w.media_files.is_some() => MediaMode::Files,
+        _ => request.media,
+    };
+    let span = profile.totals.span_days.max(1);
+    let timeline = Timeline::new(request.now_ms, profile.utc_offset_secs, profile.rollover_hour, span);
+    let mut out = Output::create(dir, &timeline, &base_config(&timeline), media)?;
+
+    let scale = request.cards as f64 / profile.totals.cards.max(1) as f64;
+    let mut structure = Rng::stream(request.seed, Stream::Structure, 0);
+    let mut ids = AllIds::default();
+    let presets = decks::presets(profile, worst, &timeline, &mut ids.presets);
+    let deck_plan = decks::decks(profile, worst, &presets, &timeline, &mut ids.decks, &mut structure);
+    let types = notetypes::build(profile, worst, &timeline, &mut ids.notetypes, &mut structure);
+    let tag_pool = notes::TagPool::build(profile, worst, scale, &mut structure);
+    out.counts.presets = presets.len() as u64;
+    out.counts.decks = deck_plan.decks.len() as u64;
+    out.counts.notetypes = types.len() as u64;
+    out.scope(|scope| {
+        for preset in &presets {
+            scope.put(preset)?;
+        }
+        for deck in &deck_plan.decks {
+            scope.put(&deck.record)?;
+        }
+        for nt in &types {
+            scope.put_notetype(&nt.record)?;
+        }
+        Ok(())
+    })?;
+
+    let assignment = notes::assign_notetypes(profile, &types, request.cards, scale, &mut structure);
+    let fsrs = revlog::Fsrs::new();
+    let ctx = notes::NoteContext {
+        profile,
+        worst,
+        timeline: &timeline,
+        types: &types,
+        decks: &deck_plan,
+        tags: &tag_pool,
+        fsrs: &fsrs,
+        seed: request.seed,
+        total_notes: assignment.len() as u64,
+    };
+    for (index, &nt) in assignment.iter().enumerate() {
+        let rows = notes::generate_note(&ctx, index as u64, nt, &mut ids);
+        out.push(rows)?;
+    }
+
+    let closing = vec![
+        config_entry("curModel", &types[0].record.id.0.to_string(), &timeline),
+        config_entry("nextPos", &(assignment.len() as u64 + 1).to_string(), &timeline),
+    ];
+    let (kind, name) = match worst {
+        Some(w) => ("worst-case", w.name.clone()),
+        None => ("profile", request.cards.to_string()),
+    };
+    let profile_sha256 = profile.sha256();
+    out.finish(&closing, |counts| Manifest {
+        generator_version: GENERATOR_VERSION,
+        kind: kind.to_owned(),
+        name,
+        seed: request.seed,
+        cards_requested: request.cards,
+        now_ms: request.now_ms,
+        profile_sha256: Some(profile_sha256),
+        media,
+        counts,
+        dump_sha256: String::new(),
+    })
+}
+
+/// The id sets of the tables the generator allocates ids in.
+#[derive(Debug, Default)]
+pub struct AllIds {
+    pub notes: Ids,
+    pub cards: Ids,
+    pub revlog: Ids,
+    pub decks: Ids,
+    pub presets: Ids,
+    pub notetypes: Ids,
+}
+
+/// The target state drawn for a card from the profile's card state mix.
+pub(crate) fn draw_target(profile: &Profile, rng: &mut Rng) -> Target {
+    match profile::sample_mix(&profile.cards.states, rng).unwrap_or("new") {
+        "learning" => Target::Learning,
+        "relearning" => Target::Relearning,
+        "review" => Target::Review(cards::Due::Any),
+        "suspended" => Target::Suspended,
+        "buried" => Target::Buried,
+        _ => Target::New,
+    }
+}

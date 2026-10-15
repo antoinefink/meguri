@@ -1,0 +1,14 @@
+# The review screen: one deck with cards due now in every queue, at a
+# pinned instant (question, answer, menu and congratulations states).
+recipe: review-ready
+description: "One deck with due, learning and new cards at the pinned instant."
+now: "2030-01-15T10:00:00+01:00"
+decks:
+  - name: "Review"
+    new: 5
+    learning: 2
+    due: 30
+    later: 10
+    tags: ["review"]
+    fields: ["Question {n}", "Answer {n}"]
+    media: {images: 1, sounds: 0}
