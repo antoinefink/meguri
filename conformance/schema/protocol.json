@@ -112,7 +112,7 @@
       "additionalProperties": false
     },
     "check_request": {
-      "description": "specs/conformance/collection-check.md K2-K8, outside any scenario, in the worker's zone (its TZ): copy <dir>/collection.anki2 and <dir>/collection.anki2-wal when present into scratch, freeze the clock at now, open the copy with Anki's Python layer in English and report. The worker never writes dir (tools/mg mounts it read-only). Errors: no_collection when dir holds no collection.anki2 file, open_failed when Anki cannot open the copy, session_open while an interactive session is open; any other failure is anki_error or internal_error.",
+      "description": "specs/conformance/collection-check.md K2-K8 and K11, outside any scenario, in the worker's zone (its TZ): copy <dir>/collection.anki2 and <dir>/collection.anki2-wal when present into scratch, freeze the clock at now, open the copy with Anki's Python layer in English and report. The worker never writes dir (tools/mg mounts it read-only). Errors: no_collection when dir holds no collection.anki2 file, open_failed when Anki cannot open the copy, session_open while an interactive session is open; any other failure is anki_error or internal_error.",
       "type": "object",
       "required": ["cmd", "dir", "now"],
       "properties": {
@@ -121,7 +121,8 @@
         "dir": { "type": "string", "minLength": 1, "description": "A directory the worker can read." },
         "now": { "type": "integer", "minimum": 0, "description": "The instant the clock is frozen at, epoch seconds." },
         "decks": { "type": "array", "items": { "type": "string" }, "description": "K6: deck names, components joined by ::." },
-        "render_notes": { "type": "array", "items": { "type": "integer" }, "description": "K8: note ids." }
+        "render_notes": { "type": "array", "items": { "type": "integer" }, "description": "K8: note ids." },
+        "schedule": { "type": "boolean", "description": "K11: when true, the response's check has schedule." }
       },
       "additionalProperties": false
     },
@@ -143,7 +144,8 @@
             "decks": { "type": "object" },
             "render": { "type": "object" },
             "check_db": { "type": "object" },
-            "changed_tables": { "type": "array", "items": { "type": "string" } }
+            "changed_tables": { "type": "array", "items": { "type": "string" } },
+            "schedule": { "type": "object", "description": "K11: present exactly when the request had schedule true." }
           },
           "additionalProperties": false
         },
