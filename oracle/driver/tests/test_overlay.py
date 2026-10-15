@@ -82,12 +82,52 @@ class Class(unittest.TestCase):
         other = day("/steps/2/next_states/#c2/hard/scheduled_days", 9, 10, 9.5)
         self.assertEqual(outside([other, chained_good]), [chained_good["pointer"]])
 
-    def test_memory_values_within_relative_1e5_are_in_the_class(self):
-        self.assertEqual(outside([{"pointer": f"{ROW}/7", "linux": 13.836124, "apple": 13.836125}]), [])
-        self.assertEqual(outside([{"pointer": f"{CARD}/again/learning/memory_state/difficulty",
-                                   "linux": 7.3921676, "apple": 7.392168}]), [])
-        self.assertEqual(outside([{"pointer": f"{ROW}/1", "linux": 2.3065, "apple": 2.3066}]), [f"{ROW}/1"])
-        self.assertEqual(outside([{"pointer": f"{ROW}/1", "linux": 2, "apple": 2.0000001}]), [f"{ROW}/1"])
+    def test_stabilities_within_relative_1e4_or_1e5_apart_are_in_the_class(self):
+        # F8.3: a stability is in the class when |apple - linux| <= max(1e-4 m, 1e-5).
+        for ptr, linux, apple in (
+            (f"{ROW}/7", 13.836124, 13.836125),  # relative 7e-8
+            # fp-probe/corpus/next-states-029 row 820: 3.9e-7 apart, under the floor (relative 9.4e-5)
+            (f"{ROW}/1", 0.0041170507, 0.0041174362),
+            (f"{ROW}/1", 0.0011, 0.0011005),  # relative 4.5e-4, but 5e-7 apart
+            # fp-probe/corpus/next-states-089 row 977, the easy stability: relative 1.04e-5
+            (f"{ROW}/10", 59.598206, 59.598827),
+            (f"{ROW}/1", 2.3065, 2.3066),  # relative 4.3e-5
+            (f"{CARD}/again/learning/memory_state/stability", 0.0011, 0.0011005),
+            (f"{CARD}/good/review/memory_state/stability", 2.3065, 2.3066),
+            (f"{CARD}/easy/memory_state/stability", 59.598206, 59.598827),
+        ):
+            with self.subTest(ptr=ptr, linux=linux, apple=apple):
+                self.assertEqual(outside([{"pointer": ptr, "linux": linux, "apple": apple}]), [])
+
+    def test_stabilities_apart_by_more_are_not(self):
+        for ptr, linux, apple in (
+            (f"{ROW}/1", 2.3065, 2.3075),  # relative 4.3e-4, 1e-3 apart
+            (f"{ROW}/4", 0.0041, 0.0042),  # 1e-4 apart, above the floor
+            (f"{CARD}/hard/review/memory_state/stability", 0.0041, 0.0042),
+            (f"{ROW}/1", 2, 2.0000001),  # not both written with a fraction
+        ):
+            with self.subTest(ptr=ptr, linux=linux, apple=apple):
+                self.assertEqual(outside([{"pointer": ptr, "linux": linux, "apple": apple}]), [ptr])
+
+    def test_difficulties_keep_relative_1e5(self):
+        inside = (f"{CARD}/again/learning/memory_state/difficulty", 7.3921676, 7.392168)  # relative 5e-8
+        self.assertEqual(outside([{"pointer": inside[0], "linux": inside[1], "apple": inside[2]}]), [])
+        for ptr in (f"{CARD}/again/learning/memory_state/difficulty", f"{ROW}/2", f"{ROW}/11"):
+            # relative 4.5e-5: inside a stability's bound, not a difficulty's
+            with self.subTest(ptr=ptr):
+                self.assertEqual(outside([{"pointer": ptr, "linux": 7.3921676, "apple": 7.3925}]), [ptr])
+        # The floor is for stability only: 5e-7 apart is relative 4.5e-4 here.
+        self.assertEqual(outside([{"pointer": f"{ROW}/5", "linux": 0.0011, "apple": 0.0011005}]), [f"{ROW}/5"])
+
+    def test_reasons_name_the_bound_of_the_member(self):
+        reasons = {e["pointer"]: e["reason"] for e in ov.outside_class([
+            {"pointer": f"{ROW}/1", "linux": 2.3065, "apple": 2.3075},
+            {"pointer": f"{ROW}/2", "linux": 7.3921676, "apple": 7.3925},
+        ])}
+        self.assertIn("1e-4", reasons[f"{ROW}/1"])
+        self.assertIn("stabilit", reasons[f"{ROW}/1"])
+        self.assertIn("difficult", reasons[f"{ROW}/2"])
+        self.assertNotIn("1e-4", reasons[f"{ROW}/2"])
 
     def test_other_pointers_are_not(self):
         for ptr, linux, apple in (

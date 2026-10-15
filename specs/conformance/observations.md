@@ -89,6 +89,8 @@ The runner compares the golden's observations (expected) with the executor's (ac
   | any number inside `stats` | 1e-6 |
 
   Card rows, review-log rows and every other kind are exact: a stored value that a tolerance could hide is a real difference.
+
+  These tolerances compare Meguri with the expected values. The `fp-libm-boundary` class (`float-determinism.md` F8.3) allows a wider stability difference between the Linux and Apple oracles. Such a difference reaches this comparison only as an overlay value, never as a tolerance (`float-determinism.md` F11.3).
 - The first divergence is the smallest step index among the differing pointers. Differences are reported in pointer order (members in key order, items in index order).
 
 ## O8. `db_dump`

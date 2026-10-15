@@ -20,7 +20,8 @@ The scheduling rules the probe exercises are `sched/fsrs-transitions` (review ca
   | Meguri-macOS | `meguri-cli fp-probe` natively on this Mac | Apple |
   | Meguri-Linux | `meguri-cli fp-probe` in the dev container | glibc |
 
-- Expected: Meguri-macOS equals the Apple oracle bit for bit, and Meguri-Linux equals the Linux oracle bit for bit (same crate, same library). The Linux and Apple oracles differ only inside the class of F8, on the order of 0.1–1 % of intervals.
+- Expected: Meguri-macOS equals the Apple oracle bit for bit, and Meguri-Linux equals the Linux oracle bit for bit (same crate, same library). The Linux and Apple oracles differ only inside the class of F8.
+- How often the oracles differ: the two libraries disagree in the last bit on a small share of calls (KTD24 estimates 0.6 % of FSRS-range inputs). That changes a memory value on a few percent of inputs, but an interval only when the change carries a rounded quantity across a half. The probe found a differing memory value on 3.3 % of its inputs and no differing interval among 400,000 (F11). The plan expected 0.1–1 % of intervals to differ, the share of differing library results; intervals differ far less often. At this corpus size a days rate of 0, or a handful of days, is normal and not a sign that the Apple side did not run (F10.1 checks that separately).
 - Decision (recorded in F11 once the probe has run): when Meguri-macOS equals the Apple oracle on the whole corpus and the fuzz table agrees on every side, Meguri keeps the platform library and adopts the overlay goldens (F7). When Meguri-macOS differs from the Apple oracle, overlays are not adopted and a new unit vendors a glibc-equivalent math port into a patched fsrs (the KTD24 fallback).
 - The milestone check on the user's own collection (aggregate agreement counts only) belongs to U19 and U246 and uses this lane; it is not specified here.
 
@@ -138,7 +139,8 @@ Input 4 of `fp-probe/next-states-edges` is the review card of `conformance/golde
 `{fsrs_next: {param_sets, inputs}}` in an `observe` list, at most once per observe step:
 
 - `param_sets`: an object with at least one member; each name matches `^[a-z0-9][a-z0-9-]*$`, each value is a list of 0, 17, 19 or 21 numbers.
-- `inputs`: a list of 1 to 1,000 objects with exactly the members of F2.1 and their ranges; `params` names a member of `param_sets`.
+- `inputs`: a list of 1 to 1,000 objects with exactly the members of F2.1, each in F2.1's range except `id`; `params` names a member of `param_sets`.
+- `id` is any integer from 0 to 2^53 (`dsl.md`'s integer limit; `uint` in `scenario.schema.json`), not only the corpus's 0–99,999. It only labels the input: ids need not be distinct or in order, and rows follow input order whatever the ids.
 - Numbers are read as `f32` per `model/json-numbers#N2` where F2.1 says `f32`, and parameter values likewise.
 - Anything else is `invalid_scenario`. No valid input is refused: the observation has no rejection kinds.
 
@@ -286,7 +288,20 @@ Why these points: a one-ulp change of `u` can change a result only where a round
 
 ### F8.3 Memory entries
 
-A memory entry is in the class when `linux` and `apple` are both numbers written with a fraction or an exponent (O6), differ, and `|apple − linux| ≤ 1e-5 × max(|linux|, |apple|)`, the R1886 tolerance for FSRS memory states.
+A memory entry is in the class when `linux` and `apple` are both numbers written with a fraction or an exponent (O6), they differ, and, with `m = max(|linux|, |apple|)`:
+
+- a stability (the member `stability` of F8.1, or `fsrs_next` columns 1, 4, 7, 10): `|apple − linux| ≤ max(1e-4 × m, 1e-5)`, a relative bound of 1e-4 or an absolute floor of 1e-5 days, whichever is larger;
+- a difficulty (the member `difficulty`, or columns 2, 5, 8, 11): `|apple − linux| ≤ 1e-5 × m`, the R1886 tolerance.
+
+The rule uses only the two values and the pointer.
+
+Why stability needs more room (evidence in F11.1). FSRS computes a new stability from the difference between a math-library result close to 1 and 1 itself. After a lapse, the new stability is, unless a cap applies, a multiple of `(1 + S)^w − 1`, with `S` the old stability and `w` a parameter of about 0.2. After a recall, it grows with `e^x − 1`, where `x` is a parameter times `1 − R` and the retrievability `R` is just below 1 for a card reviewed early. When that difference is small, one unit in the last place of the power or exponential (2^-23, about 1.19e-7, between 1 and 2) is a large part of it. The corpus figures below are worked out in 64-bit floats for the 85 % of inputs with the default or a 21-value set:
+
+- After a lapse the relative difference is `2^-23 / ((1 + S)^w − 1)`: 9.4e-5 at `S` = 0.0048 and about 5e-4 near the 0.001 minimum. In absolute terms it stays small, because the cap keeps the factor in front of the difference below about `1/w`. Over the corpus, wherever the relative difference exceeds 1e-5, the absolute difference is at most 5.1e-7 days. The floor of 1e-5 days leaves a margin of about 20 and is a tenth of the precision at which card data stores stability (`model/card-data-json#C4`).
+- After a recall the relative difference is roughly the factor in front of `e^x − 1` times 2^-23, and smaller when `e^x − 1` is not small. It was 1.04e-5 on the probe and at most 1.9e-5 for any corpus input. To exceed 1e-4, a parameter set would need a factor more than five times the corpus's largest.
+- Difficulty involves no such difference: it differed by one or two units in the last place (at most relative 1.9e-7) on the probe.
+
+The bound covers only the differences between the two oracles. Meguri's comparison with the expected values keeps O7's relative 1e-5 (F11.3).
 
 ### F8.4 Examples
 
@@ -298,13 +313,23 @@ A memory entry is in the class when `linux` and `apple` are both numbers written
 | a good day entry with `unrounded` 14.972222 on both sides, `linux` 13, `apple` 14 | yes: `Δ` is 2.472222, so `u − Δ` is 12.5 |
 | an easy day entry with no boundary of its own, `linux` 26, `apple` 27, in a row whose good day entry is in the class | yes: Easy follows Good |
 | `/steps/0/fsrs_next/rows/417/7`, `linux` 13.836124, `apple` 13.836125 | yes: relative 7e-8 |
-| a stability entry with `linux` 2.3065, `apple` 2.3066 | no: relative 4.3e-5 |
+| `fp-probe/corpus/next-states-029` `/steps/0/fsrs_next/rows/820/1` (an again stability), `linux` 0.0041170507, `apple` 0.0041174362 | yes: 3.9e-7 apart, under the 1e-5 floor (relative 9.4e-5) |
+| a stability entry with `linux` 0.0011, `apple` 0.0011005 | yes: relative 4.5e-4, but only 5e-7 apart, under the floor |
+| `fp-probe/corpus/next-states-089` `/steps/0/fsrs_next/rows/977/10` (an easy stability), `linux` 59.598206, `apple` 59.598827 | yes: relative 1.04e-5, under 1e-4 |
+| a stability entry with `linux` 2.3065, `apple` 2.3066 | yes: relative 4.3e-5 |
+| a stability entry with `linux` 2.3065, `apple` 2.3075 | no: relative 4.3e-4, and 1e-3 apart |
+| a stability entry with `linux` 0.0041, `apple` 0.0042 | no: 1e-4 apart, above the floor (relative 2.4e-2) |
+| a stability entry with `linux` 2 (written without a fraction), `apple` 2.0000001 | no: not both written with a fraction |
+| `/steps/2/next_states/#c1/again/learning/memory_state/difficulty`, `linux` 7.3921676, `apple` 7.392168 | yes: relative 5e-8 |
+| a difficulty entry with `linux` 7.3921676, `apple` 7.3925 | no: relative 4.5e-5; difficulty keeps 1e-5 |
 | `/steps/2/next_states/#c1/current/memory_state/stability` | no: `current` is stored data |
 | `/steps/3/card/#c1/data/s`, `/steps/0/fuzz_table/rows/12/5` | no: not a next state |
 
 ### F8.5 What the class leaves out
 
 A boundary flip can reach later steps: answering at a flipped interval stores another due date, and a memory state that rounds differently in the card data (`model/card-data-json#C4`) feeds every later state. Those differences are outside the class, so such a scenario fails on macOS until a decision (F11). Scenarios meant for both platforms observe next states before answering where they can. The scheduler units revisit this class with the probe's evidence.
+
+The day rules keep relative 1e-5 for the two unrounded intervals (F8.2 rules 2 and 4), while F8.3 allows a stability up to relative 1e-4. An unrounded interval is the stability times a factor both sides compute alike, so a day flip caused by a stability difference above relative 1e-5 is outside the class. It then goes to a decision with its evidence. The probe had no such flip (F11.2).
 
 ### F8.6 The deviation entry
 
@@ -391,16 +416,49 @@ The status is `fail` when a gate pair has any difference, when the fuzz table di
 
 ## F11. Decision record
 
-Filled in after the probe has run on the committed corpus, with the report's numbers. Until then the decision is pending, and no overlay may be adopted on a scheduler area's goldens.
+Each side of the probe ran on the committed corpus on 2026-10-15, and the numbers below come from those runs. The single `tools/mg fp-probe` job could not run yet: it needs U14 integrated, so that one checkout has both `oracle/` and Meguri's probe. The decision applies from now on. The first green `tools/mg fp-probe` on `feat/meguri-v1` after U14 merges must give every number below; its run id and commit then replace "pending" in the first two rows. If it gives any other number, the decision is pending again until this section is revised, and no overlay may be adopted on a scheduler area's goldens in the meantime.
 
 | Item | Value |
 |---|---|
-| Probe run | pending |
-| Date, commit | pending |
-| Corpus `sha256` | pending |
-| Linux vs Apple oracle: differing inputs, days (rate), memory values, entries outside the class | pending |
-| Apple oracle vs Meguri-macOS: differences | pending |
-| Linux oracle vs Meguri-Linux: differences | pending |
-| Fuzz table: mismatches | pending |
-| Decision | pending: overlays adopted, or a new unit for a patched fsrs with a vendored glibc-equivalent math port |
-| Recorded by | pending |
+| Probe run | Sides run one at a time. Oracle sides: the committed goldens and overlays of `fp-probe/corpus`. The Apple side is reproduced by `tools/mg oracle compare --platform apple fp-probe/corpus`: 101 of 101 scenarios pass, with 5,549 overlay entries applied. Meguri sides: `meguri-cli fp-probe` on macOS and in the dev container, in the U14 implementer's probe run `20261015T221715Z-93715`. The integrated run: pending. |
+| Date, commit | 2026-10-15. The Apple compare ran at `spec/U14` 329234e; the Meguri sides at `unit/U14` 3d5af28 with uncommitted changes. The integrated run: pending. |
+| Corpus `sha256` | `c1daa0fcd5dc5a6a8230acd609c8f40de70edb00955e74d9ec79c27f80c14306` (100,000 inputs) |
+| Linux vs Apple oracle | 3,288 of 100,000 inputs differ. 0 of 400,000 days differ (rate 0.0). 5,549 memory values differ: 4,915 stabilities and 634 difficulties. 12 entries were outside the class as first written (every memory value within relative 1e-5). None is outside it under F8.3 as revised (F11.1). |
+| Apple oracle vs Meguri-macOS | 0 differences |
+| Linux oracle vs Meguri-Linux | 0 differences |
+| Fuzz table | 0 mismatches: 10,000 pairs × 20 intervals are equal on all four sides. `fp-probe/corpus/fuzz-table` has no overlay. |
+| Decision | Overlays adopted. Meguri keeps the platform math library (KTD24), and F8.3 is widened for stability. The KTD24 fallback (a patched fsrs with a vendored glibc-equivalent math port) is not started. O7 is unchanged (F11.3). |
+| Recorded by | spec writer, session `s-20261015T223556Z-c74bba35` (U14) |
+
+### F11.1 The entries outside the first class
+
+All 12 are stabilities in `fp-probe/corpus` scenarios. `Row` is the input's row in its scenario and `id` its line in `inputs.jsonl`:
+
+| Scenario | Row (`id`) | Column | Input `s`, set | `linux` | `apple` | Relative | Apart |
+|---|---|---|---|---|---|---|---|
+| `next-states-007` | 429 (7429) | 1 `again_s` | 0.0155, `fsrs6-c` | 0.010866672 | 0.010866291 | 3.5e-5 | 3.8e-7 |
+| `next-states-009` | 529 (9529) | 1 `again_s` | 0.0112895155, `default` | 0.008719591 | 0.0087199425 | 4.0e-5 | 3.5e-7 |
+| `next-states-017` | 638 (17638) | 1 `again_s` | 0.0382, `default` | 0.026549045 | 0.026548726 | 1.2e-5 | 3.2e-7 |
+| `next-states-019` | 18 (19018) | 1 `again_s` | 0.0331, `fsrs6-c` | 0.025712885 | 0.025713312 | 1.7e-5 | 4.3e-7 |
+| `next-states-020` | 503 (20503) | 1 `again_s` | 0.0368, `fsrs6-c` | 0.033080965 | 0.033080474 | 1.5e-5 | 4.9e-7 |
+| `next-states-026` | 627 (26627) | 1 `again_s` | 0.0096, `fsrs6-a` | 0.008743496 | 0.008743873 | 4.3e-5 | 3.8e-7 |
+| `next-states-029` | 820 (29820) | 1 `again_s` | 0.0048447875, `default` | 0.0041170507 | 0.0041174362 | 9.4e-5 | 3.9e-7 |
+| `next-states-051` | 896 (51896) | 1 `again_s` | 0.0155, `fsrs6-c` | 0.013848968 | 0.013848482 | 3.5e-5 | 4.9e-7 |
+| `next-states-087` | 748 (87748) | 1 `again_s` | 0.05237645, `fsrs6-c` | 0.04590779 | 0.045908276 | 1.1e-5 | 4.9e-7 |
+| `next-states-087` | 768 (87768) | 1 `again_s` | 0.0382, `default` | 0.027307305 | 0.027306978 | 1.2e-5 | 3.3e-7 |
+| `next-states-089` | 977 (89977) | 10 `easy_s` | 36.2029, `fsrs6-c` | 59.598206 | 59.598827 | 1.04e-5 | 6.2e-4 |
+| `next-states-096` | 643 (96643) | 1 `again_s` | 0.013814153, `default` | 0.011778707 | 0.011778318 | 3.3e-5 | 3.9e-7 |
+
+Each is one unit in the last place of the library result that F8.3 names. For the 11 again stabilities, `2^-23 / ((1 + s)^w − 1)`, worked from the input's `s` and its set's `w`, gives the relative difference to within 1 %. For the easy stability, one unit in the last place of the exponential gives 1.042e-5, which is the observed value. Every other memory entry was already within relative 1e-5: at most 7.7e-6 for stabilities and 1.9e-7 for difficulties.
+
+Widening F8.3 changes only which entries goldens-check accepts; the overlays stay as recorded.
+
+### F11.2 Intervals
+
+No interval differed. The unrounded intervals can be recomputed in 64-bit floats from the differing hard, good and easy stabilities. That recomputation finds 6 inputs where a rounded quantity of F8.2 (`round(u)`, `u − Δ` or `u + Δ`) moved by one. All 6 have intervals above 2,800 days, where one unit in the last place is 0.0002 to 0.002 day. In each, the result was the same day on both sides: a moved bound changes the fuzz pick for only some fuzz factors, and a moved `round(u)` matters only next to the current interval (`sched/fuzz#Z5`). Day entries in overlays are therefore expected to be rare, and the day rules of F8.2 are unchanged and still untested by real entries.
+
+### F11.3 O7 keeps relative 1e-5
+
+O7's tolerance compares Meguri with the expected values, not the two oracles with each other. On macOS the expected values include the overlay's exact Apple values (F9), and Meguri-macOS equals the Apple oracle bit for bit. On Linux, Meguri-Linux equals the Linux oracle bit for bit. So no comparison needs more than 1e-5, and a wider O7 would only loosen R1886 for Meguri.
+
+Some comparisons cross platforms without an overlay: live chains (F9), and the U19 and U246 milestone counts on the user's collection. There, a stability that differs by more than relative 1e-5 is reported, and F8.3 is the explanation that R1902 asks for.
