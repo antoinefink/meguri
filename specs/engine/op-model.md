@@ -5,7 +5,7 @@ Requirements: R1490, R1494, R1495, R1658, R1790, R1860, R2002, R2006, R727 (mech
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
 
-How every write to `collection.anki2` runs: one serialized executor per open collection, ops with a source, one transaction per op, a sequence number, cancellation, the plan/commit pattern and its write-phase rule, and declared long writes. The change set an op produces is `engine/change-stream`; which ops the executor admits in which collection state is `engine/lifecycle`; jobs, cancel tokens and progress are `engine/jobs`. Undo (U25) consumes the op journal described here.
+How every write to `collection.anki2` runs: one serialized executor per open collection, ops with a source, one transaction per op, a sequence number, cancellation, the plan/commit pattern and its write-phase rule, and declared long writes. The change set an op produces is `engine/change-stream`; which ops the executor admits in which collection state is `engine/lifecycle`; jobs, cancel tokens and progress are `engine/jobs`. Undo (`engine/undo`, U25) consumes the op journal described here.
 
 ## O1. Ops and sources
 
@@ -33,7 +33,7 @@ An op is a closure that writes through one write scope (`storage/ids-usn-mtime`,
 | `Rollover` | background | `Local` | day-rollover writes (U40) |
 | `Maintenance` | background | `Local` | Check Database, Empty Cards and other maintenance (U128-U131) |
 
-What each source means for undo (recorded, skip, clear) is U25's.
+What each source does to the undo history (recorded, cleared, truncated, the sync merge rule; skip-undo per op) is `engine/undo` M2.
 
 ## O2. One writer, two queues
 
@@ -51,7 +51,7 @@ What each source means for undo (recorded, skip, clear) is U25's.
 ## O4. Sequence numbers and the result
 
 - Every op that commits takes the next value of the engine's sequence counter at its commit, under the commit lock (O6). The counter is the change stream's (`engine/change-stream` S3): op seqs and event seqs are one strictly increasing sequence, from 1, for the life of the engine. An op that changed nothing still takes a seq, but publishes no event.
-- The result: `seq`; the change set (`engine/change-stream` S1), shared, empty when nothing changed; `undo`, the op's name and source when the op is `UserUndoable` and changed something (U25 adds the entry); `generation`; the op's own value; `past_cancel_point` (O5); timing (O10).
+- The result: `seq`; the change set (`engine/change-stream` S1), shared, empty when nothing changed; `undo`, the name and source of the undo step the op recorded (`engine/undo` M1: a `UserUndoable` op that changed something, or a redo; the step's id is the op's seq), applied on the writer before the result is returned; `generation`; the op's own value; `past_cancel_point` (O5); timing (O10).
 - An op that writes nothing gets an empty change set, `col.mod` stays unchanged (a scope without a change does not stamp it), and no event is published.
 
 ## O5. Cancellation
@@ -98,21 +98,23 @@ The precondition kinds:
 
 ## O9. Op catalog
 
-The one list of ops that may declare a long write, and of maintenance tasks. Units add their entry here and in `executor/catalog.rs` together.
+The list of named engine ops with their undo class (`engine/undo` M11, R2020), the one list of ops that may declare a long write, and the list of maintenance tasks. Units add their entry here and in `executor/catalog.rs` together. An op that is not listed is a plain op: it may not declare a long write.
 
-| Name | Unit | Long write | Write cancellable between batches |
-|---|---|---|---|
-| `check_database` (vacuum and repairs) | U128 | yes | no |
-| `apkg_apply` (a large `.apkg` apply) | U120 | yes | no |
-| `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | yes | yes |
-| `notetype_structure_change` (on large note types) | U34 | yes | no |
-| `bulk_op` (bulk ops over large selections) | U86 | yes | no |
-| `vacuum` | U128, U132 | maintenance task | |
-| `reindex` | U128 | maintenance task | |
-| `analyze` | U132 | maintenance task | |
-| `wal_checkpoint` | U109, U132 | maintenance task | |
+| Name | Unit | Undo class | Long write | Write cancellable between batches |
+|---|---|---|---|---|
+| `check_database` (vacuum and repairs) | U128 | destructive, not undoable | yes | no |
+| `apkg_apply` (a large `.apkg` apply) | U120 | undoable | yes | no |
+| `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | not destructive | yes | yes |
+| `notetype_structure_change` (on large note types) | U34 | undoable | yes | no |
+| `bulk_op` (bulk ops over large selections) | U86 | undoable | yes | no |
+| `undo` (`engine/undo` M4: long when the step's op was) | U25 | undoable | yes | no |
+| `redo` (`engine/undo` M5) | U25 | undoable | yes | no |
+| `vacuum` | U128, U132 | not destructive | maintenance task | |
+| `reindex` | U128 | not destructive | maintenance task | |
+| `analyze` | U132 | not destructive | maintenance task | |
+| `wal_checkpoint` | U109, U132 | not destructive | maintenance task | |
 
-U37 exports the catalog's names and undoability; U25 adds each op's undo class (R2020).
+A destructive op that is not undoable is confirmed first and preceded by U127's pre-op backup. U37 exports the catalog's names and undo classes.
 
 ## O10. Timing and budgets
 
