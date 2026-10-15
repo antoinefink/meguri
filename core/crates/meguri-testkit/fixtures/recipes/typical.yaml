@@ -1,0 +1,45 @@
+# Everyday shape: a few nested decks with every count, names in several
+# scripts (CJK, right-to-left, emoji), tags and media.
+recipe: typical
+description: "Nested decks with new, learning, due and later cards; CJK, RTL and emoji names."
+now: "2030-01-15T10:00:00+01:00"
+presets:
+  - {name: "Light", new_per_day: 10, reviews_per_day: 100}
+decks:
+  - name: "Languages::日本語::語彙"
+    preset: "Light"
+    notetype: "reversed"
+    new: 20
+    learning: 2
+    due: 36
+    later: 120
+    suspended: 2
+    tags: ["日本語", "jlpt::n4"]
+    fields: ["単語 {n}", "word {n}"]
+    media: {images: 0, sounds: 1}
+  - name: "Languages::日本語::文法"
+    notetype: "cloze"
+    new: 5
+    due: 12
+    later: 40
+    tags: ["日本語", "grammar"]
+  - name: "Languages::العربية"
+    new: 8
+    due: 6
+    later: 25
+    fields: ["كلمة {n}", "word {n}"]
+  - name: "Languages::Español 🇪🇸"
+    new: 10
+    learning: 1
+    due: 18
+    later: 60
+    buried: 1
+    tags: ["es"]
+    fields: ["palabra {n}", "word {n}"]
+    media: {images: 1, sounds: 1}
+  - name: "Science::Chemistry ⚗️"
+    new: 4
+    due: 3
+    later: 30
+  - name: "Reading"
+    later: 12

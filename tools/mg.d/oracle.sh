@@ -10,14 +10,14 @@
 # U2's deny rules. Copies they make are deleted when they finish.
 
 mg_job oracle host mg_oracle \
-  "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | bump <version> | lock | test [pattern]"
+  "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... | bump <version> | lock | test [pattern]"
 
 MG_ORACLE_UV_VERSION=0.12.24
 # uv resolves for this platform tag; the lock still hashes every published wheel.
 MG_ORACLE_LOCK_PLATFORM=x86_64-manylinux_2_40
 
 mg_oracle__usage() {
-  mg_failure usage "usage: tools/mg oracle build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | bump <version> | lock | test [pattern]" "tools/mg oracle build"
+  mg_failure usage "usage: tools/mg oracle build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... | bump <version> | lock | test [pattern]" "tools/mg oracle build"
   mg_message "oracle: $1"
   mg_status error
 }
@@ -309,6 +309,7 @@ mg_oracle() {
     hello) mg_oracle_hello "$@" ;;
     record | compare) mg_oracle_record_compare "$sub" "$@" ;;
     recordings) mg_oracle_recordings "$@" ;;
+    check) mg_oracle_check "$@" ;;
     bump) mg_oracle_bump "$@" ;;
     lock) mg_oracle_lock "$@" ;;
     test) mg_oracle_test "$@" ;;
@@ -545,6 +546,88 @@ mg_oracle__report() {
   else
     mg_message "oracle $cmd: $passed/$total $ok; $(jq -r '.totals | to_entries | map("\(.key) \(.value)") | join(", ")' "$report")"
     mg_status fail
+  fi
+}
+
+# check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]...
+# (specs/conformance/collection-check.md): one worker checks a copy of <dir>'s
+# collection, the directory mounted read-only. The harness derives the clock
+# and zone from the manifest when they are not given and checks the values;
+# here only the shape of the arguments and the collection file are checked,
+# before the image is built. The report is check.json (artifact `report`,
+# repeated under details.check); status per K9, and a K7 kind as the failure
+# of an `error`.
+mg_oracle_check() {
+  local dir="" abs rc
+  local args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --now | --tz | --deck | --render-note)
+        [ "$#" -ge 2 ] || { mg_oracle__usage "check: $1 needs a value"; return 0; }
+        # --opt=value, so a value starting with '-' stays a value.
+        args[${#args[@]}]="$1=$2"
+        shift 2
+        ;;
+      --now=* | --tz=* | --deck=* | --render-note=*) args[${#args[@]}]="$1"; shift ;;
+      -*) mg_oracle__usage "check: unknown option '$1'"; return 0 ;;
+      *)
+        [ -z "$dir" ] || { mg_oracle__usage "check takes one collection directory"; return 0; }
+        dir="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$dir" ] || { mg_oracle__usage "check needs a collection directory"; return 0; }
+  if [ ! -f "$dir/collection.anki2" ]; then
+    mg_failure no_collection "$dir/collection.anki2 does not exist" "tools/mg oracle check <dir with a collection.anki2>"
+    mg_message "oracle check: no collection.anki2 in $dir"
+    mg_status error
+    return 0
+  fi
+  abs="$(cd "$dir" && pwd -P)"
+  case "$abs" in *:*) mg_oracle__usage "check: $abs has a ':', which a bind mount cannot carry"; return 0 ;; esac
+  mg_oracle__docker_ok || return 0
+  mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
+  rm -f "$MG_RUN_DIR/check.json" "$MG_RUN_DIR/check-error.json"
+  mg_oracle__run "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" -u "$(id -u):$(id -g)" \
+    -v "$abs:/in/collection:ro" -v "$MG_RUN_DIR:/out" \
+    oracle harness check --dir /in/collection "--label=$dir" --out /out ${args[0]+"${args[@]}"} </dev/null
+  rc=$?
+  mg_detail image "$(jq -nc --arg t "meguri-oracle:$MG_ORACLE_TAG" --arg i "$MG_ORACLE_ID" '{tag: $t, id: $i}')"
+  mg_oracle__check_result "$rc" "$dir"
+}
+
+# mg_oracle__check_result <harness rc> <dir as given>: K9.
+mg_oracle__check_result() {
+  local rc="$1" dir="$2" report="$MG_RUN_DIR/check.json" err="$MG_RUN_DIR/check-error.json" kind problems
+  if [ "$rc" -eq 0 ] && [ -s "$report" ]; then
+    mg_artifact report "$report" "collection check"
+    mg_detail check "$(jq -c . "$report")"
+    problems="$(jq -c --arg repro "$MG_DEFAULT_REPRO" '
+      (if (.check_db | has("error")) then [{id: "corrupt", message: "Check Database found the file corrupt"}]
+       else [.check_db | to_entries[] | select(.value > 0)
+         | {id: .key, message: "Check Database reported \(.value) of \(.key)"}] end)
+      + [.changed_tables[] | select(. != "col" and . != "config")
+         | {id: ("changed_" + .), message: "Check Database changed the \(.) table"}]
+      | .[] | . + {repro: $repro}' "$report")"
+    if [ -n "$problems" ]; then
+      printf '%s\n' "$problems" >>"$MG_STATE/failures.jsonl"
+      mg_message "oracle check: $(printf '%s\n' "$problems" | grep -c .) problems in $dir; see check.json"
+      mg_status fail
+    else
+      mg_message "oracle check: Check Database found nothing in $dir ($(jq -r '.counts | "\(.notes) notes, \(.cards) cards, \(.revlog) reviews"' "$report"))"
+      mg_status pass
+    fi
+  elif [ -s "$err" ]; then
+    kind="$(jq -r '.kind' "$err")"
+    case "$kind" in usage | no_collection | open_failed | oracle_error) ;; *) kind=oracle_error ;; esac
+    mg_failure "$kind" "$(jq -r '.detail' "$err")"
+    mg_message "oracle check: $kind for $dir"
+    mg_status error
+  else
+    mg_failure oracle_error "the check exited with code $rc without a report; see log.txt"
+    mg_message "oracle check: no report for $dir"
+    mg_status error
   fi
 }
 

@@ -1,0 +1,8 @@
+{
+  "cards": 500000,
+  "description": "R1805: one deck holding 500,000 review cards, all due today or earlier at the pinned instant; its preset allows 9,999 reviews a day.",
+  "due_deck": {
+    "review_limit": 9999
+  },
+  "name": "due-500k"
+}

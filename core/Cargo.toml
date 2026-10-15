@@ -87,3 +87,11 @@ panic = "unwind"
 # the app's dSYM at link time.
 debug = "line-tables-only"
 strip = "none"
+
+# `tools/mg fixtures` (U11): an optimized meguri-cli without release's fat LTO
+# and single codegen unit, which take minutes to link a test tool.
+[profile.fixtures]
+inherits = "release"
+lto = false
+codegen-units = 16
+debug = false

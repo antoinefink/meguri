@@ -1,0 +1,10 @@
+{
+  "cards": 10000,
+  "description": "R1805: 200 notes with two inline base64 PNGs of 20,000 bytes each in their first field.",
+  "inline_images": {
+    "image_bytes": 20000,
+    "notes": 200,
+    "per_note": 2
+  },
+  "name": "inline-images"
+}

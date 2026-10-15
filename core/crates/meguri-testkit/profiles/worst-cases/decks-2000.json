@@ -1,0 +1,6 @@
+{
+  "cards": 20000,
+  "decks": 2000,
+  "description": "R1805: 2,000 normal decks (the default deck included), nested by the user's deck depths, over the user's shape.",
+  "name": "decks-2000"
+}

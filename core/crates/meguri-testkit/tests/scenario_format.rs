@@ -351,7 +351,6 @@ fn valid_draft_args(op: &str) -> Value {
         "build_filtered" => json!({"name": "F", "search": "deck:A"}),
         "import" => json!({"fixture": "package/x.apkg"}),
         "export" => json!({"format": "apkg", "name": "out.apkg"}),
-        "check_db" => json!({}),
         other => panic!("no valid example for draft op {other}: add one with the schema change"),
     }
 }
@@ -366,16 +365,20 @@ fn model_accepts(step: Value) -> Result<(), String> {
 #[test]
 fn the_model_requires_what_the_schema_requires_of_draft_ops() {
     let from_schema = schema_draft_requirements();
-    // Ten draft ops: `sync` left them when sync-ops.md fixed its shape, and
-    // `edit_note`, `delete_notes` and `db_exec` with record-ops.md W5.
-    assert!(from_schema.len() >= 10, "{from_schema:?}");
-    for exact in ["edit_note", "delete_notes", "db_exec", "set_config"] {
+    // Nine draft ops: `sync` left them when sync-ops.md fixed its shape,
+    // `edit_note`, `delete_notes` and `db_exec` with record-ops.md W5, and
+    // `check_db` with collection-check.md K10.
+    assert!(from_schema.len() >= 9, "{from_schema:?}");
+    for exact in ["edit_note", "delete_notes", "db_exec", "set_config", "check_db"] {
         assert!(
             !from_schema.iter().any(|(op, _, _)| op == exact),
             "{exact} is not a draft op"
         );
     }
     assert!(!from_schema.iter().any(|(op, _, _)| op == "sync"), "{from_schema:?}");
+    // K10: `check_db` takes exactly `{}` (the schema's maxProperties 0).
+    assert_eq!(model_accepts(json!({"check_db": {}})), Ok(()));
+    assert!(model_accepts(json!({"check_db": {"repair": true}})).is_err());
     assert!(!scenario::draft_requirements().iter().any(|(op, _)| *op == "sync"));
     let in_model: Vec<(String, Vec<String>)> = scenario::draft_requirements()
         .into_iter()

@@ -1,0 +1,26 @@
+# Layout stress: very long and deeply nested deck names, counts past four
+# digits, long field text.
+recipe: overflow
+description: "Long and deep deck names, counts above 9,999, long fields."
+now: "2030-01-15T10:00:00Z"
+presets:
+  - {name: "Unlimited", new_per_day: 9999, reviews_per_day: 9999}
+decks:
+  - name: "A deck whose name keeps going far past any sidebar width, with words that never seem to end, and then some more words to be sure it wraps or truncates"
+    new: 3
+    due: 5
+  - name: "Level 1::Level 2::Level 3::Level 4::Level 5::Level 6::Level 7::Level 8 with a long leaf name as well"
+    new: 2
+    due: 2
+    later: 4
+  - name: "Huge counts"
+    preset: "Unlimited"
+    new: 1200
+    due: 10200
+    later: 300
+  - name: "Long fields"
+    due: 3
+    fields: ["Supercalifragilisticexpialidocious pneumonoultramicroscopicsilicovolcanoconiosis antidisestablishmentarianism floccinaucinihilipilification hippopotomonstrosesquippedaliophobia {n}", "A back side that runs on and on, sentence after sentence, so that the answer area has to scroll on the smallest phone and still has more to say after that, card {n}."]
+  - name: "ＷＩＤＥ　ＣＨＡＲＡＣＴＥＲＳ　ＡＮＤ　漢字だけの長いデッキ名前がここに続きます"
+    new: 1
+    later: 1

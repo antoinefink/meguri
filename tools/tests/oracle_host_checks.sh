@@ -161,6 +161,114 @@ sys.exit(1 if bad else 0)
 EOF
 }
 
+# tools/mg oracle check (specs/conformance/collection-check.md) on a copy of a
+# committed fixture: a clean report with the zone and clock from the manifest,
+# a planted problem (fail), and the K7 errors. Nested tools/mg runs of this
+# checkout; the outer run rewrites build/mg/oracle/latest when it ends.
+CHECK_DIR="$WORK/check"
+
+check_run() { # <out var> <args...>: the result.json path of one run
+  local var="$1" out
+  shift
+  out="$(/bin/bash "$REPO/tools/mg" oracle check "$@" 2>>"$WORK/check.log" | tail -n 1)"
+  [ -f "$out" ] || {
+    echo "tools/mg oracle check $* wrote no result:"
+    tail -n 20 "$WORK/check.log"
+    return 1
+  }
+  printf -v "$var" '%s' "$out"
+}
+
+t_check_job_reports_problems_and_errors() {
+  local col="$CHECK_DIR/col" bad="$CHECK_DIR/bad" garbage="$CHECK_DIR/garbage" bare="$CHECK_DIR/bare" r
+  rm -rf "$CHECK_DIR" && mkdir -p "$col" "$bad" "$garbage" "$bare" || return 1
+  cp "$REPO/conformance/fixtures/storage/schema-18.anki2" "$col/collection.anki2" &&
+    cp "$col/collection.anki2" "$bad/collection.anki2" &&
+    cp "$col/collection.anki2" "$bare/collection.anki2" || return 1
+  printf '{"now_ms": 1894701600999, "utc_offset_secs": 3600}\n' >"$col/manifest.json"
+  cp "$col/manifest.json" "$bad/manifest.json"
+  head -c 8192 /dev/zero | tr '\0' x >"$garbage/collection.anki2"
+  sqlite3 "$bad/collection.anki2" "insert into revlog values (1, 1, -1, 0, 0, 0, 0, 0, 0)" || return 1
+  check_run r "$col" --deck Lang --render-note 1 || return 1
+  expect "clean status" "$(jq -r .status "$r")" pass &&
+    expect "zone from the manifest" "$(jq -r .details.check.tz "$r")" Etc/GMT-1 &&
+    expect "clock from the manifest" "$(jq -r .details.check.now "$r")" 1894701600 &&
+    expect "offset in the zone" "$(jq -r .details.check.timing.utc_offset_secs "$r")" 3600 &&
+    expect "dir as given" "$(jq -r .details.check.dir "$r")" "$col" &&
+    expect "report artifact" "$(jq -r '[.artifacts[] | select(.kind == "report") | .path | endswith("/check.json")] == [true]' "$r")" true &&
+    expect "artifact equals details.check" \
+      "$(jq -S . "$(dirname "$r")/check.json" | mg_oracle__sha256)" "$(jq -S .details.check "$r" | mg_oracle__sha256)" || return 1
+  cp "$(dirname "$r")/check.json" "$CHECK_DIR/clean-report.json"
+  check_run r "$bad" || return 1
+  # The repaired row also changes the revlog table.
+  expect "planted problem" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["fail",["revlog_properties","changed_revlog"]]' || return 1
+  check_run r "$CHECK_DIR/none" || return 1
+  expect "missing directory" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["no_collection"]]' || return 1
+  check_run r "$garbage" --tz UTC --now 2030-01-15T10:00:00Z || return 1
+  expect "not a collection" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["open_failed"]]' || return 1
+  check_run r "$bare" || return 1
+  expect "no manifest" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["usage"]]' || return 1
+  check_run r "$col" --bogus || return 1
+  expect "unknown option" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["usage"]]' || return 1
+  expect "source left as it was" "$(mg_oracle__sha256 <"$col/collection.anki2")" \
+    "$(mg_oracle__sha256 <"$REPO/conformance/fixtures/storage/schema-18.anki2")" &&
+    expect "nothing added beside it" "$(ls "$col" | tr '\n' ' ')" "collection.anki2 manifest.json "
+}
+
+# The check's worker transcript against protocol.json and the report of the
+# previous check against collection-check.schema.json, with jsonschema in the
+# dev image.
+t_check_transcript_and_report_match_the_schemas() {
+  local req="$WORK/check-requests.jsonl" resp="$WORK/check-responses.jsonl" report="$CHECK_DIR/clean-report.json"
+  [ -s "$report" ] || {
+    echo "no report from t_check_job_reports_problems_and_errors"
+    return 1
+  }
+  cat >"$req" <<'EOF'
+{"cmd":"hello"}
+{"cmd":"check","id":1,"dir":"/in/collection","now":1894701600,"decks":["Lang","Nope"],"render_notes":[1788249600238,1]}
+{"cmd":"check","id":2,"dir":"/in/nothing","now":1894701600}
+{"cmd":"check","id":3,"dir":"/in/collection"}
+EOF
+  mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" -e TZ=Asia/Kathmandu -v "$CHECK_DIR/col:/in/collection:ro" oracle <"$req" >"$resp" || return 1
+  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 4 &&
+    expect "error kinds" "$(jq -sc '[.[] | .error.kind // "ok"]' "$resp")" '["ok","ok","no_collection","protocol_error"]' &&
+    expect "rendered cards" "$(jq -sc '.[1].check.render | [keys, (.["1788249600238"] | length > 0), .["1"]]' "$resp")" \
+      '[["1","1788249600238"],true,null]' || return 1
+  local rel_req="${req#"$REPO"/}" rel_resp="${resp#"$REPO"/}" rel_report="${report#"$REPO"/}"
+  mg_compose build dev >"$WORK/dev-build.log" 2>&1 || {
+    tail -20 "$WORK/dev-build.log"
+    return 1
+  }
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel_req" "$rel_resp" "$rel_report" <<'EOF'
+import json, sys
+from jsonschema import Draft202012Validator
+protocol = json.load(open("conformance/schema/protocol.json"))
+report_schema = json.load(open("conformance/schema/collection-check.schema.json"))
+Draft202012Validator.check_schema(report_schema)
+def validator(ref):
+    return Draft202012Validator({"$ref": f"#/$defs/{ref}", "$defs": protocol["$defs"]})
+bad = 0
+for name, v, path in (("request", validator("request"), sys.argv[1]), ("response", validator("response"), sys.argv[2])):
+    for n, line in enumerate(open(path), 1):
+        msg = json.loads(line)
+        if name == "request" and msg.get("cmd") == "check" and "now" not in msg:
+            if v.is_valid(msg):
+                print(f"request {n}: a check without now passed the schema"); bad += 1
+            continue
+        for err in v.iter_errors(msg):
+            print(f"{name} {n}: {err.json_path}: {err.message}"); bad += 1
+report = Draft202012Validator(report_schema)
+for err in report.iter_errors(json.load(open(sys.argv[3]))):
+    print(f"report: {err.json_path}: {err.message}"); bad += 1
+check = json.loads(open(sys.argv[2]).readlines()[1])["check"]
+full = {"report_version": 1, "oracle": {"anki_version": "26.9.3", "lock_sha256": "0" * 64, "driver_sha256": "0" * 64}, "dir": "x", **check}
+for err in report.iter_errors(full):
+    print(f"worker check as a report: {err.json_path}: {err.message}"); bad += 1
+sys.exit(1 if bad else 0)
+EOF
+}
+
 t_the_oracle_service_has_no_route_out() {
   local cfg
   cfg="$(mg_compose config --format json)" || return 1
@@ -259,7 +367,8 @@ t_no_copy_of_oracle_files_is_left_behind() {
 
 TESTS="t_tag_is_content_addressed_and_stable t_rebuilding_an_unchanged_tree_keeps_tag_and_image
 t_editing_a_driver_file_changes_tag_and_driver_hash t_a_compose_worker_says_hello_in_its_zone
-t_protocol_transcript_matches_the_schema t_the_oracle_service_has_no_route_out
+t_protocol_transcript_matches_the_schema t_check_job_reports_problems_and_errors
+t_check_transcript_and_report_match_the_schemas t_the_oracle_service_has_no_route_out
 t_the_network_probe_connects_when_a_route_exists t_no_meguri_code_refers_to_oracle
 t_compare_runs_in_a_worktree_without_oracle t_no_copy_of_oracle_files_is_left_behind"
 

@@ -960,6 +960,243 @@ EOF
   ! grep -q ' fuzz run ' "$STUB_LOG"
 }
 
+# --- fixtures (cargo and meguri-cli stubbed; runs as if in the dev container) --
+
+# fixtures_sandbox: a user shape, worst case `wide`, recipe `tiny`, a cargo
+# stub whose build exits $STUB_BUILD_EXIT and whose metadata names a target
+# directory holding a meguri-cli stub. The stub logs its arguments, reports
+# $STUB_ELAPSED_MS and $STUB_PEAK_KB, exits $STUB_CLI_EXIT, and reports
+# `cached` when its --out directory holds a manifest.json.
+fixtures_sandbox() {
+  local stubs="$BATS_TEST_TMPDIR/fixtures-stubs" target="$BATS_TEST_TMPDIR/fixtures-target"
+  local testkit="$SB/core/crates/meguri-testkit"
+  mkdir -p "$stubs" "$target/fixtures" "$testkit/profiles/worst-cases" "$testkit/fixtures/recipes"
+  printf '{"format": 1}\n' >"$testkit/profiles/user-shape.json"
+  printf '{}\n' >"$testkit/profiles/worst-cases/wide.json"
+  printf 'recipe: tiny\n' >"$testkit/fixtures/recipes/tiny.yaml"
+  cat >"$stubs/cargo" <<STUB
+#!/bin/bash
+echo "cargo \$*" >>"\$STUB_LOG"
+case "\$1" in
+  build) exit "\${STUB_BUILD_EXIT:-0}" ;;
+  metadata) printf '{"target_directory": "%s"}\n' "$target" ;;
+  *) exit 97 ;;
+esac
+STUB
+  cat >"$target/fixtures/meguri-cli" <<'STUB'
+#!/bin/bash
+echo "meguri-cli $*" >>"$STUB_LOG"
+out=""
+while [ "$#" -gt 0 ]; do
+  [ "$1" = --out ] && out="$2"
+  shift
+done
+cached=false
+[ -f "$out/manifest.json" ] && cached=true
+mkdir -p "$out" && printf '{}\n' >"$out/manifest.json"
+printf '{"dir": "%s", "cached": %s, "elapsed_ms": %s, "peak_rss_kb": %s, "manifest": {"counts": {"cards": 1}}}\n' \
+  "$out" "$cached" "${STUB_ELAPSED_MS:-1000}" "${STUB_PEAK_KB:-50000}"
+exit "${STUB_CLI_EXIT:-0}"
+STUB
+  chmod +x "$stubs/cargo" "$target/fixtures/meguri-cli"
+  export PATH="$stubs:$PATH" MG_CONTAINER=dev STUB_LOG="$BATS_TEST_TMPDIR/fixtures.log"
+  : >"$STUB_LOG"
+}
+
+@test "fixtures rejects bad usage before building anything" {
+  fixtures_sandbox
+  local args
+  for args in "" "--seed" "--seed x 10k" "--media all 10k" "--frobnicate 10k" "lots" "10k nosuch"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg fixtures $args
+    [ "$status" -eq 2 ] || { echo "$args"; jq . "$result"; return 1; }
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = usage ]
+    validate "$result"
+  done
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "fixtures generates sizes, worst cases and recipes into build/fixtures and reuses them" {
+  fixtures_sandbox
+  local shape
+  shape="$(sha256sum <"$SB/core/crates/meguri-testkit/profiles/user-shape.json" | cut -c1-16)"
+  mg fixtures 10k worst-cases recipes --seed 3
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  [ "$(field .summary.total)" -eq 3 ]
+  [ "$(field '[.details.fixtures[] | "\(.target)=\(.kind)"] | join(" ")')" = "10k=size wide=worst-case tiny=recipe" ]
+  grep -qx "meguri-cli generate 10k --seed 3 --out build/fixtures/$shape-3-10k --cache" "$STUB_LOG"
+  grep -qx "meguri-cli generate worst-case wide --seed 3 --out build/fixtures/$shape-3-wide --cache" "$STUB_LOG"
+  grep -qx "meguri-cli generate recipe tiny --seed 3 --out build/fixtures/recipes/tiny-3 --cache" "$STUB_LOG"
+  [ "$(grep -c '^cargo build --profile fixtures -p meguri-cli$' "$STUB_LOG")" -eq 1 ]
+  [ "$(field '[.artifacts[] | select(.kind == "fixture")] | length')" -eq 3 ]
+  validate "$result"
+
+  mg fixtures 10k --seed 3
+  [ "$status" -eq 0 ]
+  [ "$(field '.details.fixtures[0].cached')" = true ]
+}
+
+@test "fixtures fails a run over the 10-minute or 2 GB budget, a failed generation and a failed build" {
+  fixtures_sandbox
+  STUB_ELAPSED_MS=600001 mg fixtures 1m
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures/1m/time ]
+  rm -rf "$SB/build/fixtures"
+  STUB_PEAK_KB=2097153 mg fixtures 1m
+  [ "$(failure_ids)" = fixtures/1m/memory ]
+  STUB_CLI_EXIT=1 mg fixtures 500k
+  [ "$(failure_ids)" = fixtures/500k ]
+  : >"$STUB_LOG"
+  STUB_BUILD_EXIT=101 mg fixtures 10k
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures-build ]
+  ! grep -q '^meguri-cli' "$STUB_LOG"
+}
+
+# --- fixtures-check (the fixtures and oracle jobs stubbed) -------------------
+
+# fixtures_check_sandbox: a user shape on day 500, worst cases `due` (a due
+# deck, limit 9999) and `big` (large fields), and stubs that replace the
+# fixtures and oracle jobs' functions: fixtures reports the summaries in
+# $STUB_DIR/summaries.jsonl, oracle reports $STUB_DIR/<dir name>.json. The
+# recipes' launch run (app build and xcodebuild) reports $STUB_DIR/launch.json,
+# or cannot run with STUB_LAUNCH=broken.
+fixtures_check_sandbox() {
+  local testkit="$SB/core/crates/meguri-testkit"
+  mkdir -p "$testkit/profiles/worst-cases" "$testkit/fixtures/recipes"
+  printf '{"totals": {"span_days": 500}}\n' >"$testkit/profiles/user-shape.json"
+  printf '{"due_deck": {"review_limit": 9999}}\n' >"$testkit/profiles/worst-cases/due.json"
+  printf '{"large_fields": {"bytes": 1048576, "notes": 2}}\n' >"$testkit/profiles/worst-cases/big.json"
+  export STUB_DIR="$BATS_TEST_TMPDIR/fixtures-check" STUB_LOG="$BATS_TEST_TMPDIR/fixtures-check.log" MG_CONTAINER=dev
+  mkdir -p "$STUB_DIR"
+  : >"$STUB_LOG"
+  cat >"$SB/tools/mg.d/zz-stub.sh" <<'STUB'
+mg_fixtures() {
+  echo "fixtures $*" >>"$STUB_LOG"
+  mg_detail fixtures "$(jq -sc . "$STUB_DIR/summaries.jsonl")"
+  mg_status "${STUB_FIXTURES_STATUS:-pass}"
+}
+mg_oracle() {
+  echo "oracle $*" >>"$STUB_LOG"
+  [ -f "$STUB_DIR/$(basename "$2").json" ] || { mg_failure oracle_error "no report"; mg_status error; return 0; }
+  mg_detail check "$(jq -c . "$STUB_DIR/$(basename "$2").json")"
+  mg_status pass
+}
+mg__fixtures_launch_run() {
+  echo "launch $1" >>"$STUB_LOG"
+  [ "${STUB_LAUNCH:-}" != broken ] || { mg_failure fixtures-check/launch "xcodebuild could not run"; return 1; }
+  cp "$STUB_DIR/launch.json" "$2.json"
+}
+STUB
+  # One collection of each kind, each as the oracle should see it.
+  local good='{"changed_tables": ["col", "config"], "check_db": {"card_properties": 0, "future_ids": 0}, "counts": {"cards": 10, "decks": 2, "graves": 0, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}, "decks": {}, "render": {}, "timing": {"days_elapsed": 500}}'
+  local m='{"counts": {"cards": 10, "decks": 2, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}}'
+  {
+    jq -nc --argjson m "$m" '{target: "10k", kind: "size", dir: "build/fixtures/s-1-10k", manifest: $m}'
+    jq -nc --argjson m "$m" '{target: "due", kind: "worst-case", dir: "build/fixtures/s-1-due", manifest: $m}'
+    jq -nc --argjson m "$m" '{target: "big", kind: "worst-case", dir: "build/fixtures/s-1-big", manifest: $m, large_field_notes: [123, 456]}'
+    jq -nc --argjson m "$m" '{target: "r", kind: "recipe", dir: "build/fixtures/recipes/r-1", manifest: $m}'
+  } >"$STUB_DIR/summaries.jsonl"
+  jq -c . <<<"$good" >"$STUB_DIR/s-1-10k.json"
+  jq -c '.decks = {Due: {learning: 0, new: 0, review: 10}}' <<<"$good" >"$STUB_DIR/s-1-due.json"
+  jq -c '.render = {"123": [{answer_bytes: 1048800, card: 124, ord: 0, question_bytes: 30, status: "ok"}]}' <<<"$good" >"$STUB_DIR/s-1-big.json"
+  jq -c '.timing.days_elapsed = 120' <<<"$good" >"$STUB_DIR/r-1.json"
+  printf '{"result": "Passed", "passed": 1, "failed": 0, "skipped": 0, "messages": []}\n' >"$STUB_DIR/launch.json"
+}
+
+@test "fixtures-check runs the oracle check on every collection with the due deck and a large-field note" {
+  fixtures_check_sandbox
+  mg fixtures-check
+  [ "$status" -eq 0 ] || { jq . "$result"; cat "$STUB_LOG"; return 1; }
+  [ "$(field .summary.total)" -eq 5 ]
+  grep -qx "fixtures 10k 100k worst-cases recipes --seed 1" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/s-1-10k" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/s-1-due --deck Due" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/s-1-big --render-note 123" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/recipes/r-1" "$STUB_LOG"
+  [ "$(field '[.artifacts[] | select(.kind == "oracle-check")] | length')" -eq 4 ]
+  # The recipe, launched in the app.
+  grep -qx "launch $SB/build/fixtures/recipes/r-1" "$STUB_LOG"
+  [ "$(field '[.artifacts[] | select(.kind == "launch")] | length')" -eq 1 ]
+  validate "$result"
+  mg fixtures-check 10k --seed 4
+  grep -qx "fixtures 10k --seed 4" "$STUB_LOG"
+}
+
+@test "fixtures-check fails on Check Database problems, changed tables, counts, the day, the due count and the render" {
+  fixtures_check_sandbox
+  jq -c '.check_db.card_properties = 2 | .changed_tables += ["notes"] | .counts.revlog = 39 | .counts.graves = 1' \
+    "$STUB_DIR/s-1-10k.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-10k.json"
+  jq -c '.decks.Due.review = 9' "$STUB_DIR/s-1-due.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-due.json"
+  jq -c '.render."123"[0].answer_bytes = 1048576' "$STUB_DIR/s-1-big.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-big.json"
+  jq -c '.timing.days_elapsed = 121' "$STUB_DIR/r-1.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/r-1.json"
+  printf '{"result": "Failed", "passed": 0, "failed": 1, "skipped": 0, "messages": ["recipe r: installed files differ"]}\n' >"$STUB_DIR/launch.json"
+  mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(field '.summary.failed')" -eq 5 ]
+  local messages
+  messages="$(field '[.failures[] | "\(.id): \(.message)"] | join("\n")')"
+  grep -qx "fixtures-check/10k: Check Database reported 2 of card_properties" <<<"$messages"
+  grep -qx "fixtures-check/10k: Check Database changed the notes table" <<<"$messages"
+  grep -qx "fixtures-check/10k: the oracle counts 39 revlog, the manifest 40" <<<"$messages"
+  grep -qx "fixtures-check/10k: the oracle counts 1 graves" <<<"$messages"
+  grep -qx "fixtures-check/due: deck Due shows 9 reviews, want 10" <<<"$messages"
+  grep -qx "fixtures-check/big: card 124 of note 123 rendered ok with 1048576 answer bytes" <<<"$messages"
+  grep -qx "fixtures-check/r: the oracle is on day 121, the collection pinned on day 120" <<<"$messages"
+  grep -qx "fixtures-check/launch: recipe r: installed files differ" <<<"$messages"
+  grep -qx "fixtures-check/launch: the launch suite ended Failed, 1 cases failed" <<<"$messages"
+  grep -qx "fixtures-check/launch: 0 launch cases passed for 1 recipes" <<<"$messages"
+  validate "$result"
+}
+
+@test "fixtures-check fails a skipped launch suite and a launch run that cannot run, and launches nothing without recipes" {
+  fixtures_check_sandbox
+  printf '{"result": "Skipped", "passed": 0, "failed": 0, "skipped": 1, "messages": []}\n' >"$STUB_DIR/launch.json"
+  mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[] | "\(.id): \(.message)"] | join("\n")')" = "$(printf '%s\n' \
+    "fixtures-check/launch: the launch suite ended Skipped, 0 cases failed" \
+    "fixtures-check/launch: 1 launch cases were skipped: a skipped check is no check" \
+    "fixtures-check/launch: 0 launch cases passed for 1 recipes")" ]
+  STUB_LAUNCH=broken mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures-check/launch ]
+  [ "$(field '.summary.failed')" -eq 1 ]
+  # No recipe among the collections: no launch run.
+  jq -c 'select(.kind != "recipe")' "$STUB_DIR/summaries.jsonl" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/summaries.jsonl"
+  : >"$STUB_LOG"
+  mg fixtures-check 10k
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  [ "$(field .summary.total)" -eq 3 ]
+  ! grep -q '^launch' "$STUB_LOG"
+}
+
+@test "fixtures-check stops when generating fails or the oracle gives no report or one it cannot read, and rejects bad usage" {
+  fixtures_check_sandbox
+  STUB_FIXTURES_STATUS=fail mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures ]
+  ! grep -q '^oracle' "$STUB_LOG"
+  rm "$STUB_DIR/s-1-due.json"
+  jq -c 'if .target == "big" then del(.large_field_notes) else . end' "$STUB_DIR/summaries.jsonl" >"$STUB_DIR/x"
+  mv "$STUB_DIR/x" "$STUB_DIR/summaries.jsonl"
+  # A report the assertions cannot read is a failure, never a pass.
+  jq -c 'del(.changed_tables)' "$STUB_DIR/s-1-10k.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-10k.json"
+  jq -c 'del(.check_db)' "$STUB_DIR/r-1.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/r-1.json"
+  STUB_LAUNCH=broken mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(field .summary.passed)" -eq 0 ]
+  [ "$(failure_ids)" = "$(printf 'fixtures-check/10k/report\nfixtures-check/big/render\nfixtures-check/due/oracle\nfixtures-check/launch\nfixtures-check/r/report')" ]
+  local args
+  for args in "--seed" "--seed x" "--frobnicate"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg fixtures-check $args
+    [ "$status" -eq 2 ] || { echo "$args"; jq . "$result"; return 1; }
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+}
+
 # --- bridge ----------------------------------------------------------------
 
 @test "swift-test --package without a name stops with a usage error" {
@@ -1260,12 +1497,29 @@ dockerfiles() {
   printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
   chmod +x "$stubs/docker"
   export PATH="$stubs:$PATH"
-  for args in "" "frobnicate" "bump" "bump 26.x" "record --jobs 0" "hello --verbose" "build extra"; do
+  for args in "" "frobnicate" "bump" "bump 26.x" "record --jobs 0" "hello --verbose" "build extra" \
+    "check" "check a b" "check --bogus a" "check a --now"; do
     # shellcheck disable=SC2086 # each case is a word list
     mg oracle $args
     [ "$status" -eq 2 ]
     [ "$(field .status)" = error ]
     [ "$(field '.failures[0].id')" = usage ]
+    [[ "$stderr" != *"docker must not run"* ]]
+    validate "$result"
+  done
+}
+
+@test "oracle check reports a missing collection before touching Docker" {
+  local stubs="$BATS_TEST_TMPDIR/oracle-stubs"
+  mkdir -p "$stubs" "$BATS_TEST_TMPDIR/empty"
+  printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
+  chmod +x "$stubs/docker"
+  export PATH="$stubs:$PATH"
+  for dir in "$BATS_TEST_TMPDIR/empty" "$BATS_TEST_TMPDIR/none"; do
+    mg oracle check "$dir" --tz UTC
+    [ "$status" -eq 2 ]
+    [ "$(field .status)" = error ]
+    [ "$(field '.failures[0].id')" = no_collection ]
     [[ "$stderr" != *"docker must not run"* ]]
     validate "$result"
   done

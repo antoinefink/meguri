@@ -39,6 +39,7 @@
 - A running Mac hook build also resizes its window on the distributed notification `<bundle id>.testhooks.resizeWindow` (object: a `-MeguriWindowSize` value) and answers `<bundle id>.testhooks.windowResized` (`WindowHookView`; the agent driver's `resize` step). Post both with `deliverImmediately`: the receiver is usually not the active app. Sandboxed senders cannot attach a `userInfo`.
 - Each UI area registers its routes (`area/screen[/state]`) in `RouteRegistry.standard`, from a `TestHooks/<Area>Routes.swift`, with literal paths: `tools/mg xcode-check` reads them from the source, launches the Mac app hidden on each and fails on a computed path.
 - Fixtures must sit inside the checkout: launched outside XCTest, the sandboxed Mac hook build can read only there (`-Dev` entitlements). The Mac UI-test runner is sandboxed too and cannot write them: create fixtures before the run (committed under `Fixtures/`, or by `tools/mg` jobs), never from a test. Keep them out of the synchronized folders, whose files are copied into bundles (a folder in an exception set is not excluded).
+- Generated UI recipes (U11) are `tools/mg fixtures <recipe>` output in `build/fixtures/recipes/<name>-<seed>/`; pass that directory to `-MeguriFixture` with the manifest's `now_ms` and offset as `-MeguriNow`/`-MeguriTimeZone`. `RecipeFixtureTests` launches all of them in-process when `tools/mg fixtures-check` sets `MEGURI_RECIPE_FIXTURES`.
 
 ## Signing and entitlements
 

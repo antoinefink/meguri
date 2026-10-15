@@ -1,0 +1,107 @@
+# Interface names the fixtures specs use that are not ordinary words: the
+# collection file names, table and column names, the collection config keys a
+# generated collection holds, card data keys, and the protobuf field names of
+# note types, fields, templates, decks and presets it writes. Short ordinary
+# words (col, notes, cards, config, kind, ...) stay unmasked.
+# Files
+collection.anki2
+collection.anki2-wal
+collection.media
+# Tables and columns
+revlog
+graves
+deck_config
+notetypes
+templates
+crt
+scm
+ver
+dty
+usn
+ls
+dconf
+mod
+nid
+did
+odid
+odue
+ord
+ivl
+lastIvl
+reps
+lapses
+queue
+due
+factor
+ease
+cid
+oid
+ntid
+guid
+mid
+flds
+sfld
+csum
+mtime_secs
+KEY
+val
+collapsed
+# Config keys
+activeDecks
+addToCur
+collapseTime
+creationOffset
+curDeck
+curModel
+dayLearnFirst
+dueCounts
+estTimes
+fsrs
+lastUnburied
+loadBalancerEnabled
+localOffset
+newSpread
+nextPos
+rollover
+sched2021
+schedVer
+sortBackwards
+sortType
+noteFld
+timeLim
+# Card data keys
+pos
+dr
+decay
+lrt
+# Protobuf fields
+original_stock_kind
+reqs
+card_ord
+field_ords
+sort_field_idx
+latex_pre
+latex_post
+font_name
+font_size
+q_format
+a_format
+study_collapsed
+browser_collapsed
+config_id
+last_day_studied
+new_studied
+review_studied
+learning_studied
+milliseconds_studied
+bury_new
+bury_reviews
+bury_interday_learning
+desired_retention
+new_per_day
+reviews_per_day
+cap_answer_time_to_secs
+# Template markup and media tags
+FrontSide
+cloze
+sound
