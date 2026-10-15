@@ -19,9 +19,16 @@ pub const DIR: &str = "goldens-apple";
 /// The `platform` of every overlay (F6.2).
 pub const PLATFORM: &str = "macos-arm64";
 
-/// Relative tolerance of memory entries and of the two unrounded intervals
-/// of a day entry (F8.2, F8.3).
+/// Relative tolerance of the two unrounded intervals of a day entry and of
+/// their distance to a half (F8.2 rules 2 and 4), and of a difficulty entry
+/// (F8.3).
 pub const CLASS_TOLERANCE: f64 = 1e-5;
+
+/// Relative tolerance of a stability entry (F8.3).
+pub const STABILITY_TOLERANCE: f64 = 1e-4;
+
+/// Absolute floor of a stability entry's tolerance, in days (F8.3).
+pub const STABILITY_FLOOR_DAYS: f64 = 1e-5;
 
 /// How close a recorded unrounded interval must be to the recomputed one
 /// (F8.2 rule 3).
@@ -208,7 +215,7 @@ impl Overlay {
         for entry in &self.entries {
             match target(&entry.pointer).map(|t| t.kind) {
                 Some(Kind::Day) => counts.0 += 1,
-                Some(Kind::Memory) => counts.1 += 1,
+                Some(Kind::Memory(_)) => counts.1 += 1,
                 None => counts.2 += 1,
             }
         }
@@ -410,7 +417,24 @@ impl Rating {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Day,
-    Memory,
+    Memory(Member),
+}
+
+/// The member of a memory entry, which picks its bound (F8.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Member {
+    Stability,
+    Difficulty,
+}
+
+impl Member {
+    fn from_name(name: &str) -> Option<Member> {
+        match name {
+            "stability" => Some(Member::Stability),
+            "difficulty" => Some(Member::Difficulty),
+            _ => None,
+        }
+    }
 }
 
 /// Where an entry sits in the class's pointers (F8.1).
@@ -441,8 +465,9 @@ fn target(pointer: &str) -> Option<Target> {
             let tail: Vec<&str> = tail.iter().map(String::as_str).collect();
             let kind = match tail.as_slice() {
                 ["scheduled_days"] | ["review", "scheduled_days"] => Kind::Day,
-                ["memory_state", "stability" | "difficulty"]
-                | ["learning" | "review", "memory_state", "stability" | "difficulty"] => Kind::Memory,
+                ["memory_state", member] | ["learning" | "review", "memory_state", member] => {
+                    Kind::Memory(Member::from_name(member)?)
+                }
                 _ => return None,
             };
             Some(Target {
@@ -463,10 +488,10 @@ fn target(pointer: &str) -> Option<Target> {
                 step,
                 row: Some((row, column)),
                 rating: Rating::from_column(column),
-                kind: if column.is_multiple_of(3) {
-                    Kind::Day
-                } else {
-                    Kind::Memory
+                kind: match column % 3 {
+                    0 => Kind::Day,
+                    1 => Kind::Memory(Member::Stability),
+                    _ => Kind::Memory(Member::Difficulty),
                 },
             })
         }
@@ -552,7 +577,7 @@ impl<'a> Class<'a> {
             return Err("not a next-state day or memory value (F8.1)".to_owned());
         };
         match t.kind {
-            Kind::Memory => memory(entry),
+            Kind::Memory(member) => memory(entry, member),
             Kind::Day if self.days_in_class.contains(&(t.set.clone(), t.rating)) => Ok(()),
             Kind::Day => self.day(entry, &t),
         }
@@ -639,19 +664,25 @@ impl<'a> Class<'a> {
     }
 }
 
-/// F8.3.
-fn memory(entry: &Entry) -> Result<(), String> {
+/// F8.3: a stability may differ by relative 1e-4 or by 1e-5 days, whichever
+/// is larger; a difficulty by relative 1e-5.
+fn memory(entry: &Entry, member: Member) -> Result<(), String> {
     let fraction = |v: &Value| v.as_number().filter(|n| n.is_f64()).and_then(|n| n.as_f64());
     let (Some(linux), Some(apple)) = (fraction(&entry.linux), fraction(&entry.apple)) else {
         return Err("a memory entry's values are numbers with a fraction or an exponent (F8.3)".to_owned());
     };
-    let rel = relative(linux, apple);
-    if rel > CLASS_TOLERANCE {
-        return Err(format!(
-            "{linux} and {apple} differ by relative {rel:.2e}, more than 1e-5 (F8.3)"
-        ));
+    let apart = (apple - linux).abs();
+    let m = linux.abs().max(apple.abs());
+    let rel = apart / m;
+    match member {
+        Member::Stability if apart > (STABILITY_TOLERANCE * m).max(STABILITY_FLOOR_DAYS) => Err(format!(
+            "a stability: {linux} and {apple} are {apart:.2e} days apart (relative {rel:.2e}), more than both relative 1e-4 and 1e-5 days (F8.3)"
+        )),
+        Member::Difficulty if apart > CLASS_TOLERANCE * m => Err(format!(
+            "a difficulty: {linux} and {apple} differ by relative {rel:.2e}, more than 1e-5 (F8.3)"
+        )),
+        Member::Stability | Member::Difficulty => Ok(()),
     }
-    Ok(())
 }
 
 /// An integer JSON value (no fraction or exponent).

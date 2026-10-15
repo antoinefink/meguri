@@ -194,8 +194,11 @@ fn oracle_differences_are_listed_with_their_class_and_never_fail_the_probe() {
     assert_eq!(oracles["gate"], false);
     let differences = oracles["differences"].as_array().unwrap();
     assert_eq!(differences.len(), entries.len());
-    // Each memory difference is in the class exactly when its relative
-    // difference is at most 1e-5 (F8.3), worked out here from the files.
+    // Each memory difference is in the class exactly when it is within its
+    // bound (F8.3), worked out here from the files: a stability (columns 1,
+    // 4, 7, 10) the larger of relative 1e-4 and 1e-5 days, a difficulty
+    // relative 1e-5.
+    let mut beyond_relative_1e5 = 0;
     for d in differences {
         let id = d["id"].as_u64().unwrap() as usize;
         let column = d["column"].as_u64().unwrap() as usize;
@@ -203,10 +206,23 @@ fn oracle_differences_are_listed_with_their_class_and_never_fail_the_probe() {
         assert_eq!((&d["left"], &d["right"]), (l, a));
         if !column.is_multiple_of(3) {
             let (l, a) = (l.as_f64().unwrap(), a.as_f64().unwrap());
-            let in_class = (a - l).abs() <= 1e-5 * l.abs().max(a.abs());
-            assert_eq!(d["in_class"], in_class, "{d}");
+            let m = l.abs().max(a.abs());
+            let bound = if column % 3 == 1 {
+                (1e-4 * m).max(1e-5)
+            } else {
+                1e-5 * m
+            };
+            assert_eq!(d["in_class"], (a - l).abs() <= bound, "{d}");
+            if (a - l).abs() > 1e-5 * m {
+                assert_eq!(column % 3, 1, "{d}");
+                beyond_relative_1e5 += 1;
+            }
         }
     }
+    // F11: every difference of the committed overlays is in the class, the
+    // 12 stabilities of F11.1 beyond relative 1e-5 included.
+    assert!(differences.iter().all(|d| d["in_class"] == true));
+    assert_eq!(beyond_relative_1e5, 12);
     let days = entries.iter().filter(|e| e.1.is_multiple_of(3)).count();
     assert_eq!(oracles["differing_memory"], entries.len() - days);
     assert_eq!(oracles["differing_days"], days);

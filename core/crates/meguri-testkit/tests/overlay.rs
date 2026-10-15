@@ -229,7 +229,7 @@ fn meguris_own_fsrs_next_run_takes_the_committed_overlay_on_macos() {
 #[test]
 fn every_committed_overlay_parses_and_is_fresh_against_its_golden() {
     // The recorder hashes the golden's observations in Python; equal hashes
-    // here mean both JCS writers agree.
+    // here mean both JCS writers agree. Every entry is in the class (F11).
     let suite = Suite::open(&repo_conformance()).unwrap();
     let ids: Vec<&str> = suite.overlay_ids().collect();
     assert!(!ids.is_empty());
@@ -240,7 +240,7 @@ fn every_committed_overlay_parses_and_is_fresh_against_its_golden() {
         .filter(|p| {
             matches!(
                 p.kind.as_str(),
-                "invalid_overlay" | "stale_overlay" | "orphan_overlay" | "overlay_entry"
+                "invalid_overlay" | "stale_overlay" | "orphan_overlay" | "overlay_entry" | "outside_class"
             )
         })
         .collect();
@@ -414,14 +414,36 @@ fn overlays_that_break_the_schema_or_the_entry_rules_are_rejected() {
 /// The class check of one overlay of smoke/fsrs-new-card: the reason for
 /// each entry outside it, `None` for entries in it.
 fn class_of(entries: Value) -> Vec<Option<String>> {
+    class_in(SMOKE, entries, false)
+}
+
+/// The class check of one overlay of the committed scenario `rel`. With
+/// `golden_holds_linux`, the Linux golden first gets each entry's `linux`
+/// value at its pointer, so that an example of F8.4 needs no golden with
+/// that very value: F8.3 reads only the two values and the pointer.
+fn class_in(rel: &str, entries: Value, golden_holds_linux: bool) -> Vec<Option<String>> {
     let dir = tree();
     let root = dir.path();
-    copy(root, SMOKE);
-    write_overlay(root, SMOKE, entries);
-    let checked =
-        Overlay::parse(&fs::read_to_string(root.join(format!("goldens-apple/{SMOKE}.json"))).unwrap()).unwrap();
-    let loaded = scenario::load(&root.join(format!("scenarios/{SMOKE}.yaml"))).unwrap();
-    let problems = overlay::check_entries(&checked, &golden_observations(root, SMOKE), &loaded.scenario);
+    copy(root, rel);
+    if golden_holds_linux {
+        let path = root.join(format!("goldens/{rel}.json"));
+        let mut golden = read_json(&path);
+        for entry in entries.as_array().unwrap() {
+            *golden["observations"]
+                .pointer_mut(entry["pointer"].as_str().unwrap())
+                .unwrap() = entry["linux"].clone();
+        }
+        fs::write(&path, serde_json::to_string_pretty(&golden).unwrap()).unwrap();
+    }
+    write_overlay(root, rel, entries);
+    let checked = Overlay::parse(&fs::read_to_string(root.join(format!("goldens-apple/{rel}.json"))).unwrap()).unwrap();
+    let path = [".yaml", ".json"]
+        .map(|suffix| root.join(format!("scenarios/{rel}{suffix}")))
+        .into_iter()
+        .find(|p| p.is_file())
+        .unwrap();
+    let loaded = scenario::load(&path).unwrap();
+    let problems = overlay::check_entries(&checked, &golden_observations(root, rel), &loaded.scenario);
     checked
         .entries
         .iter()
@@ -486,17 +508,25 @@ fn the_class_follows_the_examples_of_f8_4() {
             .count(),
         2
     );
-    // Memory: relative 7e-8 is in, 4.3e-5 is out; an integer is not a
-    // memory value.
+    // Memory: relative 7e-8 is in. The stability bound is the larger of
+    // relative 1e-4 and 1e-5 days; the hard stability here is 9.240417.
     let memory = |rating: &str, linux: Value, apple: Value| json!({"pointer": format!("{SET}/{rating}/memory_state/stability"), "linux": linux, "apple": apple});
     assert_eq!(
         class_of(json!([memory("good", json!(13.836124), json!(13.836125))])),
         [None]
     );
+    // Relative 4.1e-5 was outside the class as first written, and is in it
+    // now; relative 2.3e-4 (2.1e-3 apart) is outside.
+    assert_eq!(
+        class_of(json!([memory("hard", json!(9.240417), json!(9.2408))])),
+        [None]
+    );
     assert!(
-        class_of(json!([memory("hard", json!(9.240417), json!(9.2408))]))[0]
+        class_of(json!([memory("hard", json!(9.240417), json!(9.2425))]))[0]
             .as_deref()
-            .is_some_and(|m| m.contains("more than 1e-5"))
+            .is_some_and(|m| m.contains("stability") && m.contains("1e-4") && m.contains("1e-5 days")),
+        "{:?}",
+        class_of(json!([memory("hard", json!(9.240417), json!(9.2425))]))
     );
     // Relearning parts count too; `current` is stored data, never a next
     // state, and card rows are not next states either.
@@ -522,6 +552,133 @@ fn the_class_follows_the_examples_of_f8_4() {
         class_of(json!([day("good", 15, 16, 15.4995, 15.5005)]))[0]
             .as_deref()
             .is_some_and(|m| m.contains("rule 2"))
+    );
+}
+
+/// One memory entry of F8.4 at `pointer` of scenario `rel`, its class.
+fn memory_class(rel: &str, pointer: &str, linux: Value, apple: Value, golden_holds_linux: bool) -> Option<String> {
+    let entry = json!([{"pointer": pointer, "linux": linux, "apple": apple}]);
+    class_in(rel, entry, golden_holds_linux).remove(0)
+}
+
+#[test]
+fn memory_entries_take_the_stability_or_difficulty_bound_of_f8_3() {
+    let corpus = |n: u32| format!("fp-probe/corpus/next-states-{n:03}");
+    let stability = format!("{SET}/again/learning/memory_state/stability");
+    let difficulty = format!("{SET}/again/learning/memory_state/difficulty");
+    let inside = |rel: &str, pointer: &str, linux: Value, apple: Value, patch: bool| {
+        let class = memory_class(rel, pointer, linux.clone(), apple.clone(), patch);
+        assert_eq!(class, None, "{pointer} {linux} {apple}");
+    };
+    let outside = |rel: &str, pointer: &str, linux: Value, apple: Value, why: &[&str]| {
+        let class = memory_class(rel, pointer, linux.clone(), apple.clone(), true);
+        assert!(
+            class
+                .as_deref()
+                .is_some_and(|m| !m.starts_with("entry:") && why.iter().all(|w| m.contains(w))),
+            "{pointer} {linux} {apple}: {class:?}"
+        );
+    };
+
+    // The committed corpus entries of F8.4, against their own goldens: an
+    // again stability 3.9e-7 apart (relative 9.4e-5) is under the 1e-5
+    // floor; an easy stability at relative 1.04e-5 is under 1e-4.
+    inside(
+        &corpus(29),
+        "/steps/0/fsrs_next/rows/820/1",
+        json!(0.0041170507),
+        json!(0.0041174362),
+        false,
+    );
+    inside(
+        &corpus(89),
+        "/steps/0/fsrs_next/rows/977/10",
+        json!(59.598206),
+        json!(59.598827),
+        false,
+    );
+    // The column decides: the same values in the difficulty column next to
+    // them are outside, since difficulty keeps relative 1e-5.
+    outside(
+        &corpus(29),
+        "/steps/0/fsrs_next/rows/820/2",
+        json!(0.0041170507),
+        json!(0.0041174362),
+        &["difficulty", "1e-5"],
+    );
+    outside(
+        &corpus(89),
+        "/steps/0/fsrs_next/rows/977/11",
+        json!(59.598206),
+        json!(59.598827),
+        &["difficulty", "1e-5"],
+    );
+    // fsrs_next columns 4 and 7 are stabilities, 5 and 8 difficulties.
+    inside(
+        EDGES,
+        "/steps/0/fsrs_next/rows/4/7",
+        json!(13.836124),
+        json!(13.836125),
+        false,
+    );
+    inside(
+        EDGES,
+        "/steps/0/fsrs_next/rows/4/4",
+        json!(9.240417),
+        json!(9.2408),
+        false,
+    );
+    outside(
+        EDGES,
+        "/steps/0/fsrs_next/rows/4/5",
+        json!(4.7481427),
+        json!(4.7484),
+        &["difficulty"],
+    );
+    inside(
+        EDGES,
+        "/steps/0/fsrs_next/rows/4/8",
+        json!(2.1041174),
+        json!(2.1041175),
+        false,
+    );
+
+    // The stability rows of F8.4, by value.
+    inside(SMOKE, &stability, json!(0.0011), json!(0.0011005), true);
+    inside(SMOKE, &stability, json!(2.3065), json!(2.3066), true);
+    outside(SMOKE, &stability, json!(2.3065), json!(2.3075), &["stability", "1e-4"]);
+    outside(
+        SMOKE,
+        &stability,
+        json!(0.0041),
+        json!(0.0042),
+        &["stability", "1e-5 days"],
+    );
+    outside(SMOKE, &stability, json!(2), json!(2.0000001), &["fraction"]);
+    // A stability under review/ takes the same bound.
+    inside(
+        SMOKE,
+        &format!("{SET}/again/review/memory_state/stability"),
+        json!(2.3065),
+        json!(2.3066),
+        true,
+    );
+
+    // The difficulty rows of F8.4: relative 5e-8 is in, 4.5e-5 is out.
+    inside(SMOKE, &difficulty, json!(7.3921676), json!(7.392168), false);
+    outside(
+        SMOKE,
+        &difficulty,
+        json!(7.3921676),
+        json!(7.3925),
+        &["difficulty", "1e-5"],
+    );
+    outside(
+        SMOKE,
+        &format!("{SET}/good/memory_state/difficulty"),
+        json!(2.1041174),
+        json!(2.1042),
+        &["difficulty"],
     );
 }
 
