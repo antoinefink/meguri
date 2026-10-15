@@ -344,7 +344,7 @@ fn standard(dir: &Path, extra_config: bool) {
         config("defaultSearchText", "\"deck:Japanese tag:jp::n5 is:due Hund\""),
         config(
             "savedFilters",
-            r#"{"My Japanese":"deck:*a*","broken":"\"open","nowhere":"-deck:Nowhere"}"#,
+            r#"{"My Japanese":"deck:*a*","broken":"\"open","nowhere":"-deck:Nowhere","regex":"tag:re:^jp front:*Hund*"}"#,
         ),
         config("flagLabels", r#"{"1":"Wichtig","2":"später"}"#),
     ];
@@ -774,13 +774,23 @@ fn searches_select_the_same_decks_and_tags() {
 
     let saved = config_value(&clone, "savedFilters");
     let saved = saved.as_object().unwrap();
-    assert_eq!(saved.len(), 3);
+    assert_eq!(saved.len(), 4);
     let values: BTreeSet<&str> = saved.values().map(|v| v.as_str().unwrap()).collect();
     assert!(values.contains("(deck:d0 OR deck:d1 OR deck:d2)"), "{values:?}");
     assert!(values.contains("-did:0"), "{values:?}");
     let unparsed: Vec<&&str> = values.iter().filter(|v| v.starts_with('"')).collect();
     assert_eq!(unparsed.len(), 1);
     assert_shape(unparsed[0], "\"[a-z]{4}");
+    // An inexact tag term keeps its prefix; a field term keeps its key and
+    // wildcards.
+    assert!(
+        values
+            .iter()
+            .any(|v| Regex::new(r"^tag:re:\^[a-z]{2} front:\*[A-Z][a-z]{3}\*$")
+                .unwrap()
+                .is_match(v)),
+        "{values:?}"
+    );
     let names: Vec<&String> = saved.keys().collect();
     assert!(
         names
@@ -799,7 +809,7 @@ fn searches_select_the_same_decks_and_tags() {
     let report = clone.report_json();
     assert_eq!(report["searches"]["rewritten"], 6);
     assert_eq!(report["searches"]["unparsed"], 1);
-    assert_eq!(report["searches"]["inexact"], 0);
+    assert_eq!(report["searches"]["inexact"], 1);
     assert_eq!(report["decks"]["searches"], 1);
     assert_eq!(report["decks"]["descriptions"], 1);
 }
