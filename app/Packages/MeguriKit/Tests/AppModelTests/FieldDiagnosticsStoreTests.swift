@@ -8,6 +8,7 @@ import AppModel
 
 /// Field diagnostics (R1867, U12): MetricKit's reports land in app-private
 /// storage, registered signposts under their names, and nothing is sent.
+/// The files are read and written off the main actor (KTD9).
 @Suite(.serialized) struct FieldDiagnosticsStoreTests {
     /// A daily report as MetricKit's Swift API encodes it: hang, hitch,
     /// launch, memory, disk writes, two signposts (one registered), and a
@@ -79,7 +80,7 @@ import AppModel
         let store = try temporaryStore()
         try await deliver([Self.metricReport()], [Self.hangDiagnostic()], to: store)
 
-        let stored = try store.metrics()
+        let stored = try await store.metrics()
         #expect(stored.count == 1)
         let kinds = stored[0].entries.flatMap(\.values).map(\.metricGroup)
         var expected: Set<MetricGroup> = [.applicationResponsiveness, .animation, .appLaunch, .diskIO]
@@ -90,7 +91,7 @@ import AppModel
         #expect(stored[0].timeRange == DateInterval(
             start: Date(timeIntervalSinceReferenceDate: 813_628_800), end: Date(timeIntervalSinceReferenceDate: 813_715_200)))
 
-        let diagnostics = try store.diagnostics()
+        let diagnostics = try await store.diagnostics()
         #expect(diagnostics.count == 1)
         guard case .hang(let hang) = diagnostics[0].result else {
             Issue.record("expected the hang diagnostic, got \(diagnostics[0].result)")
@@ -103,22 +104,74 @@ import AppModel
         #expect(files.contains { $0.hasPrefix("metrics/") && $0.hasSuffix(".json") })
         #expect(files.contains { $0.hasPrefix("diagnostics/") && $0.hasSuffix(".json") })
         let reopened = FieldDiagnosticsStore(directory: store.directory)
-        #expect(try reopened.metrics().count == 1)
-        #expect(try reopened.diagnostics().count == 1)
+        #expect(try await reopened.metrics().count == 1)
+        #expect(try await reopened.diagnostics().count == 1)
     }
 
     @Test func aRegisteredSignpostIsStoredUnderItsName() async throws {
         let store = try temporaryStore()
         try await deliver([Self.metricReport(), Self.metricReport()], [], to: store)
 
-        let answers = try store.signposts(named: IntervalNames.answerToNextVisible.name)
+        let answers = try await store.signposts(named: IntervalNames.answerToNextVisible.name)
         #expect(answers.count == 2, "one entry per delivered report")
         #expect(answers.allSatisfy { $0.metric.totalCount == 410 && $0.metric.signpostCategory == "Review" })
         #expect(answers[0].metric.signpostDuration.buckets.map(\.count) == [400, 10])
-        #expect(try store.signposts(named: "someone.elses").isEmpty, "only registered names are kept")
-        #expect(try store.signposts(named: IntervalNames.editorOpenToEditable.name).isEmpty)
+        #expect(try await store.signposts(named: "someone.elses").isEmpty, "only registered names are kept")
+        #expect(try await store.signposts(named: IntervalNames.editorOpenToEditable.name).isEmpty)
         // Signposts are kept apart from the report's other values.
-        #expect(try store.metrics().allSatisfy { $0.entries.flatMap(\.values).allSatisfy { $0.metricGroup != .signpost } })
+        #expect(try await store.metrics().allSatisfy { $0.entries.flatMap(\.values).allSatisfy { $0.metricGroup != .signpost } })
+    }
+
+    @Test func aNewReportAddsToTheSignpostHistoryWithoutRewritingIt() async throws {
+        let store = try temporaryStore()
+        try await deliver([Self.metricReport()], [], to: store)
+        let before = try Self.files(in: store.directory)
+        #expect(before.keys.contains { $0.hasPrefix("signposts/") }, "\(before.keys)")
+
+        try await deliver([Self.metricReport()], [], to: store)
+        let after = try Self.files(in: store.directory)
+        for (path, bytes) in before {
+            #expect(after[path] == bytes, "\(path) was rewritten")
+        }
+        let added = after.keys.filter { before[$0] == nil }
+        #expect(added.filter { $0.hasPrefix("signposts/") }.count == 1, "\(added)")
+        #expect(try await store.signposts(named: IntervalNames.answerToNextVisible.name).count == 2)
+    }
+
+    /// The main thread stays blocked while the store records and reads: a
+    /// store that needed the main actor could not finish (KTD9: no file work
+    /// on the UI thread).
+    @Test @MainActor func theStoreWorksOffTheMainActor() throws {
+        let store = try temporaryStore()
+        let report = try Self.metricReport()
+        let diagnostic = try Self.hangDiagnostic()
+        let done = DispatchSemaphore(value: 0)
+        let counts = Mutex<[Int]>([])
+        Task.detached {
+            try? await store.record(report)
+            try? await store.record(diagnostic)
+            let metrics = (try? await store.metrics().count) ?? -1
+            let diagnostics = (try? await store.diagnostics().count) ?? -1
+            counts.withLock { $0 = [metrics, diagnostics] }
+            done.signal()
+        }
+        #expect(done.wait(timeout: .now() + 20) == .success, "the store did not finish while the main thread was busy")
+        #expect(counts.withLock { $0 } == [1, 1])
+    }
+
+    /// Every file under `directory`, by relative path, with its bytes.
+    static func files(in directory: URL) throws -> [String: Data] {
+        let root = directory.path(percentEncoded: false)
+        var files: [String: Data] = [:]
+        for path in try FileManager.default.subpathsOfDirectory(atPath: root) {
+            let url = directory.appending(path: path, directoryHint: .notDirectory)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDirectory),
+                !isDirectory.boolValue
+            else { continue }
+            files[path] = try Data(contentsOf: url)
+        }
+        return files
     }
 
     @Test func storingMakesNoNetworkRequest() async throws {
@@ -132,16 +185,18 @@ import AppModel
 
         let store = try temporaryStore()
         try await deliver([Self.metricReport()], [Self.hangDiagnostic()], to: store)
-        _ = try store.debugInfo()
-        #expect(try store.metrics().count == 1)
+        _ = try await store.debugInfo()
+        #expect(try await store.metrics().count == 1)
         #expect(RequestRecorder.requests.withLock { $0 }.isEmpty, "field diagnostics never leave the device")
     }
 
     @Test func debugInfoHoldsEverythingStored() async throws {
         let store = try temporaryStore()
-        #expect(try JSONSerialization.jsonObject(with: store.debugInfo()) as? [String: Any] != nil)
+        let empty = try await store.debugInfo()
+        #expect(try JSONSerialization.jsonObject(with: empty) as? [String: Any] != nil)
         try await deliver([Self.metricReport()], [Self.hangDiagnostic()], to: store)
-        let info = try #require(JSONSerialization.jsonObject(with: store.debugInfo()) as? [String: Any])
+        let stored = try await store.debugInfo()
+        let info = try #require(JSONSerialization.jsonObject(with: stored) as? [String: Any])
         #expect((info["metrics"] as? [Any])?.count == 1)
         #expect((info["diagnostics"] as? [Any])?.count == 1)
         let signposts = try #require(info["signposts"] as? [String: Any])

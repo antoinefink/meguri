@@ -10,23 +10,31 @@ import os
 /// here talks to the network. Settings shows it through Copy Debug Info
 /// (U160, `debugInfo()`).
 ///
+/// The store is an actor on its own utility-QoS serial queue: every read
+/// and write runs there, never on the main actor (KTD9), and callers await
+/// it. Files are only ever added, never rewritten, so a report costs one
+/// write however much history is stored.
+///
 /// Layout, one JSON file per report:
 /// - `metrics/<received>-<uuid>.json`: a `FieldMetrics`, the report's
 ///   entries with only the kept values;
 /// - `diagnostics/<received>-<uuid>.json`: a `FieldDiagnostic` (hang, disk
 ///   write exception, launch, and on iOS memory exception);
-/// - `signposts/<interval name>.json`: the `FieldSignpost`s of a registered
-///   interval, one per report that had it. Signposts under other names are
-///   dropped.
-public final class FieldDiagnosticsStore {
-    public let directory: URL
+/// - `signposts/<interval name>/<received>-<uuid>.json`: the
+///   `FieldSignpost`s a report had for that registered interval. Signposts
+///   under other names are dropped.
+public actor FieldDiagnosticsStore {
+    public nonisolated let directory: URL
+    private nonisolated let queue = DispatchSerialQueue(label: "com.antoinefink.meguri.fieldDiagnostics", qos: .utility)
+
+    public nonisolated var unownedExecutor: UnownedSerialExecutor { queue.asUnownedSerialExecutor() }
 
     public init(directory: URL) {
         self.directory = directory
     }
 
     /// `<Application Support>/Diagnostics/` in the app's container.
-    public static var standard: FieldDiagnosticsStore {
+    public nonisolated static var standard: FieldDiagnosticsStore {
         FieldDiagnosticsStore(directory: URL.applicationSupportDirectory.appending(path: "Diagnostics", directoryHint: .isDirectory))
     }
 
@@ -37,32 +45,33 @@ public final class FieldDiagnosticsStore {
     public func record(_ report: MetricReport) throws {
         let received = Date()
         var signposts: [String: [FieldSignpost]] = [:]
-        func kept(_ values: [MetricResult]) -> [MetricResult] {
-            values.filter { value in
+        var entries: [FieldMetrics.Entry] = []
+        let reported = report.intervalEntries.map { (states: $0.states, duration: Optional($0.duration), values: $0.values) }
+            + report.stateEntries.map { (states: [$0.state], duration: nil, values: $0.values) }
+        for entry in reported {
+            var kept: [MetricResult] = []
+            for value in entry.values {
                 if case .signpostInterval(let metric) = value {
                     if let interval = IntervalNames.named(metric.signpostName),
                         interval.category.rawValue == metric.signpostCategory
                     {
                         signposts[interval.name, default: []].append(FieldSignpost(timeRange: report.timeRange, metric: metric))
                     }
-                    return false
+                } else if Self.keptGroups.contains(value.metricGroup) {
+                    kept.append(value)
                 }
-                return Self.keptGroups.contains(value.metricGroup)
             }
+            entries.append(FieldMetrics.Entry(states: entry.states, duration: entry.duration, values: kept))
         }
         let metrics = FieldMetrics(
             received: received,
             timeRange: report.timeRange,
             applicationVersion: report.environment?.latestApplicationVersion,
-            entries: report.intervalEntries.map { FieldMetrics.Entry(states: $0.states, duration: $0.duration, values: kept($0.values)) }
-                + report.stateEntries.map { FieldMetrics.Entry(states: [$0.state], duration: nil, values: kept($0.values)) }
+            entries: entries
         )
         try write(metrics, to: newFile(in: Folder.metrics, received: received))
         for (name, entries) in signposts {
-            let file = signpostFile(name)
-            var all = try read([FieldSignpost].self, from: file) ?? []
-            all += entries
-            try write(all, to: file)
+            try write(entries, to: newFile(in: Folder.signposts(name), received: received))
         }
     }
 
@@ -88,10 +97,11 @@ public final class FieldDiagnosticsStore {
         try readAll(FieldDiagnostic.self, in: Folder.diagnostics)
     }
 
-    /// The stored daily statistics of the registered interval `name`.
+    /// The stored daily statistics of the registered interval `name`,
+    /// oldest report first.
     public func signposts(named name: String) throws -> [FieldSignpost] {
         guard IntervalNames.named(name) != nil else { return [] }
-        return try read([FieldSignpost].self, from: signpostFile(name)) ?? []
+        return try readAll([FieldSignpost].self, in: Folder.signposts(name)).flatMap { $0 }
     }
 
     /// Everything stored, as one JSON object (`metrics`, `diagnostics`,
@@ -109,7 +119,7 @@ public final class FieldDiagnosticsStore {
 
     /// Hang, hitch, launch, memory and disk writes (R1867). MetricKit
     /// reports no memory metrics on the Mac.
-    static let keptGroups: Set<MetricGroup> = {
+    nonisolated static let keptGroups: Set<MetricGroup> = {
         var groups: Set<MetricGroup> = [.applicationResponsiveness, .animation, .appLaunch, .diskIO]
         #if os(iOS)
         groups.insert(.memory)
@@ -117,7 +127,7 @@ public final class FieldDiagnosticsStore {
         return groups
     }()
 
-    static func keeps(_ result: DiagnosticResult) -> Bool {
+    nonisolated static func keeps(_ result: DiagnosticResult) -> Bool {
         switch result {
         case .hang, .diskWriteException, .appLaunch: return true
         default:
@@ -133,10 +143,10 @@ public final class FieldDiagnosticsStore {
     private enum Folder {
         static let metrics = "metrics"
         static let diagnostics = "diagnostics"
-        static let signposts = "signposts"
+        static func signposts(_ name: String) -> String { "signposts/\(name)" }
     }
 
-    private static let encoder: JSONEncoder = {
+    private nonisolated static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return encoder
@@ -147,18 +157,14 @@ public final class FieldDiagnosticsStore {
         return directory.appending(path: "\(folder)/\(stamp)-\(UUID().uuidString).json", directoryHint: .notDirectory)
     }
 
-    private func signpostFile(_ name: String) -> URL {
-        directory.appending(path: "\(Folder.signposts)/\(name).json", directoryHint: .notDirectory)
-    }
-
+    /// Writes a new file; an existing file is never replaced.
     private func write<T: Encodable>(_ value: T, to file: URL) throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Self.encoder.encode(value).write(to: file, options: [.atomic])
+        try Self.encoder.encode(value).write(to: file, options: [.withoutOverwriting])
     }
 
-    private func read<T: Decodable>(_ type: T.Type, from file: URL) throws -> T? {
-        guard FileManager.default.fileExists(atPath: file.path(percentEncoded: false)) else { return nil }
-        return try JSONDecoder().decode(type, from: Data(contentsOf: file))
+    private func read<T: Decodable>(_ type: T.Type, from file: URL) throws -> T {
+        try JSONDecoder().decode(type, from: Data(contentsOf: file))
     }
 
     private func readAll<T: Decodable>(_ type: T.Type, in folder: String) throws -> [T] {
@@ -167,7 +173,7 @@ public final class FieldDiagnosticsStore {
         return try FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false))
             .filter { $0.hasSuffix(".json") }
             .sorted()
-            .compactMap { try read(type, from: dir.appending(path: $0, directoryHint: .notDirectory)) }
+            .map { try read(type, from: dir.appending(path: $0, directoryHint: .notDirectory)) }
     }
 
     private struct DebugInfo: Encodable {
@@ -178,7 +184,7 @@ public final class FieldDiagnosticsStore {
 }
 
 /// A stored metric report.
-public struct FieldMetrics: Codable, Sendable {
+nonisolated public struct FieldMetrics: Codable, Sendable {
     /// One of the report's entries: an interval entry (states and duration)
     /// or a state entry (one state, no duration).
     public struct Entry: Codable, Sendable {
@@ -194,7 +200,7 @@ public struct FieldMetrics: Codable, Sendable {
 }
 
 /// A stored diagnostic.
-public struct FieldDiagnostic: Codable, Sendable {
+nonisolated public struct FieldDiagnostic: Codable, Sendable {
     public let received: Date
     public let timeRange: DateInterval
     public let applicationVersion: String
@@ -202,7 +208,7 @@ public struct FieldDiagnostic: Codable, Sendable {
 }
 
 /// One report's statistics of a registered interval.
-public struct FieldSignpost: Codable, Sendable {
+nonisolated public struct FieldSignpost: Codable, Sendable {
     public let timeRange: DateInterval
     public let metric: SignpostIntervalMetric
 }
@@ -238,7 +244,7 @@ public final class FieldDiagnosticsSubscriber {
         metricLoop = {
             for await report in metricReports {
                 do {
-                    try store.record(report)
+                    try await store.record(report)
                 } catch {
                     Self.log.error("storing a metric report failed: \(error.localizedDescription, privacy: .public)")
                 }
@@ -247,7 +253,7 @@ public final class FieldDiagnosticsSubscriber {
         diagnosticLoop = {
             for await report in diagnosticReports {
                 do {
-                    try store.record(report)
+                    try await store.record(report)
                 } catch {
                     Self.log.error("storing a diagnostic report failed: \(error.localizedDescription, privacy: .public)")
                 }
