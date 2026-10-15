@@ -385,14 +385,45 @@ native_hello_run() { # <out var> [env...]: the result.json of tools/mg oracle he
   printf -v "$var" '%s' "$out"
 }
 
+# native_time_control: the time control this Mac's native workers have
+# (F6.3), faketime or none, as the hello check found it (or from a hello of
+# its own when that check did not run). none means libfaketime cannot be
+# injected here, and the checks then expect the real-clock fallback.
+native_time_control() {
+  local r mode
+  if [ ! -s "$WORK/native-time-control" ]; then
+    native_hello_run r || return 1
+    jq -r '.details.hello.time_control // ""' "$r" >"$WORK/native-time-control"
+  fi
+  mode="$(cat "$WORK/native-time-control")"
+  case "$mode" in
+    faketime | none) printf '%s\n' "$mode" ;;
+    *)
+      echo "hello answered time_control '$mode', neither faketime nor none"
+      return 1
+      ;;
+  esac
+}
+
 t_the_native_lane_says_hello_with_its_platform_lock_and_time_control() {
   native_or_skip || return $?
-  local r container="$WORK/hello-container.json"
+  local r mode container="$WORK/hello-container.json"
   hello_on "$MG_ORACLE_TAG" "$ORACLE" UTC "$container" || return 1
   native_hello_run r || return 1
-  expect "status" "$(jq -r .status "$r")" pass &&
+  mode="$(jq -r '.details.hello.time_control // ""' "$r")"
+  printf '%s\n' "$mode" >"$WORK/native-time-control"
+  # F6.3: faketime where libfaketime can be injected; otherwise the worker
+  # runs on the real clock and hello warns. A passing run says which.
+  case "$mode" in
+    faketime) expect "status" "$(jq -r .status "$r")" pass ;;
+    none)
+      expect "status on the real clock" "$(jq -r .status "$r")" warn &&
+        expect "failures on the real clock" "$(jq -c '[.failures[].id]' "$r")" '["no-faketime"]' &&
+        echo "NOTE time control none on this Mac: the real-clock fallback was checked"
+      ;;
+    *) expect "time control" "$mode" "faketime or none" ;;
+  esac &&
     expect "platform" "$(jq -r .details.hello.platform "$r")" macos-arm64 &&
-    expect "time control" "$(jq -r .details.hello.time_control "$r")" faketime &&
     expect "tz" "$(jq -r .details.hello.tz "$r")" Asia/Kathmandu &&
     expect "lock: the macOS lock" "$(jq -r .details.hello.lock_sha256 "$r")" \
       "$(mg_oracle__sha256 <"$ORACLE/macos/requirements-macos.lock")" &&
@@ -426,17 +457,24 @@ native_harness() { # <record-apple|compare-apple> <report> [args...]
 # tree, as the Linux oracle would write it (the pin's Linux lock), from a
 # native run with the edit applied.
 native_golden() {
-  local id="$1" resp="$NATIVE_DIR/run.json" sha
+  local id="$1" resp="$NATIVE_DIR/run.json"
   native_run "$NATIVE_DIR/scenarios/$id.json" "$resp" || {
     cat "$resp"
     return 1
   }
+  native_golden_of "$id" "$2" <"$resp"
+}
+
+# native_golden_of <id> <jq edit>, a run response on stdin: the golden with
+# that response's observations, the edit applied.
+native_golden_of() {
+  local id="$1" sha
   sha="$("$NATIVE" harness hash "$NATIVE_DIR/scenarios/$id.json" | cut -d' ' -f1)"
   jq -S --arg id "$id" --arg sha "$sha" --slurpfile pin "$NATIVE_DIR/oracle.json" '
     {scenario_id: $id, scenario_sha256: $sha,
      oracle: {anki_version: "26.9.3", lock_sha256: $pin[0].lock_sha256, driver_sha256: ("0" * 64)},
      tz: "UTC", clock: {start: "2030-01-15T10:00:00", mode: "frozen"}, observations: .observations} | '"$2" \
-    "$resp" >"$NATIVE_DIR/goldens/$id.json"
+    >"$NATIVE_DIR/goldens/$id.json"
 }
 
 t_the_native_harness_records_compares_and_refuses_overlays() {
@@ -449,7 +487,11 @@ t_the_native_harness_records_compares_and_refuses_overlays() {
 }
 
 native_overlays() {
-  local dir="$NATIVE_DIR" report="$NATIVE_DIR/report.json" overlay="$NATIVE_DIR/overlays/t/probe.json" before rc rel
+  local dir="$NATIVE_DIR" report="$NATIVE_DIR/report.json" overlay="$NATIVE_DIR/overlays/t/probe.json" before rc rel mode timed
+  mode="$(native_time_control)" || {
+    echo "$mode"
+    return 1
+  }
   rm -rf "$dir" && mkdir -p "$dir/scenarios/t" "$dir/goldens/t" "$dir/scratch" || return 1
   jq '{anki_version, lock_sha256, macos_lock_sha256}' "$REPO/conformance/oracle.json" >"$dir/oracle.json"
   cat >"$dir/scenarios/t/probe.json" <<'JSON'
@@ -461,12 +503,23 @@ JSON
   cat >"$dir/scenarios/t/timed.json" <<'JSON'
 {"id": "t/timed", "clock": {"tz": "UTC", "start": "2030-01-15T10:00:00"}, "steps": [{"observe": ["timing"]}]}
 JSON
-  native_golden t/probe . && native_golden t/timed . || return 1
+  native_golden t/probe . || return 1
+  if [ "$mode" = faketime ]; then
+    native_golden t/timed . || return 1
+    timed=no_difference
+  else
+    # A real-clock worker does not run t/timed (F6.3): its golden only has
+    # to be fresh, so it is written here rather than recorded.
+    echo '{"observations": {"steps": [{"timing": {"days_elapsed": 0, "next_day_at": 1894766400, "now": 1894701600, "utc_offset_secs": 0}}]}}' |
+      native_golden_of t/timed . || return 1
+    timed=clock_unsupported
+  fi
 
-  # The Apple oracle reproduces its own output: no overlay.
+  # The Apple oracle reproduces its own output: no overlay. On the real
+  # clock only the clock-free t/probe runs.
   native_harness record-apple "$report"
   expect "no difference" "$(jq -c '[.scenarios[] | [.scenario, .status]]' "$report")" \
-    '[["t/probe","no_difference"],["t/timed","no_difference"]]' &&
+    "[[\"t/probe\",\"no_difference\"],[\"t/timed\",\"$timed\"]]" &&
     expect "no overlay" "$([ -e "$overlay" ] && echo written || echo none)" none || return 1
 
   # Good's days 3 apart: an entry outside the class, written and reported (F7.2, F8).
@@ -548,7 +601,9 @@ for t in $TESTS; do
   out="$("$t" 2>&1)"
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    echo "ok $n $t"
+    # A passing check may say how it passed with a line "NOTE <text>".
+    note="$(printf '%s\n' "$out" | sed -n 's/^NOTE //p' | head -n 1)"
+    echo "ok $n $t${note:+ ($note)}"
   elif [ "$rc" -eq 2 ] && printf '%s' "$out" | grep -q '^SKIP '; then
     echo "ok $n $t # SKIP $(printf '%s' "$out" | sed -n 's/^SKIP //p' | head -n 1)"
   else
