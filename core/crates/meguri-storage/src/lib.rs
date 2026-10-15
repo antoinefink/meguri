@@ -21,12 +21,13 @@ mod pragmas;
 pub mod raw;
 pub mod rows;
 pub mod schema;
+pub mod snapshot;
 pub mod stamp;
 pub mod write_scope;
 
 pub use checkpoint::CheckpointOutcome;
 pub use conn_init::Initializers;
-pub use connections::{Reader, ReaderRole, Writer};
+pub use connections::{Reader, ReaderFactory, ReaderRole, Writer};
 pub use error::{BuilderRefusal, OpenError, StorageError, UpgradeStage};
 pub use journal::{Journal, JournalOptions};
 pub use open::{OpenEvent, OpenOptions, OpenedCollection, open_collection};
@@ -37,5 +38,6 @@ pub use rows::{Cell, Record, RowError, RowImage, RowKey, Table};
 /// functions through this re-export, never by opening a collection.
 pub use rusqlite;
 pub use schema::expected_objects::{ExpectedObjects, SchemaObject};
+pub use snapshot::ReadSnapshot;
 pub use stamp::StampMode;
-pub use write_scope::{CollectionBuilder, Committed, WriteScope, Written};
+pub use write_scope::{CollectionBuilder, Committed, Savepoint, WriteScope, Written};

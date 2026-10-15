@@ -119,6 +119,35 @@ pub struct Reader {
     role: ReaderRole,
 }
 
+/// Opens readers of an open collection from any thread (C6): the engine's
+/// writer thread owns the [`crate::OpenedCollection`], and its readers open
+/// lazily on the threads that first need them. Only an opened collection
+/// hands one out, so its writer has already set WAL mode.
+#[derive(Clone, Debug)]
+pub struct ReaderFactory {
+    path: PathBuf,
+    initializers: Initializers,
+}
+
+impl ReaderFactory {
+    pub(crate) fn new(path: &Path, initializers: &Initializers) -> ReaderFactory {
+        ReaderFactory {
+            path: path.to_path_buf(),
+            initializers: initializers.clone(),
+        }
+    }
+
+    /// Opens a reader of `role` (C6). The caller closes it before the
+    /// collection closes.
+    pub fn open(&self, role: ReaderRole) -> Result<Reader, StorageError> {
+        Reader::open(&self.path, role, &self.initializers)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 impl Reader {
     /// Opens a reader of `role` on a collection the writer has already set
     /// to WAL mode.
