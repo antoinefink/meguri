@@ -629,7 +629,7 @@ if devices_phase && [ "$UI" = true ]; then
   else
     skip mac-Debug-TestHooksTests "queued for tools/mg mac-ui"
   fi
-  if [ -n "$IPHONE" ]; then
+  if [ "$SIMS" = true ] && [ -n "$IPHONE" ]; then
     run_tests iphone-app-hosted Meguri Snapshot Debug "id=$IPHONE"
     for config in Debug Release AppStore; do
       run_tests "iphone-$config-TestHooksTests" Meguri UI "$config" "id=$IPHONE" -only-testing:MeguriUITests/TestHooksTests
@@ -639,7 +639,9 @@ if devices_phase && [ "$UI" = true ]; then
     # The agent driver's script parser (U8); it launches no app.
     run_tests iphone-Debug-DriveScriptTests Meguri UI Debug "id=$IPHONE" -only-testing:MeguriUITests/DriveScriptTests
   fi
-  [ -z "$IPAD" ] || run_tests ipad-Debug-TestHooksTests Meguri UI Debug "id=$IPAD" -only-testing:MeguriUITests/TestHooksTests
+  if [ "$SIMS" = true ] && [ -n "$IPAD" ]; then
+    run_tests ipad-Debug-TestHooksTests Meguri UI Debug "id=$IPAD" -only-testing:MeguriUITests/TestHooksTests
+  fi
   [ "$SIMS" = true ] || skip "simulator test runs" "queued: no test VM (user step mac-vm)"
 fi
 

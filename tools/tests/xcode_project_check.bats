@@ -115,7 +115,7 @@ EOF
 #!/usr/bin/env bash
 unmap() { local s="$*"; printf "%s" "${s//"$FAKE_VM_FS"/}"; }
 echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
-other="$(pgrep -f "xcodebuild[ ]test-without-building")" && echo "vm-overlap with $other" >>"$STUB_LOG"
+other="$(pgrep -f 'xcodebuild[ ]test-without-building|UITests-Runner[.]app/[^/]*UITests-Runner')" && echo "vm-overlap with $other" >>"$STUB_LOG"
 echo "$$" >>"$FAKE_VM/tests.pids"
 only=""
 while [ "$#" -gt 0 ]; do
@@ -136,6 +136,11 @@ fi
 if [ -n "${FAKE_VM_SSH_DROP:-}" ] && [ ! -e "$FAKE_VM/ssh-dropped" ]; then
   : >"$FAKE_VM/ssh-dropped"
   [ "$FAKE_VM_SSH_DROP" != down ] || : >"$FAKE_VM_DIR/ssh-down"
+  # The iOS runner survives xcodebuild's SIGTERM until cleanup sends SIGKILL.
+  bash -c 'trap "" TERM; exec -a /Simulator/MeguriUITests-Runner.app/MeguriUITests-Runner sleep 600' \
+    </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &
+  echo "$!" >>"$FAKE_VM/tests.pids"
+  until pgrep -f 'UITests-Runner[.]app/[^/]*UITests-Runner' >/dev/null; do sleep 0.01; done
   kill -9 "$PPID"
   exec </dev/null >/dev/null 2>&1 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-
   for _ in $(seq 1 6000); do sleep 0.1; done
@@ -361,6 +366,8 @@ SWIFT
   [ -n "$stop" ] && [ -n "$second" ] && [ "$stop" -lt "$second" ] || { cat "$STUB_LOG"; return 1; }
   not_called '^vm-overlap'
   ! vm_tests_running
+  ! FAKE_VM="$FAKE_VM_DIR/meguri-mac" "$FAKE_VM_BIN/pgrep" -f 'UITests-Runner[.]app/[^/]*UITests-Runner'
+  called '^vm-pkill -9 -f '
 
   # SSH stops answering as well: the run cannot be stopped, and no other run
   # starts in the VM.
@@ -383,5 +390,13 @@ SWIFT
   not_called 'id=POOL'
   not_called '^xcodebuild build-for-testing'
   tap_line 'ok [0-9]+ lease the iPhone and iPad simulators # SKIP queued: no test VM \(user step mac-vm\)'
+  tap_line 'ok [0-9]+ simulator test runs # SKIP queued: no test VM \(user step mac-vm\)'
+}
+
+@test "without the test VM, supplied iPhone and iPad IDs do not start simulator test runs" {
+  check_project --phase devices --no-sims --iphone GIVEN-IPHONE --ipad GIVEN-IPAD
+  not_called '^sim-pool\.sh '
+  not_called '^xcodebuild test .* -destination id='
+  not_called '^xcodebuild build-for-testing'
   tap_line 'ok [0-9]+ simulator test runs # SKIP queued: no test VM \(user step mac-vm\)'
 }
