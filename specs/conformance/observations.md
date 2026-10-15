@@ -23,7 +23,7 @@ What each observation kind records, how values are written, and how the runner c
 - `kind(#c1, #c3)`: the kind for these references, in the order given;
 - `{kind: <arguments>}`: kinds that take structured arguments.
 
-Requesting a per-card kind twice in one step merges the two results when they name different cards; naming a card twice in one step is invalid.
+Requesting a per-card kind twice in one step merges the two results when they name different cards; naming a card twice in one step is invalid. A kind whose value is a list (`template`) may be requested once per step.
 
 ## O3. Pointers and patterns
 
@@ -46,7 +46,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
-| `render` | card references or none | draft (render): question and answer HTML, AV tags and error kind per card |
+| `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
+| `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |
