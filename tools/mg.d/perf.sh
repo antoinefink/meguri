@@ -12,6 +12,9 @@
 #   bench         criterion suites in the dev container: every bench target
 #                 outside benches/icount/; each writes its own perf result
 #                 (meguri-testkit bench::report).
+#   bench-mac     the same suites natively on this Mac (R1864's Apple
+#                 silicon numbers, phys_footprint memory) at 10k, 100k, 150k
+#                 and 500k cards, built first and run holding the host lease.
 #   bench-icount  gungraun suites under valgrind in the dev container: every
 #                 bench target under benches/icount/; perf-compare turns
 #                 gungraun's JSON into a perf result.
@@ -21,6 +24,8 @@ mg_job perf-ui host mg_perf_ui \
   "UI performance tests (R1863, R1866): [--platform iphone|ipad|mac] [--device <leased udid>] [--config Profile] [--suite <class>]... (default SmokePerfTests); Profile build of the Performance plan, intervals, hitches, launch and memory into perf-result.json (tools/perf/perf-result.schema.json); any other configuration is refused"
 mg_job bench docker:dev mg_bench \
   "Criterion wall-clock suites (R1864): [--sizes 10k,150k] [--bench <target>]... [-- criterion args]; makes the collections first (meguri-cli generate, as tools/mg fixtures), then every bench target outside benches/icount/: per-operation p50/p95/p99 and peak memory into perf results (tools/perf/perf-result.schema.json)"
+mg_job bench-mac host mg_bench_mac \
+  "Criterion wall-clock suites natively on this Mac (R1864): [--sizes 10k,100k,150k,500k] [--bench <target>]... [-- criterion args]; makes the collections first (tools/mg fixtures), builds every bench target outside benches/icount/ with cargo on the host, then runs them holding the host lease (a locked screen does not stop it): per-operation p50/p95/p99 and peak phys_footprint into perf results (tools/perf/perf-result.schema.json)"
 mg_job bench-icount docker:dev mg_bench_icount \
   "gungraun instruction-count suites under valgrind (R1864): [--bench <target>]...; every bench target under benches/icount/, per-bench instruction counts into perf results (tools/perf/perf-result.schema.json)"
 mg_job metrics host mg_metrics \
@@ -33,6 +38,7 @@ MG_PERF_COMPARE=tools/scripts/perf-compare/perf_compare.py
 # a bench samples its own process's memory, and generating a collection
 # under valgrind would take minutes.
 MG_BENCH_SIZES="10k,150k"
+MG_BENCH_MAC_SIZES="10k,100k,150k,500k"
 MG_BENCH_ICOUNT_FIXTURES="10k"
 
 mg__perf_usage() {
@@ -51,12 +57,20 @@ mg__bench_targets() {
     | "\($p) \(.name)"'
 }
 
-# mg__perf_validate <result.json>...: each against the perf result schema;
-# records a failure per invalid file. Returns 1 when one is invalid.
+# mg__perf_validate <result.json>...: each against the perf result schema
+# (python3-jsonschema: in the dev container for docker jobs, through the
+# image-tools container for host jobs); records a failure per invalid file.
+# Returns 1 when one is invalid.
 mg__perf_validate() {
-  local f out rc=0
+  local f out ok rc=0
   for f in "$@"; do
-    if ! out="$(python3 "$MG_PERF_COMPARE" validate "$f" 2>&1)"; then
+    if [ "$MG_PLACEMENT" = host ]; then
+      out="$(mg_image_tools python3 "$MG_PERF_COMPARE" validate "$(mg_container_path "$f")" 2>&1)" && ok=1 || ok=0
+      out="$(printf '%s\n' "$out" | grep -Ev '^ *(Container|Image|Network|Volume) ')"
+    else
+      out="$(python3 "$MG_PERF_COMPARE" validate "$f" 2>&1)" && ok=1 || ok=0
+    fi
+    if [ "$ok" = 0 ]; then
       mg_failure "invalid-result/$(basename "$f")" "$f is not a perf result: $(printf '%s' "$out" | head -n 3 | tr '\n' ' ')"
       rc=1
     fi
@@ -64,55 +78,71 @@ mg__perf_validate() {
   return "$rc"
 }
 
-# tools/mg bench [--sizes 10k,150k] [--bench <target>]... [-- criterion args]
-mg_bench() {
-  local sizes="$MG_BENCH_SIZES" only=() extra=() line pkg target results rc failed=0 ran=0 f
+# mg__bench_args <default sizes> <job args...>: [--sizes <list>]
+# [--bench <target>]... [-- criterion args] into MG_B_SIZES, MG_B_ONLY and
+# MG_B_EXTRA. Returns 1 after recording a usage error.
+mg__bench_args() {
+  MG_B_SIZES="$1"
+  MG_B_ONLY=()
+  MG_B_EXTRA=()
+  shift
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --sizes)
-        [ "$#" -ge 2 ] && [ -n "$2" ] || { mg__perf_usage "--sizes takes a comma-separated list such as 10k,150k"; return 0; }
-        sizes="$(printf '%s' "$2" | tr 'A-Z' 'a-z')" && shift 2
+        [ "$#" -ge 2 ] && [ -n "$2" ] || { mg__perf_usage "--sizes takes a comma-separated list such as $MG_B_SIZES"; return 1; }
+        MG_B_SIZES="$(printf '%s' "$2" | tr 'A-Z' 'a-z')" && shift 2
         ;;
       --bench)
-        [ "$#" -ge 2 ] && [ -n "$2" ] || { mg__perf_usage "--bench takes a bench target name"; return 0; }
-        only[${#only[@]}]="$2" && shift 2
+        [ "$#" -ge 2 ] && [ -n "$2" ] || { mg__perf_usage "--bench takes a bench target name"; return 1; }
+        MG_B_ONLY[${#MG_B_ONLY[@]}]="$2" && shift 2
         ;;
-      --) shift && extra=("$@") && break ;;
-      *) mg__perf_usage "unknown argument '$1'"; return 0 ;;
+      --) shift && MG_B_EXTRA=("$@") && break ;;
+      *) mg__perf_usage "unknown argument '$1'"; return 1 ;;
     esac
   done
-  # shellcheck disable=SC2046 # one size per word
-  if ! mg__perf_fixtures $(printf '%s' "$sizes" | tr ',' ' '); then
-    mg_failure fixtures "making the bench collections ($sizes) failed; see log.txt" "tools/mg fixtures $(printf '%s' "$sizes" | tr ',' ' ')"
-    mg_status fail
-    return 0
-  fi
-  results="$MG_RUN_DIR/results"
-  mkdir -p "$results"
-  local targets
-  targets="$(mg__bench_targets criterion)" || { mg_failure cargo-metadata "cargo metadata failed; see log.txt"; mg_status error; return 0; }
+}
+
+# mg__bench_selected: the criterion targets (mg__bench_targets lines) that
+# --bench names, all of them without it; records an error and returns 1
+# when cargo metadata fails or nothing matches.
+mg__bench_selected() {
+  local targets pkg target
+  targets="$(mg__bench_targets criterion)" || {
+    mg_failure cargo-metadata "cargo metadata failed; see log.txt"
+    mg_status error
+    return 1
+  }
+  MG_B_TARGETS=""
   while IFS=' ' read -r pkg target; do
     [ -n "$target" ] || continue
-    if [ "${#only[@]}" -gt 0 ] && ! mg_word_in "$target" "${only[*]}"; then continue; fi
+    if [ "${#MG_B_ONLY[@]}" -gt 0 ] && ! mg_word_in "$target" "${MG_B_ONLY[*]}"; then continue; fi
+    MG_B_TARGETS="$MG_B_TARGETS$pkg $target"$'\n'
+  done <<<"$targets"
+  [ -n "$MG_B_TARGETS" ] || { mg__perf_usage "no criterion bench target matched${MG_B_ONLY[0]+ ${MG_B_ONLY[*]}}"; return 1; }
+}
+
+# mg__bench_run <results dir>: runs each of MG_B_TARGETS on MG_B_SIZES, each
+# writing its perf result into the directory; then validates the results
+# and records the counts, artifacts and status.
+mg__bench_run() {
+  local results="$1" pkg target rc failed=0 ran=0 f files=()
+  mkdir -p "$results"
+  while IFS=' ' read -r pkg target; do
+    [ -n "$target" ] || continue
     ran=$((ran + 1))
-    echo "bench: $pkg $target" >&2
+    echo "$MG_JOB: $pkg $target" >&2
     (
       cd core &&
-        MEGURI_BENCH_SIZES="$sizes" MEGURI_BENCH_RESULTS="$results" MEGURI_BENCH_FIXTURES="$MG_ROOT/build/fixtures" \
-          cargo bench -p "$pkg" --bench "$target" -- ${extra[0]+"${extra[@]}"}
+        MEGURI_BENCH_SIZES="$MG_B_SIZES" MEGURI_BENCH_RESULTS="$results" MEGURI_BENCH_FIXTURES="$MG_ROOT/build/fixtures" \
+          cargo bench -p "$pkg" --bench "$target" -- ${MG_B_EXTRA[0]+"${MG_B_EXTRA[@]}"}
     )
     rc=$?
     if [ "$rc" -ne 0 ]; then
       mg_failure "bench/$target" "cargo bench --bench $target exited $rc (a failed build, a crash or the bench's own check); see log.txt" \
-        "tools/mg bench --bench $target${sizes:+ --sizes $sizes}"
+        "tools/mg $MG_JOB --bench $target --sizes $MG_B_SIZES"
       failed=$((failed + 1))
     fi
-  done <<<"$targets"
-  if [ "$ran" -eq 0 ]; then
-    mg__perf_usage "no criterion bench target matched${only[0]+ ${only[*]}}"
-    return 0
-  fi
-  local files=()
+  done <<<"$MG_B_TARGETS"
   for f in "$results"/*.json; do [ -f "$f" ] && files[${#files[@]}]="$f"; done
   if [ "${#files[@]}" -eq 0 ]; then
     mg_failure no-results "no bench wrote a perf result into $results"
@@ -121,17 +151,72 @@ mg_bench() {
     failed=$((failed + 1))
   fi
   for f in ${files[0]+"${files[@]}"}; do mg_artifact perf-result "$f" "$(basename "$f" .json)"; done
-  mg_detail results "$(cat /dev/null ${files[0]+"${files[@]}"} | jq -sc '[.[] | {suite, runner: .runner.id, results: [.results[] | {name, metric, percentile, value, unit, fixture}]}]' 2>/dev/null || echo null)"
+  mg_detail sizes "$(mg_json_array $(printf '%s' "$MG_B_SIZES" | tr ',' ' '))"
+  mg_detail results "$(cat /dev/null ${files[0]+"${files[@]}"} | jq -sc '[.[] | {suite, runner: .runner.id, memory_measure: .runner.memory_measure, results: [.results[] | {name, metric, percentile, value, unit, fixture}]}]' 2>/dev/null || echo null)"
   mg_count total "$ran"
   mg_count failed "$failed"
   mg_count passed $((ran - failed < 0 ? 0 : ran - failed))
   if [ "$failed" -eq 0 ]; then
-    mg_message "bench: $ran suite(s), ${#files[@]} perf result(s) in ${results#"$MG_ROOT"/}"
+    mg_message "$MG_JOB: $ran suite(s) on $MG_B_SIZES, ${#files[@]} perf result(s) in ${results#"$MG_ROOT"/}"
     mg_status pass
   else
-    mg_message "bench: $failed problem(s) in $ran suite(s); see failures"
+    mg_message "$MG_JOB: $failed problem(s) in $ran suite(s); see failures"
     mg_status fail
   fi
+}
+
+# tools/mg bench [--sizes 10k,150k] [--bench <target>]... [-- criterion args]
+mg_bench() {
+  mg__bench_args "$MG_BENCH_SIZES" "$@" || return 0
+  # shellcheck disable=SC2046 # one size per word
+  if ! mg__perf_fixtures $(printf '%s' "$MG_B_SIZES" | tr ',' ' '); then
+    mg_failure fixtures "making the bench collections ($MG_B_SIZES) failed; see log.txt" "tools/mg fixtures $(printf '%s' "$MG_B_SIZES" | tr ',' ' ')"
+    mg_status fail
+    return 0
+  fi
+  mg__bench_selected || return 0
+  mg__bench_run "$MG_RUN_DIR/results"
+}
+
+# mg__bench_mac_fixtures <size>...: the bench collections, made (or reused)
+# by tools/mg fixtures in the dev container. The bench opens them from
+# build/fixtures through bench::fixtures, which reuses a directory whose
+# manifest matches. Returns 1 when the job did not pass.
+mg__bench_mac_fixtures() {
+  local result
+  result="$("$MG_TOOLS/mg" fixtures "$@" </dev/null)"
+  [ -n "$result" ] && [ -f "$result" ] || return 1
+  mg_artifact fixtures "$result" "tools/mg fixtures result"
+  mg_word_in "$(jq -r .status "$result" 2>/dev/null)" "pass warn"
+}
+
+# tools/mg bench-mac [--sizes 10k,100k,150k,500k] [--bench <target>]...
+#   [-- criterion args]
+# The same suites as bench, natively on this Mac (R1864: Apple silicon,
+# phys_footprint). It builds them first, then runs them holding the host
+# lease, so no simulator, app or other bench job shares the machine; a
+# locked screen does not stop it.
+mg_bench_mac() {
+  local pkg target
+  mg__bench_args "$MG_BENCH_MAC_SIZES" "$@" || return 0
+  mg__bench_selected || return 0
+  # shellcheck disable=SC2046 # one size per word
+  if ! mg__bench_mac_fixtures $(printf '%s' "$MG_B_SIZES" | tr ',' ' '); then
+    mg_failure fixtures "tools/mg fixtures could not make the bench collections ($MG_B_SIZES); see its result" \
+      "tools/mg fixtures $(printf '%s' "$MG_B_SIZES" | tr ',' ' ')"
+    mg_status fail
+    return 0
+  fi
+  while IFS=' ' read -r pkg target; do
+    [ -n "$target" ] || continue
+    if ! (cd core && cargo bench -p "$pkg" --bench "$target" --no-run); then
+      mg_failure "build/$target" "cargo bench --no-run --bench $target failed on the host; see log.txt" "tools/mg bench-mac --bench $target"
+      mg_status fail
+      return 0
+    fi
+  done <<<"$MG_B_TARGETS"
+  mg_host_lease --no-session || return 0
+  mg__bench_run "$MG_RUN_DIR/results"
 }
 
 # mg__perf_fixtures <size>...: the shared bench collections

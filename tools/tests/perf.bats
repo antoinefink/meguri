@@ -85,6 +85,7 @@ mg_app_xcodebuild_test() {
 mg__perf_ui_runner() {
   jq -n '{kind: "simulator", id: "iPhone 17 Pro/24A434", model: "iPhone 17 Pro", os: "iOS 27.0", os_build: "24A434", arch: "arm64"}' >"$2"
 }
+mg__bench_mac_fixtures() { echo "fake fixtures $*" >>"$STUB_LOG"; return "${FX_FIXTURES_RC:-0}"; }
 mg_image_tools() {
   echo "fake image-tools $*" >>"$STUB_LOG"
   local args=() a
@@ -146,15 +147,99 @@ EOF
 
 # --- bench, bench-icount, metrics ------------------------------------------
 
-@test "bench and bench-icount reject unknown arguments before building" {
+@test "bench, bench-mac and bench-icount reject unknown arguments before building" {
   mg bench --nonsense
   [ "$(field .status)" = error ]
   [ "$(field '.failures[0].id')" = usage ]
   mg bench --sizes
   [ "$(field '.failures[0].id')" = usage ]
+  mg bench-mac --nonsense
+  [ "$(field .status)" = error ]
+  [ "$(field .message)" = "bench-mac: unknown argument '--nonsense'" ]
   mg bench-icount --sizes 10k
   [ "$(field '.failures[0].id')" = usage ]
   [ "$(field .message)" = "bench-icount: unknown argument '--sizes'" ]
+  not_called 'cargo bench'
+}
+
+# cargo: metadata lists one criterion and one icount suite; a bench run
+# writes FX_BENCH_RESULT as its perf result, a --no-run build exits
+# FX_BUILD_RC.
+bench_fakes() {
+  stub cargo 'echo "cargo $* sizes=${MEGURI_BENCH_SIZES:-} fixtures=${MEGURI_BENCH_FIXTURES:-}" >>"$STUB_LOG"
+case "$1" in
+  metadata) cat "$FX_CARGO_METADATA" ;;
+  bench)
+    case " $* " in *" --no-run "*) exit "${FX_BUILD_RC:-0}" ;; esac
+    target="" prev=""
+    for a in "$@"; do [ "$prev" != --bench ] || target="$a"; prev="$a"; done
+    cp "$FX_BENCH_RESULT" "$MEGURI_BENCH_RESULTS/$target.json"
+    ;;
+  *) exit 64 ;;
+esac'
+  export FX_CARGO_METADATA="$BATS_TEST_TMPDIR/metadata.json" FX_BENCH_RESULT="$BATS_TEST_TMPDIR/open.json"
+  jq -n '{packages: [{name: "meguri-testkit", targets: [
+      {name: "meguri_testkit", kind: ["lib"], src_path: "/x/core/crates/meguri-testkit/src/lib.rs"},
+      {name: "open", kind: ["bench"], src_path: "/x/core/crates/meguri-testkit/benches/open.rs"},
+      {name: "icount_open", kind: ["bench"], src_path: "/x/core/crates/meguri-testkit/benches/icount/open.rs"}]}]}' \
+    >"$FX_CARGO_METADATA"
+  jq -n '{schema_version: 1, suite: "open", kind: "wall-clock", configuration: "bench",
+      runner: {kind: "mac", id: "Apple M3 Max/macOS 27.0", cpu: "Apple M3 Max", os: "macOS 27.0", os_build: "24A434",
+        arch: "aarch64", memory_measure: "phys_footprint"},
+      results: [{name: "collection.open", metric: "duration", unit: "ms", percentile: "p95", value: 0.4, samples: 400,
+        fixture: "500k"}]}' >"$FX_BENCH_RESULT"
+}
+
+@test "bench-mac runs the criterion suites natively at 10k, 100k, 150k and 500k, after building them" {
+  bench_fakes
+  mg bench-mac
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .placement)" = host ]
+  [ "$(field -c .details.sizes)" = '["10k","100k","150k","500k"]' ]
+  called '^fake fixtures 10k 100k 150k 500k$'
+  called "^cargo bench -p meguri-testkit --bench open -- sizes=10k,100k,150k,500k fixtures=$SB/build/fixtures$"
+  not_called 'icount_open'
+  # Collections, then the build, then the measured run.
+  local made built measured
+  made="$(grep -n '^fake fixtures' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  built="$(grep -n -- '--bench open --no-run' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  measured="$(grep -n -- '--bench open -- ' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  [ "$made" -lt "$built" ] && [ "$built" -lt "$measured" ]
+  # Measured holding the host lease; validated through image-tools.
+  [ "$(field '.details.host_lease.job')" = bench-mac ]
+  called '^fake image-tools python3 tools/scripts/perf-compare/perf_compare.py validate /work/build/mg/bench-mac/.*/results/open.json$'
+  [ "$(field '[.artifacts[] | select(.kind == "perf-result")] | length')" = 1 ]
+  [ "$(field -r '.details.results[0].memory_measure')" = phys_footprint ]
+}
+
+@test "bench-mac runs on a locked Mac, and takes its sizes and suites from the arguments" {
+  bench_fakes
+  stub ioreg 'echo "    | \"CGSSessionScreenIsLocked\"=Yes"'
+  mg bench-mac --sizes 10K,500k --bench open -- --sample-size 10
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.blocked)" = null ]
+  called '^fake fixtures 10k 500k$'
+  called '^cargo bench -p meguri-testkit --bench open -- --sample-size 10 sizes=10k,500k '
+  mg bench-mac --bench nosuch
+  [ "$(field .status)" = error ]
+  [ "$(field .message)" = "bench-mac: no criterion bench target matched nosuch" ]
+}
+
+@test "bench-mac stops before measuring when the collections or the build fail" {
+  bench_fakes
+  export FX_FIXTURES_RC=1
+  mg bench-mac
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = fixtures ]
+  not_called 'cargo bench'
+  export FX_FIXTURES_RC=0 FX_BUILD_RC=101
+  : >"$STUB_LOG"
+  mg bench-mac
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = build/open ]
+  [ "$(field .details.host_lease)" = null ]
+  not_called 'cargo bench -p meguri-testkit --bench open -- '
 }
 
 @test "metrics refuses the Mac, video and a missing script" {

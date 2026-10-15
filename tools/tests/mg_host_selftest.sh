@@ -4,7 +4,8 @@
 # tools, the real doctor on this Mac, a docker job started (and killed) from
 # the host, cargo's lock shared between dev containers, a dev image rebuild
 # that reuses every layer, the simulator pool's locks (with a fake simctl) and
-# host jobs whose container tests run only under bash 5 (fixtures-check).
+# host jobs whose container tests run only under bash 5 (fixtures-check,
+# bench-mac).
 #
 # usage: mg_host_selftest.sh <sandbox dir>
 # The sandbox is a throwaway copy of tools/ and docker/ in its own git repo
@@ -853,6 +854,38 @@ EOF
     expect "launch run" "$(grep '^launch ' "$STUB_LOG")" "launch $SB/build/fixtures/recipes/r-1"
 }
 
+# bench-mac (U12), a host job, under macOS bash 3.2 with cargo, the nested
+# fixtures job and validation stubbed: the default sizes, the build before
+# the run, and the host lease taken without the session check (it passes
+# on a locked Mac) and released.
+t_bench_mac_on_macos_bash() {
+  local dir="$SB/bench-mac"
+  local PATH="$dir/bin:$PATH" STUB_LOG="$dir/stub.log" MEGURI_HOST_LEASE_DIR="$dir/host.lock" FX_RESULT="$dir/open.json"
+  export PATH STUB_LOG MEGURI_HOST_LEASE_DIR FX_RESULT
+  mkdir -p "$dir/bin" && : >"$STUB_LOG" || return 1
+  cat >"$dir/bin/cargo" <<'EOF'
+#!/bin/bash
+echo "cargo $* sizes=${MEGURI_BENCH_SIZES:-}" >>"$STUB_LOG"
+case "$1" in
+  metadata) printf '{"packages": [{"name": "meguri-testkit", "targets": [{"name": "open", "kind": ["bench"], "src_path": "/x/benches/open.rs"}, {"name": "icount_open", "kind": ["bench"], "src_path": "/x/benches/icount/open.rs"}]}]}\n' ;;
+  bench) case " $* " in *" --no-run "*) ;; *) cp "$FX_RESULT" "$MEGURI_BENCH_RESULTS/open.json" ;; esac ;;
+esac
+EOF
+  chmod +x "$dir/bin/cargo"
+  printf '{"suite": "open"}\n' >"$FX_RESULT"
+  cat >"$SB/tools/mg.d/zz-bench-stub.sh" <<'EOF'
+mg__bench_mac_fixtures() { echo "fixtures $*" >>"$STUB_LOG"; }
+mg__perf_validate() { echo "validate $(basename "$1") lease=$(jq -r .job "$MEGURI_HOST_LEASE_DIR/holder.json" 2>/dev/null)" >>"$STUB_LOG"; }
+EOF
+  mg bench-mac
+  rm -f "$SB/tools/mg.d/zz-bench-stub.sh"
+  expect "exit" "$RC" 0 &&
+    expect "status" "$(field .status) $(field .details.host_lease.job) $(field .details.blocked)" "pass bench-mac null" &&
+    expect "calls" "$(grep -v '^cargo metadata' "$STUB_LOG" | tr '\n' '|')" \
+      "fixtures 10k 100k 150k 500k|cargo bench -p meguri-testkit --bench open --no-run sizes=|cargo bench -p meguri-testkit --bench open -- sizes=10k,100k,150k,500k|validate open.json lease=bench-mac|" &&
+    expect "lease released" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -869,7 +902,7 @@ t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_r
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
 t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
 t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
-t_fixtures_check_on_macos_bash t_results_validate_against_schema"
+t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

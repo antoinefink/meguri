@@ -121,9 +121,12 @@ mg__lease_write() {
     mv -f "$1/holder.json.tmp" "$1/holder.json"
 }
 
-# mg_host_lease: takes the host lease, waiting while another job holds it,
-# then checks the session. Returns 0 when the job may go on (the lease is
-# released when the job ends); otherwise records the result and returns 1.
+# mg_host_lease [--no-session]: takes the host lease, waiting while another
+# job holds it, then checks the session. Returns 0 when the job may go on
+# (the lease is released when the job ends); otherwise records the result
+# and returns 1. --no-session is for jobs that use neither the screen nor a
+# simulator (bench-mac): they run on a locked Mac too, and keep it from idle
+# sleep but let the display sleep.
 #
 # A recording (`tools/mg record start`) keeps the lease until it stops. While
 # it holds it for this checkout, this checkout's jobs take the one nested slot
@@ -134,7 +137,8 @@ mg__lease_write() {
 # (tools/scripts/host-lease-mutex.sh).
 mg_host_lease() {
   local dir wait="${MEGURI_HOST_LEASE_WAIT_SECONDS:-3600}" poll="${MEGURI_HOST_LEASE_POLL_SECONDS:-5}"
-  local start holder inner announced="" lock
+  local start holder inner announced="" lock session=check
+  [ "${1:-}" != --no-session ] || session=skip
   dir="$(mg_host_lease_dir)"
   mkdir -p "$(dirname "$dir")" || {
     mg_failure host-lease "cannot create $(dirname "$dir")"
@@ -198,6 +202,13 @@ mg_host_lease() {
   [ -z "$announced" ] || echo "host lease: taken after $(($(mg__epoch) - start)) s" >&2
 
   local state
+  if [ "$session" = skip ]; then
+    if command -v caffeinate >/dev/null 2>&1; then
+      caffeinate -i -w "$$" >/dev/null 2>&1 &
+      mg_on_exit "kill $! 2>/dev/null"
+    fi
+    return 0
+  fi
   state="$(mg_host_session_state)"
   if [ "$state" != ok ]; then
     mg_user_step host-session missing true "Unlock the Mac and keep a display awake" \
