@@ -6,9 +6,9 @@
 # fails to run, a result is invalid, or a bench's own check fails.
 #
 #   perf-ui       XCTest performance tests in the Profile configuration on a
-#                 pool simulator (the Mac runs through the Mac UI gate), then
-#                 tools/scripts/perf-compare turns the xcresult's metrics into
-#                 a perf result.
+#                 pool simulator in the test VM (mac-vm.sh; the Mac runs
+#                 through the Mac UI gate), then tools/scripts/perf-compare
+#                 turns the xcresult's metrics into a perf result.
 #   bench         criterion suites in the dev container: every bench target
 #                 outside benches/icount/; each writes its own perf result
 #                 (meguri-testkit bench::report).
@@ -18,7 +18,8 @@
 #   bench-icount  gungraun suites under valgrind in the dev container: every
 #                 bench target under benches/icount/; perf-compare turns
 #                 gungraun's JSON into a perf result.
-#   metrics       an xctrace recording around a drive script (R1961).
+#   metrics       an xctrace recording around a drive script (R1961), made
+#                 where the simulator is (the test VM) and copied back.
 
 mg_job perf-ui host mg_perf_ui \
   "UI performance tests (R1863, R1866): [--platform iphone|ipad|mac] [--device <leased udid>] [--config Profile] [--suite <class>]... (default SmokePerfTests); Profile build of the Performance plan, intervals, hitches, launch and memory into perf-result.json (tools/perf/perf-result.schema.json); any other configuration is refused"
@@ -29,7 +30,7 @@ mg_job bench-mac host mg_bench_mac \
 mg_job bench-icount docker:dev mg_bench_icount \
   "gungraun instruction-count suites under valgrind (R1864): [--bench <target>]...; every bench target under benches/icount/, per-bench instruction counts into perf results (tools/perf/perf-result.schema.json)"
 mg_job metrics host mg_metrics \
-  "An Instruments recording around a drive script (R1961): <script.json> [--platform iphone|iphone-small|ipad|ipad-small] [--device <leased udid>] [--config Debug|Profile] [--template <name>] (default 'Time Profiler'); xctrace records the simulator while tools/mg drive runs, the .trace is an artifact"
+  "An Instruments recording around a drive script (R1961): <script.json> [--platform iphone|iphone-small|ipad|ipad-small] [--device <leased udid>] [--config Debug|Profile] [--template <name>] (default Logging: os_signpost intervals; Time Profiler's sampling does not start in the test VM); xctrace records the simulator while tools/mg drive runs, the .trace is an artifact"
 
 MG_PERF_SCHEMA=tools/perf/perf-result.schema.json
 MG_PERF_COMPARE=tools/scripts/perf-compare/perf_compare.py
@@ -319,9 +320,11 @@ MG_PERF_UI_SUITES="PerfTestCaseTests SmokePerfTests"
 MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests"
 
 # mg__perf_ui_runner <mac|udid> <out.json>: the perf result's runner, the
-# baseline key U241 uses (model and OS build; CPU and OS on the Mac).
+# baseline key U241 uses (model and OS build; CPU and OS on the Mac). A run
+# in the test VM has keys of its own (vm/<name>...): its timings are not this
+# Mac's.
 mg__perf_ui_runner() {
-  local kind name model runtime build version cpu os
+  local kind model build version cpu os vm=""
   if [ "$1" = mac ]; then
     if [ "${MG_MAC_RUNNER:-}" = vm ]; then
       jq -n --arg vm "$(jq -r .name <<<"$MG_MAC_VM")" '{kind: "mac", id: ("vm/" + $vm), model: ("test VM " + $vm)}' >"$2"
@@ -337,8 +340,9 @@ mg__perf_ui_runner() {
   model="$(jq -r --arg k "$kind" 'first(.devices[] | select(.kind == $k) | .device_type_name) // "unknown"' tools/sim-devices.json)"
   version="$(jq -r .runtime.version tools/sim-devices.json)"
   build="$(jq -r .runtime.build tools/sim-devices.json)"
-  jq -n --arg m "$model" --arg v "iOS $version" --arg b "$build" --arg u "$1" \
-    '{kind: "simulator", id: "\($m)/\($b)", model: $m, os: $v, os_build: $b, arch: "arm64"}' >"$2"
+  [ "${MG_SIM_RUNNER:-}" != vm ] || vm="vm/$(jq -r .name <<<"$MG_MAC_VM")/"
+  jq -n --arg m "$model" --arg v "iOS $version" --arg b "$build" --arg vm "$vm" \
+    '{kind: "simulator", id: "\($vm)\($m)/\($b)", model: $m, os: $v, os_build: $b, arch: "arm64"}' >"$2"
 }
 
 # tools/mg perf-ui [--platform iphone|iphone-small|ipad|ipad-small|mac]
@@ -390,9 +394,12 @@ mg_perf_ui() {
     platform=mac
     dest="platform=macOS,arch=arm64"
   else
+    # The pool's simulators are in the test VM (mac-vm.sh): the plan runs
+    # there, and its result bundle comes back (mg_app_xcodebuild_test).
+    mg_sim_begin || return 0
     [ -z "$udid" ] || mg_sim_check_given "$udid" || return 0
     mg_app_build ios-sim Profile Performance Meguri-Profile || return 0
-    mg_host_lease || return 0
+    mg_sim_take || return 0
     if [ -n "$udid" ]; then
       mg_sim_check_given "$udid" || return 0
     else
@@ -492,15 +499,73 @@ mg_perf_ui() {
   fi
 }
 
-# mg__metrics_stop <pid>: SIGINT (xctrace saves the trace on it), then
-# SIGKILL after 120 s; returns once it has exited.
+# mg__metrics_record <template> <udid> <trace> <log> <note>: starts xctrace
+# recording every process of the simulator where it is (MG_SIM_RUNNER: this
+# Mac, or the test VM) into <trace>, after a waiter for its tracing-started
+# notification <note>. Sets MG_METRICS_PID (xctrace, or the SSH session that
+# runs it) and MG_METRICS_WAITER (notifyutil -1, or its SSH session), which
+# exits 0 once tracing has started. xctrace saves the trace when stopped with
+# SIGINT, so it starts with SIGINT at its default (a background command
+# ignores it; a command over SSH has it).
+mg__metrics_record() {
+  local args=(record --template "$1" --instrument os_signpost --device "$2" --all-processes
+    --output "$3" --no-prompt --notify-tracing-started "$5")
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    # Darwin notifications stay on their machine: the waiter runs in the VM
+    # too. xctrace replaces the shell that wrote its pid: SIGINT reaches it
+    # there (mg__metrics_stop).
+    mg_mac_vm_ssh "exec notifyutil -1 $(mvl_q "$5")" >/dev/null 2>&1 &
+    MG_METRICS_WAITER=$!
+    mg_mac_vm_ssh "mkdir -p $(mvl_q "$(dirname "$3")") && rm -rf $(mvl_q "$3") && echo \$\$ >$(mvl_q "$3.pid") &&
+      exec xcrun xctrace $(mvl_q "${args[@]}")" >"$4" 2>&1 &
+    MG_METRICS_PID=$!
+    return 0
+  fi
+  notifyutil -1 "$5" >/dev/null 2>&1 &
+  MG_METRICS_WAITER=$!
+  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' xcrun xctrace "${args[@]}" </dev/null >"$4" 2>&1 &
+  MG_METRICS_PID=$!
+}
+
+# mg__metrics_signal_remote <INT|KILL> <trace>: in the test VM, sends the
+# signal to the xctrace that <trace>.pid names, while that pid still runs
+# xctrace (a pid can be reused once it has exited).
+mg__metrics_signal_remote() {
+  local cmd="p=$(mvl_q "$2.pid"); [ -f \"\$p\" ] && x=\$(cat \"\$p\") && "
+  cmd="$cmd ps -o command= -p \"\$x\" 2>/dev/null | grep -q 'xctrace record' && kill -$1 \"\$x\""
+  mg_mac_vm_ssh "$cmd" >/dev/null 2>&1
+}
+
+# mg__metrics_kill_remote <trace> <note> [--drop]: in the test VM, ends an
+# xctrace left recording there and its waiter (SIGKILL), and drops the pid
+# file: killing the local SSH clients leaves both running there. With --drop
+# it also removes a trace left there (one that never came back: a failed
+# start, a cancelled run). Nothing to do on this Mac.
+mg__metrics_kill_remote() {
+  local drop=""
+  [ "$MG_SIM_RUNNER" = vm ] && [ -n "$MG_MAC_VM" ] || return 0
+  mg__metrics_signal_remote KILL "$1"
+  [ "${3:-}" != --drop ] || drop=" $(mvl_q "$1")"
+  # The brackets keep the shell that runs pkill from matching itself.
+  mg_mac_vm_ssh "rm -rf $(mvl_q "$1.pid")$drop; pkill -9 -f $(mvl_q "notifyutil[ ]-1 $2")" >/dev/null 2>&1
+  return 0
+}
+
+# mg__metrics_stop <pid> <trace> <note>: SIGINT to xctrace (it saves the
+# trace on it), then SIGKILL after 120 s; returns once it has exited. In the
+# test VM the signals go to xctrace there, and its waiter ends there too.
 mg__metrics_stop() {
   local i
-  kill -INT "$1" 2>/dev/null
+  if [ "$MG_SIM_RUNNER" = vm ]; then
+    mg__metrics_signal_remote INT "$2"
+  else
+    kill -INT "$1" 2>/dev/null
+  fi
   for i in $(seq 1 1200); do
     kill -0 "$1" 2>/dev/null || break
     sleep 0.1
   done
+  mg__metrics_kill_remote "$2" "$3"
   kill -9 "$1" 2>/dev/null
   wait "$1" 2>/dev/null
 }
@@ -508,7 +573,10 @@ mg__metrics_stop() {
 # tools/mg metrics <script.json> [--platform ...] [--device <udid>]
 #   [--config Debug|Profile] [--template <name>]
 mg_metrics() {
-  local template="Time Profiler" args=() udid script
+  # Logging records what the drive measures, the os_signpost intervals, and
+  # starts in the test VM; Time Profiler's CPU sampling never starts there
+  # ("Device disconnected while trying to start tap").
+  local template=Logging args=() udid script
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --template)
@@ -533,9 +601,12 @@ mg_metrics() {
     return 0
   fi
   udid="$MG_D_UDID"
+  # The pool's simulators are in the test VM (mac-vm.sh): xctrace records
+  # there, the drive runs there, and the trace comes back.
+  mg_sim_begin || return 0
   [ -z "$udid" ] || mg_sim_check_given "$udid" || return 0
   mg_app_build ios-sim "$MG_D_CONFIG" || return 0
-  mg_host_lease || return 0
+  mg_sim_take || return 0
   if [ -n "$udid" ]; then
     mg_sim_check_given "$udid" || return 0
   else
@@ -547,31 +618,31 @@ mg_metrics() {
 
   # xctrace records every process of the simulator, with os_signpost added
   # to the template so the registered intervals show (R1861). It runs
-  # headless; started with SIGINT at its default (a background command
-  # ignores it), it saves the trace when stopped with SIGINT.
+  # headless and saves the trace when stopped with SIGINT.
   local trace="$MG_RUN_DIR/metrics.trace" log="$MG_RUN_DIR/xctrace.log" note pid waiter i started=0
   note="com.antoinefink.meguri.mg.metrics.$MG_RUN_ID"
-  notifyutil -1 "$note" >/dev/null 2>&1 &
-  waiter=$!
   mg_detail xctrace "$(jq -nc --arg t "$template" --arg d "$udid" '{template: $t, device: $d, instruments: ["os_signpost"]}')"
-  perl -e '$SIG{INT} = "DEFAULT"; exec @ARGV or die "exec: $!"' \
-    xcrun xctrace record --template "$template" --instrument os_signpost --device "$udid" --all-processes \
-    --output "$trace" --no-prompt --notify-tracing-started "$note" </dev/null >"$log" 2>&1 &
-  pid=$!
-  mg_on_exit "kill -9 $pid $waiter 2>/dev/null"
+  mg__metrics_record "$template" "$udid" "$trace" "$log" "$note"
+  pid="$MG_METRICS_PID"
+  waiter="$MG_METRICS_WAITER"
+  # Registered after the lease: it runs first, while the job still holds it.
+  mg_on_exit "kill -9 $pid $waiter 2>/dev/null; mg__metrics_kill_remote '$trace' '$note' --drop"
   mg_artifact log "$log" "xctrace record"
   for i in $(seq 1 600); do
     if ! kill -0 "$waiter" 2>/dev/null; then
-      started=1
+      # notifyutil got the notification; an SSH session that failed did not.
+      wait "$waiter" && started=1
       break
     fi
     kill -0 "$pid" 2>/dev/null || break
     sleep 0.1
   done
   if [ "$started" = 0 ]; then
-    kill -9 "$waiter" 2>/dev/null
-    mg__metrics_stop "$pid"
-    mg_failure xctrace "xctrace did not start recording within 60 s; see $log" "tools/mg metrics $script"
+    local why="within 60 s"
+    kill -0 "$pid" 2>/dev/null || why="before it ended"
+    # Nothing to save: the exit cleanup kills xctrace and its waiter (an
+    # xctrace stuck before tracing ignores SIGINT).
+    mg_failure xctrace "xctrace did not start recording $why; see $log" "tools/mg metrics $script"
     mg_message "metrics: xctrace did not start recording; see $log"
     mg_status error
     return 0
@@ -579,7 +650,14 @@ mg_metrics() {
 
   mg_drive_run "$script" ios "$udid" "$MG_D_CONFIG" no "$MG_RUN_DIR/drive"
   local rc=$?
-  mg__metrics_stop "$pid"
+  mg__metrics_stop "$pid" "$trace" "$note"
+  # From the VM the trace comes back here, where it is read and kept; the VM
+  # keeps no copy.
+  if [ "$MG_SIM_RUNNER" = vm ] && ! mg_sim_fetch "$trace"; then
+    mg_message "metrics: the trace did not come back from the test VM; see the failures and $log"
+    mg_status error
+    return 0
+  fi
   if [ ! -d "$trace" ]; then
     mg_failure xctrace "xctrace saved no trace; see $log" "tools/mg metrics $script"
     mg_message "metrics: no trace was saved; see $log"

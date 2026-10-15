@@ -3,10 +3,11 @@
 #
 # Every Mac XCUITest run (mac-ui, a11y --platform mac, drive --platform mac)
 # and every simulator job (sim, sim-setup, run, drive, screenshot, ui-tree,
-# record, a11y, snapshots, xcode-check) builds on the host and runs its tests
-# and simulators in a macOS VM on this Mac (docs/process/mac-ui-vm.md,
-# tools/vm/AGENTS.md), so it never takes over the host's screen, boots no
-# simulator on the host, needs no host session and runs as often as needed.
+# record, a11y, snapshots, xcode-check, perf-ui, metrics) builds on the host
+# and runs its tests and simulators in a macOS VM on this Mac
+# (docs/process/mac-ui-vm.md, tools/vm/AGENTS.md), so it never takes over the
+# host's screen, boots no simulator on the host, needs no host session and
+# runs as often as needed.
 # The VMs are named by a per-host config, never by the repository:
 # $MEGURI_MAC_VM_CONFIG, else ~/Library/Application Support/meguri/mac-vm.json:
 #
