@@ -976,6 +976,108 @@ STUB
   ! grep -q '^meguri-cli' "$STUB_LOG"
 }
 
+# --- fixtures-check (the fixtures and oracle jobs stubbed) -------------------
+
+# fixtures_check_sandbox: a user shape on day 500, worst cases `due` (a due
+# deck, limit 9999) and `big` (large fields), and stubs that replace the
+# fixtures and oracle jobs' functions: fixtures reports the summaries in
+# $STUB_DIR/summaries.jsonl, oracle reports $STUB_DIR/<dir name>.json.
+fixtures_check_sandbox() {
+  local testkit="$SB/core/crates/meguri-testkit"
+  mkdir -p "$testkit/profiles/worst-cases" "$testkit/fixtures/recipes"
+  printf '{"totals": {"span_days": 500}}\n' >"$testkit/profiles/user-shape.json"
+  printf '{"due_deck": {"review_limit": 9999}}\n' >"$testkit/profiles/worst-cases/due.json"
+  printf '{"large_fields": {"bytes": 1048576, "notes": 2}}\n' >"$testkit/profiles/worst-cases/big.json"
+  export STUB_DIR="$BATS_TEST_TMPDIR/fixtures-check" STUB_LOG="$BATS_TEST_TMPDIR/fixtures-check.log" MG_CONTAINER=dev
+  mkdir -p "$STUB_DIR"
+  : >"$STUB_LOG"
+  cat >"$SB/tools/mg.d/zz-stub.sh" <<'STUB'
+mg_fixtures() {
+  echo "fixtures $*" >>"$STUB_LOG"
+  mg_detail fixtures "$(jq -sc . "$STUB_DIR/summaries.jsonl")"
+  mg_status "${STUB_FIXTURES_STATUS:-pass}"
+}
+mg_oracle() {
+  echo "oracle $*" >>"$STUB_LOG"
+  [ -f "$STUB_DIR/$(basename "$2").json" ] || { mg_failure oracle_error "no report"; mg_status error; return 0; }
+  mg_detail check "$(jq -c . "$STUB_DIR/$(basename "$2").json")"
+  mg_status pass
+}
+STUB
+  # One collection of each kind, each as the oracle should see it.
+  local good='{"changed_tables": ["col", "config"], "check_db": {"card_properties": 0, "future_ids": 0}, "counts": {"cards": 10, "decks": 2, "graves": 0, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}, "decks": {}, "render": {}, "timing": {"days_elapsed": 500}}'
+  local m='{"counts": {"cards": 10, "decks": 2, "notes": 8, "notetypes": 1, "presets": 2, "revlog": 40, "tags": 3}}'
+  {
+    jq -nc --argjson m "$m" '{target: "10k", kind: "size", dir: "build/fixtures/s-1-10k", manifest: $m}'
+    jq -nc --argjson m "$m" '{target: "due", kind: "worst-case", dir: "build/fixtures/s-1-due", manifest: $m}'
+    jq -nc --argjson m "$m" '{target: "big", kind: "worst-case", dir: "build/fixtures/s-1-big", manifest: $m, large_field_notes: [123, 456]}'
+    jq -nc --argjson m "$m" '{target: "r", kind: "recipe", dir: "build/fixtures/recipes/r-1", manifest: $m}'
+  } >"$STUB_DIR/summaries.jsonl"
+  jq -c . <<<"$good" >"$STUB_DIR/s-1-10k.json"
+  jq -c '.decks = {Due: {learning: 0, new: 0, review: 10}}' <<<"$good" >"$STUB_DIR/s-1-due.json"
+  jq -c '.render = {"123": [{answer_bytes: 1048800, card: 124, ord: 0, question_bytes: 30, status: "ok"}]}' <<<"$good" >"$STUB_DIR/s-1-big.json"
+  jq -c '.timing.days_elapsed = 120' <<<"$good" >"$STUB_DIR/r-1.json"
+}
+
+@test "fixtures-check runs the oracle check on every collection with the due deck and a large-field note" {
+  fixtures_check_sandbox
+  mg fixtures-check
+  [ "$status" -eq 0 ] || { jq . "$result"; cat "$STUB_LOG"; return 1; }
+  [ "$(field .summary.total)" -eq 4 ]
+  grep -qx "fixtures 10k 100k worst-cases recipes --seed 1" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/s-1-10k" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/s-1-due --deck Due" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/s-1-big --render-note 123" "$STUB_LOG"
+  grep -qx "oracle check $SB/build/fixtures/recipes/r-1" "$STUB_LOG"
+  [ "$(field '[.artifacts[] | select(.kind == "oracle-check")] | length')" -eq 4 ]
+  validate "$result"
+  mg fixtures-check 10k --seed 4
+  grep -qx "fixtures 10k --seed 4" "$STUB_LOG"
+}
+
+@test "fixtures-check fails on Check Database problems, changed tables, counts, the day, the due count and the render" {
+  fixtures_check_sandbox
+  jq -c '.check_db.card_properties = 2 | .changed_tables += ["notes"] | .counts.revlog = 39 | .counts.graves = 1' \
+    "$STUB_DIR/s-1-10k.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-10k.json"
+  jq -c '.decks.Due.review = 9' "$STUB_DIR/s-1-due.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-due.json"
+  jq -c '.render."123"[0].answer_bytes = 1048576' "$STUB_DIR/s-1-big.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/s-1-big.json"
+  jq -c '.timing.days_elapsed = 121' "$STUB_DIR/r-1.json" >"$STUB_DIR/x" && mv "$STUB_DIR/x" "$STUB_DIR/r-1.json"
+  mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(field '.summary.failed')" -eq 4 ]
+  local messages
+  messages="$(field '[.failures[] | "\(.id): \(.message)"] | join("\n")')"
+  grep -qx "fixtures-check/10k: Check Database reported 2 of card_properties" <<<"$messages"
+  grep -qx "fixtures-check/10k: Check Database changed the notes table" <<<"$messages"
+  grep -qx "fixtures-check/10k: the oracle counts 39 revlog, the manifest 40" <<<"$messages"
+  grep -qx "fixtures-check/10k: the oracle counts 1 graves" <<<"$messages"
+  grep -qx "fixtures-check/due: deck Due shows 9 reviews, want 10" <<<"$messages"
+  grep -qx "fixtures-check/big: card 124 of note 123 rendered ok with 1048576 answer bytes" <<<"$messages"
+  grep -qx "fixtures-check/r: the oracle is on day 121, the collection pinned on day 120" <<<"$messages"
+  validate "$result"
+}
+
+@test "fixtures-check stops when generating fails or the oracle gives no report, and rejects bad usage" {
+  fixtures_check_sandbox
+  STUB_FIXTURES_STATUS=fail mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = fixtures ]
+  ! grep -q '^oracle' "$STUB_LOG"
+  rm "$STUB_DIR/s-1-due.json"
+  jq -c 'if .target == "big" then del(.large_field_notes) else . end' "$STUB_DIR/summaries.jsonl" >"$STUB_DIR/x"
+  mv "$STUB_DIR/x" "$STUB_DIR/summaries.jsonl"
+  mg fixtures-check
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = "$(printf 'fixtures-check/big/render\nfixtures-check/due/oracle')" ]
+  local args
+  for args in "--seed" "--seed x" "--frobnicate"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg fixtures-check $args
+    [ "$status" -eq 2 ] || { echo "$args"; jq . "$result"; return 1; }
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+}
+
 # --- bridge ----------------------------------------------------------------
 
 @test "swift-test --package without a name stops with a usage error" {
