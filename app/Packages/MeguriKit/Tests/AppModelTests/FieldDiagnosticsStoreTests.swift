@@ -130,12 +130,39 @@ import AppModel
 
         try await deliver([Self.metricReport()], [], to: store)
         let after = try Self.files(in: store.directory)
+        #expect(after.keys.allSatisfy { $0.hasSuffix(".json") }, "completed writes leave no staging files")
         for (path, bytes) in before {
             #expect(after[path] == bytes, "\(path) was rewritten")
         }
         let added = after.keys.filter { before[$0] == nil }
         #expect(added.filter { $0.hasPrefix("signposts/") }.count == 1, "\(added)")
         #expect(try await store.signposts(named: IntervalNames.answerToNextVisible.name).count == 2)
+    }
+
+    @Test(arguments: ["metrics", "diagnostics", "signposts/review.answerToNextVisible"], [".json", ".tmp"])
+    func partialFilesDoNotBlockExport(folder: String, suffix: String) async throws {
+        let store = try temporaryStore()
+        defer { try? FileManager.default.removeItem(at: store.directory) }
+        try await store.record(Self.metricReport())
+        try await store.record(Self.hangDiagnostic())
+        let partial = store.directory.appending(path: "\(folder)/interrupted\(suffix)")
+        let bytes = Data("{\"timeRange\":".utf8)
+        try bytes.write(to: partial)
+        let before = try Self.files(in: store.directory)
+
+        let reopened = FieldDiagnosticsStore(directory: store.directory)
+        try await reopened.record(Self.metricReport())
+        try await reopened.record(Self.hangDiagnostic())
+        let exported = try await reopened.debugInfo()
+        let info = try #require(JSONSerialization.jsonObject(with: exported) as? [String: Any])
+        #expect((info["metrics"] as? [Any])?.count == 2)
+        #expect((info["diagnostics"] as? [Any])?.count == 2)
+        let signposts = try #require(info["signposts"] as? [String: [Any]])
+        #expect(signposts[IntervalNames.answerToNextVisible.name]?.count == 2)
+        let after = try Self.files(in: store.directory)
+        for (path, bytes) in before {
+            #expect(after[path] == bytes, "\(path) was rewritten or removed")
+        }
     }
 
     /// The main thread stays blocked while the store records and reads: a

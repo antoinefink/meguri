@@ -13,7 +13,10 @@ import os
 /// The store is an actor on its own utility-QoS serial queue: every read
 /// and write runs there, never on the main actor (KTD9), and callers await
 /// it. Files are only ever added, never rewritten, so a report costs one
-/// write however much history is stored.
+/// write however much history is stored. A report is written under a
+/// staging name and then linked in under its final one, so a reader never
+/// sees it partly written; a report that does not decode (left partly
+/// written by an older build) is skipped, not removed.
 ///
 /// Layout, one JSON file per report:
 /// - `metrics/<received>-<uuid>.json`: a `FieldMetrics`, the report's
@@ -157,10 +160,17 @@ public actor FieldDiagnosticsStore {
         return directory.appending(path: "\(folder)/\(stamp)-\(UUID().uuidString).json", directoryHint: .notDirectory)
     }
 
-    /// Writes a new file; an existing file is never replaced.
+    /// Writes a new file; an existing file is never replaced. The bytes go
+    /// to a staging file (`.tmp`, which readers ignore) first; the hard link
+    /// to the final name appears at once, complete, and fails when that name
+    /// exists.
     private func write<T: Encodable>(_ value: T, to file: URL) throws {
-        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Self.encoder.encode(value).write(to: file, options: [.withoutOverwriting])
+        let folder = file.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let staging = folder.appending(path: "\(UUID().uuidString).tmp", directoryHint: .notDirectory)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try Self.encoder.encode(value).write(to: staging, options: [.withoutOverwriting])
+        try FileManager.default.linkItem(at: staging, to: file)
     }
 
     private func read<T: Decodable>(_ type: T.Type, from file: URL) throws -> T {
@@ -173,7 +183,14 @@ public actor FieldDiagnosticsStore {
         return try FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false))
             .filter { $0.hasSuffix(".json") }
             .sorted()
-            .map { try read(type, from: dir.appending(path: $0, directoryHint: .notDirectory)) }
+            .compactMap { name -> T? in
+                do {
+                    return try read(type, from: dir.appending(path: name, directoryHint: .notDirectory))
+                } catch is DecodingError {
+                    // A partly written report: kept on disk, left out of the export.
+                    return nil
+                }
+            }
     }
 
     private struct DebugInfo: Encodable {
