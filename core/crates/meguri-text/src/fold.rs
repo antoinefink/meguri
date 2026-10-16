@@ -2,6 +2,7 @@
 //! collation every SQLite connection registers (R1451, U22).
 
 use std::cmp::Ordering;
+use std::hash::{Hash, Hasher};
 
 use unicase::UniCase;
 
@@ -11,10 +12,63 @@ pub fn compare_folded(a: &str, b: &str) -> Ordering {
     UniCase::new(a).cmp(&UniCase::new(b))
 }
 
+/// U2's folding of `text` as one string: each character replaced by its
+/// folding, in the order the comparison uses (a three-character folding as
+/// third, first, second). Two texts compare equal exactly when their folds
+/// are equal. These are the bytes `UniCase::new(text)` feeds a hasher.
+pub fn folded(text: &str) -> String {
+    /// Keeps the bytes a `Hash` implementation writes.
+    struct Bytes(Vec<u8>);
+    impl Hasher for Bytes {
+        fn finish(&self) -> u64 {
+            0
+        }
+        fn write(&mut self, bytes: &[u8]) {
+            self.0.extend_from_slice(bytes);
+        }
+    }
+    let mut bytes = Bytes(Vec::with_capacity(text.len()));
+    UniCase::new(text).hash(&mut bytes);
+    // unicase writes each folded character as whole UTF-8 (ASCII text as its
+    // lower-case bytes), so the bytes are UTF-8.
+    String::from_utf8(bytes.0).expect("unicase hashes UTF-8 characters")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::compare_folded;
+    use super::{compare_folded, folded};
     use std::cmp::Ordering::{self, Equal, Greater, Less};
+
+    #[test]
+    fn folds_are_the_characters_u2_compares() {
+        for (text, fold) in [
+            ("ABC", "abc"),
+            ("Straße", "strasse"),
+            ("STRASSE", "strasse"),
+            ("\u{1e9e}", "ss"),
+            ("\u{130}", "i\u{307}"),
+            ("\u{fb03}", "iff"),
+            ("\u{212a}", "k"),
+            ("\u{131}", "\u{131}"),
+            ("\u{a7c0}", "\u{a7c0}"),
+            ("", ""),
+            ("Photo.JPG", "photo.jpg"),
+        ] {
+            assert_eq!(folded(text), fold, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn equal_folds_are_equal_comparisons() {
+        let words = [
+            "a", "B", "Straße", "STRASSE", "\u{130}", "i\u{307}", "i", "\u{fb03}", "iff", "ffi", "\u{131}", "I",
+        ];
+        for a in words {
+            for b in words {
+                assert_eq!(folded(a) == folded(b), compare_folded(a, b) == Equal, "{a:?} vs {b:?}");
+            }
+        }
+    }
 
     #[test]
     fn comparisons_match_the_spec_table() {

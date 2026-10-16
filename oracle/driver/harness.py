@@ -6,7 +6,7 @@
   python -m driver.harness diff-report --old DIR --new DIR --report FILE [--markdown FILE]
   python -m driver.harness hash FILE...
   python -m driver.harness check --dir DIR --label TEXT --out DIR [--now INSTANT] [--tz ZONE]
-                                 [--deck NAME]... [--render-note ID]...
+                                 [--deck NAME]... [--render-note ID]... [--schedule]
   python -m driver.harness record-apple  --scenarios DIR --goldens DIR --overlays DIR --pin FILE
                                          [--filter F]... [--jobs N] [--report FILE]
   python -m driver.harness compare-apple --scenarios DIR --goldens DIR --overlays DIR --pin FILE
@@ -35,7 +35,7 @@ deletes an overlay that no longer differs, and lists entries outside the
 fp-libm-boundary class (F8), which fail the scenario. compare-apple compares a
 native run with the golden plus its overlay, exactly.
 
-`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9)
+`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9, K11)
 derives the clock and zone from the directory's manifest when they are not
 given, starts one worker in that zone and writes the report to <out>/check.json
 (exit 0), or {kind, detail} to <out>/check-error.json (exit 1) with a K7 kind.
@@ -798,7 +798,10 @@ def cmd_check(args) -> int:
         notes = [parse_note_id(text) for text in args.render_note or []]
     except CheckUsage as exc:
         return _check_error(out, "usage", str(exc))
-    request = {"cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes}
+    request = {
+        "cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes,
+        "schedule": args.schedule,
+    }
     try:
         with WorkerProcess(tz) as worker:
             resp = worker.request(request)
@@ -849,6 +852,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--tz")
     c.add_argument("--deck", action="append")
     c.add_argument("--render-note", action="append")
+    c.add_argument("--schedule", action="store_true")
     args = p.parse_args(argv)
     if getattr(args, "jobs", 1) < 1:
         p.error("--jobs must be at least 1")

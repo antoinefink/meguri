@@ -1,22 +1,23 @@
 # Collection check (oracle)
 
 Spec: conformance/collection-check
-Requirements: R1804, R1805, R1887; supports R1803
+Requirements: R1804, R1805, R1887; supports R1803, R1941, R1942
 Anki: 26.09.3
 Scenarios: none (a command, not a scenario); the `check_db` op of `dsl.md` D7.2 reports K5
 
-A black-box check of a collection directory that someone else wrote, such as a generated one (`specs/fixtures/synthetic-collections.md`): Anki opens a copy at a pinned instant and reports its row counts, the day it computes, deck-list counts, render results and what its Check Database finds and changes. Implementers run it like `tools/mg oracle record`, from any worktree, without reading `oracle/`.
+A black-box check of a collection directory that someone else wrote, such as a generated one (`specs/fixtures/synthetic-collections.md`) or an anonymized clone (`specs/fixtures/anonymizer.md`): Anki opens a copy at a pinned instant and reports its row counts, the day it computes, deck-list counts, render results, optionally digests of every card's next states and every deck's queue, and what its Check Database finds and changes. Implementers run it like `tools/mg oracle record`, from any worktree, without reading `oracle/`.
 
 ## K1. Command
 
 ```
-tools/mg oracle check <dir> [--now <instant>] [--tz <zone>] [--deck <name>]... [--render-note <note id>]...
+tools/mg oracle check <dir> [--now <instant>] [--tz <zone>] [--deck <name>]... [--render-note <note id>]... [--schedule]
 ```
 
 - A host job. `<dir>` is a directory on the host holding `collection.anki2`, and optionally `collection.anki2-wal`, `collection.media/` and `manifest.json` (`fixtures/synthetic-collections` F10.2). The job gives one oracle worker read-only access to it and never writes it.
 - `--now`: the instant the oracle's clock is frozen at, written as `clock.start` with an offset or `Z` (`dsl.md` D5), whole seconds. Default: the manifest's `now_ms` divided by 1000, rounded down. Without both, a usage error.
 - `--tz`: the IANA zone the worker runs in. Default from the manifest's `utc_offset_secs`: `UTC` for 0; for a whole number of hours `h` from -12 to +14, `Etc/GMT-<h>` for east and `Etc/GMT+<h>` for west (IANA's inverted sign: +1 h is `Etc/GMT-1`). Any other offset, or no manifest, needs `--tz`. The zone must exist in the worker's time zone database.
 - `--deck <name>`: a deck by its human name (`::` between components), any number of times. `--render-note <id>`: a note by its real id in decimal, any number of times.
+- `--schedule`: also report K11.
 - A usage error is the job status `error` with failure `usage`, before any worker starts.
 
 ## K2. Copy and clock
@@ -36,7 +37,9 @@ tools/mg oracle check <dir> [--now <instant>] [--tz <zone>] [--deck <name>]... [
 8. Digest the twelve tables again. `changed_tables` lists, in O8's table order, those whose digest differs from step 6.
 9. Close the collection and delete the copy.
 
-Steps 2 to 5 run before Check Database, so they see the collection as written. Anki's own writes while steps 1 to 5 run (for example the config key `localOffset` that a client writes when it computes the day) happen on the copy and before step 6, so they never show in `changed_tables`.
+With `--schedule`, K11 runs between steps 5 and 6.
+
+Steps 2 to 5 (and K11) run before Check Database, so they see the collection as written. Anki's own writes while they run (for example the config key `localOffset` that a client writes when it computes the day, or `curDeck` when K11 selects decks) happen on the copy and before step 6, so they never show in `changed_tables`.
 
 ## K4. Report
 
@@ -60,6 +63,7 @@ One JSON object, `conformance/schema/collection-check.schema.json`, in the golde
 
 - `dir` is `<dir>` as given; `now` is the frozen instant in epoch seconds; `tz` the zone used.
 - `decks` and `render` are `{}` when no `--deck` or `--render-note` was given.
+- `schedule` (K11.3) is present only with `--schedule`; `report_version` stays 1.
 - `check_db` is the K5 object, or `{"error": "corrupt"}` when Anki's integrity check found the file corrupt (then `changed_tables` is `[]`).
 
 ## K5. Check Database problems
@@ -108,8 +112,60 @@ When the check cannot produce a report, the job status is `error` with one failu
 ## K9. Job result
 
 - `result.json` (`tools/AGENTS.md`) lists the report as an artifact of kind `report`, `check.json` in the run directory, and repeats it under `details.check`.
-- Status: `fail` when the report has a `check_db` count above 0, `check_db` is a rejection, or `changed_tables` names a table other than `col` and `config`; `pass` otherwise; `error` per K7.
+- Status: `fail` when the report has a `check_db` count above 0, `check_db` is a rejection, or `changed_tables` names a table other than `col` and `config`; `pass` otherwise; `error` per K7. `--schedule` adds no condition: K11 observes, it does not judge.
 
 ## K10. The `check_db` op
 
 In scenarios, `check_db` takes `{}` and runs step 7 on the scenario's collection. Its output is `{"check_db": <the K5 object>}`, or the rejection `{"check_db": {"error": "corrupt"}}` (nothing changed). It is stable (`dsl.md` D7.2).
+
+## K11. Schedule (`--schedule`)
+
+What Anki's scheduler would do at `now`, as counts and digests. Two collections that hold the same cards with other text, such as a collection and its anonymized clone (`fixtures/anonymizer` A17 V3), can be compared without any card text, deck name or tag in the report. K11 runs after K3 step 5, on the collection as written, once step 3 has computed the day (which, as opening the deck list does, unburies cards buried on an earlier day).
+
+### K11.1 Steps
+
+1. Deck list: the deck tree Anki computes at `now`, read as K6 reads it: for every deck its `new`, `learning` and `review` numbers (with subdecks, limits applied), and the root's numbers.
+2. Queues: for every deck, normal and filtered, in ascending id order: select it as the deck list does when the user clicks it, build its study queue, and read all of it in the order the reviewer would present the cards if none were answered: learning cards due now, then the main queue (reviews, interday learning and new cards as Anki mixes them), then learning cards due within the learn-ahead limit (`collapseTime`). Each entry is a card id and its kind, `new`, `learning` or `review`. Also read the three counts Anki gives that queue.
+3. Next states: for every card, in ascending id order, its `next_states` value (`observations.md` O4, O5), as the reviewer computes it while a queue is built. When `loadBalancerEnabled` is on, the load balancer is in effect; it covers every deck's cards whichever deck's queue is built, so the last queue of step 2 serves.
+
+Steps 2 and 3 write only `curDeck` and `activeDecks` on the copy (K3).
+
+### K11.2 Digests
+
+A digest is the SHA-256, in lower-case hex, of UTF-8 lines each ending in LF. An empty list gives the digest of no bytes, `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+- Queue line: `<card id>`, TAB, `<kind>`; lines in queue order.
+- Next-states line: `<card id>`, TAB, the O5 value written compactly: no whitespace, object members sorted by name (code point order), absent optional members (`memory_state` with FSRS off) left out, integers in decimal, 32-bit floats as O6 writes them; lines in card id order.
+
+Example lines (TAB written as `→`): `1894701600123→review` and `1894701600123→{"again":{"kind":"relearning",...},"current":{...},"easy":{...},"good":{...},"hard":{...}}`.
+
+### K11.3 Report
+
+The report gains one member:
+
+```json
+"schedule": {
+  "cards": 10012,
+  "decks": {
+    "1": {"cards": 0, "next_states_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "queue": {"entries": 0, "learning": 0, "new": 0, "order_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "review": 0}, "tree": null},
+    "1894701600001": {"cards": 412, "next_states_sha256": "<hex>", "queue": {"entries": 220, "learning": 3, "new": 20, "order_sha256": "<hex>", "review": 197}, "tree": {"learning": 3, "new": 20, "review": 197}}
+  },
+  "root": {"learning": 3, "new": 40, "review": 412},
+  "sha256": "<hex>"
+}
+```
+
+- `cards`: the number of cards.
+- `decks`: one member per deck, keyed by its id in decimal:
+  - `cards`: the cards whose `did` is this deck (subdecks not included; a filtered deck has the cards it holds);
+  - `next_states_sha256`: the next-states digest of those cards;
+  - `queue`: `entries`, the number of entries step 2 read; `new`, `learning`, `review`, the counts Anki gave; `order_sha256`, the queue digest;
+  - `tree`: the deck's step 1 numbers, or `null` when the deck tree leaves the deck out (an empty default deck without subdecks).
+- `root`: the deck tree root's numbers. The root has numbers but no queue: Anki builds a queue only for a selected deck, and the root is not one (every top-level deck's queue is reported under its id).
+- `sha256`: the SHA-256 of `{"cards":…,"decks":…,"root":…}` written compactly (no whitespace, members sorted by name).
+
+Ids are the collection's own; no deck name, tag or field text appears. A report from the private collection stays in its run directory; only pass counts are committed (R1940).
+
+### K11.4 Comparing
+
+Two reports have the same schedule exactly when their `schedule.sha256` are equal; the per-deck digests then locate a difference. Digests compare oracle reports with each other, under one oracle pin. They do not compare Meguri with Anki: O7's tolerance on memory states needs the values, which the private suite (R1942) compares itself.
