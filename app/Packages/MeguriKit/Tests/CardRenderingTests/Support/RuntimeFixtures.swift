@@ -7,9 +7,10 @@ extension WebTestHarness {
     /// A harness with one open page, closed after `body`.
     static func withPage<T>(
         platform: CardRuntime.Platform = .mac, appearance: CardRuntime.Appearance = .light, reviewExtra: String = "",
-        size: CGSize = WebTestHarness.size, log: Bool = true, _ body: (WebTestHarness, TestPage) async throws -> T
+        size: CGSize = WebTestHarness.size, log: Bool = true, frameClock: Bool = false,
+        _ body: (WebTestHarness, TestPage) async throws -> T
     ) async throws -> T {
-        let harness = WebTestHarness(platform: platform, appearance: appearance, reviewExtra: reviewExtra)
+        let harness = WebTestHarness(platform: platform, appearance: appearance, reviewExtra: reviewExtra, frameClock: frameClock)
         defer { harness.close() }
         let page = try await harness.openPage(size: size)
         if log { try await page.installLog() }

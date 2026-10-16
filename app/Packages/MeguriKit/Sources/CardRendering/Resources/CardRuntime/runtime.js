@@ -327,13 +327,19 @@
   for (let i = 0; i < TAP_TYPES.length; i++) tracked[TAP_TYPES[i]] = true;
   for (let i = 0; i < KEY_TYPES.length; i++) tracked[KEY_TYPES[i]] = true;
 
-  // target -> { type: [{ callback, capture }] }
+  // target -> { type: [{ callback, capture, once }] }, one entry per add
+  // WebKit may have registered. An abort removes only its own add's entry.
   const registry = new WeakMapCtor();
 
   function captureOf(options) {
     if (typeof options === "boolean") return options;
     if (options !== null && typeof options === "object") return !!options.capture;
     return false;
+  }
+
+  function removeEntryAt(entries, index) {
+    for (let j = index + 1; j < entries.length; j++) entries[j - 1] = entries[j];
+    entries.length -= 1;
   }
 
   function entriesOf(target, type, create) {
@@ -351,13 +357,23 @@
     return entries || null;
   }
 
+  // removeEventListener: WebKit holds at most one registration per type,
+  // callback and capture, and it is gone now.
   function untrack(target, type, callback, capture) {
     const entries = entriesOf(target, type, false);
     if (!entries) return;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].callback === callback && entries[i].capture === capture) removeEntryAt(entries, i);
+    }
+  }
+
+  // A signal's abort: only the entry its own add made, if still there.
+  function untrackEntry(target, type, entry) {
+    const entries = entriesOf(target, type, false);
+    if (!entries) return;
     for (let i = 0; i < entries.length; i++) {
-      if (entries[i].callback === callback && entries[i].capture === capture) {
-        for (let j = i + 1; j < entries.length; j++) entries[j - 1] = entries[j];
-        entries.length -= 1;
+      if (entries[i] === entry) {
+        removeEntryAt(entries, i);
         return;
       }
     }
@@ -367,18 +383,24 @@
     type = StringCtor(type);
     if (!tracked[type] || callback === null || callback === undefined) return;
     const capture = captureOf(options);
-    const signal = options !== null && typeof options === "object" ? options.signal : undefined;
+    const object = options !== null && typeof options === "object";
+    const signal = object ? options.signal : undefined;
+    if (signal && call(abortedGetter, signal)) return;
+    const entries = entriesOf(target, type, true);
+    // A live entry means WebKit ignored this add, signal included. A `once`
+    // entry may have fired already, so the add may be a new registration:
+    // it gets its own entry (counting too much is allowed, C13).
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      if (entry.callback === callback && entry.capture === capture && !entry.once) return;
+    }
+    const entry = { callback: callback, capture: capture, once: object && !!options.once };
+    entries[entries.length] = entry;
     if (signal) {
-      if (call(abortedGetter, signal)) return;
       call(nativeAdd, signal, "abort", function () {
-        untrack(target, type, callback, capture);
+        untrackEntry(target, type, entry);
       }, { once: true });
     }
-    const entries = entriesOf(target, type, true);
-    for (let i = 0; i < entries.length; i++) {
-      if (entries[i].callback === callback && entries[i].capture === capture) return;
-    }
-    entries[entries.length] = { callback: callback, capture: capture };
   }
 
   // A call with no `this` reaches the window, as the platform defines.

@@ -46,10 +46,11 @@ final class WebTestHarness {
 
     /// A harness whose pages run the runtime, or, with `runtime` false, the
     /// same skeleton and configuration without the runtime and jQuery (the
-    /// C9.4 baseline).
+    /// C9.4 baseline). With `frameClock`, each page also counts animation
+    /// frames itself (`TestPage.frameStamps()`).
     init(
         platform: CardRuntime.Platform = .mac, appearance: CardRuntime.Appearance = .light, reviewExtra: String = "",
-        runtime: Bool = true
+        runtime: Bool = true, frameClock: Bool = false
     ) {
         self.platform = platform
         self.appearance = appearance
@@ -80,6 +81,10 @@ final class WebTestHarness {
         configuration.allowsInlineMediaPlayback = true
         #endif
         let controller = configuration.userContentController
+        if frameClock {
+            controller.addUserScript(
+                WKUserScript(source: Self.frameClockScript, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
+        }
         controller.addUserScript(
             WKUserScript(source: CardRuntime.interactionScript, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world))
         controller.add(signals, contentWorld: world, name: CardRuntime.signalHandlerName)
@@ -104,6 +109,51 @@ final class WebTestHarness {
         for page in pages { page.close() }
         pages.removeAll()
     }
+
+    /// The test's own frame clock, in the interaction world: a
+    /// `requestAnimationFrame` loop that counts frames from document start,
+    /// and the count at each moment a test compares: `#qa` turning visible
+    /// (step 8), each message the interaction script posts, and the marks a
+    /// test sets. It relies on nothing the runtime or the interaction script
+    /// says about frames.
+    static let frameClockScript = """
+        (function () {
+          "use strict";
+          let frames = 0;
+          const stamps = [];
+          function tick() {
+            requestAnimationFrame(function () {
+              frames += 1;
+              tick();
+            });
+          }
+          tick();
+          function wrap(name) {
+            const handler = window.webkit.messageHandlers[name];
+            const post = handler.postMessage;
+            handler.postMessage = function (message) {
+              const what = message && (message.signal || message.phase);
+              stamps.push({ event: name + ":" + String(what), frame: frames });
+              return post.call(handler, message);
+            };
+          }
+          wrap("\(CardRuntime.signalHandlerName)");
+          wrap("\(CardRuntime.confirmationHandlerName)");
+          let qaVisible = false;
+          new MutationObserver(function () {
+            const qa = document.getElementById("qa");
+            const visible = !!qa && qa.style.opacity === "1";
+            if (visible && !qaVisible) stamps.push({ event: "qaVisible", frame: frames });
+            qaVisible = visible;
+          }).observe(document, { subtree: true, attributes: true, attributeFilter: ["style"] });
+          window.meguriTestFrames = {
+            stamps: stamps,
+            mark: function (event) {
+              stamps.push({ event: event, frame: frames });
+            },
+          };
+        })();
+        """
 
     // MARK: Signals
 
@@ -130,6 +180,14 @@ final class WebTestHarness {
             try await Task.sleep(for: .milliseconds(5))
         }
     }
+}
+
+/// Whether this process runs in a virtual machine, such as the test VM
+/// and its simulators (`kern.hv_vmm_present`).
+nonisolated func runsInVirtualMachine() -> Bool {
+    var value: Int32 = 0
+    var size = MemoryLayout<Int32>.size
+    return sysctlbyname("kern.hv_vmm_present", &value, &size, nil, 0) == 0 && value == 1
 }
 
 /// Resumes a continuation once, with whichever result comes first.
@@ -302,6 +360,34 @@ final class TestPage {
         try await runIsolated("meguriCard.unpresent();")
     }
 
+    // MARK: The frame clock (`frameClock` harnesses)
+
+    struct FrameStamp: Decodable, Equatable {
+        let event: String
+        let frame: Int
+    }
+
+    /// Everything the frame clock stamped, in order.
+    func frameStamps() async throws -> [FrameStamp] {
+        let text = try await runIsolated("return JSON.stringify(window.meguriTestFrames.stamps);")
+        guard let text = text as? String else { throw HarnessFailure("this page has no frame clock") }
+        return try JSONDecoder().decode([FrameStamp].self, from: Data(text.utf8))
+    }
+
+    /// The frame count of the first stamp named `event`.
+    func frame(of event: String) async throws -> Int {
+        let stamps = try await frameStamps()
+        guard let stamp = stamps.first(where: { $0.event == event }) else {
+            throw HarnessFailure("no frame stamp \(event) in \(stamps)")
+        }
+        return stamp.frame
+    }
+
+    /// `present(token:)`, stamped `present` in the same task.
+    func presentStamped(token: Int = 1) async throws {
+        try await runIsolated("meguriTestFrames.mark('present'); meguriCard.present(token);", ["token": token])
+    }
+
     /// Asks the page to warm its caches with `html` (C7.5).
     func warm(_ html: String) async throws {
         try await runIsolated("meguriCard.warm(html);", ["html": html])
@@ -380,7 +466,9 @@ private final class TestWindow {
     #if os(macOS)
     private let window: NSWindow
     #else
-    private let window: UIWindow
+    /// Nil without a window scene: a UIWindow needs one (`init(frame:)` is
+    /// deprecated since iOS 26), and only a run with an app host has one.
+    private let window: UIWindow?
     #endif
 
     init(_ content: WKWebView) {
@@ -391,8 +479,8 @@ private final class TestWindow {
         window.isReleasedWhenClosed = false
         window.contentView = content
         #else
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-        window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: content.frame)
+        window = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first.map { UIWindow(windowScene: $0) }
+        guard let window else { return }
         window.frame = content.frame
         let controller = UIViewController()
         controller.view = content
@@ -406,8 +494,8 @@ private final class TestWindow {
         window.contentView = nil
         window.close()
         #else
-        window.isHidden = true
-        window.rootViewController = nil
+        window?.isHidden = true
+        window?.rootViewController = nil
         #endif
     }
 }

@@ -60,7 +60,36 @@ extension WebKitSuites.CardRuntimeSuites {
                 try await page.present(token: 11)
                 let visible = try await harness.signal("visible", from: page)
                 #expect(visible.card == 9 && visible.side == "question" && visible["token"] as? Int == 11)
-                #expect(harness.confirmations.contains(.init(token: 11, cardID: 9, phase: .visible)))
+                // Posted right after the signal, to another handler.
+                try await harness.until("the visible confirmation") {
+                    harness.confirmations.contains(.init(token: 11, cardID: 9, phase: .visible))
+                }
+            }
+        }
+
+        /// C6.6, C14, R1862, counted by the test's own frame clock: the
+        /// settled confirmation comes no sooner than the second frame after
+        /// `#qa` turned visible, the visible one no sooner than the second
+        /// frame after presentation.
+        @Test func confirmationsComeTwoFramesAfterWhatTheyConfirm() async throws {
+            try await WebTestHarness.withPage(frameClock: true) { harness, page async throws in
+                try await page.announce(card: 5, generation: 3)
+                try await page.showQuestion("<p>five</p>")
+                try await harness.signal("settled", from: page)
+                let shown = try await page.frame(of: "qaVisible")
+                let settled = try await page.frame(of: "\(CardRuntime.confirmationHandlerName):settled")
+                #expect(settled - shown >= 2, "settled confirmed in frame \(settled), #qa visible in frame \(shown)")
+                #expect(try await page.frame(of: "\(CardRuntime.signalHandlerName):settled") == settled)
+
+                try await page.presentStamped(token: 4)
+                try await harness.signal("visible", from: page)
+                let presented = try await page.frame(of: "present")
+                let visible = try await page.frame(of: "\(CardRuntime.confirmationHandlerName):visible")
+                #expect(visible - presented >= 2, "visible confirmed in frame \(visible), presented in frame \(presented)")
+                #expect(try await page.frame(of: "\(CardRuntime.signalHandlerName):visible") == visible)
+                try await harness.until("the visible confirmation") {
+                    harness.confirmations.contains(.init(token: 4, cardID: 5, phase: .visible))
+                }
             }
         }
 
@@ -155,7 +184,11 @@ extension WebKitSuites.CardRuntimeSuites {
 
         // MARK: SU7, C8.2, D7
 
-        @Test func autoplayHeldUntilPresent() async throws {
+        /// Not in a virtual machine: the test VM's simulators have no audio
+        /// route, and an `<audio>` there never loads past its metadata, so
+        /// it never autoplays (decision record s2, S2(a)).
+        @Test(.disabled(if: runsInVirtualMachine(), "no audio route in a virtual machine"))
+        func autoplayHeldUntilPresent() async throws {
             try await WebTestHarness.withPage { harness, page async throws in
                 harness.media.add("/_tone.wav", TestMedia.silentWAV(seconds: 3), "audio/wav")
                 try await page.showQuestion(#"<audio id="tone" src="_tone.wav" autoplay loop></audio>"#)
@@ -341,6 +374,81 @@ extension WebKitSuites.CardRuntimeSuites {
                     #"<p id="p">x</p><script>window.__c = new AbortController(); document.addEventListener("click", function () {}, { signal: __c.signal });</script>"#)
                 #expect(try await page.hasCardListener("tap", at: "#p"))
                 try await page.run("window.__c.abort();")
+                #expect(try await !page.hasCardListener("tap", at: "#p"))
+            }
+        }
+
+        /// A signal removes only the registration it came with: a listener
+        /// removed and added again with a second signal stays (in WebKit and
+        /// in the registry) when the first signal aborts.
+        @Test func registryKeepsAListenerAddedAgainWithAnotherSignal() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showPresentedQuestion(
+                    """
+                    <p id="p">x</p>
+                    <script>
+                    window.__h = function () { log("click"); };
+                    window.__a = new AbortController();
+                    window.__b = new AbortController();
+                    document.addEventListener("click", __h, { signal: __a.signal });
+                    document.removeEventListener("click", __h);
+                    document.addEventListener("click", __h, { signal: __b.signal });
+                    </script>
+                    """)
+                try await page.run("window.__a.abort();")
+                try await page.run(#"document.getElementById("p").click();"#)
+                #expect(try await page.log() == ["click"])
+                #expect(try await page.hasCardListener("tap", at: "#p"))
+                try await page.run("window.__b.abort();")
+                #expect(try await !page.hasCardListener("tap", at: "#p"))
+            }
+        }
+
+        /// WebKit ignores a second add of the same type, callback and capture,
+        /// so aborting the second add's signal leaves the first registration.
+        @Test func registryIgnoresTheSignalOfARepeatedAdd() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showPresentedQuestion(
+                    """
+                    <p id="p">x</p>
+                    <script>
+                    window.__h = function () { log("key"); };
+                    window.__a = new AbortController();
+                    window.__b = new AbortController();
+                    document.addEventListener("keydown", __h, { signal: __a.signal });
+                    document.addEventListener("keydown", __h, { signal: __b.signal });
+                    </script>
+                    """)
+                try await page.run("window.__b.abort();")
+                try await page.run(#"document.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));"#)
+                #expect(try await page.log() == ["key"])
+                #expect(try await page.hasCardListener("keydown"))
+                try await page.run("window.__a.abort();")
+                #expect(try await !page.hasCardListener("keydown"))
+            }
+        }
+
+        /// A `once` listener that fired is gone from WebKit, so adding it
+        /// again registers it anew; the first add's signal must not take that
+        /// registration out of the registry.
+        @Test func registryKeepsAOnceListenerAddedAgainAfterItFired() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                try await page.showPresentedQuestion(
+                    """
+                    <p id="p">x</p>
+                    <script>
+                    window.__h = function () { log("click"); };
+                    window.__a = new AbortController();
+                    window.__b = new AbortController();
+                    document.addEventListener("click", __h, { once: true, signal: __a.signal });
+                    </script>
+                    """)
+                try await page.run(
+                    #"document.getElementById("p").click(); document.addEventListener("click", __h, { signal: __b.signal }); __a.abort();"#)
+                try await page.run(#"document.getElementById("p").click();"#)
+                #expect(try await page.log() == ["click", "click"])
+                #expect(try await page.hasCardListener("tap", at: "#p"))
+                try await page.run("window.__b.abort();")
                 #expect(try await !page.hasCardListener("tap", at: "#p"))
             }
         }
