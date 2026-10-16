@@ -18,7 +18,7 @@ use crate::transport::{Method, Payload, runtime};
 pub async fn login(job: &mut Job, user_name: &str, password: &str) -> Result<HostKey, SyncError> {
     let body = login_body(user_name, password)?;
     let answer = job.request(Method::HostKey, Payload::Json(body)).await?.bytes().await?;
-    host_key(&answer)
+    decode_login_answer(&answer)
 }
 
 /// [`login`] as a blocking call on the sync runtime (T9), in a job of its
@@ -49,8 +49,9 @@ fn login_body(user_name: &str, password: &str) -> Result<Vec<u8>, SyncError> {
     Ok(body.into_bytes())
 }
 
-/// The non-empty string `key` of a JSON object; other members are ignored.
-fn host_key(answer: &[u8]) -> Result<HostKey, SyncError> {
+/// The `hostKey` answer (L5): the non-empty string `key` of a JSON object;
+/// other members are ignored.
+pub fn decode_login_answer(answer: &[u8]) -> Result<HostKey, SyncError> {
     let bad = SyncError::Protocol(ProtocolError::BadLoginAnswer);
     let value: Value = serde_json::from_slice(answer).map_err(|_| bad.clone())?;
     match value.get("key") {
