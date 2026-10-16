@@ -2,6 +2,7 @@
 //! and the private suite. Commands land with their units.
 
 mod conformance;
+mod fp_probe;
 mod generate;
 mod profile_extract;
 
@@ -10,6 +11,7 @@ fn main() {
     let status = match args.split_first() {
         Some((command, rest)) if command == "conformance" => conformance::main(rest),
         Some((command, rest)) if command == "generate" => generate::main(rest),
+        Some((command, rest)) if command == "fp-probe" => fp_probe::main(rest),
         Some((command, rest)) if command == "profile-extract" => profile_extract::main(rest),
         Some((command, _)) if command == "--version" => {
             println!("meguri-cli {}", env!("CARGO_PKG_VERSION"));
@@ -18,6 +20,7 @@ fn main() {
         _ => {
             eprintln!("usage: meguri-cli conformance <command> ...   (meguri-cli conformance help)");
             eprintln!("       meguri-cli generate <size>|worst-case <name>|recipe <name> --out DIR [options]");
+            eprintln!("       meguri-cli fp-probe eval|report ...   (meguri-cli fp-probe help)");
             eprintln!("       meguri-cli profile-extract <collection> --media-dir <dir> --tz <IANA zone> --out <file>");
             2
         }

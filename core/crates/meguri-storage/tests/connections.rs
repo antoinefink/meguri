@@ -39,7 +39,9 @@ fn the_writer_has_the_settings_of_c4_and_c9() {
     assert_eq!(int(&exec(w, "SELECT * FROM pragma_page_size")), 4096);
     assert_eq!(int(&exec(w, "SELECT * FROM pragma_cache_size")), -40960);
     assert_eq!(int(&exec(w, "SELECT * FROM pragma_temp_store")), 2, "MEMORY");
-    assert_eq!(int(&exec(w, "SELECT * FROM pragma_synchronous")), 2, "FULL");
+    // C9: NORMAL, with full syncs on Apple whatever `synchronous` is (the
+    // checkpoint and WAL-restart syncs SQLite still issues).
+    assert_eq!(int(&exec(w, "SELECT * FROM pragma_synchronous")), 1, "NORMAL");
     assert_eq!(int(&exec(w, "PRAGMA wal_autocheckpoint")), 1000);
     let apple = cfg!(target_vendor = "apple") as i64;
     assert_eq!(int(&exec(w, "SELECT * FROM pragma_fullfsync")), apple);

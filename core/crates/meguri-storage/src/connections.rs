@@ -55,6 +55,8 @@ pub(crate) const READ_WRITE: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
 #[derive(Debug)]
 pub struct Writer {
     pub(crate) conn: Connection,
+    #[cfg(feature = "test-hooks")]
+    pub(crate) fail_next_wal_sync: std::cell::Cell<bool>,
 }
 
 impl Writer {
@@ -70,7 +72,11 @@ impl Writer {
                 detail: format!("the journal mode stayed {mode}, not wal"),
             },
         })?;
-        Ok(Writer { conn })
+        Ok(Writer {
+            conn,
+            #[cfg(feature = "test-hooks")]
+            fail_next_wal_sync: std::cell::Cell::new(false),
+        })
     }
 }
 
@@ -117,6 +123,35 @@ impl ReaderRole {
 pub struct Reader {
     pub(crate) conn: Connection,
     role: ReaderRole,
+}
+
+/// Opens readers of an open collection from any thread (C6): the engine's
+/// writer thread owns the [`crate::OpenedCollection`], and its readers open
+/// lazily on the threads that first need them. Only an opened collection
+/// hands one out, so its writer has already set WAL mode.
+#[derive(Clone, Debug)]
+pub struct ReaderFactory {
+    path: PathBuf,
+    initializers: Initializers,
+}
+
+impl ReaderFactory {
+    pub(crate) fn new(path: &Path, initializers: &Initializers) -> ReaderFactory {
+        ReaderFactory {
+            path: path.to_path_buf(),
+            initializers: initializers.clone(),
+        }
+    }
+
+    /// Opens a reader of `role` (C6). The caller closes it before the
+    /// collection closes.
+    pub fn open(&self, role: ReaderRole) -> Result<Reader, StorageError> {
+        Reader::open(&self.path, role, &self.initializers)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 impl Reader {

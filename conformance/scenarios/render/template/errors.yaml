@@ -1,0 +1,40 @@
+# Errors (specs/render/template-syntax.md T6-T9, R959, R1908): every kind, the
+# side, structural errors before render errors, first error in order, errors
+# in hidden sections, a blank question hiding the answer's error, and no error
+# for an unclosed tag.
+id: render/template/errors
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Error Probe, fields: [Front, Back]}
+          cases:
+            - {front: "{{Front}}{{#Back}}x", fields: [front, back]}
+            - {front: "{{Front}}{{#Back}}x{{/Front}}", fields: [front, back]}
+            - {front: "{{#Front}}{{#Back}}x{{/Front}}{{/Back}}", fields: [front, back]}
+            - {front: "{{Front}}{{/Back}}", fields: [front, back]}
+            - {front: "{{Front}}{{/Back}}{{#Back}}", fields: [front, back]}
+            - {front: "{{Front}}{{Nope}}", fields: [front, back]}
+            - {front: "{{Front}}{{text:hint:Nope}}", fields: [front, back]}
+            - {front: "{{Front}}{{#Nope}}x{{/Nope}}", fields: [front, back]}
+            - {front: "{{Front}}{{^Nope}}x{{/Nope}}", fields: [front, back]}
+            - {front: "{{Nope}}{{#Back}}", fields: [front, back]}
+            - {front: "{{Back}}{{#Nope}}{{/Nope}}{{Zip}}", fields: [front, back]}
+            - {front: "{{Back}}{{Zip}}{{#Nope}}{{/Nope}}", fields: [front, back]}
+            - {front: "{{Back}}{{#Front}}{{Nope}}{{/Front}}", fields: ["", back]}
+            - {front: "{{Back}}{{^Back}}{{#Nope}}{{/Nope}}{{/Back}}", fields: [front, back]}
+            - {front: "{{Front}}", back: "{{Nope}}", fields: [front, back]}
+            - {front: "{{Front}}", back: "{{FrontSide}}{{#Front}}", fields: [front, back]}
+            - {front: "{{Front}}", back: "{{Nope}}", fields: ["", back]}
+            - {front: "{{Nope}}", back: "{{#X}}", fields: [front, back]}
+            - {front: "{{Front}}{{front}}", fields: [front, back]}
+            - {front: "{{Front}}{{c2}}", fields: [front, back]}
+            - {front: "{{Front}}{{#C1}}{{/C1}}", fields: [front, back]}
+            - {front: "{{Front}}{{#c}}{{/c}}", fields: [front, back]}
+            - {front: "{{Front}}{{#c1x}}{{/c1x}}", fields: [front, back]}
+            - {front: "{{Front}}{{#c4294967296}}{{/c4294967296}}", fields: [front, back]}
+            - {front: "{{Front}}{{#c-1}}{{/c-1}}", fields: [front, back]}
+            - {front: "{{Front}}{{#FrontSide}}{{/FrontSide}}", fields: [front, back]}
+            - {front: "{{Front}}{{#text:Front}}x{{/text:Front}}", fields: [front, back]}
+            - {front: "{{Front}} {{Back", fields: [front, back]}
+            - {front: "{{Front}} {{#Back}", fields: [front, back]}

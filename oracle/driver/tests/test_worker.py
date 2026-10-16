@@ -13,6 +13,7 @@ import re
 import shutil
 import statistics
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -77,6 +78,27 @@ class Hello(unittest.TestCase):
         self.assertEqual(resp["tz"], "Europe/Paris")
         lockfile = (ORACLE_HOME / "requirements.lock").read_text()
         self.assertRegex(lockfile, r"(?m)^anki==26\.9\.3 ")
+        # A container worker: its CPU architecture, and a frozen clock it checked.
+        arch = {"aarch64": "arm64", "x86_64": "x86_64"}[os.uname().machine]
+        self.assertEqual(resp["platform"], f"linux-{arch}")
+        self.assertEqual(resp["time_control"], "faketime")
+
+    def test_a_container_worker_whose_clock_is_not_frozen_refuses_to_start(self):
+        # libfaketime named but not loaded: the start-up check sees the real
+        # clock (float-determinism.md F6.3), which a container worker never runs on.
+        scratch = tempfile.mkdtemp(prefix="t-", dir=os.environ.get("ORACLE_SCRATCH_ROOT") or tempfile.gettempdir())
+        try:
+            env = {k: v for k, v in os.environ.items() if not k.startswith("FAKETIME") and k != "LD_PRELOAD"}
+            env.update(TZ="UTC", ORACLE_SCRATCH=scratch, FAKETIME_TIMESTAMP_FILE=f"{scratch}/clock",
+                       LD_PRELOAD="/nonexistent/libfaketime.so.1")
+            proc = subprocess.run([sys.executable, "-m", "driver"], input='{"cmd":"hello"}\n', capture_output=True,
+                                  text=True, env=env, timeout=120)
+            leftovers = sorted(os.listdir(scratch))
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        self.assertEqual((proc.returncode, proc.stdout), (78, ""))
+        self.assertIn("frozen clock does not reach", proc.stderr)
+        self.assertEqual(leftovers, [])
 
 
 class Ids(unittest.TestCase):
@@ -155,6 +177,46 @@ class Clock(unittest.TestCase):
                 self.assertEqual(second["now"], s + 86400)
                 self.assertEqual(first["next_day_at"], next_rollover(s, tz))
                 self.assertEqual(second["days_elapsed"], first["days_elapsed"] + 1)
+
+
+class FsrsContext(unittest.TestCase):
+    """Run requests with fsrs_context (protocol.json): per next_states card,
+    the home deck's effective desired retention and the decay of its preset's
+    parameters (sched/fsrs-transitions T2.1, T2.2)."""
+
+    PARAMS_21 = [0.2] * 20 + [0.95]  # the 21st value is clipped to 0.8
+
+    def scenario(self, config):
+        setup = {
+            "config": config,
+            "presets": [{"name": "P", "desired_retention": 0.87},
+                        {"name": "Q", "desired_retention": 0.9, "fsrs_params": self.PARAMS_21}],
+            "decks": [{"name": "A", "preset": "P"}, {"name": "B", "preset": "Q"}],
+            "notes": [{"notetype": "QA", "deck": "A", "fields": ["q1", "a1"]},
+                      {"notetype": "QA", "deck": "B", "fields": ["q2", "a2"]}],
+        }
+        steps = [{"observe": ["next_states"]}, {"answer": {"card": "#c1", "rating": "good"}},
+                 {"legacy_update": {"deck": "B", "patch": {"desiredRetention": 85}}},
+                 {"observe": ["next_states(#c2)", "timing"]}]
+        return scenario("t/ctx", "UTC", "2030-01-15T10:00:00", steps, setup=setup)
+
+    def test_context_per_card_pointer_only_when_asked_and_only_with_fsrs(self):
+        with WorkerProcess("UTC") as w:
+            asked = w.request({"cmd": "run", "scenario": self.scenario({"fsrs": True}), "fsrs_context": True})
+            plain = w.request({"cmd": "run", "scenario": self.scenario({"fsrs": True})})
+            off = w.request({"cmd": "run", "scenario": self.scenario({"fsrs": False}), "fsrs_context": True})
+            bad = w.request({"cmd": "run", "scenario": self.scenario({"fsrs": True}), "fsrs_context": 1})
+        self.assertTrue(asked["ok"], asked)
+        self.assertEqual(asked["fsrs_context"], {
+            "/steps/0/next_states/#c1": {"desired_retention": 0.87, "decay": 0.1542},
+            "/steps/0/next_states/#c2": {"desired_retention": 0.9, "decay": 0.8},
+            # The deck's own desired retention, a whole percent (T2.2).
+            "/steps/3/next_states/#c2": {"desired_retention": 0.85, "decay": 0.8},
+        })
+        self.assertEqual(asked["observations"], plain["observations"])
+        self.assertNotIn("fsrs_context", plain)
+        self.assertEqual(off["fsrs_context"], {})
+        self.assertEqual(bad["error"]["kind"], "protocol_error")
 
 
 class Errors(unittest.TestCase):

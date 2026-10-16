@@ -1,0 +1,47 @@
+# Special fields of stored cards (specs/render/special-fields.md P3, R960,
+# render-ops.md Q1.3): nested deck names and Subdeck, the original deck of a
+# card with odid set, missing decks, flags 3, 7 and 9, CardID, stored tags,
+# template names of a standard and a cloze note type, the note's own fields.
+# Meguri runs it once notes and cards exist in its executor (U27, U29) and the
+# cloze blank check exists (U61); the cloze note has one cloze so that card ids
+# do not depend on Anki's hash-set order.
+id: render/special-fields/cards
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Lang::Japanese::Vocab", Other]
+  notetypes:
+    - name: Vocab
+      fields: [Word, Meaning]
+      templates:
+        - {name: Recognition, front: "{{Word}}", back: "{{Meaning}}"}
+        - {name: Recall, front: "{{Meaning}}", back: "{{Word}}"}
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap Card, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  notes:
+    - {notetype: Vocab, deck: "Lang::Japanese::Vocab", fields: ["猫", cat], tags: [animal, jlpt-n5]}
+    - {notetype: Vocab, deck: Other, fields: ["犬", dog]}
+    - {notetype: Gap, deck: Other, fields: ["a {{c2::b}}", extra]}
+steps:
+  - observe: [ids]
+  - db_exec:
+      sql: "UPDATE cards SET flags = 3 WHERE nid = (SELECT min(id) FROM notes) AND ord = 1"
+  - db_exec:
+      sql: "UPDATE cards SET flags = 7, odid = did, did = (SELECT did FROM cards WHERE nid = (SELECT min(id) FROM notes) AND ord = 0) WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1) AND ord = 0"
+  - db_exec:
+      sql: "UPDATE cards SET flags = 9, did = 999999 WHERE nid = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1) AND ord = 1"
+  - db_exec:
+      sql: "UPDATE cards SET odid = 999999 WHERE nid = (SELECT max(id) FROM notes)"
+  - observe:
+      - template:
+          cases:
+            - {card: "#c1", front: "{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{CardID}}|{{Card}}|{{Type}}|{{Tags}}|{{#c1}}c1{{/c1}}{{#c2}}c2{{/c2}}", back: "{{FrontSide}}"}
+            - {card: "#c2", front: "{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{CardID}}|{{Card}}|{{Type}}|{{Tags}}|{{#c1}}c1{{/c1}}{{#c2}}c2{{/c2}}", back: "{{FrontSide}}"}
+            - {card: "#c3", front: "{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{CardID}}|{{Card}}|{{Type}}|{{Tags}}|{{#Tags}}tagged{{/Tags}}{{^Tags}}untagged{{/Tags}}"}
+            - {card: "#c4", front: "{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{CardID}}|{{Card}}|{{Type}}"}
+            - {card: "#c5", front: "{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{CardID}}|{{Card}}|{{Type}}|{{#c1}}c1{{/c1}}{{#c2}}c2{{/c2}}"}
+            - {card: "#c1", front: "{{Word}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}"}
+            - {card: "#c5", front: "{{Text}}|{{Extra}}", back: "{{FrontSide}}|{{text:Text}}"}
+            - {card: "#c5", front: "{{Word}}"}

@@ -1,0 +1,118 @@
+//! The engine's error. Area units add a variant only when callers must react
+//! to it differently from these; meguri-ffi maps them onto `CoreError`.
+
+use std::fmt;
+
+use meguri_storage::{OpenError, StorageError, Table};
+
+use crate::lifecycle::Generation;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineError {
+    /// A precondition of the op failed (`engine/op-model` O7): the row it
+    /// was planned on changed. Nothing was written.
+    Stale {
+        table: Table,
+        key: String,
+    },
+    /// The op, handle or snapshot belongs to an older collection generation
+    /// (`engine/lifecycle` L3).
+    StaleGeneration {
+        planned: Generation,
+        current: Generation,
+    },
+    /// The collection cannot take this op now (`engine/lifecycle` L4, L6).
+    CollectionUnavailable {
+        reason: String,
+    },
+    /// Another long operation holds the slot this one needs (R171).
+    Busy {
+        running_op: String,
+    },
+    /// The op's or job's cancel token was cancelled before it committed.
+    Cancelled,
+    /// The open gate refused or failed (`storage/open-and-connections` C8).
+    Open(OpenError),
+    Storage(StorageError),
+    /// The op panicked; its transaction was rolled back.
+    Panicked {
+        message: String,
+    },
+    /// The caller passed something the engine rejects.
+    InvalidArgument {
+        message: String,
+    },
+    /// Compiled out for this platform or build.
+    Unsupported {
+        feature: String,
+    },
+    /// A failure the caller cannot act on.
+    Internal {
+        message: String,
+    },
+}
+
+impl EngineError {
+    pub(crate) fn from_panic(payload: &(dyn std::any::Any + Send)) -> EngineError {
+        EngineError::Panicked {
+            message: panic_message(payload),
+        }
+    }
+
+    pub(crate) fn internal(message: impl Into<String>) -> EngineError {
+        EngineError::Internal {
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn unavailable(reason: impl Into<String>) -> EngineError {
+        EngineError::CollectionUnavailable { reason: reason.into() }
+    }
+}
+
+/// The text of a caught panic's payload.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_owned()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panic with a non-string payload".to_owned()
+    }
+}
+
+impl From<StorageError> for EngineError {
+    fn from(error: StorageError) -> EngineError {
+        EngineError::Storage(error)
+    }
+}
+
+impl From<OpenError> for EngineError {
+    fn from(error: OpenError) -> EngineError {
+        EngineError::Open(error)
+    }
+}
+
+impl fmt::Display for EngineError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EngineError::Stale { table, key } => write!(f, "stale: row {key} of {table} changed since it was read"),
+            EngineError::StaleGeneration { planned, current } => write!(
+                f,
+                "stale generation: planned on generation {}, the collection is at {}",
+                planned.0, current.0
+            ),
+            EngineError::CollectionUnavailable { reason } => write!(f, "collection unavailable: {reason}"),
+            EngineError::Busy { running_op } => write!(f, "busy: {running_op} is running"),
+            EngineError::Cancelled => f.write_str("cancelled"),
+            EngineError::Open(error) => write!(f, "open: {error}"),
+            EngineError::Storage(error) => write!(f, "storage: {error}"),
+            EngineError::Panicked { message } => write!(f, "panic: {message}"),
+            EngineError::InvalidArgument { message } => write!(f, "invalid argument: {message}"),
+            EngineError::Unsupported { feature } => write!(f, "unsupported: {feature}"),
+            EngineError::Internal { message } => write!(f, "internal error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for EngineError {}

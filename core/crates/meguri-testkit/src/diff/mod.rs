@@ -9,7 +9,8 @@ use std::collections::BTreeSet;
 use serde_json::{Number, Value};
 
 use crate::observe;
-use crate::suite::Deviation;
+use crate::observe::overlay;
+use crate::suite::{Deviation, Transform};
 
 /// One difference; `None` is a member or item present on one side only.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +30,9 @@ pub struct CompareOptions<'a> {
     /// `compare.set` pointer patterns.
     pub set: &'a [String],
     pub deviations: &'a [Deviation],
+    /// The scenario's overlay entries, which the `apple_overlay` deviation
+    /// puts into expected: only in T0 on macOS (float-determinism.md F9).
+    pub overlay: &'a [overlay::Entry],
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,19 +41,34 @@ pub struct Comparison {
     pub differences: Vec<Difference>,
     /// Ids of the deviations whose pointer matched in the expected value.
     pub deviations_applied: Vec<String>,
+    /// How many overlay entries the `apple_overlay` deviation applied.
+    pub overlay_applied: usize,
 }
 
 /// Compares a golden's observations (expected) with an executor's (actual):
-/// deviation transforms on expected first, then set comparison, then the
-/// member-by-member walk with the declared tolerances.
+/// deviation transforms on expected first (the `apple_overlay` entry before
+/// the others, dsl.md D13), then set comparison, then the member-by-member
+/// walk with the declared tolerances.
 pub fn compare(scenario_id: &str, expected: &Value, actual: &Value, options: &CompareOptions<'_>) -> Comparison {
     let mut expected = expected.clone();
     let mut actual = actual.clone();
     let mut applied = Vec::new();
-    for deviation in options.deviations {
-        if deviation.scenarios.iter().any(|p| pointer::glob(p, scenario_id))
-            && transforms::apply(deviation, &mut expected)
-        {
+    let mut overlay_applied = 0;
+    let selected = || {
+        options
+            .deviations
+            .iter()
+            .filter(|d| d.scenarios.iter().any(|p| pointer::glob(p, scenario_id)))
+    };
+    for deviation in selected().filter(|d| matches!(d.transform, Transform::AppleOverlay(_))) {
+        let n = overlay::apply(options.overlay, &pointer::parse(&deviation.pointer), &mut expected);
+        if n > 0 {
+            overlay_applied += n;
+            applied.push(deviation.id.clone());
+        }
+    }
+    for deviation in selected().filter(|d| !matches!(d.transform, Transform::AppleOverlay(_))) {
+        if transforms::apply(deviation, &mut expected) {
             applied.push(deviation.id.clone());
         }
     }
@@ -68,6 +87,7 @@ pub fn compare(scenario_id: &str, expected: &Value, actual: &Value, options: &Co
     Comparison {
         differences,
         deviations_applied: applied,
+        overlay_applied,
     }
 }
 
