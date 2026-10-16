@@ -1,0 +1,157 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "template": [
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front}"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front}}"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front\r\nback"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "back and {{Front"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "x{{Front"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "text }} more front {"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front|front|front"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "front[][][]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "shownfront"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "afront"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "back}back}}",
+            "empty": false,
+            "question": "front"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "aeac0ec295e2e34082a4d084d08e6a5f40ef7e0ebb45ac49e5e1139b1a16affc",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/template/tags",
+  "scenario_sha256": "db18567e44d11270306e99a351a5abead73ae74e5561b8fba7f92204ab8ab7ef",
+  "tz": "UTC"
+}

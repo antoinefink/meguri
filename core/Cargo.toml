@@ -55,6 +55,10 @@ pulldown-cmark = { version = "=0.13.4", default-features = false, features = ["h
 # meguri-storage issues SQL against a collection.
 rusqlite = { version = "0.40.2", default-features = false, features = ["backup", "bundled", "cache", "collation", "functions"] }
 
+# Per-op spans in the engine's executor (U24, rust-stack §5): name, source,
+# rows, plan and write-phase time. Macros only; no subscriber in the core.
+tracing = { version = "0.1.44", default-features = false, features = ["std"] }
+
 # Workspace tooling.
 proc-macro2 = { version = "1.0.107", default-features = false, features = ["span-locations"] }
 serde = { version = "1.0.228", features = ["derive"] }
@@ -83,10 +87,15 @@ libc = "0.2.190"
 
 [profile.dev]
 opt-level = 1
+# Line tables keep backtraces and test failures pointing at source lines. Full
+# debug info made each worktree's target directory 15-35 GB, and parallel
+# worktrees filled the disk.
+debug = "line-tables-only"
 
 # Dependencies (ndarray, SQLite) run 10-50x slower unoptimized; our code stays debuggable.
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
 [profile.release]
 lto = "fat"
