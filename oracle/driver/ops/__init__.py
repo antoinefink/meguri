@@ -11,6 +11,7 @@ from . import (  # noqa: F401
     notes,
     notetypes,
     package,
+    preservation,
     sched,
     storage,
     storage_open,

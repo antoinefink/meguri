@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""db_dump [{tables: [...]}]: the stored rows of the current collection
-(specs/conformance/observations.md O8).
+"""db_dump [{tables?: [...], raw?: bool}]: the stored rows of the current
+collection (specs/conformance/observations.md O8; raw: normalized-dump.md N4).
 
 {<table>: {<primary key as text>: {<column>: <value>}}} for the twelve tables
 of a schema-18 file. A value follows the SQLite storage class of what is
@@ -9,7 +9,8 @@ TEXT str, NULL None, BLOB {"sha256": <hex of the bytes>}. The observation
 hides what Anki draws at random: notes.guid reads "#random", and the digests of
 fields.config and templates.config skip the field's and template's random id
 (top-level protobuf fields 9 and 8). `dump(col, raw=True)` keeps them: that is
-the raw dump `converge` compares (sync-ops.md S7.2).
+the raw dump `converge` compares (sync-ops.md S7.2), and what {raw: true}
+reports for the requested tables (normalized-dump.md N4).
 
 Columns come from SQLite's table-valued pragma inside a SELECT: a bare PRAGMA
 goes through the DB proxy as a modification, which would mark the collection
@@ -124,18 +125,25 @@ def dump(col, tables: tuple[str, ...] | list[str] = TABLES, raw: bool = False) -
     return {t: dump_table(col, t, raw) for t in tables}
 
 
-def _tables(args: Any) -> list[str]:
+def _arguments(args: Any) -> tuple[list[str], bool]:
+    """(tables, raw) from nothing or {tables?, raw?}."""
     if args is None:
-        return list(TABLES)
-    if not isinstance(args, dict) or set(args) != {"tables"} or not isinstance(args["tables"], list):
-        raise invalid("db_dump takes nothing or {tables: [...]}")
-    tables = args["tables"]
+        return list(TABLES), False
+    if (
+        not isinstance(args, dict)
+        or set(args) - {"tables", "raw"}
+        or ("tables" in args and not isinstance(args["tables"], list))
+        or not isinstance(args.get("raw", False), bool)
+    ):
+        raise invalid("db_dump takes nothing or {tables?: [...], raw?: true|false}")
+    tables = args.get("tables", list(TABLES))
     unknown = [t for t in tables if t not in TABLES]
     if unknown or len(set(tables)) != len(tables):
         raise invalid(f"db_dump tables are distinct names among {', '.join(TABLES)}")
-    return tables
+    return tables, args.get("raw", False)
 
 
 @observation("db_dump")
 def db_dump(session, args):
-    return dump(session.col, _tables(args))
+    tables, raw = _arguments(args)
+    return dump(session.col, tables, raw=raw)
