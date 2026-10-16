@@ -546,6 +546,53 @@ fn a19_source_texts_get_their_clone_shapes() {
 }
 
 #[test]
+fn attribute_values_after_whitespace_around_the_equals_sign_are_values() {
+    // A6.1: an attribute's `=` and its value, in HTML's syntax, which allows
+    // whitespace (spaces, tabs, line breaks) on either side of the `=`. The
+    // value is then replaced or kept by A6.2 like any other; the whitespace
+    // and the `=` are kept.
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    let mut spec = Spec::new();
+    spec.notes = vec![
+        note(
+            CRT * 1000 + 1,
+            BASIC,
+            &["<span title = \"Secret\">x</span>", "<span title\t=\t'Geheim'>x</span>"],
+            "",
+        ),
+        note(
+            CRT * 1000 + 2,
+            BASIC,
+            &[
+                "<abbr\ntitle\n=\nVertraulich\n>x</abbr>",
+                "<span hidden class = \"Merkmal\" alt  =  Kennwort data-x = >x</span>",
+            ],
+            "",
+        ),
+    ];
+    build(&source, spec);
+    let clone = run(&source, &dir.path().join("clone"));
+    let first = clone.fields(CRT * 1000 + 1);
+    assert_shape(&first[0], r#"<span title = "[A-Z][a-z]{5}">[a-z]</span>"#);
+    assert_shape(&first[1], "<span title\t=\t'[A-Z][a-z]{5}'>[a-z]</span>");
+    let second = clone.fields(CRT * 1000 + 2);
+    assert_shape(&second[0], "<abbr\ntitle\n=\n[A-Z][a-z]{10}\n>[a-z]</abbr>");
+    // `class` is kept (A6.2); `hidden` has no value; `alt` is replaced; an
+    // `=` before the `>` gives an empty value.
+    assert_shape(
+        &second[1],
+        r#"<span hidden class = "Merkmal" alt  =  [A-Z][a-z]{7} data-x = >[a-z]</span>"#,
+    );
+    for field in first.iter().chain(&second) {
+        for word in ["Secret", "Geheim", "Vertraulich", "Kennwort"] {
+            assert!(!field.contains(word), "{word} kept in {field:?}");
+        }
+    }
+    assert_eq!(clone.report.json["checks"]["structure"], "pass");
+}
+
+#[test]
 fn a19_media_names_hash_as_the_spec_lists() {
     let (_dir, clone) = standard_clone(false);
     let refs = media_refs::references(&clone.fields(N_MEDIA)[1]);

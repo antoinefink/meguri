@@ -389,6 +389,19 @@ impl<N: Names, S: Sink> Walker<'_, '_, '_, N, S> {
         None
     }
 
+    /// The first position from `q` that holds an atom or a character other
+    /// than whitespace, or the end of the field.
+    fn skip_whitespace(&self, mut q: usize) -> usize {
+        while q < self.src.len() && !self.atoms.contains_key(&q) {
+            let c = self.char_at(q);
+            if !c.is_whitespace() {
+                break;
+            }
+            q += c.len_utf8();
+        }
+        q
+    }
+
     /// A6.1: a start tag at `p` (a `<` and an ASCII letter); `None` when no
     /// `>` ends it before the end of the field.
     fn start_tag(&self, p: usize) -> Option<StartTag> {
@@ -444,9 +457,12 @@ impl<N: Names, S: Sink> Walker<'_, '_, '_, N, S> {
                 q += c.len_utf8();
             }
             let attr = (attr_start, q);
-            if q < len && !self.atoms.contains_key(&q) && self.src.as_bytes()[q] == b'=' {
-                parts.push(Part::Kept(attr_start, q + 1));
-                q += 1;
+            // HTML's attribute syntax: whitespace may stand on either side
+            // of the `=`; it is kept with the name and the `=`.
+            let eq = self.skip_whitespace(q);
+            if eq < len && !self.atoms.contains_key(&eq) && self.src.as_bytes()[eq] == b'=' {
+                q = self.skip_whitespace(eq + 1);
+                parts.push(Part::Kept(attr_start, q));
                 let quote = self
                     .src
                     .as_bytes()
