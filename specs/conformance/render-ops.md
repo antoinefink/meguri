@@ -120,5 +120,5 @@ A reference to a card not created yet is `unknown_ref`. A card of a standard not
 
 ### Q4.5 Status
 
-- Oracle: the driver evaluates each card with Anki's review render of an existing card, the render of `collection-check` K8 (U29's oracle-maintainer work). `notetypes/records/stock-render-handoff` observes it and has its golden once the driver has it.
+- Oracle: the driver implements the kind with Anki's review render of an existing card, the render of `collection-check` K8. `notetypes/records/stock-render-handoff` observes it; its golden, recorded with `tools/mg oracle record notetypes/records/stock-render-handoff`, has every card `ok`.
 - Meguri: the executor adds the kind with the render pipeline (U62), from the stored templates through `render/template-syntax` and `render/cloze`. Until then a scenario that observes it in T0, or in a segment Meguri runs, is `pending`. `notetypes/records/stock-render-handoff` observes it only in the oracle's segment, so Meguri needs only `handoff` and the new collection there (`dsl.md` D9.2).

@@ -4,8 +4,9 @@ Read at tag 26.09.3 to choose the `anki` Python APIs behind `add_notetype`,
 `add_stock_notetype`, `clone_notetype`, `update_notetype`,
 `ensure_io_notetype`, the `notetype_structure` observation and `add_note` by
 stored name (`driver/ops/notetypes.py`, `driver/ops/notes.py`; meanings in
-`specs/conformance/notetype-ops.md`); no code was copied. The specs' own
-sources are in `notetypes.md`.
+`specs/conformance/notetype-ops.md`), and the `render_status` observation
+(`driver/observe/render_status.py`; `specs/conformance/render-ops.md` Q4); no
+code was copied. The specs' own sources are in `notetypes.md`.
 
 | Anki file | Read for |
 |---|---|
@@ -19,8 +20,10 @@ sources are in `notetypes.md`.
 | `rslib/src/error/mod.rs`, `rslib/src/backend/error.rs`, `proto/anki/backend.proto`, `proto/anki/links.proto` | card type errors carry a help page per kind; parse errors and unknown fields share one, and their message is header, `<br>`, then the see-preview or field-not-found text |
 | `ftl/core/card-templates.ftl` | which translations hold the two details (read through the backend's translations, never as literal text) |
 | `proto/anki/notetypes.proto` | the structure's protobuf fields; `original_id` and field `tag` are optional (presence) |
+| `pylib/anki/template.py` (`TemplateRenderContext.from_existing_card`, `_partially_render`), `rslib/src/notetype/render.rs` (`render_existing_card`), `rslib/src/template.rs` (`render_card`) | `render_status`: the review render of a stored card (browser off), partial for Python, as `collection_check.render_card` does for K8; the backend raises a question-side template error before its blank check and an answer-side one after it; a standard card's ordinal with no template is invalid input; the note type comes through `get_notetype`'s cache, hence the reopen first |
 
-Probed in the oracle image (`driver/tests/test_notetypes.py` and one-off
-runs): every scenario under `conformance/scenarios/notetypes/` agrees with
-what it states; a field rename makes Anki append the first field to browser
-question formats that reference no field (U34's behavior, not the driver's).
+Probed in the oracle image (`driver/tests/test_notetypes.py`,
+`test_render_status.py` and one-off runs): every scenario under
+`conformance/scenarios/notetypes/` agrees with what it states; a field rename
+makes Anki append the first field to browser question formats that reference
+no field (U34's behavior, not the driver's).

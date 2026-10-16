@@ -1700,3 +1700,50 @@ fn update_notetype_needs_a_capability_per_kind_of_edit() {
             .contains("update_notetype.add_field")
     );
 }
+
+/// render-ops.md Q4.1: `render_status` takes card references or none, and
+/// reads the collection.
+#[test]
+fn render_status_requests_follow_the_schema() {
+    let parse = |request: &str| {
+        let text = format!(
+            "id: notetypes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    for good in [
+        "render_status",
+        "\"render_status(#c1, #c3)\"",
+        "{render_status: [\"#c2\"]}",
+        "\"render_status(#c1)\", {render_status: [\"#c2\"]}",
+    ] {
+        let parsed = parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+        assert!(parsed.needs().observations.contains("render_status"), "{good}");
+        assert!(parsed.starts_from_new_collection(), "{good}");
+    }
+    for (bad, why) in [
+        ("\"render_status(#n1)\"", "does not take these arguments"),
+        ("{render_status: [\"#n1\"]}", "does not take these arguments"),
+        ("{render_status: {cards: [\"#c1\"]}}", "does not take these arguments"),
+        ("{render_status: []}", "at least one reference"),
+        ("{render_status: null}", "cannot take null"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// records.md N12: in notetypes/records/stock-render-handoff Meguri only makes
+/// its new collection and hands it over; the oracle adds and renders.
+#[test]
+fn stock_render_handoff_needs_only_the_new_collection_and_handoff_on_meguri() {
+    let path = conformance_dir().join("scenarios/notetypes/records/stock-render-handoff.yaml");
+    let text = fs::read_to_string(path).unwrap();
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap();
+    let meguri = parsed.needs_on(scenario::Side::Meguri);
+    assert_eq!(meguri.setup.iter().collect::<Vec<_>>(), [scenario::NEW_COLLECTION]);
+    assert_eq!(meguri.ops.iter().collect::<Vec<_>>(), ["handoff"]);
+    assert!(meguri.observations.is_empty(), "{}", meguri.summary());
+    let oracle = parsed.needs_on(scenario::Side::Oracle);
+    assert!(oracle.observations.contains("render_status"), "{}", oracle.summary());
+}

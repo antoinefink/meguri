@@ -1512,6 +1512,8 @@ pub enum ObservationKind {
     Queue,
     DeckTree,
     Render,
+    /// render-ops.md Q4.
+    RenderStatus,
     /// render-ops.md Q1.
     Template,
     /// search-ops.md S1.
@@ -1559,7 +1561,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 27] = [
+    pub const ALL: [ObservationKind; 28] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1570,6 +1572,7 @@ impl ObservationKind {
         ObservationKind::Queue,
         ObservationKind::DeckTree,
         ObservationKind::Render,
+        ObservationKind::RenderStatus,
         ObservationKind::Template,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
@@ -1601,6 +1604,7 @@ impl ObservationKind {
             ObservationKind::Queue => "queue",
             ObservationKind::DeckTree => "deck_tree",
             ObservationKind::Render => "render",
+            ObservationKind::RenderStatus => "render_status",
             ObservationKind::Template => "template",
             ObservationKind::Search => "search",
             ObservationKind::CanonicalSearch => "canonical_search",
@@ -1635,9 +1639,11 @@ impl ObservationKind {
             | ObservationKind::UndoStatus
             | ObservationKind::TagTree
             | ObservationKind::BrowserConfig => ArgShape::None,
-            ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
-                ArgShape::CardRefs
-            }
+            ObservationKind::Card
+            | ObservationKind::Revlog
+            | ObservationKind::NextStates
+            | ObservationKind::Render
+            | ObservationKind::RenderStatus => ArgShape::CardRefs,
             ObservationKind::FuzzTable
             | ObservationKind::NetProbe
             | ObservationKind::LegacyJson
