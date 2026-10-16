@@ -78,6 +78,19 @@ impl Method {
     pub fn is_media(self) -> bool {
         self as usize >= Method::MediaBegin as usize
     }
+
+    /// The name an error reports (errors.md E1): media methods with their
+    /// `msync/` prefix (`msync/begin`), the others bare (`meta`).
+    pub fn qualified_name(self) -> &'static str {
+        match self {
+            Method::MediaBegin => "msync/begin",
+            Method::MediaChanges => "msync/mediaChanges",
+            Method::UploadChanges => "msync/uploadChanges",
+            Method::DownloadFiles => "msync/downloadFiles",
+            Method::MediaSanity => "msync/mediaSanity",
+            other => other.name(),
+        }
+    }
 }
 
 /// What a request sends, before compression (T5).

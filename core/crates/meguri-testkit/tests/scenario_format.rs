@@ -1096,6 +1096,8 @@ fn a_login_says_how_it_derives_its_credentials() {
             Credentials::WrongPassword,
         ),
         ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+        // S4.1: the sync status the client's indicator asks for (U106).
+        ("{kind: status}", SyncKind::Status, Credentials::Account),
     ] {
         let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
         let Step::Sync(spec) = &parsed.steps[1] else {
@@ -1105,6 +1107,7 @@ fn a_login_says_how_it_derives_its_credentials() {
     }
     for (args, why) in [
         ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: status, credentials: account}", "credentials"),
         ("{kind: full_upload, credentials: wrong_password}", "credentials"),
         ("{kind: login, credentials: other}", "other"),
         ("{kind: login, credentials: null}", "credentials"),
@@ -1122,6 +1125,10 @@ fn a_login_says_how_it_derives_its_credentials() {
         &loaded.scenario.steps[1],
         Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
     ));
+
+    // The committed status scenario parses, its fourth step a status.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/meta/status.yaml")).unwrap();
+    assert!(matches!(&loaded.scenario.steps[3], Step::Sync(s) if s.kind == SyncKind::Status));
 }
 
 #[test]

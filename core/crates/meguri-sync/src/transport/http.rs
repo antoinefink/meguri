@@ -38,6 +38,9 @@ impl HttpTransport {
             .retry(reqwest::retry::never())
             .connect_timeout(CONNECT_TIMEOUT)
             .tls_version_min(reqwest::tls::Version::TLS_1_2)
+            // The system's name lookup, its failures marked so `classify` can
+            // tell them from other connect failures (errors.md E5).
+            .dns_resolver(Arc::new(SystemResolver))
             // Neither environment variables nor system settings: only the
             // proxy the job carries (T10).
             .no_proxy();
@@ -286,7 +289,7 @@ fn classify(err: &reqwest::Error, head_arrived: bool, body_failure: &Mutex<Optio
     }
     let cause = match (err.is_connect(), err.is_timeout()) {
         (true, true) => NetworkCause::ConnectTimeout,
-        (true, false) => NetworkCause::Connect,
+        (true, false) => connect_cause(err),
         _ => NetworkCause::Connection,
     };
     SyncError::Network(NetworkError {
@@ -294,6 +297,70 @@ fn classify(err: &reqwest::Error, head_arrived: bool, body_failure: &Mutex<Optio
         head_arrived,
         detail: chain(err),
     })
+}
+
+/// Why a connection could not be made (errors.md E5): the name lookup
+/// failed, the network or host is unreachable (both `offline`), or another
+/// cause, a refused connection among them (`network`).
+fn connect_cause(err: &(dyn StdError + 'static)) -> NetworkCause {
+    let mut cause = NetworkCause::Connect;
+    each_cause(err, &mut |current| {
+        if current.downcast_ref::<NameLookupFailed>().is_some() {
+            cause = NetworkCause::NameLookup;
+        } else if let Some(io) = current.downcast_ref::<io::Error>()
+            && unreachable(io.kind())
+            && cause == NetworkCause::Connect
+        {
+            cause = NetworkCause::Unreachable;
+        }
+    });
+    cause
+}
+
+/// The socket errors that mean the device has no route to the server.
+fn unreachable(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::NetworkUnreachable | io::ErrorKind::HostUnreachable | io::ErrorKind::NetworkDown
+    )
+}
+
+/// Name lookups through the system resolver (`getaddrinfo` on a blocking
+/// thread, as reqwest's own resolver does), with failures wrapped in
+/// [`NameLookupFailed`].
+struct SystemResolver;
+
+impl reqwest::dns::Resolve for SystemResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let found = tokio::task::spawn_blocking(move || {
+                std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), 0)).map(Iterator::collect::<Vec<_>>)
+            })
+            .await
+            .unwrap_or_else(|join| Err(io::Error::other(join.to_string())));
+            match found {
+                Ok(addresses) => Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs),
+                Err(err) => Err(Box::new(NameLookupFailed(err)) as Box<dyn StdError + Send + Sync>),
+            }
+        })
+    }
+}
+
+/// A name that did not resolve.
+#[derive(Debug)]
+struct NameLookupFailed(io::Error);
+
+impl std::fmt::Display for NameLookupFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "name lookup failed: {}", self.0)
+    }
+}
+
+impl StdError for NameLookupFailed {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&self.0)
+    }
 }
 
 /// Visits every error in `err`'s chain, the errors an `io::Error` wraps
@@ -326,4 +393,28 @@ fn chain(err: &(dyn StdError + 'static)) -> String {
         source = current.source();
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_failures_are_told_apart_by_their_cause() {
+        // errors.md E5: no route (offline) against every other cause.
+        for (kind, cause) in [
+            (io::ErrorKind::NetworkUnreachable, NetworkCause::Unreachable),
+            (io::ErrorKind::HostUnreachable, NetworkCause::Unreachable),
+            (io::ErrorKind::NetworkDown, NetworkCause::Unreachable),
+            (io::ErrorKind::ConnectionRefused, NetworkCause::Connect),
+            (io::ErrorKind::Other, NetworkCause::Connect),
+        ] {
+            assert_eq!(connect_cause(&io::Error::from(kind)), cause, "{kind:?}");
+        }
+        let lookup = NameLookupFailed(io::Error::other("no such name"));
+        assert_eq!(connect_cause(&lookup), NetworkCause::NameLookup);
+        // Inside the wrappers a connector puts around it.
+        let wrapped = io::Error::other(NameLookupFailed(io::Error::from(io::ErrorKind::HostUnreachable)));
+        assert_eq!(connect_cause(&wrapped), NetworkCause::NameLookup);
+    }
 }
