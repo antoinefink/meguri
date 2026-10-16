@@ -551,14 +551,12 @@ fn a_check_refused_during_a_one_way_sync_runs_once_the_collection_is_ready() {
     assert_eq!(d.check(), report(5, BOUNDARY, None));
 }
 
-#[test]
-fn a_generation_change_restarts_the_day_clock_and_unburies_the_new_collection() {
-    let d = Day::paris(Timing::New);
-    d.at(DAY5_EVENING);
-    assert_eq!(d.check().today, 5);
-    // The replacement: created 2030-01-13 (day 7 now), a card buried on day 3.
+/// The replacement collection of the generation tests: created 2030-01-13
+/// in Paris (day 7 at `DAY5_EVENING`), with a review card buried by the
+/// user on day 3 (`lastUnburied` 3).
+fn replacement() -> (TempDir, std::path::PathBuf) {
     let earlier = StepClock::new(1_894_525_200_000, offset(CET), "Europe/Paris");
-    let (_source_dir, source) = day::new_collection(&earlier, Timing::New);
+    let (dir, source) = day::new_collection(&earlier, Timing::New);
     day::raw(
         &source,
         &earlier,
@@ -581,6 +579,32 @@ fn a_generation_change_restarts_the_day_clock_and_unburies_the_new_collection() 
             ),
         ],
     );
+    (dir, source)
+}
+
+/// The replacement's buried card.
+const REPLACEMENT_CARD: CardId = CardId(1_700_000_000_001);
+
+/// Replaces the collection with `source` through a restore's exclusive
+/// phase and returns the new generation's privileged handle.
+fn replace_with(engine: &Engine, source: std::path::PathBuf) -> Collection {
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(false).unwrap();
+    exclusive
+        .replace(move |live| {
+            std::fs::copy(&source, live)
+                .map(drop)
+                .map_err(|e| EngineError::Internal { message: e.to_string() })
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_generation_change_restarts_the_day_clock_and_unburies_the_new_collection() {
+    let d = Day::paris(Timing::New);
+    d.at(DAY5_EVENING);
+    assert_eq!(d.check().today, 5);
+    let (_source_dir, source) = replacement();
     let subscription = d.subscribe();
     let slot = d.engine.acquire_slot(LongOp::Restore).unwrap();
     let mut exclusive = slot.enter_exclusive(false).unwrap();
@@ -593,7 +617,7 @@ fn a_generation_change_restarts_the_day_clock_and_unburies_the_new_collection() 
         .unwrap();
     {
         let reader = new.reader(ReaderRole::Query).unwrap();
-        let card = reader.card(CardId(1_700_000_000_001)).unwrap().unwrap();
+        let card = reader.card(REPLACEMENT_CARD).unwrap().unwrap();
         assert_eq!(
             (card.queue, card.mtime, card.usn),
             (CardQueue::Review, EpochSecs(1_700_000_001), Usn(3))
@@ -618,6 +642,100 @@ fn a_generation_change_restarts_the_day_clock_and_unburies_the_new_collection() 
         "a new generation records its day: {:?}",
         shown(&day_events(&events))
     );
+}
+
+/// What a listener heard of the new generation: the day a check reported
+/// and the replacement's buried card's queue, or the error it got.
+type Heard = Result<(u32, CardQueue), String>;
+
+/// Checks the day and reads the card through a handle of the current
+/// generation, as an app would on hearing of a replacement.
+fn look(engine: &Engine) -> Heard {
+    let c = engine.collection().map_err(|e| e.to_string())?;
+    let today = c.check_rollover().map_err(|e| e.to_string())?.today;
+    let reader = c.reader(ReaderRole::Query).map_err(|e| e.to_string())?;
+    let card = reader.card(REPLACEMENT_CARD).map_err(|e| e.to_string())?;
+    Ok((today, card.ok_or("no card")?.queue))
+}
+
+/// A `GenerationListener` that looks at the new generation when told.
+#[derive(Default)]
+struct Looking {
+    engine: std::sync::OnceLock<Engine>,
+    heard: std::sync::Mutex<Vec<Heard>>,
+}
+
+impl meguri_engine::GenerationListener for Looking {
+    fn name(&self) -> &str {
+        "looking"
+    }
+
+    fn collection_replaced(&self, _old: meguri_engine::Generation, _new: meguri_engine::Generation) {
+        let heard = look(self.engine.get().expect("the engine"));
+        self.heard.lock().unwrap().push(heard);
+    }
+}
+
+#[test]
+fn whoever_hears_of_a_generation_change_sees_its_first_check_committed() {
+    // L8, D8: the new generation's first check commits before
+    // `CollectionReplaced` is delivered, before any `GenerationListener` is
+    // told and before its readers open. Either sees the replacement's day
+    // (7) and its card unburied, never the old collection's cached day (5)
+    // or the card still buried.
+    let listener = Arc::new(Looking::default());
+    let clock = Arc::new(StepClock::new(T0 * 1000, offset(CET), "Europe/Paris"));
+    let (_dir, path) = day::new_collection(clock.as_ref(), Timing::New);
+    let (engine, c) = day::open(
+        &path,
+        clock.clone(),
+        Ports::default().generation_listener(listener.clone()),
+    );
+    assert!(listener.engine.set(engine.clone()).is_ok());
+    clock.set_now_ms(DAY5_EVENING * 1000);
+    assert_eq!(c.check_rollover().unwrap().today, 5);
+
+    let subscription = engine.stream().subscribe();
+    let subscriber = {
+        let engine = engine.clone();
+        std::thread::spawn(move || {
+            loop {
+                let event = subscription
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("CollectionReplaced");
+                if matches!(event.kind, EventKind::CollectionReplaced { .. }) {
+                    // Looks before taking any later event.
+                    let heard = look(&engine);
+                    let later = drain(&subscription, Duration::from_millis(200));
+                    return (event, heard, later);
+                }
+            }
+        })
+    };
+    let (_source_dir, source) = replacement();
+    let new = replace_with(&engine, source);
+    let (replaced, heard, later) = subscriber.join().unwrap();
+
+    assert_eq!(*listener.heard.lock().unwrap(), [Ok((7, CardQueue::Review))]);
+    assert_eq!(heard, Ok((7, CardQueue::Review)));
+    // The first check's change set follows `CollectionReplaced` on the
+    // stream, in the new generation.
+    let first = later
+        .iter()
+        .find_map(|e| match &e.kind {
+            EventKind::Changes(changes) => Some((e, changes.clone())),
+            _ => None,
+        })
+        .expect("the first check's change set");
+    assert_eq!(first.1.source, OpSource::Rollover);
+    assert_eq!(
+        first.1.cards.iter().map(|card| card.id).collect::<Vec<_>>(),
+        [REPLACEMENT_CARD]
+    );
+    assert!(first.0.seq > replaced.seq);
+    assert_eq!(first.0.generation, new.generation());
+    assert_eq!(replaced.generation, new.generation());
+    assert!(day_events(&later).is_empty(), "{:?}", shown(&day_events(&later)));
 }
 
 #[test]

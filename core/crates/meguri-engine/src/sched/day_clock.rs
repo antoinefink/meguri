@@ -160,7 +160,7 @@ impl DayClock {
 
     /// The writer's side of a check, inside a `Rollover` op (D8 steps 1 to
     /// 5; D9, D10).
-    fn run(self: &Arc<DayClock>, ctx: &mut OpContext<'_, '_>) -> Result<DayReport, EngineError> {
+    pub(crate) fn run(self: &Arc<DayClock>, ctx: &mut OpContext<'_, '_>) -> Result<DayReport, EngineError> {
         let now = self.now();
         let (mut cache, seen, before) = {
             let mut state = self.lock();
@@ -254,7 +254,7 @@ impl DayClock {
     /// then; its events come from its commit hook.
     pub(crate) fn schedule_check(self: &Arc<DayClock>, shared: &ExecShared) {
         let this = Arc::clone(self);
-        let spec = spec().park_when_unavailable().run_on_any_generation();
+        let spec = op_spec().park_when_unavailable().run_on_any_generation();
         drop(shared.submit_op(spec, shared.generation(), None, move |ctx| this.run(ctx)));
     }
 
@@ -272,7 +272,8 @@ impl DayClock {
     }
 }
 
-fn spec() -> OpSpec {
+/// The op every check runs in (D10).
+pub(crate) fn op_spec() -> OpSpec {
     OpSpec::named(OP_NAME, OpSource::Rollover).stamp(StampMode::Raw)
 }
 
@@ -299,7 +300,7 @@ impl Collection {
             return Ok(report);
         }
         let this = Arc::clone(day_clock);
-        match self.submit(spec(), move |ctx| this.run(ctx)).wait() {
+        match self.submit(op_spec(), move |ctx| this.run(ctx)).wait() {
             Ok(result) => Ok(result.value),
             Err(error @ EngineError::CollectionUnavailable { .. }) => {
                 day_clock.park(exec);
@@ -328,9 +329,10 @@ impl Collection {
         Ok(())
     }
 
-    /// Restarts the day clock as an open does and runs its first check
-    /// (D8): at open and after a generation change, before anything reads
-    /// counts.
+    /// Restarts the day clock and runs its first check (D8): the open's
+    /// last step, before anything reads counts. After a generation change
+    /// the writer's replace task does the same itself, before the readers
+    /// open (L8).
     pub(crate) fn restart_day_clock(&self) -> Result<DayReport, EngineError> {
         self.core.exec.day_clock.reset();
         self.check_rollover()

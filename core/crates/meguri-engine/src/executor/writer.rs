@@ -16,7 +16,7 @@ use meguri_storage::{Initializers, OpenOptions, OpenedCollection, ReaderFactory,
 
 use crate::cancel::CancelToken;
 use crate::changes::observers::{self, ObservedCommit};
-use crate::changes::stream::{EventKind, Seq};
+use crate::changes::stream::{EventKind, Reservation, Seq};
 use crate::changes::{self, MediaNotes};
 use crate::error::EngineError;
 use crate::executor::exclusive::Privilege;
@@ -537,10 +537,19 @@ pub(crate) struct Replaced {
     /// The new generation, when a file the swap changed was reopened: after
     /// every successful swap, and after a failed one that had already
     /// changed the file.
-    pub generation: Option<Generation>,
+    pub generation: Option<NewGeneration>,
     /// Readers of the collection open now: the new file, or the old one when
     /// the swap failed before changing it; `None` when nothing is open.
     pub factory: Option<ReaderFactory>,
+}
+
+/// A generation a replace made (`engine/lifecycle` L8): its number, and the
+/// seq its `CollectionReplaced` holds. That seq precedes every event of the
+/// new generation; the replace's caller fills it once the readers are open,
+/// so nobody hears of the generation before its first day check committed.
+pub(crate) struct NewGeneration {
+    pub generation: Generation,
+    pub announce: Reservation,
 }
 
 /// The swap of `engine/lifecycle` L8: runs with the collection path and
@@ -602,11 +611,14 @@ impl TaskBody for ReplaceTask {
                 env.touched.reset(*shared.lock_commit());
                 let generation = replacing.then(|| {
                     let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
-                    shared
-                        .stream
-                        .publish(generation, None, EventKind::CollectionReplaced { generation });
-                    generation
+                    NewGeneration {
+                        generation,
+                        announce: shared.stream.reserve(),
+                    }
                 });
+                if generation.is_some() {
+                    first_day_check(env);
+                }
                 Replaced {
                     error: swapped.err(),
                     generation,
@@ -623,6 +635,24 @@ impl TaskBody for ReplaceTask {
             generation: None,
             factory: None,
         });
+    }
+}
+
+/// The new generation's first day check (`engine/lifecycle` L8,
+/// `sched/day-clock` D8), run by the replace task itself: the day clock
+/// forgets the old collection's day and what it reported, then writes and
+/// unburies on the new file in a `Rollover` op, while the readers are still
+/// closed and before anyone hears of the generation. A failure is logged;
+/// the next check computes afresh.
+fn first_day_check(env: &mut WriterEnv<'_>) {
+    let shared = env.shared;
+    shared.day_clock.reset();
+    let day_clock = Arc::clone(&shared.day_clock);
+    let spec = crate::sched::day_clock::op_spec();
+    let mut meta = shared.meta(spec.def.name(), spec.source);
+    meta.planned = Some(shared.generation());
+    if let Err(error) = run_op(env, &meta, spec, move |ctx| day_clock.run(ctx)) {
+        tracing::warn!(%error, "the day clock's first check on the new generation");
     }
 }
 

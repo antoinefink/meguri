@@ -4,10 +4,11 @@
 use std::fmt;
 use std::sync::Arc;
 
+use crate::changes::stream::EventKind;
 use crate::collection::{Collection, CollectionCore};
 use crate::error::EngineError;
 use crate::executor::exclusive::{Admission, Privilege};
-use crate::executor::writer::Swap;
+use crate::executor::writer::{NewGeneration, Swap};
 use crate::lifecycle::state::{ExclusivePhase, FailedReason, LifecycleState};
 use crate::lifecycle::{Engine, is_open};
 
@@ -32,8 +33,9 @@ pub(crate) struct Replacement {
 
 /// L8: closes the readers and the writer, runs `swap` with nothing open,
 /// reopens through the open gate, and, when the file changed, moves to the
-/// next generation, publishes `CollectionReplaced` once, tells every
-/// `GenerationListener` and starts the day clock again.
+/// next generation, whose first day check the writer has committed by
+/// then; then opens the readers, publishes `CollectionReplaced` once and
+/// tells every `GenerationListener`.
 pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Privilege, swap: Swap) -> Replacement {
     engine.set_exclusive_phase(core, ExclusivePhase::Replacing);
     core.exec.wait_idle();
@@ -44,7 +46,11 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
     if let Some(factory) = replaced.factory {
         core.readers.set_factory(factory);
     }
-    let moved = replaced.generation.map(|new| {
+    let moved = replaced.generation.map(|moved: NewGeneration| {
+        let new = moved.generation;
+        moved
+            .announce
+            .fill(new, None, EventKind::CollectionReplaced { generation: new });
         for listener in engine.ports().generation_listeners {
             listener.collection_replaced(old, new);
         }
@@ -54,13 +60,6 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
             privilege: Some(privilege),
         }
     });
-    if let Some(collection) = &moved
-        && let Err(error) = collection.restart_day_clock()
-    {
-        // The day clock starts again as at an open (`sched/day-clock` D8);
-        // a failure here leaves the next check to compute afresh.
-        tracing::warn!(%error, "the day clock's first check on the new generation");
-    }
     if reopened {
         engine.set_exclusive_phase(core, ExclusivePhase::Working);
     } else if let Some(error) = &replaced.error {
