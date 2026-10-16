@@ -18,8 +18,10 @@ use rusqlite::{Connection, params_from_iter};
 
 use crate::connections::{Reader, Writer};
 use crate::error::StorageError;
+use crate::journal;
 use crate::rows::config::{ConfigValue, stored_value};
-use crate::rows::{self, Cell, Record, RowKey, Table, col::COL_KEY, graves, notetypes};
+use crate::rows::{self, Cell, Record, RowImage, RowKey, Table, col::COL_KEY, graves, notetypes};
+use crate::snapshot::ReadSnapshot;
 use crate::write_scope::WriteScope;
 
 mod sealed {
@@ -42,6 +44,12 @@ impl sealed::Connected for Writer {
 }
 
 impl sealed::Connected for WriteScope<'_> {
+    fn connection(&self) -> &Connection {
+        self.conn()
+    }
+}
+
+impl sealed::Connected for ReadSnapshot<'_> {
     fn connection(&self) -> &Connection {
         self.conn()
     }
@@ -96,6 +104,19 @@ pub trait ReadRows: sealed::Connected {
 
     fn grave(&self, oid: i64, kind: GraveKind) -> Result<Option<Grave>, StorageError> {
         rows::get(self.connection(), &graves::key(oid, kind))
+    }
+
+    /// The stored row with `key`, every column by storage class, as the
+    /// journal records rows; `None` when there is none.
+    fn row_image(&self, table: Table, key: &RowKey) -> Result<Option<RowImage>, StorageError> {
+        rows::select_image(self.connection(), table, key)
+    }
+
+    /// The SHA-256 of the stored row with `key` ([`journal::digest`]), the
+    /// content precondition of `engine/op-model` O7; `None` when there is no
+    /// such row.
+    fn row_digest(&self, table: Table, key: &RowKey) -> Result<Option<[u8; 32]>, StorageError> {
+        Ok(self.row_image(table, key)?.map(|image| journal::digest(&image)))
     }
 
     /// The cards of a note, by id.
@@ -169,6 +190,7 @@ pub trait ReadRows: sealed::Connected {
 impl ReadRows for Reader {}
 impl ReadRows for Writer {}
 impl ReadRows for WriteScope<'_> {}
+impl ReadRows for ReadSnapshot<'_> {}
 
 fn limit_value(limit: usize) -> i64 {
     i64::try_from(limit).unwrap_or(i64::MAX)

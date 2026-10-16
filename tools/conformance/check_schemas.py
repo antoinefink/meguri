@@ -19,7 +19,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-SCHEMAS = ("scenario", "observation", "golden", "area", "deviations")
+SCHEMAS = ("scenario", "observation", "golden", "area", "deviations", "overlay")
 
 
 def load_schemas(root: Path) -> dict[str, dict]:
@@ -57,6 +57,8 @@ def schema_for(rel: str) -> str | None:
             return "scenario"
     if rel.startswith("goldens/") and name.endswith(".json"):
         return "golden"
+    if rel.startswith("goldens-apple/") and name.endswith(".json"):
+        return "overlay"
     return None
 
 

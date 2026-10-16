@@ -1,9 +1,58 @@
-# Interface names the render specs use: template filter names, the
-# image-occlusion field prefix, and the element, class and attribute names
-# Anki writes into card HTML (note type CSS and card scripts depend on them).
-# render/cloze
+# Interface names the render specs use: template tag syntax (special field
+# names, filter names, type-in and TTS markers), the markup the hint and ruby
+# filters write, the note type keys of the legacy card requirements, and the
+# image-occlusion field prefix and the element, class and attribute names
+# Anki writes into cloze HTML (note type CSS and card scripts depend on them).
+FrontSide
+Tags
+Type
+Deck
+Subdeck
+Card
+CardFlag
+CardID
+flag0
+furigana
+kana
+kanji
+hint
+tts
+tts-voices
+type-nc
+type-cloze
+nc
+ci
 cloze
 cloze-only
+editable
+clickable
+anki
+lang
+voices
+speed
+ruby
+rb
+rt
+onclick
+getElementById
+draggable
+href
+class
+display
+sound
+nbsp
+req
+reqs
+odid
+did
+flags
+qfmt
+afmt
+flds
+tmpls
+latexPre
+latexPost
+# render/cloze
 cloze-inactive
 cloze-highlight
 data-cloze

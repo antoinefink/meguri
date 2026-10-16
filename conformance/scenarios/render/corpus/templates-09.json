@@ -1,0 +1,2465 @@
+{
+ "id": "render/corpus/templates-09",
+ "description": "Generated templates and field values, part 9 of 20 (corpora/templates/generate.py).",
+ "tags": [
+  "generated"
+ ],
+ "clock": {
+  "tz": "UTC",
+  "start": "2030-01-15T10:00:00"
+ },
+ "steps": [
+  {
+   "observe": [
+    {
+     "template": {
+      "notetype": {
+       "name": "Corpus Basic",
+       "fields": [
+        "Front",
+        "Back",
+        "Extra"
+       ]
+      },
+      "cases": [
+       {
+        "front": "{{{{　Extra}}&nbsp;{{\n#FrontSide　}}{{{Front}}}{{ ci:Back　}}{{/FrontSide}}",
+        "back": "{{ Front }}{{　Front}}<hr id=answer></div>",
+        "ord": 1,
+        "fields": [
+         "語[sound:b.mp3]😀",
+         "<br> ",
+         "&nbsp;私[わたし]&bogus;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{Front}}{{#Type }}日本{{　Subdeck}}{{{{/Type}}{{Extra\n}}{{{{Card}}}",
+        "back": "{{FrontSide}}\nx[y]{{{{　hint:tts en_US:Front}}",
+        "fields": [
+         "é 日本[にほん]語[ご]",
+         "<i>it</i> &lt;tag&gt;word",
+         "語[sound:b.mp3]a>b[c]"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{\nkana:type-cloze:Extra}}{{\ntts en_US:Back }}",
+        "back": "{{FrontSide}}\n{{\ntype-nc:nc:Front\n}}",
+        "name": "カード",
+        "fields": [
+         "<span></span><BR/>",
+         "",
+         "&#x41;"
+        ]
+       },
+       {
+        "front": "{{{{Back}}{{Subdeck}}<br>",
+        "back": "{{{　#c01　}}<!-- {{ Back }}{{ci:edit:kana:Back }}{{Extra }}{{{\n/c01}}{{ text:Extra　}}",
+        "ord": 1,
+        "fields": [
+         "",
+         " 日本[にほん]語[ご] ",
+         "wordé"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{　furigana:type-cloze:kanji:Extra}}{{text:edit:tts ja_JP voices=Kyoko speed=0.9:Extra}}{{#text:Front\n}}x[y]<hr id=answer><!--\n-->{{text:Type}}{{ /text:Front}}<!---->-->",
+        "back": "{{\nBack　}}{{ c1}}",
+        "fields": [
+         "é",
+         "&amp;語[sound:b.mp3]",
+         "&nbsp;&amp;<div></div>"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "#{{ type:Text:edit:Front}}{{{kanji:tts en_US:Extra}}",
+        "back": "{{=<% %>=}}<%FrontSide%>\n<%Extra%><%#Extra%>#<%^Front\n%><%#Extra%><b><%/Extra %>\n<%/Front %><%{{ /Extra%>",
+        "ord": 1,
+        "fields": [
+         "<img src=\"a.png\">",
+         "<span></span>",
+         "<br>"
+        ]
+       },
+       {
+        "front": "x[y]<!--<!--😀--><!--\n-->{{　kana: Front　}}{{　#Extra }}}}{{Front　}}{{{{/Extra　}}-->{{#c01}}{{{\nBack　}}{{tts ja_JP voices=Kyoko speed=0.9:custom:CardFlag　}}<!--&nbsp;-->{{{{/c01\n}}<br>",
+        "back": "{{FrontSide}}\n{{\ntext:custom:nc:Extra}}{{{　tts ja_JP voices=Kyoko speed=0.9:Text:tts en_US:Front}}{{{　^Extra\n}}{{{#FrontSide　}}-->}{{\n/FrontSide　}}}}{{{#c+1\n}}{{　kanji:editable:type-cloze:Back}}{{{{\nkanji:type-nc:text:Front\n}}{{/c+1}}{{Back}}{{/Extra　}}{{{{　furigana:text::Front}}",
+        "fields": [
+         "}}<br>",
+         "",
+         "  語[sound:b.mp3]"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{type:Front}}<!--",
+        "back": "{{FrontSide}}%>{{#Extra}}{{{{tts en_US:Back　}}{{{{　^Extra　}}{{\n^c2\n}}<!--<!--[sound:q.mp3]<!--<!--{{{{　Back }}-->-->--><!--{{{{custom:type:edit:Front }}-->{{{/c2}}{{{\nnc:Text:hint:Front}}{{/Extra }}{{ /Extra }}",
+        "fields": [
+         "word😀&amp;",
+         "　a>b[c]",
+         "😀"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{type-cloze:Back}}:#",
+        "back": "{{FrontSide}}{{CardFlag}}{{#Card}}[sound:q.mp3]{{Front}}\n{{　/Card}}{{\ntts ja_JP voices=Kyoko speed=0.9:tts en_US:type-nc:Front }}",
+        "fields": [
+         "",
+         "Back texté&bogus;",
+         "Back text<div></div>"
+        ]
+       },
+       {
+        "front": "{{Extra }} {{ #Front}}{{ #Extra\n}}😀{{/Extra}}<!--<br>-->{{ /Front }}{{\n^c+1 }}{{edit:Back}}{{ /c+1}}",
+        "back": "{{FrontSide}}<hr id=answer>{{\ntype:Text:hint:Back}}",
+        "ord": 1,
+        "fields": [
+         "&amp;",
+         "&#x41;<span></span>",
+         "&#x41;<!-- c --><div></div>"
+        ]
+       },
+       {
+        "front": "日本{{ Extra }}",
+        "back": "{{FrontSide}}<div class=front>{{editable:tts ja_JP voices=Kyoko speed=0.9:Extra }}{{type-nc:type-cloze:type-cloze:Front}}",
+        "fields": [
+         "Back text<BR/>x[]]",
+         "<div></div>Back text",
+         "x[]]"
+        ]
+       },
+       {
+        "front": "{{furigana:Extra　}}&nbsp;-->{{\nhint:Tags}}{{　#Front }}😀<!--{{#Extra }}[sound:q.mp3]{{\n/Extra}}-->{{{^c01　}}{{ ^Deck　}}<div class=front><!--{{　/Deck}}{{\n/c01\n}}{{{/Front}}",
+        "back": "{{FrontSide}}<!--{{ Text:kanji:kanji:CardFlag }}{{{{#Deck　}}<!--<!--{%>-->-->{{{{\n/Deck　}}-->\n<!-- {{{Text:type-nc:Back\n}}\n",
+        "ord": 2,
+        "fields": [
+         "&bogus;😀",
+         "&bogus;",
+         "<BR/>　"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{{\nci:kana:tts ja_JP voices=Kyoko speed=0.9:Extra}}^{{\n#Back}}<!--:-->{{\n#Back}}^{{ /Back}}{{{\n/Back　}}",
+        "back": "{{FrontSide}}\n{{ Front}}<script>var a = {b: 1};</script>",
+        "fields": [
+         "<BR/>",
+         "é",
+         "\t"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{ type-nc:Extra　}}<!--{{#Extra}}</div>{{\n/Extra　}}{{#Front}}{{{{　Front}}{{Back}}{{/Front }}-->",
+        "back": "{{FrontSide}}\n{{{{#Card\n}}\n{{\n/Card\n}}{{ edit:nc:Front}}",
+        "ord": 1,
+        "name": "Card A",
+        "fields": [
+         "&nbsp;私[わたし]&nbsp;私[わたし]{{Front}}",
+         "",
+         "<BR/> &#x41;"
+        ]
+       },
+       {
+        "front": "{{Back　}}{{Extra　}}x[y]{{\nFront　}}",
+        "back": " {{=<% %>=}}<%Back\n%>}<%#c01　%>}}<%#FrontSide%><%{{Front　%><%type-cloze::Extra%><%/FrontSide%><%　/c01%>",
+        "fields": [
+         "Back texté",
+         "",
+         "<br>&#x41;<b>bold</b>"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{{custom:Back }}<hr id=answer>{{　Text:nc:kanji:Back　}}",
+        "back": "{{FrontSide}}{{text:Front\n}}<!--<%-->",
+        "fields": [
+         "　x[]]",
+         "😀 ",
+         "&bogus;{{Front}}"
+        ]
+       },
+       {
+        "front": "{{{ Front}}{{　type-cloze:Front}}{{ Card　}}{{\nedit:furigana:Front }}%>",
+        "back": "\n  {{=<% %>=}}<%FrontSide%><%Extra%>",
+        "fields": [
+         "{{Front}}",
+         "<img src=\"a.png\">",
+         " a>b[c]<span></span>"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{ Front\n}}{{\nkanji::furigana:Back　}}{{{{\n#Extra}}<b><!--{{Back}}-->{{{ /Extra　}}{{#FrontSide }}{{Front}}{{　^Front }}{{ Extra}}{{{　Back}}{{/Front\n}}{{{{\n^Extra\n}}{{　:FrontSide　}}{{/Extra\n}}<b>{{　/FrontSide }}{{#FrontSide\n}}{{#Front }}[sound:q.mp3]<!--{{{　/Front\n}}{{{{custom:kana:custom:Back}}{{{{ /FrontSide}}",
+        "back": "{{FrontSide}}\n{{custom::Front }}",
+        "ord": 499,
+        "fields": [
+         "<img src=\"a.png\">&amp;é",
+         "　&bogus;word",
+         "語[sound:b.mp3]word[sound:a.mp3]"
+        ]
+       },
+       {
+        "front": "{{{{　Extra\n}}{{kanji:Front}}x[y]{{type-cloze:Card}}<!-- {{Front }}",
+        "back": "<!--<b>-->",
+        "fields": [
+         "<span></span>",
+         "[sound:a.mp3]&nbsp;私[わたし]",
+         "<!-- c -->"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}-->",
+        "back": "{{tts en_US:furigana:type:Extra }}<!--{{\nBack}}--></div>%>",
+        "ord": 2,
+        "fields": [
+         "}}",
+         "",
+         "<img src=\"a.png\">\t "
+        ],
+        "tags": [
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{　Back}}{{{{ #Extra\n}}{{^Front }}{{#Front　}}^<!--日本-->{{/Front\n}}{{=<% %>=}}{{　/Front}}{{#Back\n}}x[y]{{{{/Back　}}{{kanji:Extra\n}}{{　/Extra }}{{\n^Front}}{{{Extra}}{{ #Card }}<!-- --><br>{{{{/Card}}<!-- {{　kana:Back}}{{{type-cloze:type:Deck}}{{/Front}}{{{{ Extra}}}",
+        "back": "<!-- {{　Back\n}}x[y]{{",
+        "ord": 499,
+        "fields": [
+         "<b>bold</b>",
+         "[sound:a.mp3] ",
+         "Back text &nbsp;"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "-->",
+        "back": "{{FrontSide}}\n{{ Front\n}}{{kana:Front\n}}{{ editable:Front}}<script>var a = {b: 1};</script>",
+        "fields": [
+         "word",
+         "",
+         "\t [sound:a.mp3]"
+        ]
+       },
+       {
+        "front": "{{type-nc:tts en_US:type-cloze:Front}}\n{{ Extra　}}:<hr id=answer>",
+        "back": "\n  {{=<% %>=}}<%FrontSide%><hr id=answer><%\nBack%><%furigana:tts en_US:CardFlag\n%><%　CardFlag%><%{Front%>",
+        "ord": 1,
+        "fields": [
+         "<br> ",
+         "}}",
+         "\t<BR/>"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{ furigana:type-nc:Extra\n}}<script>var a = {b: 1};</script>{{　#Subdeck　}}{{{ Back}}{{　Extra}}{{/Subdeck　}}",
+        "back": "{{tts ja_JP voices=Kyoko speed=0.9:Back}}<!-- {{　Extra　}}{{{{　kana:Front　}}:",
+        "name": "カード",
+        "fields": [
+         "x[]]",
+         "&nbsp;私[わたし]",
+         "<BR/>&#x41;"
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{Back}}{{　edit:type:CardID }}<!--<!--</b>-->&nbsp;😀",
+        "back": "{{{\nExtra}}{{{{c1\n}}",
+        "fields": [
+         " ",
+         "&nbsp;私[わたし]\n",
+         "&#x41;"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{hint:Extra}} %><!--{{ Front }}{{hint:Front}}{{{\ntype-cloze:Tags\n}}-->{{{{ kana:Extra }}",
+        "back": "{{FrontSide}}<hr id=answer>{{#FrontSide}}{{\n#c3\n}}}{{{{ FrontSide}}{{{{/c3}}{{ text:furigana:nc:Front }}{{　#Back }}<!--}-->{{{ /Back\n}}{{{　/FrontSide}}",
+        "fields": [
+         "&nbsp;word&amp;",
+         "",
+         "&bogus;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{\nFront}}<hr id=answer>{{type-cloze:Extra}}",
+        "back": "{{{{　type-cloze::Back\n}}{{Type}}{{ type:custom:type:Back }}{{ci:FrontSide\n}}",
+        "ord": 2,
+        "fields": [
+         "<div></div>&bogus;",
+         "<!-- c -->",
+         " "
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{CardID}}",
+        "back": "<!--😀{{Back\n}}{{Back}}--><!--<hr id=answer>--><b>",
+        "fields": [
+         "&bogus;",
+         "Back text<b>bold</b><b>bold</b>",
+         "&nbsp;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{Extra }}{{{{Text:type-cloze:Front}}",
+        "back": "{{FrontSide}}\n{{{{\n#text:Front\n}}-->{&nbsp;{{\n/text:Front }}{{custom:Back\n}}{{　tts ja_JP voices=Kyoko speed=0.9:kana:type-nc:Back\n}}",
+        "name": "カード",
+        "fields": [
+         "\n",
+         "<img src=\"a.png\">",
+         "é<span></span> 日本[にほん]語[ご]"
+        ]
+       },
+       {
+        "front": "{{Front}}{{tts en_US:Extra}}",
+        "back": "<!--{{{:type-nc:hint:Extra }}<!--{{ Front}}{{\nFrontSide}}-->",
+        "ord": 2,
+        "fields": [
+         "<br>&amp;\t",
+         "<i>it</i> &lt;tag&gt;",
+         "\nx[]]"
+        ]
+       },
+       {
+        "front": "{{Extra\n}}text }} more",
+        "back": "<br>^{{ #c01\n}}{{\n#c3　}}{{#Front }}日本<!--<!--{{Extra }}<hr id=answer>{{{{　Back }}-->{{　/Front}}{{ #Extra}}<!--{{furigana:Front　}}{{ kanji:Extra}}-->{{/Extra　}}{{/c3\n}}{{{{\nExtra}}{{{　/c01 }}",
+        "fields": [
+         "word",
+         "}}<!-- c -->",
+         ""
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{=<% %>=}}<%{{　type-cloze:Extra\n%><%Back%>",
+        "back": "{{FrontSide}}<hr id=answer>日本{",
+        "fields": [
+         "　}}",
+         "word",
+         ""
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{type-nc:Front}}{{kanji:Back\n}}<!--{{ #Front\n}}<!--%>-->{{\nFront }}{{{{ /Front}}<br>-->{{\ntype-nc:Front}}",
+        "back": "{{#Front\n}}{{　#Extra　}}{{\ntext:Back}}#{{　/Extra　}}{{{{\nfurigana:text:Extra }}{{Back}}{{Front }}{{ /Front }}<br>{{\nExtra}}{",
+        "ord": 1,
+        "fields": [
+         "\n &#x41;",
+         "&nbsp;私[わたし]",
+         "&nbsp;私[わたし]😀"
+        ]
+       },
+       {
+        "front": "{{{{tts ja_JP voices=Kyoko speed=0.9:text:Extra }}-->{{{　nc:Extra }}",
+        "back": " {{=<% %>=}}<%FrontSide%><hr id=answer><!--:--><div class=front>",
+        "ord": 1,
+        "fields": [
+         "語[sound:b.mp3]é<br>",
+         "語[sound:b.mp3]&nbsp;&amp;",
+         "😀"
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": " {{Front{{=<% %>=}}{{ #Front}}{{\ncustom:custom:type-cloze:Front}}[sound:q.mp3]</b>{{　/Front }}",
+        "back": "{{FrontSide}}\n[sound:q.mp3]",
+        "fields": [
+         "{{Front}} 日本[にほん]語[ご]",
+         "語[sound:b.mp3]",
+         "　\né"
+        ],
+        "tags": [
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%::kana:Front %><!-- -->",
+        "back": "😀",
+        "ord": 499,
+        "fields": [
+         "<b>bold</b><BR/>}}",
+         "<!-- c -->&#x41;é",
+         "<!-- c -->a>b[c]"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "<!---->^<!-- -->-->{{#Extra}}{{{{\nBack}}{{/Extra\n}}{{{{type:Front}}",
+        "back": "{{FrontSide}}#<!--{{\n^Back }}{{^Extra}}{{hint:custom:Extra　}}{{Text:Tags}}{{ /Extra　}}{{tts ja_JP voices=Kyoko speed=0.9:Extra}}{{ /Back}}--><!--{{　kana:Back}}Q: {{#Back}}{{{{\n#Front }}😀{{\nnc:Deck }}{{/Front}}{{ /Back }}{{ ^Extra}}{{#FrontSide　}}<!---->{{::type-cloze:Extra　}}-->日本{{/FrontSide}}{{/Extra}}-->{",
+        "ord": 499,
+        "fields": [
+         "x[]]",
+         "&amp;",
+         "é{{Front}}"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{　^Extra\n}}{{{　#Subdeck}}{{#Back　}}{{　tts ja_JP voices=Kyoko speed=0.9:edit:nc:Extra　}}:{{ /Back }}{{{/Subdeck　}}{{\n/Extra}}{{{　#Extra}}{{=<% %>=}}{{/Extra\n}}",
+        "back": "{{ hint:CardID }}%>",
+        "fields": [
+         " x[]]",
+         " 日本[にほん]語[ご]<b>bold</b><img src=\"a.png\">",
+         ""
+        ],
+        "tags": [
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{Front}}{{^c2　}}{{{{Extra}}<!--</div>-->&nbsp;<!--{{{{:Tags }}-->{{/c2\n}}<!---->-->{{\nhint:edit:Back}}",
+        "back": "{{=<% %>=}}<!---->[sound:q.mp3]#<%tts ja_JP voices=Kyoko speed=0.9:Text:hint:Back%>",
+        "fields": [
+         "a>b[c]",
+         "\n&bogus;",
+         ""
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{ #Extra　}}{{{Back }}{{type-nc:type-nc:Subdeck}}{{/Extra}}{{　#Back }}{{　^c1 }}{{#Extra\n}}{{Back}}{{ Extra\n}}{{　/Extra}}:{{ /c1}}{{{{　type:Front}}{{/Back\n}}{{^Front\n}}{{ #FrontSide}}<b>{{　type-cloze:kana:kana:Subdeck\n}}{{\n/FrontSide}}{{{{#Extra }}{{ Back }}{{kana:type-cloze:tts en_US:Front　}}{{{{ /Extra}}{{\n#Front}}{{kanji:Extra　}}{{\n/Front }}{{ /Front}}<!-- {{ Extra}}",
+        "back": "{{FrontSide}}{{{{#Back}}{{Back\n}}{{edit:Front}}{{{{editable:tts ja_JP voices=Kyoko speed=0.9:tts en_US:Deck\n}}{{/Back}}",
+        "name": "カード",
+        "fields": [
+         "&amp;<span></span>",
+         "  a>b[c]",
+         ""
+        ]
+       },
+       {
+        "front": "{{{ Front　}}{{type-nc:FrontSide}}{{\ntype-nc:kana:kanji:Extra}}{{{#Back}}{{type:Front}}{{　/Back}}<!--{{Extra }}-->",
+        "back": "{{\ntype-cloze:editable:type-nc:Front　}}{{\ntype-nc:edit:Front}}",
+        "ord": 499,
+        "name": "Card A",
+        "fields": [
+         " Back text",
+         " ",
+         "é[sound:a.mp3]"
+        ]
+       },
+       {
+        "front": "{{{Extra\n}}{{{{#Front}}Q: {{#Type}}<div class=front>{{/Type }}{{{{/Front}}#",
+        "back": "{",
+        "ord": 1,
+        "name": "Card A",
+        "fields": [
+         " 　a>b[c]",
+         "",
+         "{{Front}}\t"
+        ],
+        "tags": [
+         "alpha",
+         "beta"
+        ]
+       },
+       {
+        "front": "{{\nkanji:hint:Back}}x[y]",
+        "back": "{{FrontSide}}\n{{\nBack}}",
+        "fields": [
+         "word&#x41;",
+         "&nbsp;私[わたし]",
+         "&bogus;"
+        ],
+        "tags": [
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{ Text:furigana:Text:Front　}}{{Card　}}:",
+        "back": "\n{{custom:Back}}{{\nnc:Extra }}{{　^Front}}{{ Extra}}{{　/Front\n}}",
+        "name": "Card A",
+        "fields": [
+         "\n",
+         "\n 日本[にほん]語[ご] 日本[にほん]語[ご]",
+         ""
+        ]
+       },
+       {
+        "front": "{{\ntts en_US:Back}}{{{{ type-cloze:hint:Back}}{{{{\neditable:text:hint:Extra　}}<!-- {{\ntype:kana:type:Front}}",
+        "back": "<!--日本-->{{ Text:Subdeck}}{{　Tags}}<div class=front>",
+        "fields": [
+         " 日本[にほん]語[ご] <span></span>",
+         "<span></span>&bogus;",
+         "a>b[c]x[]]\t"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{ Front }}日本",
+        "back": "\n  {{=<% %>=}}<b><% Card%>",
+        "ord": 1,
+        "fields": [
+         "&nbsp;私[わたし]<br>",
+         "a>b[c]word",
+         "<br>"
+        ],
+        "tags": [
+         "alpha",
+         "beta"
+        ]
+       },
+       {
+        "front": "{{Back}}{{{{text:Back}}{{\nBack }}x[y]{{　tts ja_JP voices=Kyoko speed=0.9:Front　}}",
+        "back": "{{FrontSide}}<hr id=answer>%>{{nc:Extra}}}{{\n^Back}}{{Front　}}{{ /Back\n}}",
+        "fields": [
+         "&#x41;",
+         "é",
+         "&#x41;"
+        ],
+        "tags": [
+         "alpha",
+         "beta"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%CardFlag %>",
+        "back": "{{FrontSide}}{{　text:Back}}} &nbsp;{{#Extra}}{{type:custom:front\n}}[sound:q.mp3]{{ /Extra}}",
+        "ord": 1,
+        "fields": [
+         "}} ",
+         "}}",
+         "<div></div><div></div>"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{　Front　}}}{{Extra}}{ {{Extra}}",
+        "back": "{{FrontSide}}\n{{{{\nFront}}{{ kana:Back}}{{ kana:editable:Text:Nope }} ",
+        "ord": 1,
+        "fields": [
+         "",
+         "",
+         "{{Front}}語[sound:b.mp3]"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{Back　}}{{{{　#Front\n}}{{Deck}}{{{{\ntts ja_JP voices=Kyoko speed=0.9:Back}}<!--😀--><!--{{ Front\n}}<!--</div>-->-->{{/Front}}{{{{　Extra\n}}",
+        "back": "#{{text:tts ja_JP voices=Kyoko speed=0.9:edit:Back}}{{{　Back }}</div>",
+        "ord": 2,
+        "fields": [
+         "\n",
+         "<!-- c -->",
+         "<span></span>}}\t"
+        ],
+        "tags": [
+         "alpha",
+         "beta"
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "observe": [
+    {
+     "template": {
+      "notetype": {
+       "name": "Corpus Words",
+       "fields": [
+        "Word",
+        "Reading",
+        "My Field",
+        "日本語"
+       ]
+      },
+      "cases": [
+       {
+        "front": "{{ ci:type:kana:My Field}}{{ text:nc:My Field }}x[y]{{{ ^c2}}{{{tts en_US:Reading}}{{ Word}}{{/c2\n}}",
+        "back": "</div>",
+        "ord": 1,
+        "fields": [
+         "<i>it</i> &lt;tag&gt;",
+         "\na>b[c]",
+         "{{Front}}a>b[c]",
+         "[sound:a.mp3]"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{text:tts en_US:日本語 }}{{kana:editable:edit:Tags\n}}{{　My Field}}}",
+        "back": "{{FrontSide}}{{\nkanji:editable:Reading}}{{ #c+1\n}}<div class=front><!--<hr id=answer><!--#--><!--{{\nnc:Word}}{{\n#Word}}<br>{{{{　/Word\n}}-->{{tts ja_JP voices=Kyoko speed=0.9:nc:custom:日本語}}{{　/c+1}}</b>{{#Word\n}}<b><!--<script>var a = {b: 1};</script>-->{{\ntts en_US:hint:Reading\n}}x[y]{{ /Word　}}",
+        "fields": [
+         "　😀",
+         "&bogus;{{Front}}}}",
+         "<b>bold</b><b>bold</b>",
+         ""
+        ]
+       },
+       {
+        "front": "{{ ci:nc:type:Reading}}{{　#Reading }}<!--</div>-->%>{{{{ #Tags}}{{　#Reading}}{{ kanji:Word\n}}{{/Reading }}😀{{\n/Tags}}{{\nReading}}{{/Reading\n}}{{　nc:ci:custom:Word}}Q: ",
+        "back": "{{FrontSide}}{{{{Word}}",
+        "fields": [
+         "&amp;<div></div>",
+         "😀&nbsp;",
+         "[sound:a.mp3]<br>",
+         "a>b[c]}}"
+        ]
+       },
+       {
+        "front": "{{{{　My Field }}x[y]<!--{-->{{\nReading }}",
+        "back": "{{#c01 }}{{{{:My Field}}{{ 日本語}}{{{My Field　}}{{{{/c01}}{{　type:hint:Reading}}",
+        "fields": [
+         " ",
+         "&bogus;",
+         "<!-- c -->",
+         "　word<span></span>"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{#Type　}} {{\ntype:edit:furigana:Reading}}{{/Type }}",
+        "back": "{{FrontSide}}<hr id=answer>{{ ^日本語}}{{{\n#My Field }}{{{{　type:Reading}}{{　/My Field}}<!--{{{日本語}}{{　#Reading }}<!--<br>-->{{ Reading}}{{\n/Reading　}}-->{{^日本語}}{{{#My Field}}{{日本語　}}&nbsp;{{{　/My Field　}}{{ kana:日本語 }}{{{　/日本語　}}{{{hint:text:kana:My Field}}{{/日本語}}<!-- {{ Reading\n}}<br>",
+        "fields": [
+         "<br><span></span>&nbsp;",
+         "Back text\n&bogus;",
+         " <BR/>&nbsp;",
+         "x[]]{{Front}}"
+        ]
+       },
+       {
+        "front": "{{{FrontSide}}}{{　^日本語}}{{\nedit:Reading}}{{/日本語　}}{{ tts ja_JP voices=Kyoko speed=0.9:My Field\n}}",
+        "back": "\n  {{=<% %>=}}<%FrontSide%><hr id=answer><br>",
+        "name": "Reverse",
+        "fields": [
+         "",
+         "&nbsp;&nbsp;",
+         "<i>it</i> &lt;tag&gt;&#x41;",
+         "<div></div>\n&nbsp;私[わたし]"
+        ]
+       },
+       {
+        "front": "{{\n#CardID　}}{{{{#Reading\n}}{{#CardID}}{{{/CardID\n}}{{/Reading}}<b>{{{nc:日本語}}{{　/CardID}}{{{{　custom:Word}}{{tts ja_JP voices=Kyoko speed=0.9:tts en_US:type-nc:Card}}",
+        "back": "<!--%>{{{{tts ja_JP voices=Kyoko speed=0.9:日本語}}{{nc:type-cloze:日本語}}",
+        "fields": [
+         " <BR/>word",
+         "\n",
+         "x[]]Back text",
+         " 日本[にほん]語[ご] 日本[にほん]語[ご]"
+        ]
+       },
+       {
+        "front": "{{{\ntype-cloze:type-cloze:My Field}}{{{furigana:tts en_US:c1}}{{{　type-nc:hint:Subdeck　}}",
+        "back": "{{{edit:My Field　}}",
+        "fields": [
+         "<div></div>&#x41;",
+         "é ",
+         "😀<img src=\"a.png\">",
+         ""
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "^{{text:Word\n}}<script>var a = {b: 1};</script>%>",
+        "back": "\n  {{=<% %>=}}<%FrontSide%><%　nc::type-nc:Reading%><%\ntype-cloze:hint:kana:My Field%>\n",
+        "ord": 499,
+        "fields": [
+         "word&amp;",
+         "",
+         "<br><br><b>bold</b>",
+         "[sound:a.mp3]<b>bold</b>Back text"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%tts en_US:Word%>\n",
+        "back": "{{FrontSide}}{{{　ci:c1 }}<!--}}-->{{tts en_US:日本語\n}}",
+        "fields": [
+         "",
+         "語[sound:b.mp3] ",
+         "",
+         "&amp;"
+        ]
+       },
+       {
+        "front": "<!--日本-->",
+        "back": "{{FrontSide}}{{{{type-cloze:Card}}😀[sound:q.mp3]",
+        "fields": [
+         "&amp;Back text",
+         "\t語[sound:b.mp3] 日本[にほん]語[ご]",
+         "é 日本[にほん]語[ご]",
+         "<b>bold</b>&bogus;"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{{editable:ci:text:My Field　}}{{#日本語 }}{{type-nc:Text:text:FrontSide}}{{{/日本語}}{{Text:日本語 }}",
+        "back": "{{FrontSide}}</b>\n",
+        "fields": [
+         "{{Front}}<br>　",
+         "word<br>",
+         "<span></span>",
+         ""
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{　type-nc:type-cloze:kana:Word}}<!--{-->{{{My Field}}{{Reading }}<!--{{{{\nTags　}}",
+        "back": "{{FrontSide}}\n\n{{{{ tts en_US:Word\n}}",
+        "ord": 499,
+        "name": "カード",
+        "fields": [
+         "😀x[]]",
+         "{{Front}}<img src=\"a.png\"><i>it</i> &lt;tag&gt;",
+         "a>b[c]語[sound:b.mp3]",
+         "😀<BR/>"
+        ]
+       },
+       {
+        "front": "{{　nc:edit:type-cloze:Word }}{{{#My Field\n}}<!-- {{Word}}<!---->x[y]{{\n#c500}}{{{{/c500}}{{　/My Field}}<script>var a = {b: 1};</script>",
+        "back": "{{FrontSide}}\n{{ci:Text:Word}}{{{tts en_US:日本語\n}}",
+        "fields": [
+         "😀&#x41;\t",
+         "<div></div><!-- c -->",
+         "\t\n",
+         "&nbsp;"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{　kana:日本語}}{{My Field }}{{c1}}-->{",
+        "back": "{{FrontSide}}<hr id=answer>{{\n#c01}}[sound:q.mp3]{{{/c01\n}}{{{:custom:FrontSide　}}",
+        "ord": 2,
+        "fields": [
+         " ",
+         "&amp; 日本[にほん]語[ご]",
+         "&bogus;",
+         "<!-- c -->&bogus;"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{{\nedit:Word}}{{{#FrontSide}}{{{{#Word　}}{{{{\nkanji:Card\n}}{{/Word\n}}{{{type-cloze:kanji:日本語}}<!--{{{Word}}-->&nbsp;{{/FrontSide}}{{ #Deck}} {{/Deck}}<!--{{　type:日本語\n}}{{ tts en_US:Word}}}<!--<script>var a = {b: 1};</script>{{\ntext:c1\n}}-->-->{{{{#c500　}}}}\n{{Type}}{{ Reading　}}{{　/c500\n}}",
+        "back": "{{{ ^Tags\n}}{{ Word\n}}}{{{ /Tags\n}}{{{#My Field}}{{ 日本語}}<div class=front>{{ #c1\n}}{{Text:hint:日本語　}}}{{ ci:Reading\n}}{{/c1}}{{ Word　}}{{\n/My Field }}",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;<!-- c -->",
+         "  日本[にほん]語[ご]}}",
+         "Back text&nbsp;",
+         " "
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{　custom:ci:kanji:日本語}}{{ ^Subdeck}}Q: {{{tts en_US:type-cloze:Text:日本語}}[sound:q.mp3]{{{{/Subdeck　}}{{{　#Tags}}{{{　#My Field}}<!--日本{{{{ /My Field }}{{#日本語　}}{{{{ Type　}}{{/日本語}}{{ Reading}}{{/Tags}}",
+        "back": "{{FrontSide}}\n{{\n#FrontSide\n}}#{{#Subdeck}}</b>{{ /Subdeck}}{{{furigana:My Field}}<!-- {{ci:日本語}}{{{tts ja_JP voices=Kyoko speed=0.9:ci:My Field}}{{\n#Reading}}</div><!--{{/Reading}}",
+        "ord": 499,
+        "fields": [
+         "",
+         "}}",
+         "<br>",
+         ""
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{\ntype:custom:kana:日本語 }}{{{edit:type-cloze:Reading\n}}",
+        "back": "{{FrontSide}}<hr id=answer>{{{{　type-cloze:kana:CardID　}}%>",
+        "fields": [
+         "<br><b>bold</b>",
+         "Back textBack text",
+         "",
+         " a>b[c]語[sound:b.mp3]"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{{{My Field}}{{^日本語}}</div>{{/日本語}}",
+        "back": "{{\n#Reading }}日本{{ /Reading}}<div class=front>{{^Word}}{{　#Reading}}}}{{{{　/Reading }}{{{custom:Word}}}{{{{　Text:nc:text:日本語}}{{#c2\n}}{{ ^Tags\n}}{{{{\nfurigana:My Field\n}}Q: {{/Tags}}{{/c2\n}}{{{{/Word}}",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;",
+         "&bogus;&amp;",
+         "<br>{{Front}}<!-- c -->",
+         "語[sound:b.mp3]"
+        ],
+        "tags": [
+         "alpha",
+         "beta"
+        ]
+       },
+       {
+        "front": "{{type:type-cloze:日本語\n}}x[y]{{#日本語}}{{{Text:type-cloze:Reading}}{{　My Field}}{{ /日本語\n}}",
+        "back": "{{CardID　}}<!-- {{\ntype-nc:日本語}}",
+        "ord": 2,
+        "fields": [
+         "",
+         "<br>a>b[c]",
+         "&amp;",
+         "&amp;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%kana:Reading%>:",
+        "back": "{{tts ja_JP voices=Kyoko speed=0.9:ci:type-cloze:Subdeck }}{{^日本語 }}{{\nWord}}{{{{\n/日本語}}<script>var a = {b: 1};</script>",
+        "name": "Reverse",
+        "fields": [
+         "<img src=\"a.png\"><span></span>",
+         "{{Front}}\n",
+         "&#x41;",
+         "<div></div>"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{　hint:Reading\n}}{{ #My Field}}{{\n#Reading\n}}<!--<hr id=answer>-->{{\n/Reading　}}<!--{{ tts ja_JP voices=Kyoko speed=0.9:Word}}-->{{{{#Reading}}</b>{{{{custom:Card　}}{{\n/Reading }}{{　Text:kana:Word}}{{/My Field}}",
+        "back": "{{FrontSide}}&nbsp;<!----></div><div class=front>{{{#Deck}}{{{{nc::Word}}{{　/Deck}}-->{{My Field}}{{{\n#c3}}<!-- {{　hint:type:日本語}}{{ Type}}{{ 日本語\n}}{{{{　/c3}}",
+        "name": "Card A",
+        "fields": [
+         " ",
+         "<img src=\"a.png\">",
+         " <img src=\"a.png\">",
+         ""
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{ 日本語}}Q: {{My Field }}",
+        "back": "{{{{editable:nc:kana:CardID　}}{{{ ^c0\n}}{{editable:Word}}{{/c0}}{{CardFlag}}<!-- {{{{tts ja_JP voices=Kyoko speed=0.9:kana:My Field}}",
+        "ord": 499,
+        "fields": [
+         "<div></div>a>b[c]",
+         "Back text",
+         "a>b[c]",
+         "<span></span><BR/>"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{日本語}}<!--x[y]{{=<% %>=}}{{#Reading}}{{\nReading}}{{{{ /Reading}}--><script>var a = {b: 1};</script>{{ 日本語　}}",
+        "back": "{{FrontSide}}<hr id=answer>{{ #Word}}{{hint:type:C1　}}{{ 日本語}}{{{{\n^My Field}}^{{{ /My Field}}{{hint:Word\n}}}{{{\n/Word}}",
+        "fields": [
+         "Back text",
+         "",
+         " &#x41;",
+         "語[sound:b.mp3]語[sound:b.mp3]"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{ type:tts en_US:ci:日本語\n}}{{　tts en_US:Tags }}",
+        "back": "\n  {{=<% %>=}}<%FrontSide%><%#My Field\n%><%kana:text:Word%><%{#日本語\n%>:<%{{editable:furigana:kanji:Reading%><%\n/日本語\n%><%\nMy Field %><%\n/My Field　%>",
+        "fields": [
+         " 日本[にほん]語[ご]語[sound:b.mp3]",
+         "<br>",
+         "😀x[]]<span></span>",
+         "&bogus;"
+        ]
+       },
+       {
+        "front": "{{　#Deck\n}}{{{ #Tags}}^{{/Tags }}{{{Text:Type\n}}{{{{　#日本語 }}%>{{\neditable:type:Deck}}{{\n/日本語　}}{{\n/Deck}}{{\nnc:日本語}}{{ type:My Field}}",
+        "back": "{{FrontSide}}<hr id=answer><!--\n{{{{　日本語}}{{{{\nWord\n}}--></b>%>日本",
+        "fields": [
+         "&nbsp;私[わたし]&nbsp;私[わたし]\n",
+         "<i>it</i> &lt;tag&gt;<br>",
+         "&nbsp;私[わたし]",
+         "<img src=\"a.png\">"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{Reading }}{{edit:kanji:Word}}",
+        "back": "{{FrontSide}}{{^c2}}{{\n#Subdeck}}{{kana:Reading}}{{CardID}}{{{　/Subdeck}}}}{{{{/c2}}{{{　custom:Reading}}<script>var a = {b: 1};</script>",
+        "ord": 2,
+        "fields": [
+         "<b>bold</b><br><br>",
+         "{{Front}}<br>",
+         "&amp;",
+         ""
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{　editable:type-cloze:Word}}<b>x[y]{{{{\nWord}}",
+        "back": "{{^CardFlag}}}}{{/CardFlag}}",
+        "fields": [
+         "😀x[]]",
+         "",
+         "",
+         " 日本[にほん]語[ご]<br>}}"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{{type-nc:edit:My Field}}{{^Word　}}{{　Deck}}}{{{{/Word}}{{ 日本語}}",
+        "back": "{{FrontSide}}<hr id=answer>{{{\ntype-nc:type:type-nc:日本語}}{{{{\n#Word}}{{ Word}}{{{{　#CardFlag }}{{My Field}}<!--日本{{{edit:custom:Reading}}-->{{/CardFlag　}}{{ /Word}}",
+        "fields": [
+         "",
+         "&#x41;",
+         "&#x41; 日本[にほん]語[ご]",
+         "語[sound:b.mp3]&nbsp;私[わたし]"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "</div>",
+        "back": "&nbsp;<br>{{#My Field\n}}{{{#Reading　}}  {{/Reading}}}}{{edit:type:nc:Word }}{{\n/My Field　}}",
+        "fields": [
+         "&amp;<span></span>",
+         "\t",
+         "\t",
+         ""
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{{{　kanji:日本語 }}<div class=front>{{\ntts ja_JP voices=Kyoko speed=0.9:type-cloze:kanji:日本語\n}}<!---->-->",
+        "back": "{{FrontSide}}<hr id=answer>[sound:q.mp3]:{{ FrontSide}}",
+        "fields": [
+         "&bogus;",
+         "&amp;",
+         "&nbsp;",
+         "<br>é"
+        ]
+       },
+       {
+        "front": "{{　tts en_US:My Field}}{{{ My Field\n}}%>",
+        "back": "{{FrontSide}}<hr id=answer>^",
+        "fields": [
+         " é",
+         "<!-- c -->",
+         "é\t",
+         "語[sound:b.mp3]"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{Reading　}}<!--x[y]-->",
+        "back": "{{{{My Field}}",
+        "ord": 2,
+        "name": "Card A",
+        "fields": [
+         "{{Front}} é",
+         "",
+         "&nbsp;<div></div>}}",
+         "Back text　"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{Word\n}}^{{Reading}}",
+        "back": "{{FrontSide}}\n",
+        "ord": 2,
+        "fields": [
+         "&nbsp;私[わたし] ",
+         " <!-- c -->}}",
+         "&nbsp;",
+         " 日本[にほん]語[ご]"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{Reading }}{{{editable:c1　}}}&nbsp;\n{{:ci:Text:Card}}",
+        "back": "{{#日本語}}<hr id=answer>{{Tags }}{{{{　#Type　}}<!--{{\n日本語　}}-->{{　^Deck}}<!--{{　furigana:日本語}}-->{{　/Deck}}{{/Type　}}&nbsp;{{{{/日本語\n}}{{Reading\n}}-->日本",
+        "fields": [
+         "　<b>bold</b>",
+         "",
+         "Back text[sound:a.mp3]",
+         "<span></span><span></span>"
+        ]
+       },
+       {
+        "front": "{{type-cloze:type-cloze:My Field}}text }} more",
+        "back": "{{FrontSide}}\n{{ tts ja_JP voices=Kyoko speed=0.9:Word　}}{{{{kana:type-nc:My Field}}}<!--x[y]-->",
+        "fields": [
+         "<!-- c --> ",
+         "é <br>",
+         "&bogus;語[sound:b.mp3]",
+         "\n<br>"
+        ]
+       },
+       {
+        "front": "{{{{　My Field}}{{My Field}}{{type-nc:type-cloze:Text:c1\n}}",
+        "back": "{{ 日本語　}}-->",
+        "ord": 499,
+        "fields": [
+         "<br> ",
+         "x[]]😀",
+         " 日本[にほん]語[ご]\n",
+         "  "
+        ]
+       },
+       {
+        "front": "{{Text:tts ja_JP voices=Kyoko speed=0.9:editable:Word　}}-->{{ ^Word\n}}日本{{ #日本語\n}}{{　type:furigana:Reading }}{{\n/日本語}}{{{ci:Reading }}{{/Word }}",
+        "back": "{{FrontSide}}{{^c500\n}}{{ type-nc:My Field}}{{^CardID\n}}{{{\n^Deck\n}}<script>var a = {b: 1};</script>{{/Deck\n}}{{ /CardID}}^{{/c500}}{{ #日本語\n}}<!--<hr id=answer>-->{{type-cloze:type-cloze:tts ja_JP voices=Kyoko speed=0.9:My Field}}{{{　type-nc:kanji:Tags }}Q: {{/日本語}}",
+        "ord": 2,
+        "fields": [
+         "<div></div>}}}}",
+         "Back text",
+         "",
+         "a>b[c]<!-- c -->"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{{{日本語\n}}{{Word }}<!-- {{:My Field}}",
+        "back": "{{FrontSide}}<hr id=answer>}}{{ ^Reading }}😀\n{{{{#c+1}}😀<br>{{/c+1}}{{/Reading }} ",
+        "fields": [
+         "\n[sound:a.mp3]<b>bold</b>",
+         "éBack text",
+         "",
+         ""
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{　Reading}}{{#c500}}<script>var a = {b: 1};</script>{{\n#c3\n}}<div class=front>{{\nhint:nc:kanji:日本語\n}}{{\n/c3　}}{{\n/c500 }}<hr id=answer>",
+        "back": "{{ nc:tts ja_JP voices=Kyoko speed=0.9:Reading }}",
+        "fields": [
+         " ",
+         "&#x41;😀<b>bold</b>",
+         "",
+         "&bogus;😀　"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{<hr id=answer>",
+        "back": "{{FrontSide}}<hr id=answer>{{\ntype-cloze:My Field }}日本",
+        "ord": 2,
+        "fields": [
+         "<div></div>",
+         "[sound:a.mp3]",
+         "語[sound:b.mp3]語[sound:b.mp3]<b>bold</b>",
+         "&bogus;"
+        ]
+       },
+       {
+        "front": "{{tts en_US:type-nc:tts ja_JP voices=Kyoko speed=0.9:My Field}}😀<!-- {{{\nkanji:edit:My Field}}{{{ 日本語}}{{　hint:Type }}",
+        "back": "{{FrontSide}}\n{{:editable:custom:Reading　}}",
+        "ord": 499,
+        "fields": [
+         " <img src=\"a.png\">",
+         "<span></span>　",
+         " <img src=\"a.png\">",
+         "<b>bold</b>\n<br>"
+        ]
+       },
+       {
+        "front": "{{tts ja_JP voices=Kyoko speed=0.9:Reading\n}}{{　text:editable:FrontSide　}}{{editable:日本語}}}{{\nedit:edit:日本語\n}}^",
+        "back": "<!--{{#c0　}}{{　#CardID}}<!---->{{ /CardID\n}}{{Text:kana:My Field}}{{ /c0\n}}<b>{Q: -->",
+        "fields": [
+         "<div></div><b>bold</b>",
+         "<i>it</i> &lt;tag&gt;&bogus;<!-- c -->",
+         " &nbsp; 日本[にほん]語[ご]",
+         ""
+        ]
+       },
+       {
+        "front": "{{　:Word}}}{{　Word}}^<b>{{{{^FrontSide}}{{\n^Reading }}{{type-cloze:Word　}}<b>{{　/Reading}}{{#Word }}{{{{#Reading}}{{{type:Word }}{{\n/Reading }}{{/Word}}}{{{{/FrontSide}}",
+        "back": "{{FrontSide}}{{#Reading\n}}{{#My Field }}{{^Reading}}{{{{日本語　}}{{{　/Reading\n}}{{　/My Field}}{{{{　/Reading}}{{#Word}} -->&nbsp;<!--{{{\ntts en_US::tts en_US:Word}}}-->{{ /Word}}Q: -->",
+        "ord": 1,
+        "fields": [
+         "{{Front}}",
+         "<img src=\"a.png\"><BR/>\t",
+         "a>b[c] \t",
+         "<div></div>　<b>bold</b>"
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{　日本語\n}}}{{^日本語}}Q: {{=<% %>=}}<b>{{ #FrontSide }}:{{　/FrontSide　}}{{/日本語 }}<br>[sound:q.mp3]",
+        "back": "{{FrontSide}}{{My Field}}",
+        "fields": [
+         "😀 {{Front}}",
+         "<b>bold</b>",
+         "{{Front}}&nbsp; ",
+         "x[]]{{Front}}"
+        ]
+       },
+       {
+        "front": "{{Reading}}{{ My Field}}<!--{{{{\n#Word\n}}{{{ edit:Reading　}}{{ ^CardFlag}}<!-- {{furigana:custom:Reading}}{{\n/CardFlag}}{{\n/Word }}-->",
+        "back": "{{FrontSide}}</b><!--<!---->-->{{#My Field}}:{{FrontSide}}{{/My Field}}-->\n{{:edit:text:Word\n}}",
+        "fields": [
+         "é<div></div>",
+         "\t 😀",
+         "\té",
+         "é<BR/>"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{type-cloze:Reading\n}}{{{ #日本語 }}{{Word　}}{{:日本語\n}}{{{Reading}}{{/日本語\n}}",
+        "back": "{{　^c0\n}}\n{{#c0}}{{\nnc:My Field }}{{{{　text:Word\n}}{{/c0　}}:{{{ My Field }}{{/c0　}}{{My Field}}",
+        "fields": [
+         "",
+         "&bogus;}}word",
+         "{{Front}}word",
+         "<div></div>"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "#}}{{{日本語}}{{ My Field}}",
+        "back": "{{FrontSide}}<hr id=answer>}}",
+        "ord": 1,
+        "fields": [
+         "<!-- c -->",
+         "<BR/> 日本[にほん]語[ご]",
+         "",
+         "\t<b>bold</b>"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%furigana:Reading\n%><%{ furigana:Word%>",
+        "back": "{{FrontSide}}<hr id=answer>{{ type-nc:hint:edit:Reading　}}{{　^c3　}}<!-- {{furigana:Reading}}%>{{{　My Field\n}}{{{{/c3}}😀",
+        "fields": [
+         "<div></div>😀",
+         "\n&#x41;",
+         "\t語[sound:b.mp3]",
+         "  "
+        ]
+       },
+       {
+        "front": "{{#c2}}{{ Text:Word\n}}{{ /c2}}{{ ci:tts en_US::日本語 }}{{custom:Deck}}{{Tags}}",
+        "back": "{{My Field　}}}{{　text:text:editable:日本語\n}}{{ #CardID　}}{{editable:c1}}{{{#c3 }}{{^c+1}}x[y]{{{{ /c+1\n}}{{ text:Reading }}{{　/c3　}}<!--<!--<!--:-->-->{{editable:Tags\n}}-->{{{^Word}}{{^My Field}}{{　ci:editable:Type}}{{kanji:Reading\n}}{{/My Field}}{{{{#Reading}}<!--<!--</b><!-- {{type:My Field}}-->-->{{/Reading　}}{{{{\n/Word}}{{{ /CardID　}}{{#日本語}}{{　日本語}}{{ type-cloze:tts en_US:type-cloze:My Field}}{{ 日本語\n}}{{{/日本語　}}",
+        "fields": [
+         "",
+         "x[]]",
+         "<br>\n😀",
+         " <span></span><i>it</i> &lt;tag&gt;"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "observe": [
+    {
+     "template": {
+      "notetype": {
+       "name": "Corpus Shadow",
+       "fields": [
+        "Front",
+        "Tags",
+        "c2",
+        "FrontSide"
+       ]
+      },
+      "cases": [
+       {
+        "front": "{{editable:tts ja_JP voices=Kyoko speed=0.9:ci:FrontSide\n}}{{ CardFlag }}",
+        "back": "<%",
+        "ord": 2,
+        "fields": [
+         "\t",
+         "語[sound:b.mp3]<i>it</i> &lt;tag&gt;}}",
+         "<b>bold</b>",
+         "<div></div>\n"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{　Front}}<script>var a = {b: 1};</script>",
+        "back": "{{Front }}{{{\n#Front}}<br>{<div class=front>{{/Front　}}#",
+        "fields": [
+         "a>b[c]&amp; ",
+         "",
+         "&nbsp;私[わたし]",
+         " 日本[にほん]語[ご]<!-- c -->"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": ":{{　#FrontSide}}{{type-cloze:FrontSide\n}}日本{{{　/FrontSide }}",
+        "back": "{{{type-cloze:FrontSide　}}",
+        "ord": 1,
+        "fields": [
+         "",
+         "&nbsp;\n&amp;",
+         "&bogus;é",
+         " &nbsp;私[わたし]"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{Front}}{{type-cloze:editable:FrontSide　}}:-->",
+        "back": "{{FrontSide}}\n{{{{ #Front }}{{Text:Tags }}{{/Front}}<div class=front>",
+        "ord": 2,
+        "fields": [
+         "<b>bold</b>　",
+         "&nbsp;",
+         "é}}",
+         "<span></span> "
+        ]
+       },
+       {
+        "front": "{{　FrontSide}}日本 ",
+        "back": "{{^c+1}}{{FrontSide　}}{{/c+1 }}<!--:-->{{#c2}}😀{{ Front　}}{{Text:hint:Tags }}</div>{{/c2 }}{{^c2\n}}<!--<script>var a = {b: 1};</script>-->{{{type-nc:tts ja_JP voices=Kyoko speed=0.9:text:c2\n}}}{{/c2}}",
+        "fields": [
+         "\t&amp;&nbsp;私[わたし]",
+         "<span></span>",
+         "",
+         "<br><span></span>"
+        ]
+       },
+       {
+        "front": "{{FrontSide　}}{{{　kana:kanji:CardFlag}} <hr id=answer>",
+        "back": "{{FrontSide}}:{{　tts ja_JP voices=Kyoko speed=0.9:Deck　}}<!--<script>var a = {b: 1};</script>-->{{　type-nc:ci:Card }}",
+        "fields": [
+         "",
+         "<i>it</i> &lt;tag&gt;&#x41;",
+         " 日本[にほん]語[ご]",
+         "語[sound:b.mp3]"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{{{\n#Tags\n}}{{\n^c01}}{{{{Tags　}}{{/c01　}}-->{{{{#Front　}}{{Card}}{{/Front }}{{/Tags }}{{{:c2}}#",
+        "back": "{{FrontSide}}\n{{{{ FrontSide }}#{{ :Front}}",
+        "fields": [
+         "<div></div>{{Front}}",
+         "　Back text",
+         "\té",
+         "語[sound:b.mp3]a>b[c]"
+        ]
+       },
+       {
+        "front": "{{{　Text:type-nc:kana:c2}}{{{kanji:hint:furigana:Front　}}<br>{{{{c2\n}}{{FrontSide\n}}}",
+        "back": "{{{　^#}}{{\nFront}}{{kanji:type:type-nc:Tags}}{{\n/#}}日本",
+        "fields": [
+         "é",
+         "<span></span>x[]]",
+         "<i>it</i> &lt;tag&gt;",
+         "<img src=\"a.png\">[sound:a.mp3]"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{hint:c2\n}}{{#Front\n}}\n{{Tags}}<script>var a = {b: 1};</script>{{custom:Deck　}}{{\n/Front}}{{kana:Front}}{{^c2　}}{{c2　}}{{ #Front\n}}{{kana:custom:Front}}{{/Front}}{{ /c2 }}",
+        "back": "{{FrontSide}}{{　edit:hint:FrontSide}}{{Front{{^Front }}%>日本{{#c+1\n}}{{type-nc:Front　}}{{{/c+1\n}}{{\n/Front }}{{:Tags\n}}",
+        "fields": [
+         " 日本[にほん]語[ご]<i>it</i> &lt;tag&gt;",
+         "\t",
+         "&#x41;😀",
+         "　"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{\n#FrontSide }}{{CardID　}}{{#Front }}{{Tags }}<!-- {{{c2 }}{{{{/Front}}{{ ^Tags}}{{　#FrontSide}}{{FrontSide}}{{　/FrontSide }}{{{{/Tags}}Q: <b>",
+        "back": "{{{\n#Front\n}}{{　custom:c2}}{{\n/Front }}",
+        "fields": [
+         "[sound:a.mp3]}} ",
+         "",
+         "",
+         "word&amp;"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{ Front }}{{ #Subdeck}}{{#c0\n}}😀{{\n/c0　}}{{edit:custom:Front　}}\n<!--{{{\n#Front　}}<!--&nbsp;--><!--x[y]-->{{/Front}}-->{{ /Subdeck }}",
+        "back": "{{FrontSide}}<!--{{{{ Card}}<b>{{c2 }}{{{^c2　}}{{hint:Type}}{{{　#Front\n}}<b>{{\nTags}}{{{　/Front\n}}{{{{/c2}}--><hr id=answer>",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;word",
+         "😀",
+         "",
+         "語[sound:b.mp3]😀[sound:a.mp3]"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{　Front}}{{\nnc:editable::c2}}",
+        "back": "{{FrontSide}}\n{{{{Tags}}<br>",
+        "fields": [
+         "é\n&#x41;",
+         "",
+         " x[]]&amp;",
+         "\n"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{=<% %>=}}<%{　Tags\n%><% editable:type-nc:Tags%> ",
+        "back": "{{FrontSide}}\n{{{{\nFrontSide\n}}</div>",
+        "fields": [
+         "<BR/>",
+         "<br>",
+         "",
+         "a>b[c]"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{\nText:type-nc:Tags　}}{{Front{{^CardID}}{{#c2\n}}}}{{Tags}}{{ /c2 }}{{{{type:type-nc:Front}}{{ci:c2\n}}{{/CardID }}",
+        "back": "{{FrontSide}}\n{{{{type:Tags}}{{Tags}}",
+        "fields": [
+         "",
+         "<span></span>",
+         "word",
+         "&nbsp;&nbsp;"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{type-nc:Front　}}{x[y]{{\n#Tags}}<div class=front>::{{{/Tags }}<!-- {{{\nhint:c2　}}",
+        "back": "\n  {{=<% %>=}}<%FrontSide%>\n ",
+        "name": "Reverse",
+        "fields": [
+         "<!-- c --> &#x41;",
+         "😀",
+         "<i>it</i> &lt;tag&gt;&bogus;",
+         "Back text[sound:a.mp3]"
+        ]
+       },
+       {
+        "front": "{{{{type-cloze:text:text:Tags}}{{{\n^Tags}}{{\n#FrontSide\n}}{{　Front}}{{/FrontSide}}\n<div class=front> {{ /Tags}}\n<!--%>-->",
+        "back": "{{FrontSide}}\n</div><br>-->{",
+        "ord": 2,
+        "fields": [
+         "",
+         "<div></div>",
+         "&#x41;&nbsp;私[わたし]",
+         "<br><div></div>&bogus;"
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{type-cloze:Tags}}{{c2}}{{Card　}}</div>{{ ^CardFlag}}<!-- {{c2 }}{{{{\ntype-nc:Text:Tags }}{{#c2}}</div>{{{/c2}}{{/CardFlag }}",
+        "back": "{{FrontSide}}\n}&nbsp;",
+        "fields": [
+         "<!-- c --><b>bold</b>",
+         "\n<i>it</i> &lt;tag&gt;",
+         "[sound:a.mp3]&bogus;　",
+         "&#x41;<i>it</i> &lt;tag&gt;[sound:a.mp3]"
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{nc:Tags }}{{\n#Tags　}}{{{type:FrontSide}}&nbsp;{{{{^c2 }}{{Front　}}}{{　/c2 }}<!-- {{Front　}}{{\n/Tags　}}{{{{　c2 }}",
+        "back": " {{=<% %>=}}^<%\n#c01　%><!--#-->:<%^Front%>{<%^Front%></div><% /Front\n%><%/Front　%><%/c01\n%>}}",
+        "name": "カード",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;",
+         "<i>it</i> &lt;tag&gt; ",
+         "<div></div>",
+         "<i>it</i> &lt;tag&gt;wordword"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{\ntype-nc:type:Tags\n}}<!--<!-- {{\ntext:Front　}}-->{{\nkanji:furigana:custom:Tags }}",
+        "back": "{{FrontSide}}<hr id=answer>{{#c2}}{{Front}}<br>{{\n#FrontSide　}}<script>var a = {b: 1};</script>{{{{{/FrontSide\n}}<br>{{{ /c2}}",
+        "fields": [
+         "<img src=\"a.png\">　 ",
+         "\t&nbsp;",
+         "<span></span>",
+         "&amp;}}"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{ci:custom:tts ja_JP voices=Kyoko speed=0.9:Tags　}}{{{edit:type-cloze::FrontSide }}",
+        "back": " {{=<% %>=}}<%{#c2\n%><b><%\nTags%><%{{/c2　%>",
+        "ord": 1,
+        "name": "Reverse",
+        "fields": [
+         "é&#x41;\t",
+         "word<br>",
+         "&nbsp;&amp;",
+         "<!-- c -->"
+        ]
+       },
+       {
+        "front": "{{　Front　}}{{^Deck\n}}<!--<b>-->{{{{　/Deck　}}日本",
+        "back": "{{FrontSide}}\n{{editable:tts en_US:editable:Tags}}{{ci:Deck }}{{\nFront}}日本",
+        "fields": [
+         "\n<b>bold</b>",
+         " 語[sound:b.mp3]",
+         "é<BR/>",
+         "\n "
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "}",
+        "back": " ",
+        "ord": 499,
+        "fields": [
+         "&nbsp;私[わたし]",
+         "<BR/>&bogus;",
+         " ",
+         ""
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{{ hint:Text:type-cloze:c2}}<!--[sound:q.mp3]--><br>",
+        "back": "{{{{editable:FrontSide　}}{{\n#FrontSide}}{{Front　}}{{ #FrontSide\n}}{{\n^Front }}<!--<!---->--><!--}}-->--><!--^-->{{/Front\n}}{{{{Deck}}{{ /FrontSide}}{{{ /FrontSide　}}{{{{#FrontSide}}}{{{ /FrontSide\n}}{{#Front}}<!--}}-->{{Q: {{#Front　}}{{\n:type-nc:c2 }}{{#Deck }} {{\n/c2}}{{　/Front}}{{/Front\n}}",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;}}word",
+         "語[sound:b.mp3]\n",
+         "<span></span>　",
+         ""
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{Front}}{{ tts ja_JP voices=Kyoko speed=0.9:Tags }}{{text:Front }}",
+        "back": "\n{{　type-cloze:Subdeck }}\n{{{c2 }}",
+        "fields": [
+         "<b>bold</b>",
+         "<i>it</i> &lt;tag&gt;",
+         " 　x[]]",
+         "<img src=\"a.png\">é"
+        ],
+        "tags": [
+         "alpha",
+         "beta"
+        ]
+       },
+       {
+        "front": "{{　Tags\n}}{{^c2}}{{{ editable:Tags　}}}<!--<!--x[y]-->{{{\n/c2 }}[sound:q.mp3]",
+        "back": "{{\n:tts en_US:c2}}{{Front\n}}",
+        "ord": 2,
+        "fields": [
+         "[sound:a.mp3]",
+         "<img src=\"a.png\">x[]]",
+         "}}",
+         "<i>it</i> &lt;tag&gt;[sound:a.mp3]<i>it</i> &lt;tag&gt;"
+        ]
+       },
+       {
+        "front": "{{ #c2　}}{{#Front }}日本{{/Front }}<!--{<%{{{{\n/c2　}}<b>",
+        "back": "{{FrontSide}}<!--Q: {{#Front}}{{\n}}<%{{ /Front\n}}{{{{tts ja_JP voices=Kyoko speed=0.9:text:tts ja_JP voices=Kyoko speed=0.9:Tags}}</div>--><!--{{=<% %>=}}{-->#{{{{　tts ja_JP voices=Kyoko speed=0.9:c2}}",
+        "ord": 1,
+        "name": "Reverse",
+        "fields": [
+         "",
+         "&amp;",
+         "　<img src=\"a.png\">x[]]",
+         ""
+        ]
+       },
+       {
+        "front": "{{Front}}<!--<!--{{custom:custom:ci:Front }}{{#FrontSide　}}{{custom:FrontSide\n}}{{\n/FrontSide　}}-->-->",
+        "back": "{{Text:text:nc:c1}}",
+        "fields": [
+         "&amp;&amp; 日本[にほん]語[ご]",
+         "\n&amp;&bogus;",
+         "<br>",
+         "a>b[c][sound:a.mp3]<i>it</i> &lt;tag&gt;"
+        ]
+       },
+       {
+        "front": "{{edit:Tags　}}{{{{ Front\n}}{{{{　kanji:Tags}}{{{　type-cloze:FrontSide}}",
+        "back": "<br>{{tts en_US:Front }}",
+        "fields": [
+         " 日本[にほん]語[ご]  日本[にほん]語[ご]",
+         "<b>bold</b>&nbsp;私[わたし]",
+         "😀",
+         "Back text<img src=\"a.png\">"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{c2}}}日本{{FrontSide　}}-->",
+        "back": "{{FrontSide}}\n{{Tags}}^<script>var a = {b: 1};</script>{{FrontSide}}",
+        "fields": [
+         "<br>　",
+         "word",
+         "é",
+         "&amp;Back text<i>it</i> &lt;tag&gt;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{　c2}}{{{Card}}{{{ kana:c2 }}",
+        "back": "{{FrontSide}}\n<!--{{　FrontSide}}\n{{#Card　}}{{Front}}{{c2}}{{/Card }}{{#Tags}}#{{Tags}}{{{{　/Tags }}-->{{tts en_US:editable:type:Type　}}}}<hr id=answer>",
+        "ord": 499,
+        "fields": [
+         "&nbsp;私[わたし]",
+         "&amp;&amp;",
+         "",
+         "<img src=\"a.png\">"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{\nkana:hint:type:c2 }}</b>{{editable:text:furigana:Deck}}",
+        "back": "-->&nbsp;",
+        "name": "Card A",
+        "fields": [
+         "\t",
+         "<i>it</i> &lt;tag&gt;<span></span>\n",
+         "語[sound:b.mp3]<div></div>",
+         ""
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<div class=front>",
+        "back": "{{　#c01}}\n}{{\n/c01\n}}",
+        "fields": [
+         "é\n",
+         "Back text",
+         "<span></span>[sound:a.mp3]",
+         "<!-- c --><span></span>"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{{ nc:Tags}}}{{Tags}}",
+        "back": "<!--{{\nCard}}x[y]</div>-->",
+        "fields": [
+         " <BR/>[sound:a.mp3]",
+         "word😀",
+         "　&bogus;",
+         ""
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{custom:custom:hint:Tags\n}}<div class=front>",
+        "back": "<!--</div>{{\nfurigana:furigana:edit:c2}}{{ :Tags\n}}-->{{type-cloze:c2}}{{{\n#Tags}}{{{　tts ja_JP voices=Kyoko speed=0.9:type-cloze:C1 }}{{　furigana:Tags}}{{{nc:c2}}}}{{/Tags}}{{edit:custom:Front\n}}",
+        "fields": [
+         "a>b[c]{{Front}}",
+         "",
+         "　",
+         "<div></div>"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{kana:tts ja_JP voices=Kyoko speed=0.9:Front}}</div>{{=<% %>=}}{{　Deck }}",
+        "back": "{{FrontSide}}\n<!-- {{ FrontSide\n}}<b>",
+        "fields": [
+         "",
+         " 日本[にほん]語[ご]<img src=\"a.png\">",
+         "&amp;",
+         "&nbsp;私[わたし]<div></div>　"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{{type-cloze:tts en_US:Tags　}}x[y]{{　^Front\n}}<!--}-->{{/Front}}{{ #Tags }}<!--<hr id=answer>-->{{^Front }}{{{{tts en_US:FrontSide}}{{　/Front　}}{{\n#Tags}}{{\nTags }}<!-- {{{tts ja_JP voices=Kyoko speed=0.9:Tags }}{{/Tags\n}}{{/Tags }}",
+        "back": "<!---->{{furigana:c2}}%><!--{{　Front}}}{{　#FrontSide　}}{{{{\nfurigana:c2}}<!--[sound:q.mp3]-->{{　/FrontSide}}-->--><br>",
+        "fields": [
+         "",
+         "<div></div>",
+         "<img src=\"a.png\">&#x41;",
+         " "
+        ],
+        "tags": [
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{=<% %>=}}<%\nFront%>Q: <!-- <%{{FrontSide%>",
+        "back": "{{=<% %>=}}<%FrontSide%><% ^c1 %><%type-nc:text:FrontSide%><%　Front%><%/c1%><!--<div class=front>-->",
+        "name": "カード",
+        "fields": [
+         "😀",
+         "{{Front}} 日本[にほん]語[ご]",
+         "<div></div>\na>b[c]",
+         "<img src=\"a.png\"> 日本[にほん]語[ご]"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{c2　}}{{{{　furigana:type:Front\n}}x[y]",
+        "back": "{{{{　kana:tts en_US:type-cloze:c2}}}",
+        "fields": [
+         "<BR/>a>b[c]語[sound:b.mp3]",
+         "<div></div>é<!-- c -->",
+         " <div></div>",
+         "<b>bold</b>{{Front}}"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{ c2}}[sound:q.mp3]{{\ntype-nc:type:Tags\n}}",
+        "back": "{{FrontSide}}<!--^<!--<!-- {{　furigana:c2}}{{\n^c500\n}}<!--{{=<% %>=}}<!--{{kanji:kanji:text:Front\n}}-->{{{ /c500}}-->-->%>{{editable:FrontSide}}",
+        "ord": 499,
+        "fields": [
+         "&#x41;",
+         "word",
+         "<!-- c -->&nbsp;",
+         "\t&amp;"
+        ]
+       },
+       {
+        "front": "{{{Front\n}}[sound:q.mp3]{{\ntype-nc:text:Front}}-->",
+        "back": "{{^c2}}{{　Tags }}{{Text:kanji:Subdeck}}{{hint:Text:kanji:Front}}{{{/c2}}",
+        "fields": [
+         "",
+         "",
+         "&nbsp;",
+         "😀<BR/>　"
+        ]
+       },
+       {
+        "front": "{{\nedit:FrontSide}}<br>{{　nc:Tags　}}",
+        "back": "{{FrontSide}}<hr id=answer>{{　tts ja_JP voices=Kyoko speed=0.9:nc:Front　}}{{editable::custom:c2}}",
+        "fields": [
+         "",
+         "{{Front}}&amp;a>b[c]",
+         "<br>word",
+         "}}\t"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{c2\n}}{{ Text:tts en_US:Front}}😀",
+        "back": "{{#Front}}<hr id=answer>{{/Front}}#{{{{#Nope}}{{{　Tags }}}<!-- {{\nkana:kanji:Tags }}{{{{ CardID }}{{/Nope\n}}",
+        "fields": [
+         "",
+         "é\n",
+         "<BR/>a>b[c]",
+         "&nbsp;"
+        ]
+       },
+       {
+        "front": "{{\nnc:text:c2}}{{\n#FrontSide}}{{ editable:ci:type-nc:c2　}}{{#c2}}<!-- {{ Front　}}{{ /c2}}{{kana:Front}}{{　/FrontSide}}",
+        "back": "{{　^Tags\n}}{{ Text:Tags}}x[y]{{kana:text:type:Subdeck }}<!--{{\n^Tags }}{{Front}}<!--<script>var a = {b: 1};</script>-->{{/Tags}}-->{{/Tags　}}{{{ci:front\n}}<!--<script>var a = {b: 1};</script>{{FrontSide}}}<hr id=answer>",
+        "ord": 1,
+        "fields": [
+         "",
+         "&#x41;😀",
+         " 日本[にほん]語[ご]",
+         "<BR/>\n"
+        ]
+       },
+       {
+        "front": "{{　kanji:furigana:text:Front}}{{#Tags}}{{{ edit:Text:hint:Deck}}<!--{{\ntext:hint:type-nc:Front}}text }} more-->{{/Tags}}{",
+        "back": "{{FrontSide}}{{#FrontSide}}<br>{{{\nTags }}}{{　Front　}}{{ Tags\n}}{{　/FrontSide}}{{{type-nc:custom:furigana:FrontSide}}",
+        "fields": [
+         "&nbsp;私[わたし]",
+         "&amp;&bogus;",
+         "",
+         " 日本[にほん]語[ご]&#x41;"
+        ],
+        "tags": [
+         "beta"
+        ]
+       },
+       {
+        "front": "{{{{ Text:FrontSide　}}<!--x[y]-->{{Front}}<!--<br>-->{{kana:FrontSide\n}}",
+        "back": "{{FrontSide}}<hr id=answer><%",
+        "fields": [
+         "<span></span>",
+         "[sound:a.mp3]é",
+         "　😀",
+         "😀[sound:a.mp3]"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{Front}}{{　tts ja_JP voices=Kyoko speed=0.9:Front\n}}^",
+        "back": "{{FrontSide}}{{ type-nc::edit:Tags }}}}",
+        "ord": 2,
+        "fields": [
+         "<BR/>&nbsp;私[わたし]",
+         "[sound:a.mp3]<!-- c -->",
+         "a>b[c]<div></div>",
+         "&#x41;&amp;&bogus;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{type-cloze:c2 }}{<script>var a = {b: 1};</script>",
+        "back": "{{FrontSide}}{{{\nFrontSide}}{{{　^c2 }}<script>var a = {b: 1};</script>{{#c2　}}😀{{{　/c2 }}<!-- {{{{FrontSide}}{{/c2}}",
+        "ord": 499,
+        "fields": [
+         "&nbsp;私[わたし]",
+         "&amp; ",
+         "wordx[]]<img src=\"a.png\">",
+         " Back text"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "",
+        "back": "{{{{#c2}}<b>{{ FrontSide }}[sound:q.mp3]{{/c2\n}}<!-- {{{\nFront　}}",
+        "fields": [
+         "&nbsp;\t",
+         "",
+         "&bogus;<BR/>",
+         "語[sound:b.mp3]&amp;"
+        ]
+       },
+       {
+        "front": "{{text:Text:FrontSide}}{{\nci:Front }}{{Tags\n}}{{ #c2}}{{ Front}}{{/c2}}",
+        "back": "{{　FrontSide}}{{ tts ja_JP voices=Kyoko speed=0.9:ci:text:CardFlag　}}",
+        "fields": [
+         "é<BR/>a>b[c]",
+         "<span></span>",
+         "",
+         "[sound:a.mp3]}}"
+        ]
+       },
+       {
+        "front": "{{\ntype-nc:custom:Tags　}}",
+        "back": "{{FrontSide}}-->",
+        "ord": 2,
+        "fields": [
+         "<!-- c --><BR/>",
+         "{{Front}}語[sound:b.mp3]<!-- c -->",
+         "<div></div>\t",
+         "[sound:a.mp3]"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "observe": [
+    {
+     "template": {
+      "notetype": {
+       "name": "Corpus Single",
+       "fields": [
+        "Text"
+       ]
+      },
+      "cases": [
+       {
+        "front": " {{=<% %>=}}<br>#<!--<%#Text%><%　#c2%><%hint:tts ja_JP voices=Kyoko speed=0.9:type-nc:Text%><% type:Tags%><%{\n/c2%><%/Text%><%\nCardID%>--><%{{ Tags　%>",
+        "back": "<!--{{\ntext:ci:Text}}{{ text:hint:Text }}",
+        "ord": 2,
+        "fields": [
+         "<br>"
+        ]
+       },
+       {
+        "front": "{{{Text}}{{Text　}}<!--[sound:q.mp3]-->Q: {{　#Text}}<!-- {{ :Text\n}}",
+        "back": "{{Text}}#{{ Type}}{{editable:Text\n}}",
+        "fields": [
+         "&nbsp;"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "-->{{　kanji:text:Text　}}{{\nSubdeck}}{{{#Card}}{{#Card }}{{editable:nc:nc:Text　}}<div class=front>{{{/Card　}}{{{{/Card　}}",
+        "back": "{{FrontSide}}\nx[y]{^<b>",
+        "fields": [
+         "<i>it</i> &lt;tag&gt; 日本[にほん]語[ご]"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{custom:Text}}#Q: %>",
+        "back": "<br>}日本{",
+        "fields": [
+         " 日本[にほん]語[ご]"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{Text:Text\n}}{{{Tags}}{{Text　}}{{{text:type-nc:text:CardID}}",
+        "back": "{{FrontSide}}<hr id=answer>{<!--{{Text}}-->%><!--<!--{-->{{\n#CardFlag }}{{　#Deck　}}%>{{{/Deck}}{{　/CardFlag}}",
+        "fields": [
+         "&amp;é"
+        ]
+       },
+       {
+        "front": "{{kana::tts ja_JP voices=Kyoko speed=0.9:Text}}日本",
+        "back": "{{FrontSide}}\n{{kanji:type-cloze:Text }}<!--{{　#Text}}<hr id=answer>%>{{{{　/Text}}<!---->-->",
+        "fields": [
+         "\n<!-- c --><i>it</i> &lt;tag&gt;"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{　Text }}<br>😀{{\n#Text\n}}<!-- {{{ hint:kana:Text}}[sound:q.mp3]<!--{{{{Text}}-->{{\n# Front}}:{{/ Front\n}}{{/Text\n}}",
+        "back": "}{{type-cloze:editable:nc:Text}}",
+        "fields": [
+         "a>b[c]<i>it</i> &lt;tag&gt;<br>"
+        ]
+       },
+       {
+        "front": "{{{{kanji:Text}}}}{{kanji:type:hint:Text}}",
+        "back": "{{FrontSide}}{{{\nhint:Text}}^",
+        "ord": 1,
+        "fields": [
+         "　[sound:a.mp3]&nbsp;私[わたし]"
+        ]
+       },
+       {
+        "front": "<!-- -->",
+        "back": "{{FrontSide}}{{\ntext:Text　}}",
+        "fields": [
+         "a>b[c]　&amp;"
+        ]
+       },
+       {
+        "front": "{{{{Text}}{{ Text}}{{　Subdeck　}}{{#c+1}}{{{{Text:Text}}{{　Text}}{{tts ja_JP voices=Kyoko speed=0.9:Text }}{{\nedit:CardID}}{{/c+1}}",
+        "back": "{{FrontSide}}\n</b>日本<!-- {{　Text　}}",
+        "ord": 499,
+        "fields": [
+         "&nbsp;私[わたし][sound:a.mp3]"
+        ]
+       },
+       {
+        "front": "{{:tts en_US::Text}}<!--{{kana:Subdeck}}{{　Text}}--><!--😀{{\nText\n}}{{　Text　}}\n",
+        "back": "{{FrontSide}}\n[sound:q.mp3]-->",
+        "ord": 1,
+        "fields": [
+         "語[sound:b.mp3]word"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "&nbsp;",
+        "back": "{{FrontSide}}{{{ furigana:type-cloze:Text}}#",
+        "fields": [
+         ""
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{tts ja_JP voices=Kyoko speed=0.9:Text:type-cloze:Text\n}}<!-- -->%>",
+        "back": "{{FrontSide}}<hr id=answer>{{　^Text}}<!--{{\ntype-nc:Text　}}-->{{Text}}{{/Text }}{{tts ja_JP voices=Kyoko speed=0.9:Text}}",
+        "ord": 499,
+        "fields": [
+         " 日本[にほん]語[ご] 日本[にほん]語[ご]"
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{Text}}[sound:q.mp3]{{#Text}} {{ Text }}{{ #Text　}}{{ c1\n}}{{/Text}}{{{{\nText}}{{/Text}}{{{Text}}",
+        "back": "{{FrontSide}}<hr id=answer>-->",
+        "fields": [
+         "word　"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": ":<hr id=answer>\n{{\nDeck　}}",
+        "back": "{{FrontSide}}\n{{　#Text}}&nbsp;{{　/Text　}}{{tts en_US:Text\n}}",
+        "fields": [
+         "<br>&nbsp;&nbsp;私[わたし]"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{　edit:Text}}{{edit:ci:text:Text}}</div>{{nc:Text:tts en_US:Text}}{{type-nc:type:tts en_US:Text}}",
+        "back": "{{{Text }}",
+        "fields": [
+         "[sound:a.mp3]<img src=\"a.png\"> "
+        ],
+        "tags": [
+         "alpha",
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{nc:kanji:type:Text\n}}{{ nc:text:hint:CardID　}}",
+        "back": "{{FrontSide}}<hr id=answer><!--x[y]{{Text}}{{\ntype-nc:type:CardFlag}}😀--></b>{{　Text　}}",
+        "ord": 2,
+        "fields": [
+         "<!-- c -->word"
+        ]
+       },
+       {
+        "front": "{{　hint:edit:Text　}}{{#Text　}}^{{Front<!-- {{　Text}}}{{ /Text}}<hr id=answer>",
+        "back": "{{FrontSide}}{{\nText:tts en_US:type-nc:Text　}}{{Text\n}}",
+        "fields": [
+         "[sound:a.mp3]a>b[c]"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{nc:kanji:Text\n}}[sound:q.mp3]{{{{#c500}}{{#Text }}&nbsp;{{　type-cloze:CardID　}}{{ /Text}}{{#Deck }}{{Subdeck　}}{{/Deck}}{{{　/c500}}Q: {{editable:type-cloze:editable:Subdeck}}",
+        "back": "{{FrontSide}}<hr id=answer>x[y]{{Text}}",
+        "ord": 2,
+        "fields": [
+         "<span></span>word "
+        ]
+       },
+       {
+        "front": "{{　Text\n}}{{\n^Text}}{{#Text}}{{{ ^Text}}{{Text　}}{{{　/Text\n}}{{{/Text }}<script>var a = {b: 1};</script>{{{　CardFlag　}}{{/Text}}{{kana:Text}}{{Text\n}}",
+        "back": "{{Text　}}{{ Text:tts en_US:Text }}}{{ Text　}}{{ Text}}",
+        "ord": 2,
+        "fields": [
+         "}}&nbsp;私[わたし]"
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{:text:Text}}{{{{ ^c0}}x[y]{{　Text\n}}{{{{\nText\n}}{{{\neditable:Text}}{{\n/c0}}{{ Text}}",
+        "back": "\n  {{=<% %>=}}<%FrontSide%>\n<%\nnc:custom:tts ja_JP voices=Kyoko speed=0.9:Text %><%#Text　%><%\nnc:kana:kanji:Text%>x[y]<%{^Text%><%Text %><%\n/Text\n%><% /Text%>",
+        "ord": 499,
+        "fields": [
+         "{{Front}}&#x41;"
+        ]
+       },
+       {
+        "front": "{{ Text\n}}{{^Text　}}<!--{{}{{/Text　}}{{type-nc:CardID　}}{{{tts en_US:Text　}}{{ #Text　}}{{ :Type\n}}<hr id=answer>{{ /Text\n}}",
+        "back": "{{FrontSide}}\n{{custom:tts en_US:Text}}}}%>",
+        "fields": [
+         "[sound:a.mp3]<img src=\"a.png\">"
+        ],
+        "tags": [
+         "alpha",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{Text\n}}{{{\n^Text}}<!-- {{{Text}}x[y]{{#Text　}}\n<b>{{ /Text}}<!--<!--<div class=front>--><!--{{　Text }}-->-->{{{ /Text }}:",
+        "back": "{{#Text }}{{{ Text }}{{{kana:Text }}x[y]日本{{　/Text }}{{type-cloze:Text }}",
+        "ord": 1,
+        "fields": [
+         "　<BR/>"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "<!--{{{{ #Text}}{{:Deck}}{{/Text　}}{{{tts en_US:Text　}}日本",
+        "back": "</div>",
+        "fields": [
+         "<br>x[]] "
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{　ci:Text\n}}}}<!-- {{kana::Text}}}{{{{\n#Tags}}{{　Text}}{{{{/Tags\n}}{{　#c+1}}{{{{\n^c+1}}{{Text }}{{ /c+1\n}}{{　Tags}}{{{{Text}}{{/c+1　}}",
+        "back": "{{FrontSide}}<!-- {{type-cloze:hint:Text:Text}}<!--{{furigana:Text:CardID}}<!-- {{{\nnc::Text}}{{{ Text }}-->{{{#CardFlag}}<br>{{{{ Text\n}}{{{/CardFlag}}",
+        "fields": [
+         "\t語[sound:b.mp3]"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{{editable:Text}}</b></div><!--%>-->",
+        "back": "<!--}日本😀-->",
+        "fields": [
+         "a>b[c]&nbsp;"
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{　type:nc:Text}}{{ Text}}",
+        "back": "{{FrontSide}}{{type-nc:nc:Text}}",
+        "fields": [
+         "\n"
+        ],
+        "tags": [
+         "beta",
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{ furigana:Text　}}<!--{{{　Subdeck}}{{ type-nc:Text }}[sound:q.mp3]{{tts en_US:Text:Text }}--></div>",
+        "back": "{{",
+        "ord": 499,
+        "fields": [
+         " é"
+        ]
+       },
+       {
+        "front": "{{{{type-nc:Text }}{{\nnc:type-nc:editable:Text\n}}<!--&nbsp;-->",
+        "back": "{{{#Text\n}} {{\n/Text }}",
+        "fields": [
+         "<span></span>"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{Text }}<br>{{{{ #Text　}}Q: {{\n/Text}}</b>",
+        "back": "{{FrontSide}}\n{{kana:hint:Text　}}{{#c01}}{{　ci:type-nc:Text}}{{\ntts en_US:type-cloze:ci:Subdeck　}}{{/c01}}{{#Text　}}{{ Text:tts ja_JP voices=Kyoko speed=0.9:Text}}{{^CardID}}{{\neditable:tts en_US:ci:Text　}}{{ /CardID}}{{{Text}}{{\n/Text　}}",
+        "ord": 1,
+        "fields": [
+         "word"
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{Text:Text　}}&nbsp;{{ type-cloze:Type　}}",
+        "back": "{{FrontSide}}\n&nbsp;<script>var a = {b: 1};</script>",
+        "ord": 499,
+        "fields": [
+         "a>b[c]<!-- c -->語[sound:b.mp3]"
+        ]
+       },
+       {
+        "front": "<!--{{#Text}}{{^Text}}<!---->{{\nText}}-->{{Text　}}{{/Text}}{{\n/Text}}{{{{:Text　}}{{{{ furigana:ci:Text}}}-->{{#Text}}:{{hint:edit:Text}}{{hint:Text }}{{Text\n}}}{{　/Text\n}}",
+        "back": "{{　Text:Text }}",
+        "fields": [
+         "a>b[c]&#x41;"
+        ]
+       },
+       {
+        "front": "{{nc:Text　}}{{^Text\n}}Q: {{{/Text　}}{{　Text}}<hr id=answer>{{{\ntext:Text}}",
+        "back": "{{　edit:kanji:type-cloze:Text　}}{{#c500\n}}{{　Text}}{{ /c500}}",
+        "ord": 499,
+        "fields": [
+         "<br>"
+        ]
+       },
+       {
+        "front": "{{{{　Text}}{{{ #Text　}}{{\nText }}{{　text:kana:Text}}}{{\n/Text　}}{{c1}}<!--{{^c500}}Q: {{　/c500\n}}{{　#Subdeck\n}}{{　Text}}{{\n/Subdeck}}{{edit:CardFlag}}-->",
+        "back": "%>{{{type-cloze:text:Text}}{{\nText}}",
+        "fields": [
+         "&nbsp;<div></div>"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{Text}}{{#Text}}{{ :Text}}{{#Text}}{{kanji:nc:Text}}{{\n/Text\n}}{{ /Text}}<!--<div class=front>--> {{{#c500 }}{{　Text}}{{/c500\n}}",
+        "back": "{{text:editable:Text:Text}}{{ kanji:Text}}<br>",
+        "fields": [
+         "\t"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%{ editable:tts ja_JP voices=Kyoko speed=0.9:kana:Text%>text }} more<!-- <%edit:Text　%><!--}<%\nkanji:Text %><%#c500　%><%#Text%>^<%{{ /Text%><!-- <%\nText\n%><%　/c500\n%><%{　#Text%><hr id=answer><%　/Text%>--><%#Text%><%{tts ja_JP voices=Kyoko speed=0.9:nc:ci:Text%><%{Subdeck\n%><%nc:Text%></div><%/Text%>",
+        "back": "{{FrontSide}}\n{{{{　type-cloze:CardID}}",
+        "ord": 2,
+        "fields": [
+         "<img src=\"a.png\">{{Front}}<br>"
+        ]
+       },
+       {
+        "front": "{{Text}}}<!--}-->{{#c3}}<!--<hr id=answer>-->{{\n^Text\n}}{{#Text\n}}:{{ type-cloze:tts en_US:tts ja_JP voices=Kyoko speed=0.9:Text\n}}{{/Text}}{{　/Text\n}}{{{ /c3}}{{kana:CardFlag　}}",
+        "back": "{{FrontSide}}<hr id=answer>{{\n#Text}}{{Text}}{{{{\n/Text }}x[y]{{{{ Text}}{{\nText　}}",
+        "fields": [
+         ""
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{Text}}--><hr id=answer>{{ kana:Text}}",
+        "back": "{{FrontSide}}{{type-cloze:kana:Text}}{{#Text}}<div class=front>{{{{/Text}}%>",
+        "fields": [
+         ""
+        ],
+        "tags": [
+         "日本語",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{Text\n}}x[y]",
+        "back": "{{FrontSide}}\n}}{{\nnc:hint:Text:Text　}}",
+        "ord": 1,
+        "name": "Reverse",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;　 日本[にほん]語[ご]"
+        ]
+       },
+       {
+        "front": "{{{ Text\n}}{{　kanji:Text　}}{{^Text}}{#x[y]}}{{{{ /Text\n}}",
+        "back": "{{=<% %>=}}<%FrontSide%>\n--><%{{　^Text%><%\nText %><% type-cloze:Text\n%><% #CardFlag %>x[y]<% /CardFlag　%><%　#Text%><%　^Subdeck\n%><!--}}--><% /Subdeck%><%\nText　%><%/Text%><%/Text%>",
+        "ord": 1,
+        "name": "Reverse",
+        "fields": [
+         "語[sound:b.mp3]"
+        ],
+        "tags": [
+         "alpha"
+        ]
+       },
+       {
+        "front": "{{\ntts en_US:Text}}<!--</b>",
+        "back": "{{{{edit:Text\n}}<br>}}",
+        "ord": 1,
+        "fields": [
+         "&#x41;<br>　"
+        ],
+        "tags": [
+         "beta",
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{{{ Text }}<script>var a = {b: 1};</script>",
+        "back": "{{FrontSide}}\n{{{\nText}}",
+        "ord": 1,
+        "fields": [
+         ""
+        ],
+        "tags": [
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{:Text}}{{{{Text}}{{{{tts ja_JP voices=Kyoko speed=0.9:tts ja_JP voices=Kyoko speed=0.9:custom:Text}}[sound:q.mp3]</b>",
+        "back": "{{kana:CardID}}:{{ ^Text　}}{{\nText}}{{Text\n}}{{/Text}}",
+        "fields": [
+         "&nbsp;私[わたし]"
+        ]
+       },
+       {
+        "front": "\n  {{=<% %>=}}<% Text　%><%tts en_US:Text\n%>}",
+        "back": "{{\nCard}}",
+        "name": "Reverse",
+        "fields": [
+         "word<img src=\"a.png\">"
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{　Text }}}<div class=front>{{{ Text　}}",
+        "back": "{{FrontSide}}\n{{　hint:CardID}}",
+        "ord": 499,
+        "fields": [
+         "&bogus;<BR/><BR/>"
+        ]
+       },
+       {
+        "front": " {{=<% %>=}}<%　type:custom:tts ja_JP voices=Kyoko speed=0.9:Subdeck%><hr id=answer><%ci:type:C1%>",
+        "back": "{{{ Text\n}}<!--<script>var a = {b: 1};</script>-->{{{Text }}",
+        "fields": [
+         "<i>it</i> &lt;tag&gt;&nbsp;"
+        ],
+        "tags": [
+         "alpha",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{ Text}}:</b>",
+        "back": "{{FrontSide}}\n日本&nbsp;#<!--\n-->",
+        "ord": 499,
+        "fields": [
+         ""
+        ],
+        "tags": [
+         "日本語"
+        ]
+       },
+       {
+        "front": "{{\nnc:Text}}{{ custom:Text\n}}</div>{{　custom:text:Card　}}}",
+        "back": "{{FrontSide}}\n{{\n^Subdeck　}}<b>{{ /Subdeck}}{{Text }}",
+        "ord": 1,
+        "fields": [
+         "é"
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{{{Text }}{{　#Text }}{{\nText}}{{furigana:furigana:Text　}}{{{{hint:Text\n}}{{/Text }}{{　^Text }}{{editable:furigana:kana:CardFlag　}}}{{Text\n}}}}}-->{{{{/Text\n}}{{{{　Text\n}}<hr id=answer>",
+        "back": "{{FrontSide}}\n{{{Text\n}}{{^ Front }}}😀<!-- {{\ntype:Text }}{{/ Front　}}{{\ntype-nc:hint:Text}}{{{{type:Text}}}",
+        "fields": [
+         "<BR/><br>&#x41;"
+        ],
+        "tags": [
+         "beta",
+         "x::y"
+        ]
+       },
+       {
+        "front": "{{　Card　}}{{{{　#Text\n}}{{{Text　}}{{x[y]<br>{{{/Text}}-->",
+        "back": "{{{{nc:custom::Text\n}}:{{Front{{{Text}}",
+        "ord": 1,
+        "fields": [
+         " <i>it</i> &lt;tag&gt;"
+        ],
+        "tags": [
+         "alpha",
+         "beta",
+         "x::y"
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}
