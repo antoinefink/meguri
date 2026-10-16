@@ -6,6 +6,7 @@ pub mod catalog;
 #[cfg(feature = "test-hooks")]
 pub mod durability_events;
 pub(crate) mod exclusive;
+mod live_file;
 pub mod op;
 pub mod plan_commit;
 pub mod preconditions;
@@ -381,7 +382,8 @@ impl ExecShared {
             body: Box::new(ReplaceTask { swap, reply }),
         });
         rx.recv().unwrap_or(Replaced {
-            result: Err(EngineError::internal("the writer stopped during a replace")),
+            error: Some(EngineError::internal("the writer stopped during a replace")),
+            generation: None,
             factory: None,
         })
     }

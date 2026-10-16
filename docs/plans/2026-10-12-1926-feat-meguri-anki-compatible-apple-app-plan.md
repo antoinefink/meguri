@@ -4491,6 +4491,32 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** From a worktree, with the host locked or unlocked, the iPhone drive example, the iPhone and iPad accessibility audits and (if they match) the snapshot matrix pass through the VM; `ps` on the host shows no booted simulator during the runs; `tools/mg selftest` passes.
 
+### U8d. The Mac app stays out of sight on the host
+
+**Goal:** When a test or a `tools/mg` job starts the Mac app on Antoine's Mac, it gets no Dock icon and never comes to the front. Mac snapshot tests (the app is their test host) and hidden launches (`open -g -j`, for window captures) still run on the host, but they no longer show up while he works. Antoine saw the app appear in his Dock on 2026-10-16 and chose this fix.
+
+**Requirements:** R1961, R1963, and root AGENTS.md "Running tests and apps on this Mac".
+
+**Dependencies:** U8c, U10.
+
+**Files:**
+- Modify: `app/Meguri/App/MeguriApp.swift` (or the Mac app delegate it uses), `tools/mg.d/app.sh` and `tools/mg.d/drive.sh` (their hidden launches pass the launch argument), `app/AGENTS.md`, root `AGENTS.md`, `docs/process/mac-ui-vm.md`; tests in the app's test targets and `tools/tests/`.
+
+**Approach:**
+- The app decides once, before it finishes launching: it runs without a Dock icon and never activates when it is a test host (`XCTestConfigurationFilePath` is set) or when the launch argument `-MeguriBackgroundLaunch YES` is passed. `tools/mg` adds that argument to every Mac launch it makes on the host. Choose the activation policy for each case from evidence: off-screen snapshot rendering and `screencapture -l <windowid>` must keep working.
+- The switch exists only in Debug builds of the dev bundle id. Release and App Store builds ignore it.
+- Mac UI suites in the VM launch the app through XCUIApplication without the argument, so it keeps the normal policy there.
+- Snapshot reference images must not change. If any Mac snapshot differs, the policy is wrong: fix it, do not re-record.
+
+**Test scenarios:**
+- A hosted test asserts that the app, as test host, has no regular activation policy.
+- `tools/mg run --platform mac` (hidden launch): `lsappinfo info -only ApplicationType <pid>` does not report `Foreground` while it runs, and the window capture still works.
+- The app launched by hand (no argument, not a test host) gets the regular policy and a Dock icon.
+- `tools/mg snapshots --platform mac` passes with unchanged references.
+- `tools/mg mac-ui` in the VM still passes.
+
+**Verification:** During `tools/mg snapshots --platform mac` and `tools/mg run --platform mac` on the host, the Meguri process never reports `Foreground` and gets no Dock tile; the Mac snapshot matrix matches its references; `tools/mg mac-ui` passes in the VM; `tools/mg selftest` passes.
+
 ### U9. DesignSystem package, design documents, UI lint gate and component gallery
 
 **Goal:** Provide the token-based design vocabulary, the written design brief and rubric, a deterministic lint gate that rejects off-token UI code and misplaced glass, a contrast test over every token pair, and a debug component gallery agents build from.

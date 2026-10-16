@@ -20,6 +20,7 @@ use crate::changes::stream::{EventKind, Seq};
 use crate::changes::{self, MediaNotes};
 use crate::error::EngineError;
 use crate::executor::exclusive::Privilege;
+use crate::executor::live_file::LiveFile;
 use crate::executor::op::{OpContext, OpResult, OpSpec, OpTiming, UndoMeta, WriteDelay};
 use crate::executor::preconditions::{self, TouchIndex};
 use crate::executor::source::QueueKind;
@@ -476,11 +477,15 @@ where
 
 /// What a replace leaves (`engine/lifecycle` L8).
 pub(crate) struct Replaced {
-    /// The swap or the reopen failed; `factory` says whether a collection is
-    /// open again.
-    pub result: Result<Generation, EngineError>,
+    /// Why the swap or the reopen failed; `factory` says whether a
+    /// collection is open again.
+    pub error: Option<EngineError>,
+    /// The new generation, when a file the swap changed was reopened: after
+    /// every successful swap, and after a failed one that had already
+    /// changed the file.
+    pub generation: Option<Generation>,
     /// Readers of the collection open now: the new file, or the old one when
-    /// the swap failed and it was reopened; `None` when nothing is open.
+    /// the swap failed before changing it; `None` when nothing is open.
     pub factory: Option<ReaderFactory>,
 }
 
@@ -503,7 +508,8 @@ impl TaskBody for ReplaceTask {
         // and the swap must not touch a file nobody holds any more.
         let Some(collection) = env.collection.take() else {
             let _ = reply.send(Replaced {
-                result: Err(EngineError::unavailable("the collection is closed")),
+                error: Some(EngineError::unavailable("the collection is closed")),
+                generation: None,
                 factory: None,
             });
             return;
@@ -511,40 +517,46 @@ impl TaskBody for ReplaceTask {
         if let Err(error) = collection.close() {
             tracing::warn!(%error, "closing the collection before a swap");
         }
+        let live = LiveFile::before_swap(&shared.path);
         let swapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
             .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
+        // A swap that failed after changing the file still replaced the
+        // collection. Checked before the reopen (see `LiveFile::changed`).
+        let changed = live.changed();
+        let replacing = swapped.is_ok() || changed;
+        if replacing {
+            // The steps describe the file the swap replaced; dropped before
+            // any op of the new generation, also when the reopen fails
+            // (engine/undo M6).
+            shared.undo.reset(DisabledReason::ClearedByOneWay);
+        }
         let reopen = env.reopen;
         let options =
             OpenOptions::new(reopen.clock.as_ref(), reopen.random.as_ref()).initializers(reopen.initializers.clone());
         let replaced = match open_collection(&shared.path, &options) {
             Err(error) => Replaced {
-                result: Err(match swapped {
+                error: Some(match swapped {
                     Err(swap_error) => swap_error,
                     Ok(()) => EngineError::Open(error),
                 }),
+                generation: None,
                 factory: None,
             },
             Ok(collection) => {
                 let factory = Some(collection.reader_factory());
                 *env.collection = Some(collection);
                 env.touched.reset(*shared.lock_commit());
-                match swapped {
-                    Err(error) => Replaced {
-                        result: Err(error),
-                        factory,
-                    },
-                    Ok(()) => {
-                        // Before any op of the new generation (engine/undo M6).
-                        shared.undo.reset(DisabledReason::ClearedByOneWay);
-                        let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
-                        shared
-                            .stream
-                            .publish(generation, None, EventKind::CollectionReplaced { generation });
-                        Replaced {
-                            result: Ok(generation),
-                            factory,
-                        }
-                    }
+                let generation = replacing.then(|| {
+                    let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
+                    shared
+                        .stream
+                        .publish(generation, None, EventKind::CollectionReplaced { generation });
+                    generation
+                });
+                Replaced {
+                    error: swapped.err(),
+                    generation,
+                    factory,
                 }
             }
         };
@@ -553,7 +565,8 @@ impl TaskBody for ReplaceTask {
 
     fn fail(self: Box<Self>, error: EngineError) {
         let _ = self.reply.send(Replaced {
-            result: Err(error),
+            error: Some(error),
+            generation: None,
             factory: None,
         });
     }
