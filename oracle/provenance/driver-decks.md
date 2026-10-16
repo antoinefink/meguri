@@ -29,6 +29,7 @@ the oracle image (`driver/tests/test_decks.py`):
 - the deck kind blob of a filtered deck reads as `filtered` through the deck
   getter; a `db_exec` deck row is found by its name at the next step.
 - Anki writes the `other` JSON members of a deck saved from its legacy form in
-  a random order (a hash map): `decks/rename/preserve`, which stores two
-  members and reads the common bytes (steps 1 and 4), gives either order from
-  one run to the next.
+  a random order (a hash map): `decks/rename/preserve` gave either order from
+  one run to the next while it stored two members and read the common bytes.
+  It now stores one member while it reads them (steps 1 and 4) and adds the
+  second after that; five compares of the re-recorded golden matched.

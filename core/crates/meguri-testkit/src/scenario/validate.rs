@@ -103,6 +103,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
             legacy_update(update).map_err(at)?;
         }
         record_op(step).map_err(at)?;
+        deck_op(step).map_err(at)?;
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
@@ -262,6 +263,37 @@ fn record_op(step: &Step) -> Result<(), FormatError> {
             Err(FormatError::new("delete_notes needs at least one note"))
         }
         Step::SetConfig(args) if args.key.is_empty() => Err(FormatError::new("set_config needs a non-empty key")),
+        _ => Ok(()),
+    }
+}
+
+/// deck-ops.md K1-K10: what the schema requires beyond the types (decks
+/// named by non-empty stored names, at least one in a list) and K9's two
+/// different presets.
+fn deck_op(step: &Step) -> Result<(), FormatError> {
+    let op = step.name();
+    let named = |names: &[String]| {
+        if names.iter().any(String::is_empty) {
+            return Err(FormatError::new(format!("{op}: a deck name must not be empty")));
+        }
+        Ok(())
+    };
+    let listed = |decks: &[String]| {
+        if decks.is_empty() {
+            return Err(FormatError::new(format!("{op} needs at least one deck")));
+        }
+        named(decks)
+    };
+    match step {
+        Step::RenameDeck(args) => named(std::slice::from_ref(&args.deck)),
+        Step::SetCurrentDeck(args) => named(std::slice::from_ref(&args.deck)),
+        Step::SetDeckPreset(args) => named(std::slice::from_ref(&args.deck)),
+        Step::ReparentDecks(args) => listed(&args.decks),
+        Step::DeleteDecks(args) => listed(&args.decks),
+        Step::SetDeckCollapsed(args) => listed(&args.decks),
+        Step::RemovePreset(args) if args.preset == args.fallback => Err(FormatError::new(
+            "remove_preset: preset and fallback must differ (deck-ops.md K9)",
+        )),
         _ => Ok(()),
     }
 }

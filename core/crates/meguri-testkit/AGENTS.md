@@ -10,6 +10,7 @@
 - Read JSON with floats through `observe::parse_json` (exact), never `serde_json::from_str`: serde_json is off by an ULP on 17-digit floats without `float_roundtrip`, and enabling that feature here would change the core's parsing in every test build (feature unification).
 - A new op or observation kind changes `scenario/model.rs` (`Step`, `ObservationKind`), the spec and schema, and the oracle driver in one change; f32 values go through `observe::f32_value`.
 - An optional model member the schema types without null is `#[serde(default, deserialize_with = "present")]`: a bare `Option` reads an explicit null as missing, so an invalid scenario would load.
+- An op whose argument is a mapping reads it through `mapping` or `op_mapping` (a variant's `deserialize_with`): a derived struct alone also reads the list of its values, which the schema forbids.
 - Scenario YAML is parsed from granit-parser events with the core-schema rules in `scenario/yaml.rs`, not through serde-saphyr's typeless deserializer (it reads `yes`, `017`, `1_000`, aliases, merge keys and tags differently). Its hash must equal the oracle's `canon.py` byte for byte; `tests/scenario_format.rs` checks it against every committed golden.
 - `wallclock.rs` is the only system-clock read, for report timing and budgets.
 - Runner tests build temporary conformance trees from copies of committed scenarios and goldens; never write to `conformance/`.
