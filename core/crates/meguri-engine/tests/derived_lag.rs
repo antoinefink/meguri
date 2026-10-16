@@ -487,6 +487,17 @@ fn mirrored_in(snapshot: &Snapshot<'_>) -> Vec<Row> {
     )
 }
 
+/// Every card as `snapshot` reads the collection, as mirror rows.
+fn cards_in(snapshot: &Snapshot<'_>) -> Vec<Row> {
+    let mut rows = Vec::new();
+    each_page(snapshot, 5_000, |cards| {
+        rows.extend(cards.iter().map(row_of));
+        Ok(())
+    })
+    .unwrap();
+    rows
+}
+
 /// The mirror's rows as a collection reader sees them through `derived`.
 fn mirrored(collection: &Collection) -> Vec<Row> {
     let reader = collection.reader(ReaderRole::Query).unwrap();
@@ -1129,6 +1140,59 @@ fn a_commit_the_store_has_not_applied_is_not_current_and_its_application_is_publ
     assert!(mirrored_in(&late).iter().any(|r| r.0 == id.0 && r.4 == 888));
     drop(late);
     drop(lease);
+    opened.close();
+}
+
+#[test]
+fn a_store_that_applied_a_commit_after_the_snapshot_before_its_first_derived_read_is_not_current() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open(&path);
+    opened.settle();
+    let generation = opened.collection.generation();
+    let id = add_cards(&opened.collection, &[1])[0];
+    opened.host.flush().unwrap();
+    // Two consumers' snapshots of the same commit: one asks at once, the
+    // other has not read `derived` yet.
+    let asked_lease = opened.collection.reader(ReaderRole::Interactive).unwrap();
+    let asked = asked_lease.snapshot().unwrap();
+    assert!(opened.host.is_current(MIRROR, &asked));
+    let unread_lease = opened.collection.reader(ReaderRole::Query).unwrap();
+    let unread = unread_lease.snapshot().unwrap();
+    assert_eq!(unread.seq(), asked.seq());
+
+    // A later commit is applied to the store.
+    let later = set_due(&opened.collection, id, 2);
+    assert!(later > unread.seq());
+    wait_for_event(&opened.events, |e| applied_of(e).is_some_and(|a| a.through >= later));
+
+    for snapshot in [&asked, &unread] {
+        assert!(
+            cards_in(snapshot).iter().any(|r| r.0 == id.0 && r.4 == 1),
+            "each snapshot sees the collection before the later commit"
+        );
+    }
+    assert!(
+        opened.host.is_current(MIRROR, &asked),
+        "the store as the snapshot first read it"
+    );
+    assert_eq!(mirrored_in(&asked), cards_in(&asked));
+
+    assert!(opened.host.is_ready(MIRROR, generation));
+    assert!(
+        !opened.host.is_current(MIRROR, &unread),
+        "the snapshot's first read of `derived` sees a commit its collection does not"
+    );
+    assert_ne!(mirrored_in(&unread), cards_in(&unread), "its derived rows are ahead");
+    drop(unread);
+    drop(asked);
+
+    let late = unread_lease.snapshot().unwrap();
+    assert!(opened.host.is_current(MIRROR, &late));
+    assert!(mirrored_in(&late).iter().any(|r| r.0 == id.0 && r.4 == 2));
+    assert_eq!(mirrored_in(&late), cards_in(&late));
+    drop(late);
+    drop(unread_lease);
+    drop(asked_lease);
     opened.close();
 }
 

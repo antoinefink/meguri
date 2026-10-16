@@ -13,7 +13,7 @@
 //!   batches to the writer (D7).
 //! - Readers attach the file as `derived` for the generation the store is
 //!   bound to (D9); `is_current` tells a consumer whether a component holds
-//!   every commit its snapshot sees, from the stamp's `seq` (D8).
+//!   exactly the commits its snapshot sees, from the stamp's `seq` (D8).
 //!
 //! U38 builds the host before the collection opens, passes its ports to
 //! `Engine::open_raw` (its open step first) and closes it after
@@ -455,13 +455,16 @@ impl DerivedHost {
             .is_some_and(|r| r.generation == generation && r.readiness == Readiness::Ready)
     }
 
-    /// Whether `component`'s tables, as `snapshot` reads them, hold every
-    /// commit the snapshot sees (D8). Commits reach the store after they
-    /// are published, so a `Ready` component can be behind the snapshot.
-    /// The answer comes from the store as the snapshot reads it, so it holds
-    /// for each of the snapshot's reads of `derived`, before or after it.
-    /// When it is false, read without the component, and ask again with a
-    /// later snapshot at the next [`DerivedApplied`] or `Ready`.
+    /// Whether `component`'s tables, as `snapshot` reads them, hold exactly
+    /// the commits the snapshot sees (D8). Commits reach the store after
+    /// they are published, so a `Ready` component can be behind the
+    /// snapshot; and SQLite fixes the snapshot's view of the store at its
+    /// first read of `derived`, not when the snapshot began, so that view
+    /// can also hold later commits. The answer comes from the store as the
+    /// snapshot reads it, so it holds for each of the snapshot's reads of
+    /// `derived`, before or after it: ask before the first. When it is
+    /// false, read without the component, and ask again with a later
+    /// snapshot at the next [`DerivedApplied`] or `Ready`.
     pub fn is_current(&self, component: &str, snapshot: &Snapshot<'_>) -> bool {
         let seq = snapshot.seq();
         // In this order: once every op up to the snapshot's has run the
@@ -479,10 +482,12 @@ impl DerivedHost {
         }
         match snapshot.derived_seq(component) {
             // The store holds every commit up to `held`; the commits after
-            // it that it was not sent change nothing in it.
+            // it that it was not sent change nothing in it. A view holding
+            // a commit after `seq` does not match the collection the
+            // snapshot sees.
             Ok(Some(held)) => {
                 let held = Seq(u64::try_from(held).unwrap_or(0));
-                held >= seq || (observed && held >= sent)
+                held == seq || (held < seq && observed && held >= sent)
             }
             Ok(None) => false,
             Err(error) => {
