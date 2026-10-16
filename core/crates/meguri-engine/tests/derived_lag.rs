@@ -1139,22 +1139,24 @@ fn a_replaced_collection_is_rebuilt_and_no_reader_of_the_new_generation_sees_old
 #[test]
 fn a_running_rebuild_yields_to_an_exclusive_phase_and_starts_again_after_it() {
     let (_dir, path) = copy_fixture("schema-18.anki2");
-    // Some cards, so the slow build has batches to pause between.
-    without_store(&path, |collection| add_cards(collection, &(0..60).collect::<Vec<_>>()));
+    // 50 batches of 30 ms: the rest of the first build takes well over the
+    // second the exclusive job may wait for the maintenance reader below.
+    without_store(&path, |collection| add_cards(collection, &(0..100).collect::<Vec<_>>()));
+    let gate = Arc::new(Gate::default());
     let opened = open_with(&path, |counters| CardMirror {
         batch: 2,
         pause: Duration::from_millis(30),
+        gate: Some(Arc::clone(&gate)),
         ..CardMirror::new(counters)
     });
-    let deadline = monotonic::now() + WAIT;
-    while !matches!(opened.readiness(), Readiness::Building { .. }) {
-        assert!(monotonic::now() < deadline, "the build never started");
-        thread::sleep(Duration::from_millis(5));
-    }
-    // The exclusive job needs the maintenance reader (its backup): the build
-    // lets go of it at its next batch.
+    // The exclusive phase begins while the builder holds its snapshot,
+    // stopped after its first batch; then the builder goes on.
+    opened.wait_for_first_batch();
     let slot = opened.engine.acquire_slot(LongOp::Restore).unwrap();
     let exclusive = slot.enter_exclusive(true).unwrap();
+    gate.open();
+    // The exclusive job needs the maintenance reader (its backup): the build
+    // lets go of it at its next batch.
     let started = monotonic::now();
     let lease = exclusive.collection().reader(ReaderRole::Maintenance).unwrap();
     assert!(
@@ -1163,11 +1165,12 @@ fn a_running_rebuild_yields_to_an_exclusive_phase_and_starts_again_after_it() {
         monotonic::now() - started
     );
     drop(lease);
+    assert_eq!(opened.builds(), 1, "a build started during the exclusive phase");
     // Cancelled without a replacement: the build starts again.
     drop(exclusive);
     drop(slot);
     opened.settle();
-    assert!(opened.builds() >= 2, "{} builds", opened.builds());
+    assert_eq!(opened.builds(), 2, "the build that yielded did not run again");
     assert_eq!(opened.readiness(), Readiness::Ready);
     assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
     opened.close();
