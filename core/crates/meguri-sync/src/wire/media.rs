@@ -209,6 +209,12 @@ pub const MAX_DOWNLOAD_BYTES: u64 = 25 * MAX_DOWNLOAD_ENTRY_BYTES;
 /// deflate alone reaches about 1032.
 pub const MAX_DOWNLOAD_EXPANSION: u64 = 100;
 
+/// The most bytes `_meta` may expand to, the one entry read into memory and
+/// parsed (R1852, R1562): an object of at most 25 members (R1577), each a
+/// real name of at most 255 bytes (W17.2) with every byte written as a
+/// six-byte escape, comes to under 40 KiB.
+pub const MAX_META_BYTES: u64 = 64 * 1024;
+
 /// The bytes one read from an entry moves to its staged file.
 const COPY_CHUNK: usize = 64 * 1024;
 
@@ -219,10 +225,10 @@ const COPY_CHUNK: usize = 64 * 1024;
 /// expanded into a new file in `staging`, an existing directory: only
 /// `_meta` is read into memory.
 ///
-/// The zip is a decode failure when one entry expands past
-/// [`MAX_DOWNLOAD_ENTRY_BYTES`], its files together past
-/// [`MAX_DOWNLOAD_BYTES`], or all its entries (`_meta` counting) past
-/// [`MAX_DOWNLOAD_EXPANSION`] times the body's size. The sizes the zip
+/// The zip is a decode failure when `_meta` expands past
+/// [`MAX_META_BYTES`], one file past [`MAX_DOWNLOAD_ENTRY_BYTES`], its files
+/// together past [`MAX_DOWNLOAD_BYTES`], or all its entries (`_meta`
+/// counting) past [`MAX_DOWNLOAD_EXPANSION`] times the body's size. The sizes the zip
 /// declares are checked before anything is staged; the bytes it expands to
 /// are checked again as they are read, and reading stops one byte past a
 /// limit. A failure leaves nothing in `staging`. A file that cannot be
@@ -299,6 +305,9 @@ fn declared_entries(archive: &ZipArchive<Cursor<&[u8]>>, limits: Limits) -> Resu
                 "zip entry {index} declares more than {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
             ));
         }
+        if name == META_ENTRY && size > MAX_META_BYTES {
+            return Err(format!("{META_ENTRY} declares more than {MAX_META_BYTES} bytes"));
+        }
         all = all.saturating_add(size);
         if name != META_ENTRY {
             files = files.saturating_add(size);
@@ -317,13 +326,13 @@ fn declared_entries(archive: &ZipArchive<Cursor<&[u8]>>, limits: Limits) -> Resu
 }
 
 /// The bytes of `_meta`, taken from `limits.all`: at most
-/// [`MAX_DOWNLOAD_ENTRY_BYTES`] and at most what is left. One byte past
-/// either limit fails, and nothing past it is read.
+/// [`MAX_META_BYTES`] and at most what is left. One byte past either limit
+/// fails, and nothing past it is read, so nothing larger is ever parsed.
 fn read_meta(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, limits: &mut Limits) -> Result<Vec<u8>, String> {
     let entry = archive
         .by_index(index)
         .map_err(|err| format!("zip entry {index}: {err}"))?;
-    let limit = MAX_DOWNLOAD_ENTRY_BYTES.min(limits.all);
+    let limit = MAX_META_BYTES.min(limits.all);
     // The buffer grows with the bytes read, never from the declared size.
     let mut data = Vec::new();
     entry
@@ -331,10 +340,8 @@ fn read_meta(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, limits: &mut
         .read_to_end(&mut data)
         .map_err(|err| format!("zip entry {index}: {err}"))?;
     let read = u64::try_from(data.len()).unwrap_or(u64::MAX);
-    if read > MAX_DOWNLOAD_ENTRY_BYTES {
-        return Err(format!(
-            "zip entry {index} expands past {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
-        ));
+    if read > MAX_META_BYTES {
+        return Err(format!("{META_ENTRY} expands past {MAX_META_BYTES} bytes"));
     }
     if read > limits.all {
         return Err(format!("the zip expands past {MAX_DOWNLOAD_EXPANSION} times its size"));

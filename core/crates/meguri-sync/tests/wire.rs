@@ -1241,6 +1241,53 @@ fn a_padded_zip_under_the_expansion_ratio_is_refused_past_25_files_of_100_mib() 
 }
 
 #[test]
+fn meta_holds_25_of_the_longest_names_and_nothing_past_64_kib() {
+    // R1852, R1562: `_meta` is read into memory and parsed, so it may expand
+    // to 64 KiB at most. The largest `_meta` an answer needs: 25 members
+    // (R1577), each a real name of 255 bytes (W17.2) written as six-byte
+    // escapes, with a space after each colon and comma.
+    let escaped = "\\u0041".repeat(255);
+    let byte = b"x".as_slice();
+    let mut entries = Vec::new();
+    let mut members = Vec::new();
+    for index in 0..25 {
+        entries.push(index.to_string());
+        members.push(format!(r#""{index}": "{escaped}""#));
+    }
+    let meta = format!("{{{}}}", members.join(", "));
+    assert!((37 * 1024..40 * 1024).contains(&meta.len()), "{}", meta.len());
+    let mut zip: Vec<(&str, &[u8], bool)> = entries.iter().map(|entry| (entry.as_str(), byte, false)).collect();
+    zip.push(("_meta", meta.as_bytes(), false));
+    let dir = staging();
+    let files = wire::decode_download_zip(&zip_of(&zip), dir.path()).unwrap();
+    assert_eq!(files.len(), 25);
+    assert!(files.iter().all(|file| file.name == "A".repeat(255)));
+
+    // A `_meta` of exactly 64 KiB decodes and one a byte longer does not,
+    // stored or deflated: white space pads it, and 2 KiB of stored bytes
+    // keep the deflated one within the zip's expansion ratio (E6).
+    let noise = incompressible(2048);
+    let named = r#""0":"a.mp3","1":"noise.bin"}"#;
+    let padded = |len: usize| format!("{{{}{named}", " ".repeat(len - 1 - named.len()));
+    for deflated in [false, true] {
+        for (len, decodes) in [(64 * 1024, true), (64 * 1024 + 1, false)] {
+            let meta = padded(len);
+            assert_eq!(meta.len(), len);
+            let zip = zip_of(&[
+                ("0", byte, false),
+                ("1", noise.as_slice(), false),
+                ("_meta", meta.as_bytes(), deflated),
+            ]);
+            if decodes {
+                assert_eq!(file_count(&zip).unwrap(), 2, "{len} bytes, deflated {deflated}");
+            } else {
+                bad_response(file_count(&zip), Method::DownloadFiles);
+            }
+        }
+    }
+}
+
+#[test]
 fn an_upload_zip_names_additions_by_batch_position_and_lists_every_change() {
     // W17.2's example.
     let zip = wire::encode_upload_zip(&[
