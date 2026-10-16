@@ -110,7 +110,9 @@ mod tests {
     struct Broadcast(Mutex<Vec<mpsc::Sender<(u64, JobOutcome)>>>);
     impl CoreEventListener for Broadcast {
         fn on_event(&self, event: CoreEvent) {
-            let CoreEventKind::JobFinished { id, outcome } = event.kind;
+            let CoreEventKind::JobFinished { id, outcome } = event.kind else {
+                return;
+            };
             for tx in self.0.lock().unwrap().iter() {
                 let _ = tx.send((id, outcome.clone()));
             }

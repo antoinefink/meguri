@@ -554,22 +554,34 @@ impl<'s> Exclusive<'s> {
     /// every connection closed (U124's verified replace). Returns the new
     /// generation's privileged handle. `CollectionUnavailable`, without
     /// running `swap`, once the phase has ended (the collection closed).
+    ///
+    /// When `swap` fails after it changed the file, the generation still
+    /// moves and this returns the swap's error: [`Exclusive::collection`]
+    /// then holds the new generation's handle.
     pub fn replace(
         &mut self,
         swap: impl FnOnce(&Path) -> Result<(), EngineError> + Send + 'static,
     ) -> Result<Collection, EngineError> {
         let engine = &self.slot.engine;
         self.check_active(&engine.lock_state())?;
-        let collection = generation::replace(engine, &self.core, self.privilege, Box::new(swap))?;
-        self.replaced = true;
-        self.collection = collection.clone();
-        // The slot now belongs to the new generation.
-        if let Some(holder) = engine.lock_state().slot.as_mut()
-            && holder.id == self.slot.id
-        {
-            holder.generation = collection.generation;
+        let replacement = generation::replace(engine, &self.core, self.privilege, Box::new(swap));
+        if let Some(collection) = &replacement.moved {
+            self.replaced = true;
+            self.collection = collection.clone();
+            // The slot now belongs to the new generation.
+            if let Some(holder) = engine.lock_state().slot.as_mut()
+                && holder.id == self.slot.id
+            {
+                holder.generation = collection.generation;
+            }
         }
-        Ok(collection)
+        match (replacement.error, replacement.moved) {
+            (None, Some(collection)) => Ok(collection),
+            (Some(error), _) => Err(error),
+            (None, None) => Err(EngineError::internal(
+                "a replace reported neither a generation nor an error",
+            )),
+        }
     }
 
     /// Whether the phase still runs: its slot is held, its collection is
