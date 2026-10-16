@@ -379,6 +379,37 @@
                 }
               }
             },
+            "cloze": {
+              "description": "specs/conformance/cloze-ops.md Z1: pure cloze functions over a list of inputs; [text, card] pairs (card 1-65535), or strings for numbers, which shares a request with no other function.",
+              "type": "object",
+              "required": ["fns", "inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "fns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["numbers", "front", "back", "only_front", "only_back", "typing"] }
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      { "type": "string" },
+                      {
+                        "type": "array",
+                        "prefixItems": [{ "type": "string" }, { "type": "integer", "minimum": 1, "maximum": 65535 }],
+                        "minItems": 2,
+                        "maxItems": 2
+                      }
+                    ]
+                  }
+                }
+              },
+              "if": { "properties": { "fns": { "contains": { "const": "numbers" } } } },
+              "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "string" } } } },
+              "else": { "properties": { "inputs": { "items": { "type": "array" } } } }
+            },
             "fsrs_next": {
               "description": "float-determinism.md F5.1: FSRS next states of a stored review card per input; never touches the scenario's collection. At most one per observe step, params must name a member of param_sets, and f32 members are read per model/json-numbers N2 (checked when the scenario loads).",
               "type": "object",

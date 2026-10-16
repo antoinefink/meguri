@@ -145,22 +145,128 @@ fn malformed_requests_are_invalid_scenarios() {
     }
 }
 
-// Q3: card cases wait for notes and cards in the executor; cloze note types
-// and cloze filters for U61.
+// Q3: card cases wait for notes and cards in the executor.
 #[test]
 fn work_of_later_units_is_refused_not_guessed() {
     let card = "  - observe:\n      - template: {cases: [{card: \"#c1\", front: \"{{Deck}}\"}]}\n";
     assert_eq!(run(card).unwrap_err().kind, "unsupported_observation");
-    let cloze = "  - observe:\n      - template:\n          notetype: {name: C, kind: cloze, fields: [Text]}\n          cases: [{front: \"{{Text}}\"}]\n";
-    assert_eq!(run(cloze).unwrap_err().kind, "unsupported_observation");
-    for template in ["{{cloze:Front}}", "{{text:cloze-only:Front}}"] {
-        let steps = request(&format!("            - {{front: \"{template}\"}}\n"));
-        assert_eq!(run(&steps).unwrap_err().kind, "unsupported_observation", "{template}");
-    }
-    // The type-in marker for cloze runs no cloze filter (filters.md F1).
-    let typed = run(&request(
-        "            - {front: \"{{Front}}{{type:cloze:Back}}\", fields: [f]}\n",
+}
+
+// filters.md F8, render/cloze C1, C6, C9: the cloze filters render for the
+// case's card number (ord + 1) and side; on a standard note type the blank
+// check is T11.2's, so an empty cloze output is no blank card (R975). The
+// type-in marker for cloze runs no cloze filter (F1).
+#[test]
+fn cloze_filters_render_for_the_card_and_side() {
+    let out = run(&request(
+        r#"            - {front: "{{cloze:Front}}", back: "{{FrontSide}}|{{cloze:Front}}", fields: ["{{c1::a::h}} {{c2::b}}"]}
+            - {front: "{{cloze:Front}}", back: "{{cloze:Front}}", ord: 2, fields: ["{{c1::a::h}} {{c2::b}}"]}
+            - {front: "{{text:cloze-only:Front}}", back: "{{text:cloze-only:Front}}", ord: 1, fields: ["{{c2::<b>x</b>}}"]}
+            - {front: "{{Front}}{{type:cloze:Back}}", fields: ["{{c1::f}}", "{{c1::g}}"]}
+"#,
     ))
     .unwrap();
-    assert_eq!(typed["steps"][0]["template"][0]["question"], "f[[type:cloze:Back]]");
+    let front = r#"<span class="cloze" data-cloze="a" data-ordinal="1">[h]</span> <span class="cloze-inactive" data-ordinal="2">b</span>"#;
+    let back =
+        r#"<span class="cloze" data-ordinal="1">a</span> <span class="cloze-inactive" data-ordinal="2">b</span>"#;
+    assert_eq!(
+        out["steps"][0]["template"],
+        json!([
+            {"question": front, "answer": format!("{front}|{back}"), "empty": false},
+            {"question": "", "answer": "", "empty": false},
+            {"question": "...", "answer": "x", "empty": false},
+            {"question": "{{c1::f}}[[type:cloze:Back]]", "answer": "", "empty": false},
+        ])
+    );
+}
+
+/// A `template` request on a cloze note type named `name` with `fields`.
+fn cloze_request(name: &str, fields: &str, cases: &str) -> String {
+    format!(
+        "  - observe:\n      - template:\n          notetype: {{name: \"{name}\", kind: cloze, fields: [{fields}]}}\n          cases:\n{cases}"
+    )
+}
+
+// T10, render/cloze C15: a cloze note's card is blank when no value of its
+// field map holds its cloze number (C5: nested clozes count, whatever the
+// template shows).
+#[test]
+fn cloze_note_cards_are_blank_without_their_cloze_number() {
+    let cloze = |cases: &str| cloze_request("C", "Text, Extra", cases);
+    let out = run(&cloze(
+        r#"            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", fields: ["{{c1::x}}", e]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", ord: 1, fields: ["{{c1::x}}", e]}
+            - {front: "{{cloze:Text}}", back: "{{Nope}}", ord: 1, fields: ["{{c1::x}}", "{{c2::y}}"]}
+            - {front: "{{Extra}}", back: "{{cloze:Text}}", ord: 2, fields: ["{{c1::a {{c3::b}}}}", e]}
+            - {front: "{{Extra}}", ord: 0, fields: ["{{c0::a {{c1::b}}}}", e]}
+            - {front: "{{Extra}}", ord: 0, fields: ["{{c1::open", e]}
+"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        out["steps"][0]["template"],
+        json!([
+            {
+                "question": r#"<span class="cloze" data-cloze="x" data-ordinal="1">[...]</span>"#,
+                "answer": r#"<span class="cloze" data-ordinal="1">x</span><br>e"#,
+                "empty": false,
+            },
+            {"question": "", "answer": null, "empty": true},
+            // Extra holds c2, so the card is not blank and its answer errs.
+            {"error": {"kind": "unknown_field", "side": "answer"}},
+            {
+                "question": "e",
+                "answer": r#"<span class="cloze-inactive" data-ordinal="1">a <span class="cloze" data-ordinal="3">b</span></span>"#,
+                "empty": false,
+            },
+            {"question": "e", "answer": "", "empty": false},
+            {"question": "e", "answer": null, "empty": true},
+        ])
+    );
+}
+
+// render/cloze C15: special values count like fields (Tags, the note type
+// name, the template name), and a note field named like a special replaces
+// it in the check too.
+#[test]
+fn special_values_count_in_the_cloze_blank_check() {
+    let out = run(&cloze_request(
+        "Gap {{c5::type}}",
+        "Text, Extra",
+        r#"            - {front: "{{cloze:Text}}", back: "{{Tags}}", ord: 2, fields: ["{{c1::a}}", ""], tags: ["{{c3::t}}"]}
+            - {front: "{{cloze:Text}}", back: "{{Card}}", ord: 3, name: "{{c4::card}}", fields: ["{{c1::a}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{Type}}", ord: 4, fields: ["{{c1::a}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{Type}}", ord: 5, fields: ["{{c1::a}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{Deck}}|{{CardFlag}}|{{CardID}}|{{c2}}", ord: 1, fields: ["{{c1::a}}", ""]}
+"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        out["steps"][0]["template"],
+        json!([
+            {"question": "", "answer": "{{c3::t}}", "empty": false},
+            {"question": "", "answer": "{{c4::card}}", "empty": false},
+            {"question": "", "answer": "Gap {{c5::type}}", "empty": false},
+            {"question": "", "answer": null, "empty": true},
+            // (Deck), flag0, 0 and 1 hold no cloze.
+            {"question": "", "answer": null, "empty": true},
+        ])
+    );
+    let shadowed = run(&cloze_request(
+        "Gap",
+        "Text, Tags, Card",
+        r#"            - {front: "{{cloze:Text}}", back: "{{Tags}}", ord: 2, fields: ["{{c1::a}}", "", ""], tags: ["{{c3::t}}"]}
+            - {front: "{{cloze:Text}}", back: "{{Tags}}", ord: 2, fields: ["{{c1::a}}", "{{c3::f}}", ""], tags: [t]}
+            - {front: "{{cloze:Text}}", back: "{{Card}}", ord: 3, name: "{{c4::card}}", fields: ["{{c1::a}}", "", ""]}
+"#,
+    ))
+    .unwrap();
+    assert_eq!(
+        shadowed["steps"][0]["template"],
+        json!([
+            {"question": "", "answer": null, "empty": true},
+            {"question": "", "answer": "{{c3::f}}", "empty": false},
+            {"question": "", "answer": null, "empty": true},
+        ])
+    );
 }

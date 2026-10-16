@@ -1,0 +1,23 @@
+# specs/render/cloze.md C2 and C3: what is and is not an opening marker, number
+# pieces that are dropped, the card number range 1-65535.
+id: render/cloze/markers
+description: "cloze marker syntax"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back]
+          inputs:
+            - ["{{c::a}} {{c,1::b}} {{c1,::c}} {{c99999::d}} {{c65535::e}} {{c01::f}}", 1]
+            - ["{{C1::x}} {{ c1::x}} {{c1 ::x}} {{c1:x}} {c1::x} {{c1::y}}", 1]
+            - ["{{c65535::last}}", 65535]
+            - ["{{c65536::none}} {{c1::one}}", 1]
+            - ["{{c0::zero}} {{c1::one}}", 1]
+            - ["{{c0::zero}}", 1]
+            - ["{{{c1::brace}}}", 1]
+            - ["{{c1::a}}{{c2::b}}", 2]
+            - ["{{c2,,5::x}}", 5]
+            - ["{{c007::seven}}", 7]
+            - ["{{c1:::x}}", 1]
+            - ["{{c1::a}}{{", 1]
+            - ["{{c1::a}} {{c,::b}}", 1]

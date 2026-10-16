@@ -2,9 +2,9 @@
 //! Meguri's executor cannot run yet: `render/template/legacy-req` needs the
 //! `legacy_update` and `legacy_json` adapters and the note type save (U29,
 //! U36), `render/special-fields/cards` needs notes, cards and decks in the
-//! collection (U27, U28, U29) and the cloze blank check (U61). Their engine
-//! part is checked here; T0 runs them once those units land. Inputs come from
-//! the scenarios and goldens, expected values from the goldens only.
+//! collection (U27, U28, U29). Their engine part, the cloze blank check
+//! included, is checked here; T0 runs them once those units land. Inputs come
+//! from the scenarios and goldens, expected values from the goldens only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -89,25 +89,23 @@ struct Card {
     /// `did`'s; `None` when that deck does not exist.
     deck: Option<&'static str>,
     flags: i64,
-    /// Template-syntax.md T10 for a cloze card, whose check is U61's.
-    cloze_blank: Option<bool>,
 }
 
 const VOCAB: Option<&str> = Some("Lang::Japanese::Vocab");
 
 #[rustfmt::skip]
 const CARDS: [Card; 5] = [
-    Card { name: "#c1", note: 0, ord: 0, deck: VOCAB, flags: 0, cloze_blank: None },
+    Card { name: "#c1", note: 0, ord: 0, deck: VOCAB, flags: 0 },
     // flags = 3.
-    Card { name: "#c2", note: 0, ord: 1, deck: VOCAB, flags: 3, cloze_blank: None },
+    Card { name: "#c2", note: 0, ord: 1, deck: VOCAB, flags: 3 },
     // flags = 7, odid = its own deck (Other), did = #c1's deck: the original
     // deck shows.
-    Card { name: "#c3", note: 1, ord: 0, deck: Some("Other"), flags: 7, cloze_blank: None },
+    Card { name: "#c3", note: 1, ord: 0, deck: Some("Other"), flags: 7 },
     // flags = 9, did = a deck id that does not exist.
-    Card { name: "#c4", note: 1, ord: 1, deck: None, flags: 9, cloze_blank: None },
-    // odid = a deck id that does not exist. The note holds c2, the card's
-    // ordinal + 1, so it is not blank.
-    Card { name: "#c5", note: 2, ord: 1, deck: None, flags: 0, cloze_blank: Some(false) },
+    Card { name: "#c4", note: 1, ord: 1, deck: None, flags: 9 },
+    // odid = a deck id that does not exist. The note's only cloze is c2, so
+    // its single card has ordinal 1.
+    Card { name: "#c5", note: 2, ord: 1, deck: None, flags: 0 },
 ];
 
 fn strings(value: &Value) -> Vec<String> {
@@ -179,7 +177,13 @@ fn stored_card_specials_match_the_oracle() {
         let result = match front.render(&fields, Side::Question) {
             Err(error) => failed(&error, "question"),
             Ok(question) => {
-                let blank = card.cloze_blank.unwrap_or_else(|| front.is_blank_question(&fields));
+                // T10: a cloze card by its cloze number in any value of the
+                // field map (render/cloze#C15), a standard one by T11.2.
+                let blank = if cloze {
+                    fields.is_blank_cloze_card()
+                } else {
+                    front.is_blank_question(&fields)
+                };
                 if blank {
                     json!({"question": question, "answer": null, "empty": true})
                 } else {

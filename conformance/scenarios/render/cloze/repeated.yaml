@@ -1,0 +1,18 @@
+# specs/render/cloze.md C6, C9 and C10: one number used several times hides
+# every occurrence (R971); type-in answers collapse only when all are identical.
+id: render/cloze/repeated
+description: "the same cloze number used several times"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back, only_front, only_back, typing]
+          inputs:
+            - ["{{c1::H}}{{c1::2}}{{c1::O}}", 1]
+            - ["{{c1::red}}, {{c1::green}} and {{c1::blue}}", 1]
+            - ["{{c1::red}}, {{c1::red}} and {{c2::blue}}", 1]
+            - ["{{c1::red}}, {{c1::red}} and {{c2::blue}}", 2]
+            - ["{{c1::same}} {{c1::same}} {{c1::same}}", 1]
+            - ["{{c1::sun}} {{c1::sun}} {{c1::star}}", 1]
+            - ["{{c1::sun::hint}} {{c1::sun}}", 1]
+            - ["x{{c3::a}}y{{c3::a}}z", 3]
