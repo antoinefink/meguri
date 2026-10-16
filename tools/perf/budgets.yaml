@@ -1251,6 +1251,8 @@ probes:
         name: probe.syntheticDelay
         metric: duration
         unit: ms
+        percentile: p50
         limit: null
         fixture: null
         where: [simulator, device]
+        note: p50, not p95. Over the smoke's 5 iterations p95 is the slowest one, which moved 7% between three runs on the VM's iPhone simulator (36.5 to 39.1 ms) while p50 stayed at 34.1-34.3 ms; a check of the harness should not flake on one slow iteration.
