@@ -182,7 +182,10 @@ impl ErrorKind {
                 r"A colon `:` must follow a keyword or a field name. To find the colon itself, write `\:`.".to_owned()
             }
             ErrorKind::UnknownEscape { provided } => {
-                format!(r"`{}` is not a valid escape. To find a backslash itself, write `\\`.", p(provided))
+                format!(
+                    r"`{}` is not a valid escape. To find a backslash itself, write `\\`.",
+                    p(provided)
+                )
             }
             ErrorKind::InvalidState { provided } => {
                 format!("`{}` is not a card state that `is:` knows.", p(provided))

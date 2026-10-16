@@ -115,7 +115,11 @@ fn float_operands_are_written_as_f6_says() {
     ];
     for (typed, written) in rows {
         for operand in typed {
-            assert_eq!(canonical(&format!("prop:d<{operand}")), format!("prop:d<{written}"), "{operand:?}");
+            assert_eq!(
+                canonical(&format!("prop:d<{operand}")),
+                format!("prop:d<{written}"),
+                "{operand:?}"
+            );
         }
     }
 }
