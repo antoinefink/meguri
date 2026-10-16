@@ -1,0 +1,23 @@
+# specs/render/image-occlusion-format.md F4, F7.1: number texts the raw
+# reading keeps exactly as written, whatever their form (R1005, R1006); the
+# strict reading's value of each is in F7.1.
+id: render/image-occlusion/format/parse-numbers
+description: "number texts in shape properties"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - image_occlusion:
+          fns: [parse]
+          inputs:
+            - "{{c1::image-occlusion:rect:left=.2081:top=0.2081:width=+.2081:height=2.081e-1}}"
+            - "{{c1::image-occlusion:rect:left=1.:top=1:width=1.0000:height=1E0}}"
+            - "{{c1::image-occlusion:rect:left=.:top=-0.:width=.0000:height=-.}}"
+            - "{{c1::image-occlusion:rect:left=-0.25:top=-1.:width=1e-3:height=.5E2}}"
+            - "{{c1::image-occlusion:rect:left=abc:top= 1:width=1 :height=1,5}}"
+            - "{{c1::image-occlusion:rect:left=0x10:top=inf:width=NaN:height=1e400}}"
+            - "{{c1::image-occlusion:rect:left=.1:top=.1:angle=-2500:width=.1:height=.1}}"
+            - "{{c1::image-occlusion:rect:left=.1:top=.1:angle=10000:width=.1:height=.1}}"
+            - "{{c1::image-occlusion:rect:left=.1:top=.1:angle=2500.7:width=.1:height=.1}}"
+            - "{{c2::image-occlusion:polygon:left=.:top=.5:points=.,.5 .25,. 1.,1.}}"
+            - "{{c2::image-occlusion:polygon:left=.1:top=.1:points=.1,.1  .2,.2 .3}}"
+            - "{{c0::image-occlusion:text:left=.1:top=.1:text=9:scale=1.5:fs=.0667}}"

@@ -50,3 +50,28 @@ flds
 tmpls
 latexPre
 latexPost
+# render/image-occlusion-format: the Occlusion field's cloze prefix, shape
+# kinds and property keys, the fill keyword the writer drops, and the field
+# role names of Anki's image-occlusion field indexes message.
+image-occlusion
+rect
+ellipse
+polygon
+text
+left
+top
+width
+height
+angle
+rx
+ry
+points
+scale
+fs
+fill
+oi
+transparent
+occlusions
+image
+header
+back_extra

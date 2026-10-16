@@ -1,0 +1,33 @@
+# specs/render/image-occlusion-format.md F4: where the raw reading stops (empty
+# key, missing `=`, bad or unpaired `\`, empty value before `:`), keys that
+# swallow colons, repeated keys, and shape names it does not check.
+id: render/image-occlusion/format/parse-malformed
+description: "raw reading of malformed shape texts"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - image_occlusion:
+          fns: [parse]
+          inputs:
+            - "{{c1::image-occlusion:rect:width=}}"
+            - "{{c1::image-occlusion:rect:width=:height=.3}}"
+            - "{{c1::image-occlusion:rect:left=.4\\n:top=.3}}"
+            - "{{c1::image-occlusion:rect:left=.4:top=.3\\}}"
+            - "{{c1::image-occlusion:rect:left=.4:}}"
+            - "{{c1::image-occlusion:rect:left=.4:height}}"
+            - "{{c1::image-occlusion:rect:}}"
+            - "{{c1::image-occlusion:rect::}}"
+            - "{{c1::image-occlusion:rect:extra:left=.4:top=.3}}"
+            - "{{c1::image-occlusion:rect:left=.4::top=.3}}"
+            - "{{c1::image-occlusion:rect::=7}}"
+            - "{{c1::image-occlusion:rect:top\\=.3:left=.4}}"
+            - "{{c1::image-occlusion:rect:left=.4=.5:top=.3}}"
+            - "{{c1::image-occlusion:rect:top=.3:top=.6:top=.9}}"
+            - "{{c1::image-occlusion:rect: top = .3 }}"
+            - "{{c1::image-occlusion:ellipse}}"
+            - "{{c1::image-occlusion:}}"
+            - "{{c1::image-occlusion::left=.4}}"
+            - "{{c1::image-occlusion:circle:left=.4:top=.3}}"
+            - "{{c1::image-occlusion:ELLIPSE:left=.4:top=.3}}"
+            - "{{c1::image-occlusion:image-occlusion:rect:left=.4}}"
+            - "{{c1::image-occlusion:rect:left=.4\\:top=.3}}"

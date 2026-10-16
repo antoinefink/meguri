@@ -1,0 +1,29 @@
+# specs/render/image-occlusion-format.md F10, F11: the writer's outputs in the
+# spec's tables (every kind, escaping, key order, fill and angle omission, `oi`
+# by mode, text labels as c0, unknown properties after `fill`), and the AE38
+# field before and after its edit and in Hide One mode, read back by Anki so
+# the golden shows each key and value as Anki takes it (R1003-R1008, R1012).
+# The inputs are exactly the spec's outputs, `<br>` added: change them together.
+id: render/image-occlusion/format/written
+description: "Meguri writer outputs read by the oracle"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - image_occlusion:
+          fns: [parse]
+          inputs:
+            - "{{c1::image-occlusion:rect:left=.2325:top=.3261:width=.202:height=.0975:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.2325:top=.3261:angle=2500:width=.202:height=.0975:oi=1}}<br>"
+            - "{{c2::image-occlusion:ellipse:left=.1:top=.2:rx=.05:ry=.08:fill=#ff0000}}<br>"
+            - "{{c3::image-occlusion:polygon:left=.3:top=.4:points=.3,.45 .5,.4 .35,.6:oi=1}}<br>"
+            - "{{c0::image-occlusion:text:left=.1:top=.1:text=a\\:b\\\\c:scale=1.:fs=.0667:oi=1}}<br>"
+            - "{{c0::image-occlusion:text:left=.5:top=.25:angle=1250:text=Label:scale=1.5:fs=.05:fill=#1e90ff}}<br>"
+            - "{{c0::image-occlusion:text:left=.2:top=.7:text=line 1\nline 2:scale=.75:fs=.04}}<br>"
+            - "{{c0::image-occlusion:text:left=.6:top=.6:text=日本\\:語:scale=1.:fs=.05:oi=1}}<br>"
+            - "{{c4::image-occlusion:rect:left=.0000:top=1.:angle=-2500:width=1.:height=.5}}<br>"
+            - "{{c5::image-occlusion:rect:left=.:top=-0.:width=.0313:height=.9688}}<br>"
+            - "{{c6::image-occlusion:rect:left=.2:top=.1:width=.1:height=.1:zz=q\\:r:oi=1}}<br>"
+            - "{{c2::image-occlusion:rect:left=.1:top=.1:width=.1:height=.1:oi=1}}<br>{{c2::image-occlusion:rect:left=.3:top=.1:width=.1:height=.1:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.05:top=.1:width=.2:height=.08:oi=1}}<br>{{c2::image-occlusion:rect:left=0.3:top=0.1:fill=#ffeba2:width=0.2:height=0.08:oi=1}}<br>{{c3::image-occlusion:ellipse:left=.55:top=.1:rx=.1:ry=.04:oi=1}}<br>{{c4::image-occlusion:rect:left=.05:top=.3:width=.2:height=.08:oi=1}}<br>{{c5::image-occlusion:polygon:left=.3:top=.3:points=.3,.3 .5,.32 .4,.4:oi=1}}<br>{{c6::image-occlusion:rect:left=.55:top=.3:width=.2:height=.08:oi=1}}<br>{{c7::image-occlusion:rect:left=.05:top=.5:angle=833:width=.2:height=.08:fill=#cc3344:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.05:top=.1:width=.2:height=.08:oi=1}}<br>{{c2::image-occlusion:rect:left=0.3:top=0.1:fill=#ffeba2:width=0.2:height=0.08:oi=1}}<br>{{c3::image-occlusion:ellipse:left=.55:top=.1:rx=.1:ry=.04:oi=1}}<br>{{c4::image-occlusion:rect:left=.0625:top=.35:width=.2:height=.08:oi=1}}<br>{{c5::image-occlusion:polygon:left=.3:top=.3:points=.3,.3 .5,.32 .4,.4:oi=1}}<br>{{c7::image-occlusion:rect:left=.05:top=.5:angle=833:width=.2:height=.08:fill=#cc3344:oi=1}}<br>"
+            - "{{c1::image-occlusion:rect:left=.05:top=.1:width=.2:height=.08}}<br>{{c2::image-occlusion:rect:left=.3:top=.1:width=.2:height=.08}}<br>{{c3::image-occlusion:ellipse:left=.55:top=.1:rx=.1:ry=.04}}<br>{{c4::image-occlusion:rect:left=.05:top=.3:width=.2:height=.08}}<br>{{c5::image-occlusion:polygon:left=.3:top=.3:points=.3,.3 .5,.32 .4,.4}}<br>{{c6::image-occlusion:rect:left=.55:top=.3:width=.2:height=.08}}<br>{{c7::image-occlusion:rect:left=.05:top=.5:angle=833:width=.2:height=.08:fill=#cc3344}}<br>"

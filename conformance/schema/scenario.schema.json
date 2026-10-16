@@ -405,7 +405,37 @@
               "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "array" } } } },
               "else": { "properties": { "inputs": { "items": { "type": "string" } } } }
             },
-            "template": { "$ref": "#/$defs/template_request" }
+            "template": { "$ref": "#/$defs/template_request" },
+            "image_occlusion": {
+              "description": "specs/conformance/image-occlusion-ops.md J1: pure image-occlusion functions over a list of inputs; strings (NFC, no control character but TAB and LF) for parse, lists of field tags (0-4294967295 or null) for fields, which shares a request with no other function.",
+              "type": "object",
+              "required": ["fns", "inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "fns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["parse", "fields"] }
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      { "type": "string", "pattern": "^[^\\u0000-\\u0008\\u000B-\\u001F]*$" },
+                      {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 4294967295 }, { "type": "null" }] }
+                      }
+                    ]
+                  }
+                }
+              },
+              "if": { "properties": { "fns": { "contains": { "const": "fields" } } } },
+              "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "array" } } } },
+              "else": { "properties": { "inputs": { "items": { "type": "string" } } } }
+            }
           },
           "additionalProperties": false
         }
