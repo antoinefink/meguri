@@ -158,9 +158,13 @@ A note update that changes exactly one note row and no other row besides `col` (
 
 The top step then covers both edits. Its time stays that of its first operation, so edits at 0 s, 30 s and 59 s form one step and an edit at 60 s starts a new one, even 1 s after the previous edit. A step put back by a redo counts as recorded at the redo, so an edit within 60 s of a redo can merge into the redone step.
 
-- Undoing the merged step puts the note back as it was before its first edit, and `col.mod` to its value before that edit (A7).
-- Redoing it puts the note back as it was when the undo ran, which is the last merged edit's row with that edit's `mod`.
-- An edit of another note, and an edit that registers a new tag or generates a card, records a step of its own, and no later edit is merged into such a step. An edit that changes the note's tags only to tags already registered is a plain note change and merges.
+A redo of an "Update Note" step is a note update for this rule. When the redone step changed exactly one note row and no other row besides `col`, the step the redo records merges into the top step under the same two conditions as an edit: the redo applies its rows and leaves the redo history as any redo does, but adds no step of its own. Two such redos of one note in the same second are 0 s apart, so they merge. An undo never merges (this could only show with the clock moved back): the step it moves to the redo history stays whole.
+
+In `undo/edit-note-merge`, the redo of the "gatito" step at 12:01:05 records a step, the redo of the "michi" step of the same note in the same second merges into it, and an edit of that note 30 s later merges too. One undo then reverts all three: the note and `col.mod` are back as they were before the first redo, nothing is left to undo, and the redo history holds only that "Update Note" step (the edit emptied it of the other note's step, A2).
+
+- Undoing the merged step puts the note back as it was before its first operation (the first edit, or the redo that began the step), and `col.mod` to its value before that operation (A7).
+- Redoing it puts the note back as it was when the undo ran: the row the last merged edit or redo left, `mod` included.
+- An edit of another note, and an edit that registers a new tag or generates a card, records a step of its own, and no later edit or redo is merged into such a step. An edit that changes the note's tags only to tags already registered is a plain note change and merges.
 - The rule looks at the rows changed, so it holds for any note update (an editor save as much as `edit_note`).
 
 Scenarios: `undo/edit-note-merge`, `undo/edit-note-new-card`.
@@ -224,7 +228,7 @@ Every row a step changed, in any table, comes back as A4 to A6 describe for note
 | Scenario | Covers | Golden |
 |---|---|---|
 | `undo/edit-note` | A1, A4 and A7 for one edit, the note's server `usn` restored; refusals at both ends | recorded |
-| `undo/edit-note-merge` | A3: edits at 0, 30 and 59 s merge, one at 60 s and an edit of another note do not; undo and redo of the merged step | recorded |
+| `undo/edit-note-merge` | A3: edits at 0, 30 and 59 s merge, one at 60 s and an edit of another note do not; undo and redo of the merged step; two redos of one note's steps in the same second merge, an edit 30 s later merges into them, and one undo reverts all three, leaving nothing to undo | recorded |
 | `undo/edit-note-new-card` | A3, A4: an edit that registers a tag and generates a card, and a later edit that is not merged into it; the undo deletes the card without a grave and the tag row | recorded |
 | `undo/delete-notes` | A5: cards and notes back with their stamps, graves gone; redone and undone again | recorded |
 | `undo/delete-note-existing-grave` | A5 with G6: graves that existed before the deletion are removed by the undo and come back pending with the redo | recorded |
@@ -241,7 +245,7 @@ Every row a step changed, in any table, comes back as A4 to A6 describe for note
 Anki's results above that the mechanism does not produce yet; the implementer updates the M sections with the code.
 
 1. **Redo emptied by every op (A2).** M1's "an op that changed nothing records nothing and leaves redo alone" and M2's skip-undo op that "is neither recorded nor clears anything" become: every op of source `UserUndoable` empties the redo history when it runs, whether or not it changed something; a skip-undo op (W4's config write, and R42's deck selection, where Anki records a "Select Deck" step and so empties redo too) keeps the undo steps and empties redo. Undo and redo keep it.
-2. **Merging (A3).** A step needs the second at which its first op began (the clock seam's time, rounded down to whole seconds; a redone step takes the time of the redo). When an "Update Note" op merges into the top step, the step keeps its before-images and takes the op's after-images, so that M4.2's check accepts the next undo; its id, kind, session and touched set stay.
+2. **Merging (A3).** A step needs the second at which its first op began (the clock seam's time, rounded down to whole seconds; a redone step takes the time of the redo). When an "Update Note" op merges into the top step, the step keeps its before-images and takes the op's after-images, so that M4.2's check accepts the next undo; its id, kind, session and touched set stay. The step a redo of an "Update Note" step records merges the same way; the redo step an undo leaves never merges.
 3. **Graves on redo (A5).** A redo of a deletion writes every grave its undo removed with `usn` -1, also one that held another `usn` before the deletion. M4.3's removal of the earlier grave is right; its redo puts the grave back pending, not with the earlier `usn`.
 4. **`col.mod` on redo (A7).** The redo step takes as its `col.mod` value the one `col.mod` held when the undo ran, and the step a redo records takes the one it held when the redo ran, instead of the step's own values swapped (M4.5, M5).
 5. **Names (A1).** The steps of these ops carry the names of `undo-ops.md` V4 exactly: "Update Note", "Delete Note", "Add Note", "Answer Card", "Suspend", "Update Config".
