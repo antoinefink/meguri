@@ -11,23 +11,46 @@ fuzz_table: {card: #cN, pairs: [[card_id, reps], ...], intervals: [days, ...]}
   {intervals, rows: [[card_id, reps, delta_days...], ...]}. The card is
   rewritten with each id and count in turn and restored afterwards; its home
   preset bounds the fuzzed interval.
+
+When the run request asked for fsrs_context (protocol.json), next_states also
+records, for each card whose states FSRS computed, its home deck's effective
+desired retention and the decay of its home preset's parameters
+(sched/fsrs-transitions T2.1, T2.2), keyed /steps/<i>/next_states/#cN.
 """
 
 from __future__ import annotations
 
-from .. import convert
+from .. import convert, fsrs_model
 from ..errors import invalid
+from ..numbers import f32_value
 from ..registry import observation
 
 BUTTONS = ("current", "again", "hard", "good", "easy")
 
 
+def _fsrs_context(col, cid: int) -> dict:
+    card = col.get_card(cid)
+    home = col._backend.get_deck(card.odid or card.did)
+    preset = col._backend.get_deck_config(home.normal.config_id).config
+    if home.normal.HasField("desired_retention"):
+        retention = home.normal.desired_retention
+    else:
+        retention = preset.desired_retention
+    params = list(preset.fsrs_params_6) or list(preset.fsrs_params_5) or list(preset.fsrs_params_4)
+    return {"desired_retention": f32_value(retention), "decay": f32_value(fsrs_model.decay(params))}
+
+
 @observation("next_states")
 def next_states(session, args):
     out = {}
+    context = session.fsrs_context
+    fsrs = context is not None and session.col.get_config("fsrs", False) is True
     for ref, cid in session.card_targets(args):
         states = session.col._backend.get_scheduling_states(cid)
         out[ref] = {b: convert.message(getattr(states, b)) for b in BUTTONS}
+        if fsrs:
+            # The step's index among the outputs is its index in the response.
+            context[f"/steps/{len(session.outputs)}/next_states/{ref}"] = _fsrs_context(session.col, cid)
     return out
 
 

@@ -1,0 +1,44 @@
+# Interface names the scheduling specs use: card columns and card data keys,
+# preset and deck keys (schema-11 JSON and protobuf), collection config keys,
+# and the public API of the pinned fsrs (6.6.2) and rand (0.9.4) crates.
+ivl
+due
+reps
+lapses
+factor
+odid
+did
+lrt
+fsrsParams6
+fsrsParams5
+fsrsWeights
+fsrs_params_6
+fsrs_params_5
+fsrs_params_4
+desiredRetention
+maxIvl
+leechFails
+delays
+fsrsShortTermWithStepsEnabled
+loadBalancerEnabled
+scheduled_days
+elapsed_days
+scheduled_secs
+elapsed_secs
+remaining_steps
+ease_factor
+memory_state
+next_day_at
+FSRS
+MemoryState
+NextStates
+ItemState
+next_states
+stability
+difficulty
+desired_retention
+days_elapsed
+StdRng
+seed_from_u64
+random_range
+fuzz_table

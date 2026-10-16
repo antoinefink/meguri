@@ -1,0 +1,318 @@
+{
+  "entries": [
+    {
+      "apple": 0.032511134,
+      "linux": 0.032511137,
+      "pointer": "/steps/0/fsrs_next/rows/3/4"
+    },
+    {
+      "apple": 0.10703457,
+      "linux": 0.10703459,
+      "pointer": "/steps/0/fsrs_next/rows/3/7"
+    },
+    {
+      "apple": 0.28940445,
+      "linux": 0.28940448,
+      "pointer": "/steps/0/fsrs_next/rows/3/10"
+    },
+    {
+      "apple": 450.91345,
+      "linux": 450.91348,
+      "pointer": "/steps/0/fsrs_next/rows/18/10"
+    },
+    {
+      "apple": 3.6623445,
+      "linux": 3.662345,
+      "pointer": "/steps/0/fsrs_next/rows/33/1"
+    },
+    {
+      "apple": 0.034034707,
+      "linux": 0.034034703,
+      "pointer": "/steps/0/fsrs_next/rows/48/1"
+    },
+    {
+      "apple": 1.1289501,
+      "linux": 1.1289498,
+      "pointer": "/steps/0/fsrs_next/rows/48/4"
+    },
+    {
+      "apple": 1.8454981,
+      "linux": 1.8454975,
+      "pointer": "/steps/0/fsrs_next/rows/48/7"
+    },
+    {
+      "apple": 3.414677,
+      "linux": 3.414676,
+      "pointer": "/steps/0/fsrs_next/rows/48/10"
+    },
+    {
+      "apple": 3.0829923,
+      "linux": 3.082992,
+      "pointer": "/steps/0/fsrs_next/rows/79/1"
+    },
+    {
+      "apple": 7.554337,
+      "linux": 7.5543375,
+      "pointer": "/steps/0/fsrs_next/rows/82/5"
+    },
+    {
+      "apple": 12.662802,
+      "linux": 12.662805,
+      "pointer": "/steps/0/fsrs_next/rows/137/4"
+    },
+    {
+      "apple": 18.537794,
+      "linux": 18.5378,
+      "pointer": "/steps/0/fsrs_next/rows/137/7"
+    },
+    {
+      "apple": 53.073353,
+      "linux": 53.07337,
+      "pointer": "/steps/0/fsrs_next/rows/137/10"
+    },
+    {
+      "apple": 10595.254,
+      "linux": 10595.25,
+      "pointer": "/steps/0/fsrs_next/rows/148/4"
+    },
+    {
+      "apple": 15366.111,
+      "linux": 15366.105,
+      "pointer": "/steps/0/fsrs_next/rows/148/7"
+    },
+    {
+      "apple": 25813.885,
+      "linux": 25813.871,
+      "pointer": "/steps/0/fsrs_next/rows/148/10"
+    },
+    {
+      "apple": 0.9055072,
+      "linux": 0.9055071,
+      "pointer": "/steps/0/fsrs_next/rows/171/1"
+    },
+    {
+      "apple": 7.005816,
+      "linux": 7.0058165,
+      "pointer": "/steps/0/fsrs_next/rows/172/5"
+    },
+    {
+      "apple": 29.882568,
+      "linux": 29.882572,
+      "pointer": "/steps/0/fsrs_next/rows/200/1"
+    },
+    {
+      "apple": 3.0599966,
+      "linux": 3.0599964,
+      "pointer": "/steps/0/fsrs_next/rows/213/1"
+    },
+    {
+      "apple": 3.652829,
+      "linux": 3.6528292,
+      "pointer": "/steps/0/fsrs_next/rows/235/1"
+    },
+    {
+      "apple": 37.32258,
+      "linux": 37.322586,
+      "pointer": "/steps/0/fsrs_next/rows/254/4"
+    },
+    {
+      "apple": 57.640427,
+      "linux": 57.640438,
+      "pointer": "/steps/0/fsrs_next/rows/254/7"
+    },
+    {
+      "apple": 102.13479,
+      "linux": 102.134796,
+      "pointer": "/steps/0/fsrs_next/rows/254/10"
+    },
+    {
+      "apple": 5.368278,
+      "linux": 5.3682785,
+      "pointer": "/steps/0/fsrs_next/rows/343/8"
+    },
+    {
+      "apple": 4.3729477,
+      "linux": 4.372948,
+      "pointer": "/steps/0/fsrs_next/rows/392/8"
+    },
+    {
+      "apple": 0.2458884,
+      "linux": 0.24588819,
+      "pointer": "/steps/0/fsrs_next/rows/409/1"
+    },
+    {
+      "apple": 1.0603629,
+      "linux": 1.060363,
+      "pointer": "/steps/0/fsrs_next/rows/485/1"
+    },
+    {
+      "apple": 1.1385474,
+      "linux": 1.1385475,
+      "pointer": "/steps/0/fsrs_next/rows/497/8"
+    },
+    {
+      "apple": 4.338883,
+      "linux": 4.3388834,
+      "pointer": "/steps/0/fsrs_next/rows/553/1"
+    },
+    {
+      "apple": 26.151709,
+      "linux": 26.151707,
+      "pointer": "/steps/0/fsrs_next/rows/571/1"
+    },
+    {
+      "apple": 7.3911395,
+      "linux": 7.39114,
+      "pointer": "/steps/0/fsrs_next/rows/599/2"
+    },
+    {
+      "apple": 6.9110146,
+      "linux": 6.911014,
+      "pointer": "/steps/0/fsrs_next/rows/600/1"
+    },
+    {
+      "apple": 44.997154,
+      "linux": 44.99715,
+      "pointer": "/steps/0/fsrs_next/rows/625/1"
+    },
+    {
+      "apple": 8.96627,
+      "linux": 8.966272,
+      "pointer": "/steps/0/fsrs_next/rows/632/1"
+    },
+    {
+      "apple": 698.01605,
+      "linux": 698.0158,
+      "pointer": "/steps/0/fsrs_next/rows/632/4"
+    },
+    {
+      "apple": 1184.4061,
+      "linux": 1184.4056,
+      "pointer": "/steps/0/fsrs_next/rows/632/7"
+    },
+    {
+      "apple": 2231.4807,
+      "linux": 2231.4797,
+      "pointer": "/steps/0/fsrs_next/rows/632/10"
+    },
+    {
+      "apple": 0.5452225,
+      "linux": 0.5452223,
+      "pointer": "/steps/0/fsrs_next/rows/637/1"
+    },
+    {
+      "apple": 0.4053847,
+      "linux": 0.40538466,
+      "pointer": "/steps/0/fsrs_next/rows/641/1"
+    },
+    {
+      "apple": 10.383202,
+      "linux": 10.383196,
+      "pointer": "/steps/0/fsrs_next/rows/641/4"
+    },
+    {
+      "apple": 14.387102,
+      "linux": 14.387094,
+      "pointer": "/steps/0/fsrs_next/rows/641/7"
+    },
+    {
+      "apple": 37.923634,
+      "linux": 37.92361,
+      "pointer": "/steps/0/fsrs_next/rows/641/10"
+    },
+    {
+      "apple": 3.977147,
+      "linux": 3.9771476,
+      "pointer": "/steps/0/fsrs_next/rows/654/1"
+    },
+    {
+      "apple": 197.77261,
+      "linux": 197.77266,
+      "pointer": "/steps/0/fsrs_next/rows/654/4"
+    },
+    {
+      "apple": 322.4412,
+      "linux": 322.44122,
+      "pointer": "/steps/0/fsrs_next/rows/654/7"
+    },
+    {
+      "apple": 595.4547,
+      "linux": 595.4548,
+      "pointer": "/steps/0/fsrs_next/rows/654/10"
+    },
+    {
+      "apple": 27.78392,
+      "linux": 27.783916,
+      "pointer": "/steps/0/fsrs_next/rows/695/1"
+    },
+    {
+      "apple": 8.920166,
+      "linux": 8.920167,
+      "pointer": "/steps/0/fsrs_next/rows/730/2"
+    },
+    {
+      "apple": 7.9063582,
+      "linux": 7.9063644,
+      "pointer": "/steps/0/fsrs_next/rows/858/4"
+    },
+    {
+      "apple": 10.6903,
+      "linux": 10.690311,
+      "pointer": "/steps/0/fsrs_next/rows/858/7"
+    },
+    {
+      "apple": 16.786896,
+      "linux": 16.786917,
+      "pointer": "/steps/0/fsrs_next/rows/858/10"
+    },
+    {
+      "apple": 2.2983446,
+      "linux": 2.2983449,
+      "pointer": "/steps/0/fsrs_next/rows/887/1"
+    },
+    {
+      "apple": 0.05812446,
+      "linux": 0.058124464,
+      "pointer": "/steps/0/fsrs_next/rows/917/1"
+    },
+    {
+      "apple": 0.15232046,
+      "linux": 0.15232047,
+      "pointer": "/steps/0/fsrs_next/rows/917/7"
+    },
+    {
+      "apple": 0.24658,
+      "linux": 0.24658003,
+      "pointer": "/steps/0/fsrs_next/rows/917/10"
+    },
+    {
+      "apple": 2.8583348,
+      "linux": 2.858335,
+      "pointer": "/steps/0/fsrs_next/rows/982/1"
+    },
+    {
+      "apple": 74.67915,
+      "linux": 74.67918,
+      "pointer": "/steps/0/fsrs_next/rows/982/4"
+    },
+    {
+      "apple": 111.96684,
+      "linux": 111.96687,
+      "pointer": "/steps/0/fsrs_next/rows/982/7"
+    },
+    {
+      "apple": 193.6237,
+      "linux": 193.62376,
+      "pointer": "/steps/0/fsrs_next/rows/982/10"
+    }
+  ],
+  "linux_observations_sha256": "63af687ed160ca64030aa539b8f18661fffa6d2b2d3030a6aff951d032f5c018",
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "13cf6de5f143a7dee18bcd1284c268f98b9c88deaf971385a9856489aaefb682",
+    "lock_sha256": "869b29c42af493bd7b46960d5ee4e72e99ff92bfc8b2a10c190dc54a5513a244",
+    "platform": "macos-arm64"
+  },
+  "scenario_id": "fp-probe/corpus/next-states-028",
+  "scenario_sha256": "c5840116ae7f6f252f34168c02fd31a810a7299bf281110811eebb37c194df6e"
+}
