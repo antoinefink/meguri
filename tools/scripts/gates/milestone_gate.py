@@ -61,16 +61,34 @@ VALIDATOR_KEYS = {
     "report": set(),
 }
 
+# U241 owns the budget report a device run records: its schema, measurement
+# dimensions, fixture, configuration and the budget cases each run must cover.
+# Until U241 lands and v_device_run checks that contract, no device run passes.
+DEVICE_RUN_PENDING = "U241"
+
 # The fixed list of external dependencies a deferral may name, each with the
-# only condition that keeps it deferred.
+# only condition that keeps it deferred and the warn it covers: while an
+# approved deferral holds, a result of its cells' run that is warn with
+# `covers` is deferred instead of failing.
 DEPENDENCIES = {
     "xcode-27.1-foldable-simulator": {
         "why": "Xcode 27.0 has no foldable iPhone simulator; Apple is expected to ship one with Xcode 27.1 "
                "(plan Dependencies / Assumptions)",
         "condition": {"job": "sim-setup", "args": [], "detail": "foldable",
                       "equals": {"status": "unavailable", "reason": "toolchain"}},
+        "covers": {"detail": "lane", "equals": {"kind": "foldable", "status": "unavailable", "reason": "toolchain"}},
     },
 }
+
+# Plan excerpts: the table text a suite, global condition or user step
+# implements (check_coverage).
+PLAN_CELLS = {"gate": "closing gate", "user_steps": "user steps"}
+# Words that may stay unclaimed between excerpts.
+CONNECTIVES = frozenset(("a", "an", "and", "as", "at", "by", "for", "in", "of", "on", "or", "plus", "the", "to",
+                         "with"))
+UNIT_TOKEN = re.compile(r"(?<![A-Za-z0-9])U[0-9]+[a-z]?(?![A-Za-z0-9])")
+UNIT_RANGE = re.compile(r"(?<![A-Za-z0-9])U([0-9]+)[\u2013-]U([0-9]+)(?![A-Za-z0-9])")  # en dash or hyphen
+DEVICE_NAMES = {"iphone": "iPhone", "ipad": "iPad", "mac": "Mac"}
 
 
 class Invalid(Exception):
@@ -196,6 +214,159 @@ def check_scope(where, scope, errors):
     return {"detail": scope["detail"], "items": list(scope["items"])}
 
 
+def check_bindings(where, value, user_step, errors):
+    """A definition's plan excerpts as [{text, items, cell}]. A suite or global
+    condition quotes the closing gate text; a user step quotes the user steps
+    text, or the closing gate text with cell: gate."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not value:
+        errors.append("%s: plan must be a list of excerpts of the plan's table text" % where)
+        return []
+    out = []
+    for b in value:
+        b = {"text": b} if isinstance(b, str) else b
+        keys = {"text", "items", "cell"} if user_step else {"text", "items"}
+        if not isinstance(b, dict) or set(b) - keys or not isinstance(b.get("text"), str) or not b["text"].strip():
+            errors.append("%s: a plan excerpt is a string or {text, items%s}" % (where, ", cell" if user_step else ""))
+            continue
+        items = b.get("items", [])
+        if not is_str_list(items, nonempty=False):
+            errors.append("%s: plan excerpt %r: items must be a list of names" % (where, b["text"]))
+            items = []
+        cell = b.get("cell", "user_steps" if user_step else "gate")
+        if cell not in PLAN_CELLS:
+            errors.append("%s: plan excerpt %r: cell must be gate or user_steps" % (where, b["text"]))
+            continue
+        span = UNIT_RANGE.search(b["text"])
+        if span:
+            errors.append("%s: plan excerpt %r spans the unit range %s; quote each unit of it on its own (U%s)"
+                          % (where, b["text"], span.group(0), span.group(2)))
+        out.append({"text": b["text"], "items": list(items), "cell": cell})
+    return out
+
+
+def check_items(where, bindings, have, what, errors):
+    """Every item an excerpt binds must be one of the definition's `have`, its
+    `what` (scope items, screens, cases); have None: `what` names the kind of
+    definition, which binds no items."""
+    for b in bindings:
+        if not b["items"]:
+            continue
+        if have is None:
+            errors.append("%s: %s binds no items (plan excerpt %r)" % (where, what, b["text"]))
+            continue
+        lack = [i for i in b["items"] if i not in have]
+        if lack:
+            errors.append("%s: plan excerpt %r binds %s, which its %s lacks (%s)"
+                          % (where, b["text"], ", ".join(lack), what, ", ".join(have) or "none"))
+
+
+def plan_units(text):
+    """The unit ids a plan text names, ranges (U252–U254) expanded."""
+    units = set(UNIT_TOKEN.findall(text))
+    for m in UNIT_RANGE.finditer(text):
+        a, b = int(m.group(1)), int(m.group(2))
+        if a < b <= a + 100:
+            units.update("U%d" % n for n in range(a, b + 1))
+    return units
+
+
+def excerpt_spans(text, excerpt):
+    """Where excerpt occurs in text, not inside a longer word or id."""
+    spans, i = [], text.find(excerpt)
+    while i >= 0:
+        j = i + len(excerpt)
+        if not (i > 0 and text[i - 1].isalnum() and excerpt[0].isalnum()) and \
+                not (j < len(text) and text[j].isalnum() and excerpt[-1].isalnum()):
+            spans.append((i, j))
+        i = text.find(excerpt, i + 1)
+    return spans
+
+
+def unclaimed(text, covered):
+    """The runs of text no excerpt covers that hold more than connectives."""
+    runs, start = [], None
+    for i, c in enumerate(covered + [True]):
+        if not c and start is None:
+            start = i
+        elif c and start is not None:
+            runs.append(text[start:i])
+            start = None
+    return [r.strip(" .,;:") for r in runs
+            if any(w.lower() not in CONNECTIVES for w in re.findall(r"[^\W_]+", r))]
+
+
+def check_coverage(model, errors):
+    """The plan's table text against the definitions that run: every part of a
+    milestone's closing gate and user steps texts is claimed by the plan
+    excerpt of a suite, global condition (in its `from` milestone) or user
+    step; each unit the text names, inside a range too, by its own excerpt;
+    device runs cover the devices their excerpts name (all three when they
+    name none); a trial's excerpt states its days."""
+    for m in model["milestones"]:
+        mid = m["id"]
+        claims = {cell: [] for cell in PLAN_CELLS}
+        for s in m["suites"]:
+            claims["gate"] += [("%s %s" % (mid, s["id"]), b) for b in s["plan"]]
+        for g in model["global"]:
+            if g["from"] == mid:
+                claims["gate"] += [("global %s" % g["id"], b) for b in g["plan"]]
+        for st in m["user_steps"]:
+            for b in st["plan"]:
+                claims[b["cell"]].append(("%s %s" % (mid, st["id"]), b))
+        for cell, label in PLAN_CELLS.items():
+            text = m["plan"][cell]
+            covered, units, claimed = [False] * len(text), plan_units(text), set()
+            for who, b in claims[cell]:
+                excerpt, spans = b["text"], excerpt_spans(text, b["text"])
+                if UNIT_TOKEN.fullmatch(excerpt):
+                    if excerpt not in units:
+                        errors.append("%s: plan excerpt %r is not a unit the %s text of %s names"
+                                      % (who, excerpt, label, mid))
+                    claimed.add(excerpt)
+                elif not spans:
+                    errors.append("%s: plan excerpt %r is not in the %s text of %s" % (who, excerpt, label, mid))
+                    continue
+                elif len(spans) > 1:
+                    errors.append("%s: plan excerpt %r occurs %d times in the %s text of %s; quote enough of it to "
+                                  "make it unique" % (who, excerpt, len(spans), label, mid))
+                    continue
+                else:
+                    claimed.update(UNIT_TOKEN.findall(excerpt))
+                for i, j in spans:
+                    covered[i:j] = [True] * (j - i)
+            for run in unclaimed(text, covered):
+                errors.append("%s: the %s text %r is claimed by no suite, global condition or user step; give the "
+                              "one that implements it a plan excerpt (or restore it if it was removed)"
+                              % (mid, label, run))
+            for u in sorted(units - claimed, key=lambda x: int(re.sub(r"[^0-9]", "", x))):
+                errors.append("%s: the %s text names %s, but no plan excerpt claims it (a unit inside a range "
+                              "needs its own: plan: [%s])" % (mid, label, u, u))
+        runs = [st for st in m["user_steps"] if st["validator"].get("type") == "device-run" and st["plan"]]
+        if runs:
+            texts = [b["text"] for st in runs for b in st["plan"]]
+            named = [d for d in DEVICES if any(re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % DEVICE_NAMES[d], t)
+                                               for t in texts)]
+            required = named or list(DEVICES)
+            have = [st["validator"].get("device") for st in runs]
+            for d in required:
+                if d not in have:
+                    errors.append("%s: the plan asks for device runs on %s; there is no device-run user step on %s "
+                                  "that claims it" % (mid, ", ".join(DEVICE_NAMES[x] for x in required), d))
+            for st in runs:
+                if st["validator"].get("device") not in required:
+                    errors.append("%s %s: a device run on %s, but its plan excerpts name only %s"
+                                  % (mid, st["id"], st["validator"].get("device"),
+                                     ", ".join(DEVICE_NAMES[x] for x in required)))
+        for st in m["user_steps"]:
+            days = st["validator"].get("days")
+            if st["validator"].get("type") == "trial" and st["plan"] and not any(
+                    re.search(r"(?<![0-9])%s-day" % days, b["text"]) for b in st["plan"]):
+                errors.append("%s %s: a trial of %s days, but its plan excerpts do not say %s-day"
+                              % (mid, st["id"], days, days))
+
+
 def runnable(run):
     """Why a tiers run cannot be a milestone suite, or None."""
     if run["tier"] not in SUITE_TIERS:
@@ -224,7 +395,7 @@ def check_suite(where, s, runs, mi, errors):
     if not isinstance(s, dict):
         errors.append("%s: a suite must be a mapping" % where)
         return None
-    extra = set(s) - {"id", "run", "scope", "require", "pending", "why"}
+    extra = set(s) - {"id", "run", "scope", "require", "pending", "plan", "why"}
     if extra:
         errors.append("%s: unknown keys %s" % (where, ", ".join(sorted(extra))))
     if not isinstance(s.get("id"), str) or not SLUG.match(s["id"]):
@@ -249,9 +420,15 @@ def check_suite(where, s, runs, mi, errors):
             if m == "{milestone}" or milestone_index(m) >= mi:
                 errors.append("%s: run %s runs `tools/mg %s %s`, which requires the %s gate; no milestone's suites may require its own gate"
                               % (where, s["run"], run["job"], " ".join(run["args"]), MILESTONES[mi] if m == "{milestone}" else m))
+    scope = check_scope(where, s.get("scope"), errors)
+    plan = check_bindings(where, s.get("plan"), False, errors)
+    if scope:
+        check_items(where, plan, scope["items"], "scope", errors)
+    else:
+        check_items(where, plan, None, "a suite without a scope", errors)
     return {
-        "id": s["id"], "run": s["run"], "scope": check_scope(where, s.get("scope"), errors),
-        "require": check_rules(where, s.get("require"), errors), "pending": pending,
+        "id": s["id"], "run": s["run"], "scope": scope,
+        "require": check_rules(where, s.get("require"), errors), "pending": pending, "plan": plan,
         "why": s.get("why") if isinstance(s.get("why"), str) else "",
     }
 
@@ -260,7 +437,7 @@ def check_step(where, st, errors):
     if not isinstance(st, dict):
         errors.append("%s: a user step must be a mapping" % where)
         return None
-    extra = set(st) - {"id", "description", "evidence", "validator"}
+    extra = set(st) - {"id", "description", "evidence", "validator", "plan"}
     if extra:
         errors.append("%s: unknown keys %s" % (where, ", ".join(sorted(extra))))
     if not isinstance(st.get("id"), str) or not SLUG.match(st["id"]):
@@ -296,7 +473,15 @@ def check_step(where, st, errors):
             errors.append("%s: cases must be a list of case ids" % where)
         elif "cases_file" in v and not is_rel_path(v["cases_file"]):
             errors.append("%s: cases_file must be a path" % where)
-    return {"id": st["id"], "description": st.get("description"), "evidence": st.get("evidence"), "validator": dict(v)}
+    plan = check_bindings(where, st.get("plan"), True, errors)
+    if t == "variant-pick" and is_str_list(v.get("screens")):
+        check_items(where, plan, v["screens"], "screens", errors)
+    elif t == "capture" and is_str_list(v.get("cases")):
+        check_items(where, plan, v["cases"], "cases", errors)
+    else:
+        check_items(where, plan, None, "a %s step" % t, errors)
+    return {"id": st["id"], "description": st.get("description"), "evidence": st.get("evidence"), "validator": dict(v),
+            "plan": plan}
 
 
 def check_deferral(where, d, runs):
@@ -436,9 +621,11 @@ def build_model(manifest, config):
             errors.append("%s: a global condition needs an id" % where)
             continue
         where = "global %s" % g["id"]
-        extra = set(g) - {"id", "kind", "run", "pending", "from", "why"}
+        extra = set(g) - {"id", "kind", "run", "pending", "from", "plan", "why"}
         if extra:
             errors.append("%s: unknown keys %s" % (where, ", ".join(sorted(extra))))
+        plan = check_bindings(where, g.get("plan"), False, errors)
+        check_items(where, plan, None, "a global condition", errors)
         if g["id"] in gids:
             errors.append("%s: listed twice" % where)
         gids.add(g["id"])
@@ -454,7 +641,7 @@ def build_model(manifest, config):
             errors.append("%s: pending must be a unit id" % where)
         if kind is not None and kind not in GLOBAL_KINDS:
             errors.append("%s: kind must be one of %s" % (where, ", ".join(GLOBAL_KINDS)))
-        entry = {"id": g["id"], "kind": kind, "pending": pending, "from": frm,
+        entry = {"id": g["id"], "kind": kind, "pending": pending, "from": frm, "plan": plan,
                  "why": g.get("why") if isinstance(g.get("why"), str) else "", "suite": None}
         if kind == "suite":
             run = runs.get(g.get("run"))
@@ -467,6 +654,7 @@ def build_model(manifest, config):
         elif "run" in g:
             errors.append("%s: only a suite condition names a run" % where)
         model["global"].append(entry)
+    check_coverage(model, errors)
     return model, errors, problems
 
 
@@ -646,59 +834,92 @@ class Git:
 # results
 
 
-def args_match(pattern, args, sha, milestone):
-    """Whether a result's args are a run's args with the milestone values:
-    {base} and {tip} are the result's own commit, {milestone} the milestone,
-    {artifact:<run>:<file>} a path to that file."""
-    if not isinstance(args, list) or len(pattern) != len(args):
-        return False
-    values = {"base": sha, "tip": sha, "milestone": milestone}
-    for p, a in zip(pattern, args):
-        m = ARTIFACT.match(p)
-        if m:
-            if not (isinstance(a, str) and a.startswith("/") and a.rsplit("/", 1)[-1] == m.group(2)):
+class Results:
+    """The job results under build/mg, and the one result the gate reads for
+    each tiers run: the latest non-dry-run result of its job whose args are
+    the run's with the milestone values. {base} and {tip} are the result's own
+    commit, {milestone} the milestone, and {artifact:<run>:<file>} exactly
+    that file among the artifacts of the result the gate reads for <run>,
+    which must be clean and on the result's own commit."""
+
+    def __init__(self, directory, runs, milestone):
+        self.dir, self.runs, self.milestone = directory, runs, milestone
+        self.selected = {}
+
+    def for_run(self, run_id, resolving=()):
+        """(path, result) the gate reads for a tiers run, or None."""
+        if run_id in resolving or run_id not in self.runs:
+            return None
+        if run_id not in self.selected:
+            run = self.runs[run_id]
+            self.selected[run_id] = self.latest(run["job"], run["args"], resolving + (run_id,))
+        return self.selected[run_id]
+
+    def latest(self, job, pattern, resolving=()):
+        """(path, result) of the latest non-dry-run result of `job` whose args
+        match the pattern, or None."""
+        best = None
+        directory = os.path.join(self.dir, job)
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            return None
+        for name in names:
+            if name == "latest":
+                continue
+            path = os.path.join(directory, name, "result.json")
+            try:
+                r = read_json(path)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(r, dict) or r.get("dry_run") is not False or r.get("job") != job:
+                continue
+            sha = (r.get("commit") or {}).get("sha") if isinstance(r.get("commit"), dict) else None
+            if not self.args_match(pattern, r.get("args"), sha, resolving):
+                continue
+            key = (str(r.get("started_at") or ""), str(r.get("run_id") or name))
+            if best is None or key > best[0]:
+                best = (key, path, r)
+        return (best[1], best[2]) if best else None
+
+    def artifact(self, run_id, name, resolving):
+        """(path, commit) of the file `name` among the artifacts of the clean
+        result the gate reads for run_id, or None."""
+        found = self.for_run(run_id, resolving)
+        if found is None:
+            return None
+        r = found[1]
+        commit = r.get("commit") if isinstance(r.get("commit"), dict) else {}
+        if commit.get("dirty") is not False:
+            return None
+        paths = [x["path"] for x in r.get("artifacts") or []
+                 if isinstance(x, dict) and isinstance(x.get("path"), str) and x["path"].rsplit("/", 1)[-1] == name]
+        return (paths[0], commit.get("sha")) if paths else None
+
+    def args_match(self, pattern, args, sha, resolving):
+        if not isinstance(args, list) or len(pattern) != len(args):
+            return False
+        values = {"base": sha, "tip": sha, "milestone": self.milestone}
+        for p, a in zip(pattern, args):
+            m = ARTIFACT.match(p)
+            if m:
+                ref = self.artifact(m.group(1), m.group(2), resolving)
+                if ref is None or a != ref[0] or not sha or ref[1] != sha:
+                    return False
+                continue
+            try:
+                expected = PLACEHOLDER.sub(lambda x: values[x.group(1)], p)
+            except (KeyError, TypeError):
                 return False
-            continue
-        try:
-            expected = PLACEHOLDER.sub(lambda x: values[x.group(1)], p)
-        except (KeyError, TypeError):
-            return False
-        if expected != a:
-            return False
-    return True
+            if expected != a:
+                return False
+        return True
 
 
-def find_result(results, job, pattern, milestone):
-    """(path, result) of the latest non-dry-run result of `job` whose args
-    match, or None."""
-    best = None
-    directory = os.path.join(results, job)
-    try:
-        names = os.listdir(directory)
-    except OSError:
-        return None
-    for name in names:
-        if name == "latest":
-            continue
-        path = os.path.join(directory, name, "result.json")
-        try:
-            r = read_json(path)
-        except (OSError, ValueError):
-            continue
-        if not isinstance(r, dict) or r.get("dry_run") is not False or r.get("job") != job:
-            continue
-        sha = (r.get("commit") or {}).get("sha") if isinstance(r.get("commit"), dict) else None
-        if not args_match(pattern, r.get("args"), sha, milestone):
-            continue
-        key = (str(r.get("started_at") or ""), str(r.get("run_id") or name))
-        if best is None or key > best[0]:
-            best = (key, path, r)
-    return (best[1], best[2]) if best else None
-
-
-def judge(r, rules, scope):
+def judge(r, rules, scope, deferred_by=None):
     """(outcome, message) of one result under the pass rules: pass,
-    awaiting_user, queued, dirty or fail."""
+    awaiting_user, deferred (a warn an approved deferral covers: deferred_by
+    says which), or a failing queued, unavailable, warn, dirty or fail."""
     commit = r.get("commit") if isinstance(r.get("commit"), dict) else {}
     if not isinstance(commit.get("sha"), str) or not SHA.match(commit["sha"]):
         return "fail", "the result names no commit"
@@ -711,7 +932,18 @@ def judge(r, rules, scope):
         return "queued", "queued, it did not run: %s" % message
     if status == "warn" and details.get("outcome") == "awaiting_user":
         return "awaiting_user", message or "awaiting Antoine"
-    if status not in ("pass", "warn"):
+    if status == "warn":
+        # Any other warn: the job did not run, or ran with something to look
+        # at. Neither closes a milestone.
+        if deferred_by:
+            return "deferred", deferred_by
+        lane = details.get("lane") if isinstance(details.get("lane"), dict) else {}
+        if lane.get("status") == "unavailable":
+            return "unavailable", "unavailable: %s (lane %s); it did not run, and no approved deferral covers it%s" % (
+                lane.get("reason"), lane.get("kind"), (": " + message) if message else "")
+        return "warn", "warn%s; a milestone suite must pass (only a queued run or one awaiting Antoine is told apart)" % (
+            (": " + message) if message else "")
+    if status != "pass":
         fails = [f.get("id", "?") for f in r.get("failures") or [] if isinstance(f, dict)]
         return "fail", "%s%s" % (status, (": " + message) if message else "") + (
             " (%s)" % ", ".join(fails[:5]) if fails else "")
@@ -818,8 +1050,13 @@ def v_device_run(ctx, step, v):
     if not ctx["git"].is_ancestor(build, ref):
         return "fail", "%s: build commit %s is not an ancestor of the gate commit %s" % (path, build[:12], ref[:12]), {}
     changed = ctx["git"].changed(build, ref, "app", "core")
-    return "pass", "%d budgets pass on build %s (%d app/ and core/ paths changed since)" % (
-        len(required), build[:12], len(changed)), {
+    # Rows that say pass are not yet evidence: nothing here checks U241's
+    # report schema, measurement dimensions, fixture, configuration or budget
+    # cases, so the step stays pending until U241 adds that check.
+    return "pending", ("lands with %s: %s lists %d budgets as passing on build %s, but a device run passes only "
+                       "against U241's budget report contract (its schema, measurement dimensions, fixture, "
+                       "configuration and budget cases), which this validator does not check yet"
+                       % (DEVICE_RUN_PENDING, path, len(required), build[:12])), {
         "build_commit": build, "budgets": required, "changed_since_build": changed}
 
 
@@ -876,7 +1113,19 @@ def v_trial(ctx, step, v):
         day = as_date(e.get("date")) if isinstance(e, dict) else None
         if day is None:
             return "fail", "%s line %d has no date (YYYY-MM-DD)" % (step["evidence"], n), {}
-        fb, inc = e.get("fallback"), e.get("data_incident")
+        # A day counts only when its entry says what happened: an absent
+        # fallback or incident is not "none".
+        lacking = [k for k in ("devices", "fallback", "data_incident") if k not in e]
+        if lacking:
+            return "fail", ("%s line %d lacks %s: every entry records, from Antoine's statement, the devices used, "
+                            "the fallback (none or {task, in_scope}) and the data incident (none or what happened)"
+                            % (step["evidence"], n, ", ".join(lacking))), {}
+        devices = e["devices"]
+        if (not isinstance(devices, list) or not devices or not all(isinstance(d, str) and d in DEVICES for d in devices)
+                or len(set(devices)) != len(devices)):
+            return "fail", "%s line %d: devices must list the devices used, each once (%s)" % (
+                step["evidence"], n, ", ".join(DEVICES)), {}
+        fb, inc = e["fallback"], e["data_incident"]
         if not is_none(fb) and not (isinstance(fb, dict) and isinstance(fb.get("task"), str)
                                     and isinstance(fb.get("in_scope"), bool)):
             return "fail", "%s line %d: fallback must be none or {task, in_scope}" % (step["evidence"], n), {}
@@ -1013,6 +1262,21 @@ def evaluate(model, config, a):
     def fail(fid, message):
         failures.append({"id": fid, "message": message})
 
+    results = Results(a.results, runs, a.milestone)
+    in_effect = []  # deferrals that hold: (model entry, record)
+
+    def deferred_by(run_id, r):
+        """Which deferral in effect covers this warn result of run_id, or None."""
+        details = r.get("details") if isinstance(r.get("details"), dict) else {}
+        for d, rec in in_effect:
+            cover = DEPENDENCIES[d["dependency"]]["covers"]
+            got = get_path(details, cover["detail"])
+            if (d["cells"]["run"] == run_id and isinstance(got, dict)
+                    and all(got.get(k) == v for k, v in cover["equals"].items())):
+                return "deferred by %s (%s, approved by %s; %s): %s" % (
+                    d["id"], d["dependency"], d["approved_by"], rec["message"], json.dumps(got))
+        return None
+
     def assess(s):
         """One suite record: its run's result judged under its pass rules."""
         rec = {"id": s["id"], "run": s["run"], "since": s.get("since"), "scope": s["scope"],
@@ -1033,11 +1297,14 @@ def evaluate(model, config, a):
         if run is None:
             rec["outcome"], rec["message"] = "missing", "run %s is not in tools/gate/tiers.yaml" % s["run"]
             return rec
-        found = find_result(a.results, run["job"], run["args"], a.milestone)
+        found = results.for_run(s["run"])
         if found is None:
+            refs = [m for m in (ARTIFACT.match(x) for x in run["args"]) if m]
             rec["outcome"] = "missing"
-            rec["message"] = "no result of `tools/mg %s` (run %s; `tools/mg milestone %s` runs it)" % (
-                " ".join([run["job"]] + run["args"]), s["run"], a.milestone)
+            rec["message"] = "no result of `tools/mg %s` (run %s; `tools/mg milestone %s` runs it)%s" % (
+                " ".join([run["job"]] + run["args"]), s["run"], a.milestone, "".join(
+                    " whose argument is the %s of the %s result the gate reads, made on its commit" % (
+                        m.group(2), m.group(1)) for m in refs))
             return rec
         path, r = found
         rec["result"], rec["run_id"], rec["status"] = path, r.get("run_id"), r.get("status")
@@ -1045,10 +1312,49 @@ def evaluate(model, config, a):
         rec["summary"] = r.get("summary")
         rec["args"] = r.get("args")
         rules = [x for x in run.get("require") or [] if not x.get("release")] + s["require"]
-        rec["outcome"], rec["message"] = judge(r, rules, s["scope"])
+        rec["outcome"], rec["message"] = judge(r, rules, s["scope"],
+                                               deferred_by(s["run"], r) if r.get("status") == "warn" else None)
         if rec["commit"]:
             seen.append((s["id"], rec["commit"]))
         return rec
+
+    # Deferrals first: the condition's result, and the cells once it no
+    # longer holds. A deferral that holds covers its cells' run below.
+    deferred = []
+    for m in model["milestones"][:mi + 1]:
+        for d in m["deferred"]:
+            rec = {"id": d["id"], "since": d["since"], "dependency": d["dependency"], "condition": d["condition"],
+                   "approved_by": d["approved_by"], "why": d["why"], "outcome": None, "message": ""}
+            deferred.append(rec)
+            if d["problems"]:
+                rec["outcome"], rec["message"] = "rejected", "; ".join(d["problems"])
+                continue
+            cond = DEPENDENCIES[d["dependency"]]["condition"]
+            found = results.latest(cond["job"], cond["args"])
+            if found is None:
+                rec["outcome"] = "unchecked"
+                rec["message"] = "no `tools/mg %s` result; run it on the gate commit" % cond["job"]
+                continue
+            path, r = found
+            commit = r.get("commit") if isinstance(r.get("commit"), dict) else {}
+            if commit.get("dirty") is not False or not isinstance(commit.get("sha"), str):
+                rec["outcome"], rec["message"] = "unchecked", "the %s result is not from a clean commit" % cond["job"]
+                continue
+            seen.append(("deferred %s (%s)" % (d["id"], cond["job"]), commit["sha"]))
+            rec["condition_result"] = {"result": path, "run_id": r.get("run_id")}
+            detail = get_path(r.get("details") or {}, cond["detail"])
+            if isinstance(detail, dict) and all(detail.get(k) == v for k, v in cond["equals"].items()):
+                rec["outcome"], rec["message"] = "deferred", "%s still reports %s" % (cond["job"], json.dumps(detail))
+                in_effect.append((d, rec))
+                continue
+            cells = assess(d["cells"])
+            rec["cells"] = cells
+            if cells["outcome"] == "pass":
+                rec["outcome"], rec["message"] = "resolved", "the condition no longer holds and its cells pass"
+            else:
+                rec["outcome"] = "fail"
+                rec["message"] = "the condition no longer holds (%s reports %s) and its cells are not green: %s %s" % (
+                    cond["job"], json.dumps(detail), cells["outcome"], cells["message"])
 
     suites = [assess(s) for s in cumulative(model, mi)]
 
@@ -1066,42 +1372,6 @@ def evaluate(model, config, a):
             rec["outcome"], rec["message"], rec["attached"] = s["outcome"], s["message"], {
                 k: s[k] for k in ("run", "job", "args", "result", "run_id", "commit", "status", "summary")}
         globals_.append(rec)
-
-    # Deferrals: the condition's result, and the cells once it no longer holds.
-    deferred = []
-    for m in model["milestones"][:mi + 1]:
-        for d in m["deferred"]:
-            rec = {"id": d["id"], "since": d["since"], "dependency": d["dependency"], "condition": d["condition"],
-                   "approved_by": d["approved_by"], "why": d["why"], "outcome": None, "message": ""}
-            deferred.append(rec)
-            if d["problems"]:
-                rec["outcome"], rec["message"] = "rejected", "; ".join(d["problems"])
-                continue
-            cond = DEPENDENCIES[d["dependency"]]["condition"]
-            found = find_result(a.results, cond["job"], cond["args"], a.milestone)
-            if found is None:
-                rec["outcome"] = "unchecked"
-                rec["message"] = "no `tools/mg %s` result; run it on the gate commit" % cond["job"]
-                continue
-            path, r = found
-            commit = r.get("commit") if isinstance(r.get("commit"), dict) else {}
-            if commit.get("dirty") is not False or not isinstance(commit.get("sha"), str):
-                rec["outcome"], rec["message"] = "unchecked", "the %s result is not from a clean commit" % cond["job"]
-                continue
-            seen.append(("deferred %s (%s)" % (d["id"], cond["job"]), commit["sha"]))
-            rec["condition_result"] = {"result": path, "run_id": r.get("run_id")}
-            detail = get_path(r.get("details") or {}, cond["detail"])
-            if isinstance(detail, dict) and all(detail.get(k) == v for k, v in cond["equals"].items()):
-                rec["outcome"], rec["message"] = "deferred", "%s still reports %s" % (cond["job"], json.dumps(detail))
-                continue
-            cells = assess(d["cells"])
-            rec["cells"] = cells
-            if cells["outcome"] == "pass":
-                rec["outcome"], rec["message"] = "resolved", "the condition no longer holds and its cells pass"
-            else:
-                rec["outcome"] = "fail"
-                rec["message"] = "the condition no longer holds (%s reports %s) and its cells are not green: %s %s" % (
-                    cond["job"], json.dumps(detail), cells["outcome"], cells["message"])
 
     # One gate commit for every result.
     commits = sorted({c for _, c in seen})
@@ -1131,10 +1401,10 @@ def evaluate(model, config, a):
     for s in suites:
         if s["outcome"] == "awaiting_user":
             awaiting.append({"id": "suite:" + s["id"], "message": s["message"]})
-        elif s["outcome"] != "pass":
+        elif s["outcome"] not in ("pass", "deferred"):
             fail("suite:" + s["id"], "%s (%s): %s" % (s["id"], s["outcome"], s["message"]))
     for g in globals_:
-        if g["outcome"] in ("pass", "not-applicable", None):
+        if g["outcome"] in ("pass", "deferred", "not-applicable", None):
             continue
         if g["outcome"] == "awaiting_user":
             awaiting.append({"id": "global:" + g["id"], "message": g["message"]})
@@ -1245,8 +1515,8 @@ def evaluate(model, config, a):
             write_json(a.record, {
                 "record_version": RECORD_VERSION, "milestone": a.milestone, "name": milestone["name"],
                 "closed_at": now, "gate_commit": gate, "head": head, "evidence_commits": evidence_commits,
-                "suites": [{k: s[k] for k in ("id", "run", "job", "args", "since", "run_id", "status", "summary")}
-                           for s in suites],
+                "suites": [{k: s[k] for k in ("id", "run", "job", "args", "since", "run_id", "status", "summary",
+                                              "outcome")} for s in suites],
                 "units": [u["id"] for u in units],
                 "user_steps": [{k: s[k] for k in ("id", "type", "evidence", "outcome", "message", "details")}
                                for s in steps],

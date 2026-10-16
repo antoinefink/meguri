@@ -45,12 +45,13 @@ def run_def(rid, job=None, args=None, tier="T0", cls="unit", **extra):
 
 def manifest(**per_milestone):
     """A valid manifest: every milestone empty but for what the caller gives
-    (a dict of milestone fields per milestone id)."""
+    (a dict of milestone fields per milestone id). Its plan texts are empty,
+    so no suite or user step needs a plan excerpt."""
     out = {"version": 1, "plan": "plan.md", "evidence_paths": ["docs/process/milestone-records/"],
            "budget_devices": {"R1822": ["ipad", "mac"]},
            "global": [{"id": "quarantine", "kind": "quarantine"}], "milestones": []}
     for m in MS:
-        entry = {"id": m, "name": "Milestone " + m, "plan": {"gate": "g", "user_steps": "u"}, "units": [],
+        entry = {"id": m, "name": "Milestone " + m, "plan": {"gate": "", "user_steps": ""}, "units": [],
                  "suites": [], "user_steps": [], "deferred": []}
         entry.update(per_milestone.get(m, {}))
         out["milestones"].append(entry)
@@ -92,11 +93,18 @@ class Sandbox(unittest.TestCase):
         self.config["runs"].append(run_def(rid, **kw))
 
     def result(self, job, args=(), status="pass", sha=None, dirty=False, details=None, summary=None,
-               failures=None, dry_run=False):
+               failures=None, dry_run=False, artifacts=()):
+        """Writes a result; `artifacts` are file names written into its run
+        directory and listed as its artifacts."""
         self.seq += 1
         run_id = "20261120T1000%02dZ-%d" % (self.seq, 100 + self.seq)
         path = os.path.join(self.results, job, run_id, "result.json")
         os.makedirs(os.path.dirname(path))
+        listed = []
+        for name in artifacts:
+            listed.append({"kind": "report", "path": os.path.join(os.path.dirname(path), name)})
+            with open(listed[-1]["path"], "w", encoding="utf-8") as f:
+                f.write("{}\n")
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"schema_version": 1, "job": job, "run_id": run_id, "status": status,
                        "exit_code": {"pass": 0, "warn": 0, "fail": 1, "error": 2}[status], "placement": "host",
@@ -105,7 +113,7 @@ class Sandbox(unittest.TestCase):
                        "duration_ms": 1000, "commit": {"sha": sha or self.git("rev-parse", "HEAD"), "dirty": dirty},
                        "message": "%s %s" % (job, status),
                        "summary": summary or {"total": 3, "passed": 3, "failed": 0, "skipped": 0},
-                       "failures": failures or [], "artifacts": [], "user_steps": [], "details": details or {}}, f)
+                       "failures": failures or [], "artifacts": listed, "user_steps": [], "details": details or {}}, f)
         return path
 
     def evaluate(self, man, milestone, doctor=None, extra=()):
@@ -281,6 +289,64 @@ class SuiteTests(Sandbox):
         self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
         self.assertEqual([a["id"] for a in ev["awaiting"]], ["suite:release-gate"])
 
+    def test_a_warn_that_is_neither_queued_nor_awaiting_fails(self):
+        # A simulator job that cannot get its simulator ends warn with the lane
+        # unavailable: nothing ran.
+        self.run_("perf-smoke", tier="T3", cls="perf")
+        self.result("perf-smoke", status="warn",
+                    details={"lane": {"kind": "iphone", "status": "unavailable", "reason": "toolchain"}})
+        man = manifest(M0={"suites": [{"id": "perf-smoke", "run": "perf-smoke"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+        self.assertEqual(ev["suites"][0]["outcome"], "unavailable")
+        self.assertIn("unavailable", self.failure(ev, "suite:perf-smoke"))
+        # A pass with notes is not a pass either.
+        self.result("perf-smoke", status="warn", details={})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["suites"][0]["outcome"], "warn")
+        self.assertIn("warn", self.failure(ev, "suite:perf-smoke"))
+        self.result("perf-smoke")
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 0, ev["failures"])
+
+    def harvest_runs(self):
+        self.run_("live", job="live-oracle", tier="T1", cls="sync")
+        self.run_("harvest", job="harvest-report", args=["--live-report", "{artifact:live:t1-live.json}"],
+                  tier="T3", cls="conformance")
+        return manifest(M0={"suites": [{"id": "live", "run": "live"}, {"id": "harvest", "run": "harvest"}]})
+
+    def test_an_artifact_argument_is_the_file_of_the_result_the_gate_reads(self):
+        man = self.harvest_runs()
+        live = os.path.join(os.path.dirname(self.result("live-oracle", artifacts=["t1-live.json"])), "t1-live.json")
+        elsewhere = os.path.join(self.tmp, "copy", "t1-live.json")
+        self.result("harvest-report", ["--live-report", elsewhere])
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertEqual([s["outcome"] for s in ev["suites"]], ["pass", "missing"])
+        self.assertIn("t1-live.json of the live result", self.failure(ev, "suite:harvest"))
+        self.result("harvest-report", ["--live-report", live])
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 0, ev["failures"])
+
+    def test_an_artifact_from_another_commit_does_not_count(self):
+        man = self.harvest_runs()
+        live_a = os.path.join(os.path.dirname(self.result("live-oracle", artifacts=["t1-live.json"])), "t1-live.json")
+        self.commit("Change code", {"core/x.rs": "fn x() {}\n"})
+        # A harvest report made on commit B from commit A's live report.
+        self.result("harvest-report", ["--live-report", live_a])
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["suites"][1]["outcome"], "missing")
+        # B's own live run is now the one the gate reads; A's report still does not count.
+        live_b = os.path.join(os.path.dirname(self.result("live-oracle", artifacts=["t1-live.json"])), "t1-live.json")
+        self.result("harvest-report", ["--live-report", live_a])
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(ev["suites"][1]["outcome"], "missing")
+        self.result("harvest-report", ["--live-report", live_b])
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 0, ev["failures"])
+
     def test_pending_suite_fails_and_says_who_lands_it(self):
         man = manifest(M1={"suites": [{"id": "u243", "run": "u243-review-loop", "pending": "U243"}]})
         rc, ev = self.evaluate(man, "M1")
@@ -393,7 +459,11 @@ class ManifestTests(Sandbox):
              for i, m in enumerate(MS)] + [
             "", "### Unit Index", "", "| U-ID | Title |", "|---|---|",
         ] + ["| U%d | t |" % i for i in range(1, 8)] + ["", "### U2b. A sub-unit", ""])
-        man = manifest(**{m: {"units": ["U1", "U2"] if m == "M0" else ["U%d" % (i + 2)]} for i, m in enumerate(MS)})
+        man = manifest(**{m: {
+            "units": ["U1", "U2"] if m == "M0" else ["U%d" % (i + 2)], "plan": {"gate": "g", "user_steps": "u"},
+            "suites": [{"id": "g", "run": "g", "pending": "U9", "plan": ["g"]}],
+            "user_steps": [{"id": "u", "description": "u", "evidence": "docs/u.json", "validator": {"type": "report"},
+                            "plan": ["u"]}]} for i, m in enumerate(MS)})
         rc, out = self.check(man, plan)
         self.assertEqual((rc, out["errors"]), (0, []))
         man["milestones"][0]["units"] = ["U1"]
@@ -406,6 +476,100 @@ class ManifestTests(Sandbox):
         self.assertIn("unit U2 of the Unit Index is in no milestone", text)
         self.assertIn("M2: plan.gate is not the table's closing gate text", text)
         self.assertIn("M3: name 'Other'", text)
+
+    @staticmethod
+    def plan_for(man):
+        """A plan whose Delivery Milestones table and Unit Index are the manifest's."""
+        lines = ["### Delivery Milestones", "", "| Milestone | Units | Gate | User steps |", "|---|---|---|---|"]
+        lines += ["| **%s %s** | %s | %s | %s |" % (m["id"], m["name"], ", ".join(m["units"]), m["plan"]["gate"],
+                                                 m["plan"]["user_steps"]) for m in man["milestones"]]
+        lines += ["", "### Unit Index", "", "| U-ID | Title |", "|---|---|"]
+        lines += ["| %s | t |" % u for m in man["milestones"] for u in m["units"]]
+        return "\n".join(lines) + "\n"
+
+    def bound_manifest(self):
+        self.run_("native", job="fp-probe", tier="T3", cls="conformance")
+        screens = {"detail": "screens", "items": ["home", "review"]}
+        home_review = {"text": "for Home and review", "items": ["home", "review"]}
+        per = {m: {"units": ["U%d" % (i + 1)]} for i, m in enumerate(MS)}
+        per["M1"] = {
+            "units": ["U246", "U252", "U253", "U254"],
+            "plan": {"gate": "U246: areas storage and sync (R1926–R1933), plus the native oracle check (KTD24). "
+                             "U252–U254 for Home and review.",
+                     "user_steps": "Device run on iPhone and iPad (AE81). A 7-day trial, logged"},
+            "suites": [
+                {"id": "u246", "run": "u246", "pending": "U246", "scope": {"detail": "areas", "items": ["storage", "sync"]},
+                 "plan": [{"text": "U246: areas storage and sync (R1926–R1933)", "items": ["storage", "sync"]}]},
+                {"id": "u252", "run": "u252", "pending": "U252", "scope": screens, "plan": ["U252", home_review]},
+                {"id": "u253", "run": "u253", "pending": "U253", "scope": screens, "plan": ["U253", home_review]},
+                {"id": "u254", "run": "u254", "pending": "U254", "scope": screens, "plan": ["U254", home_review]}],
+            "user_steps": [
+                {"id": "device-run-%s" % d, "description": "run", "evidence": "docs/%s.json" % d,
+                 "validator": {"type": "device-run", "device": d}, "plan": ["Device run on iPhone and iPad (AE81)"]}
+                for d in ("iphone", "ipad")] + [
+                {"id": "trial", "description": "trial", "evidence": "docs/log.jsonl",
+                 "validator": {"type": "trial", "days": 7}, "plan": ["A 7-day trial, logged"]}]}
+        man = manifest(**per)
+        man["global"].append({"id": "native-oracle", "kind": "suite", "run": "native", "from": "M1",
+                              "plan": ["the native oracle check (KTD24)"]})
+        return man
+
+    def test_check_binds_the_plan_text_to_the_suites_and_user_steps_that_run(self):
+        man = self.bound_manifest()
+        rc, out = self.check(man, self.plan_for(man))
+        self.assertEqual((rc, out["errors"]), (0, []))
+
+        def m1(m):
+            return m["milestones"][1]
+
+        def drop(key, ident):
+            return lambda m: m1(m).__setitem__(key, [x for x in m1(m)[key] if x["id"] != ident])
+
+        def set_in(get, value):
+            return lambda m: get(m).update(value)
+
+        cases = [
+            ("a required suite removed", drop("suites", "u246"), "U246: areas storage and sync (R1926–R1933)"),
+            ("a scope item removed", set_in(lambda m: m1(m)["suites"][0]["scope"], {"items": ["storage"]}),
+             "binds sync, which its scope lacks"),
+            ("the suite of a unit inside a range removed", drop("suites", "u253"), "names U253"),
+            ("the suite of a range's last unit removed", drop("suites", "u254"), "names U254"),
+            ("a device run removed", drop("user_steps", "device-run-ipad"), "no device-run user step on ipad"),
+            ("the trial shortened", set_in(lambda m: m1(m)["user_steps"][2]["validator"], {"days": 5}),
+             "trial of 5 days, but its plan excerpts do not say 5-day"),
+            ("a global condition unbound", lambda m: m["global"][1].pop("plan"), "the native oracle check (KTD24)"),
+            ("an excerpt that is not in the text",
+             set_in(lambda m: m1(m)["suites"][0], {"plan": ["U246: areas storage and search"]}),
+             "'U246: areas storage and search' is not in the closing gate text"),
+            ("an excerpt that spans a unit range", set_in(lambda m: m1(m)["suites"][1], {"plan": ["U252–U254"]}),
+             "spans the unit range U252–U254"),
+            ("an excerpt that is not unique", set_in(lambda m: m1(m)["suites"][0], {"plan": [
+                "U246: areas", {"text": "storage", "items": ["storage"]}, {"text": "and", "items": []},
+                {"text": "sync (R1926–R1933)", "items": ["sync"]}]}), "'and' occurs 2 times"),
+            ("items on a step that takes none",
+             set_in(lambda m: m1(m)["user_steps"][2], {"plan": [{"text": "A 7-day trial, logged", "items": ["x"]}]}),
+             "a trial step binds no items"),
+        ]
+        for name, mutate, expected in cases:
+            with self.subTest(name):
+                broken = copy.deepcopy(man)
+                mutate(broken)
+                rc, out = self.check(broken, self.plan_for(broken))
+                self.assertEqual(rc, 1, out)
+                self.assertTrue(any(expected in e for e in out["errors"]), "%r not in %s" % (expected, out["errors"]))
+                # evaluate refuses the same manifest: a gate never runs without a required entry.
+                rc, out = self.evaluate(broken, "M1")
+                self.assertEqual(rc, 2, out)
+
+    def test_device_runs_the_plan_does_not_name_cover_every_device(self):
+        man = self.bound_manifest()
+        m1 = man["milestones"][1]
+        m1["plan"]["user_steps"] = "Device run. A 7-day trial, logged"
+        for st in m1["user_steps"][:2]:
+            st["plan"] = ["Device run"]
+        rc, out = self.check(man, self.plan_for(man))
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("no device-run user step on mac" in e for e in out["errors"]), out["errors"])
 
     def test_check_rejects_an_unapproved_deferral(self):
         self.run_("snap", job="snapshots", cls="ui")
@@ -581,6 +745,46 @@ class DeferralTests(Sandbox):
         rc, ev = self.evaluate(self.man(), "M5")
         self.assertIn("sim-setup", self.failure(ev, "deferred:foldable"))
 
+    UNAVAILABLE = {"lane": {"kind": "foldable", "status": "unavailable", "reason": "toolchain"}}
+
+    def test_an_approved_deferral_covers_its_cells_runs_unavailable_lane(self):
+        self.result("core-test")
+        self.result("sim-setup", details={"foldable": {"status": "unavailable", "reason": "toolchain"}})
+        self.result("snapshots", status="warn", details=self.UNAVAILABLE)
+        man = self.man()
+        man["milestones"][1]["suites"] = [{"id": "snap", "run": "snap"}]
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 0, ev["failures"])
+        snap = [s for s in ev["suites"] if s["id"] == "snap"][0]
+        self.assertEqual(snap["outcome"], "deferred")
+        self.assertIn("foldable", snap["message"])
+        with open(self.record, encoding="utf-8") as f:
+            self.assertEqual([(s["id"], s["status"], s["outcome"]) for s in json.load(f)["suites"]],
+                             [("unit", "pass", "pass"), ("snap", "warn", "deferred")])
+        os.remove(self.record)
+        # Without the deferral, the same result fails.
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 1)
+        self.assertIn("unavailable", self.failure(ev, "suite:snap"))
+
+    def test_a_deferral_covers_only_its_dependencys_lane_while_it_holds(self):
+        self.result("core-test")
+        self.result("sim-setup", details={"foldable": {"status": "unavailable", "reason": "toolchain"}})
+        self.result("snapshots", status="warn",
+                    details={"lane": {"kind": "ipad", "status": "unavailable", "reason": "toolchain"}})
+        man = self.man()
+        man["milestones"][1]["suites"] = [{"id": "snap", "run": "snap"}]
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("suite:snap", self.failure_ids(ev))
+        # The condition no longer holds: nothing covers the lane.
+        self.result("snapshots", status="warn", details=self.UNAVAILABLE)
+        self.result("sim-setup", details={"foldable": {"status": "available", "device_type": "iPhone Fold"}})
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("suite:snap", self.failure_ids(ev))
+        self.assertIn("deferred:foldable", self.failure_ids(ev))
+
 
 class UserStepTests(Sandbox):
     def setUp(self):
@@ -624,13 +828,26 @@ class UserStepTests(Sandbox):
             "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", build, ["R1818", "R1823"]),
             "docs/process/milestone-records/device-runs/M1/ipad.json": device_run("M1", "ipad", build, M1_BUDGETS)})
         rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
-        self.assertEqual((rc, ev["outcome"]), (0, "pass"), ev["failures"])
+        # The evidence commit is accepted; the runs stay pending on U241's report contract.
+        self.assertEqual(self.failure_ids(ev), ["user-step:device-run-iphone", "user-step:device-run-ipad"])
         self.assertEqual(ev["gate_commit"], self.gate)
         self.assertEqual(ev["evidence_commits"], [later])
-        with open(self.record, encoding="utf-8") as f:
-            step = json.load(f)["user_steps"][0]
+        step = ev["user_steps"][0]
         self.assertEqual(step["details"]["build_commit"], build)
         self.assertEqual(step["details"]["budgets"], ["R1818", "R1823"])  # R1822 is iPad and Mac only
+
+    def test_a_device_run_stays_pending_until_u241s_report_contract(self):
+        # Rows that only say pass: nothing checks U241's schema, dimensions,
+        # fixture or configuration yet, so they must not close the step.
+        self.commit("Record device runs", {
+            "docs/process/milestone-records/device-runs/M1/iphone.json":
+                {"milestone": "M1", "device": "iphone", "build_commit": self.gate,
+                 "budgets": [{"id": "R1818", "status": "pass"}, {"id": "R1823", "status": "pass"}]}})
+        rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+        self.assertEqual(ev["user_steps"][0]["outcome"], "pending")
+        self.assertIn("U241", self.failure(ev, "user-step:device-run-iphone"))
+        self.assertFalse(os.path.exists(self.record))
 
     def test_a_device_run_copies_the_app_and_core_changes_since_its_build(self):
         build = self.gate
@@ -641,7 +858,7 @@ class UserStepTests(Sandbox):
             "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", build, ["R1818", "R1823"]),
             "docs/process/milestone-records/device-runs/M1/ipad.json": device_run("M1", "ipad", build, M1_BUDGETS)})
         rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
-        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(ev["gate_commit"], self.gate)
         self.assertEqual(ev["user_steps"][0]["details"]["changed_since_build"], ["app/Meguri/A.swift"])
 
     def test_invalid_device_runs_fail(self):
@@ -700,6 +917,24 @@ class UserStepTests(Sandbox):
         rc, ev = self.trial([self.day(n, fallback=out_of_scope if n == 12 else "none") for n in range(10, 17)])
         self.assertEqual(rc, 0, ev["failures"])
         self.assertEqual(ev["user_steps"][0]["details"]["streak"], 7)
+
+    def test_trial_entries_must_record_devices_fallback_and_incident(self):
+        # Seven entries holding only a date are no evidence of seven clean days.
+        rc, ev = self.trial([{"date": "2026-11-%02d" % n} for n in range(10, 17)])
+        self.assertEqual(rc, 1)
+        self.assertIn("lacks devices, fallback, data_incident", self.failure(ev, "user-step:trial"))
+        partial = [self.day(n) for n in range(10, 17)]
+        del partial[3]["data_incident"]
+        rc, ev = self.trial(partial)
+        self.assertEqual(rc, 1)
+        self.assertIn("line 4 lacks data_incident", self.failure(ev, "user-step:trial"))
+        for devices in ([], ["watch"], "iphone", ["iphone", "iphone"]):
+            with self.subTest(devices=devices):
+                entries = [self.day(n) for n in range(10, 17)]
+                entries[0]["devices"] = devices
+                rc, ev = self.trial(entries)
+                self.assertEqual(rc, 1)
+                self.assertIn("devices must list", self.failure(ev, "user-step:trial"))
 
     def test_a_short_or_gapped_trial_awaits(self):
         rc, ev = self.trial([self.day(n) for n in (5, 6, 7, 8, 10, 11, 12)])

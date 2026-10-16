@@ -58,9 +58,12 @@ t_doctor() {
 EOF
   {
     printf '# Plan\n\n### Delivery Milestones\n\n| Milestone | Units | Closing gate | User steps |\n|---|---|---|---|\n'
-    i=1
-    for m in M0 M1 M2 M3 M4 M5; do
-      printf '| **%s Stage %s** | U%d | Gate of %s. | Steps of %s |\n' "$m" "$m" "$i" "$m" "$m"
+    # Only M0 has closing-gate and user-steps text: its suite and user step
+    # claim it with their plan excerpts.
+    printf '| **M0 Stage M0** | U1 | Gate of M0. | Steps of M0 |\n'
+    i=2
+    for m in M1 M2 M3 M4 M5; do
+      printf '| **%s Stage %s** | U%d |  |  |\n' "$m" "$m" "$i"
       i=$((i + 1))
     done
     printf '\n### Unit Index\n\n| U-ID | Title |\n|---|---|\n'
@@ -71,11 +74,12 @@ EOF
     printf 'global:\n  - {id: quarantine, kind: quarantine}\nmilestones:\n'
     i=1
     for m in M0 M1 M2 M3 M4 M5; do
-      printf '  - id: %s\n    name: Stage %s\n    plan: {gate: "Gate of %s.", user_steps: "Steps of %s"}\n    units: [U%d]\n' \
-        "$m" "$m" "$m" "$m" "$i"
       if [ "$m" = M0 ]; then
-        printf '    suites:\n      - {id: unit, run: unit}\n      - {id: milestones, run: milestones}\n'
-        printf '    user_steps:\n      - {id: xcode-license, description: Accept the license, evidence: build/mg/doctor/, validator: {type: setup, step: xcode-license}}\n'
+        printf '  - id: M0\n    name: Stage M0\n    plan: {gate: "Gate of M0.", user_steps: "Steps of M0"}\n    units: [U1]\n'
+        printf '    suites:\n      - {id: unit, run: unit, plan: [Gate of M0]}\n      - {id: milestones, run: milestones}\n'
+        printf '    user_steps:\n      - {id: xcode-license, description: Accept the license, evidence: build/mg/doctor/, validator: {type: setup, step: xcode-license}, plan: [Steps of M0]}\n'
+      else
+        printf '  - id: %s\n    name: Stage %s\n    plan: {gate: "", user_steps: ""}\n    units: [U%d]\n' "$m" "$m" "$i"
       fi
       i=$((i + 1))
     done
@@ -113,7 +117,7 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 
 @test "the evaluator's own tests pass" {
   run python3 -B -m unittest discover -s "$REPO_ROOT/tools/scripts/gates/tests" -t "$REPO_ROOT/tools/scripts/gates/tests"
-  [ "$status" -eq 0 ] || { printf '%s\n' "$output" | tail -n 40; return 1; }
+  [ "$status" -eq 0 ] || { printf '%s\n' "$output" | grep -E '^(FAIL|ERROR):'; printf '%s\n' "$output" | tail -n 40; return 1; }
 }
 
 @test "the real manifest mirrors the plan and names only runs tools/mg milestone executes" {
@@ -133,6 +137,35 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
     "$(jq '[.milestones[].units[]] | unique | length' "$d/manifest.json")" ]
   [ "$(jq '[.milestones[].units[]] | length' "$d/manifest.json")" -eq \
     "$(sed -n '/^### Unit Index/,/^### /p' "$REPO_ROOT/$(jq -r .plan "$d/manifest.json")" | grep -c '^| U[0-9]')" ]
+}
+
+@test "the real manifest fails the check when an entry the plan requires is removed" {
+  local d="$BATS_TEST_TMPDIR" line edit expected m1='.milestones[] | select(.id == "M1")'
+  "$REPO_ROOT/tools/mg" --list >"$d/registry.tsv"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
+    --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$d/registry.tsv" \
+    --conformance "$REPO_ROOT/conformance" --out "$d/config.json"
+  python3 -B -I "$REPO_ROOT/tools/scripts/gates/milestone_gate.py" load \
+    --manifest "$REPO_ROOT/docs/process/milestones.yaml" --out "$d/manifest.json"
+  while IFS= read -r line; do
+    edit="${line%%;;*}" expected="${line#*;;}"
+    jq "$edit" "$d/manifest.json" >"$d/broken.json"
+    ! cmp -s "$d/manifest.json" "$d/broken.json" || { echo "no change: $edit"; return 1; }
+    run python3 -B -I "$REPO_ROOT/tools/scripts/gates/milestone_gate.py" check \
+      --manifest "$d/broken.json" --config "$d/config.json" --root "$REPO_ROOT"
+    [ "$status" -eq 1 ] || { echo "passed: $edit"; return 1; }
+    jq -e --arg e "$expected" 'any(.errors[]; contains($e))' <<<"$output" >/dev/null ||
+      { echo "$edit: no error with '$expected'"; jq . <<<"$output"; return 1; }
+  done <<EOF
+($m1).suites |= map(select(.id != "u246-conformance"));;U246: areas storage, sched
+($m1 | .suites[] | select(.id == "private-suite") | .scope.items) -= ["queues"];;binds queues, which its scope lacks
+($m1).suites |= map(select(.id != "u253-a11y"));;including U253's sweep of those screens
+($m1).user_steps |= map(select(.id != "device-run-ipad"));;no device-run user step on ipad
+($m1 | .user_steps[] | select(.id == "trial") | .validator.days) = 6;;do not say 6-day
+(.milestones[] | select(.id == "M3")).suites |= map(select(.id != "u253-a11y"));;M3: the closing gate text names U253
+(.milestones[] | select(.id == "M5")).user_steps |= map(select(.id != "device-run-mac"));;no device-run user step on mac
+(.global[] | select(.id == "native-oracle")) |= del(.plan);;the macOS-native oracle check (KTD24)
+EOF
 }
 
 @test "milestone-gate fails while a suite has no result, and names it" {
@@ -211,12 +244,12 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 }
 
 @test "milestone-gate --check fails when the manifest drifts from the plan" {
-  sed 's/Steps of M3/Other steps/' "$SB/docs/plan.md" >"$SB/docs/plan.md.new"
+  sed 's/Steps of M0/Other steps/' "$SB/docs/plan.md" >"$SB/docs/plan.md.new"
   mv "$SB/docs/plan.md.new" "$SB/docs/plan.md"
   mg milestone-gate --check
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
-  [[ "$(field '.failures[0].message')" == *"M3: plan.user_steps is not the table's user steps text"* ]]
+  [[ "$(field '.failures[0].message')" == *"M0: plan.user_steps is not the table's user steps text"* ]]
   validate "$result"
 }
 

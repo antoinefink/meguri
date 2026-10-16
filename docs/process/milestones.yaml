@@ -4,8 +4,12 @@
 # Delivery Milestones table. This file mirrors it: `units` and the `plan`
 # texts must equal the table's cells, and every unit of the plan's Unit Index
 # is in exactly one milestone (`tools/mg milestone-gate --check`, a T0 run).
-# When the table changes, copy the cells here and update the suites and user
-# steps to match.
+# The definitions that run are bound to that text by their `plan` excerpts
+# (below): every part of a milestone's closing gate and user steps texts must
+# be claimed by the suite, global condition or user step that implements it,
+# so removing a required entry, scope item or device run fails the check.
+# When the table changes, copy the cells here and update the suites, user
+# steps and their excerpts to match.
 #
 # `tools/mg milestone <M>` (U19) runs the suites; `tools/mg milestone-gate <M>`
 # evaluates them with tools/scripts/gates/milestone_gate.py. A milestone
@@ -44,9 +48,27 @@
 #            detail, only_keys})
 #   pending  the unit that delivers the run or its scope; a pending suite
 #            fails the gate as `pending` until that unit removes the key
+#   plan     the part of the milestone's closing gate text it implements: a
+#            list of excerpts, each a string or {text, items}; `items` are
+#            the scope items that text asks for, and must be in `scope`
 #   why      what it proves (the plan's closing-gate text)
 # A suite may not run a job that requires its own milestone's gate (or a
-# later one's).
+# later one's). A result counts only when its status is pass (or warn awaiting
+# Antoine); a queued, unavailable or other warn result fails, unless a
+# deferral that holds covers it.
+#
+# Plan excerpts (`plan` on suites, user steps and global conditions; checked
+# by --check and before every evaluation): each excerpt occurs exactly once in
+# its text, word for word, or is a bare unit id the text names (a unit inside
+# a range such as U252–U254 is quoted on its own: U253; an excerpt never spans
+# a unit range). Together they must cover the text but for punctuation and
+# the words a, an, and, as, at, by, for, in, of, on, or, plus, the, to, with,
+# and claim every unit it names. A suite or global condition (in its `from`
+# milestone) quotes the closing gate text; a user step quotes the user steps
+# text, or the closing gate text with {text, cell: gate}. Device-run steps
+# must cover the devices their excerpts name (all three when they name none),
+# and a trial's excerpt states its days ("7-day"). A suite or user step the
+# table does not ask for needs no excerpt.
 #
 # User steps (performed by Antoine; agents only record his reports):
 #   id, description, evidence (the path read at HEAD), validator:
@@ -60,13 +82,18 @@
 #                 with a pass for every budget of this milestone's and the
 #                 earlier milestones' `budgets` that applies to the device
 #                 (`budget_devices`); the record copies the build commit and
-#                 the app/ and core/ paths changed since
+#                 the app/ and core/ paths changed since. Pending until U241:
+#                 a run that records no failure stays `pending` (it fails the
+#                 gate) until the validator checks U241's budget report
+#                 contract (schema, measurement dimensions, fixture,
+#                 configuration, budget cases)
 #   variant-pick  {screens}: docs/design/decisions.md has a "Picked ..." row
 #                 for each screen, dated within the milestone (on or after
 #                 the previous milestone record's closed_at date, not after
 #                 today)
-#   trial         {days}: the daily-driver log (JSON lines: date, devices,
-#                 fallback null|"none"|{task, in_scope}, data_incident
+#   trial         {days}: the daily-driver log (JSON lines, every key
+#                 required: date, devices [iphone|ipad|mac, ...], fallback
+#                 null|"none"|{task, in_scope}, data_incident
 #                 null|"none"|<text or object>): the latest run of
 #                 consecutive logged days within the milestone, ending at the
 #                 last entry, reaches `days` with no in-scope fallback and no
@@ -91,7 +118,9 @@
 # do not pass. The only dependency today:
 #   - dependency: xcode-27.1-foldable-simulator
 #     condition: {job: sim-setup, args: [], detail: foldable, equals: {status: unavailable, reason: toolchain}}
-#     (a sim-setup result on the gate commit; run `tools/mg sim-setup` there)
+#     (a sim-setup result on the gate commit; run `tools/mg sim-setup` there);
+#     while it holds, a warn result of the cells' run whose details.lane is
+#     {kind: foldable, status: unavailable, reason: toolchain} is deferred
 # The foldable cells (R1962, R1971) are not deferred yet: Antoine has not
 # approved it (perfqa coverage note, question 5).
 #
@@ -126,6 +155,7 @@ global:
     kind: suite
     run: native-oracle
     from: M1
+    plan: ["plus the macOS-native oracle check (KTD24)"]
     why: The macOS-native oracle result is attached from M1 (U246, KTD24)
   - id: nightly-divergences
     pending: U247
@@ -140,37 +170,46 @@ milestones:
       user_steps: "Xcode license, simulator runtime and Xcode agent access (R1969)"
     units: [U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241]
     suites:
-      - {id: static, run: static, why: "provenance trailers and the static checks (U2, U19)"}
+      - {id: static, run: static, plan: [provenance-trailer check, are enforced (U2)], why: "provenance trailers and the static checks (U2, U19)"}
       - {id: static-tree, run: static-tree, why: "the static checks over the whole tree (U19)"}
-      - {id: similarity, run: similarity, why: "the similarity scan is enforced (U2)"}
+      - {id: similarity, run: similarity, plan: [The similarity scan, are enforced (U2)], why: "the similarity scan is enforced (U2)"}
       - {id: similarity-selftest, run: similarity-selftest, why: "the scanner and its calibration (U2)"}
-      - {id: oracle-test, run: oracle-test, why: "the oracle image builds (U3)"}
+      - {id: oracle-test, run: oracle-test, plan: [The oracle image builds, U3], why: "the oracle image builds (U3)"}
       - {id: pin-canary, run: pin-canary, why: "pins first (U5, AE82)"}
       - {id: canary-scenarios, run: canary-scenarios, why: "the fuzz-table and collation canaries (U4)"}
-      - {id: conformance, run: conformance, why: "T0 runs the first goldens, id allocation passing (U4, U23)"}
-      - {id: goldens-check, run: goldens-check, why: "goldens recorded by the pinned oracle (U4)"}
+      - id: conformance
+        run: conformance
+        plan: ["T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1"]
+        why: T0 runs the first goldens, id allocation passing (U4, U23)
+      - id: goldens-check
+        run: goldens-check
+        plan: ["records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset", U4]
+        why: goldens recorded by the pinned oracle (U4)
       - {id: harvest-report, run: harvest-report, why: "the harvest catalog (U4)"}
       - {id: harvest-coverage, run: harvest-coverage, why: "no unclassified harvest row at any milestone (R1880)"}
-      - {id: live-oracle, run: live-oracle, why: "a two-client full upload and download under a frozen clock (U13)"}
+      - {id: live-oracle, run: live-oracle, plan: ["A two-client full upload and download runs under a frozen clock (U13)"], why: "a two-client full upload and download under a frozen clock (U13)"}
       - {id: fixtures-check, run: fixtures-check, why: "the generator's collections check against the oracle (U11)"}
       - {id: core-lint, run: core-lint, why: "the lint gate (U5)"}
       - {id: core-deny, run: core-deny, why: "the dependency and license gate (U5)"}
       - {id: core-test, run: core-test, why: "core unit tests (U5, U20-U23)"}
-      - {id: swift-test-core, run: swift-test-core, why: "the XCFramework builds and CoreBridge tests pass (U6)"}
+      - {id: swift-test-core, run: swift-test-core, plan: [The XCFramework builds, U6], why: "the XCFramework builds and CoreBridge tests pass (U6)"}
       - {id: swift-test-kit, run: swift-test-kit, why: "MeguriKit tests (U7, U9)"}
-      - {id: build-app-ios, run: build-app-ios, why: "the app builds for the simulator (U7)"}
-      - {id: build-app-mac, run: build-app-mac, why: "the app builds for the Mac (U7)"}
-      - {id: xcode-check, run: xcode-check, why: "the app launches on iPhone and iPad simulators and on the Mac with a fixture, with a screenshot and hierarchy (U8)"}
+      - {id: build-app-ios, run: build-app-ios, plan: [U7], why: "the app builds for the simulator (U7)"}
+      - {id: build-app-mac, run: build-app-mac, plan: [U7], why: "the app builds for the Mac (U7)"}
+      - id: xcode-check
+        run: xcode-check
+        plan: ["the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy", U8]
+        why: the app launches on iPhone and iPad simulators and on the Mac with a fixture, with a screenshot and hierarchy (U8)
       - {id: mac-ui, run: mac-ui, why: "Mac UI suites in the test VM (U8)"}
-      - {id: lint-ui, run: lint-ui, why: "the lint-ui gate is active (U9)"}
+      - {id: lint-ui, run: lint-ui, plan: ["The `lint-ui` gate is active (U9)"], why: "the lint-ui gate is active (U9)"}
       - {id: lint-ui-selftest, run: lint-ui-selftest, why: "the lint rules' own tests (U9)"}
       - {id: design-docs, run: design-docs, why: "the design documents and screen inventory (U9, U10)"}
       - {id: snapshots, run: snapshots, why: "the snapshot harness (U10)"}
       - {id: a11y-iphone, run: a11y-iphone, why: "the accessibility harness on iPhone (U10)"}
       - {id: a11y-mac, run: a11y-mac, why: "the accessibility harness on the Mac (U10)"}
       - {id: image-tools-selftest, run: image-tools-selftest, why: "image diff, critic, gallery and perf-compare tests (U10, U12)"}
-      - {id: perf-smoke, run: perf-smoke, why: "a stub screen emits a named interval (U12)"}
-      - {id: perf-gate, run: perf-gate, why: "U241 evaluates the stub screen's interval (U12, U241)"}
+      - {id: perf-smoke, run: perf-smoke, plan: [A stub screen emits a named interval, (U12)], why: "a stub screen emits a named interval (U12)"}
+      - {id: perf-gate, run: perf-gate, plan: [that U241 evaluates], why: "U241 evaluates the stub screen's interval (U12, U241)"}
       - {id: selftest, run: selftest, why: "tools/mg self-tests (U1, U19, U240)"}
       - {id: selftest-host, run: selftest-host, why: "tools/mg host self-tests (U1)"}
       - {id: selftest-xcframework, run: selftest-xcframework, why: "the XCFramework build script (U6)"}
@@ -180,14 +219,17 @@ milestones:
         description: Accept the Xcode license
         evidence: build/mg/doctor/
         validator: {type: setup, step: xcode-license}
+        plan: [Xcode license, (R1969)]
       - id: ios-runtime
         description: Install the iOS 27 simulator runtime
         evidence: build/mg/doctor/
         validator: {type: setup, step: ios-runtime}
+        plan: [simulator runtime, (R1969)]
       - id: xcode-external-agents
         description: Allow external agents to use Xcode tools (Xcode agent access)
         evidence: build/mg/doctor/
         validator: {type: setup, step: xcode-external-agents}
+        plan: [Xcode agent access, (R1969)]
     deferred: []
 
   - id: M1
@@ -208,63 +250,80 @@ milestones:
         run: u246-conformance
         pending: U246
         scope: {detail: areas, items: [storage, sched, render, sync]}
+        plan:
+          - {text: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933)", items: [storage, sched, render, sync]}
         why: U246 areas storage, sched (R1890-R1903, R1906), render (R1907-R1915) and sync (R1926-R1933)
       - id: private-suite
         run: private-suite
         pending: U249
         scope: {detail: checks, items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+        plan:
+          - {text: "U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down", items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
         why: U249 subset on the private collection (R1938-R1943)
       - {id: private-selftest, run: private-selftest, why: "the private vault's mount and scan (U15)"}
       - {id: anonymize-check, run: anonymize-check, why: "the anonymized clone (U15)"}
-      - {id: u243-review-loop, run: u243-review-loop, pending: U243, why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
+      - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: [U243 on the Mac host and simulators], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
       - id: perf-gate
         run: perf-gate
         scope: {detail: groups, items: [launch, review, open, sync]}
+        plan:
+          - {text: "U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844)", items: [launch, review, open, sync]}
         why: U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842-R1844)
-      - {id: bench-mac, run: bench-mac, why: "the core benchmarks on Apple silicon that perf-gate reads (U242, R1864)"}
+      - id: bench-mac
+        run: bench-mac
+        plan: ["U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844)"]
+        why: the core benchmarks on Apple silicon that perf-gate reads (U242, R1864)
       - id: u244-ui-perf
         run: u244-ui-perf
         pending: U244
         scope: {detail: groups, items: [launch-home]}
+        plan: [{text: "U244 launch and Home group (R1818–R1822)", items: [launch-home]}]
         why: U244 launch and Home group (R1818-R1822)
       - id: u245-resources
         run: u245-resources
         pending: U245
         scope: {detail: groups, items: [review, memory]}
+        plan: [{text: "U245 review and memory subset", items: [review, memory]}]
         why: U245 review and memory subset
       - id: u248-soak
         run: u248-soak
         pending: U248
         scope: {detail: scenarios, items: [coexistence]}
+        plan: [{text: "U248 coexistence soak", items: [coexistence]}]
         why: U248 coexistence soak, run by tools/mg milestone
-      - {id: u36-preservation, run: u36-preservation, pending: U36, why: "the preservation suite (R2017)"}
+      - {id: u36-preservation, run: u36-preservation, pending: U36, plan: [U36 preservation suite (R2017)], why: "the preservation suite (R2017)"}
       - id: u250-fault
         run: u250-fault
         pending: U250
         scope: {detail: classes, items: [review, sync, full-download, backup]}
+        plan: [{text: "U250 fault classes: review, sync, full download, backup (AE86)", items: [review, sync, full-download, backup]}]
         why: U250 fault classes (AE86)
       - id: u251-safety-app
         run: u251-safety-app
         pending: U251
         scope: {detail: cases, items: [kill-review, kill-sync, restore]}
+        plan: [{text: "U251 kill during review and sync, plus restore", items: [kill-review, kill-sync, restore]}]
         why: U251 kill during review and sync, plus restore
       - id: u252-snapshot-matrix
         run: u252-snapshot-matrix
         pending: U252
         scope: {detail: screens, items: [home.deckList, home.deckPage, review.question, review.answer]}
+        plan: [U252, {text: "for Home, deck page and review", items: [home.deckList, home.deckPage, review.question, review.answer]}]
         why: U252 snapshot matrix for Home, deck page and review
       - id: u253-a11y
         run: u253-a11y
         pending: U253
         scope: {detail: screens, items: [home.deckList, home.deckPage, review.question, review.answer]}
+        plan: [U253, {text: "for Home, deck page and review", items: [home.deckList, home.deckPage, review.question, review.answer]}, "including U253's sweep of those screens"]
         why: U253's accessibility sweep of Home, deck page and review
       - id: u254-critic
         run: u254-critic
         pending: U254
         scope: {detail: screens, items: [home.deckList, home.deckPage, review.question, review.answer]}
+        plan: [U254, {text: "for Home, deck page and review", items: [home.deckList, home.deckPage, review.question, review.answer]}]
         why: U254 critic loop; the screens are verified
-      - {id: u38-wiring, run: u38-wiring, pending: U38, why: "U38's wiring/pending.rs is empty"}
-      - {id: u176-fallback, run: u176-fallback, pending: U176, why: "U176's snapshot-swap fallback exists behind its flag"}
+      - {id: u38-wiring, run: u38-wiring, pending: U38, plan: ["U38's `wiring/pending.rs` is empty"], why: "U38's wiring/pending.rs is empty"}
+      - {id: u176-fallback, run: u176-fallback, pending: U176, plan: ["U176's snapshot-swap fallback exists behind its flag"], why: "U176's snapshot-swap fallback exists behind its flag"}
     # Device-run budgets by group (U241 keys them); a milestone's device runs
     # cover its groups and every earlier milestone's.
     budgets:
@@ -278,26 +337,32 @@ milestones:
         description: Before U68, hand-capture the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)
         evidence: conformance/references/render/
         validator: {type: capture, index: conformance/references/render/index.json, cases_file: conformance/references/render/cases.json}
+        plan: ["Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)"]
       - id: device-run-iphone
         description: U256 device run on the iPhone (AE81)
         evidence: docs/process/milestone-records/device-runs/M1/iphone.json
         validator: {type: device-run, device: iphone}
+        plan: ["U256 device run on iPhone, iPad and Mac (AE81)"]
       - id: device-run-ipad
         description: U256 device run on the iPad (AE81)
         evidence: docs/process/milestone-records/device-runs/M1/ipad.json
         validator: {type: device-run, device: ipad}
+        plan: ["U256 device run on iPhone, iPad and Mac (AE81)"]
       - id: device-run-mac
         description: U256 device run on the Mac (AE81)
         evidence: docs/process/milestone-records/device-runs/M1/mac.json
         validator: {type: device-run, device: mac}
+        plan: ["U256 device run on iPhone, iPad and Mac (AE81)"]
       - id: variant-picks
         description: Variant picks for Home, deck page and review (U254)
         evidence: docs/design/decisions.md
         validator: {type: variant-pick, screens: [home.deckList, home.deckPage, review.question, review.answer]}
+        plan: [{text: "Variant picks for Home, deck page and review (U254)", items: [home.deckList, home.deckPage, review.question, review.answer]}]
       - id: trial
         description: "A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged"
         evidence: docs/process/daily-driver-log.jsonl
         validator: {type: trial, days: 7}
+        plan: ["A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged"]
     deferred: []
 
   - id: M2
@@ -308,22 +373,62 @@ milestones:
     units: [U69, U71, U86, U87, U90, U91, U194, U196, U197, U200, U201, U202, U203, U205, U206, U207, U211,
       U212, U213, U214, U215, U216, U217, U218, U219, U220, U221, U223, U247]
     suites:
-      - {id: u246-conformance, run: u246-conformance, pending: U246, scope: {detail: areas, items: [search, package, maintenance, notes, editor-preview]}, why: "U246 areas search (R1916-R1920), packages and maintenance (R1922-R1925), notes and rendering of editor previews"}
-      - {id: private-suite, run: private-suite, pending: U249, scope: {detail: checks, items: [saved-searches, browser-sorts, package-round-trips]}, why: "U249 adds saved searches, browser sorts and apkg/colpkg round trips"}
-      - {id: u244-ui-perf, run: u244-ui-perf, pending: U244, scope: {detail: groups, items: [browser, search, editor]}, why: "U244 browser, search and editor groups (R1824-R1836)"}
-      - {id: perf-gate, run: perf-gate, scope: {detail: groups, items: [bulk, import, backup, check-database]}, why: "U242 bulk, import, backup and Check DB (R1831, R1832, R1846-R1848)"}
-      - {id: u250-fault, run: u250-fault, pending: U250, scope: {detail: classes, items: [edit, bulk, import, export, check-database]}, why: "U250 classes edit, bulk, import, export, Check DB"}
-      - {id: u251-safety-app, run: u251-safety-app, pending: U251, scope: {detail: cases, items: [disk-full, kill-import]}, why: "U251 disk-full and kill during import"}
+      - id: u246-conformance
+        run: u246-conformance
+        pending: U246
+        scope: {detail: areas, items: [search, package, maintenance, notes, editor-preview]}
+        plan:
+          - {text: "U246: areas search (R1916–R1920), packages and maintenance (R1922–R1925), notes and rendering of editor previews", items: [search, package, maintenance, notes, editor-preview]}
+        why: U246 areas search (R1916-R1920), packages and maintenance (R1922-R1925), notes and rendering of editor previews
+      - id: private-suite
+        run: private-suite
+        pending: U249
+        scope: {detail: checks, items: [saved-searches, browser-sorts, package-round-trips]}
+        plan: [{text: "U249 adds saved searches, browser sorts and apkg/colpkg round trips", items: [saved-searches, browser-sorts, package-round-trips]}]
+        why: U249 adds saved searches, browser sorts and apkg/colpkg round trips
+      - id: u244-ui-perf
+        run: u244-ui-perf
+        pending: U244
+        scope: {detail: groups, items: [browser, search, editor]}
+        plan: [{text: "U244 browser, search and editor groups (R1824–R1836)", items: [browser, search, editor]}]
+        why: U244 browser, search and editor groups (R1824-R1836)
+      - id: perf-gate
+        run: perf-gate
+        scope: {detail: groups, items: [bulk, import, backup, check-database]}
+        plan: [{text: "U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848)", items: [bulk, import, backup, check-database]}]
+        why: U242 bulk, import, backup and Check DB (R1831, R1832, R1846-R1848)
+      - id: u250-fault
+        run: u250-fault
+        pending: U250
+        scope: {detail: classes, items: [edit, bulk, import, export, check-database]}
+        plan: [{text: "U250 classes: edit, bulk, import, export, Check DB", items: [edit, bulk, import, export, check-database]}]
+        why: U250 classes edit, bulk, import, export, Check DB
+      - id: u251-safety-app
+        run: u251-safety-app
+        pending: U251
+        scope: {detail: cases, items: [disk-full, kill-import]}
+        plan: [{text: "U251 disk-full and kill during import", items: [disk-full, kill-import]}]
+        why: U251 disk-full and kill during import
       - id: u252-snapshot-matrix
         run: u252-snapshot-matrix
         pending: U252
         scope: {detail: screens, items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}
+        plan: [U252, {text: "for browser, editor, note types and IO editor", items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}]
         why: U252 for browser, editor, note types and IO editor
-      - {id: u253-a11y, run: u253-a11y, pending: U253, scope: {detail: screens, items: [browse.browser, editor.add, editor.edit]}, why: "U253 VoiceOver for browser and editor"}
+      - id: u253-a11y
+        run: u253-a11y
+        pending: U253
+        scope: {detail: screens, items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}
+        plan:
+          - U253
+          - {text: "for browser, editor, note types and IO editor", items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}
+          - {text: "U253 VoiceOver for browser and editor", items: [browse.browser, editor.add, editor.edit]}
+        why: U253's sweep of browser, editor, note types and IO editor (U252-U254), with VoiceOver for browser and editor
       - id: u254-critic
         run: u254-critic
         pending: U254
         scope: {detail: screens, items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}
+        plan: [U254, {text: "for browser, editor, note types and IO editor", items: [browse.browser, editor.add, editor.edit, noteTypes.list, noteTypes.templates, noteTypes.fields, noteTypes.preview, noteTypes.changeNoteType, imageOcclusion.editor]}]
         why: U254 for browser, editor, note types and IO editor
     budgets:
       browser-search: [R1824, R1825, R1826, R1827, R1828, R1829, R1830, R1831, R1832]
@@ -334,22 +439,28 @@ milestones:
         description: Variant picks for browser and editor
         evidence: docs/design/decisions.md
         validator: {type: variant-pick, screens: [browse.browser, editor.add]}
+        plan: [{text: "Variant picks for browser and editor", items: [browse.browser, editor.add]}]
       - id: device-run-iphone
         description: Device run on the iPhone (browser and editor budgets)
         evidence: docs/process/milestone-records/device-runs/M2/iphone.json
         validator: {type: device-run, device: iphone}
+        plan: [Device run (browser and editor budgets)]
       - id: device-run-ipad
         description: Device run on the iPad (browser and editor budgets)
         evidence: docs/process/milestone-records/device-runs/M2/ipad.json
         validator: {type: device-run, device: ipad}
+        plan: [Device run (browser and editor budgets)]
       - id: device-run-mac
         description: Device run on the Mac (browser and editor budgets)
         evidence: docs/process/milestone-records/device-runs/M2/mac.json
         validator: {type: device-run, device: mac}
+        plan: [Device run (browser and editor budgets)]
       - id: paste-capture
         description: One-time capture of the Word, Google Docs, Safari, Chrome and Yomitan clipboard payloads for U197's paste corpus
         evidence: conformance/corpora/paste/
         validator: {type: capture, index: conformance/corpora/paste/index.json, cases: [word, google-docs, safari, chrome, yomitan]}
+        plan:
+          - {text: "One-time capture of the Word, Google Docs, Safari, Chrome and Yomitan clipboard payloads for U197's paste corpus (Google Docs needs Antoine's account, a stop condition for agents)", items: [word, google-docs, safari, chrome, yomitan]}
       - id: device-session
         description: A monthly device session within the last 45 days (U254; a device run's feel checklist counts)
         evidence: docs/process/milestone-records/device-sessions/
@@ -363,15 +474,59 @@ milestones:
       user_steps: "Variant picks for stats and deck options. Device run"
     units: [U104, U165, U226, U230, U231, U233, U234, U236, U237]
     suites:
-      - {id: u246-conformance, run: u246-conformance, pending: U246, scope: {detail: areas, items: [stats, optimizer]}, why: "U246 stats (R1921), optimizer (R1904, R1905)"}
-      - {id: private-suite, run: private-suite, pending: U249, scope: {detail: checks, items: [stats-per-deck]}, why: "U249 adds stats per deck"}
-      - {id: u244-ui-perf, run: u244-ui-perf, pending: U244, scope: {detail: groups, items: [stats]}, why: "U244 stats group (R1837-R1839, R1841)"}
-      - {id: perf-gate, run: perf-gate, scope: {detail: groups, items: [memory-states, optimizer]}, why: "U242 memory states and optimizer (R1849, R1850)"}
-      - {id: u245-resources, run: u245-resources, pending: U245, scope: {detail: groups, items: [widget-memory]}, why: "U245 widget memory (R1840)"}
-      - {id: u248-soak, run: u248-soak, pending: U248, scope: {detail: scenarios, items: [two-device-optimizer]}, why: "U248 two-device optimizer scenario"}
-      - {id: u252-snapshot-matrix, run: u252-snapshot-matrix, pending: U252, scope: {detail: screens, items: [stats.overview, deckOptions.options, widget.heatmap]}, why: "U252 for stats, deck options and widget"}
-      - {id: u253-a11y, run: u253-a11y, pending: U253, scope: {detail: screens, items: [stats.overview, deckOptions.options, widget.heatmap]}, why: "U253 for stats, deck options and widget"}
-      - {id: u254-critic, run: u254-critic, pending: U254, scope: {detail: screens, items: [stats.overview, deckOptions.options, widget.heatmap]}, why: "U254 for stats, deck options and widget"}
+      - id: u246-conformance
+        run: u246-conformance
+        pending: U246
+        scope: {detail: areas, items: [stats, optimizer]}
+        plan: [{text: "U246: stats (R1921), optimizer (R1904, R1905)", items: [stats, optimizer]}]
+        why: U246 stats (R1921), optimizer (R1904, R1905)
+      - id: private-suite
+        run: private-suite
+        pending: U249
+        scope: {detail: checks, items: [stats-per-deck]}
+        plan: [{text: "U249 adds stats per deck", items: [stats-per-deck]}]
+        why: U249 adds stats per deck
+      - id: u244-ui-perf
+        run: u244-ui-perf
+        pending: U244
+        scope: {detail: groups, items: [stats]}
+        plan: [{text: "U244 stats group (R1837–R1839, R1841)", items: [stats]}]
+        why: U244 stats group (R1837-R1839, R1841)
+      - id: perf-gate
+        run: perf-gate
+        scope: {detail: groups, items: [memory-states, optimizer]}
+        plan: [{text: "U242 memory states and optimizer (R1849, R1850)", items: [memory-states, optimizer]}]
+        why: U242 memory states and optimizer (R1849, R1850)
+      - id: u245-resources
+        run: u245-resources
+        pending: U245
+        scope: {detail: groups, items: [widget-memory]}
+        plan: [{text: "U245 widget memory (R1840)", items: [widget-memory]}]
+        why: U245 widget memory (R1840)
+      - id: u248-soak
+        run: u248-soak
+        pending: U248
+        scope: {detail: scenarios, items: [two-device-optimizer]}
+        plan: [{text: "U248 two-device optimizer scenario", items: [two-device-optimizer]}]
+        why: U248 two-device optimizer scenario
+      - id: u252-snapshot-matrix
+        run: u252-snapshot-matrix
+        pending: U252
+        scope: {detail: screens, items: [stats.overview, deckOptions.options, widget.heatmap]}
+        plan: [U252, {text: "for stats, deck options and widget", items: [stats.overview, deckOptions.options, widget.heatmap]}]
+        why: U252 for stats, deck options and widget
+      - id: u253-a11y
+        run: u253-a11y
+        pending: U253
+        scope: {detail: screens, items: [stats.overview, deckOptions.options, widget.heatmap]}
+        plan: [U253, {text: "for stats, deck options and widget", items: [stats.overview, deckOptions.options, widget.heatmap]}]
+        why: U253 for stats, deck options and widget
+      - id: u254-critic
+        run: u254-critic
+        pending: U254
+        scope: {detail: screens, items: [stats.overview, deckOptions.options, widget.heatmap]}
+        plan: [U254, {text: "for stats, deck options and widget", items: [stats.overview, deckOptions.options, widget.heatmap]}]
+        why: U254 for stats, deck options and widget
     budgets:
       stats: [R1837, R1838, R1839, R1841]
       widget: [R1840]
@@ -381,18 +536,22 @@ milestones:
         description: Variant picks for stats and deck options
         evidence: docs/design/decisions.md
         validator: {type: variant-pick, screens: [stats.overview, deckOptions.options]}
+        plan: [{text: "Variant picks for stats and deck options", items: [stats.overview, deckOptions.options]}]
       - id: device-run-iphone
         description: Device run on the iPhone
         evidence: docs/process/milestone-records/device-runs/M3/iphone.json
         validator: {type: device-run, device: iphone}
+        plan: [Device run]
       - id: device-run-ipad
         description: Device run on the iPad
         evidence: docs/process/milestone-records/device-runs/M3/ipad.json
         validator: {type: device-run, device: ipad}
+        plan: [Device run]
       - id: device-run-mac
         description: Device run on the Mac
         evidence: docs/process/milestone-records/device-runs/M3/mac.json
         validator: {type: device-run, device: mac}
+        plan: [Device run]
       - id: device-session
         description: A monthly device session within the last 45 days (U254; a device run's feel checklist counts)
         evidence: docs/process/milestone-records/device-sessions/
@@ -406,27 +565,46 @@ milestones:
       user_steps: "The firewall check on a clean user account (spike in the servers area). Device run (U256) on iPhone, iPad and Mac"
     units: [U135, U136, U137, U138, U139, U140, U141, U142, U143, U144, U145, U146, U147, U164, U255]
     suites:
-      - {id: u246-conformance, run: u246-conformance, pending: U246, scope: {detail: areas, items: [servers]}, why: "U246 server contract suites (R1944-R1946, R1948, R1949)"}
-      - {id: private-suite, run: private-suite, pending: U249, scope: {detail: checks, items: [migaku-routing-replay]}, why: "U249 Migaku routing replay (AE87)"}
-      - {id: u250-fault, run: u250-fault, pending: U250, scope: {detail: classes, items: [server-writes]}, why: "U250 class for server writes during edit and review"}
-      - {id: u255-mac-servers, run: u255-mac-servers, pending: U255, why: "U255 Mac entitlement and loopback checks"}
+      - id: u246-conformance
+        run: u246-conformance
+        pending: U246
+        scope: {detail: areas, items: [servers]}
+        plan: [{text: "U246: server contract suites (R1944–R1946, R1948, R1949) from the Mac-servers area", items: [servers]}]
+        why: U246 server contract suites (R1944-R1946, R1948, R1949)
+      - id: private-suite
+        run: private-suite
+        pending: U249
+        scope: {detail: checks, items: [migaku-routing-replay]}
+        plan: [{text: "U249 Migaku routing replay (AE87)", items: [migaku-routing-replay]}]
+        why: U249 Migaku routing replay (AE87)
+      - id: u250-fault
+        run: u250-fault
+        pending: U250
+        scope: {detail: classes, items: [server-writes]}
+        plan: [{text: "U250 class for server writes during edit and review", items: [server-writes]}]
+        why: U250 class for server writes during edit and review
+      - {id: u255-mac-servers, run: u255-mac-servers, pending: U255, plan: [U255 Mac entitlement and loopback checks], why: "U255 Mac entitlement and loopback checks"}
     user_steps:
       - id: firewall-check
         description: The firewall check on a clean user account (R1671; spike in the servers area)
         evidence: docs/process/milestone-records/M4/firewall-check.json
         validator: {type: report}
+        plan: [The firewall check on a clean user account (spike in the servers area)]
       - id: device-run-iphone
         description: Device run (U256) on the iPhone
         evidence: docs/process/milestone-records/device-runs/M4/iphone.json
         validator: {type: device-run, device: iphone}
+        plan: ["Device run (U256) on iPhone, iPad and Mac"]
       - id: device-run-ipad
         description: Device run (U256) on the iPad
         evidence: docs/process/milestone-records/device-runs/M4/ipad.json
         validator: {type: device-run, device: ipad}
+        plan: ["Device run (U256) on iPhone, iPad and Mac"]
       - id: device-run-mac
         description: Device run (U256) on the Mac
         evidence: docs/process/milestone-records/device-runs/M4/mac.json
         validator: {type: device-run, device: mac}
+        plan: ["Device run (U256) on iPhone, iPad and Mac"]
       - id: device-session
         description: A monthly device session within the last 45 days (U254; a device run's feel checklist counts)
         evidence: docs/process/milestone-records/device-sessions/
@@ -445,14 +623,15 @@ milestones:
         require:
           - {id: R1880-in-scope, detail: harvest.by_classification.in-scope.statuses, only_keys: [pass]}
           - {id: R1880-preservation, detail: harvest.by_classification.preservation-only.statuses, only_keys: [pass]}
+        plan: [every in-scope and preservation-only harvested scenario passes (R1880)]
         why: every in-scope and preservation-only harvested scenario passes (R1880)
-      - {id: u246-coverage, run: u246-coverage, pending: U246, why: "U246 full: the coverage report, no undocumented deviation (R1889)"}
-      - {id: u252-full-matrix, run: u252-full-matrix, pending: U252, why: "the full snapshot matrix (U252)"}
-      - {id: u254-all-verified, run: u254-all-verified, pending: U254, why: "every screen is verified (U254)"}
-      - {id: u255-release-check, run: u255-release-check, pending: U255, why: "U255 release configs"}
+      - {id: u246-coverage, run: u246-coverage, pending: U246, plan: ["U246 full:", no undocumented deviation remains (R1889)], why: "U246 full: the coverage report, no undocumented deviation (R1889)"}
+      - {id: u252-full-matrix, run: u252-full-matrix, pending: U252, plan: [The full snapshot matrix (U252)], why: "the full snapshot matrix (U252)"}
+      - {id: u254-all-verified, run: u254-all-verified, pending: U254, plan: ["Every screen is \"verified\" (U254)"], why: "every screen is verified (U254)"}
+      - {id: u255-release-check, run: u255-release-check, pending: U255, plan: [U255 release configs], why: "U255 release configs"}
       - {id: notices, run: notices, why: "the generated notices are current (U16)"}
       - {id: u17-release-audit, run: u17-release-audit, pending: U17, why: "the distribution compliance audit (U17)"}
-      - {id: release-gate, run: release-gate, pending: U257, why: "U257 release readiness"}
+      - {id: release-gate, run: release-gate, pending: U257, plan: [U257 release readiness], why: "U257 release readiness"}
     budgets:
       remaining: [R1583, R1845, R1852, R1854, R1855]
     user_steps:
@@ -460,24 +639,30 @@ milestones:
         description: Signature-screen sign-off (all), picked from variants
         evidence: docs/design/decisions.md
         validator: {type: variant-pick, screens: [home.deckList, home.deckPage, review.question, review.answer, editor.add, browse.browser, stats.overview, deckOptions.options]}
+        plan: [Signature-screen sign-off (all)]
       - id: device-session
         description: The monthly device session (U254)
         evidence: docs/process/milestone-records/device-sessions/
         validator: {type: device-session, days: 45}
+        plan: [the monthly device session]
       - id: daily-driver
         description: The 30-day daily-driver run (U257)
         evidence: docs/process/daily-driver-log.jsonl
         validator: {type: trial, days: 30}
+        plan: [the 30-day daily-driver run (U257)]
       - id: device-run-iphone
         description: U256 device run on every budget, iPhone
         evidence: docs/process/milestone-records/device-runs/M5/iphone.json
         validator: {type: device-run, device: iphone}
+        plan: [{text: "U256 device run on every budget", cell: gate}]
       - id: device-run-ipad
         description: U256 device run on every budget, iPad
         evidence: docs/process/milestone-records/device-runs/M5/ipad.json
         validator: {type: device-run, device: ipad}
+        plan: [{text: "U256 device run on every budget", cell: gate}]
       - id: device-run-mac
         description: U256 device run on every budget, Mac
         evidence: docs/process/milestone-records/device-runs/M5/mac.json
         validator: {type: device-run, device: mac}
+        plan: [{text: "U256 device run on every budget", cell: gate}]
     deferred: []

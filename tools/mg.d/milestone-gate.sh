@@ -139,8 +139,9 @@ mg_milestone_gate() {
   mg_detail record "$(jq -c .record "$out")"
   mg_count total "$(jq '.suites | length' "$out")"
   mg_count passed "$(jq '[.suites[] | select(.outcome == "pass")] | length' "$out")"
-  mg_count failed "$(jq '[.suites[] | select(.outcome != "pass" and .outcome != "awaiting_user")] | length' "$out")"
-  mg_count skipped 0
+  mg_count failed "$(jq '[.suites[] | select(.outcome | IN("pass", "awaiting_user", "deferred") | not)] | length' "$out")"
+  # A suite an approved deferral covers (its lane is unavailable) did not run.
+  mg_count skipped "$(jq '[.suites[] | select(.outcome == "deferred")] | length' "$out")"
   mg_count pending "$(jq '[.suites[] | select(.outcome == "pending")] | length' "$out")"
   mg_count missing "$(jq '[.suites[] | select(.outcome == "missing")] | length' "$out")"
   mg_count user_steps "$(jq '.user_steps | length' "$out")"
