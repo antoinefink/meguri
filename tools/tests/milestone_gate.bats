@@ -16,7 +16,7 @@ setup_file() {
   cp "$REPO_ROOT/.gitignore" "$t/"
   for f in "$t"/tools/mg.d/*.sh; do
     case "$(basename "$f")" in
-      gate.sh | milestone-gate.sh) ;;
+      gate.sh | milestone-gate.sh | perf-gate.sh) ;;
       *) rm -f "$f" ;;
     esac
   done
@@ -35,6 +35,7 @@ utilities:
   - {job: gate, why: runs the tiers}
   - {job: static-checks, why: static checks}
   - {job: doctor, why: reads host state}
+  - {job: perf-gate, why: "milestone-gate loads its budget catalog for device runs"}
 EOF
   printf 'entries:\n' >"$t/tools/gate/quarantine.yaml"
   cat >"$t/tools/mg.d/zz-fakes.sh" <<'EOF'

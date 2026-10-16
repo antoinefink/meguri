@@ -324,14 +324,25 @@ runs:
     class: perf
     triggers: &hot-paths [app/Meguri/, app/Packages/MeguriKit/Sources/, app/Packages/MeguriCore/Sources/, core/crates/meguri-engine/src/, core/crates/meguri-storage/src/, core/crates/meguri-sched/src/, core/crates/meguri-template/src/, core/crates/meguri-search/src/, core/crates/meguri-ffi/src/, core/crates/meguri-host/src/, app/TestPlans/Performance.xctestplan]
     budget_s: 2400
+  # U241: the budgets and baselines applied to this commit's perf results (the
+  # smoke above, and any other perf job's results on the commit).
   - id: perf-gate
     job: perf-gate
     tier: T0
-    placement: host
+    placement: [host, docker:dev]
     class: perf
     triggers: *hot-paths
     budget_s: 300
-    pending: U241
+  # The budget catalog against the plan's requirement list, IntervalNames, the
+  # UI performance tests and milestones.yaml (U241, R1861).
+  - id: perf-catalog
+    job: perf-gate
+    args: [--check]
+    tier: T0
+    placement: [host, docker:dev]
+    class: static
+    triggers: [tools/perf/, tools/scripts/gates/perf_gate.py, tools/mg.d/perf-gate.sh, app/Packages/MeguriCore/Sources/Instrumentation/, app/MeguriUITests/Performance/, docs/process/milestones.yaml, docs/plans/]
+    budget_s: 300
   - id: notices
     job: notices
     tier: T0
@@ -523,6 +534,16 @@ runs:
     placement: docker:dev
     class: perf
     budget_s: 3600
+  # R1864: the nightly benches' instruction counts against their baselines
+  # (+5%), after both bench runs.
+  - id: perf-gate-nightly
+    job: perf-gate
+    args: [--require, bench, --require, bench-icount]
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:dev]
+    class: perf
+    budget_s: 300
   - id: gallery
     job: gallery
     tier: T2
@@ -575,6 +596,15 @@ runs:
     placement: host
     class: perf
     budget_s: 7200
+  # The milestone evaluation (U240's perf-gate suites): after bench-mac, so the
+  # Mac benches and the simulator smoke are judged on one commit.
+  - id: perf-gate-milestone
+    job: perf-gate
+    args: [--require, perf-ui, --require, bench-mac]
+    tier: T3
+    placement: [host, docker:dev]
+    class: perf
+    budget_s: 300
   # R1880: zero unclassified harvest rows at every milestone; at release every
   # in-scope and preservation-only scenario passes. The live oracle run's T1
   # report gives the live chains their statuses (otherwise they stay `live`).

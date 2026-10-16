@@ -106,6 +106,20 @@ mg_milestone_gate() {
     fi
   fi
 
+  # Device runs are checked against U241's budget catalog (perf-gate.sh). A
+  # catalog that does not load fails those steps, not the run.
+  local catalog=""
+  if jq -e --arg m "$which" \
+    '[.milestones[]? | select(.id == $m) | .user_steps[]? | select(.validator.type? == "device-run")] | length > 0' \
+    "$manifest" >/dev/null 2>&1; then
+    catalog="$MG_RUN_DIR/budgets.json"
+    if mg_perf_gate__load_json "$catalog" "$MG_RUN_DIR/budgets-errors.json"; then
+      mg_artifact catalog "$catalog" "the budget catalog the device runs are checked against"
+    else
+      catalog=""
+    fi
+  fi
+
   # Only the integration branch closes a milestone: elsewhere a unit
   # branch's own commits count as merged, so the evaluation fails there.
   local out="$MG_RUN_DIR/evaluation.json" errors="$MG_RUN_DIR/evaluate-errors.json" where=""
@@ -113,7 +127,7 @@ mg_milestone_gate() {
   mg_gate__in_main || where=--outside-main
   mg_milestone_gate__python evaluate --manifest "$manifest" --config "$config" --milestone "$which" \
     --root "$MG_ROOT" --results "$MG_ROOT/build/mg" --now "$(mg_gate__now)" ${doctor:+--doctor "$doctor"} \
-    --record "$record" --out "$out" $where >"$errors"
+    ${catalog:+--catalog "$catalog"} --record "$record" --out "$out" $where >"$errors"
   rc=$?
   if [ "$rc" -eq 2 ] || [ ! -s "$out" ]; then
     if jq -e '.errors | length > 0' "$errors" >/dev/null 2>&1; then

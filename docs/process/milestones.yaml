@@ -87,17 +87,21 @@
 #                 report this docs/process/one-time-setup.md step missing; a
 #                 step doctor cannot check (unverified) passes and is
 #                 recorded as unverified
-#   device-run    {device: iphone|ipad|mac}: the U256 JSON at `evidence`:
-#                 {milestone, device, build_commit (an ancestor of the gate
-#                 commit), budgets: [{id: R-ID, status: pass|fail}, ...]}
-#                 with a pass for every budget of this milestone's and the
-#                 earlier milestones' `budgets` that applies to the device
-#                 (`budget_devices`); the record copies the build commit and
-#                 the app/ and core/ paths changed since. Pending until U241:
-#                 a run that records no failure stays `pending` (it fails the
-#                 gate) until the validator checks U241's budget report
-#                 contract (schema, measurement dimensions, fixture,
-#                 configuration, budget cases)
+#   device-run    {device: iphone|ipad|mac}: the U256 JSON at `evidence`,
+#                 U241's device-run report (`tools/mg perf-gate --results
+#                 <dir> --device-run <M> --device <d>` writes it): {milestone,
+#                 device, build_commit (an ancestor of the gate commit),
+#                 configuration Profile, runner (that device), budgets: [{id,
+#                 status, cases: [...]}]} with a pass for every budget of this
+#                 milestone's and the earlier milestones' `budgets` that
+#                 applies to the device (`budget_devices`). Each budget's
+#                 device cases in tools/perf/budgets.yaml must be recorded
+#                 with their dimensions (suite, interval, metric, unit,
+#                 percentile, fixture) and values, and are judged again
+#                 against the catalog; a case still pending on the unit that
+#                 lands its measurement keeps the step `pending` (it fails
+#                 the gate). The record copies the build commit and the app/
+#                 and core/ paths changed since
 #   variant-pick  {screens}: docs/design/decisions.md has a "Picked ..." row
 #                 for each screen, dated within the milestone (on or after
 #                 the previous milestone record's closed_at date, not after
@@ -157,9 +161,12 @@ evidence_paths:
   - docs/process/milestone-records/
   - conformance/private/
 
-# Budgets that apply only to some devices, from their requirement text. Every
-# other budget applies to iPhone, iPad and Mac (R1802).
+# Budgets that apply only to some devices, from their requirement text (R1816:
+# KTD19, no tint on the Mac). Every other budget applies to iPhone, iPad and
+# Mac (R1802). tools/perf/budgets.yaml holds the same `devices`, and `tools/mg
+# perf-gate --check` keeps the two equal.
 budget_devices:
+  R1816: [iphone, ipad]
   R1822: [ipad, mac]
   R1851: [iphone]
   R1852: [iphone]
@@ -226,7 +233,7 @@ milestones:
       - {id: a11y-mac, run: a11y-mac, why: "the accessibility harness on the Mac (U10)"}
       - {id: image-tools-selftest, run: image-tools-selftest, why: "image diff, critic, gallery and perf-compare tests (U10, U12)"}
       - {id: perf-smoke, run: perf-smoke, plan: [A stub screen emits a named interval, (U12)], why: "a stub screen emits a named interval (U12)"}
-      - {id: perf-gate, run: perf-gate, plan: [that U241 evaluates], why: "U241 evaluates the stub screen's interval (U12, U241)"}
+      - {id: perf-gate, run: perf-gate-milestone, plan: [that U241 evaluates], why: "U241 evaluates the stub screen's interval (U12, U241)"}
       - {id: selftest, run: selftest, why: "tools/mg self-tests (U1, U19, U240)"}
       - {id: selftest-host, run: selftest-host, why: "tools/mg host self-tests (U1)"}
       - {id: selftest-xcframework, run: selftest-xcframework, why: "the XCFramework build script (U6)"}
@@ -281,7 +288,7 @@ milestones:
       - {id: anonymize-check, run: anonymize-check, why: "the anonymized clone (U15)"}
       - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: [U243 on the Mac host and simulators], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
       - id: perf-gate
-        run: perf-gate
+        run: perf-gate-milestone
         scope: {detail: groups, items: [launch, review, open, sync]}
         plan:
           - {text: "U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844)", items: [launch, review, open, sync]}
@@ -409,7 +416,7 @@ milestones:
         plan: [{text: "U244 browser, search and editor groups (R1824–R1836)", items: [browser, search, editor]}]
         why: U244 browser, search and editor groups (R1824-R1836)
       - id: perf-gate
-        run: perf-gate
+        run: perf-gate-milestone
         scope: {detail: groups, items: [bulk, import, backup, check-database]}
         plan: [{text: "U242 bulk, import, backup and Check DB (R1831, R1832, R1846–R1848)", items: [bulk, import, backup, check-database]}]
         why: U242 bulk, import, backup and Check DB (R1831, R1832, R1846-R1848)
@@ -509,7 +516,7 @@ milestones:
         plan: [{text: "U244 stats group (R1837–R1839, R1841)", items: [stats]}]
         why: U244 stats group (R1837-R1839, R1841)
       - id: perf-gate
-        run: perf-gate
+        run: perf-gate-milestone
         scope: {detail: groups, items: [memory-states, optimizer]}
         plan: [{text: "U242 memory states and optimizer (R1849, R1850)", items: [memory-states, optimizer]}]
         why: U242 memory states and optimizer (R1849, R1850)

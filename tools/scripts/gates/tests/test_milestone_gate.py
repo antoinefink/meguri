@@ -19,6 +19,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(os.path.dirname(HERE), "milestone_gate.py")
+sys.path.insert(0, os.path.dirname(HERE))
+import perf_gate  # noqa: E402  (U241: device-run reports are its contract)
 TIERS_GATE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "gate", "gate.py")
 NOW = "2026-11-20T12:00:00Z"
 MS = ("M0", "M1", "M2", "M3", "M4", "M5")
@@ -129,6 +131,11 @@ class Sandbox(unittest.TestCase):
         cmd = [sys.executable, "-B", GATE, "evaluate", "--manifest", paths["manifest"], "--config", paths["config"],
                "--milestone", milestone, "--root", self.root, "--results", self.results, "--now", NOW,
                "--record", self.record, "--out", out] + list(extra)
+        if getattr(self, "catalog", None) is not None:
+            paths["catalog"] = os.path.join(self.tmp, "catalog.json")
+            with open(paths["catalog"], "w", encoding="utf-8") as f:
+                json.dump({"catalog": self.catalog, "milestones": None}, f)
+            cmd += ["--catalog", paths["catalog"]]
         if doctor is not None:
             dpath = os.path.join(self.tmp, "doctor.json")
             with open(dpath, "w", encoding="utf-8") as f:
@@ -162,9 +169,52 @@ class Sandbox(unittest.TestCase):
         return hits[0]
 
 
-def device_run(milestone, device, build, budgets, fail=()):
-    return {"milestone": milestone, "device": device, "build_commit": build,
-            "budgets": [{"id": b, "status": "fail" if b in fail else "pass", "p95_ms": 100} for b in budgets]}
+def budget_catalog():
+    """U241's catalog for the budgets these tests name: one device case each,
+    with the plan's numbers (R1818 500 ms, R1822 one frame, R1823 150 ms)."""
+    def entry(rid, cid, name, metric, unit, limit, devices=None, pending=None):
+        c = {"id": cid, "suite": "LaunchHomePerfTests", "name": name, "metric": metric, "unit": unit, "limit": limit,
+             "where": ["simulator", "device"]}
+        if pending:
+            c["pending"] = pending
+        e = {"id": rid, "title": rid, "group": "launch", "cases": [c]}
+        if devices:
+            e["devices"] = devices
+        return e
+    return {"version": 1,
+            "rules": {"ui_regression_percent": 10, "icount_regression_percent": 5,
+                      "simulator_absolute_units": ["frames", "ms/s", "MB", "count"], "time_units": ["ms", "s"]},
+            "defaults": {"fixture": "150k", "percentile": "p95", "multiplier_500k": 2, "rule_1m": "completes"},
+            "groups": {"launch": "launch"},
+            "budgets": [entry("R1818", "cold-launch", "launch.toDeckListInteractive", "duration", "ms", 500),
+                        entry("R1822", "toggle", "home.deckToggle", "frames", "frames", 1, devices=["ipad", "mac"]),
+                        entry("R1823", "device", "launch.openCollection", "duration", "ms", 150)]}
+
+
+RUNNERS = {"iphone": {"kind": "device", "id": "iPhone18,1/24A434", "model": "iPhone 17 Pro"},
+           "ipad": {"kind": "device", "id": "iPad17,3/24A434", "model": "iPad Pro 13-inch (M5)"},
+           "mac": {"kind": "mac", "id": "Apple M3 Max/macOS 27.0", "cpu": "Apple M3 Max"}}
+MEASURED = {"R1818": ("launch.toDeckListInteractive", "ms", 420.0, 540.0),
+            "R1822": ("home.deckToggle", "frames", 1.0, 2.0),
+            "R1823": ("launch.openCollection", "ms", 120.0, 170.0)}
+
+
+def device_run(milestone, device, build, budgets, fail=(), catalog=None, measured=None):
+    """The report `tools/mg perf-gate --device-run` writes for a device whose
+    measurements of `budgets` (or of `measured` among them) pass (or, for
+    `fail`, breach their budget)."""
+    rows = [{"name": MEASURED[b][0], "metric": "duration" if MEASURED[b][1] == "ms" else "frames",
+             "unit": MEASURED[b][1], "percentile": "p95", "value": MEASURED[b][3 if b in fail else 2], "samples": 5,
+             "test": "LaunchHomePerfTests/test%s()" % b} for b in (budgets if measured is None else measured)]
+    result = {"schema_version": 1, "suite": "LaunchHomePerfTests", "kind": "ui", "configuration": "Profile",
+              "attachments": 0, "runner": RUNNERS[device], "results": rows}
+    cat, errors = perf_gate.normalize(catalog or budget_catalog())
+    assert not errors, errors
+    evaluation = perf_gate.evaluate(cat, [{"path": "r.json", "job": None, "run_id": None, "result": result}], {})
+    report, problems = perf_gate.device_report(cat, evaluation, milestone, device, build)
+    assert not problems, problems
+    report["budgets"] = [b for b in report["budgets"] if b["id"] in budgets]
+    return report
 
 
 M1_BUDGETS = ["R1818", "R1822", "R1823"]
@@ -895,6 +945,7 @@ class DeferralTests(Sandbox):
 class UserStepTests(Sandbox):
     def setUp(self):
         super().setUp()
+        self.catalog = budget_catalog()
         self.run_("unit", job="core-test")
         self.result("core-test")
         self.gate = self.git("rev-parse", "HEAD")
@@ -934,26 +985,67 @@ class UserStepTests(Sandbox):
             "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", build, ["R1818", "R1823"]),
             "docs/process/milestone-records/device-runs/M1/ipad.json": device_run("M1", "ipad", build, M1_BUDGETS)})
         rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
-        # The evidence commit is accepted; the runs stay pending on U241's report contract.
-        self.assertEqual(self.failure_ids(ev), ["user-step:device-run-iphone", "user-step:device-run-ipad"])
+        self.assertEqual((rc, ev["outcome"]), (0, "pass"), ev["failures"])
         self.assertEqual(ev["gate_commit"], self.gate)
         self.assertEqual(ev["evidence_commits"], [later])
         step = ev["user_steps"][0]
+        self.assertEqual(step["outcome"], "pass", step["message"])
         self.assertEqual(step["details"]["build_commit"], build)
         self.assertEqual(step["details"]["budgets"], ["R1818", "R1823"])  # R1822 is iPad and Mac only
 
-    def test_a_device_run_stays_pending_until_u241s_report_contract(self):
-        # Rows that only say pass: nothing checks U241's schema, dimensions,
-        # fixture or configuration yet, so they must not close the step.
+    def test_rows_that_only_say_pass_are_not_a_device_run(self):
+        # The U240 placeholder shape: no schema, configuration, runner or
+        # measured cases, so nothing shows the budgets were met.
         self.commit("Record device runs", {
             "docs/process/milestone-records/device-runs/M1/iphone.json":
                 {"milestone": "M1", "device": "iphone", "build_commit": self.gate,
                  "budgets": [{"id": "R1818", "status": "pass"}, {"id": "R1823", "status": "pass"}]}})
         rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
         self.assertEqual((rc, ev["outcome"]), (1, "fail"))
-        self.assertEqual(ev["user_steps"][0]["outcome"], "pending")
-        self.assertIn("U241", self.failure(ev, "user-step:device-run-iphone"))
+        message = self.failure(ev, "user-step:device-run-iphone")
+        self.assertIn("schema_version", message)
+        self.assertIn("Profile", message)
         self.assertFalse(os.path.exists(self.record))
+
+    def test_a_device_run_stays_pending_while_a_case_waits_on_its_unit(self):
+        pending = budget_catalog()
+        pending["budgets"][2]["cases"][0]["pending"] = "U244"  # R1823's device case
+        self.catalog = pending
+        self.commit("Record device runs", {
+            "docs/process/milestone-records/device-runs/M1/iphone.json":
+                device_run("M1", "iphone", self.gate, ["R1818", "R1823"], catalog=pending, measured=["R1818"])})
+        rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+        self.assertEqual(ev["user_steps"][0]["outcome"], "pending")
+        self.assertIn("U244", self.failure(ev, "user-step:device-run-iphone"))
+
+    def test_a_device_run_whose_values_breach_what_it_says_passed_fails(self):
+        report = device_run("M1", "iphone", self.gate, ["R1818", "R1823"])
+        report["budgets"][0]["cases"][0]["value"] = 610.0
+        self.commit("Record device runs", {"docs/process/milestone-records/device-runs/M1/iphone.json": report})
+        rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+        self.assertEqual(rc, 1)
+        message = self.failure(ev, "user-step:device-run-iphone")
+        self.assertIn("R1818", message)
+        self.assertIn("610", message)
+
+    def test_a_device_run_from_a_debug_build_or_another_device_fails(self):
+        for edit, expected in ((("configuration", "Debug"), "Profile"),
+                               (("runner", RUNNERS["ipad"]), "not an iphone device")):
+            report = device_run("M1", "iphone", self.gate, ["R1818", "R1823"])
+            report[edit[0]] = edit[1]
+            self.commit("Device run", {"docs/process/milestone-records/device-runs/M1/iphone.json": report})
+            rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+            self.assertEqual(rc, 1, expected)
+            self.assertIn(expected, self.failure(ev, "user-step:device-run-iphone"))
+
+    def test_a_device_run_without_the_budget_catalog_fails(self):
+        self.commit("Record device runs", {
+            "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", self.gate, ["R1818", "R1823"])})
+        self.catalog = None
+        rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+        self.assertEqual(rc, 1)
+        self.assertIn("no budget catalog", self.failure(ev, "user-step:device-run-iphone"))
 
     def test_a_device_run_copies_the_app_and_core_changes_since_its_build(self):
         build = self.gate

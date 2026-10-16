@@ -61,10 +61,10 @@ VALIDATOR_KEYS = {
     "report": set(),
 }
 
-# U241 owns the budget report a device run records: its schema, measurement
-# dimensions, fixture, configuration and the budget cases each run must cover.
-# Until U241 lands and v_device_run checks that contract, no device run passes.
-DEVICE_RUN_PENDING = "U241"
+# U241's budget catalog (tools/perf/budgets.yaml, as `perf_gate.py load`
+# writes it) and its device-run report contract, which v_device_run checks.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import perf_gate  # noqa: E402  (stdlib only, like this file)
 
 # The fixed list of external dependencies a deferral may name, each with the
 # only condition that keeps it deferred and the warn it covers: while an
@@ -1232,33 +1232,22 @@ def v_device_run(ctx, step, v):
         return "fail", "%s names milestone %r, not %s" % (path, data.get("milestone"), mid), {}
     if data.get("device") != device:
         return "fail", "%s names device %r, not %s" % (path, data.get("device"), device), {}
-    entries = {}
-    for b in data["budgets"]:
-        if not isinstance(b, dict) or not isinstance(b.get("id"), str) or b.get("status") not in ("pass", "fail"):
-            return "fail", "%s: every budget needs an id and a status pass or fail" % path, {}
-        entries[b["id"]] = "fail" if entries.get(b["id"]) == "fail" else b["status"]
-    failed = sorted(r for r, s in entries.items() if s == "fail")
-    if failed:
-        return "fail", "%s records the failure of %s" % (path, ", ".join(failed)), {"failed": failed}
-    required = required_budgets(ctx, device)
-    absent = [r for r in required if r not in entries]
-    if absent:
-        return "fail", "%s records no result for %s" % (path, ", ".join(absent)), {"absent": absent}
     build = data.get("build_commit")
     ref = ctx["gate"] or ctx["head"]
     if not isinstance(build, str) or not SHA.match(build) or ctx["git"].commit(build) != build:
         return "fail", "%s: build_commit must be a full commit id of this repository" % path, {}
     if not ctx["git"].is_ancestor(build, ref):
         return "fail", "%s: build commit %s is not an ancestor of the gate commit %s" % (path, build[:12], ref[:12]), {}
-    changed = ctx["git"].changed(build, ref, "app", "core")
-    # Rows that say pass are not yet evidence: nothing here checks U241's
-    # report schema, measurement dimensions, fixture, configuration or budget
-    # cases, so the step stays pending until U241 adds that check.
-    return "pending", ("lands with %s: %s lists %d budgets as passing on build %s, but a device run passes only "
-                       "against U241's budget report contract (its schema, measurement dimensions, fixture, "
-                       "configuration and budget cases), which this validator does not check yet"
-                       % (DEVICE_RUN_PENDING, path, len(required), build[:12])), {
-        "build_commit": build, "budgets": required, "changed_since_build": changed}
+    required = required_budgets(ctx, device)
+    info = {"build_commit": build, "budgets": required, "changed_since_build": ctx["git"].changed(build, ref, "app", "core")}
+    if ctx["catalog"] is None:
+        return "fail", "%s: no budget catalog to check it against (%s)" % (path, ctx["catalog_error"]), info
+    # U241's report contract: schema, Profile configuration, the device as
+    # runner, and every device case of the catalog recorded with its
+    # dimensions and judged again from its values.
+    outcome, message, details = perf_gate.verify_device_report(data, ctx["catalog"], device, required)
+    info.update(details)
+    return outcome, "%s %s" % (path, message), info
 
 
 def decision_rows(text):
@@ -1691,8 +1680,16 @@ def evaluate(model, config, a):
         return " (the working tree has an uncommitted change there; evidence counts once committed)" \
             if git.uncommitted(path) else ""
 
+    catalog, catalog_error = None, "milestone_gate.py evaluate --catalog: perf_gate.py load's output"
+    if a.catalog:
+        try:
+            catalog, _ = perf_gate.load_catalog(a.catalog)
+        except (perf_gate.Invalid, OSError, ValueError) as e:
+            catalog_error = "%s: %s" % (a.catalog, e)
+
     ctx = {"git": git, "head": head, "gate": gate, "milestone": a.milestone, "mi": mi, "model": model,
-           "today": today, "start": start, "doctor": doctor, "hint": hint}
+           "today": today, "start": start, "doctor": doctor, "hint": hint, "catalog": catalog,
+           "catalog_error": catalog_error}
     steps = []
     for st in milestone["user_steps"]:
         outcome, message, details = VALIDATORS[st["validator"]["type"]](ctx, st, st["validator"])
@@ -1785,6 +1782,7 @@ def main(argv):
     s.add_argument("--results", required=True, help="the job results directory (build/mg)")
     s.add_argument("--now", required=True, help="YYYY-MM-DDTHH:MM:SSZ")
     s.add_argument("--doctor", help="a tools/mg doctor result.json, for setup steps")
+    s.add_argument("--catalog", help="perf_gate.py load's output (tools/perf/budgets.yaml), for device runs")
     s.add_argument("--record", help="where a pass writes the milestone record (unless one exists)")
     s.add_argument("--outside-main", action="store_true",
                    help="the checkout is not the main checkout: evaluate, but the gate fails")
