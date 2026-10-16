@@ -35,3 +35,21 @@ referenced field is non-empty, hence the sentinel field),
 synthesized card with `template_idx` = `card_ord`), `rslib/src/notetype/schema11.rs`
 (legacy template JSON), `rslib/src/notes/service.rs` (cloze numbers come back
 unordered) and `pylib/anki/template.py` (the legacy uncommitted-card call).
+
+## Session s-20261016T052305Z-361e8088 (spec writer): C15 and two template scenarios
+
+Read at tag 26.09.3: `rslib/src/template.rs` (the cloze branch of the blank
+check takes the cloze numbers of every value of the field map it is given) and
+`rslib/src/notetype/render.rs` (the map holds the note's fields, then the
+special values Tags, Type, Deck, Subdeck, CardFlag, Card and CardID and the
+card-number key, each only where no note field has the name). Checked against
+the oracle as a black box with the `template` observation's new-note cases:
+tags, the note type name and the template name holding a cloze count; a note
+field named `Tags` hides the tags. Recorded as `render/cloze/blank-check`; the
+filters inside templates (side, FrontSide, chains, specials, a standard note
+type) as `render/cloze/templates`. No harvested test covers either: the
+`render_card` test of `template.rs` has no cloze note type.
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| cloze C15, template-syntax T10 | `rslib/src/template.rs`, `rslib/src/notetype/render.rs` | blank check over the whole field map, specials included unless shadowed |
