@@ -1,0 +1,40 @@
+# #n1 and its card #c1 were deleted once and that deletion was synced (graves
+# with the server usn 5); the note came back under the same ids, as an import
+# that keeps ids brings it, and its graves stayed. Removing #n1 and #n2 keeps
+# those two graves as they are (graves G2). The undo removes every grave of
+# the removed notes and cards, the two earlier ones included (graves G6); the
+# redo adds all four back with usn -1 (specs/engine/undo.md A5, A7). Needs
+# db_exec, delete_notes, undo, redo and undo_status
+# (specs/conformance/undo-ops.md).
+id: undo/delete-note-existing-grave
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [river, rio]}
+    - {notetype: Single, deck: Inbox, fields: [lake, lago]}
+steps:
+  - observe: [ids]
+  # #n1 and #c1 both have the id 1894701600000, the frozen instant
+  # (specs/storage/ids-usn-mtime.md I2).
+  - db_exec:
+      sql: "INSERT INTO graves (oid, type, usn) VALUES (?, 0, 5), (?, 1, 5)"
+      params: [1894701600000, 1894701600000]
+  - advance: 1h
+  - delete_notes: {notes: ["#n1", "#n2"]}
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY type, oid"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - undo: {}
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY type, oid"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - observe: ["card(#c1, #c2)"]
+  - advance: 1h
+  - redo: {}
+  - db_exec: {sql: "SELECT oid, type, usn FROM graves ORDER BY type, oid"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - observe: [undo_status, "card(#c1, #c2)"]

@@ -1,0 +1,58 @@
+# Edits of one note that change only its row merge into the top "Update
+# Note" step while that step began less than 60 s earlier: the edits at 0,
+# 30 and 59 s are one step, the edit at 60 s (1 s after the previous one) and
+# an edit of another note are steps of their own. One undo of the merged step
+# puts back the note and col.mod from before its first edit; its redo puts
+# back the last merged edit (specs/engine/undo.md A3, A7). Needs db_exec,
+# edit_note, undo, redo and undo_status (specs/conformance/undo-ops.md).
+id: undo/edit-note-merge
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [cat, gato]}
+    - {notetype: Single, deck: Inbox, fields: [dog, perro]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  # 11:00:00: the step begins.
+  - edit_note: {note: "#n1", fields: {Back: gata}}
+  - advance: 30s
+  - edit_note: {note: "#n1", fields: {Back: gatita}}
+  - advance: 29s
+  - edit_note: {note: "#n1", fields: {Back: gatito}}
+  - observe: [undo_status]
+  - advance: 1s
+  # 11:01:00, 60 s after the step began: a step of its own.
+  - edit_note: {note: "#n1", fields: {Back: michi}}
+  - advance: 5s
+  # Another note, 5 s later: a step of its own.
+  - edit_note: {note: "#n2", fields: {Back: perra}}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - undo: {}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - undo: {}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - undo: {}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - observe: [undo_status]
+  - undo: {}
+  - advance: 1h
+  - redo: {}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - redo: {}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - observe: [undo_status]
+  # Both redos ran at 12:01:05: the michi step's redo merged into the step the
+  # gatito step's redo recorded the same second. An edit of the note 30 s
+  # later merges into that step too, and one undo reverts all three, leaving
+  # nothing to undo (specs/engine/undo.md A3).
+  - advance: 30s
+  - edit_note: {note: "#n1", fields: {Back: neko}}
+  - undo: {}
+  - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
+  - observe: [undo_status]

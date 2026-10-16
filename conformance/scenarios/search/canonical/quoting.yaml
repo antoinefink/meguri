@@ -1,0 +1,41 @@
+# specs/search/canonical-form.md F4: the quoting rule. Quotes appear for
+# and/or words, a leading `-` with more after it, spaces and brackets; `"` is
+# always escaped; nothing else is.
+id: search/canonical/quoting
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          - '"and"'
+          - '"OR"'
+          - '"AnD"'
+          - '"-"'
+          - '"-a"'
+          - '"a-b"'
+          - '"(a)"'
+          - '"a(b"'
+          - '"a)b"'
+          - '"a b"'
+          - '\('
+          - '\)'
+          - '"a\"b"'
+          - '"\""'
+          - 'deck:-a'
+          - '"deck:a(b"'
+          - 'deck:a\)b'
+          - '"a:b c"'
+          - '\-f:x'
+          - 'tag:and'
+          - 'tag:\-x'
+          - '"note:a b"'
+          - '"card:Side two"'
+          - '"w:a b"'
+          - '"nc:(x)"'
+          - '"has-cd:a b"'
+          - '"preset:a b"'
+          - '"dupe:1,a b"'
+          - '"prop:cds:k=a b"'
+          - '"re:a b"'
+          - '\*\_'
+          - 'a*b'
+          - 'a_b'

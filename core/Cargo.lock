@@ -1063,6 +1063,7 @@ dependencies = [
  "meguri-storage",
  "meguri-testkit",
  "meguri-text",
+ "serde_json",
  "tempfile",
  "tracing",
 ]
@@ -1072,6 +1073,7 @@ name = "meguri-ffi"
 version = "0.0.0"
 dependencies = [
  "meguri-engine",
+ "meguri-model",
  "uniffi",
 ]
 
@@ -1105,6 +1107,12 @@ dependencies = [
 [[package]]
 name = "meguri-search"
 version = "0.0.0"
+dependencies = [
+ "meguri-model",
+ "meguri-testkit",
+ "regex",
+ "rusqlite",
+]
 
 [[package]]
 name = "meguri-servers"
@@ -1139,6 +1147,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "difflib",
+ "htmlescape",
  "meguri-testkit",
  "meguri-text",
  "regex",
@@ -1155,16 +1164,19 @@ dependencies = [
  "granit-parser",
  "gungraun",
  "hdrhistogram",
+ "htmlescape",
  "jiff",
  "libc",
  "meguri-engine",
  "meguri-model",
  "meguri-sched",
+ "meguri-search",
  "meguri-storage",
  "meguri-sync",
  "meguri-template",
  "meguri-text",
  "rand 0.9.4",
+ "regex",
  "ryu",
  "serde",
  "serde_json",

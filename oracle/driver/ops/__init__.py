@@ -17,4 +17,5 @@ from . import (  # noqa: F401
     sync_client,
     sync_server,
     tags,
+    undo,
 )

@@ -317,7 +317,7 @@ mg_bench_icount() {
 MG_PERF_UI_SUITES="PerfTestCaseTests SmokePerfTests"
 # The harness's own checks: they measure nothing and have no perf result.
 # Every other suite is a performance suite and must yield one.
-MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests"
+MG_PERF_UI_CHECK_SUITES="PerfTestCaseTests CardSwapTimingGateTests"
 
 # mg__perf_ui_runner <mac|udid> <out.json>: the perf result's runner, the
 # baseline key U241 uses (model and OS build; CPU and OS on the Mac). A run

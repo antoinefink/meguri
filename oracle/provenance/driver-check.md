@@ -27,3 +27,29 @@ count larger than the free list makes `quick_check` fail while Anki still opens
 the file and counts rows, so Check Database returns the corrupt error; a
 `sqlite3` reader of an Anki collection needs a `unicase` collation registered
 to open cursors on its indexes.
+
+## Schedule (K11, U15)
+
+Read at tag 26.09.3 for `tools/mg oracle check --schedule`
+(`collection_check.schedule_report`). No code was copied.
+
+| Anki file | Read for |
+|---|---|
+| `qt/aqt/deckbrowser.py`, `qt/aqt/operations/deck.py`, `pylib/anki/decks.py` (`set_current`, `select`) | clicking a deck in the deck list sets the current deck through the backend, nothing else |
+| `rslib/src/decks/current.rs` | setting another current deck drops the cached study queues; the next fetch builds them for that deck; the current deck is always a deck id (a missing one falls back to the default deck), so every queue is a deck's and the root has none (K11.3 `root`) |
+| `pylib/anki/scheduler/v3.py`, `proto/anki/scheduler.proto` (`QueuedCards`) | `get_queued_cards(fetch_limit, intraday_learning_only)`, each entry's queue (new, learning, review) and the three counts |
+| `rslib/src/scheduler/queue/mod.rs`, `learning.rs`, `entry.rs` | the fetch reads the queue in presentation order (learning due now, the main queue, learning within the learn-ahead limit) up to the fetch limit; interday learning entries report as learning; counts refresh the learning cutoff only when all are zero |
+| `rslib/src/scheduler/queue/builder/mod.rs`, `gathering.rs`, `rslib/src/storage/deck/mod.rs` (`update_active_decks`) | the queue is built for the current deck and its children, burying siblings as it gathers; the load balancer, when on, is built over every deck's preset; active decks go to a temporary table, not the file |
+| `rslib/src/scheduler/answering/mod.rs` (`get_scheduling_states`) | next states use the load balancer of the queues cached at that moment, so they are read after the last queue is built |
+| `rslib/src/decks/tree.rs` (`deck_tree`, `hide_default_deck`) | the root node's numbers; an empty default deck without children is left out of the tree when other decks exist |
+| `pylib/anki/scheduler/base.py` (`get_or_create_filtered_deck`, `add_or_update_filtered_deck`), `proto/anki/decks.proto` (`Filtered.SearchTerm.Order`), `rslib/src/scheduler/filtered/mod.rs`, `card.rs`, `rslib/src/storage/card/filtered.rs`, `rslib/src/scheduler/queue/builder/mod.rs` (`sort_options`) | for the driver test of a filtered deck: saving one builds it; latest-added-first takes notes by descending id; moved new cards take consecutive positions as their due, and a filtered deck's queue keeps that order (no sibling spacing) |
+
+Probed in the oracle image: on the 10k generated collection a deck's queue
+counts can be lower than its deck-list numbers, because building the queue
+buries siblings and the deck list does not; the driver tests compare the two
+only on notes with one card each. Two runs at the same frozen instant give the
+same `schedule.sha256`. So does a copy of that collection whose fields have
+every ASCII letter and digit outside cloze openers replaced, whose decks carry
+A11.1 rank names and whose tag components are hashed (a probe, not the
+anonymizer: it left `sfld` and `csum` stale, so its Check Database rewrote
+`notes`).
