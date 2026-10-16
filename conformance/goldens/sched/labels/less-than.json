@@ -1,0 +1,230 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "answer_labels": {
+          "#c1": {
+            "again": {
+              "amount": "5",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "10",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "20",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "hard": {
+              "amount": "13",
+              "less_than": true,
+              "unit": "minutes"
+            }
+          },
+          "#c2": {
+            "again": {
+              "amount": "20",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "9",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "20",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "hard": {
+              "amount": "20",
+              "less_than": true,
+              "unit": "minutes"
+            }
+          },
+          "#c3": {
+            "again": {
+              "amount": "10",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "8",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "2",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "15",
+              "less_than": true,
+              "unit": "minutes"
+            }
+          }
+        }
+      },
+      {},
+      {
+        "answer_labels": {
+          "#c1": {
+            "again": {
+              "amount": "5",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "10",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "20",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "hard": {
+              "amount": "13",
+              "less_than": true,
+              "unit": "minutes"
+            }
+          },
+          "#c2": {
+            "again": {
+              "amount": "20",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "9",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "20",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "hard": {
+              "amount": "20",
+              "less_than": true,
+              "unit": "minutes"
+            }
+          },
+          "#c3": {
+            "again": {
+              "amount": "10",
+              "less_than": true,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "8",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "2",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "15",
+              "less_than": true,
+              "unit": "minutes"
+            }
+          }
+        }
+      },
+      {},
+      {
+        "answer_labels": {
+          "#c1": {
+            "again": {
+              "amount": "5",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "10",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "20",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "hard": {
+              "amount": "13",
+              "less_than": false,
+              "unit": "minutes"
+            }
+          },
+          "#c2": {
+            "again": {
+              "amount": "20",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "9",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "20",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "hard": {
+              "amount": "20",
+              "less_than": false,
+              "unit": "minutes"
+            }
+          },
+          "#c3": {
+            "again": {
+              "amount": "10",
+              "less_than": false,
+              "unit": "minutes"
+            },
+            "easy": {
+              "amount": "8",
+              "less_than": false,
+              "unit": "days"
+            },
+            "good": {
+              "amount": "2",
+              "less_than": false,
+              "unit": "days"
+            },
+            "hard": {
+              "amount": "15",
+              "less_than": false,
+              "unit": "minutes"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "b490ad0efe12a5980bf3bfb23472baed186edbe49fdc039cea5745cbe11ec2e8",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/labels/less-than",
+  "scenario_sha256": "a6a28292314d2624de2ca4f88e1457cc35d5d1f5622b46012f53c673192d758e",
+  "tz": "UTC"
+}
