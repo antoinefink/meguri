@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use meguri_testkit::exec::{
     ExecError, Executor, MeguriExecutor, Needs, SegmentExecutor, SegmentOutput, SegmentRequest,
 };
-use meguri_testkit::scenario::LoadedScenario;
+use meguri_testkit::scenario::{LoadedScenario, SyncSpec};
 use meguri_testkit::suite::{GoldensCheck, LiveRun, Status, Suite};
 use meguri_testkit::wallclock::Stopwatch;
 use serde_json::{Value, json};
@@ -1053,7 +1053,7 @@ fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
     // runs none of it (every adapter here would fail the run).
     let mut registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.actor(never_dump);
-    registry.op_rejecting("sync", &["clock_incorrect", "network"], never_op);
+    registry.op_rejecting("sync", &SyncSpec::REJECTIONS, never_op);
     registry.observation("card", never_observe);
     registry.observation("db_dump", never_observe);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
