@@ -27,10 +27,11 @@ pub fn new_row(name: &str) -> Tag {
     }
 }
 
-/// T3 for one normalized name: the spelling it takes, registering it when
-/// no row is equal to it. Spellings are kept, so an operation that spells
-/// one name many times reads the registry once for it: once spelled, a name
-/// is equal to a row until the operation removes rows again.
+/// T3 for the names of one operation: the spelling each normalized name
+/// takes, registering it when no row is equal to it. Spellings are kept, so
+/// an operation that spells one name many times reads the registry once for
+/// it: once spelled, a name is equal to a row until the operation removes
+/// rows again.
 #[derive(Debug, Default)]
 pub struct Speller {
     spelled: HashMap<String, String>,
@@ -41,33 +42,94 @@ impl Speller {
         Speller::default()
     }
 
-    /// T3: the spelling of `normalized` (a T2 result).
+    /// T3: the spelling of `normalized` (a T2 result), registered as a new
+    /// row when no row is equal to it.
     pub fn spell(&mut self, scope: &mut WriteScope<'_>, normalized: &str) -> Result<String, StorageError> {
+        self.spell_with(scope, normalized, new_row)
+    }
+
+    /// T3 steps 1 and 2, registering a spelling no row is equal to as the
+    /// row `register` makes of it: a renamed or moved tag's row takes its
+    /// source's columns (T7 step 5).
+    pub fn spell_with(
+        &mut self,
+        scope: &mut WriteScope<'_>,
+        normalized: &str,
+        register: impl FnOnce(&str) -> Tag,
+    ) -> Result<String, StorageError> {
         if let Some(spelling) = self.spelled.get(normalized) {
             return Ok(spelling.clone());
         }
-        let spelling = spell(scope, normalized)?;
+        let spelling = match spelling_of(&*scope, normalized)? {
+            Spelling::Registered(name) => name,
+            Spelling::New(name) => {
+                scope.put(&register(&name))?;
+                name
+            }
+        };
         self.spelled.insert(normalized.to_owned(), spelling.clone());
         Ok(spelling)
     }
 }
 
-/// T3: a row equal to `normalized` lends its spelling and nothing is
-/// registered; otherwise the nearest registered ancestor lends its spelling
-/// to the leading components, and the result is registered as a new row.
-pub fn spell(scope: &mut WriteScope<'_>, normalized: &str) -> Result<String, StorageError> {
-    if let Some(row) = scope.tag(normalized)? {
-        return Ok(row.name);
+/// What T3 gives a normalized name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Spelling {
+    /// Step 1: the spelling of the row equal to the name.
+    Registered(String),
+    /// Step 2: the spelling to register.
+    New(String),
+}
+
+/// T3 on the registry as `reader` sees it, registering nothing. A row equal
+/// to `normalized` lends its spelling (step 1). Otherwise the longest
+/// leading part of `normalized` that is a node (T1), trying the name itself
+/// and then its ancestors from its parent outward, lends its tree spelling
+/// to that part (step 2).
+pub fn spelling_of(reader: &(impl ReadRows + ?Sized), normalized: &str) -> Result<Spelling, StorageError> {
+    if let Some(row) = reader.tag(normalized)? {
+        return Ok(Spelling::Registered(row.name));
     }
-    let mut spelling = normalized.to_owned();
+    if let Some(node) = implicit_spelling(reader, normalized)? {
+        return Ok(Spelling::New(node));
+    }
     for ancestor in ancestors(normalized) {
-        if let Some(row) = scope.tag(ancestor)? {
-            spelling = format!("{}{}", row.name, &normalized[ancestor.len()..]);
-            break;
+        let node = match reader.tag(ancestor)? {
+            Some(row) => Some(row.name),
+            None => implicit_spelling(reader, ancestor)?,
+        };
+        if let Some(node) = node {
+            return Ok(Spelling::New(format!("{node}{}", &normalized[ancestor.len()..])));
         }
     }
-    scope.put(&new_row(&spelling))?;
-    Ok(spelling)
+    Ok(Spelling::New(normalized.to_owned()))
+}
+
+/// T1's tree spelling of `name` as an implicit parent: its components as
+/// the first row, in `unicase` order, that has an ancestor equal to `name`
+/// spells them; `None` when no row has. Every such row folds to a text
+/// beginning with `name`'s folding and `::`, so the first row at or after
+/// `name::` in key order is the one, when there is one. Whether `name` is an
+/// ancestor of a row beginning that way depends on `name` alone (`a:` is
+/// none of `a:::b`'s, whose components are `a` and `:b`), so when that row
+/// does not have it, no row does.
+fn implicit_spelling(reader: &(impl ReadRows + ?Sized), name: &str) -> Result<Option<String>, StorageError> {
+    let below = format!("{name}{LEVEL}");
+    let Some(row) = reader.tag_rows_from(&below, 1)?.pop() else {
+        return Ok(None);
+    };
+    if !folded(&row.name).starts_with(&folded(&below)) {
+        return Ok(None);
+    }
+    Ok(ancestors(&row.name)
+        .find(|ancestor| compare_folded(ancestor, name) == Ordering::Equal)
+        .map(str::to_owned))
+}
+
+/// T3: the spelling of `normalized`, registered as a new row when no row is
+/// equal to it.
+pub fn spell(scope: &mut WriteScope<'_>, normalized: &str) -> Result<String, StorageError> {
+    Speller::new().spell(scope, normalized)
 }
 
 /// T4: what a note save stores for the tag list it is given (the editor,

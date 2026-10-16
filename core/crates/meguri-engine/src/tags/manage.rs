@@ -3,13 +3,17 @@
 //! one undoable step (T15).
 //!
 //! Rename and reparent remove the old rows before they spell the new names,
-//! and write into the notes the spelling they register (T7, T8 deviations
+//! write into the notes the spelling they register (T7, T8 deviations
 //! `tags-rename-new-casing`, `tags-rename-existing-spelling`,
-//! `tags-reparent-existing-spelling`).
+//! `tags-reparent-existing-spelling`), and give each row they register the
+//! columns of the removed row it replaces (T7 step 5, deviations
+//! `tags-rename-carries-columns*`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use meguri_model::ids::NoteId;
+use meguri_model::tag::Tag;
+use meguri_model::usn::Usn;
 use meguri_storage::{ReadRows, StorageError, Table, WriteScope};
 use meguri_text::fold::folded;
 
@@ -17,7 +21,7 @@ use super::canonical::{
     ancestors, check_new_name, first_component, join_note_tags, last_component, normalize, split_text,
 };
 use super::matching::Matcher;
-use super::registry::{Speller, set_collapsed_in};
+use super::registry::{Speller, new_row, set_collapsed_in};
 use super::{RunOptions, each_note_tags, matching_notes, no_check, op_spec, plan_check, planned, rewrite_notes};
 use crate::collection::Collection;
 use crate::error::EngineError;
@@ -47,15 +51,32 @@ fn notes_plan(context: &crate::PlanContext<'_>, matcher: &Matcher) -> Result<Pla
     })
 }
 
-/// Removes every row that matches (T5). Returns how many went.
-fn remove_matching_rows(scope: &mut WriteScope<'_>, matcher: &Matcher) -> Result<usize, StorageError> {
-    let mut removed = 0;
+/// Removes every row that matches (T5). Returns the rows that went, by
+/// their names' folding (U2): the sources of T7 step 5.
+fn remove_matching_rows(scope: &mut WriteScope<'_>, matcher: &Matcher) -> Result<HashMap<String, Tag>, StorageError> {
+    let mut removed = HashMap::new();
     for row in scope.tag_rows()? {
         if matcher.matches(&row.name) && scope.remove_tag(&row.name)?.changed() {
-            removed += 1;
+            removed.insert(folded(&row.name), row);
         }
     }
     Ok(removed)
+}
+
+/// T7 step 5: the row registered for a renamed or moved tag, with the
+/// `collapsed` and `config` of its source (the removed row equal to the
+/// matching tag) and `usn` -1; a new row's columns when no removed row
+/// lists the tag.
+fn carried_row(name: &str, source: Option<&Tag>) -> Tag {
+    match source {
+        Some(source) => Tag {
+            name: name.to_owned(),
+            usn: Usn::PENDING,
+            collapsed: source.collapsed,
+            config: source.config.clone(),
+        },
+        None => new_row(name),
+    }
 }
 
 /// Whether one of the listed notes, read now, matches.
@@ -70,14 +91,18 @@ fn any_matches(scope: &WriteScope<'_>, notes: &[NoteId], matcher: &Matcher) -> R
     Ok(false)
 }
 
-/// T7 step 4 and T8 step 4: each matching tag replaced by `targets[name]`
-/// followed by the rest of the tag after its matched part, normalized and
-/// spelled against the registry as it is now, in note id order and stored
-/// order; other tags stay where they are (T6).
+/// T7 steps 4 to 7 and T8 step 4: each matching tag replaced by
+/// `targets[name]` followed by the rest of the tag after its matched part,
+/// normalized and spelled against the registry as it is now, in note id
+/// order and stored order; other tags stay where they are (T6). A spelling
+/// no row is equal to is registered with the columns of the tag's row in
+/// `removed`, the first matching tag in that order supplying them; one
+/// equal to a row is a merge and leaves that row as it is.
 fn move_tags(
     scope: &mut WriteScope<'_>,
     matcher: &Matcher,
     targets: &[String],
+    removed: &HashMap<String, Tag>,
     notes: &[NoteId],
     progress: Option<&ProgressSink>,
 ) -> Result<usize, StorageError> {
@@ -91,7 +116,8 @@ fn move_tags(
             match matcher.first_match(tag) {
                 Some((name, matched)) => {
                     let moved = format!("{}{}", targets[name], &tag[matched..]);
-                    tags.push(speller.spell(scope, &normalize(&moved))?);
+                    let source = removed.get(&folded(tag));
+                    tags.push(speller.spell_with(scope, &normalize(&moved), |spelling| carried_row(spelling, source))?);
                 }
                 None => tags.push(tag.to_owned()),
             }
@@ -100,9 +126,10 @@ fn move_tags(
     })
 }
 
-/// T7 steps 2 to 5 on the notes that matched `from` when planned: nothing
+/// T7 steps 2 to 7 on the notes that matched `from` when planned: nothing
 /// when none of them matches now; otherwise the rows matching `from` go, and
-/// the notes' matching tags move under `to`. Returns the notes written.
+/// the notes' matching tags move under `to`, their rows with them. Returns
+/// the notes written.
 fn apply_rename(
     scope: &mut WriteScope<'_>,
     from: &str,
@@ -114,8 +141,8 @@ fn apply_rename(
     if !any_matches(scope, notes, &matcher)? {
         return Ok(0);
     }
-    remove_matching_rows(scope, &matcher)?;
-    move_tags(scope, &matcher, &[to.to_owned()], notes, progress)
+    let removed = remove_matching_rows(scope, &matcher)?;
+    move_tags(scope, &matcher, &[to.to_owned()], &removed, notes, progress)
 }
 
 /// T7: renames `from` and its descendants to `to` on every note, as one
@@ -185,9 +212,9 @@ fn apply_reparent(
     if !any_matches(scope, notes, &matcher)? {
         return Ok(0);
     }
-    remove_matching_rows(scope, &matcher)?;
+    let removed = remove_matching_rows(scope, &matcher)?;
     let targets: Vec<String> = moves.iter().map(|(_, new_name)| new_name.clone()).collect();
-    move_tags(scope, &matcher, &targets, notes, progress)
+    move_tags(scope, &matcher, &targets, &removed, notes, progress)
 }
 
 /// T8: moves the sources (as the tree spells them) under `target`, or to

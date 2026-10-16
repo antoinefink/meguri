@@ -65,12 +65,78 @@ fn saving_dedupes_ignoring_case_sorts_and_registers() {
 }
 
 #[test]
-fn rename_takes_a_registered_spelling_and_refuses_a_space() {
+fn a_new_tag_takes_the_spelling_of_an_implicit_parent() {
+    // T3 step 2: the longest leading part that the tree shows lends its
+    // spelling, an implicit parent included (the name itself or an
+    // ancestor), spelled as the first row below it in unicase order.
+    let h = fresh();
+    let c = &h.collection;
+    save_note(c, &["Pod::x"]);
+    let child = save_note(c, &["pod::y"]);
+    let itself = save_note(c, &["POD"]);
+    assert_eq!(tags_of(c, child), " Pod::y ");
+    assert_eq!(tags_of(c, itself), " Pod ");
+    // Within one save, a tag registered earlier makes its parent a node for
+    // the tags after it.
+    let list = save_note(c, &["qq::R", "QQ"]);
+    assert_eq!(tags_of(c, list), " qq qq::R ");
+    // The longest node wins over a shorter registered one.
+    save_note(c, &["W"]);
+    save_note(c, &["W::V::m"]);
+    let deep = save_note(c, &["w::v::n"]);
+    assert_eq!(tags_of(c, deep), " W::V::n ");
+    // Rows another client spelled unlike each other: the first in unicase
+    // order spells the implicit parents.
+    raw(
+        c,
+        "INSERT INTO tags (tag, usn, collapsed, config) VALUES \
+         ('sea::NORTH::fjord', 0, 1, NULL), ('SEA::north::bay', 0, 1, NULL)",
+        &[],
+    );
+    let sea = save_note(c, &["Sea::North::cove"]);
+    assert_eq!(tags_of(c, sea), " SEA::north::cove ");
+    // `k:::m` has the components `k` and `:m`: `k` is its implicit parent,
+    // `k:` is no node.
+    save_note(c, &["k:::m"]);
+    let colon = save_note(c, &["K:"]);
+    let letter = save_note(c, &["K"]);
+    assert_eq!((tags_of(c, colon), tags_of(c, letter)), (" K: ".into(), " k ".into()));
+    assert_eq!(
+        names(c),
+        [
+            "K:",
+            "Pod",
+            "Pod::x",
+            "Pod::y",
+            "SEA::north::bay",
+            "SEA::north::cove",
+            "W",
+            "W::V::m",
+            "W::V::n",
+            "k",
+            "k:::m",
+            "qq",
+            "qq::R",
+            "sea::NORTH::fjord"
+        ]
+    );
+    let made = row(c, "Pod").unwrap();
+    assert_eq!((made.usn, made.collapsed, made.config), (Usn(-1), true, None));
+}
+
+#[test]
+fn rename_onto_an_implicit_parent_takes_its_spelling_and_refuses_a_space() {
+    // The plan's setup: `Bar::x` is the only row near the new name.
     let h = fresh();
     let c = &h.collection;
     let n1 = save_note(c, &["foo", "foo::c"]);
     let n2 = save_note(c, &["Bar::x"]);
-    save_note(c, &["Bar"]);
+    raw(c, "UPDATE tags SET usn = 0", &[]);
+    raw(
+        c,
+        "UPDATE tags SET collapsed = 0, config = X'04' WHERE tag = 'foo'",
+        &[],
+    );
     let before = common::col_mod(c);
     for refused in ["has space", "", "   ", "a\u{3000}b", "\t"] {
         assert!(
@@ -90,6 +156,16 @@ fn rename_takes_a_registered_spelling_and_refuses_a_space() {
     assert_eq!(tags_of(c, n1), " Bar Bar::c ");
     assert_eq!(tags_of(c, n2), " Bar::x ");
     assert_eq!(names(c), ["Bar", "Bar::c", "Bar::x"]);
+    // Each new row carries its source's columns, with usn -1 (T7 step 5).
+    let bar = row(c, "Bar").unwrap();
+    assert_eq!((bar.usn, bar.collapsed, bar.config), (Usn(-1), false, Some(vec![4])));
+    let kid = row(c, "Bar::c").unwrap();
+    assert_eq!((kid.usn, kid.collapsed, kid.config), (Usn(-1), true, None));
+    assert_eq!(
+        row(c, "Bar::x").unwrap().usn,
+        Usn(0),
+        "the implicit parent's row is untouched"
+    );
     let UndoStatus::Available(step) = c.peek_undo(UndoScope::Global).unwrap() else {
         panic!("the rename recorded a step")
     };
@@ -105,12 +181,31 @@ fn a_case_only_rename_and_a_rename_below_a_new_casing_adopt_the_new_casing() {
     let h = fresh();
     let c = &h.collection;
     let n = save_note(c, &["verbs", "verbs::x"]);
+    raw(c, "UPDATE tags SET usn = 0", &[]);
+    raw(
+        c,
+        "UPDATE tags SET collapsed = 0, config = X'0801' WHERE tag = 'verbs'",
+        &[],
+    );
+    raw(c, "UPDATE tags SET config = X'02' WHERE tag = 'verbs::x'", &[]);
     let before = (tags_of(c, n), rows(c));
     assert_eq!(tags::rename(c, "verbs", "Verbs", &opts()).unwrap().value, 1);
     assert_eq!(tags_of(c, n), " Verbs Verbs::x ");
-    assert_eq!(names(c), ["Verbs", "Verbs::x"]);
+    // Each row keeps its state and config under the new spelling (T7 step
+    // 5): an expanded `verbs` stays expanded as `Verbs`.
+    let renamed: Vec<_> = rows(c)
+        .into_iter()
+        .map(|r| (r.name, r.usn, r.collapsed, r.config))
+        .collect();
+    assert_eq!(
+        renamed,
+        [
+            ("Verbs".to_owned(), Usn(-1), false, Some(vec![8, 1])),
+            ("Verbs::x".to_owned(), Usn(-1), true, Some(vec![2])),
+        ]
+    );
     // The rows went and came back under keys that compare equal: one undo
-    // brings back the old spelling.
+    // brings back the old spelling and every column.
     undo(&h);
     assert_eq!((tags_of(c, n), rows(c)), before);
 
@@ -129,19 +224,37 @@ fn rename_rewrites_in_place_without_sorting_and_keeps_a_merged_rows_columns() {
     let n1 = save_note(c, &["bar", "foo"]);
     let n2 = save_note(c, &["a", "zzz"]);
     let n3 = save_note(c, &["foobar"]);
+    let n4 = save_note(c, &["foo::a"]);
+    raw(c, "UPDATE tags SET usn = 0", &[]);
     raw(
         c,
         "UPDATE tags SET collapsed = 0, config = X'01' WHERE tag = 'bar'",
         &[],
     );
+    raw(
+        c,
+        "UPDATE tags SET collapsed = 1, config = X'05' WHERE tag = 'foo'",
+        &[],
+    );
+    raw(
+        c,
+        "UPDATE tags SET collapsed = 0, config = X'03' WHERE tag = 'foo::a'",
+        &[],
+    );
     tags::set_collapsed(c, &["foo::orphan"], false).unwrap();
     let untouched = common::tagging::note(c, n3);
     h.clock.step_ms(3_600_000);
-    assert_eq!(tags::rename(c, "FOO", "bar", &opts()).unwrap().value, 1);
+    assert_eq!(tags::rename(c, "FOO", "bar", &opts()).unwrap().value, 2);
     assert_eq!(tags_of(c, n1), " bar bar ");
+    assert_eq!(tags_of(c, n4), " bar::a ");
     assert_eq!(common::tagging::note(c, n3), untouched, "foobar does not match foo");
+    // A merge into a row that the rename left (T7 step 6): that row keeps
+    // every column, and the columns of `foo` go.
     let bar = row(c, "bar").unwrap();
-    assert_eq!((bar.collapsed, bar.config), (false, Some(vec![1])));
+    assert_eq!((bar.usn, bar.collapsed, bar.config), (Usn(0), false, Some(vec![1])));
+    // The descendant's new row carries the columns of `foo::a` (step 5).
+    let kid = row(c, "bar::a").unwrap();
+    assert_eq!((kid.usn, kid.collapsed, kid.config), (Usn(-1), false, Some(vec![3])));
     assert!(row(c, "foo::orphan").is_none(), "registry-only descendants go");
     assert!(row(c, "bar::orphan").is_none(), "and are not made again");
 
@@ -250,6 +363,128 @@ fn the_first_source_in_list_order_decides() {
         1
     );
     assert_eq!(tags_of(c, n), " p::bar::x ");
+}
+
+/// Every registry row as (name, usn, collapsed, config), by name.
+fn columns(c: &meguri_engine::Collection) -> Vec<(String, Usn, bool, Option<Vec<u8>>)> {
+    rows(c)
+        .into_iter()
+        .map(|r| (r.name, r.usn, r.collapsed, r.config))
+        .collect()
+}
+
+#[test]
+fn a_reparent_carries_its_rows_columns_and_one_undo_restores_them() {
+    // T8 step 4 with T7 step 5: each moved row takes the columns of the row
+    // it replaces, with usn -1.
+    let h = fresh();
+    let c = &h.collection;
+    let n = save_note(c, &["ra", "ra::kid", "rb"]);
+    raw(c, "UPDATE tags SET usn = 0", &[]);
+    raw(c, "UPDATE tags SET collapsed = 0, config = X'05' WHERE tag = 'ra'", &[]);
+    raw(c, "UPDATE tags SET collapsed = 0 WHERE tag = 'ra::kid'", &[]);
+    let before = (common::tagging::note(c, n), columns(c));
+    let col_before = common::col_mod(c);
+    h.clock.step_ms(3_600_000);
+    assert_eq!(tags::reparent(c, &["ra"], Some("rb"), &opts()).unwrap().value, 1);
+    assert_eq!(tags_of(c, n), " rb::ra rb::ra::kid rb ");
+    assert_eq!(
+        columns(c),
+        [
+            ("rb".to_owned(), Usn(0), true, None),
+            ("rb::ra".to_owned(), Usn(-1), false, Some(vec![5])),
+            ("rb::ra::kid".to_owned(), Usn(-1), false, None),
+        ]
+    );
+    assert_eq!(top_step(&h), Some(RENAME_TAG));
+    undo(&h);
+    assert_eq!((common::tagging::note(c, n), columns(c)), before);
+    assert_eq!(common::col_mod(c), col_before);
+}
+
+#[test]
+fn two_tags_giving_one_new_name_take_the_columns_of_the_first_in_note_order() {
+    // `foo` and `x::foo` onto `p` both give `p::foo`: the first matching tag
+    // in note id order, then stored order, registers it with its row's
+    // columns (T7 steps 4 and 5).
+    for (first, second, carried) in [
+        (&["x::foo"][..], &["foo", "x::foo"][..], (true, Some(vec![2]))),
+        (&["foo"][..], &["x::foo", "foo"][..], (false, Some(vec![1]))),
+    ] {
+        let h = fresh();
+        let c = &h.collection;
+        let n1 = save_note(c, first);
+        let n2 = save_note(c, second);
+        // The second save sorted its tags; store them in the given order, as
+        // the rewrite keeps stored order (T6).
+        common::tagging::raw(
+            c,
+            "UPDATE notes SET tags = ?1 WHERE id = ?2",
+            &[
+                SqlValue::Text(format!(" {} ", second.join(" "))),
+                SqlValue::Integer(n2.0),
+            ],
+        );
+        raw(
+            c,
+            "UPDATE tags SET collapsed = 0, config = X'01' WHERE tag = 'foo'",
+            &[],
+        );
+        raw(
+            c,
+            "UPDATE tags SET collapsed = 1, config = X'02' WHERE tag = 'x::foo'",
+            &[],
+        );
+        assert_eq!(
+            tags::reparent(c, &["foo", "x::foo"], Some("p"), &opts()).unwrap().value,
+            2
+        );
+        assert_eq!(tags_of(c, n1), " p::foo ");
+        assert_eq!(tags_of(c, n2), " p::foo p::foo ");
+        assert_eq!(
+            columns(c),
+            [("p::foo".to_owned(), Usn(-1), carried.0, carried.1)],
+            "{first:?} first"
+        );
+    }
+}
+
+#[test]
+fn a_matching_tag_that_no_row_lists_gets_a_new_rows_columns() {
+    // Another client stored `ghost::kid` without registering it: no row
+    // gives it columns, so its new row has T3's (T7 step 5).
+    let h = fresh();
+    let c = &h.collection;
+    let spelled = save_note(c, &["ghost"]);
+    let other = stored_note(c, " ghost::kid ");
+    raw(
+        c,
+        "UPDATE tags SET collapsed = 0, config = X'07' WHERE tag = 'ghost'",
+        &[],
+    );
+    assert_eq!(tags::rename(c, "ghost", "spirit", &opts()).unwrap().value, 2);
+    assert_eq!(tags_of(c, spelled), " spirit ");
+    assert_eq!(tags_of(c, other), " spirit::kid ");
+    assert_eq!(
+        columns(c),
+        [
+            ("spirit".to_owned(), Usn(-1), false, Some(vec![7])),
+            ("spirit::kid".to_owned(), Usn(-1), true, None),
+        ]
+    );
+}
+
+#[test]
+fn a_reparent_onto_an_implicit_parent_takes_its_spelling() {
+    // `foo` onto `bar` while only `Bar::x` is registered: `Bar` is the
+    // tree's spelling of the target (T3, T8 step 4).
+    let h = fresh();
+    let c = &h.collection;
+    let n = save_note(c, &["foo", "foo::k"]);
+    save_note(c, &["Bar::x"]);
+    assert_eq!(tags::reparent(c, &["foo"], Some("bar"), &opts()).unwrap().value, 1);
+    assert_eq!(tags_of(c, n), " Bar::foo Bar::foo::k ");
+    assert_eq!(names(c), ["Bar::foo", "Bar::foo::k", "Bar::x"]);
 }
 
 #[test]
@@ -448,6 +683,16 @@ fn unmarking_removes_marked_in_any_case_and_its_descendants() {
     assert!(!marked::is_marked(&tags_of(c, n)));
     assert_eq!(marked::mark(c, &[n], &opts()).unwrap().value, 1);
     assert_eq!(tags_of(c, n), " Marked markedly q ", "the registered spelling");
+
+    // With only `Marked::x` registered, `marked` is its implicit parent and
+    // takes the tree's spelling (M2, T3).
+    let h = fresh();
+    let c = &h.collection;
+    save_note(c, &["Marked::x"]);
+    let n = save_note(c, &["q"]);
+    assert_eq!(marked::mark(c, &[n], &opts()).unwrap().value, 1);
+    assert_eq!(tags_of(c, n), " Marked q ");
+    assert_eq!(names(c), ["Marked", "Marked::x", "q"]);
 }
 
 #[test]
@@ -531,18 +776,23 @@ fn the_tree_adds_implicit_parents_and_orders_children_by_unicase() {
     let h = fresh();
     let c = &h.collection;
     assert!(tags::tag_tree(c).unwrap().is_empty());
-    save_note(c, &["kite::WING::left"]);
-    save_note(c, &["KITE::wing::right"]);
     save_note(c, &["lamp", "lamp-post", "lamp::shade"]);
-    save_note(c, &["Bar::x"]);
-    save_note(c, &["bar::y"]);
+    // Rows another client wrote, spelled unlike each other (a note save
+    // would have spelled them alike, T3).
+    raw(
+        c,
+        "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('KITE::wing::right', 0, 1, NULL), \
+         ('kite::WING::left', 0, 1, NULL), ('Bar::x', 0, 1, NULL), ('bar::y', 0, 1, NULL)",
+        &[],
+    );
     raw(
         c,
         "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('a!', 0, 1, NULL), ('B2', 0, 0, NULL), ('b2::c', 0, 0, NULL)",
         &[],
     );
-    // Expanding an implicit parent registers it with the tree's spelling.
-    tags::set_collapsed(c, &["kite::WING"], false).unwrap();
+    // Expanding an implicit parent registers it with the tree's spelling,
+    // whatever case it is given in (T12 step 1).
+    tags::set_collapsed(c, &["KITE::wing"], false).unwrap();
     let tree = tags::tag_tree(c).unwrap();
     // `-` sorts before `:`, yet `lamp::shade` stays under `lamp`, and
     // `lamp-post` comes after `lamp` (T13 step 3).

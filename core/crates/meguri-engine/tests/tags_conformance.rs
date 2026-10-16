@@ -567,6 +567,11 @@ fn rename_existing_spelling() {
 }
 
 #[test]
+fn rename_implicit_parent() {
+    play("rename/implicit-parent");
+}
+
+#[test]
 fn rename_new_casing() {
     play("rename/new-casing");
 }
@@ -618,7 +623,7 @@ fn every_tags_scenario_is_played_here() {
         }
     }
     names.sort();
-    assert_eq!(names.len(), 18, "{names:?}");
+    assert_eq!(names.len(), 19, "{names:?}");
     for name in names {
         assert!(this.contains(&format!("play(\"{name}\")")), "tags/{name} is not played");
     }
