@@ -1,3 +1,56 @@
+# Interface names the render specs use: template tag syntax (special field
+# names, filter names, type-in and TTS markers), the markup the hint and ruby
+# filters write, and the note type keys of the legacy card requirements.
+FrontSide
+Tags
+Type
+Deck
+Subdeck
+Card
+CardFlag
+CardID
+flag0
+furigana
+kana
+kanji
+hint
+tts
+tts-voices
+type-nc
+type-cloze
+nc
+ci
+cloze
+cloze-only
+editable
+clickable
+anki
+lang
+voices
+speed
+ruby
+rb
+rt
+onclick
+getElementById
+draggable
+href
+class
+display
+sound
+nbsp
+req
+reqs
+odid
+did
+flags
+qfmt
+afmt
+flds
+tmpls
+latexPre
+latexPost
+
 # Interface names the render specs use (specs/render/card-runtime.md): the card
 # page's element ids and classes that templates target, the page-world globals,
 # package names and bridge commands templates call, the forbidden client
@@ -38,7 +91,6 @@ _typeAnsPress
 ankiPlatform
 pycmd
 bridgeCommand
-anki
 mutateNextCardStates
 imageOcclusion
 setupImageCloze

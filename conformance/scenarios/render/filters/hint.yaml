@@ -1,0 +1,25 @@
+# The hint filter (specs/render/filters.md F5, R965): exact markup and BLAKE3
+# ids for ASCII, CJK and emoji text, white-space-only text returned unchanged,
+# the key as written in the tag, the hash taken over the current text.
+id: render/filters/hint
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Hint Probe, fields: [Key, Extra, My Hint, "ヒント"]}
+          cases:
+            - {front: "{{Key}}{{hint:Extra}}", fields: [k, "hello"]}
+            - {front: "{{Key}}{{hint:Extra}}", fields: [k, "日本語のヒント"]}
+            - {front: "{{Key}}{{hint:Extra}}", fields: [k, "\U0001f600 emoji \U0001f469‍\U0001f469‍\U0001f467"]}
+            - {front: "{{Key}}{{hint:Extra}}", fields: [k, "<b>bold</b> &amp; <i>more</i>"]}
+            - {front: "{{Key}}{{hint:Extra}}", fields: [k, "line one\nline two"]}
+            - {front: "{{Key}}[{{hint:Extra}}]", fields: [k, ""]}
+            - {front: "{{Key}}[{{hint:Extra}}]", fields: [k, " "]}
+            - {front: "{{Key}}[{{hint:Extra}}]", fields: [k, "　\t\n"]}
+            - {front: "{{Key}}[{{hint:Extra}}]", fields: [k, "&nbsp;"]}
+            - {front: "{{Key}}[{{hint:Extra}}]", fields: [k, "<br>"]}
+            - {front: "{{Key}}{{hint:My Hint}}", fields: [k, "", "hello"]}
+            - {front: "{{Key}}{{hint:ヒント}}", fields: [k, "", "", "hello"]}
+            - {front: "{{Key}}{{hint:text:Extra}}", fields: [k, "<b>hello</b>"]}
+            - {front: "{{Key}}{{hint:Type}}", fields: [k]}
+            - {front: "{{Key}}", back: "{{FrontSide}}<hr>{{hint:Extra}}{{hint:Key}}", fields: [k, "hello"]}

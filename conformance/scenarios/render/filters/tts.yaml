@@ -1,0 +1,17 @@
+# The tts filter (specs/render/filters.md F6, R967): the markup, options kept
+# verbatim, names that are not the filter, options split by a colon.
+id: render/filters/tts
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Speech Probe, fields: [Key, Text]}
+          cases:
+            - {front: "{{tts ja_JP voices=Apple_Kyoko speed=0.8:Text}}", fields: [k, "こんにちは"]}
+            - {front: "{{tts en_US:Text}}", fields: [k, "<b>Hello</b> [sound:a.mp3]"]}
+            - {front: "{{tts en_US voices=Alex,Samantha speed=1.2 extra=x:Text}}", fields: [k, "two voices"]}
+            - {front: "{{Key}}{{tts  ja_JP:Text}}|{{tts :Text}}|{{tts:Text}}|{{TTS en:Text}}", fields: [k, x]}
+            - {front: "{{Key}}{{tts en_US voices=a:b:Text}}", fields: [k, x]}
+            - {front: "{{Key}}{{tts en_US:text:Text}}", fields: [k, "<i>it</i>"]}
+            - {front: "{{Key}}[{{tts en_US:Text}}]", fields: [k, ""]}
+            - {front: "{{Key}}", back: "{{FrontSide}}|{{tts de_DE:Text}}", fields: [k, "Guten Tag"]}

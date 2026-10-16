@@ -78,6 +78,16 @@ pub struct WriteScope<'c> {
     journal: Option<Journal>,
     changed: bool,
     open: bool,
+    /// Open savepoints, innermost last: whether the scope had a change when
+    /// each was taken.
+    savepoints: Vec<bool>,
+}
+
+/// A savepoint inside a write scope (`engine/op-model` O3): one step of a
+/// composite op. Released or rolled back innermost first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Savepoint {
+    depth: usize,
 }
 
 impl std::fmt::Debug for WriteScope<'_> {
@@ -119,7 +129,62 @@ impl<'c> WriteScope<'c> {
             journal: journal.map(Journal::new),
             changed: false,
             open: true,
+            savepoints: Vec::new(),
         })
+    }
+
+    /// Starts a step: an SQLite savepoint and a journal mark. Writes after it
+    /// can be rolled back to it without ending the transaction.
+    pub fn savepoint(&mut self) -> Result<Savepoint, StorageError> {
+        let depth = self.savepoints.len();
+        self.conn.execute_batch(&format!("SAVEPOINT meguri_step_{depth}"))?;
+        self.savepoints.push(self.changed);
+        if let Some(journal) = &mut self.journal {
+            journal.push_mark();
+        }
+        Ok(Savepoint { depth })
+    }
+
+    fn innermost(&self, savepoint: Savepoint) -> Result<(), StorageError> {
+        if savepoint.depth + 1 == self.savepoints.len() {
+            Ok(())
+        } else {
+            Err(StorageError::Mode {
+                detail: format!(
+                    "savepoint {} is not the innermost of {} open savepoints",
+                    savepoint.depth,
+                    self.savepoints.len()
+                ),
+            })
+        }
+    }
+
+    /// Ends a step and keeps its writes in the transaction.
+    pub fn release_savepoint(&mut self, savepoint: Savepoint) -> Result<(), StorageError> {
+        self.innermost(savepoint)?;
+        self.conn
+            .execute_batch(&format!("RELEASE meguri_step_{}", savepoint.depth))?;
+        self.savepoints.pop();
+        if let Some(journal) = &mut self.journal {
+            journal.release_mark();
+        }
+        Ok(())
+    }
+
+    /// Undoes a step: its writes and its journal entries are gone, the
+    /// transaction stays open with the writes made before the step.
+    pub fn rollback_to_savepoint(&mut self, savepoint: Savepoint) -> Result<(), StorageError> {
+        self.innermost(savepoint)?;
+        let name = format!("meguri_step_{}", savepoint.depth);
+        self.conn
+            .execute_batch(&format!("ROLLBACK TO {name}; RELEASE {name}"))?;
+        if let Some(changed) = self.savepoints.pop() {
+            self.changed = changed;
+        }
+        if let Some(journal) = &mut self.journal {
+            journal.rollback_mark();
+        }
+        Ok(())
     }
 
     pub fn mode(&self) -> StampMode {

@@ -9,7 +9,14 @@ cannot carry. stdout carries protocol lines only: everything else the process
 prints (Python or Anki's Rust backend) goes to stderr.
 
 The worker serves exactly one time zone, $TZ, for its whole life (R1871); its
-clock is the libfaketime file set up by entrypoint.sh.
+clock is the libfaketime file set up by entrypoint.sh (container) or
+oracle/macos/run-native.sh (native lane, float-determinism.md F6). At start it
+checks that the frozen clock reaches Python and Anki (timecontrol.py) and
+answers time_control in hello: a container worker that fails the check refuses
+to start; a native one runs on the real clock and answers "none".
+
+A run request with fsrs_context: true also gets, per next_states card pointer,
+the desired retention and decay its FSRS states used (protocol.json, F7.2).
 
 Actor scenarios (specs/conformance/sync-ops.md S10) run whole with `run`, or
 interactively: begin takes caller_actors and ids and answers with the setup's
@@ -34,19 +41,21 @@ import sys
 import time
 from typing import Any, TextIO
 
-from . import collection_check, meta, registry
+from . import collection_check, meta, registry, timecontrol
 from .clock import Clock, zone
 from .errors import DriverError, log_exception
 from .session import Session
 
 
 class Worker:
-    def __init__(self, tz: str, scratch: str, clock: Clock, handoff_root: str | None = None) -> None:
+    def __init__(
+        self, tz: str, scratch: str, clock: Clock, handoff_root: str | None = None, time_control: str = "faketime"
+    ) -> None:
         self.tz = tz
         self.scratch = scratch
         self.clock = clock
         self.handoff_root = handoff_root
-        self.hello = meta.hello(tz)
+        self.hello = meta.hello(tz, time_control)
         self.session: Session | None = None
 
     def handle(self, req: Any) -> dict:
@@ -62,11 +71,16 @@ class Worker:
             scenario = req.get("scenario")
             if isinstance(scenario, dict) and "actors" in scenario and {"steps", "resume", "handoff"} & set(req):
                 raise DriverError("invalid_scenario", detail="an actor scenario runs whole (sync-ops.md S10.1)")
+            fsrs_context = req.get("fsrs_context", False)
+            if not isinstance(fsrs_context, bool):
+                raise DriverError("protocol_error", detail="fsrs_context is a boolean")
             started = time.perf_counter()
             session = Session(
                 req.get("scenario"), self.tz, self.scratch, self.clock,
                 resume=req.get("resume"), handoff_root=self.handoff_root,
             )
+            if fsrs_context:
+                session.fsrs_context = {}
             state = None
             try:
                 first, end = _step_range(req.get("steps"), len(session.steps))
@@ -82,6 +96,8 @@ class Worker:
             }
             if state is not None:
                 resp["state"] = state
+            if session.fsrs_context is not None:
+                resp["fsrs_context"] = session.fsrs_context
             return resp
         if cmd == "begin":
             self._no_open_session()
@@ -269,12 +285,22 @@ def main() -> int:
     except DriverError:
         print(f"oracle: TZ={tz!r} is not an IANA time zone", file=sys.stderr)
         return 78
+    platform = meta.platform_name()
+    if platform not in meta.PLATFORMS:
+        print(f"oracle: {platform} is not an oracle platform ({', '.join(meta.PLATFORMS)})", file=sys.stderr)
+        return 78
+    native = meta.is_native()
     clock_file = os.environ.get("FAKETIME_TIMESTAMP_FILE")
     scratch = os.environ.get("ORACLE_SCRATCH")
-    if not clock_file or not scratch or "libfaketime" not in os.environ.get("LD_PRELOAD", ""):
-        print("oracle: start workers through entrypoint.sh (libfaketime is not set up)", file=sys.stderr)
+    if not clock_file or not scratch or (not native and "libfaketime" not in os.environ.get("LD_PRELOAD", "")):
+        launcher = "oracle/macos/run-native.sh" if native else "entrypoint.sh"
+        print(f"oracle: start workers through {launcher} (libfaketime is not set up)", file=sys.stderr)
+        return 78
+    time_control = timecontrol.check(clock_file, scratch)
+    if time_control != "faketime" and not native:
+        print("oracle: the frozen clock does not reach Python or Anki (libfaketime)", file=sys.stderr)
         return 78
     registry.load_all()
-    worker = Worker(tz, scratch, Clock(clock_file), os.environ.get("ORACLE_HANDOFF") or None)
+    worker = Worker(tz, scratch, Clock(clock_file), os.environ.get("ORACLE_HANDOFF") or None, time_control)
     worker.serve(sys.stdin, proto_out)
     return 0

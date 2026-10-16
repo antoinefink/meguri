@@ -1,0 +1,34 @@
+# Blank questions (specs/render/template-syntax.md T10, T11.2): a question is
+# blank when no replacement of a non-empty name would render, whatever text it
+# outputs; the answer is then not rendered.
+id: render/template/blank
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Blank Probe, fields: [Front, Back]}
+          cases:
+            - {front: "{{Front}}", back: "{{Back}}", fields: ["", back]}
+            - {front: "{{Front}}", back: "{{Back}}", fields: ["<br>", back]}
+            - {front: "{{Front}}", back: "{{Back}}", fields: [" ", back]}
+            - {front: "{{Front}}", back: "{{Back}}", fields: ["&nbsp;", back]}
+            - {front: "Question text only", back: "{{Back}}", fields: [front, back]}
+            - {front: "x{{#Front}}{{/Front}}y", back: "{{Back}}", fields: [front, back]}
+            - {front: "{{#Front}}text{{/Front}}", back: "{{Back}}", fields: [front, back]}
+            - {front: "{{FrontSide}}", back: "{{Back}}", fields: [front, back]}
+            - {front: "{{text:}}", back: "{{Back}}", fields: [front, back]}
+            - {front: "<!--{{Front}}-->", back: "{{Back}}", fields: [front, back]}
+            - {front: "{{^Front}}{{Back}}{{/Front}}", back: "{{Back}}", fields: ["", back]}
+            - {front: "{{^Front}}{{Back}}{{/Front}}", back: "{{Back}}", fields: [front, back]}
+            - {front: "{{^Front}}{{Front}}{{/Front}}", back: "{{Back}}", fields: [front, back]}
+            - {front: "{{#Front}}{{Back}}{{/Front}}", back: "{{Back}}", fields: ["", back]}
+            - {front: "{{#Front}}{{^Back}}{{Front}}{{/Back}}{{/Front}}", back: "{{Back}}", fields: [front, ""]}
+            - {front: "{{text:Front}}", back: "{{Back}}", fields: ["<b></b>", back]}
+            - {front: "{{hint:Front}}", back: "{{Back}}", fields: [" ", back]}
+            - {front: "{{Type}}", back: "{{Back}}", fields: ["", ""]}
+            - {front: "{{Tags}}", back: "{{Back}}", fields: ["", ""]}
+            - {front: "{{Tags}}", back: "{{Back}}", fields: ["", ""], tags: [tagged]}
+            - {front: "{{c1}}", back: "{{Back}}", fields: ["", ""]}
+            - {front: "{{#c1}}{{Front}}{{/c1}}", back: "{{Back}}", fields: [front, ""]}
+            - {front: "{{^Back}}{{Front}}{{/Back}}", back: "{{Nope}}", fields: [front, back]}
+            - {front: "{{^Front}}x{{/Front}}", back: "{{Back}}", fields: ["", back]}

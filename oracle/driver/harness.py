@@ -7,15 +7,33 @@
   python -m driver.harness hash FILE...
   python -m driver.harness check --dir DIR --label TEXT --out DIR [--now INSTANT] [--tz ZONE]
                                  [--deck NAME]... [--render-note ID]...
+  python -m driver.harness record-apple  --scenarios DIR --goldens DIR --overlays DIR --pin FILE
+                                         [--filter F]... [--jobs N] [--report FILE]
+  python -m driver.harness compare-apple --scenarios DIR --goldens DIR --overlays DIR --pin FILE
+                                         [--filter F]... [--jobs N] [--report FILE]
 
-Runs inside the oracle image without libfaketime (entrypoint.sh harness). Each
-worker is a separate `entrypoint.sh worker` process with its own TZ, clock file
-and scratch directory, so workers never share a clock, a zone or a collection
-(R1871, R1872). The pool is keyed by TZ and sized by --jobs.
+Runs inside the oracle image without libfaketime (entrypoint.sh harness), or
+natively on an arm64 Mac (oracle/macos/run-native.sh harness). Each worker is a
+separate `entrypoint.sh worker` (`run-native.sh worker`) process with its own
+TZ, clock file and scratch directory, so workers never share a clock, a zone or
+a collection (R1871, R1872). The pool is keyed by TZ and sized by --jobs.
 
 `record` is the only writer of goldens: one file per scenario at the same
 relative path under --goldens, with a .json suffix. Exit status: 0 when every
 selected scenario recorded or matched, 1 otherwise, 2 for usage errors.
+
+`record-apple` and `compare-apple` (native lane only; float-determinism.md
+F6.4, F7) need fresh Linux goldens (against --pin, conformance/oracle.json) and
+accept only workers that answer macos-arm64, the pinned anki_version and the
+pin's macos_lock_sha256. On a worker without faketime they run only scenarios
+tagged clock-free and report the others as clock_unsupported. record-apple is
+the only writer of --overlays/<id>.json: it compares the native run with the
+Linux golden value by value, writes every differing scalar as an entry (day
+entries with their unrounded intervals, from the run's fsrs_context or the
+scenario's fsrs_next inputs), writes nothing on a structural difference,
+deletes an overlay that no longer differs, and lists entries outside the
+fp-libm-boundary class (F8), which fail the scenario. compare-apple compares a
+native run with the golden plus its overlay, exactly.
 
 `check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9)
 derives the clock and zone from the directory's manifest when they are not
@@ -44,12 +62,16 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from . import overlay as ov
 from .canon import SCENARIO_SUFFIXES, ScenarioFormatError, golden_text, load_scenario_file, scenario_sha256
 from .errors import install_excepthook
 
 ORACLE_HOME = Path(os.environ.get("ORACLE_HOME", Path(__file__).resolve().parent.parent))
-ENTRYPOINT = ORACLE_HOME / "entrypoint.sh"
+# The native lane's launcher takes the same `worker` subcommand.
+ENTRYPOINT = ORACLE_HOME / ("macos/run-native.sh" if sys.platform == "darwin" else "entrypoint.sh")
 ORACLE_KEYS = ("anki_version", "lock_sha256", "driver_sha256")
+NATIVE_PLATFORM = "macos-arm64"
+CLOCK_FREE = "clock-free"
 MAX_DIFFS = 20
 # Per-directory metadata files of the conformance tree, not scenarios (U4).
 NOT_SCENARIOS = {"area.yaml", "area.yml"}
@@ -131,6 +153,8 @@ class Item:
     hello: dict | None = None
     wall_ms: float = 0.0
     result: dict = field(default_factory=dict)
+    golden: dict | None = None  # record-apple, compare-apple: the fresh Linux golden
+    overlay: dict | None = None  # compare-apple: the scenario's overlay, when it has one
 
 
 def find_scenarios(root: Path, filters: list[str]) -> list[Item]:
@@ -169,8 +193,10 @@ def prepare(item: Item) -> None:
     item.tz = tz
 
 
-def run_pool(items: list[Item], jobs: int) -> None:
-    """Run every prepared item on workers keyed by TZ (in place)."""
+def run_pool(items: list[Item], jobs: int, extra: dict | None = None, accept=None) -> None:
+    """Run every prepared item on workers keyed by TZ (in place). extra:
+    members added to each run request; accept(hello): None, or the error of
+    every item a worker with that hello would have run."""
     runnable = [i for i in items if i.error is None]
     if not runnable:
         return
@@ -183,19 +209,37 @@ def run_pool(items: list[Item], jobs: int) -> None:
         k = max(1, min(len(group), round(jobs * len(group) / len(runnable))))
         tasks += [(tz, group[i::k]) for i in range(k)]
     with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
-        for fut in [pool.submit(_run_chunk, tz, chunk) for tz, chunk in tasks]:
+        for fut in [pool.submit(_run_chunk, tz, chunk, extra, accept) for tz, chunk in tasks]:
             fut.result()
 
 
-def _run_chunk(tz: str, chunk: list[Item]) -> None:
+def clock_free(scenario: Any) -> bool:
+    tags = scenario.get("tags") if isinstance(scenario, dict) else None
+    return isinstance(tags, list) and CLOCK_FREE in tags
+
+
+def _run_chunk(tz: str, chunk: list[Item], extra: dict | None = None, accept=None) -> None:
     worker = None
     try:
         for item in chunk:
             try:
                 if worker is None:
                     worker = WorkerProcess(tz)
+                item.hello = worker.hello
+                refused = accept(worker.hello) if accept else None
+                if refused:
+                    item.error = refused
+                    continue
+                if worker.hello.get("time_control") == "none" and not clock_free(item.scenario):
+                    # float-determinism.md F6.3: a worker on the real clock runs
+                    # only scenarios whose observations hold at any instant.
+                    item.error = {
+                        "kind": "clock_unsupported",
+                        "detail": "the worker runs on the real clock and the scenario is not tagged clock-free",
+                    }
+                    continue
                 started = time.perf_counter()
-                item.response = worker.request({"cmd": "run", "id": item.rel, "scenario": item.scenario})
+                item.response = worker.request({"cmd": "run", "id": item.rel, "scenario": item.scenario, **(extra or {})})
                 item.wall_ms = (time.perf_counter() - started) * 1000
                 item.hello = worker.hello
                 if not item.response.get("ok"):
@@ -319,6 +363,199 @@ def cmd_compare(args) -> int:
     return _report(args, "compare", items, ok_statuses={"pass"})
 
 
+# --- the macOS native lane (float-determinism.md F6.4, F7) ----------------------
+
+
+def _load_pin(path: str) -> dict | None:
+    try:
+        pin = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        print(f"harness: cannot read the pin {path}: {exc}", file=sys.stderr)
+        return None
+    if not isinstance(pin, dict) or not all(isinstance(pin.get(k), str) for k in ("anki_version", "lock_sha256")):
+        print(f"harness: {path} has no anki_version and lock_sha256", file=sys.stderr)
+        return None
+    return pin
+
+
+def native_refusal(pin: dict):
+    """accept() for run_pool: a native worker must answer macos-arm64, the
+    pinned anki_version and the pin's macos_lock_sha256 (F6.2)."""
+
+    def accept(hello: dict) -> dict | None:
+        want = {"platform": NATIVE_PLATFORM, "anki_version": pin.get("anki_version"),
+                "lock_sha256": pin.get("macos_lock_sha256")}
+        got = {k: hello.get(k) for k in want}
+        if not pin.get("macos_lock_sha256") or got != want:
+            return {"kind": "oracle_mismatch", "detail": f"the worker answers {got}, the pin wants {want}"}
+        return None
+
+    return accept
+
+
+def _fresh_golden(item: Item, goldens: Path, pin: dict) -> None:
+    """Sets item.golden, or item.error when the Linux golden is missing,
+    unreadable or stale (dsl.md D10): such a scenario is not run."""
+    path = goldens / f"{item.rel}.json"
+    if not path.exists():
+        item.error = {"kind": "missing_golden", "detail": f"{path.as_posix()} does not exist; record it first"}
+        return
+    try:
+        golden = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        item.error = {"kind": "invalid_golden", "detail": str(exc)}
+        return
+    if not isinstance(golden, dict) or golden.get("scenario_sha256") != item.sha256:
+        item.error = {"kind": "stale_golden", "detail": "the golden was recorded for another scenario text"}
+    elif (golden.get("oracle") or {}).get("lock_sha256") != pin["lock_sha256"]:
+        item.error = {"kind": "stale_golden", "detail": "the golden was recorded with another oracle lock"}
+    else:
+        item.golden = golden
+
+
+def _select_apple(args, pin: dict, before_run=None) -> list[Item] | None:
+    root = Path(args.scenarios)
+    if not root.is_dir():
+        print(f"harness: scenario directory {root} does not exist", file=sys.stderr)
+        return None
+    items = find_scenarios(root, args.filter or [])
+    for item in items:
+        prepare(item)
+        if item.error is None:
+            _fresh_golden(item, Path(args.goldens), pin)
+        if item.error is None and before_run is not None:
+            before_run(item)
+    started = time.perf_counter()
+    extra = {"fsrs_context": True} if args.command == "record-apple" else None
+    run_pool(items, args.jobs, extra=extra, accept=native_refusal(pin))
+    args._wall_s = time.perf_counter() - started
+    return items
+
+
+def _not_run(item: Item) -> dict:
+    kind = item.error.get("kind") if isinstance(item.error, dict) else None
+    status = kind if kind in ("clock_unsupported", "missing_golden", "stale_golden", "stale_overlay", "invalid_overlay") else "error"
+    return {"status": status, "error": item.error}
+
+
+def _entry_counts(entries: list[dict]) -> dict:
+    kinds = [(ov.classify(e["pointer"]) or ("other", "", "", ""))[0] for e in entries]
+    rows = {ov.classify(e["pointer"])[1] for e in entries if ov.classify(e["pointer"]) and "/fsrs_next/" in e["pointer"]}
+    return {
+        "entries": len(entries),
+        "day_entries": kinds.count("day"),
+        "memory_entries": kinds.count("memory"),
+        "other_entries": kinds.count("other"),
+        "differing_rows": len(rows),
+    }
+
+
+def _fsrs_next_inputs(scenario: Any) -> int:
+    steps = scenario.get("steps", []) if isinstance(scenario, dict) else []
+    return sum(len(ov.fsrs_next_request(scenario, i)["inputs"]) for i in range(len(steps))
+               if ov.fsrs_next_request(scenario, i) is not None)
+
+
+def cmd_record_apple(args) -> int:
+    pin = _load_pin(args.pin)
+    if pin is None:
+        return 2
+    items = _select_apple(args, pin)
+    if items is None:
+        return 2
+    overlays = Path(args.overlays)
+    for item in items:
+        path = overlays / f"{item.rel}.json"
+        if item.error:
+            item.result = _not_run(item)
+            continue
+        linux_obs, apple_obs = item.golden["observations"], item.response["observations"]
+        try:
+            entries = ov.scalar_diff(linux_obs, apple_obs)
+        except ov.Structural as exc:
+            # F7.2 step 4: nothing is written, the existing overlay stays.
+            item.result = {"status": "structural", "pointer": exc.pointer}
+            continue
+        base = {"overlay": path.as_posix(), "fsrs_next_inputs": _fsrs_next_inputs(item.scenario)}
+        if not entries:
+            deleted = path.exists()
+            if deleted:
+                path.unlink()
+            item.result = {"status": "no_difference", **base, "deleted": deleted, **_entry_counts([])}
+            continue
+        ov.add_unrounded(entries, linux_obs, apple_obs, ov.FsrsInputs(item.scenario, item.response.get("fsrs_context")))
+        outside = ov.outside_class(entries)
+        doc = ov.document(item.scenario.get("id"), item.sha256, item.golden, item.hello, entries)
+        _write_atomic(path, golden_text(doc))
+        item.result = {
+            "status": "outside_class" if outside else "recorded",
+            **base,
+            **_entry_counts(entries),
+            "outside_class": outside,
+            "entries_written": doc["entries"],
+        }
+    report_extra = {"overlay_totals": _overlay_totals(items)}
+    return _report(args, "record-apple", items, ok_statuses={"recorded", "no_difference"}, extra=report_extra)
+
+
+def _overlay_totals(items: list[Item]) -> dict:
+    keys = ("fsrs_next_inputs", "entries", "day_entries", "memory_entries", "other_entries", "differing_rows")
+    totals = {k: sum(i.result.get(k, 0) for i in items) for k in keys}
+    totals["outside_class"] = sum(len(i.result.get("outside_class", [])) for i in items)
+    totals["overlays_written"] = sum(1 for i in items if i.result.get("status") in ("recorded", "outside_class"))
+    totals["overlays_deleted"] = sum(1 for i in items if i.result.get("deleted"))
+    inputs = totals["fsrs_next_inputs"]
+    totals["days_rate"] = totals["day_entries"] / (4 * inputs) if inputs else None
+    return totals
+
+
+def cmd_compare_apple(args) -> int:
+    pin = _load_pin(args.pin)
+    if pin is None:
+        return 2
+    overlays = Path(args.overlays)
+
+    def load_overlay(item: Item) -> None:
+        path = overlays / f"{item.rel}.json"
+        if not path.exists():
+            return
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list):
+                raise ValueError("an overlay is an object with entries")
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+            item.error = {"kind": "invalid_overlay", "detail": str(exc)}
+            return
+        why = ov.staleness(doc, item.sha256, item.golden, pin)
+        if why:
+            item.error = {"kind": "stale_overlay", "detail": f"{path.as_posix()}: {why}"}
+            return
+        item.overlay = doc
+
+    items = _select_apple(args, pin, before_run=load_overlay)
+    if items is None:
+        return 2
+    for item in items:
+        if item.error:
+            item.result = _not_run(item)
+            continue
+        expected = item.golden["observations"]
+        applied = 0
+        if item.overlay is not None:
+            try:
+                expected = ov.apply(expected, item.overlay["entries"])
+            except (ValueError, KeyError, TypeError) as exc:
+                item.result = {"status": "invalid_overlay", "error": {"detail": str(exc)}}
+                continue
+            applied = len(item.overlay["entries"])
+        diffs = json_diff(expected, item.response["observations"])
+        item.result = {"status": "fail" if diffs else "pass", "overlay_applied": applied, "diff_count": len(diffs)}
+        if diffs:
+            item.result["first_step"] = _first_step(diffs)
+            item.result["diffs"] = diffs[:MAX_DIFFS]
+    return _report(args, "compare-apple", items, ok_statuses={"pass"})
+
+
 def _select(args) -> list[Item] | None:
     root = Path(args.scenarios)
     if not root.is_dir():
@@ -333,7 +570,7 @@ def _select(args) -> list[Item] | None:
     return items
 
 
-def _report(args, command: str, items: list[Item], ok_statuses: set[str]) -> int:
+def _report(args, command: str, items: list[Item], ok_statuses: set[str], extra: dict | None = None) -> int:
     totals: dict[str, int] = defaultdict(int)
     hello = next((i.hello for i in items if i.hello), None)
     entries = []
@@ -356,8 +593,11 @@ def _report(args, command: str, items: list[Item], ok_statuses: set[str]) -> int
         "scenario_count": len(items),
         "wall_s": round(getattr(args, "_wall_s", 0.0), 3),
         "mean_worker_ms": round(sum(worker_ms) / len(worker_ms), 3) if worker_ms else None,
+        **(extra or {}),
         "scenarios": entries,
     }
+    if hello and command.endswith("-apple"):
+        report["oracle"].update(platform=hello.get("platform"), time_control=hello.get("time_control"))
     if args.report:
         _write_atomic(Path(args.report), json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     else:
@@ -585,6 +825,15 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--filter", action="append")
         sp.add_argument("--jobs", type=int, default=min(12, os.cpu_count() or 1))
         sp.add_argument("--report")
+    for name in ("record-apple", "compare-apple"):
+        sp = sub.add_parser(name)
+        sp.add_argument("--scenarios", required=True)
+        sp.add_argument("--goldens", required=True)
+        sp.add_argument("--overlays", required=True)
+        sp.add_argument("--pin", required=True)
+        sp.add_argument("--filter", action="append")
+        sp.add_argument("--jobs", type=int, default=min(12, os.cpu_count() or 1))
+        sp.add_argument("--report")
     dr = sub.add_parser("diff-report")
     dr.add_argument("--old", required=True)
     dr.add_argument("--new", required=True)
@@ -605,7 +854,7 @@ def main(argv: list[str] | None = None) -> int:
         p.error("--jobs must be at least 1")
     return {
         "record": cmd_record, "compare": cmd_compare, "diff-report": cmd_diff_report, "hash": cmd_hash,
-        "check": cmd_check,
+        "check": cmd_check, "record-apple": cmd_record_apple, "compare-apple": cmd_compare_apple,
     }[args.command](args)
 
 

@@ -1,0 +1,24 @@
+# Type-in markers (specs/render/filters.md F1 rewrite and F7, R964 parse side):
+# modifiers Anki 26.09.3 knows, combinations it falls back on, legacy names,
+# marker filters inside a chain, empty and FrontSide keys.
+id: render/filters/type
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Typing Probe, fields: [Front, Back, My Answer]}
+          cases:
+            - {front: "{{Front}}{{type:Back}}", back: "{{FrontSide}}<hr id=answer>{{type:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:nc:Back}}|{{type-nc:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:cloze:Back}}|{{type-cloze:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:ci:Back}}|{{type:nc:ci:Back}}|{{type:ci:nc:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:cloze:nc:Back}}|{{type:nc:cloze:Back}}|{{type:ci:cloze:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:text:Back}}|{{type:unknown:Back}}|{{type:type:Back}}|{{type::Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:type-nc:Back}}|{{type-nc:type:Back}}|{{type-cloze:text:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{text:type:Back}}|{{furigana:type:Back}}|{{nc:type:Back}}|{{edit:type:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{Type:Back}}|{{TYPE:Back}}", fields: [front, back]}
+            - {front: "{{Front}}|{{type:My Answer}}|{{type:nc:My Answer}}", fields: [front, back]}
+            - {front: "{{Front}}|[{{type:}}]", fields: [front, back]}
+            - {front: "{{Front}}", back: "{{type:FrontSide}}|{{type:Front}}", fields: [front, back]}
+            - {front: "{{Front}}{{type:Missing}}", fields: [front, back]}
+            - {front: "{{type:Back}}", fields: [front, ""]}
