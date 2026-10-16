@@ -279,6 +279,7 @@ const N_CLOZE: i64 = CRT * 1000 + 4;
 const N_OCCLUSION: i64 = CRT * 1000 + 5;
 const N_FURIGANA: i64 = CRT * 1000 + 6;
 const N_MEDIA: i64 = CRT * 1000 + 7;
+const N_ATTRIBUTE_SPACES: i64 = CRT * 1000 + 8;
 const D_JAPANESE: i64 = 1_700_000_000_003;
 const D_FILTERED: i64 = 1_700_000_000_099;
 
@@ -344,6 +345,7 @@ fn standard(dir: &Path, kept_names: bool) {
             " Straße german::verb ",
         ),
         note(N_MEDIA, BASIC, &["Cat", A19_REFERENCES], " STRASSE spanish::verb "),
+        note(N_ATTRIBUTE_SPACES, BASIC, &["<span title = \"Note\">x</span>", ""], ""),
     ];
     spec.tags = vec!["jp::n5", "jp", "leech", "Straße", "german::verb", "spanish::verb"];
     spec.config = vec![
@@ -513,6 +515,12 @@ fn a19_source_texts_get_their_clone_shapes() {
         &attributes[1],
         r#"<a href="https://[a-z]{7}\.[a-z]{3}/[a-z]">[a-z]</a>"#,
     );
+    // Whitespace around the `=` (A6.1): ` = ` and the quotes kept, the
+    // value replaced. `Note` has the clone's shape itself, so the shape
+    // alone would not show a kept value.
+    let spaces = &clone.fields(N_ATTRIBUTE_SPACES)[0];
+    assert_shape(spaces, r#"<span title = "[A-Z][a-z]{3}">[a-z]</span>"#);
+    assert!(!spaces.contains("Note"), "the title kept in {spaces:?}");
 
     let cloze = clone.fields(N_CLOZE);
     assert_shape(
