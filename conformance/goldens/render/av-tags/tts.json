@@ -1,0 +1,100 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<hr id=answer>[anki:tts lang=ja_JP voices=Kyoko]猫[/anki:tts]ねこ[sound:last.mp3]",
+              "blank": null,
+              "question": "[anki:tts lang=ja_JP]ねこ[/anki:tts][sound:after.mp3]"
+            },
+            "review": {
+              "answer": "[anki:play:q:0][anki:play:q:1]<hr id=answer>[anki:play:a:0]ねこ[anki:play:a:1]",
+              "answer_av": [
+                {
+                  "tts": "ja_JP"
+                },
+                {
+                  "sound": "last.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "[anki:play:q:0][anki:play:q:1]",
+              "question_av": [
+                {
+                  "tts": "ja_JP"
+                },
+                {
+                  "sound": "after.mp3"
+                }
+              ]
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "|[anki:tts lang=]ねこ[/anki:tts][sound:c.mp3]",
+              "blank": null,
+              "question": "[anki:tts]ねこ[/anki:tts]<b>cat</b>[sound:b.mp3]"
+            },
+            "review": {
+              "answer": "[tts: lang not set]<b>cat</b>[anki:play:q:0]|[tts: lang not set][anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "c.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "[tts: lang not set]<b>cat</b>[anki:play:q:0]",
+              "question_av": [
+                {
+                  "sound": "b.mp3"
+                }
+              ]
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "|[anki:tts lang=en lang=fr]<b>cat</b>[/anki:tts][anki:tts lang=]empty[/anki:tts][sound:y.mp3]",
+              "blank": null,
+              "question": "[anki:tts  lang=\"en US\" speed=1.2 cloze_blank=gap\n]<b>cat</b> [sound:inside.mp3][/anki:tts][anki:TTS lang=en]up[/anki:TTS][sound:x.mp3]"
+            },
+            "review": {
+              "answer": "[anki:play:q:0][anki:TTS lang=en]up[/anki:TTS][anki:play:q:1]|[anki:play:a:0][tts: lang not set][anki:play:a:1]",
+              "answer_av": [
+                {
+                  "tts": "fr"
+                },
+                {
+                  "sound": "y.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "[anki:play:q:0][anki:TTS lang=en]up[/anki:TTS][anki:play:q:1]",
+              "question_av": [
+                {
+                  "tts": "en US"
+                },
+                {
+                  "sound": "x.mp3"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/av-tags/tts",
+  "scenario_sha256": "d6c299cebee715961cf19dc05e772c88b56fb9f03b875006c3ab2df8e6c225b6",
+  "tz": "UTC"
+}

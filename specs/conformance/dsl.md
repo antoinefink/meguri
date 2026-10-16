@@ -103,7 +103,7 @@ A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset u
 
 ### D6.4 notetypes
 
-A list of `{name, kind, fields, templates, css}`: `kind` is `standard` (default) or `cloze`; `fields` a non-empty list of field names; `templates` a non-empty list of `{name, front, back, browser_front, browser_back}` (template texts, empty when missing; `browser_front` and `browser_back` are the browser question and answer formats, schema-11 `bqfmt` and `bafmt`, which a note type save stores without checking them: `specs/render/card-render-pipeline.md` K5; driver support pending, U62); `css` a string (empty when missing). Scenarios define their own note types and CSS; stock note types appear only in scenarios about interop with them (R1959).
+A list of `{name, kind, fields, templates, css}`: `kind` is `standard` (default) or `cloze`; `fields` a non-empty list of field names; `templates` a non-empty list of `{name, front, back, browser_front, browser_back}` (template texts, empty when missing; `browser_front` and `browser_back` are the browser question and answer formats, schema-11 `bqfmt` and `bafmt`, which a note type save stores without checking them: `specs/render/card-render-pipeline.md` K5); `css` a string (empty when missing). Scenarios define their own note types and CSS; stock note types appear only in scenarios about interop with them (R1959).
 
 ### D6.5 notes
 

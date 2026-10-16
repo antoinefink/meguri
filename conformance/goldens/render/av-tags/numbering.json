@@ -1,0 +1,106 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<hr id=answer>dog [sound:dog.mp3]",
+              "blank": null,
+              "question": "犬[sound:inu.mp3] [sound:inu-slow.mp3]"
+            },
+            "review": {
+              "answer": "犬[anki:play:q:0] [anki:play:q:1]<hr id=answer>dog [anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "dog.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "犬[anki:play:q:0] [anki:play:q:1]",
+              "question_av": [
+                {
+                  "sound": "inu.mp3"
+                },
+                {
+                  "sound": "inu-slow.mp3"
+                }
+              ]
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "[sound:inu.mp3] [sound:inu-slow.mp3]",
+              "blank": null,
+              "question": "<script>var clip = '[sound:script.mp3]';</script><img alt=\"[sound:attr.mp3]\" src=\"pic.png\">dog [sound:dog.mp3]"
+            },
+            "review": {
+              "answer": "[anki:play:a:0] [anki:play:a:1]",
+              "answer_av": [
+                {
+                  "sound": "inu.mp3"
+                },
+                {
+                  "sound": "inu-slow.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<script>var clip = '[anki:play:q:0]';</script><img alt=\"[anki:play:q:1]\" src=\"pic.png\">dog [anki:play:q:2]",
+              "question_av": [
+                {
+                  "sound": "script.mp3"
+                },
+                {
+                  "sound": "attr.mp3"
+                },
+                {
+                  "sound": "dog.mp3"
+                }
+              ]
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "犬[sound:inu.mp3] [sound:inu-slow.mp3]",
+              "blank": null,
+              "question": "dog [sound:dog.mp3]dog [sound:dog.mp3]"
+            },
+            "review": {
+              "answer": "犬[anki:play:a:0] [anki:play:a:1]dog [anki:play:q:0]dog [anki:play:q:1]",
+              "answer_av": [
+                {
+                  "sound": "inu.mp3"
+                },
+                {
+                  "sound": "inu-slow.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "dog [anki:play:q:0]dog [anki:play:q:1]",
+              "question_av": [
+                {
+                  "sound": "dog.mp3"
+                },
+                {
+                  "sound": "dog.mp3"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/av-tags/numbering",
+  "scenario_sha256": "edccebe8a05ab468e0a8cf5c3e8a99717dee8f5e1c2209c5ce30fc1db64d93a5",
+  "tz": "UTC"
+}

@@ -1,0 +1,122 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "tree [sound:tree.mp3]||Baum",
+              "blank": null,
+              "question": "<i>tree [sound:tree.mp3]</i>"
+            },
+            "review": {
+              "answer": "Baum[anki:play:q:0]<hr id=answer>tree [anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "tree.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "Baum[anki:play:q:0]",
+              "question_av": [
+                {
+                  "sound": "front.mp3"
+                }
+              ]
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "<hr id=answer>Baum[sound:back.mp3]",
+              "blank": null,
+              "question": "Q: tree [sound:tree.mp3]"
+            },
+            "review": {
+              "answer": "tree [anki:play:q:0]<hr id=answer>Baum[anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "back.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "tree [anki:play:q:0]",
+              "question_av": [
+                {
+                  "sound": "tree.mp3"
+                }
+              ]
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "  ",
+              "blank": null,
+              "question": "<div>Baum</div>"
+            },
+            "review": {
+              "answer": "tree [anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "tree.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<div>Baum</div>",
+              "question_av": []
+            }
+          },
+          "#c4": {
+            "browser": {
+              "error": {
+                "kind": "unclosed_conditional",
+                "side": "question"
+              }
+            },
+            "review": {
+              "answer": "tree [anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "tree.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<p>Baum</p>",
+              "question_av": []
+            }
+          },
+          "#c5": {
+            "browser": {
+              "error": {
+                "kind": "unknown_field",
+                "side": "answer"
+              }
+            },
+            "review": {
+              "answer": "tree [anki:play:a:0]",
+              "answer_av": [
+                {
+                  "sound": "tree.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "<span>Baum</span>",
+              "question_av": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0d1f8a76f22edf02e8f9efc68013502cc7ea25d71e4bafe7122409299f17cafb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/pipeline/browser",
+  "scenario_sha256": "c4118768864718e0b256f2c8dbc308d3da6d1d0dd554039c7a3616a5e2a0fdf1",
+  "tz": "UTC"
+}

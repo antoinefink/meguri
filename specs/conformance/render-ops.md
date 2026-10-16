@@ -139,5 +139,5 @@ Anki writes a localized error message where a TTS directive has no language (`av
 
 ## Q5. Status of `render`
 
-- Draft until the oracle driver implements Q4 (`observations.md` O4); the render scenarios of U62 (`render/pipeline`, `render/errors`, `render/av-tags`) wait for their goldens.
+- The oracle driver implements Q4 and the browser formats of `dsl.md` D6.4: the render scenarios of U62 (`render/pipeline`, `render/errors`, `render/av-tags`) have their goldens, recorded with `tools/mg oracle record render/pipeline render/av-tags render/errors`.
 - Meguri's executor (the testkit's `render` adapter, U62) reports the engine's comparable outputs (`card-render-pipeline.md` K11). It needs the `notes`, `decks` and `notetypes` setup sections (U27, U28, U29) and the `edit_note` and `db_exec` ops for the scenarios that use them; until then those scenarios are `pending`. The scenario model must also read the browser formats of `dsl.md` D6.4: until it does, `render/pipeline/browser` is `invalid` in T0 and in `tools/mg goldens-check`.

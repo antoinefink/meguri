@@ -90,6 +90,11 @@ SIDES = (
     ("question", "card_template_rendering_front_side_problem"),
     ("answer", "card_template_rendering_back_side_problem"),
 )
+# Browser mode (the render kind, render-ops.md Q4) has its own side headers.
+BROWSER_SIDES = (
+    ("question", "card_template_rendering_browser_front_side_problem"),
+    ("answer", "card_template_rendering_browser_back_side_problem"),
+)
 SENTINEL = "MEGURI-ARGUMENT-{}-MEGURI"
 _SENTINEL = re.compile(r"MEGURI-ARGUMENT-([a-z0-9]+)-MEGURI")
 # A tag Anki quotes in the unknown-field message names a section exactly when
@@ -279,7 +284,22 @@ def _get_scratch(session) -> _Scratch:
 # --- rendering ----------------------------------------------------------------
 
 
-def _compose(nodes, front_side: str | None) -> str:
+def without_blank_notice(tr, question_nodes, cloze: bool, card_ord: int) -> list:
+    """The question nodes of a response flagged empty, less Anki's blank
+    notice (the last node), after checking it is that notice."""
+    nodes = list(question_nodes)
+    notice = tr.card_template_rendering_missing_cloze(number=card_ord + 1) if cloze else (
+        tr.card_template_rendering_empty_front()
+    )
+    if not nodes or nodes[-1].WhichOneof("value") != "text" or not nodes[-1].text.startswith(f"<div>{notice}<br>"):
+        raise DriverError("internal_error", detail="a blank question does not end with Anki's blank notice")
+    return nodes[:-1]
+
+
+def compose(nodes, front_side: str | None) -> str:
+    """Partially rendered nodes as pylib composes them with no add-on hooks:
+    text as it is, a replacement's current text, and FrontSide's front_side
+    when given (its current text, empty, otherwise)."""
     out = []
     for node in nodes:
         if node.WhichOneof("value") == "text":
@@ -307,15 +327,10 @@ def _render(col, note, card_ord: int, template: dict, cloze: bool) -> dict:
         kind, side = classified
         return {"error": {"kind": kind, "side": side}}
     if out.is_empty:
-        nodes = list(out.question_nodes)
-        notice = col.tr.card_template_rendering_missing_cloze(number=card_ord + 1) if cloze else (
-            col.tr.card_template_rendering_empty_front()
-        )
-        if not nodes or nodes[-1].WhichOneof("value") != "text" or not nodes[-1].text.startswith(f"<div>{notice}<br>"):
-            raise DriverError("internal_error", detail="a blank question does not end with Anki's blank notice")
-        return {"question": _compose(nodes[:-1], None), "answer": None, "empty": True}
-    question = _compose(out.question_nodes, None)
-    return {"question": question, "answer": _compose(out.answer_nodes, question), "empty": False}
+        return {"question": compose(without_blank_notice(col.tr, out.question_nodes, cloze, card_ord), None),
+                "answer": None, "empty": True}
+    question = compose(out.question_nodes, None)
+    return {"question": question, "answer": compose(out.answer_nodes, question), "empty": False}
 
 
 def _new_note_case(scratch: _Scratch, saved: dict, nt: Notetype, case: Case) -> dict:
@@ -355,16 +370,17 @@ def _pattern(render, args: tuple[str, ...]) -> tuple[re.Pattern, list[str]]:
     return re.compile(regex + re.escape(text[pos:]), re.DOTALL), order
 
 
-def classify(tr, message: str) -> tuple[str, str] | None:
+def classify(tr, message: str, browser: bool = False) -> tuple[str, str] | None:
     """(kind, side) of a template error message, or None when it is not a
-    side header, escaped details and a help link whose details are one of
-    Q2's kinds (no_closing_brackets is not).
+    side header (the browser-mode ones when browser is set, the others
+    otherwise), escaped details and a help link whose details are one of Q2's
+    kinds (no_closing_brackets is not).
 
     Arguments are free text, so details can fit two messages ("Missing '}}'
     in '{{A'" also fits "Missing '<anything>'"): the message whose fixed text
     covers more of the details wins, and a tie is an internal_error."""
     more_info = tr.card_template_rendering_more_info()
-    for side, method in SIDES:
+    for side, method in BROWSER_SIDES if browser else SIDES:
         prefix = getattr(tr, method)() + "<br>"
         if message.startswith(prefix):
             break
