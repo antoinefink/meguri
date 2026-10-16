@@ -211,7 +211,38 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
   [ "$(field .details.token_set.tokens)" -eq 2 ]
   [ "$(field .details.token_set.in_repository)" -eq 1 ]
   [ ! -e "$SB/build/private/$run/candidates.jsonl" ]
+  # The hooks that check commits and merges against the token set.
+  grep -q 'tools/hooks/pre-commit' "$SB/.git/hooks/pre-commit"
+  grep -q 'tools/hooks/pre-merge-commit' "$SB/.git/hooks/pre-merge-commit"
+  [ "$(field -c '[.details.hooks[].name]')" = '["commit-msg","pre-commit","pre-merge-commit"]' ]
   no_private_text "$result" "$SB/build/mg/private/$run/log.txt"
+}
+
+@test "private copy, suite and anonymize build no token set where the hooks that check commits cannot be installed" {
+  make_source
+  printf '#!/bin/sh\nexit 0\n' >"$SB/.git/hooks/pre-commit"
+  chmod +x "$SB/.git/hooks/pre-commit"
+  local command
+  for command in "private copy" "private suite" "anonymize"; do
+    # shellcheck disable=SC2086 # the job and its command, as two words
+    mg $command
+    [ "$status" -eq 2 ]
+    [ "$(field '.failures[0].id')" = hook-exists ]
+    [[ "$(field '.failures[0].message')" == *"/hooks/pre-commit exists"* ]]
+    [ "$(field '.failures[0].repro')" = "tools/mg hooks install" ]
+  done
+  rm "$SB/.git/hooks/pre-commit"
+  git -C "$SB" config core.hooksPath .githooks
+  mg private copy
+  [ "$(field '.failures[0].id')" = hooks-path ]
+  ! grep -q docker "$STUB_LOG"
+  [ ! -e "$SB/build/private/tokens/tokens.txt" ]
+  # anonymize --source reads no private collection and builds no token set.
+  git -C "$SB" config --unset core.hooksPath
+  printf '#!/bin/sh\nexit 0\n' >"$SB/.git/hooks/pre-commit"
+  anonymize_sandbox
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$(field .status)" = pass ]
 }
 
 @test "private status, copy and suite refuse when a CI marker is set; scan-outputs does not" {

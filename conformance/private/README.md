@@ -40,6 +40,6 @@ A check that could not run is `{"error": true}`; its error text stays in `build/
 
 - `tools/mg private suite` scans its summary and writes it here only when the scan is clean.
 - `tools/mg private scan-outputs <paths>` checks any file before it is committed, and `tools/mg private scan-outputs` with no path checks the staged lines.
-- The pre-commit hook (`tools/hooks/pre-commit`) blocks a commit that adds a line holding a token, merge commits included (`tools/hooks/pre-merge-commit` runs it for the merges `git merge` commits itself).
+- The pre-commit hook (`tools/hooks/pre-commit`) blocks a commit that adds a line holding a token, merge commits included (`tools/hooks/pre-merge-commit` runs it for the merges `git merge` commits itself). `tools/mg private copy`, `tools/mg private suite` and `tools/mg anonymize` (from the vault) install both hooks before they copy the collection, and copy nothing when they cannot.
 
 Each of them names files and line numbers, never the token.

@@ -21,7 +21,9 @@
 # tools/scripts/private-scan/private_scan.py keeps those not already
 # committed (HEAD, private results excepted). scan-outputs and the
 # pre-commit and pre-merge-commit hooks (tools/hooks/) check files against
-# it and name files and lines, never a token.
+# it and name files and lines, never a token. Every job that copies the
+# collection installs those hooks first (tools/mg hooks install) and copies
+# nothing when it cannot.
 #
 # suite runs the checks meguri-cli registers (U249 adds the R1942 checks),
 # scans the summary and only then, with --record, writes it to
@@ -147,6 +149,22 @@ mg__private_docker() {
   fi
 }
 
+# mg__private_hooks: installs (or refreshes) the hooks that check commits and
+# merges against the token set (tools/mg hooks install). Every job that
+# copies the collection rebuilds the token set, and a token set no hook reads
+# guards nothing (R1940), so they call this first. Records an error and
+# returns 1 when the hooks cannot be installed.
+mg__private_hooks() {
+  if ! mg_hooks_install; then
+    mg_failure "$MG_HOOKS_FAILURE" "the private collection is copied only where the hooks that check commits and merges against its token set are installed (R1940): $MG_HOOKS_MESSAGE" "tools/mg hooks install"
+    mg_message "private: the commit hooks cannot be installed, so nothing was copied"
+    mg_status error
+    return 1
+  fi
+  # shellcheck disable=SC2086 # one hook name per word
+  mg_detail hooks "$(mg_json_array $MG_HOOK_NAMES | jq -c --arg d "$MG_HOOKS_DIR" '[.[] | {name: ., path: ($d + "/" + .)}]')"
+}
+
 # mg__private_run <script> [args...]: runs `sh -c <script> sh <meguri-cli>
 # /vault [args...]` in the private service, the source mounted read-only at
 # /vault. Paths the script writes are under /work (the checkout).
@@ -248,6 +266,7 @@ mg__private_copy_job() {
     mg__private_no_source
     return 0
   }
+  mg__private_hooks || return 0
   mg__private_docker || return 0
   local run="$MG_PRIVATE_DIR/$MG_RUN_ID"
   if ! mg__private_copy "$run"; then
@@ -355,6 +374,7 @@ mg__private_suite() {
     mg__private_no_source
     return 0
   }
+  mg__private_hooks || return 0
   mg__private_docker || return 0
   local run="$MG_PRIVATE_DIR/$MG_RUN_ID" rc
   [ "$keep" = true ] || mg_on_exit "rm -rf '$MG_ROOT/$run/copy'"
@@ -752,6 +772,7 @@ mg_anonymize() {
       mg__private_no_source
       return 0
     }
+    mg__private_hooks || return 0
   else
     source="$(mg__anonymize_abs "$source")"
     if [ ! -f "$source/collection.anki2" ]; then
