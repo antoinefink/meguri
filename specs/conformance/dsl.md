@@ -153,6 +153,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `clear_unused_tags` | `{}` | `{count}` | stable (`tag-ops.md` G6) |
 | `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | stable (`tag-ops.md` G7) |
 | `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | stable (`tag-ops.md` G8) |
+| `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | stable (`browser-config-ops.md` B1) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
@@ -166,7 +167,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |
-| `sync` | `{kind: login \| normal \| full_upload \| full_download, credentials?: account \| wrong_password}`; `credentials` only with `login` | `{result: <result>}`: `ok`, or for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`; rejections `auth_failed`, `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
+| `sync` | `{kind: login \| normal \| status \| full_upload \| full_download, credentials?: account \| wrong_password}`; `credentials` only with `login` | `{result: <result>}`: `ok`, for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`, for `status` one of `no_changes`, `normal_sync`, `full_sync`; rejections `auth_failed`, `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
 | `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |
 | `converge` | `{}` | `{differences, dump}` (`sync-ops.md` S7.5) | stable (actor scenarios, `sync-ops.md` S7) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |

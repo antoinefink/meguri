@@ -36,6 +36,12 @@ SETUP = {
 UPLOAD = [{"advance": "1m"}, {"sync": {"kind": "login"}}, {"sync": {"kind": "normal"}}, {"sync": {"kind": "full_upload"}}]
 OK = {"sync": {"result": "ok"}}
 AUTH_FAILED = {"sync": {"error": "auth_failed"}}
+STATUS = {"sync": {"kind": "status"}}
+MOON = {"add_note": {"notetype": "Pair", "deck": "Words", "fields": ["moon", "luna"]}}
+
+
+def result(value):
+    return {"sync": {"result": value}}
 
 
 def actor_scenario(sid, actors, steps, server=None):
@@ -273,6 +279,28 @@ class ServerClock(unittest.TestCase):
                 self.assertEqual(out[2:4], [OK, {"sync": {"error": "clock_incorrect"}}])
                 self.assertEqual(out[4], out[1])  # S4.4: the collection does not change
 
+    def test_status_is_clock_incorrect_only_when_it_asks_the_server(self):
+        steps = [
+            {"advance": "1m"},                    # 0
+            {"sync": {"kind": "login"}},          # 1
+            {"observe": ["db_dump"]},             # 2
+            STATUS,                               # 3: never synced, so the server is asked
+            {"observe": ["db_dump"]},             # 4
+            {"sync": {"kind": "full_upload"}},    # 5: no status check (S4.1)
+            {"advance": "1m"},                    # 6
+            MOON,                                 # 7
+            STATUS,                               # 8: local changes, answered offline
+        ]
+        for offset in (301, -301):
+            with self.subTest(offset=offset):
+                out = self.offset_run(offset, steps)
+                self.assertEqual(out[3], {"sync": {"error": "clock_incorrect"}})
+                self.assertEqual(out[4], out[2])  # S4.4: the collection does not change
+                self.assertEqual(out[5], OK)
+                # S4.4: status gets clock_incorrect only when it asks the server;
+                # meta-status.md M6 step 1 answers local changes without asking.
+                self.assertEqual(out[8], result("normal_sync"))
+
     def test_300s_is_within_the_limit_and_the_server_clock_follows_the_scenario(self):
         steps = [{"advance": "1m"}, {"sync": {"kind": "login"}}, {"sync": {"kind": "normal"}},
                  {"advance": "2d"}, {"sync": {"kind": "normal"}}]
@@ -293,6 +321,9 @@ class Checks(unittest.TestCase):
             # S4.5: credentials only with login, and only its two values.
             "credentials with normal": (actor_scenario("t/x", ["client_a"],
                                                        [login, {"sync": {"kind": "normal", "credentials": "account"}}]), 1),
+            "status before login": (actor_scenario("t/x", ["client_a"], [STATUS]), 0),
+            "credentials with status": (actor_scenario("t/x", ["client_a"],
+                                                       [login, {"sync": {"kind": "status", "credentials": "account"}}]), 1),
             "unknown credentials": (actor_scenario("t/x", ["client_a"],
                                                    [{"sync": {"kind": "login", "credentials": "guest"}}]), 0),
             "credentials not a string": (actor_scenario("t/x", ["client_a"],
@@ -498,19 +529,58 @@ class AuthFailed(unittest.TestCase):
         self.assertTrue(refuse <= {(a, s) for (a, s, _) in proxy.seen}, proxy.seen)
 
     def test_after_auth_failed_the_actor_holds_no_host_key(self):
-        steps = [{"advance": "1m"}, {"sync": {"kind": "login"}}, {"sync": {"kind": "normal"}},
-                 {"sync": {"kind": "normal"}}]
-        with ForwardProxy({("client_a", 2)}) as proxy:
+        # status asks the server here: the collection never synced (meta-status.md M6).
+        for kind in ("normal", "status"):
+            with self.subTest(kind=kind):
+                steps = [{"advance": "1m"}, {"sync": {"kind": "login"}}, {"sync": {"kind": kind}},
+                         {"sync": {"kind": kind}}]
+                with ForwardProxy({("client_a", 2)}) as proxy:
+                    with WorkerProcess("UTC", extra_env={"ORACLE_SYNC_RECORDER": proxy.address}) as w:
+                        w.request({"cmd": "begin", "scenario": actor_scenario("t/key", ["client_a"], steps)})
+                        resp = [w.request({"cmd": "step"}) for _ in steps]
+                        w.request({"cmd": "end"})
+                self.assertEqual([r.get("observation") for r in resp[:3]], [{}, OK, AUTH_FAILED])
+                # S4.2: the key step 1's login gave is gone, so step 3 is a run
+                # error and never reaches the server.
+                err = resp[3].get("error", {})
+                self.assertEqual((resp[3]["ok"], err.get("kind"), err.get("step")), (False, "invalid_scenario", 3))
+                self.assertEqual({s for (_, s, _) in proxy.seen}, {1, 2})
+
+
+class Status(unittest.TestCase):
+    """S4.1's status kind (specs/sync/meta-status.md M6). The stand-in recorder
+    shows which steps reached the server."""
+
+    def test_the_remembered_answer_serves_299s_and_not_300s(self):
+        steps = [
+            {"actor": "client_c"},                     # 0: an empty collection
+            {"advance": "1m"},                         # 1
+            {"sync": {"kind": "login"}},               # 2
+            {"sync": {"kind": "normal"}},              # 3: remembered from start + 60 s
+            {"actor": "client_a"},                     # 4
+            {"advance": "1m"},                         # 5
+            {"sync": {"kind": "login"}},               # 6
+            {"sync": {"kind": "full_upload"}},         # 7: the server's record changes
+            {"actor": "client_c"},                     # 8
+            {"advance": "3m59s"},                      # 9: 299 s after step 3
+            STATUS,                                    # 10
+            {"advance": "1s"},                         # 11: 300 s
+            STATUS,                                    # 12
+            STATUS,                                    # 13
+        ]
+        with ForwardProxy() as proxy:
             with WorkerProcess("UTC", extra_env={"ORACLE_SYNC_RECORDER": proxy.address}) as w:
-                w.request({"cmd": "begin", "scenario": actor_scenario("t/key", ["client_a"], steps)})
-                resp = [w.request({"cmd": "step"}) for _ in steps]
-                w.request({"cmd": "end"})
-        self.assertEqual([r.get("observation") for r in resp[:3]], [{}, OK, AUTH_FAILED])
-        # S4.2: the key step 1's login gave is gone, so step 3 is a run error
-        # and never reaches the server.
-        err = resp[3].get("error", {})
-        self.assertEqual((resp[3]["ok"], err.get("kind"), err.get("step")), (False, "invalid_scenario", 3))
-        self.assertEqual({s for (_, s, _) in proxy.seen}, {1, 2})
+                out = run(self, w, actor_scenario("t/remembered", ["client_a", "client_c"], steps))
+        # M3: both collections new, both mod 0: no changes. M6.1: a sync job
+        # that found no changes is remembered as such.
+        self.assertEqual(out[3], result("no_changes"))
+        self.assertEqual(out[7], OK)
+        self.assertEqual(out[10], result("no_changes"))  # 299 s: remembered
+        # 300 s: the server is asked, and its schema time differs (M3).
+        self.assertEqual(out[12], result("full_sync"))
+        self.assertEqual(out[13], result("full_sync"))  # M6 step 3: that answer is remembered
+        seen = {a: {s for (x, s, _) in proxy.seen if x == a} for a in ("client_a", "client_c")}
+        self.assertEqual(seen, {"client_a": {6, 7}, "client_c": {2, 3, 12}})
 
 
 @needs_faults
@@ -548,6 +618,32 @@ class Faults(unittest.TestCase):
         # the server over loopback, outside it (S3.1, S7.1).
         self.assertEqual(out[20]["converge"]["differences"], {"client_a": [], "client_c": []})
         self.assertEqual(self.proxies(), [])  # deleted with the session
+
+    def test_status_answers_without_a_request_while_every_connection_resets(self):
+        steps = UPLOAD + [                                                  # 0-3: client_a uploads
+            {"net_fault": {"kind": "reset", "direction": "to_server"}},     # 4
+            {"sync": {"kind": "normal"}},                                   # 5: always asks
+            STATUS,                                                         # 6
+            {"advance": "1m"},                                              # 7
+            MOON,                                                           # 8
+            STATUS,                                                         # 9
+            {"db_exec": {"sql": "UPDATE col SET scm = ls + 1000"}},         # 10
+            STATUS,                                                         # 11
+            {"net_fault": {"kind": "clear"}},                               # 12
+        ]
+        with WorkerProcess("UTC") as w:
+            out = run(self, w, actor_scenario("t/status", ["client_a"], steps))
+        self.assertEqual(out[3], OK)
+        self.assertEqual(out[5], {"sync": {"error": "network"}})  # every request fails from step 4
+        # meta-status.md M6.1: a one-way sync that succeeded is remembered as
+        # no changes, and a failed job leaves that answer.
+        self.assertEqual(out[6], result("no_changes"))
+        self.assertEqual(out[8], {"add_note": {"note": "#n2", "cards": ["#c2"]}})
+        # M5, M6 step 1: local changes, then a schema time past the last sync,
+        # answered from the collection alone.
+        self.assertEqual(out[9], result("normal_sync"))
+        self.assertEqual(out[11], result("full_sync"))
+        self.assertEqual(self.proxies(), [])
 
     def test_a_scripted_caller_plays_a_meguri_actor(self):
         from anki.collection import Collection

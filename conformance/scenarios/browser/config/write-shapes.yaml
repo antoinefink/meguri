@@ -1,0 +1,65 @@
+# Starts from the schema-18 storage fixture (specs/conformance/storage-ops.md
+# P1), whose config holds sortType "noteFld" and sortBackwards false as a new
+# collection does. Every browser config key written once through
+# browser_config_set (specs/conformance/browser-config-ops.md B1) with a value
+# of its shape (specs/browser/config-keys.md K1): the stored text is the
+# compact form of storage/config-table C5 (object members sorted by code
+# point, a tab and a backslash escaped, non-ASCII kept as UTF-8, unknown
+# column keys and the empty column key kept in place), as a BLOB with usn -1
+# and mtime_secs now, and Anki's reads give the values back. An hour later
+# the same values, objects with their members in another order, write nothing
+# (K10.1): no row is stamped and col.mod does not move. Needs open
+# (storage-ops.md P1), browser_config_set, db_exec (record-ops.md W1) and the
+# browser_config observation (B2).
+id: browser/config/write-shapes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - browser_config_set: {key: activeCols, value: [question, answer, noteFld, addonX, cardDue]}
+  - browser_config_set: {key: activeNoteCols, value: [noteTags, "", noteFld]}
+  - browser_config_set: {key: sortType, value: cardDue}
+  - browser_config_set: {key: noteSortType, value: noteMod}
+  - browser_config_set: {key: sortBackwards, value: true}
+  - browser_config_set: {key: browserNoteSortBackwards, value: true}
+  - browser_config_set: {key: browserTableShowNotesMode, value: true}
+  - browser_config_set: {key: savedFilters, value: {Zed: "tag:leech", "Ünï": 'deck:"A B"', apple: "is:due", Apple: "flag:1", "Tab\there": "a/b \\ c"}}
+  - browser_config_set: {key: flagLabels, value: {"3": Important, "1": "Wrong ✓", "7": '"Quoted"'}}
+  - browser_config_set: {key: collapseSavedSearches, value: true}
+  - browser_config_set: {key: collapseToday, value: true}
+  - browser_config_set: {key: collapseFlags, value: true}
+  - browser_config_set: {key: collapseCardState, value: true}
+  - browser_config_set: {key: collapseDecks, value: true}
+  - browser_config_set: {key: collapseNotetypes, value: true}
+  - browser_config_set: {key: collapseTags, value: true}
+  - browser_config_set: {key: previewBothSides, value: true}
+  - browser_config_set: {key: setDueBrowser, value: "1-7!"}
+  - browser_config_set: {key: defaultSearchText, value: "deck:Inbox is:due"}
+  - browser_config_set: {key: ignoreAccentsInSearch, value: true}
+  - browser_config_set: {key: restorePositionBrowser, value: false}
+  - browser_config_set: {key: resetCountsBrowser, value: true}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), typeof(val) FROM config WHERE KEY IN ('activeCols', 'activeNoteCols', 'sortType', 'noteSortType', 'sortBackwards', 'browserNoteSortBackwards', 'browserTableShowNotesMode', 'savedFilters', 'flagLabels', 'collapseSavedSearches', 'collapseToday', 'collapseFlags', 'collapseCardState', 'collapseDecks', 'collapseNotetypes', 'collapseTags', 'previewBothSides', 'setDueBrowser', 'defaultSearchText', 'ignoreAccentsInSearch', 'restorePositionBrowser', 'resetCountsBrowser') ORDER BY KEY"}
+  - observe: [browser_config]
+  - advance: 1h
+  - browser_config_set: {key: activeCols, value: [question, answer, noteFld, addonX, cardDue]}
+  - browser_config_set: {key: activeNoteCols, value: [noteTags, "", noteFld]}
+  - browser_config_set: {key: sortType, value: cardDue}
+  - browser_config_set: {key: noteSortType, value: noteMod}
+  - browser_config_set: {key: sortBackwards, value: true}
+  - browser_config_set: {key: browserNoteSortBackwards, value: true}
+  - browser_config_set: {key: browserTableShowNotesMode, value: true}
+  - browser_config_set: {key: savedFilters, value: {"Tab\there": "a/b \\ c", Apple: "flag:1", apple: "is:due", "Ünï": 'deck:"A B"', Zed: "tag:leech"}}
+  - browser_config_set: {key: flagLabels, value: {"7": '"Quoted"', "1": "Wrong ✓", "3": Important}}
+  - browser_config_set: {key: collapseSavedSearches, value: true}
+  - browser_config_set: {key: collapseToday, value: true}
+  - browser_config_set: {key: collapseFlags, value: true}
+  - browser_config_set: {key: collapseCardState, value: true}
+  - browser_config_set: {key: collapseDecks, value: true}
+  - browser_config_set: {key: collapseNotetypes, value: true}
+  - browser_config_set: {key: collapseTags, value: true}
+  - browser_config_set: {key: previewBothSides, value: true}
+  - browser_config_set: {key: setDueBrowser, value: "1-7!"}
+  - browser_config_set: {key: defaultSearchText, value: "deck:Inbox is:due"}
+  - browser_config_set: {key: ignoreAccentsInSearch, value: true}
+  - browser_config_set: {key: restorePositionBrowser, value: false}
+  - browser_config_set: {key: resetCountsBrowser, value: true}
+  - db_exec: {sql: "SELECT (SELECT count(*) FROM config WHERE mtime_secs >= 1894705200), (SELECT count(*) FROM col WHERE mod >= 1894705200000)"}

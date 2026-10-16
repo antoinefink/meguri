@@ -1,0 +1,33 @@
+# Deck objects as they travel in the first array of applyChanges `decks`
+# (specs/sync/wire-format.md W6; specs/model/schema11-json.md S7-S9, S11;
+# R1464, R1523): the default deck, a normal deck with a preset, limits, a
+# markdown description and synthetic add-on members in `other`, a nested deck
+# (its name in human form on the wire), and a nested filtered deck. No setup
+# section creates a filtered deck, so its row is inserted with the blobs of
+# model/proto/deck-filtered-bytes: both collapsed flags; reschedule on, one
+# search "is:due" limit 50 order 6, Again 60 s, Hard 600 s.
+id: sync/wire/decks
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Fsrs, desired_retention: 0.87}]
+  decks:
+    - {name: Words, preset: Fsrs}
+    - "Words::Kanji"
+steps:
+  - legacy_update:
+      deck: Words
+      patch:
+        x_deck_color: "#3a7"
+        x_deck_meta: {pinned: true, order: [3, 1]}
+        reviewLimit: 120
+        newLimit: 15
+        reviewLimitToday: {limit: 30, today: 3}
+        desiredRetention: 85
+        desc: "Daily <b>words</b>"
+        md: true
+        collapsed: false
+        browserCollapsed: false
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1894701600100, 'Words' || char(31) || 'Cram', 1894701600, 0, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c')"
+  - observe:
+      - legacy_json: {decks: [Default, Words, "Words::Kanji", "Words::Cram"]}

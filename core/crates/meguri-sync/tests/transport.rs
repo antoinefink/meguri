@@ -7,6 +7,8 @@
 //! AnkiWeb rules run under the `aw.test` stand-in (T12), and the guard's
 //! refusals build the host from `endpoint_guard::ANKIWEB_HOST` (U19).
 
+mod common;
+
 use std::collections::VecDeque;
 use std::future::Future;
 use std::io;
@@ -441,12 +443,17 @@ fn a_403_on_login_is_an_auth_failure_and_gives_no_key() {
 
 #[test]
 fn a_login_answer_without_a_non_empty_key_is_a_protocol_error() {
+    // L5, read by wire-format.md W1.2: a repeated `key` makes the object
+    // invalid, and so does nesting past 127 levels, the outermost counting.
+    let deep = format!(r#"{{"key":"k","x":{}{}}}"#, "[".repeat(127), "]".repeat(127));
     for answer in [
         &br#"{"nokey":"x"}"#[..],
         &br#"{"key":""}"#[..],
         &br#"{"key":5}"#[..],
         &br#"["key"]"#[..],
         &b"not json"[..],
+        &br#"{"key":"first","key":"second"}"#[..],
+        deep.as_bytes(),
     ] {
         let payload = answer.to_vec();
         let stub = SyncStub::serve(move |_| Reply::ok(&payload));
@@ -458,6 +465,13 @@ fn a_login_answer_without_a_non_empty_key_is_a_protocol_error() {
             String::from_utf8_lossy(answer)
         );
     }
+    // Exactly 127 levels read.
+    let deepest = format!(r#"{{"key":"k","x":{}{}}}"#, "[".repeat(126), "]".repeat(126));
+    let stub = SyncStub::serve(move |_| Reply::ok(deepest.as_bytes()));
+    assert_eq!(
+        login_blocking(threads(), &options(&stub.url()), &random(), "someone", "pw"),
+        Ok(HostKey::new("k"))
+    );
 }
 
 // --- Responses (T6) ---------------------------------------------------------
@@ -1445,63 +1459,7 @@ fn transfers_report_uncompressed_bytes_against_their_totals() {
 // loopback. With the rig up:
 //   tools/mg core-test -- --run-ignored only -E 'package(meguri-sync) & test(/^rig_/)'
 
-/// The rig and one of its test accounts.
-struct Rig {
-    base: String,
-    user: String,
-    password: String,
-}
-
-/// Where the rig listens, from the latest `tools/mg sync-rig` result in this
-/// checkout, and the password of its first test user, from the rig's env
-/// files (docker/syncserver.env overrides the example, as compose reads
-/// them). Inside the dev container, the Mac's loopback is the Docker host,
-/// `host.docker.internal`.
-fn rig() -> Rig {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let result = root.join("build/mg/sync-rig/latest/result.json");
-    let result: Value = serde_json::from_slice(&std::fs::read(&result).expect("tools/mg sync-rig up first"))
-        .expect("a tools/mg result is JSON");
-    let details = &result["details"];
-    assert_eq!(details["running"], json!(true), "the rig is down: tools/mg sync-rig up");
-    let endpoint = details["endpoints"]["syncserver"]
-        .as_str()
-        .expect("the rig reports its endpoint");
-    let port: u16 = endpoint
-        .trim_end_matches('/')
-        .rsplit(':')
-        .next()
-        .and_then(|p| p.parse().ok())
-        .expect("the endpoint has a port");
-    let user = details["users"][0]
-        .as_str()
-        .expect("the rig reports its test users")
-        .to_owned();
-    let mut password = None;
-    for file in ["docker/syncserver.env.example", "docker/syncserver.env"] {
-        let Ok(text) = std::fs::read_to_string(root.join(file)) else {
-            continue;
-        };
-        for line in text.lines() {
-            if let Some((_, account)) = line.split_once('=')
-                && line.starts_with("SYNC_USER")
-                && let Some((name, secret)) = account.split_once(':')
-                && name == user
-            {
-                password = Some(secret.to_owned());
-            }
-        }
-    }
-    let host = std::net::ToSocketAddrs::to_socket_addrs(&("host.docker.internal", port))
-        .ok()
-        .and_then(|mut addresses| addresses.next())
-        .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], port)));
-    Rig {
-        base: format!("http://{host}/"),
-        user,
-        password: password.expect("the rig's env files hold the user's password"),
-    }
-}
+use common::rig;
 
 #[test]
 #[ignore = "needs tools/mg sync-rig up"]

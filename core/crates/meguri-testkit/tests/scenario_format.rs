@@ -699,6 +699,86 @@ fn tag_ops_follow_the_schema() {
     }
 }
 
+/// browser-config-ops.md B1, B2: the op with scenario.schema.json's key
+/// list and value shapes, and the observation.
+#[test]
+fn browser_config_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: browser/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{browser_config_set: {key: activeCols, value: [question, \"\", addonX]}}, \
+         {browser_config_set: {key: sortType, value: myAddonColumn}}, \
+         {browser_config_set: {key: collapseTags, value: true}}, \
+         {browser_config_set: {key: savedFilters, value: {a: \"is:due\"}}}, \
+         {browser_config_set: {key: flagLabels, value: {}}}, \
+         {observe: [browser_config, {browser_config: null}]}]",
+    )
+    .unwrap();
+    assert!(
+        matches!(&parsed.steps[0], Step::BrowserConfigSet(args) if args.key == "activeCols"
+        && args.value == serde_json::json!(["question", "", "addonX"]))
+    );
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("browser_config_set"));
+    assert!(Step::NAMES.contains(&"browser_config_set"));
+    assert!(needs.observations.contains("browser_config"));
+    assert!(
+        parsed.starts_from_new_collection(),
+        "browser_config reads the collection"
+    );
+    for (bad, why) in [
+        (
+            "[{browser_config_set: {key: normalize_note_text, value: false}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: curDeck, value: 1}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: ActiveCols, value: []}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: collapseTags, value: 1}}]",
+            "takes a boolean",
+        ),
+        (
+            "[{browser_config_set: {key: setDueBrowser, value: 5}}]",
+            "takes a string",
+        ),
+        ("[{browser_config_set: {key: sortType, value: null}}]", "takes a string"),
+        (
+            "[{browser_config_set: {key: activeCols, value: [noteFld, 5]}}]",
+            "takes an array of strings",
+        ),
+        (
+            "[{browser_config_set: {key: activeCols, value: noteFld}}]",
+            "takes an array of strings",
+        ),
+        (
+            "[{browser_config_set: {key: savedFilters, value: {a: 3}}}]",
+            "takes an object of strings",
+        ),
+        (
+            "[{browser_config_set: {key: flagLabels, value: []}}]",
+            "takes an object of strings",
+        ),
+        ("[{browser_config_set: {key: flagLabels}}]", "value"),
+        (
+            "[{browser_config_set: {key: flagLabels, value: {}, undoable: true}}]",
+            "unknown field",
+        ),
+        ("[{observe: [{browser_config: {}}]}]", "browser_config"),
+        ("[{observe: [\"browser_config(#c1)\"]}]", "does not take"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn text_requests_follow_the_schema() {
     let parse = |request: &str| {
@@ -1016,6 +1096,8 @@ fn a_login_says_how_it_derives_its_credentials() {
             Credentials::WrongPassword,
         ),
         ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+        // S4.1: the sync status the client's indicator asks for (U106).
+        ("{kind: status}", SyncKind::Status, Credentials::Account),
     ] {
         let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
         let Step::Sync(spec) = &parsed.steps[1] else {
@@ -1025,6 +1107,7 @@ fn a_login_says_how_it_derives_its_credentials() {
     }
     for (args, why) in [
         ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: status, credentials: account}", "credentials"),
         ("{kind: full_upload, credentials: wrong_password}", "credentials"),
         ("{kind: login, credentials: other}", "other"),
         ("{kind: login, credentials: null}", "credentials"),
@@ -1042,6 +1125,10 @@ fn a_login_says_how_it_derives_its_credentials() {
         &loaded.scenario.steps[1],
         Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
     ));
+
+    // The committed status scenario parses, its fourth step a status.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/meta/status.yaml")).unwrap();
+    assert!(matches!(&loaded.scenario.steps[3], Step::Sync(s) if s.kind == SyncKind::Status));
 }
 
 #[test]
