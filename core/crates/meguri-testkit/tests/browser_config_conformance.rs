@@ -153,11 +153,12 @@ fn wrong_shapes() {
     play("wrong-shapes");
 }
 
-/// T0 lists every browser/config scenario as pending until the new
-/// collection exists (U28), and T1 can run the live chain: Meguri's
-/// segments need only the browser, clock and storage adapters.
+/// T0 lists every browser/config scenario but the live chain as pending
+/// until the new collection exists (U28), the only capability they lack
+/// since the storage area runs `setup.config`; T1 can run the live chain:
+/// Meguri's segments need only the browser, clock and storage adapters.
 #[test]
-fn meguri_needs_only_the_new_collection_and_setup() {
+fn meguri_needs_only_the_new_collection() {
     let executor = MeguriExecutor::new();
     for entry in std::fs::read_dir(conformance().join("scenarios/browser/config")).unwrap() {
         let path = entry.unwrap().path();
@@ -178,12 +179,7 @@ fn meguri_needs_only_the_new_collection_and_setup() {
         if loaded.scenario.is_live() {
             assert!(setup.is_empty(), "{}: {setup:?}", path.display());
         } else {
-            assert!(setup.contains(&"new_collection"), "{}: {setup:?}", path.display());
-            assert!(
-                setup.iter().all(|s| ["new_collection", "config"].contains(s)),
-                "{}: {setup:?}",
-                path.display()
-            );
+            assert_eq!(setup, ["new_collection"], "{}", path.display());
         }
     }
 }

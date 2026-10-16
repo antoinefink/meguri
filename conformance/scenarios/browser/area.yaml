@@ -2,8 +2,9 @@
 # live chain). config/live-roundtrip's Meguri segment needs only the browser
 # adapters (meguri-testkit exec/browser.rs, U83), the clock and the storage
 # area. The other browser/config scenarios start from the new collection
-# (U28), other-keys-untouched also with setup.config; the unit that lands the
-# last of those activates them here. Meanwhile
+# (dsl.md D8), the only capability they lack; the unit that gives Meguri's
+# executor that capability activates them here (U28 for new-collection:
+# docs/process/review-log/U83.md, A1). Meanwhile
 # core/crates/meguri-testkit/tests/browser_config_conformance.rs plays every
 # browser/config scenario on Meguri's executor against its golden, with
 # stand-ins for the new collection and the config setup.
