@@ -62,13 +62,14 @@ enum MatrixRegistry {
             platform == .iphone && state == .overflow ? .pairwise : .keyVariants
         },
         // The shell in key variants: the tab layout on the iPhone, the
-        // sidebar layout on the iPad and the Mac. The iPad's are the light
-        // ones with Reduce Transparency on: with Liquid Glass the system
-        // sidebar renders with a grain that differs between runs beyond the
-        // tolerance (3 of 4 cells failed in one of three runs, 2026-10-16),
-        // and with Reduce Transparency the sidebar toggle's glass still
-        // differs by one level, which failed a dark cell in 2 of 7 runs
-        // (near-black pixels). The Mac's draw the split view's columns flat
+        // sidebar layout on the iPad and the Mac. The iPad renders only the
+        // light ones with Reduce Transparency on and lists the others as
+        // deferred: with Liquid Glass the system sidebar renders with a
+        // grain that differs between runs beyond the tolerance (3 of 4 cells
+        // failed in one of three runs, 2026-10-16), and with Reduce
+        // Transparency the sidebar toggle's glass still differs by one
+        // level, which failed a dark cell in 2 of 7 runs (near-black
+        // pixels). The Mac's draw the split view's columns flat
         // (`ChromeGlass.flat`, the Mac matrix's own): the off-screen render
         // (cacheDisplay) cannot draw their materials. The pairwise set's
         // dark iPhone cells with Increase Contrast, Reduce Motion or a glass
@@ -77,7 +78,7 @@ enum MatrixRegistry {
         ScreenRegistration(type: ShellRootPreview.self) { platform, _ in
             switch platform {
             case .iphone, .mac: .keyVariants
-            case .ipad: .opaqueLightKeyVariants
+            case .ipad: .unstableGlassKeyVariants
             }
         },
     ]

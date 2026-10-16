@@ -18,26 +18,47 @@ import AppKit
 @MainActor
 @Suite struct ShellSnapshotTests {
     private func shellCells(on platform: SnapshotPlatform) -> [SnapshotCase] {
-        MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" && $0.cell.deferredReason == nil }
+        MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" }
+    }
+
+    private func rendered(_ cases: [SnapshotCase]) -> [SnapshotCase] {
+        cases.filter { $0.cell.deferredReason == nil }
     }
 
     /// Both layouts in every state: the tab layout on the iPhone, the
-    /// sidebar layout on the iPad (light, Reduce Transparency on: its
-    /// system glass is not the same twice, MatrixRegistry) and on the Mac
-    /// (its split view drawn flat), all rendered rather than deferred.
+    /// sidebar layout on the iPad and on the Mac (its split view drawn
+    /// flat), each in light and dark.
     @Test func bothLayoutsAreSnapshottedInEveryState() {
         #expect(ShellRootPreview.previewStates == [.typical, .error, .loading])
         let states: Set<String> = ["typical", "loading", "error"]
-        let iphone = shellCells(on: .iphone)
-        #expect(iphone.allSatisfy { !$0.cell.device.horizontalSizeClassIsRegular })
-        #expect(Set(iphone.map(\.state)) == states)
+        // The iPhone and the Mac render every cell they have.
+        for platform in [SnapshotPlatform.iphone, .mac] {
+            let cells = shellCells(on: platform)
+            #expect(Set(cells.map(\.state)) == states, "\(platform)")
+            #expect(Set(cells.map(\.cell.appearance)) == [.light, .dark], "\(platform)")
+            #expect(cells.allSatisfy { $0.cell.deferredReason == nil }, "\(platform): \(cells.compactMap(\.cell.deferredReason))")
+        }
+        #expect(shellCells(on: .iphone).allSatisfy { !$0.cell.device.horizontalSizeClassIsRegular })
+    }
+
+    /// The iPad's system sidebar glass is not the same twice
+    /// (MatrixRegistry): its light cells with Reduce Transparency on render,
+    /// and its dark cells and its Liquid Glass ones stay listed as deferred,
+    /// with the reason, rather than missing from the matrix.
+    @Test func theIPadRendersItsOpaqueLightSidebarAndListsTheRestAsDeferred() {
+        let states: Set<String> = ["typical", "loading", "error"]
         let ipad = shellCells(on: .ipad)
-        #expect(ipad.allSatisfy { $0.cell.device.horizontalSizeClassIsRegular && $0.cell.reduceTransparency })
-        #expect(Set(ipad.map(\.state)) == states)
-        #expect(Set(shellCells(on: .mac).map(\.state)) == states)
-        for platform in SnapshotPlatform.allCases {
-            let all = MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" }
-            #expect(all.allSatisfy { $0.cell.deferredReason == nil }, "\(platform): \(all.compactMap(\.cell.deferredReason))")
+        #expect(ipad.allSatisfy { $0.cell.device.horizontalSizeClassIsRegular })
+        let light = rendered(ipad)
+        #expect(Set(light.map(\.state)) == states)
+        #expect(light.allSatisfy { $0.cell.appearance == .light && $0.cell.reduceTransparency })
+        for state in states {
+            let mine = ipad.filter { $0.state == state }
+            let dark = mine.filter { $0.cell.appearance == .dark }
+            #expect(dark.count == 4, "\(state): dark cells \(dark.map(\.cell.name))")
+            #expect(dark.allSatisfy { $0.cell.deferredReason != nil }, "\(state)")
+            #expect(mine.filter { $0.cell.appearance == .light && !$0.cell.reduceTransparency }.allSatisfy { $0.cell.deferredReason != nil })
+            #expect(mine.contains { $0.cell.appearance == .dark && $0.cell.reduceTransparency }, "\(state): no dark sidebar cell")
         }
     }
 
