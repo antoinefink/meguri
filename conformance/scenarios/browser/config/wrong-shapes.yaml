@@ -1,4 +1,5 @@
-# Stored values of other shapes, written by another client or an add-on
+# Starts from the schema-18 storage fixture (specs/conformance/storage-ops.md
+# P1). Stored values of other shapes, written by another client or an add-on
 # (specs/browser/config-keys.md K2.1, K2.2; storage/config-table C3). Anki's
 # typed reads give the key's default for anything but a JSON boolean (or a
 # JSON string for setDueBrowser and defaultSearchText): an integer, a quoted
@@ -7,11 +8,12 @@
 # savedFilters and flagLabels keys the kind reports the stored value whatever
 # its shape, or the default when it is unreadable (browser-config-ops.md B2).
 # A string read keeps an empty string and surrounding spaces. Reading writes
-# nothing: every row keeps its bytes and stamps. Needs db_exec
-# (record-ops.md W1) and the browser_config observation.
+# nothing: every row keeps its bytes and stamps. Needs open (storage-ops.md
+# P1), db_exec (record-ops.md W1) and the browser_config observation.
 id: browser/config/wrong-shapes
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 steps:
+  - open: {fixture: storage/schema-18.anki2}
   - db_exec:
       sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, ?), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, ?), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, ?), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB))"
       params:

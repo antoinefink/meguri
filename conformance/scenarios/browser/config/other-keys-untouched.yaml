@@ -1,23 +1,26 @@
 # Writing one browser key touches no other key (specs/browser/config-keys.md
-# K9, K10.1; R1138, R1266): after a flagLabels write, the browser keys set at
-# setup, the two Reposition keys Meguri never uses, an add-on key and browser
-# keys another client stored with its own spacing all keep their bytes, usn
-# and mtime_secs; only flagLabels is stamped with the time of the write, and
-# col.mod moves once. Needs browser_config_set
-# (specs/conformance/browser-config-ops.md B1) and db_exec (record-ops.md W1).
+# K9, K10.1; R1138, R1266). Starts from the schema-18 storage fixture
+# (specs/conformance/storage-ops.md P1); a scenario that uses open has no
+# setup (P1.3), so set_config writes the starting keys in sorted key order at
+# the start time. After a flagLabels write, those browser keys, the two
+# Reposition keys Meguri never uses, an add-on key and browser keys another
+# client stored with its own spacing all keep their bytes, usn and
+# mtime_secs; only flagLabels is stamped with the time of the write, and
+# col.mod moves once. Needs open (storage-ops.md P1), set_config and db_exec
+# (record-ops.md W4, W1) and browser_config_set
+# (specs/conformance/browser-config-ops.md B1).
 id: browser/config/other-keys-untouched
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
-setup:
-  config:
-    activeCols: [noteFld, addonX, deck]
-    sortType: noteCrt
-    savedFilters: {Leeches: "tag:leech"}
-    collapseTags: true
-    setDueBrowser: "3"
-    randomOrderReposition: true
-    shiftPositionOfExistingCards: false
-    myAddon_state: {b: 1, a: [1, 2.5]}
 steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - set_config: {key: activeCols, value: [noteFld, addonX, deck]}
+  - set_config: {key: collapseTags, value: true}
+  - set_config: {key: myAddon_state, value: {b: 1, a: [1, 2.5]}}
+  - set_config: {key: randomOrderReposition, value: true}
+  - set_config: {key: savedFilters, value: {Leeches: "tag:leech"}}
+  - set_config: {key: setDueBrowser, value: "3"}
+  - set_config: {key: shiftPositionOfExistingCards, value: false}
+  - set_config: {key: sortType, value: noteCrt}
   - db_exec:
       sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, CAST(? AS BLOB)), (?, 3, 1700000500, CAST(? AS BLOB)), (?, 0, 1700000900, CAST(? AS BLOB))"
       params:
