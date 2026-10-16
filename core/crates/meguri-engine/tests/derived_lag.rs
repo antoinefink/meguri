@@ -21,8 +21,8 @@ use meguri_engine::derived_host::{
     DerivedHostBuilder, DerivedReadiness, IndexDef, Invalidation, Readiness, TableDef,
 };
 use meguri_engine::{
-    Collection, Engine, EngineConfig, EngineError, Event, EventKind, Generation, LongOp, ObservedCommit, OpSpec, Ports,
-    Qos, Seq, Snapshot, Subscription, monotonic,
+    ChangeObserver, Collection, Engine, EngineConfig, EngineError, Event, EventKind, Generation, LongOp,
+    ObservedCommit, OpSpec, Ports, Qos, Seq, Snapshot, Subscription, monotonic,
 };
 use meguri_model::card::{Card, CardQueue, CardType};
 use meguri_model::changes::OpSource;
@@ -347,6 +347,36 @@ impl DerivedComponent for Blocker {
     }
 }
 
+/// An observer that holds the collection writer in a commit giving a card
+/// `due` until a gate opens. Registered before the store's observer, it
+/// holds that commit in the collection, its message not yet sent to the
+/// derived writer.
+struct HeldObserver {
+    due: i64,
+    gate: Arc<Gate>,
+    entered: Arc<AtomicBool>,
+}
+
+impl ChangeObserver for HeldObserver {
+    fn name(&self) -> &str {
+        "held"
+    }
+
+    fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
+        let gives_due = commit.cards.iter().any(|delta| {
+            delta
+                .after_card()
+                .unwrap()
+                .is_some_and(|card| i64::from(card.due) == self.due)
+        });
+        if gives_due {
+            self.entered.store(true, Ordering::SeqCst);
+            self.gate.pass();
+        }
+        Ok(())
+    }
+}
+
 /// An engine with one collection open and the derived store wired as U38
 /// wires it.
 struct Opened {
@@ -371,11 +401,27 @@ fn open_components(
     path: &Path,
     register: impl FnOnce(DerivedHostBuilder, &Arc<Counters>) -> DerivedHostBuilder,
 ) -> Opened {
+    open_ports(path, Ports::default(), register)
+}
+
+/// Opens with the mirror, `observer` running before the store's observer.
+fn open_after_observer(path: &Path, observer: Arc<dyn ChangeObserver>) -> Opened {
+    open_ports(path, Ports::default().observer(observer), |builder, counters| {
+        builder.component(CardMirror::new(counters))
+    })
+}
+
+/// [`open_components`] with the store's ports added to `ports`.
+fn open_ports(
+    path: &Path,
+    ports: Ports,
+    register: impl FnOnce(DerivedHostBuilder, &Arc<Counters>) -> DerivedHostBuilder,
+) -> Opened {
     let counters = Arc::new(Counters::default());
     let engine = Engine::new(EngineConfig::default()).unwrap();
     let events = engine.stream().subscribe();
     let host = register(DerivedHost::builder(&engine), &counters).start().unwrap();
-    let ports = host.ports(Ports::default());
+    let ports = host.ports(ports);
     let collection = engine
         .open_raw(path, open_config(&clock()).ports(ports.clone()))
         .unwrap();
@@ -1193,6 +1239,80 @@ fn a_store_that_applied_a_commit_after_the_snapshot_before_its_first_derived_rea
     drop(late);
     drop(unread_lease);
     drop(asked_lease);
+    opened.close();
+}
+
+/// Opens its gate when dropped: a failing test never leaves the collection
+/// writer held.
+struct OpenOnDrop(Arc<Gate>);
+
+impl Drop for OpenOnDrop {
+    fn drop(&mut self) {
+        self.0.open();
+    }
+}
+
+#[test]
+fn a_rebuild_whose_snapshot_sees_a_commit_the_store_was_not_sent_yet_is_ready_only_once_it_holds_it() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let gate = Arc::new(Gate::default());
+    let entered = Arc::new(AtomicBool::new(false));
+    let opened = open_after_observer(
+        &path,
+        Arc::new(HeldObserver {
+            due: 777,
+            gate: Arc::clone(&gate),
+            entered: Arc::clone(&entered),
+        }),
+    );
+    let _release = OpenOnDrop(Arc::clone(&gate));
+    opened.settle();
+    let id = add_cards(&opened.collection, &[1])[0];
+    opened.host.flush().unwrap();
+    // A consumer's snapshot of every commit the store holds; it has not
+    // read `derived` yet.
+    let lease = opened.collection.reader(ReaderRole::Query).unwrap();
+    let older = lease.snapshot().unwrap();
+
+    // A later commit, held in its observers before the store's captures it.
+    let committer = {
+        let collection = opened.collection.clone();
+        thread::spawn(move || set_due(&collection, id, 777))
+    };
+    wait_until("the held commit's observers", || entered.load(Ordering::SeqCst));
+    // A rebuild whose snapshot sees that commit.
+    opened.host.invalidate(Invalidation::CheckDatabase);
+    // Time for the rebuild to end, were it able to while the commit is held.
+    let idle = opened.host.wait_idle(Duration::from_secs(1));
+    assert!(
+        !opened.host.is_current(MIRROR, &older),
+        "a snapshot from before the held commit that first reads the store now is not current: \
+         derived {:?}, cards {:?}",
+        mirrored_in(&older),
+        cards_in(&older)
+    );
+    assert!(
+        !idle,
+        "the rebuild waits until the commit its snapshot sees reached the store"
+    );
+    assert_ne!(opened.readiness(), Readiness::Ready);
+
+    gate.open();
+    let seq = committer.join().unwrap();
+    opened.settle();
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    assert!(
+        !opened.host.is_current(MIRROR, &older),
+        "its view of the store is still the one it first read"
+    );
+    drop(older);
+    let late = lease.snapshot().unwrap();
+    assert_eq!(late.seq(), seq);
+    assert!(opened.host.is_current(MIRROR, &late));
+    assert!(mirrored_in(&late).iter().any(|r| r.0 == id.0 && r.4 == 777));
+    assert_eq!(mirrored_in(&late), cards_in(&late));
+    drop(late);
+    drop(lease);
     opened.close();
 }
 

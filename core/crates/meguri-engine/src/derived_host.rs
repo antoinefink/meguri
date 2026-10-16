@@ -1392,7 +1392,11 @@ impl Worker {
 
     /// The last transaction of a refresh: the swap (rebuild), the deltas kept
     /// after the snapshot, `ready` 1. The component then holds every commit
-    /// the writer handled: the stamp's `seq` says so.
+    /// the writer handled: the stamp's `seq` says so. Its builder sent `Done`
+    /// only once every commit the snapshot sees had run the observers, so
+    /// those after `through` were not sent: they concern no component. The
+    /// stamp is the whole store's: never the snapshot's seq, which the other
+    /// ready components may not hold yet.
     fn finish(
         &mut self,
         schema: &ComponentSchema,
@@ -1706,6 +1710,15 @@ impl Builder {
     fn run(self, activity: &ThreadActivity) {
         let (snapshot, outcome) = panic::catch_unwind(AssertUnwindSafe(|| self.refresh(activity)))
             .unwrap_or_else(|payload| (None, Outcome::Failed(EngineError::from_panic(payload.as_ref()))));
+        // A commit the snapshot sees may not have run the observers yet
+        // (they run after the commit lock is released). Once they all have,
+        // each message the store was sent for them is ahead of `Done`, so the
+        // writer has handled them, and its `through`, the stamp's `seq` the
+        // refresh writes, covers every commit the rows hold (D8).
+        if let (Some(seq), Outcome::Built | Outcome::CaughtUp) = (snapshot, &outcome) {
+            let _busy = activity.busy();
+            self.shared.stream.wait_settled(seq);
+        }
         let _ = self.sender.send(Msg::Done {
             refresh: self.refresh,
             snapshot,
