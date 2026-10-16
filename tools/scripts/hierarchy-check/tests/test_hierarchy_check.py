@@ -157,6 +157,27 @@ class MissingIdentifier(unittest.TestCase):
         )
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_a_mac_scroll_bars_parts_are_the_systems(self):
+        # Seen in a real export of a Mac scroll view (the shell's deck page):
+        # AppKit's scroller reports its knob, arrows and page regions, the
+        # page region below the knob as an unlabelled button, none with an
+        # identifier, and none can take one.
+        bar = el("scrollBar", f=(1162, 81, 19, 722.5), children=[
+            el("valueIndicator", f=(1166, 85, 11, 260.5)),
+            el("incrementArrow", f=(1163, 82, 0, 0)),
+            el("decrementArrow", f=(1163, 82, 0, 0)),
+            el("button", f=(1166, 346, 11, 453.5)),
+            el("button", f=(1166, 85, 11, 0)),
+        ])
+        tree = doc(el("scrollView", f=(300, 81, 881, 722.5), children=[
+            el("staticText", "testhooks.shell.deckPageRow.1", "Row 1", f=(320, 100, 600, 20)), bar]), window=(0, 0, 1180, 800))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_a_button_beside_a_scroll_bar_still_needs_an_identifier(self):
+        tree = doc(el("scrollView", f=(0, 0, 400, 800), children=[
+            el("scrollBar", f=(390, 0, 10, 800)), el("button", label="Load more", f=(16, 700, 200, 44))]))
+        self.assertEqual([(i["kind"], i["label"]) for i in hierarchy_check.check(tree)], [("missing-identifier", "Load more")])
+
     def test_the_split_views_sidebar_toggle_is_the_systems(self):
         # Seen in real exports: the Mac toolbar's toggle and the iPad
         # sidebar's, in its navigation bar; neither takes an identifier.
@@ -270,6 +291,34 @@ class TextOverlap(unittest.TestCase):
                       children=[el("staticText", label="Loading", f=(30, 205, 60, 16))]))
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_rows_a_scroll_view_clips_do_not_overlap_the_text_below_it(self):
+        # Seen in a real export (the shell's deck page on the iPad, its
+        # state probe below the scroll view): a lazy stack's next rows hang
+        # past the scroll view's edge, clipped; only what shows counts.
+        tree = doc(el("scrollView", f=(0, 0, 1032, 1334.5), children=[
+            el("staticText", "testhooks.shell.deckPageRow.20", "Row 20", f=(372, 1312.5, 608, 44.5)),
+            el("staticText", "testhooks.shell.deckPageRow.21", "Row 21", f=(372, 1369, 608, 44.5))]),
+            el("staticText", "testhooks.shell.state", "layout=sidebar", f=(0, 1334.5, 1032, 41.5)), window=(0, 0, 1032, 1376))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_the_visible_part_of_a_clipped_row_still_overlaps(self):
+        # A label floating over the scroll view's last visible points.
+        tree = doc(el("scrollView", f=(0, 0, 400, 400), children=[
+            el("staticText", "home.list.row.9", "Row 9", f=(16, 380, 300, 44))]),
+            el("staticText", "home.list.badge", "New", f=(16, 390, 100, 20)))
+        issues = hierarchy_check.check(tree)
+        self.assertEqual(kinds(issues), ["text-overlap"])
+        self.assertEqual(issues[0]["labels"], ["Row 9", "New"])
+        self.assertIn("overlap by 100x10 pt", issues[0]["message"])
+
+    def test_a_table_clips_its_rows_to_the_scroll_view_around_it(self):
+        # On the Mac a table's frame is its whole content; the scroll view
+        # around it is what shows.
+        tree = doc(el("scrollView", f=(0, 100, 400, 300), children=[el("table", f=(0, 100, 400, 2000), children=[
+            el("staticText", "home.list.row.30", "Row 30", f=(16, 410, 300, 20))])]),
+            el("staticText", "home.footer.total", "40 decks", f=(16, 410, 120, 20)))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
     def test_text_inside_text_is_one_element_not_an_overlap(self):
         tree = doc(el("staticText", label="Title", f=(0, 0, 100, 20), children=[el("staticText", label="Title", f=(0, 0, 100, 20))]))
         self.assertEqual(hierarchy_check.check(tree), [])
@@ -327,6 +376,17 @@ class RealExports(unittest.TestCase):
         for name in ["ios-shell-typical.json", "ipad-shell-typical.json"]:
             with self.subTest(name=name):
                 self.assertEqual(hierarchy_check.check(self.load(name)), [])
+
+    def test_the_shell_deck_page_on_the_mac_has_no_issue(self):
+        # A scroll view with AppKit's scroller, its lazy rows hanging past
+        # its bottom edge into the state probe's strip below it.
+        tree = self.load("mac-shell-deck-page.json")
+        self.assertEqual(hierarchy_check.check(tree), [])
+        root = hierarchy_check.Element(tree["root"], None, 0)
+        self.assertTrue(any(e.type == "scrollBar" for e in root.walk()))
+        probe = next(e for e in root.walk() if e.identifier == "testhooks.shell.state")
+        self.assertTrue(any(e.identifier.startswith("testhooks.shell.deckPageRow.") and e.y < probe.y + probe.h and e.y + e.h > probe.y
+                            for e in root.walk()), "no row's full frame reaches the probe")
 
     def test_the_defects_route_on_iphone_reports_its_two_defects_and_not_the_spinner(self):
         issues = hierarchy_check.check(self.load("ios-sample-defects.json"))

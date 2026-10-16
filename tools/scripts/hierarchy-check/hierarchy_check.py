@@ -12,11 +12,14 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
 - bad-identifier: an identifier that is not area.screen.element[.id], each of
   area, screen and element lowerCamel (R1964);
 - duplicate-identifier: one identifier on several elements;
-- text-overlap: two text elements of one window whose frames overlap (R1965);
+- text-overlap: two text elements of one window whose visible frames overlap
+  (R1965); a text inside a scrolling container shows only where that
+  container does, so a row scrolled past its edge overlaps nothing there;
 - text-outside-window: a text element that is not wholly inside its window or
   sheet and not inside a scrolling container (R1965).
 
-Ignored: system UI (keyboard, status bar, menu bar, Touch Bar), the buttons of
+Ignored: system UI (keyboard, status bar, menu bar, Touch Bar, and a Mac
+scroll bar with its knob, arrows and page regions), the buttons of
 system alerts (which drop identifiers, or on the Mac carry action-button-<n>;
 app/AGENTS.md; a Mac alert sheet is told by AppKit's id on the sheet or an
 action-button-<n>, never by a lack of identifiers), the sidebar toggle a
@@ -49,7 +52,9 @@ INTERACTIVE = {
 ROWS = {"cell", "tableRow", "outlineRow"}
 TEXT = {"staticText", "textField", "secureTextField", "searchField", "textView"}
 TRANSIENT = {"activityIndicator", "progressIndicator"}
-SYSTEM_UI = {"keyboard", "statusBar", "menuBar", "touchBar"}
+# A Mac scroll view's AppKit scroller reports its parts (the page regions
+# as unlabelled buttons), none of which can take an identifier.
+SYSTEM_UI = {"keyboard", "statusBar", "menuBar", "touchBar", "scrollBar"}
 SCROLLING = {"scrollView", "table", "collectionView", "outline", "browser", "webView"}
 WINDOWS = {"window", "sheet", "popover", "alert"}
 SYSTEM_IDENTIFIERS = {"BackButton", "Toolbar", "PopoverDismissRegion"}
@@ -107,6 +112,17 @@ class Element:
     @property
     def visible(self):
         return self.w > 0 and self.h > 0
+
+    def shown(self):
+        """The part of the frame its scrolling containers show, as (x, y, w,
+        h), or None when they show none of it."""
+        x0, y0, x1, y1 = self.x, self.y, self.x + self.w, self.y + self.h
+        for a in self.ancestors:
+            if a.type in SCROLLING:
+                x0, y0, x1, y1 = max(x0, a.x), max(y0, a.y), min(x1, a.x + a.w), min(y1, a.y + a.h)
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return x0, y0, x1 - x0, y1 - y0
 
     def under(self, types):
         return self.type in types or any(a.type in types for a in self.ancestors)
@@ -204,12 +220,14 @@ def check(document):
             })
 
     texts = [e for e in elements if e.type in TEXT and e.visible]
-    for i, a in enumerate(texts):
-        for b in texts[i + 1:]:
+    shown = [(e, e.shown()) for e in texts]
+    shown = [(e, r) for e, r in shown if r]
+    for i, (a, (ax, ay, aw, ah)) in enumerate(shown):
+        for b, (bx, by, bw, bh) in shown[i + 1:]:
             if a in b.ancestors or b in a.ancestors or a.window() is not b.window():
                 continue
-            dx = min(a.x + a.w, b.x + b.w) - max(a.x, b.x)
-            dy = min(a.y + a.h, b.y + b.h) - max(a.y, b.y)
+            dx = min(ax + aw, bx + bw) - max(ax, bx)
+            dy = min(ay + ah, by + bh) - max(ay, by)
             if dx > OVERLAP_TOLERANCE and dy > OVERLAP_TOLERANCE:
                 issues.append({
                     "kind": "text-overlap",
