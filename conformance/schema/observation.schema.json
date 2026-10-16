@@ -288,6 +288,67 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "browser_config": {
+          "description": "specs/conformance/browser-config-ops.md B2: the 23 browser and search config keys as Anki's own reads give them; the last eight are stored JSON values of any shape.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "browserTableShowNotesMode", "collapseSavedSearches", "collapseToday", "collapseFlags", "collapseCardState",
+            "collapseDecks", "collapseNotetypes", "collapseTags", "previewBothSides", "ignoreAccentsInSearch",
+            "restorePositionBrowser", "resetCountsBrowser", "normalize_note_text", "setDueBrowser", "defaultSearchText",
+            "activeCols", "activeNoteCols", "sortType", "noteSortType", "sortBackwards", "browserNoteSortBackwards",
+            "savedFilters", "flagLabels"
+          ],
+          "properties": {
+            "browserTableShowNotesMode": { "type": "boolean" },
+            "collapseSavedSearches": { "type": "boolean" },
+            "collapseToday": { "type": "boolean" },
+            "collapseFlags": { "type": "boolean" },
+            "collapseCardState": { "type": "boolean" },
+            "collapseDecks": { "type": "boolean" },
+            "collapseNotetypes": { "type": "boolean" },
+            "collapseTags": { "type": "boolean" },
+            "previewBothSides": { "type": "boolean" },
+            "ignoreAccentsInSearch": { "type": "boolean" },
+            "restorePositionBrowser": { "type": "boolean" },
+            "resetCountsBrowser": { "type": "boolean" },
+            "normalize_note_text": { "type": "boolean" },
+            "setDueBrowser": { "type": "string" },
+            "defaultSearchText": { "type": "string" },
+            "activeCols": true,
+            "activeNoteCols": true,
+            "sortType": true,
+            "noteSortType": true,
+            "sortBackwards": true,
+            "browserNoteSortBackwards": true,
+            "savedFilters": true,
+            "flagLabels": true
+          }
+        },
+        "add_note_tags": { "description": "specs/conformance/tag-ops.md G1: notes written.", "$ref": "#/$defs/op_count" },
+        "remove_note_tags": { "description": "tag-ops.md G2: notes written.", "$ref": "#/$defs/op_count" },
+        "delete_tags": { "description": "tag-ops.md G3: notes written.", "$ref": "#/$defs/op_count" },
+        "rename_tag": {
+          "description": "tag-ops.md G4: notes written, or the rejection invalid_name.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_name"] } } }] }
+          ]
+        },
+        "reparent_tags": { "description": "tag-ops.md G5: notes written.", "$ref": "#/$defs/op_count" },
+        "clear_unused_tags": { "description": "tag-ops.md G6: registry rows removed.", "$ref": "#/$defs/op_count" },
+        "set_flag": {
+          "description": "tag-ops.md G8: cards written, or the rejection invalid_flag.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_flag"] } } }] }
+          ]
+        },
+        "tag_tree": {
+          "description": "tag-ops.md G9: top-level nodes of the tag tree (specs/tags/tags.md T13).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/tag_node" }
+        },
         "undo": {
           "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]
@@ -385,6 +446,22 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "op_count": {
+      "type": "object",
+      "required": ["count"],
+      "additionalProperties": false,
+      "properties": { "count": { "type": "integer", "minimum": 0 } }
+    },
+    "tag_node": {
+      "type": "object",
+      "required": ["name", "collapsed", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "collapsed": { "type": "boolean" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/tag_node" } }
+      }
+    },
     "undo_step": {
       "description": "undo-ops.md V4: the id of an undo step's name.",
       "enum": [

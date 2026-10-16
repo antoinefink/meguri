@@ -4,6 +4,7 @@
 //! scenarios run as a chain of segments on both (dsl.md D9, `live`), actor
 //! scenarios through the parties executor (sync-ops.md S10, `parties`).
 
+mod browser;
 pub mod clock;
 pub mod live;
 mod meguri;
@@ -15,6 +16,7 @@ pub mod sched;
 mod search;
 mod storage;
 pub mod sync_guard;
+mod tags;
 mod text;
 
 use std::fmt;
@@ -32,6 +34,7 @@ pub use meguri::{
 };
 pub use oracle::{Hello, OracleExecutor};
 pub use storage::{Storage, db_dump_table, db_exec_rows, normalize_sql};
+pub use tags::tag_tree_value;
 
 /// A failed run: a protocol error kind (`unknown_ref`, `invalid_scenario`,
 /// `unsupported_op`, `anki_error`, `worker_died`, ...), the step when known and

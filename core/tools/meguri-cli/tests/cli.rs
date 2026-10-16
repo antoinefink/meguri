@@ -29,17 +29,26 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["ops"],
         serde_json::json!([
+            "add_note_tags",
             "add_notetype",
             "add_stock_notetype",
             "advance",
+            "browser_config_set",
+            "clear_unused_tags",
             "clone_notetype",
             "db_exec",
+            "delete_tags",
             "ensure_io_notetype",
             "handoff",
             "open",
+            "remove_note_tags",
+            "rename_tag",
             "reopen",
+            "reparent_tags",
             "set_clock",
             "set_config",
+            "set_flag",
+            "set_tag_collapsed",
             "update_notetype",
             "update_notetype.css",
             "update_notetype.field_options",
@@ -57,6 +66,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!([
+            "browser_config",
             "canonical_search",
             "cloze",
             "db_dump",
@@ -64,16 +74,18 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "notetype_structure",
             "schema_objects",
             "search",
+            "tag_tree",
             "template",
             "text",
             "timing"
         ])
     );
-    // dsl.md D7.2: 34 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 43 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
-    // set_config, undo-ops.md's undo, redo and remove_config and the note
+    // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
+    // of tag-ops.md, browser-config-ops.md's browser_config_set and the note
     // type ops of notetype-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 34);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 43);
     for op in [
         "actor",
         "sync",
@@ -87,6 +99,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "undo",
         "redo",
         "remove_config",
+        "rename_tag",
+        "set_flag",
+        "browser_config_set",
     ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),

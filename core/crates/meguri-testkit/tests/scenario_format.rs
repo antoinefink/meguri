@@ -632,6 +632,153 @@ fn undo_ops_follow_the_schema() {
     }
 }
 
+/// tag-ops.md G1-G9: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn tag_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: tags/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{add_note_tags: {notes: [\"#n1\", \"#n2\"], tags: \"a b\"}}, {remove_note_tags: {notes: [\"#n1\"], tags: \"\"}}, \
+         {delete_tags: {tags: \"x y\"}}, {rename_tag: {from: \"C++\", to: \"a b\"}}, \
+         {reparent_tags: {tags: [a, \"b::c\"], parent: \"\"}}, {clear_unused_tags: {}}, \
+         {set_tag_collapsed: {tags: [a], collapsed: false}}, {set_flag: {cards: [\"#c1\"], flag: 8}}, \
+         {observe: [tag_tree, {tag_tree: null}]}]",
+    )
+    .unwrap();
+    assert!(matches!(&parsed.steps[0], Step::AddNoteTags(args) if args.notes.len() == 2 && args.tags == "a b"));
+    assert!(matches!(&parsed.steps[3], Step::RenameTag(args) if args.from == "C++" && args.to == "a b"));
+    assert!(matches!(&parsed.steps[4], Step::ReparentTags(args) if args.parent.is_empty() && args.tags.len() == 2));
+    assert!(matches!(&parsed.steps[6], Step::SetTagCollapsed(args) if !args.collapsed));
+    assert!(matches!(&parsed.steps[7], Step::SetFlag(args) if args.flag == 8));
+    let needs = parsed.needs();
+    for op in [
+        "add_note_tags",
+        "remove_note_tags",
+        "delete_tags",
+        "rename_tag",
+        "reparent_tags",
+        "clear_unused_tags",
+        "set_tag_collapsed",
+        "set_flag",
+    ] {
+        assert!(needs.ops.contains(op), "{op}");
+        assert!(Step::NAMES.contains(&op), "{op}");
+    }
+    assert!(needs.observations.contains("tag_tree"));
+    assert!(parsed.starts_from_new_collection(), "tag_tree reads the collection");
+    for (bad, why) in [
+        ("[{add_note_tags: {notes: [], tags: a}}]", "at least one note"),
+        (
+            "[{remove_note_tags: {notes: [\"#c1\"], tags: a}}]",
+            "not a note reference",
+        ),
+        ("[{add_note_tags: {notes: [\"#n1\"]}}]", "tags"),
+        ("[{add_note_tags: {notes: [\"#n1\"], tags: 1}}]", "invalid type"),
+        ("[{delete_tags: {tags: [a]}}]", "invalid type"),
+        ("[{rename_tag: {from: \"\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: \"a b\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: \"a\u{3000}b\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: a}}]", "to"),
+        ("[{reparent_tags: {tags: [], parent: p}}]", "at least one tag"),
+        ("[{reparent_tags: {tags: [\"\"], parent: p}}]", "non-empty tag names"),
+        ("[{reparent_tags: {tags: [a]}}]", "parent"),
+        ("[{clear_unused_tags: {all: true}}]", "unknown key"),
+        ("[{set_tag_collapsed: {tags: [], collapsed: true}}]", "at least one tag"),
+        ("[{set_tag_collapsed: {tags: [a], collapsed: 1}}]", "invalid type"),
+        ("[{set_flag: {cards: [], flag: 1}}]", "at least one card"),
+        ("[{set_flag: {cards: [\"#c1\"], flag: -1}}]", "invalid value"),
+        ("[{set_flag: {cards: [\"#n1\"], flag: 1}}]", "not a card reference"),
+        ("[{observe: [{tag_tree: {}}]}]", "tag_tree"),
+        ("[{observe: [\"tag_tree(#c1)\"]}]", "does not take"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// browser-config-ops.md B1, B2: the op with scenario.schema.json's key
+/// list and value shapes, and the observation.
+#[test]
+fn browser_config_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: browser/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{browser_config_set: {key: activeCols, value: [question, \"\", addonX]}}, \
+         {browser_config_set: {key: sortType, value: myAddonColumn}}, \
+         {browser_config_set: {key: collapseTags, value: true}}, \
+         {browser_config_set: {key: savedFilters, value: {a: \"is:due\"}}}, \
+         {browser_config_set: {key: flagLabels, value: {}}}, \
+         {observe: [browser_config, {browser_config: null}]}]",
+    )
+    .unwrap();
+    assert!(
+        matches!(&parsed.steps[0], Step::BrowserConfigSet(args) if args.key == "activeCols"
+        && args.value == serde_json::json!(["question", "", "addonX"]))
+    );
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("browser_config_set"));
+    assert!(Step::NAMES.contains(&"browser_config_set"));
+    assert!(needs.observations.contains("browser_config"));
+    assert!(
+        parsed.starts_from_new_collection(),
+        "browser_config reads the collection"
+    );
+    for (bad, why) in [
+        (
+            "[{browser_config_set: {key: normalize_note_text, value: false}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: curDeck, value: 1}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: ActiveCols, value: []}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: collapseTags, value: 1}}]",
+            "takes a boolean",
+        ),
+        (
+            "[{browser_config_set: {key: setDueBrowser, value: 5}}]",
+            "takes a string",
+        ),
+        ("[{browser_config_set: {key: sortType, value: null}}]", "takes a string"),
+        (
+            "[{browser_config_set: {key: activeCols, value: [noteFld, 5]}}]",
+            "takes an array of strings",
+        ),
+        (
+            "[{browser_config_set: {key: activeCols, value: noteFld}}]",
+            "takes an array of strings",
+        ),
+        (
+            "[{browser_config_set: {key: savedFilters, value: {a: 3}}}]",
+            "takes an object of strings",
+        ),
+        (
+            "[{browser_config_set: {key: flagLabels, value: []}}]",
+            "takes an object of strings",
+        ),
+        ("[{browser_config_set: {key: flagLabels}}]", "value"),
+        (
+            "[{browser_config_set: {key: flagLabels, value: {}, undoable: true}}]",
+            "unknown field",
+        ),
+        ("[{observe: [{browser_config: {}}]}]", "browser_config"),
+        ("[{observe: [\"browser_config(#c1)\"]}]", "does not take"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn text_requests_follow_the_schema() {
     let parse = |request: &str| {

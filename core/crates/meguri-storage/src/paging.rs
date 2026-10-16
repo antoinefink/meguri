@@ -103,6 +103,63 @@ pub trait ReadRows: sealed::Connected {
         rows::get(self.connection(), &RowKey::text(name))
     }
 
+    /// Every `tags` row, in the table's key order (`unicase`).
+    fn tag_rows(&self) -> Result<Vec<Tag>, StorageError> {
+        rows::select_where(self.connection(), Table::Tags, "1", &[])?
+            .iter()
+            .map(|cells| Tag::from_cells(cells).map_err(StorageError::from))
+            .collect()
+    }
+
+    /// Up to `limit` `tags` rows whose `tag` is `from` or comes after it in
+    /// the table's key order (`unicase`), in that order. The rows whose
+    /// names fold to a text beginning with `from`'s folding come first, one
+    /// after another (`tags/tags` T1's tree spelling).
+    fn tag_rows_from(&self, from: &str, limit: usize) -> Result<Vec<Tag>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT tag, usn, collapsed, config FROM tags WHERE tag >= ?1 ORDER BY tag LIMIT ?2")?;
+        let images = statement.query_map((from, limit_value(limit)), |row| rows::row_image(row, Table::Tags))?;
+        let mut out = Vec::new();
+        for image in images {
+            out.push(Tag::from_cells(&image?)?);
+        }
+        Ok(out)
+    }
+
+    /// Up to `limit` notes' `tags` columns with ids above `after` (all when
+    /// `None`), by id: the tag scans of `tags/tags` T5 and T11, which read
+    /// no field. A `tags` value that is not UTF-8 text makes the row
+    /// unreadable, as it does for [`ReadRows::note`].
+    fn note_tags_after(&self, after: Option<NoteId>, limit: usize) -> Result<Vec<(NoteId, String)>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id, tags FROM notes WHERE id > ?1 ORDER BY id LIMIT ?2")?;
+        let found = statement.query_map((after.map_or(i64::MIN, |id| id.0), limit_value(limit)), |row| {
+            Ok((row.get::<_, i64>(0)?, Cell::from_ref(row.get_ref(1)?)))
+        })?;
+        let mut out = Vec::new();
+        for item in found {
+            let (id, tags) = item?;
+            let tags = match tags {
+                Cell::Text(bytes) => String::from_utf8(bytes).map_err(|_| "text is not UTF-8".to_owned()),
+                other => Err(format!("not text: {other:?}")),
+            };
+            match tags {
+                Ok(tags) => out.push((NoteId(id), tags)),
+                Err(reason) => {
+                    return Err(StorageError::from(rows::RowError {
+                        table: Table::Notes.name(),
+                        column: "tags",
+                        key: RowKey::Id(id).to_string(),
+                        reason,
+                    }));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     fn grave(&self, oid: i64, kind: GraveKind) -> Result<Option<Grave>, StorageError> {
         rows::get(self.connection(), &graves::key(oid, kind))
     }

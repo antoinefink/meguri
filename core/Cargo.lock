@@ -1622,10 +1622,12 @@ dependencies = [
  "libc",
  "meguri-model",
  "meguri-sched",
+ "meguri-search",
  "meguri-storage",
  "meguri-template",
  "meguri-testkit",
  "meguri-text",
+ "regex",
  "serde_json",
  "tempfile",
  "tracing",
@@ -1673,9 +1675,11 @@ name = "meguri-search"
 version = "0.0.0"
 dependencies = [
  "meguri-model",
+ "meguri-storage",
  "meguri-testkit",
  "regex",
  "rusqlite",
+ "tempfile",
 ]
 
 [[package]]
