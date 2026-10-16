@@ -1168,7 +1168,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 23] = [
+    pub const ALL: [ObservationKind; 24] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1273,11 +1273,15 @@ pub struct ObservationRequest {
 }
 
 impl ObservationRequest {
-    /// D8: the kinds that never read a collection, `text`, `cloze` and
-    /// `fsrs_next`, and `template` when every case is a new-note case.
+    /// D8: the kinds that never read a collection, `text`, `cloze`,
+    /// `fsrs_next` and `canonical_search`, and `template` when every case is
+    /// a new-note case.
     pub fn reads_no_collection(&self) -> bool {
         match self.kind {
-            ObservationKind::Text | ObservationKind::Cloze | ObservationKind::FsrsNext => true,
+            ObservationKind::Text
+            | ObservationKind::Cloze
+            | ObservationKind::FsrsNext
+            | ObservationKind::CanonicalSearch => true,
             ObservationKind::Template => match &self.args {
                 ObservationArgs::Mapping(map) => TemplateRequest::from_mapping(map)
                     .is_ok_and(|request| request.cases.iter().all(|c| matches!(c, TemplateCase::NewNote(_)))),

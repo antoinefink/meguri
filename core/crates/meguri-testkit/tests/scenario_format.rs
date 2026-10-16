@@ -1005,6 +1005,7 @@ fn a_scenario_starts_from_the_new_collection_unless_it_opens_a_fixture_or_reads_
         "  - observe: [{text: {fns: [strip_markup], inputs: [\"<b>a</b>\"]}}]\n".to_owned(),
         "  - observe: [{cloze: {fns: [numbers], inputs: [\"{{c1::a}}\"]}}]\n".to_owned(),
         "  - observe: [{fsrs_next: {param_sets: {default: []}, inputs: [{id: 0, card_id: 1, reps: 1, s: 1.0, d: 5.0, elapsed_days: 1, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}]}}]\n".to_owned(),
+        "  - observe: [{canonical_search: [\"deck:a\", \"a or\"]}]\n".to_owned(),
         template(new_note),
     ] {
         assert!(!needs_it("", &steps), "{steps}");
