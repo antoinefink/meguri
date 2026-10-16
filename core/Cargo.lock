@@ -1063,6 +1063,7 @@ dependencies = [
  "meguri-storage",
  "meguri-testkit",
  "meguri-text",
+ "regex",
  "serde_json",
  "tempfile",
  "tracing",

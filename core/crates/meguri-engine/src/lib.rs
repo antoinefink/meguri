@@ -5,20 +5,24 @@
 //! ordered change stream and in-core observers (C2), the collection
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
 //! registry, the ports, cancellation and progress; U25 adds undo and redo
-//! (C3). Specs: `specs/engine/op-model.md`, `change-stream.md`,
-//! `lifecycle.md`, `jobs.md`, `undo.md`.
+//! (C3); U30 the tags, flags and marked notes (`specs/tags/`). Specs:
+//! `specs/engine/op-model.md`, `change-stream.md`, `lifecycle.md`,
+//! `jobs.md`, `undo.md`.
 
 pub mod cancel;
 pub mod changes;
 pub mod collection;
 pub mod error;
 pub mod executor;
+pub mod flags;
 pub mod jobs;
 pub mod lifecycle;
+pub mod marked;
 pub mod monotonic;
 pub mod ports;
 pub mod progress;
 pub mod readers;
+pub mod tags;
 pub mod threads;
 pub mod undo;
 
@@ -29,7 +33,7 @@ pub use collection::Collection;
 pub use error::EngineError;
 pub use executor::catalog::{OpDef, UndoClass};
 pub use executor::op::{OpContext, OpResult, OpSpec, OpTiming, Pending, UndoMeta, WriteDelay};
-pub use executor::plan_commit::{Plan, PlanContext, plan_and_commit};
+pub use executor::plan_commit::{Plan, PlanContext, plan_and_commit, plan_and_commit_with};
 pub use executor::preconditions::Precondition;
 pub use jobs::registry::{JobRegistry, RunningJob};
 pub use jobs::{JobContext, JobHandle, JobId, JobKind, JobOutcome};
