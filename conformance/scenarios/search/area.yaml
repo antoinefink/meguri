@@ -1,0 +1,19 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
+# the testkit's search adapter (meguri-search). errors/run and
+# structure/whole-collection have no setup: they open the schema-18 storage
+# fixture and write their notes and cards with db_exec. The other result
+# scenarios need the notetypes and notes setup sections (U29, U27) and, where
+# tagged needs-*, the terms of U81 and U82; they become active as those land.
+area: search
+active:
+  - "canonical/*"
+  - "errors/arguments"
+  - "errors/escapes"
+  - "errors/kinds"
+  - "errors/order"
+  - "errors/run"
+  - "lexing/*"
+  - "structure/groups"
+  - "structure/negation"
+  - "structure/operators"
+  - "structure/whole-collection"

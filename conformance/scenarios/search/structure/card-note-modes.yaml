@@ -1,0 +1,47 @@
+# R1080, specs/search/query-model.md Q4: a note with two cards, the first a
+# review card and the second a suspended new card; a second note with two new
+# cards. Notes mode tests the whole query on one card at a time. Needs the
+# state, template and plain-text terms (U81, U82).
+id: search/structure/card-note-modes
+tags: [needs-text, needs-state, needs-template]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Duo, fields: [dog, x]}
+    - {notetype: Duo, fields: [cat, y]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 3, factor = 2500 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - search:
+          - {query: 'is:suspended'}
+          - {query: 'is:suspended', kind: notes}
+          - {query: '-is:suspended'}
+          - {query: '-is:suspended', kind: notes}
+          - {query: 'is:review'}
+          - {query: 'is:review', kind: notes}
+          - {query: 'is:suspended is:review'}
+          - {query: 'is:suspended is:review', kind: notes}
+          - {query: 'is:suspended or is:review'}
+          - {query: 'is:suspended or is:review', kind: notes}
+          - {query: 'is:suspended is:new'}
+          - {query: 'is:suspended is:new', kind: notes}
+          - {query: 'card:2'}
+          - {query: 'card:2', kind: notes}
+          - {query: '-card:2'}
+          - {query: '-card:2', kind: notes}
+          - {query: 'is:suspended dog'}
+          - {query: 'is:suspended dog', kind: notes}
+          - {query: 'is:suspended cat'}
+          - {query: 'is:suspended cat', kind: notes}
+          - {query: '-is:suspended dog'}
+          - {query: '-is:suspended dog', kind: notes}
+          - {query: ''}
+          - {query: '', kind: notes}
