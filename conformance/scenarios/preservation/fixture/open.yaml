@@ -1,0 +1,15 @@
+# The kitchen-sink fixture as Meguri and Anki read it (specs/conformance/
+# normalized-dump.md N9, N10): every row, normalized as observations.md O8
+# says, and the schema-11 objects of its note types, decks and presets. The
+# observe step is the recipe's last one (preservation/recipe/kitchen-sink),
+# and its value equals the recipe golden's: the maker checks it (N9.2).
+id: preservation/fixture/open
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: preservation/kitchen-sink.anki2}
+  - observe:
+      - db_dump
+      - legacy_json:
+          notetypes: [Vocab, Gaps, Formula]
+          decks: [Default, Languages, "Languages::Japanese", Math, Cram, Custom Study Session]
+          presets: [Default, Steady, Legacy]

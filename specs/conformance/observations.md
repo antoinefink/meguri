@@ -49,7 +49,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
-| `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
+| `db_dump` | none or `{tables?: [...], raw?: bool}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8), or raw (`normalized-dump.md` N4) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
 | `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |
@@ -125,6 +125,8 @@ The runner compares the golden's observations (expected) with the executor's (ac
   - the digest of `fields.config` covers the stored bytes without the field's random id, top-level protobuf field 9, and the digest of `templates.config` covers them without the template's random id, top-level protobuf field 8. Removing a field removes every occurrence of that top-level field number, tag and value, and keeps the other bytes in their order. The blob parses when it is a sequence of fields, each a varint tag with a field number of at least 1 and a wire type of 0 (varint), 1 (8 bytes), 2 (a varint length, then that many bytes) or 5 (4 bytes), that ends exactly at the blob's end. A blob that does not parse is digested as stored.
 
   `converge` compares the raw values instead (`sync-ops.md` S7.2), so actors that disagree on a random value still differ there.
+
+  `{db_dump: {raw: true}}` reports the raw values too (`normalized-dump.md` N4): scenarios that start from a fixture, whose values are fixed, use it to show that they survive byte for byte.
 - Real ids appear as stored. Meguri allocates ids as Anki does (`specs/storage/ids-usn-mtime.md` I2), so a Meguri collection's dump has the same ids as the oracle's, except where Meguri's one-day cap applies (I3, with its deviations).
 
 ## O9. Text functions

@@ -35,6 +35,11 @@
       "description": "No handoff in an actor scenario (dsl.md D9.3).",
       "if": { "required": ["actors"] },
       "then": { "properties": { "steps": { "not": { "contains": { "required": ["handoff"] } } } } }
+    },
+    {
+      "description": "No adopt in an actor scenario (normalized-dump.md N5).",
+      "if": { "required": ["actors"] },
+      "then": { "properties": { "steps": { "not": { "contains": { "required": ["adopt"] } } } } }
     }
   ],
   "properties": {
@@ -327,11 +332,12 @@
               }
             },
             "db_dump": {
-              "description": "observations.md O8: all twelve tables, or the listed ones.",
+              "description": "observations.md O8: all twelve tables, or the listed ones; raw true leaves out O8's normalization of random values (normalized-dump.md N4).",
               "type": ["object", "null"],
               "additionalProperties": false,
               "properties": {
-                "tables": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/dump_table" } }
+                "tables": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/dump_table" } },
+                "raw": { "type": "boolean" }
               }
             },
             "stats": { "description": "Draft.", "type": ["object", "null"] },
@@ -651,6 +657,11 @@
         },
         "reopen": {
           "description": "Close the collection and open it again from its file (sync-ops.md S6).",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "adopt": {
+          "description": "normalized-dump.md N5: give the collection's notes and cards that have no logical id the next #nN and #cN, in ascending id order. Not in actor scenarios.",
           "type": "object",
           "maxProperties": 0
         },

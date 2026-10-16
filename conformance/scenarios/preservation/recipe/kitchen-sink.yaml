@@ -1,0 +1,300 @@
+# The recipe of the preservation fixture conformance/fixtures/preservation/
+# kitchen-sink.anki2 (specs/conformance/normalized-dump.md N9): a synced FSRS
+# collection holding every kind of data Meguri keeps without using it
+# (R2017, R322, R323, R1483-R1486). The oracle maintainer's maker runs these
+# steps on the oracle and keeps the collection file; this scenario's golden
+# documents the result (the final observe step). Every value the steps leave
+# is set by the scenario or by the frozen clock, except the notes' guids.
+#
+# Timeline (UTC): created 2030-01-01 09:00 (day 0), reviews on days 0 and 4,
+# filtered decks on day 7, other clients' data on days 9 and 11, last sync on
+# 2030-01-14 18:00 (day 13). Scenarios that open the fixture start on day 14.
+id: preservation/recipe/kitchen-sink
+clock: {tz: UTC, start: "2030-01-01T09:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false, fsrsLegacyEvaluate: true, renderLatex: false}
+  presets:
+    - {name: Steady, learn_steps: [1m, 10m], relearn_steps: [10m], new_per_day: 20, reviews_per_day: 200, desired_retention: 0.9, max_interval_days: 36500}
+    - {name: Legacy, learn_steps: [10m], relearn_steps: [10m], new_per_day: 10, reviews_per_day: 100, desired_retention: 0.85, starting_ease: 2.3, easy_bonus: 1.4, hard_interval: 1.1, interval_modifier: 0.95, lapse_new_interval: 0.2}
+  decks:
+    - {name: Languages, preset: Steady}
+    - {name: "Languages::Japanese", preset: Steady}
+    - {name: Math, preset: Legacy}
+  notetypes:
+    - name: Vocab
+      fields: [Word, Meaning, Reading, Audio]
+      templates:
+        - name: Recognize
+          front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}'
+          back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'
+        - name: Recall
+          front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}'
+          back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'
+      css: ".card { font-family: serif; font-size: 22px; text-align: center; }\n.word { font-size: 40px; }\n.reading rt { color: gray; }\n"
+    - name: Gaps
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - name: Cloze
+          front: "{{cloze:Text}}"
+          back: "{{cloze:Text}}<br>{{hint:Extra}}"
+      css: ".card { font-family: sans-serif; }\n.cloze { font-weight: bold; color: teal; }\n"
+    - name: Formula
+      fields: [Front, Back, Source]
+      templates:
+        - name: Statement
+          front: "{{Front}}"
+          back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'
+      css: ".card { font-family: serif; }\n.src { font-size: 12px; }\n"
+  notes:
+    - {notetype: Vocab, deck: "Languages::Japanese", fields: ["食べる", to eat, "食[た]べる", "[sound:taberu.mp3]"], tags: [verb, "jlpt::n5"]}
+    - {notetype: Vocab, deck: "Languages::Japanese", fields: ["飲む", to drink, "飲[の]む", ""], tags: [verb, "jlpt::n5"]}
+    - {notetype: Vocab, deck: "Languages::Japanese", fields: ["本", book, "本[ほん]", ""], tags: [noun, "jlpt::n5"]}
+    - {notetype: Vocab, deck: "Languages::Japanese", fields: ["水", water, "水[みず]", "[anki:tts lang=ja_JP]みず[/anki:tts]"], tags: [noun]}
+    - {notetype: Vocab, deck: "Languages::Japanese", fields: ["学校", school, "学校[がっこう]", ""], tags: [noun, "jlpt::n4"]}
+    - {notetype: Vocab, deck: "Languages::Japanese", fields: ["静か", quiet, "静[しず]か", ""], tags: [adjective]}
+    - {notetype: Gaps, deck: Languages, fields: ["{{c1::Paris}} is the capital of France.", geography]}
+    - {notetype: Gaps, deck: Languages, fields: ['Water boils at {{c1::100 °C::temperature}} at sea level, \(T_b = 373.15\,\mathrm{K}\).', ""]}
+    - {notetype: Formula, deck: Math, fields: [Area of a circle, '\(A = \pi r^2\)', '[$]A=\pi r^2[/$]']}
+    - {notetype: Formula, deck: Math, fields: ["Euler's identity", '\[e^{i\pi} + 1 = 0\]', '[latex]$e^{i\pi}+1=0$[/latex]']}
+    - {notetype: Formula, deck: Math, fields: [Quadratic formula, '\(x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}\)', '[$$]x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}[/$$]'], tags: [algebra]}
+    - {notetype: Formula, deck: Math, fields: [Derivative of sine, '\(\cos x\)', ""], tags: [skip]}
+steps:
+  # Day 0. Note types with ids, LaTeX settings, browser templates and legacy
+  # keys of their own; Anki gives new fields and templates random ids.
+  - legacy_update:
+      notetype: Vocab
+      patch:
+        latexPre: "\\documentclass{article}\n\\usepackage{CJKutf8}\n\\begin{document}\n"
+        latexPost: "\\end{document}\n"
+        originalStockKind: 2
+        originalId: 1700000000000
+        flds:
+          - {name: Word, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, description: "the word", plainText: false, collapsed: false, excludeFromSearch: false, id: 3001, tag: null, preventDeletion: true}
+          - {name: Meaning, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, description: "", plainText: false, collapsed: false, excludeFromSearch: false, id: 3002, tag: null, preventDeletion: false}
+          - {name: Reading, ord: 2, sticky: true, rtl: false, font: "Noto Sans JP", size: 24, description: "", plainText: true, collapsed: false, excludeFromSearch: false, id: 3003, tag: null, preventDeletion: false}
+          - {name: Audio, ord: 3, sticky: false, rtl: false, font: Arial, size: 14, description: "", plainText: false, collapsed: true, excludeFromSearch: true, id: 3004, tag: null, preventDeletion: false}
+        tmpls:
+          - {name: Recognize, ord: 0, qfmt: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', afmt: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}', bqfmt: "{{Word}}", bafmt: "{{Meaning}}", did: null, bfont: Arial, bsize: 14, id: 4001}
+          - {name: Recall, ord: 1, qfmt: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', afmt: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>', bqfmt: "", bafmt: "", did: null, bfont: "", bsize: 0, id: 4002}
+  - legacy_update:
+      notetype: Gaps
+      patch:
+        latexPre: "\\documentclass{article}\n\\begin{document}\n"
+        latexPost: "\\end{document}\n"
+        flds:
+          - {name: Text, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, description: "", plainText: false, collapsed: false, excludeFromSearch: false, id: 5001, tag: null, preventDeletion: false}
+          - {name: Extra, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, description: "", plainText: false, collapsed: false, excludeFromSearch: false, id: 5002, tag: null, preventDeletion: false}
+        tmpls:
+          - {name: Cloze, ord: 0, qfmt: "{{cloze:Text}}", afmt: "{{cloze:Text}}<br>{{hint:Extra}}", bqfmt: "", bafmt: "", did: null, bfont: "", bsize: 0, id: 6001}
+  - legacy_update:
+      notetype: Formula
+      patch:
+        latexPre: "\\documentclass[11pt]{article}\n\\usepackage{amsmath,amssymb}\n\\begin{document}\n"
+        latexPost: "\\end{document}"
+        latexsvg: true
+        mathAddon: {engine: mathjax3, macros: {RR: "\\mathbb{R}"}, version: 2}
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, description: "", plainText: false, collapsed: false, excludeFromSearch: false, id: 7001, tag: null, preventDeletion: false}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, description: "", plainText: false, collapsed: false, excludeFromSearch: false, id: 7002, tag: null, preventDeletion: false}
+          - {name: Source, ord: 2, sticky: false, rtl: false, font: Courier, size: 16, description: "LaTeX", plainText: true, collapsed: false, excludeFromSearch: true, id: 7003, tag: null, preventDeletion: false}
+        tmpls:
+          - {name: Statement, ord: 0, qfmt: "{{Front}}", afmt: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>', bqfmt: "", bafmt: "", did: null, bfont: "", bsize: 0, id: 8001}
+  # Presets: every FSRS list, Easy Days, historical retention, the optimizer's
+  # search and cut-off date, SM-2 ease settings, and one unknown top-level key
+  # each (a future FSRS list; an add-on block). Anki writes several top-level
+  # members of other in no set order, so each preset keeps one.
+  - legacy_update:
+      preset: Steady
+      patch:
+        fsrsWeights: [0.5512, 1.3904, 4.2051, 11.3107, 5.2209, 1.1503, 0.9102, 0.0405, 1.5903, 0.1407, 0.9908, 2.0511, 0.0802, 0.3311, 1.5102, 0.2304, 2.7509]
+        fsrsParams5: [0.3891, 1.2207, 3.3014, 14.9056, 7.1213, 0.5502, 1.1024, 0.0201, 1.5809, 0.1611, 1.0457, 1.9102, 0.0899, 0.3108, 2.1503, 0.2602, 2.8104, 0.4703, 0.6012]
+        fsrsParams6: [0.1544, 0.8813, 2.9105, 11.2071, 6.8114, 0.7103, 2.6541, 0.0052, 1.6812, 0.1801, 0.8724, 1.5932, 0.0712, 0.2891, 1.7524, 0.5103, 2.0542, 0.4817, 0.1123, 0.0841, 0.1305]
+        easyDaysPercentages: [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.0]
+        sm2Retention: 0.85
+        weightSearch: "deck:Languages*"
+        ignoreRevlogsBeforeDate: "2029-12-01"
+        fsrsParams7: [0.25, 1.5, 3.75]
+  - legacy_update:
+      preset: Legacy
+      patch:
+        fsrsParams5: [0.3891, 1.2207, 3.3014, 14.9056, 7.1213, 0.5502, 1.1024, 0.0201, 1.5809, 0.1611, 1.0457, 1.9102, 0.0899, 0.3108, 2.1503, 0.2602, 2.8104, 0.4703, 0.6012]
+        easyDaysPercentages: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0]
+        sm2Retention: 0.9
+        addonLegacy: {enabled: true, intervals: [1, 3, 7], label: "週末", ratio: 0.5}
+  # Decks: legacy custom-study extensions, collapsed states, descriptions, limit
+  # overrides and one unknown top-level key.
+  - legacy_update:
+      deck: Languages
+      patch:
+        extendNew: 5
+        extendRev: 10
+        collapsed: false
+        browserCollapsed: true
+        desc: "<b>Languages</b> shared deck"
+        provenance: {id: 1234567890, kind: shared, title: Core}
+  - legacy_update:
+      deck: "Languages::Japanese"
+      patch:
+        extendNew: 3
+        extendRev: 0
+        collapsed: true
+        browserCollapsed: false
+        reviewLimit: 150
+        newLimit: 15
+        desiredRetention: 92
+  - legacy_update:
+      deck: Math
+      patch:
+        collapsed: false
+        browserCollapsed: false
+        desc: "Formulas, *Markdown* text"
+        md: true
+  # Anki creates the cards of one cloze note in no set order, so the second
+  # cloze arrives by an edit: its card is created after the others.
+  - edit_note: {note: "#n7", fields: ["{{c1::Paris}} is the capital of {{c2::France}}."]}
+  # Day 0 reviews: learning steps, graduations, one card left in learning.
+  - answer: {card: "#c1", rating: good, time_ms: 4100}
+  - answer: {card: "#c3", rating: good, time_ms: 3900}
+  - answer: {card: "#c5", rating: good, time_ms: 5200}
+  - answer: {card: "#c7", rating: good, time_ms: 2800}
+  - answer: {card: "#c13", rating: good, time_ms: 6100}
+  - answer: {card: "#c15", rating: good, time_ms: 7300}
+  - answer: {card: "#c16", rating: good, time_ms: 6600}
+  - answer: {card: "#c11", rating: again, time_ms: 9000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c3", rating: good, time_ms: 2500}
+  - answer: {card: "#c5", rating: good, time_ms: 3500}
+  - answer: {card: "#c7", rating: good, time_ms: 2000}
+  - answer: {card: "#c13", rating: good, time_ms: 4000}
+  - answer: {card: "#c15", rating: good, time_ms: 5000}
+  - answer: {card: "#c16", rating: good, time_ms: 4500}
+  # Day 4: reviews, a lapse and its relearning step.
+  - set_clock: "2030-01-05T09:00:00"
+  - answer: {card: "#c1", rating: good, time_ms: 3300}
+  - answer: {card: "#c3", rating: again, time_ms: 8000}
+  - answer: {card: "#c5", rating: hard, time_ms: 6000}
+  - answer: {card: "#c7", rating: easy, time_ms: 1500}
+  - answer: {card: "#c13", rating: good, time_ms: 3700}
+  - answer: {card: "#c15", rating: good, time_ms: 4200}
+  - answer: {card: "#c16", rating: hard, time_ms: 9100}
+  - advance: 10m
+  - answer: {card: "#c3", rating: good, time_ms: 2600}
+  # Day 7: two filtered decks, as Anki builds them (specs/model/schema11-json
+  # S9; cards moved in keep their home deck in odid and their due in odue, and
+  # take positions from -100000). Cram reschedules; Custom Study Session does
+  # not, so its cards wait in the review queue. A card answered in each gives
+  # review-log type 3 entries (an early review, a preview).
+  - set_clock: "2030-01-08T09:00:00"
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1894093200000, 'Cram', 1894093200, -1, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c'), (1894093200001, 'Custom Study Session', 1894093200, -1, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c')"
+  - legacy_update:
+      deck: Cram
+      patch:
+        collapsed: false
+        browserCollapsed: false
+        resched: true
+        terms: [["deck:Languages* is:review", 50, 6], ["tag:verb", 20, 1]]
+        delays: [1.5, 10.0]
+        previewDelay: 10
+        previewAgainSecs: 60
+        previewHardSecs: 600
+        previewGoodSecs: 0
+  - legacy_update:
+      deck: Custom Study Session
+      patch:
+        collapsed: false
+        browserCollapsed: false
+        resched: false
+        terms: [["deck:\"Languages::Japanese\" is:new", 100, 5]]
+        delays: null
+        previewDelay: 0
+        previewAgainSecs: 60
+        previewHardSecs: 600
+        previewGoodSecs: 0
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894093200000, odue = due, due = -100000, mod = 1894093200, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894093200000, odue = due, due = -99999, mod = 1894093200, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894093200000, odue = due, due = -99998, mod = 1894093200, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894093200001, odue = due, due = -100000, queue = 2, mod = 1894093200, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894093200001, odue = due, due = -99999, queue = 2, mod = 1894093200, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 11)"}
+  - answer: {card: "#c7", rating: good, time_ms: 2200}
+  - answer: {card: "#c9", rating: again, time_ms: 7000}
+  # Custom study state: the Japanese deck's limit raised by 5 new cards today
+  # (a negative new count) and the tags its last custom study used.
+  - legacy_update:
+      deck: "Languages::Japanese"
+      patch:
+        newToday: [7, -5]
+  # Day 9: what other clients leave on cards and in the review log: a manual
+  # due change and a reschedule entry, flags, a suspended card, marked and
+  # leech tags, a collapsed tag, custom scheduling data.
+  - set_clock: "2030-01-10T09:00:00"
+  - db_exec: {sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (1894266000000, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 12), -1, 0, 7, 3, 2500, 0, 4), (1894266000001, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 15), -1, 0, 5, 4, 2500, 0, 5)"}
+  - db_exec: {sql: "UPDATE cards SET flags = 1, mod = 1894266000, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET flags = 7, mod = 1894266000, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - suspend: {cards: ["#c18"]}
+  - edit_note: {note: "#n2", tags: [verb, "jlpt::n5", marked]}
+  - edit_note: {note: "#n4", tags: [noun, leech]}
+  - db_exec: {sql: "UPDATE tags SET collapsed = 0 WHERE tag = 'verb'"}
+  - db_exec:
+      sql: "UPDATE cards SET data = json_set(data, '$.cd', ?), mod = 1894266000, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: ['{"streak":3,"v":"a"}']
+  - db_exec:
+      sql: "UPDATE cards SET data = json_set(data, '$.cd', ?), mod = 1894266000, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
+      params: ['{"seen":true}']
+  # Day 11: config keys of other clients and add-ons, with their own byte
+  # layouts, usn and mtime_secs, and the reviewer keys Anki desktop writes.
+  - set_clock: "2030-01-12T09:00:00"
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('heatmap', 0, 1700000000, CAST(? AS BLOB)), ('onigiri_sidebar_collapsed', 4, 1700000500, CAST(? AS BLOB)), ('addon_float', -1, 1894438800, CAST(? AS BLOB)), ('addon_big', -1, 1894438800, CAST(? AS BLOB)), ('addon_nested', -1, 1894438800, CAST(? AS BLOB))"
+      params:
+        - '{"limdate":0,"limhist":365,"mode":"year"}'
+        - '{"collapsed": true,  "width":220 }'
+        - "0.30000000000000004"
+        - "18446744073709551615"
+        - '{"b":[1,2,{"c":null}],"a":"x"}'
+  - db_exec:
+      sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('_deck_' || (SELECT id FROM decks WHERE name = 'Languages' || char(31) || 'Japanese') || '_customStudyIncludeTags', -1, 1894093200, CAST('[\"verb\"]' AS BLOB)), ('_deck_' || (SELECT id FROM decks WHERE name = 'Languages' || char(31) || 'Japanese') || '_customStudyExcludeTags', -1, 1894093200, CAST('[]' AS BLOB))"
+  - set_config: {key: cardStateCustomizer, value: "if (states.current.normal?.review) { customData.good.v = 1; }"}
+  - set_config: {key: setDueReviewer, value: "3-7"}
+  - set_config: {key: restorePositionReviewer, value: false}
+  - set_config: {key: resetCountsReviewer, value: true}
+  - db_exec: {sql: "UPDATE config SET val = CAST(CAST((SELECT id FROM decks WHERE name = 'Languages' || char(31) || 'Japanese') AS TEXT) AS BLOB), usn = -1, mtime_secs = 1894438800 WHERE KEY = 'curDeck'"}
+  - db_exec: {sql: "UPDATE config SET val = CAST('[' || (SELECT id FROM decks WHERE name = 'Languages' || char(31) || 'Japanese') || ']' AS BLOB), usn = -1, mtime_secs = 1894438800 WHERE KEY = 'activeDecks'"}
+  # Protobuf fields Anki does not declare, appended where no later step saves
+  # the record again (specs/model/protobuf-records.md P4): the Vocab note
+  # type, its first field and first template, the Math deck's common and kind,
+  # the Steady preset (field 7 holds a future FSRS list).
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'a00107' AS BLOB) WHERE name = 'Vocab'"}
+  - db_exec: {sql: "UPDATE fields SET config = CAST(config || X'a20103616263' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Vocab') AND ord = 0"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'f00101' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Vocab') AND ord = 0"}
+  - db_exec: {sql: "UPDATE decks SET common = CAST(common || X'4801' AS BLOB), kind = CAST(kind || X'1805' AS BLOB) WHERE name = 'Math'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = CAST(config || X'3a0400008040b80201' AS BLOB) WHERE name = 'Steady'"}
+  # Anki's stock note types leave the fixture (R1959); the Add screen points
+  # at Vocab.
+  - db_exec: {sql: "DELETE FROM templates WHERE ntid IN (SELECT id FROM notetypes WHERE name IN ('Basic', 'Basic (and reversed card)', 'Basic (optional reversed card)', 'Basic (type in the answer)', 'Cloze', 'Image Occlusion'))"}
+  - db_exec: {sql: "DELETE FROM fields WHERE ntid IN (SELECT id FROM notetypes WHERE name IN ('Basic', 'Basic (and reversed card)', 'Basic (optional reversed card)', 'Basic (type in the answer)', 'Cloze', 'Image Occlusion'))"}
+  - db_exec: {sql: "DELETE FROM notetypes WHERE name IN ('Basic', 'Basic (and reversed card)', 'Basic (optional reversed card)', 'Basic (type in the answer)', 'Cloze', 'Image Occlusion')"}
+  - db_exec: {sql: "UPDATE config SET val = CAST(CAST((SELECT id FROM notetypes WHERE name = 'Vocab') AS TEXT) AS BLOB), usn = -1, mtime_secs = 1894438800 WHERE KEY = 'curModel'"}
+  # Day 13: the state a normal sync leaves when this client sent everything
+  # (specs/conformance/normalized-dump.md N9.3): sent rows carry the server's
+  # usn 9, config entries usn 0, no graves; the collection's usn is 10 and
+  # its last sync equals its modification time.
+  - set_clock: "2030-01-14T18:00:00"
+  - db_exec: {sql: "UPDATE notes SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE cards SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE revlog SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE decks SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE deck_config SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE notetypes SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE tags SET usn = 9 WHERE usn = -1"}
+  - db_exec: {sql: "UPDATE config SET usn = 0 WHERE usn = -1"}
+  - db_exec: {sql: "DELETE FROM graves"}
+  - db_exec: {sql: "UPDATE col SET usn = 10, mod = 1894644000000, ls = 1894644000000"}
+  - observe:
+      - db_dump
+      - legacy_json:
+          notetypes: [Vocab, Gaps, Formula]
+          decks: [Default, Languages, "Languages::Japanese", Math, Cram, Custom Study Session]
+          presets: [Default, Steady, Legacy]

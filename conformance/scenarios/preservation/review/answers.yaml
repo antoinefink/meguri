@@ -1,0 +1,234 @@
+# R582, R2017 (normalized-dump.md N10, N11.1): 200 answers over 20 days on
+# ten cards of the Languages decks (none in a filtered deck or in Math, whose
+# deck blobs carry unknown protobuf fields) write no config key: the config
+# table, presets and note types keep every byte, the decks change only in
+# their day counters and modification stamps. Cards and the review log are
+# the scheduler's (U44) and are not observed here.
+id: preservation/review/answers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: preservation/kitchen-sink.anki2}
+  - adopt: {}
+  - observe:
+      - {db_dump: {tables: [col, notes, decks, deck_config, notetypes, fields, templates, tags, config, graves], raw: true}}
+  - answer: {card: "#c2", rating: good, time_ms: 2000}
+  - answer: {card: "#c3", rating: good, time_ms: 2100}
+  - answer: {card: "#c4", rating: hard, time_ms: 2200}
+  - answer: {card: "#c6", rating: good, time_ms: 2300}
+  - answer: {card: "#c7", rating: easy, time_ms: 2400}
+  - answer: {card: "#c8", rating: good, time_ms: 2500}
+  - answer: {card: "#c10", rating: good, time_ms: 2600}
+  - answer: {card: "#c11", rating: again, time_ms: 2700}
+  - answer: {card: "#c13", rating: good, time_ms: 2800}
+  - answer: {card: "#c14", rating: hard, time_ms: 2900}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2010}
+  - answer: {card: "#c3", rating: easy, time_ms: 2110}
+  - answer: {card: "#c4", rating: good, time_ms: 2210}
+  - answer: {card: "#c6", rating: good, time_ms: 2310}
+  - answer: {card: "#c7", rating: again, time_ms: 2410}
+  - answer: {card: "#c8", rating: good, time_ms: 2510}
+  - answer: {card: "#c10", rating: hard, time_ms: 2610}
+  - answer: {card: "#c11", rating: good, time_ms: 2710}
+  - answer: {card: "#c13", rating: good, time_ms: 2810}
+  - answer: {card: "#c14", rating: hard, time_ms: 2910}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2020}
+  - answer: {card: "#c3", rating: again, time_ms: 2120}
+  - answer: {card: "#c4", rating: good, time_ms: 2220}
+  - answer: {card: "#c6", rating: hard, time_ms: 2320}
+  - answer: {card: "#c7", rating: good, time_ms: 2420}
+  - answer: {card: "#c8", rating: good, time_ms: 2520}
+  - answer: {card: "#c10", rating: hard, time_ms: 2620}
+  - answer: {card: "#c11", rating: good, time_ms: 2720}
+  - answer: {card: "#c13", rating: easy, time_ms: 2820}
+  - answer: {card: "#c14", rating: good, time_ms: 2920}
+  - advance: 1d
+  - answer: {card: "#c2", rating: hard, time_ms: 2030}
+  - answer: {card: "#c3", rating: good, time_ms: 2130}
+  - answer: {card: "#c4", rating: good, time_ms: 2230}
+  - answer: {card: "#c6", rating: hard, time_ms: 2330}
+  - answer: {card: "#c7", rating: good, time_ms: 2430}
+  - answer: {card: "#c8", rating: easy, time_ms: 2530}
+  - answer: {card: "#c10", rating: good, time_ms: 2630}
+  - answer: {card: "#c11", rating: good, time_ms: 2730}
+  - answer: {card: "#c13", rating: again, time_ms: 2830}
+  - answer: {card: "#c14", rating: good, time_ms: 2930}
+  - advance: 1d
+  - answer: {card: "#c2", rating: hard, time_ms: 2040}
+  - answer: {card: "#c3", rating: good, time_ms: 2140}
+  - answer: {card: "#c4", rating: easy, time_ms: 2240}
+  - answer: {card: "#c6", rating: good, time_ms: 2340}
+  - answer: {card: "#c7", rating: good, time_ms: 2440}
+  - answer: {card: "#c8", rating: again, time_ms: 2540}
+  - answer: {card: "#c10", rating: good, time_ms: 2640}
+  - answer: {card: "#c11", rating: hard, time_ms: 2740}
+  - answer: {card: "#c13", rating: good, time_ms: 2840}
+  - answer: {card: "#c14", rating: good, time_ms: 2940}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2050}
+  - answer: {card: "#c3", rating: good, time_ms: 2150}
+  - answer: {card: "#c4", rating: again, time_ms: 2250}
+  - answer: {card: "#c6", rating: good, time_ms: 2350}
+  - answer: {card: "#c7", rating: hard, time_ms: 2450}
+  - answer: {card: "#c8", rating: good, time_ms: 2550}
+  - answer: {card: "#c10", rating: good, time_ms: 2650}
+  - answer: {card: "#c11", rating: hard, time_ms: 2750}
+  - answer: {card: "#c13", rating: good, time_ms: 2850}
+  - answer: {card: "#c14", rating: easy, time_ms: 2950}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2060}
+  - answer: {card: "#c3", rating: hard, time_ms: 2160}
+  - answer: {card: "#c4", rating: good, time_ms: 2260}
+  - answer: {card: "#c6", rating: good, time_ms: 2360}
+  - answer: {card: "#c7", rating: hard, time_ms: 2460}
+  - answer: {card: "#c8", rating: good, time_ms: 2560}
+  - answer: {card: "#c10", rating: easy, time_ms: 2660}
+  - answer: {card: "#c11", rating: good, time_ms: 2760}
+  - answer: {card: "#c13", rating: good, time_ms: 2860}
+  - answer: {card: "#c14", rating: again, time_ms: 2960}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2070}
+  - answer: {card: "#c3", rating: hard, time_ms: 2170}
+  - answer: {card: "#c4", rating: good, time_ms: 2270}
+  - answer: {card: "#c6", rating: easy, time_ms: 2370}
+  - answer: {card: "#c7", rating: good, time_ms: 2470}
+  - answer: {card: "#c8", rating: good, time_ms: 2570}
+  - answer: {card: "#c10", rating: again, time_ms: 2670}
+  - answer: {card: "#c11", rating: good, time_ms: 2770}
+  - answer: {card: "#c13", rating: hard, time_ms: 2870}
+  - answer: {card: "#c14", rating: good, time_ms: 2970}
+  - advance: 1d
+  - answer: {card: "#c2", rating: easy, time_ms: 2080}
+  - answer: {card: "#c3", rating: good, time_ms: 2180}
+  - answer: {card: "#c4", rating: good, time_ms: 2280}
+  - answer: {card: "#c6", rating: again, time_ms: 2380}
+  - answer: {card: "#c7", rating: good, time_ms: 2480}
+  - answer: {card: "#c8", rating: hard, time_ms: 2580}
+  - answer: {card: "#c10", rating: good, time_ms: 2680}
+  - answer: {card: "#c11", rating: good, time_ms: 2780}
+  - answer: {card: "#c13", rating: hard, time_ms: 2880}
+  - answer: {card: "#c14", rating: good, time_ms: 2980}
+  - advance: 1d
+  - answer: {card: "#c2", rating: again, time_ms: 2090}
+  - answer: {card: "#c3", rating: good, time_ms: 2190}
+  - answer: {card: "#c4", rating: hard, time_ms: 2290}
+  - answer: {card: "#c6", rating: good, time_ms: 2390}
+  - answer: {card: "#c7", rating: good, time_ms: 2490}
+  - answer: {card: "#c8", rating: hard, time_ms: 2590}
+  - answer: {card: "#c10", rating: good, time_ms: 2690}
+  - answer: {card: "#c11", rating: easy, time_ms: 2790}
+  - answer: {card: "#c13", rating: good, time_ms: 2890}
+  - answer: {card: "#c14", rating: good, time_ms: 2990}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2100}
+  - answer: {card: "#c3", rating: good, time_ms: 2200}
+  - answer: {card: "#c4", rating: hard, time_ms: 2300}
+  - answer: {card: "#c6", rating: good, time_ms: 2400}
+  - answer: {card: "#c7", rating: easy, time_ms: 2500}
+  - answer: {card: "#c8", rating: good, time_ms: 2600}
+  - answer: {card: "#c10", rating: good, time_ms: 2700}
+  - answer: {card: "#c11", rating: again, time_ms: 2800}
+  - answer: {card: "#c13", rating: good, time_ms: 2900}
+  - answer: {card: "#c14", rating: hard, time_ms: 3000}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2110}
+  - answer: {card: "#c3", rating: easy, time_ms: 2210}
+  - answer: {card: "#c4", rating: good, time_ms: 2310}
+  - answer: {card: "#c6", rating: good, time_ms: 2410}
+  - answer: {card: "#c7", rating: again, time_ms: 2510}
+  - answer: {card: "#c8", rating: good, time_ms: 2610}
+  - answer: {card: "#c10", rating: hard, time_ms: 2710}
+  - answer: {card: "#c11", rating: good, time_ms: 2810}
+  - answer: {card: "#c13", rating: good, time_ms: 2910}
+  - answer: {card: "#c14", rating: hard, time_ms: 3010}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2120}
+  - answer: {card: "#c3", rating: again, time_ms: 2220}
+  - answer: {card: "#c4", rating: good, time_ms: 2320}
+  - answer: {card: "#c6", rating: hard, time_ms: 2420}
+  - answer: {card: "#c7", rating: good, time_ms: 2520}
+  - answer: {card: "#c8", rating: good, time_ms: 2620}
+  - answer: {card: "#c10", rating: hard, time_ms: 2720}
+  - answer: {card: "#c11", rating: good, time_ms: 2820}
+  - answer: {card: "#c13", rating: easy, time_ms: 2920}
+  - answer: {card: "#c14", rating: good, time_ms: 3020}
+  - advance: 1d
+  - answer: {card: "#c2", rating: hard, time_ms: 2130}
+  - answer: {card: "#c3", rating: good, time_ms: 2230}
+  - answer: {card: "#c4", rating: good, time_ms: 2330}
+  - answer: {card: "#c6", rating: hard, time_ms: 2430}
+  - answer: {card: "#c7", rating: good, time_ms: 2530}
+  - answer: {card: "#c8", rating: easy, time_ms: 2630}
+  - answer: {card: "#c10", rating: good, time_ms: 2730}
+  - answer: {card: "#c11", rating: good, time_ms: 2830}
+  - answer: {card: "#c13", rating: again, time_ms: 2930}
+  - answer: {card: "#c14", rating: good, time_ms: 3030}
+  - advance: 1d
+  - answer: {card: "#c2", rating: hard, time_ms: 2140}
+  - answer: {card: "#c3", rating: good, time_ms: 2240}
+  - answer: {card: "#c4", rating: easy, time_ms: 2340}
+  - answer: {card: "#c6", rating: good, time_ms: 2440}
+  - answer: {card: "#c7", rating: good, time_ms: 2540}
+  - answer: {card: "#c8", rating: again, time_ms: 2640}
+  - answer: {card: "#c10", rating: good, time_ms: 2740}
+  - answer: {card: "#c11", rating: hard, time_ms: 2840}
+  - answer: {card: "#c13", rating: good, time_ms: 2940}
+  - answer: {card: "#c14", rating: good, time_ms: 3040}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2150}
+  - answer: {card: "#c3", rating: good, time_ms: 2250}
+  - answer: {card: "#c4", rating: again, time_ms: 2350}
+  - answer: {card: "#c6", rating: good, time_ms: 2450}
+  - answer: {card: "#c7", rating: hard, time_ms: 2550}
+  - answer: {card: "#c8", rating: good, time_ms: 2650}
+  - answer: {card: "#c10", rating: good, time_ms: 2750}
+  - answer: {card: "#c11", rating: hard, time_ms: 2850}
+  - answer: {card: "#c13", rating: good, time_ms: 2950}
+  - answer: {card: "#c14", rating: easy, time_ms: 3050}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2160}
+  - answer: {card: "#c3", rating: hard, time_ms: 2260}
+  - answer: {card: "#c4", rating: good, time_ms: 2360}
+  - answer: {card: "#c6", rating: good, time_ms: 2460}
+  - answer: {card: "#c7", rating: hard, time_ms: 2560}
+  - answer: {card: "#c8", rating: good, time_ms: 2660}
+  - answer: {card: "#c10", rating: easy, time_ms: 2760}
+  - answer: {card: "#c11", rating: good, time_ms: 2860}
+  - answer: {card: "#c13", rating: good, time_ms: 2960}
+  - answer: {card: "#c14", rating: again, time_ms: 3060}
+  - advance: 1d
+  - answer: {card: "#c2", rating: good, time_ms: 2170}
+  - answer: {card: "#c3", rating: hard, time_ms: 2270}
+  - answer: {card: "#c4", rating: good, time_ms: 2370}
+  - answer: {card: "#c6", rating: easy, time_ms: 2470}
+  - answer: {card: "#c7", rating: good, time_ms: 2570}
+  - answer: {card: "#c8", rating: good, time_ms: 2670}
+  - answer: {card: "#c10", rating: again, time_ms: 2770}
+  - answer: {card: "#c11", rating: good, time_ms: 2870}
+  - answer: {card: "#c13", rating: hard, time_ms: 2970}
+  - answer: {card: "#c14", rating: good, time_ms: 3070}
+  - advance: 1d
+  - answer: {card: "#c2", rating: easy, time_ms: 2180}
+  - answer: {card: "#c3", rating: good, time_ms: 2280}
+  - answer: {card: "#c4", rating: good, time_ms: 2380}
+  - answer: {card: "#c6", rating: again, time_ms: 2480}
+  - answer: {card: "#c7", rating: good, time_ms: 2580}
+  - answer: {card: "#c8", rating: hard, time_ms: 2680}
+  - answer: {card: "#c10", rating: good, time_ms: 2780}
+  - answer: {card: "#c11", rating: good, time_ms: 2880}
+  - answer: {card: "#c13", rating: hard, time_ms: 2980}
+  - answer: {card: "#c14", rating: good, time_ms: 3080}
+  - advance: 1d
+  - answer: {card: "#c2", rating: again, time_ms: 2190}
+  - answer: {card: "#c3", rating: good, time_ms: 2290}
+  - answer: {card: "#c4", rating: hard, time_ms: 2390}
+  - answer: {card: "#c6", rating: good, time_ms: 2490}
+  - answer: {card: "#c7", rating: good, time_ms: 2590}
+  - answer: {card: "#c8", rating: hard, time_ms: 2690}
+  - answer: {card: "#c10", rating: good, time_ms: 2790}
+  - answer: {card: "#c11", rating: easy, time_ms: 2890}
+  - answer: {card: "#c13", rating: good, time_ms: 2990}
+  - answer: {card: "#c14", rating: good, time_ms: 3090}
+  - observe:
+      - {db_dump: {tables: [col, notes, decks, deck_config, notetypes, fields, templates, tags, config, graves], raw: true}}

@@ -1,0 +1,9 @@
+# specs/conformance/dsl.md D9.1; the suite is specs/conformance/
+# normalized-dump.md N10. Each scenario becomes active in the change that
+# lands what Meguri's executor needs for it (N10's table): fixture/open and
+# churn/* with U36's adapters (adopt, raw db_dump, reopen, legacy_json),
+# edit/* with U27's edit_note, review/* with U44's answer, render/* with
+# U62's template card cases, sync/* with U107's sync adapter (T1). The
+# recipe is the oracle's: Meguri runs it only once every op it uses exists.
+area: preservation
+active: []

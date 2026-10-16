@@ -115,3 +115,18 @@ fsrsWeights
 desiredRetention
 loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
+# Preservation suite (normalized-dump.md, U36): the adopt op and the config
+# keys, preset key and fixture name the suite names.
+adopt
+kitchen-sink
+setDueReviewer
+restorePositionReviewer
+resetCountsReviewer
+customStudyIncludeTags
+customStudyExcludeTags
+fsrsLegacyEvaluate
+renderLatex
+fsrsParams7
+lastFsrsOptimize
+dueCounts
+estTimes
