@@ -47,8 +47,10 @@ steps:
   - redo: {}
   - db_exec: {sql: "SELECT notes.id, notes.flds, notes.mod, notes.usn, col.mod FROM notes, col ORDER BY notes.id"}
   - observe: [undo_status]
-  # The step redone at 12:01:05 counts as recorded then: an edit of its note
-  # 30 s later merges into it, and one undo reverts both.
+  # Both redos ran at 12:01:05: the michi step's redo merged into the step the
+  # gatito step's redo recorded the same second. An edit of the note 30 s
+  # later merges into that step too, and one undo reverts all three, leaving
+  # nothing to undo (specs/engine/undo.md A3).
   - advance: 30s
   - edit_note: {note: "#n1", fields: {Back: neko}}
   - undo: {}
