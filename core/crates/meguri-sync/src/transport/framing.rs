@@ -220,7 +220,8 @@ pub(crate) struct Decompressor {
     received: bool,
     /// The last step ended a frame (and flushed it).
     at_frame_end: bool,
-    /// The last step filled its output: the decoder may hold more.
+    /// The last step filled its output inside a frame: the decoder may hold
+    /// more.
     pending_output: bool,
     scratch: Vec<u8>,
 }
@@ -274,7 +275,9 @@ impl Decompressor {
                 return Err(ProtocolError::SizeExceeded);
             }
             self.at_frame_end = status.remaining == 0;
-            self.pending_output = status.bytes_written == room;
+            // A full output may hide more, unless the frame ended with it: a
+            // step after the end would read as the start of a new frame.
+            self.pending_output = status.bytes_written == room && !self.at_frame_end;
             if status.bytes_written > 0 {
                 self.produced += status.bytes_written as u64;
                 return Ok(Some(Bytes::copy_from_slice(&self.scratch[..status.bytes_written])));

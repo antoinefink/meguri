@@ -594,6 +594,34 @@ fn several_frames_and_skippable_frames_make_one_body() {
 }
 
 #[test]
+fn a_whole_body_decodes_to_its_declared_size_whatever_that_size() {
+    // T6.2: complete frames that reach the declared size are the payload.
+    // The sizes sit on and around multiples of 64 KiB, where a frame can end
+    // exactly as a decoded piece fills, then once as two such frames.
+    let pattern = |len: usize| (0..len).map(|i| (i % 251) as u8).collect::<Vec<u8>>();
+    for size in [65_535, 65_536, 65_537, 131_072, 196_608] {
+        let payload = pattern(size);
+        let expected = payload.clone();
+        let stub = SyncStub::serve(move |_| Reply::ok(&payload));
+        let mut job = new_job(&options(&stub.url()));
+        let got = request(&mut job, Method::Download, Payload::empty());
+        assert!(got.as_ref() == Ok(&expected), "{size}: {:?}", got.map(|b| b.len()));
+    }
+    let half = pattern(65_536);
+    let body = [compress(&half), compress(&half)].concat();
+    let stub = SyncStub::serve(move |_| {
+        Reply::status(200)
+            .with_header("anki-original-size", "131072")
+            .with_body(vec![Part::Bytes(body.clone())])
+    });
+    let mut job = new_job(&options(&stub.url()));
+    assert_eq!(
+        request(&mut job, Method::Download, Payload::empty()).unwrap(),
+        [half.clone(), half].concat()
+    );
+}
+
+#[test]
 fn an_empty_body_is_the_empty_payload() {
     let stub = SyncStub::serve(|_| Reply::status(200).with_header("anki-original-size", "0"));
     let mut job = new_job(&options(&stub.url()));
