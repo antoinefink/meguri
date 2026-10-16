@@ -51,7 +51,7 @@ The `compare` section (D5) is part of the value, so changing a comparison hint m
 |---|---|---|
 | `id` | yes | D1 |
 | `description` | no | one line for people |
-| `tags` | no | list of strings: matrix dimensions and other metadata read by checkers, never by executors |
+| `tags` | no | list of strings: matrix dimensions and other metadata read by checkers and tools, never by executors; `generated` marks generator output, `clock-free` a scenario whose observations hold at any instant (`float-determinism.md` F6.3) |
 | `clock` | yes | D5 |
 | `compare` | no | D5 |
 | `setup` | no | D6 |
@@ -139,7 +139,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
 | `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing | none | stable |
 | `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
-| `observe` | list of observation requests (`observations.md` O2) | `{<kind>: <value>, ...}` | stable |
+| `observe` | list of observation requests (`observations.md` O2); the pure kinds `text` and `fsrs_next` (`float-determinism.md` F5) never touch the collection | `{<kind>: <value>, ...}` | stable |
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
 | `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
 | `set_config` | `{key, value}`: one collection config key and its JSON value | none | stable (`record-ops.md` W4) |
@@ -223,9 +223,9 @@ The runner gives each scenario exactly one status, checking in this order:
 
 | Status | When | Fails T0 | Fails T1 |
 |---|---|---|---|
-| `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), or its id does not match its path | always | always |
+| `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), or its id does not match its path; on macOS also when the scenario's overlay fails its schema or the `fp-libm-boundary` class (`float-determinism.md` F7.4, F8) | always | always |
 | `missing` | no golden | if active | always |
-| `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`) | if active | always |
+| `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`); on macOS also when the scenario's overlay is stale or orphaned (`float-determinism.md` F7.3) | if active | always |
 | `pending` | Meguri lacks a setup section, op or observation kind the scenario uses (for a live scenario: what its own segments use, D9.2, or what its Meguri actors use, D9.3) | if active | if active |
 | `live` | T0 only: a live scenario Meguri could join; T0 does not run it | never | (not in T1) |
 | `error` | an executor failed while running it (a panic in an adapter included) | if active | always |
@@ -233,7 +233,7 @@ The runner gives each scenario exactly one status, checking in this order:
 | `pass` | observations match | never | never |
 
 - **T0** (`tools/mg conformance`, and the `conformance` test binary under `tools/mg core-test`) runs every scenario that is not live against its golden with Meguri's executor, natively on macOS and in the Linux dev container. It fails when any scenario is `invalid` or any active scenario is neither `pass` nor `live`. Other statuses are listed in the report.
-- **Freshness** (`tools/mg goldens-check`) fails when any scenario is `invalid`, `missing` or `stale`, when a golden has no scenario, when an `area.yaml` entry matches nothing, or when the pin in `conformance/oracle.json` differs from the oracle's lock file (checked where `oracle/` is present). With a base revision it also lists every golden value that changed since that revision (golden, pointer, value before and after), grouped by area and observation kind (the review step of an oracle bump, R1874); the text shows the first 20 per group and the `--report` JSON all of them.
+- **Freshness** (`tools/mg goldens-check`) fails when any scenario is `invalid`, `missing` or `stale`, when a golden has no scenario, when an `area.yaml` entry matches nothing, when an overlay in `conformance/goldens-apple/` is invalid, stale, orphaned or holds an entry outside the `fp-libm-boundary` class (`float-determinism.md` F7.4), or when a pin in `conformance/oracle.json` differs from its lock file (`lock_sha256` from `oracle/requirements.lock`, `macos_lock_sha256` from `oracle/macos/requirements-macos.lock`; checked where `oracle/` is present). These checks run on every platform. With a base revision it also lists every golden value that changed since that revision (golden, pointer, value before and after), grouped by area and observation kind (the review step of an oracle bump, R1874); the text shows the first 20 per group and the `--report` JSON all of them.
 - **T1** (`tools/mg conformance --live`) first re-records missing and stale goldens through `tools/mg oracle record` (the only writer of goldens), then runs T0, then runs every selected scenario on live oracle workers: the oracle replays it against its golden with no deviation applied (deviations describe Meguri, D13), and a live scenario whose replay passes then runs as a chain (D9.2), or as a mixed run of an actor scenario (D9.3), and is compared with the same golden, deviations applied. Workers must answer the pinned `anki_version` and `lock_sha256` and all run the same driver, or the run is an `error`. Any scenario that is not `pass`, active or not, fails T1, except a `pending` one that is not active: an oracle that no longer reproduces its golden is drift to fix before anything else.
 
 ## D11. Goldens
@@ -255,7 +255,8 @@ A golden is written only by `tools/mg oracle record` (R1885). There is no path t
 - `clock.mode` is `frozen` when the scenario leaves it out.
 - A live scenario's golden comes from the oracle running all its segments (D9.2).
 - Text: UTF-8 JSON, keys sorted, two-space indents, an array of scalars on one line with `, ` between items, `": "` after keys, an empty object as `{}`, LF line ends and a final newline.
-- `conformance/oracle.json` records the current pin, `{anki_version, lock_sha256}`. Adopting an oracle bump updates it together with the lock file and every golden, in one change.
+- `conformance/oracle.json` records the current pin, `{anki_version, lock_sha256, macos_lock_sha256}` (`macos_lock_sha256`: the native lane's lock, `float-determinism.md` F6.1). Adopting an oracle bump updates it together with both lock files, every golden and every overlay, in one change.
+- **Overlay goldens.** `conformance/goldens-apple/<id>.json` holds, for a scenario whose observations on the macOS native oracle differ from its golden, the differing values (`float-determinism.md` F7). Only `tools/mg oracle record --platform apple <filter>` writes them, never a person and never Meguri's output. `tools/mg goldens-check` validates them for freshness and for the `fp-libm-boundary` class (F7.4, F8); the runner applies them on macOS only (F9).
 
 ## D12. Failure report
 
@@ -268,7 +269,7 @@ For every scenario that is not `pass`, the runner reports (R1888):
 - for a T1 `fail` or `error`, whether the oracle's replay or the live chain differed;
 - a one-line repro command, `tools/mg conformance <id>` (`tools/mg conformance --live <id>` for T1 and live scenarios).
 
-`meguri-cli conformance run --report <file>` writes the same as JSON: `{runner, tier: t0|t1, executor, lane, oracle_pin, wall_ms, totals, failed, scenarios: [{scenario, path, area, active, live, status, fails, message, repro, scenario_sha256?, first_divergence?, diffs?, diff_count?, missing?, deviations_applied?}]}`, where `fails` follows the report's tier and `scenario_sha256` is the hash of the scenario text the status is for (absent when the file did not load); a T1 run adds the workers' `oracle` metadata.
+`meguri-cli conformance run --report <file>` writes the same as JSON: `{runner, tier: t0|t1, executor, lane, oracle_pin, wall_ms, totals, failed, scenarios: [{scenario, path, area, active, live, status, fails, message, repro, scenario_sha256?, first_divergence?, diffs?, diff_count?, missing?, deviations_applied?, overlay_applied?}]}`, where `fails` follows the report's tier and `scenario_sha256` is the hash of the scenario text the status is for (absent when the file did not load); a T1 run adds the workers' `oracle` metadata. On macOS, `overlay_applied` is the number of overlay entries applied to the scenario's expected values (present when it has an overlay), and `totals` gains `overlay_applied` (entries) and `overlay_scenarios` (scenarios with at least one); the text report adds `overlays: <entries> values in <scenarios> scenarios` (`float-determinism.md` F9).
 
 ## D13. Known deviations
 
@@ -286,7 +287,8 @@ deviations:
 ```
 
 - The runner applies an entry's transform to the expected (oracle) value at every pointer matching `pointer` in every scenario matching `scenarios`, before comparing. Applied entries are listed in the report. Only comparisons that hold Meguri's observations apply them (T0, live chains); the oracle's replay of its own golden in T1 never does.
-- Transforms: `replace: <value>` makes the expected value `<value>`. Areas add transforms in `core/crates/meguri-testkit/src/diff/transforms.rs` with their spec.
+- Transforms: `replace: <value>` makes the expected value `<value>`. `apple_overlay: true` (only the entry `fp-libm-boundary`, R1889, `float-determinism.md` F8.6): in T0 on macOS, each entry of the scenario's overlay whose pointer lies at or under a matching pointer puts its `apple` value there; on Linux, in live chains and for scenarios without an overlay, it does nothing. Areas add transforms in `core/crates/meguri-testkit/src/diff/transforms.rs` with their spec.
+- Order: the `apple_overlay` entry applies first, then the other entries in file order, so a deviation describes Meguri against Anki on the same platform.
 - No other difference is tolerated: an unlisted difference fails.
 - `test` names the scenario or test that asserts Meguri's own behavior; every entry needs one.
 

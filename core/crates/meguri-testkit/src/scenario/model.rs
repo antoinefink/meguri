@@ -1103,6 +1103,8 @@ pub enum ObservationKind {
     Queue,
     DeckTree,
     Render,
+    /// render-ops.md Q1.
+    Template,
     Search,
     DbDump,
     /// storage-ops.md P3.
@@ -1113,6 +1115,8 @@ pub enum ObservationKind {
     BlobDecode,
     PackageCol,
     Text,
+    /// float-determinism.md F5.
+    FsrsNext,
 }
 
 /// How a kind takes arguments.
@@ -1131,7 +1135,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 19] = [
+    pub const ALL: [ObservationKind; 21] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1142,6 +1146,7 @@ impl ObservationKind {
         ObservationKind::Queue,
         ObservationKind::DeckTree,
         ObservationKind::Render,
+        ObservationKind::Template,
         ObservationKind::Search,
         ObservationKind::DbDump,
         ObservationKind::SchemaObjects,
@@ -1151,6 +1156,7 @@ impl ObservationKind {
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
         ObservationKind::Text,
+        ObservationKind::FsrsNext,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1165,6 +1171,7 @@ impl ObservationKind {
             ObservationKind::Queue => "queue",
             ObservationKind::DeckTree => "deck_tree",
             ObservationKind::Render => "render",
+            ObservationKind::Template => "template",
             ObservationKind::Search => "search",
             ObservationKind::DbDump => "db_dump",
             ObservationKind::SchemaObjects => "schema_objects",
@@ -1174,6 +1181,7 @@ impl ObservationKind {
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
+            ObservationKind::FsrsNext => "fsrs_next",
         }
     }
 
@@ -1197,7 +1205,9 @@ impl ObservationKind {
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
-            | ObservationKind::Text => ArgShape::Mapping,
+            | ObservationKind::Template
+            | ObservationKind::Text
+            | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
         }
     }
@@ -1421,6 +1431,405 @@ impl TextRequest {
             TextInputs::Strings(strings.ok_or_else(|| bad("inputs are strings"))?)
         };
         Ok(TextRequest { fns, inputs })
+    }
+}
+
+/// One probe input of an `fsrs_next` request: a stored review card
+/// (float-determinism.md F2.1, F3.1), with its `f32` members read per
+/// `model/json-numbers` N2.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FsrsNextInput {
+    pub id: u64,
+    pub card_id: u64,
+    pub reps: u64,
+    pub s: f32,
+    pub d: f32,
+    pub elapsed_days: u32,
+    pub scheduled_days: u32,
+    pub dr: f32,
+    /// A member of the request's `param_sets`.
+    pub params: String,
+    pub max_ivl: u32,
+}
+
+/// An `fsrs_next` observation request (float-determinism.md F5.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FsrsNextRequest {
+    /// Parameter sets by name: 0, 17, 19 or 21 `f32` values.
+    pub param_sets: BTreeMap<String, Vec<f32>>,
+    /// 1 to 1,000 inputs.
+    pub inputs: Vec<FsrsNextInput>,
+}
+
+/// The most inputs one `fsrs_next` request holds (F5.1).
+pub const FSRS_NEXT_MAX_INPUTS: usize = 1000;
+
+/// The members of an `fsrs_next` input (F2.1).
+const FSRS_NEXT_MEMBERS: [&str; 10] = [
+    "card_id",
+    "d",
+    "dr",
+    "elapsed_days",
+    "id",
+    "max_ivl",
+    "params",
+    "reps",
+    "s",
+    "scheduled_days",
+];
+
+/// `^[a-z0-9][a-z0-9-]*$`: a parameter set's name (F5.1).
+fn param_set_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A JSON number read as `f32` (`model/json-numbers` N2): an integer literal
+/// to the nearest `f32`, any other to the nearest 64-bit float, then to the
+/// nearest `f32`.
+pub fn json_f32(value: &Value) -> Option<f32> {
+    let n = value.as_number()?;
+    if let Some(i) = n.as_i64() {
+        return Some(i as f32);
+    }
+    if let Some(u) = n.as_u64() {
+        return Some(u as f32);
+    }
+    n.as_f64().map(|x| x as f32)
+}
+
+impl FsrsNextInput {
+    /// Reads one input with scenario.schema.json's `fsrs_next_input` rules.
+    pub fn from_value(value: &Value) -> Result<FsrsNextInput, String> {
+        let map = value.as_object().ok_or("an input is an object")?;
+        let keys: BTreeSet<&str> = map.keys().map(String::as_str).collect();
+        if keys != BTreeSet::from(FSRS_NEXT_MEMBERS) {
+            return Err(format!(
+                "an input has exactly the members {}",
+                FSRS_NEXT_MEMBERS.join(", ")
+            ));
+        }
+        let int = |key: &str, min: u64, max: u64| {
+            map[key]
+                .as_u64()
+                .filter(|v| (min..=max).contains(v))
+                .ok_or_else(|| format!("{key} is an integer from {min} to {max}"))
+        };
+        let small = |key: &str, min: u32, max: u32| int(key, min.into(), max.into()).map(|v| v as u32);
+        let number = |key: &str, ok: &dyn Fn(f64) -> bool, range: &str| {
+            map[key]
+                .as_f64()
+                .filter(|v| ok(*v))
+                .and_then(|_| json_f32(&map[key]))
+                .ok_or_else(|| format!("{key} is a number {range}"))
+        };
+        Ok(FsrsNextInput {
+            id: int("id", 0, u64::MAX)?,
+            card_id: int("card_id", 1, (1 << 53) - 1)?,
+            reps: int("reps", 0, 4_294_967_294)?,
+            s: number("s", &|v| (0.001..=36500.0).contains(&v), "from 0.001 to 36,500")?,
+            d: number("d", &|v| (1.0..=10.0).contains(&v), "from 1 to 10")?,
+            elapsed_days: small("elapsed_days", 0, 20_000)?,
+            scheduled_days: small("scheduled_days", 1, 36_500)?,
+            dr: number("dr", &|v| v > 0.0 && v < 1.0, "above 0 and below 1")?,
+            params: map["params"]
+                .as_str()
+                .filter(|p| param_set_name(p))
+                .ok_or("params names a parameter set")?
+                .to_owned(),
+            max_ivl: small("max_ivl", 1, 36_500)?,
+        })
+    }
+}
+
+impl FsrsNextRequest {
+    /// Reads parameter sets (`param_sets`, or the probe's `param-sets.json`):
+    /// at least one, each named `^[a-z0-9][a-z0-9-]*$` with 0, 17, 19 or 21
+    /// numbers read as `f32`.
+    pub fn param_sets(value: &Value) -> Result<BTreeMap<String, Vec<f32>>, String> {
+        let sets = value
+            .as_object()
+            .filter(|sets| !sets.is_empty())
+            .ok_or("param_sets is an object with at least one parameter set")?;
+        let mut param_sets = BTreeMap::new();
+        for (name, values) in sets {
+            if !param_set_name(name) {
+                return Err(format!("parameter set name {name:?} must match ^[a-z0-9][a-z0-9-]*$"));
+            }
+            let values = values
+                .as_array()
+                .filter(|v| matches!(v.len(), 0 | 17 | 19 | 21))
+                .and_then(|v| v.iter().map(json_f32).collect::<Option<Vec<f32>>>())
+                .ok_or_else(|| format!("parameter set {name} is a list of 0, 17, 19 or 21 numbers"))?;
+            param_sets.insert(name.clone(), values);
+        }
+        Ok(param_sets)
+    }
+
+    /// Reads the request with scenario.schema.json's rules and F5.1's: exactly
+    /// `param_sets` and `inputs`; at least one parameter set, each named
+    /// `^[a-z0-9][a-z0-9-]*$` with 0, 17, 19 or 21 numbers; 1 to 1,000 inputs,
+    /// each naming a set of `param_sets`.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<FsrsNextRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation fsrs_next: {why}"));
+        if map.len() != 2 || !map.contains_key("param_sets") || !map.contains_key("inputs") {
+            return Err(bad("takes exactly {param_sets, inputs}"));
+        }
+        let param_sets = FsrsNextRequest::param_sets(&map["param_sets"]).map_err(|e| bad(&e))?;
+        let items = map["inputs"]
+            .as_array()
+            .filter(|i| (1..=FSRS_NEXT_MAX_INPUTS).contains(&i.len()))
+            .ok_or_else(|| bad("inputs is a list of 1 to 1,000 inputs"))?;
+        let mut inputs = Vec::with_capacity(items.len());
+        for (k, item) in items.iter().enumerate() {
+            let input = FsrsNextInput::from_value(item).map_err(|e| bad(&format!("input {k}: {e}")))?;
+            if !param_sets.contains_key(&input.params) {
+                return Err(bad(&format!(
+                    "input {k}: params {:?} is not in param_sets",
+                    input.params
+                )));
+            }
+            inputs.push(input);
+        }
+        Ok(FsrsNextRequest { param_sets, inputs })
+    }
+}
+
+/// A `template` observation request (render-ops.md Q1.1-Q1.3), read with
+/// the load-time checks of Q1.6.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateRequest {
+    /// Present exactly when some case is a new-note case.
+    pub notetype: Option<TemplateNotetype>,
+    pub cases: Vec<TemplateCase>,
+}
+
+/// The note type of a request's new-note cases (Q1.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateNotetype {
+    pub name: String,
+    pub kind: NotetypeKind,
+    pub fields: Vec<String>,
+}
+
+/// One case of a `template` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateCase {
+    /// Q1.2: a note and card not yet added.
+    NewNote(NewNoteCase),
+    /// Q1.3: a stored card with other template texts.
+    Card { card: CardRef, front: String, back: String },
+}
+
+/// Q1.2, with the field values resolved to the note type's field order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewNoteCase {
+    pub front: String,
+    pub back: String,
+    pub ord: u32,
+    /// The template name; `None` means `Card <ord + 1>`.
+    pub name: Option<String>,
+    /// One value per note type field, in field order; missing ones empty.
+    pub fields: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+/// Q1.2: the largest card ordinal a new-note case takes.
+pub const TEMPLATE_MAX_ORD: u64 = 499;
+
+impl TemplateRequest {
+    /// Reads the request with scenario.schema.json's rules and Q1.1's
+    /// name rules, ord range and field checks.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<TemplateRequest, FormatError> {
+        let bad = |why: String| FormatError::new(format!("observation template: {why}"));
+        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "notetype" | "cases")) {
+            return Err(bad(format!("takes {{notetype?, cases}}, not {key:?}")));
+        }
+        let cases = map
+            .get("cases")
+            .and_then(Value::as_array)
+            .filter(|cases| !cases.is_empty())
+            .ok_or_else(|| bad("cases is a non-empty list".to_owned()))?;
+        let notetype = map
+            .get("notetype")
+            .map(TemplateNotetype::from_value)
+            .transpose()
+            .map_err(|e| bad(format!("notetype: {e}")))?;
+        let has_new_note = cases.iter().any(|case| case.get("card").is_none());
+        match (&notetype, has_new_note) {
+            (None, true) => return Err(bad("a new-note case needs notetype".to_owned())),
+            (Some(_), false) => {
+                return Err(bad(
+                    "notetype is only for new-note cases; every case names a card".to_owned()
+                ));
+            }
+            _ => {}
+        }
+        let cases = cases
+            .iter()
+            .enumerate()
+            .map(|(i, case)| {
+                TemplateCase::from_value(case, notetype.as_ref()).map_err(|e| bad(format!("case {i}: {e}")))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(TemplateRequest { notetype, cases })
+    }
+}
+
+impl TemplateNotetype {
+    fn from_value(value: &Value) -> Result<TemplateNotetype, String> {
+        let map = value.as_object().ok_or("must be a mapping")?;
+        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "name" | "kind" | "fields")) {
+            return Err(format!("takes {{name, kind?, fields}}, not {key:?}"));
+        }
+        let name = map.get("name").and_then(Value::as_str).ok_or("name is a string")?;
+        if name.is_empty() || meguri_text::normalize::nfc(name) != name || name.contains('"') {
+            return Err(format!("name {name:?} must be non-empty, NFC and without \""));
+        }
+        let kind = match map.get("kind").map(|k| k.as_str()) {
+            None | Some(Some("standard")) => NotetypeKind::Standard,
+            Some(Some("cloze")) => NotetypeKind::Cloze,
+            Some(_) => return Err("kind is standard or cloze".to_owned()),
+        };
+        let fields = map
+            .get("fields")
+            .and_then(Value::as_array)
+            .filter(|fields| !fields.is_empty())
+            .ok_or("fields is a non-empty list of field names")?;
+        let mut names: Vec<String> = Vec::with_capacity(fields.len());
+        for field in fields {
+            let field = field.as_str().ok_or("fields are strings")?;
+            if let Some(problem) = field_name_problem(field) {
+                return Err(format!("field {field:?} {problem}"));
+            }
+            if let Some(twin) = names
+                .iter()
+                .find(|n| meguri_text::fold::compare_folded(n, field) == std::cmp::Ordering::Equal)
+            {
+                return Err(format!(
+                    "fields {twin:?} and {field:?} are the same name to Anki (unicase)"
+                ));
+            }
+            names.push(field.to_owned());
+        }
+        Ok(TemplateNotetype {
+            name: name.to_owned(),
+            kind,
+            fields: names,
+        })
+    }
+}
+
+/// Q1.1: why a note type save would change or refuse this field name.
+fn field_name_problem(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("is empty")
+    } else if meguri_text::normalize::nfc(name) != name {
+        Some("is not NFC")
+    } else if name.contains([':', '{', '}', '"']) {
+        Some("holds one of : { } \"")
+    } else if name.starts_with(['#', '/', '^']) || name.starts_with(char::is_whitespace) {
+        Some("starts with #, /, ^ or white space")
+    } else if name.ends_with(char::is_whitespace) {
+        Some("ends with white space")
+    } else {
+        None
+    }
+}
+
+impl TemplateCase {
+    fn from_value(value: &Value, notetype: Option<&TemplateNotetype>) -> Result<TemplateCase, String> {
+        let map = value.as_object().ok_or("must be a mapping")?;
+        let text = |key: &str, required: bool| match map.get(key) {
+            Some(Value::String(s)) => Ok(s.clone()),
+            None if !required => Ok(String::new()),
+            None => Err(format!("{key} is required")),
+            Some(_) => Err(format!("{key} is a string")),
+        };
+        if let Some(card) = map.get("card") {
+            if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "card" | "front" | "back")) {
+                return Err(format!("a card case takes {{card, front, back?}}, not {key:?}"));
+            }
+            let card: LogicalRef = card
+                .as_str()
+                .ok_or("card is a #cN reference")?
+                .parse()
+                .map_err(|e: FormatError| e.to_string())?;
+            if card.kind != RefKind::Card {
+                return Err(format!("{card} is not a card reference"));
+            }
+            return Ok(TemplateCase::Card {
+                card: CardRef(card),
+                front: text("front", true)?,
+                back: text("back", false)?,
+            });
+        }
+        let notetype = notetype.ok_or("a new-note case needs notetype")?;
+        if let Some(key) = map
+            .keys()
+            .find(|k| !matches!(k.as_str(), "front" | "back" | "ord" | "name" | "fields" | "tags"))
+        {
+            return Err(format!(
+                "a new-note case takes {{front, back?, ord?, name?, fields?, tags?}}, not {key:?}"
+            ));
+        }
+        let ord = match map.get("ord") {
+            None => 0,
+            Some(ord) => ord
+                .as_u64()
+                .filter(|&ord| ord <= TEMPLATE_MAX_ORD)
+                .and_then(|ord| u32::try_from(ord).ok())
+                .ok_or_else(|| format!("ord is an integer from 0 to {TEMPLATE_MAX_ORD}"))?,
+        };
+        let name = match map.get("name") {
+            None => None,
+            Some(Value::String(name)) if !name.is_empty() => Some(name.clone()),
+            Some(_) => return Err("name is a non-empty string".to_owned()),
+        };
+        let mut fields = vec![String::new(); notetype.fields.len()];
+        match map.get("fields") {
+            None => {}
+            Some(Value::Array(values)) => {
+                if values.len() > fields.len() {
+                    return Err(format!("{} field values for {} fields", values.len(), fields.len()));
+                }
+                for (slot, value) in fields.iter_mut().zip(values) {
+                    *slot = value.as_str().ok_or("field values are strings")?.to_owned();
+                }
+            }
+            Some(Value::Object(values)) => {
+                for (name, value) in values {
+                    let ord =
+                        notetype.fields.iter().position(|f| f == name).ok_or_else(|| {
+                            format!("fields names {name:?}, which is not a field of {:?}", notetype.name)
+                        })?;
+                    fields[ord] = value.as_str().ok_or("field values are strings")?.to_owned();
+                }
+            }
+            Some(_) => return Err("fields is a list of values or a mapping of field name to value".to_owned()),
+        }
+        let tags = match map.get("tags") {
+            None => Vec::new(),
+            Some(tags) => tags
+                .as_array()
+                .and_then(|tags| {
+                    tags.iter()
+                        .map(|t| t.as_str().map(str::to_owned))
+                        .collect::<Option<Vec<_>>>()
+                })
+                .ok_or("tags is a list of strings")?,
+        };
+        Ok(TemplateCase::NewNote(NewNoteCase {
+            front: text("front", true)?,
+            back: text("back", false)?,
+            ord,
+            name,
+            fields,
+            tags,
+        }))
     }
 }
 

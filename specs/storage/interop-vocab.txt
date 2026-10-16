@@ -99,6 +99,8 @@ cache_size
 temp_store
 fullfsync
 checkpoint_fullfsync
+F_FULLFSYNC
+SQLITE_FCNTL_JOURNAL_POINTER
 wal_autocheckpoint
 wal_checkpoint
 query_only

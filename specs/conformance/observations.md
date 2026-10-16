@@ -23,7 +23,7 @@ What each observation kind records, how values are written, and how the runner c
 - `kind(#c1, #c3)`: the kind for these references, in the order given;
 - `{kind: <arguments>}`: kinds that take structured arguments.
 
-Requesting a per-card kind twice in one step merges the two results when they name different cards; naming a card twice in one step is invalid.
+Requesting a per-card kind twice in one step merges the two results when they name different cards; naming a card twice in one step is invalid. A kind whose value is a list (`template`) may be requested once per step.
 
 ## O3. Pointers and patterns
 
@@ -46,7 +46,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
-| `render` | card references or none | draft (render): question and answer HTML, AV tags and error kind per card |
+| `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
+| `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |
@@ -56,6 +57,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
 | `tag_tree` | none | `[{name, collapsed, children}, ...]`: the tag tree of `specs/tags/tags.md` T13, top-level nodes first (`tag-ops.md` G9) |
+| `fsrs_next` | `{param_sets: {<name>: [<number>, ...]}, inputs: [<input>, ...]}`, at most once per observe step | `{rows: [<row>, ...]}`: the FSRS next states of a review card per input, as twelve values (days, stability and difficulty for again, hard, good and easy); never reads or changes the scenario's collection (`float-determinism.md` F3, F5) |
 
 ## O5. Scheduling states
 
@@ -74,7 +76,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 
 ## O7. Comparison
 
-The runner compares the golden's observations (expected) with the executor's (actual) after applying deviation transforms to expected (`dsl.md` D13) and set comparison to both (`compare.set`).
+The runner compares the golden's observations (expected) with the executor's (actual) after applying, on macOS, the scenario's Apple overlay to expected (`float-determinism.md` F9), then deviation transforms to expected (`dsl.md` D13), and set comparison to both (`compare.set`).
 
 - Objects compare member by member: a member on one side only is a difference, shown as `<absent>` on the other side.
 - Arrays compare item by item; extra items on either side are differences. Under `compare.set` the two arrays are first sorted by the JCS text of their items, ties broken by a text that keeps the number kind (JCS writes 1 and 1.0 alike), so two equal multisets always line up.
@@ -85,9 +87,12 @@ The runner compares the golden's observations (expected) with the executor's (ac
   | Where | Tolerance |
   |---|---|
   | `stability` and `difficulty` in any `memory_state` inside `next_states` | 1e-5 |
+  | the stability and difficulty columns (1, 2, 4, 5, 7, 8, 10, 11) of `fsrs_next` rows | 1e-5 |
   | any number inside `stats` | 1e-6 |
 
   Card rows, review-log rows and every other kind are exact: a stored value that a tolerance could hide is a real difference.
+
+  These tolerances compare Meguri with the expected values. The `fp-libm-boundary` class (`float-determinism.md` F8.3) allows a wider stability difference between the Linux and Apple oracles. Such a difference reaches this comparison only as an overlay value, never as a tolerance (`float-determinism.md` F11.3).
 - The first divergence is the smallest step index among the differing pointers. Differences are reported in pointer order (members in key order, items in index order).
 
 ## O8. `db_dump`

@@ -1,0 +1,163 @@
+{
+  "entries": [
+    {
+      "apple": 0.6950888,
+      "linux": 0.69508886,
+      "pointer": "/steps/0/fsrs_next/rows/31/1"
+    },
+    {
+      "apple": 5.5112143,
+      "linux": 5.5112133,
+      "pointer": "/steps/0/fsrs_next/rows/115/1"
+    },
+    {
+      "apple": 8.310888,
+      "linux": 8.310887,
+      "pointer": "/steps/0/fsrs_next/rows/146/1"
+    },
+    {
+      "apple": 2.5076559,
+      "linux": 2.5076563,
+      "pointer": "/steps/0/fsrs_next/rows/164/1"
+    },
+    {
+      "apple": 0.082924604,
+      "linux": 0.08292462,
+      "pointer": "/steps/0/fsrs_next/rows/228/1"
+    },
+    {
+      "apple": 6.0140214,
+      "linux": 6.014022,
+      "pointer": "/steps/0/fsrs_next/rows/364/1"
+    },
+    {
+      "apple": 4306.836,
+      "linux": 4306.839,
+      "pointer": "/steps/0/fsrs_next/rows/364/4"
+    },
+    {
+      "apple": 5010.3423,
+      "linux": 5010.3457,
+      "pointer": "/steps/0/fsrs_next/rows/364/7"
+    },
+    {
+      "apple": 9145.832,
+      "linux": 9145.842,
+      "pointer": "/steps/0/fsrs_next/rows/364/10"
+    },
+    {
+      "apple": 4320.7744,
+      "linux": 4320.774,
+      "pointer": "/steps/0/fsrs_next/rows/407/7"
+    },
+    {
+      "apple": 7880.121,
+      "linux": 7880.1206,
+      "pointer": "/steps/0/fsrs_next/rows/407/10"
+    },
+    {
+      "apple": 2.7323782,
+      "linux": 2.7323785,
+      "pointer": "/steps/0/fsrs_next/rows/412/11"
+    },
+    {
+      "apple": 3.850118,
+      "linux": 3.8501177,
+      "pointer": "/steps/0/fsrs_next/rows/431/1"
+    },
+    {
+      "apple": 3.1850765,
+      "linux": 3.1850767,
+      "pointer": "/steps/0/fsrs_next/rows/447/1"
+    },
+    {
+      "apple": 3.2066166,
+      "linux": 3.206618,
+      "pointer": "/steps/0/fsrs_next/rows/519/4"
+    },
+    {
+      "apple": 4.546663,
+      "linux": 4.546668,
+      "pointer": "/steps/0/fsrs_next/rows/519/7"
+    },
+    {
+      "apple": 7.825953,
+      "linux": 7.825968,
+      "pointer": "/steps/0/fsrs_next/rows/519/10"
+    },
+    {
+      "apple": 14.959436,
+      "linux": 14.959438,
+      "pointer": "/steps/0/fsrs_next/rows/593/1"
+    },
+    {
+      "apple": 0.1549801,
+      "linux": 0.1549804,
+      "pointer": "/steps/0/fsrs_next/rows/814/1"
+    },
+    {
+      "apple": 1352.1489,
+      "linux": 1352.149,
+      "pointer": "/steps/0/fsrs_next/rows/853/10"
+    },
+    {
+      "apple": 0.6327629,
+      "linux": 0.6327627,
+      "pointer": "/steps/0/fsrs_next/rows/867/1"
+    },
+    {
+      "apple": 9.054242,
+      "linux": 9.05424,
+      "pointer": "/steps/0/fsrs_next/rows/868/1"
+    },
+    {
+      "apple": 3.019218,
+      "linux": 3.0192213,
+      "pointer": "/steps/0/fsrs_next/rows/874/4"
+    },
+    {
+      "apple": 4.0837984,
+      "linux": 4.083803,
+      "pointer": "/steps/0/fsrs_next/rows/874/7"
+    },
+    {
+      "apple": 6.415138,
+      "linux": 6.415148,
+      "pointer": "/steps/0/fsrs_next/rows/874/10"
+    },
+    {
+      "apple": 1.2160368,
+      "linux": 1.2160367,
+      "pointer": "/steps/0/fsrs_next/rows/922/1"
+    },
+    {
+      "apple": 323.9746,
+      "linux": 323.97473,
+      "pointer": "/steps/0/fsrs_next/rows/952/4"
+    },
+    {
+      "apple": 409.71024,
+      "linux": 409.71048,
+      "pointer": "/steps/0/fsrs_next/rows/952/7"
+    },
+    {
+      "apple": 594.2773,
+      "linux": 594.2778,
+      "pointer": "/steps/0/fsrs_next/rows/952/10"
+    },
+    {
+      "apple": 0.8464245,
+      "linux": 0.84642446,
+      "pointer": "/steps/0/fsrs_next/rows/997/1"
+    }
+  ],
+  "linux_observations_sha256": "4d849e2fbb33165feae556d1a84602bd4737e74f4f6f96bd9b75f87fea07d05f",
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "13cf6de5f143a7dee18bcd1284c268f98b9c88deaf971385a9856489aaefb682",
+    "lock_sha256": "869b29c42af493bd7b46960d5ee4e72e99ff92bfc8b2a10c190dc54a5513a244",
+    "platform": "macos-arm64"
+  },
+  "scenario_id": "fp-probe/corpus/next-states-095",
+  "scenario_sha256": "267d7c751725f31b30c745e19d0cc5b33fa5a5c2006f0902aada567908659418"
+}
