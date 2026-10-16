@@ -999,6 +999,110 @@ fn a_download_zip_maps_its_entries_through_meta() {
     }
 }
 
+const MIB: usize = 1024 * 1024;
+
+/// A download zip whose entry `0` holds `stored` as is, entry `1` `zeros`
+/// zero bytes deflated (written a MiB at a time, so the test never holds
+/// them), and `_meta` naming both.
+fn padded_zero_zip(stored: &[u8], zeros: usize) -> Vec<u8> {
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let as_is = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("0", as_is).unwrap();
+    zip.write_all(stored).unwrap();
+    let deflated = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file("1", deflated).unwrap();
+    let piece = vec![0u8; MIB];
+    let mut left = zeros;
+    while left > 0 {
+        let size = left.min(MIB);
+        zip.write_all(&piece[..size]).unwrap();
+        left -= size;
+    }
+    zip.start_file("_meta", as_is).unwrap();
+    zip.write_all(br#"{"0":"noise.bin","1":"silence.wav"}"#).unwrap();
+    zip.finish().unwrap().into_inner()
+}
+
+/// How many files a download zip decodes to: a failing test prints no file
+/// bytes.
+fn file_count(zip: &[u8]) -> Result<usize, JobError> {
+    wire::decode_download_zip(zip).map(|files| files.len())
+}
+
+/// Bytes deflate cannot shrink (xorshift).
+fn incompressible(len: usize) -> Vec<u8> {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    (0..len)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect()
+}
+
+#[test]
+fn a_zip_bomb_is_refused() {
+    // errors.md E6: a decoder allocates only in proportion to the bytes
+    // received. A GiB of zeros deflates to about a MiB.
+    let bomb = padded_zero_zip(b"", 1024 * MIB);
+    assert!(bomb.len() < 2 * MIB, "{}", bomb.len());
+    bad_response(file_count(&bomb), Method::DownloadFiles);
+}
+
+#[test]
+fn entries_that_expand_too_far_together_are_refused() {
+    // E6 over the whole zip: 40 entries of 4 MiB of zeros, each about 4 KiB
+    // deflated and each well under the file limit.
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let deflated = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let zeros = vec![0u8; 4 * MIB];
+    let mut meta = serde_json::Map::new();
+    for index in 0..40 {
+        zip.start_file(index.to_string(), deflated).unwrap();
+        zip.write_all(&zeros).unwrap();
+        meta.insert(index.to_string(), json!(format!("{index}.wav")));
+    }
+    zip.start_file("_meta", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(&bytes(&Value::Object(meta))).unwrap();
+    let zip = zip.finish().unwrap().into_inner();
+    assert!(zip.len() < MIB / 2, "{}", zip.len());
+    bad_response(file_count(&zip), Method::DownloadFiles);
+
+    // One such entry beside 64 KiB of stored bytes expands about 60 times:
+    // a deflated file a server may well send.
+    let noise = incompressible(64 * 1024);
+    let files = wire::decode_download_zip(&padded_zero_zip(&noise, 4 * MIB)).unwrap();
+    assert_eq!(
+        files[0],
+        MediaFile {
+            name: "noise.bin".to_owned(),
+            data: noise
+        }
+    );
+    assert_eq!(files[1].name, "silence.wav");
+    assert!(files[1].data == zeros, "{} bytes", files[1].data.len());
+}
+
+#[test]
+fn a_downloaded_file_over_100_mib_is_refused_and_one_of_100_mib_is_not() {
+    // W17.2: no server keeps a file over 100 MiB (R1565: Meguri never sends
+    // one). 2 MiB of stored bytes keep the zip's expansion in proportion
+    // (E6), so only the file's own size can refuse it.
+    let noise = incompressible(2 * MIB);
+    let files = wire::decode_download_zip(&padded_zero_zip(&noise, 100 * MIB)).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[1].data.len(), 100 * MIB);
+    assert!(files[1].data.iter().all(|&byte| byte == 0));
+    drop(files);
+    bad_response(
+        file_count(&padded_zero_zip(&noise, 100 * MIB + 1)),
+        Method::DownloadFiles,
+    );
+}
+
 #[test]
 fn an_upload_zip_names_additions_by_batch_position_and_lists_every_change() {
     // W17.2's example.

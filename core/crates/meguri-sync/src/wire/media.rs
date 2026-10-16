@@ -162,16 +162,34 @@ pub struct MediaFile {
     pub data: Vec<u8>,
 }
 
+/// The most bytes one entry of a `downloadFiles` zip may expand to: the
+/// largest file a server keeps (W17.2) and Meguri sends (R1565).
+pub const MAX_DOWNLOAD_ENTRY_BYTES: u64 = 100 * 1024 * 1024;
+
+/// How many times its own size a `downloadFiles` zip may expand to, all its
+/// entries together (errors.md E6: a decoder allocates only in proportion to
+/// the bytes received). Stored entries, which servers send, stay under 1;
+/// deflate alone reaches about 1032.
+pub const MAX_DOWNLOAD_EXPANSION: u64 = 100;
+
 /// The `downloadFiles` answer (W17.1): a zip whose `_meta` maps each entry
 /// name to a real name. Entries may be stored or deflated. A file entry that
 /// `_meta` does not map makes the whole zip a decode failure; a `_meta`
 /// member with no entry is ignored. Files come in entry order.
+///
+/// Reading stops at the first byte past [`MAX_DOWNLOAD_ENTRY_BYTES`] in one
+/// entry, or past [`MAX_DOWNLOAD_EXPANSION`] times the body's size in all of
+/// them (`_meta` counting), and the zip is a decode failure: a small body
+/// never expands into a large allocation.
 pub fn decode_download_zip(body: &[u8]) -> Result<Vec<MediaFile>, JobError> {
     let fail = |detail: String| JobError::bad_response(Method::DownloadFiles, detail);
     let mut archive =
         ZipArchive::new(Cursor::new(body)).map_err(|err| fail(format!("the body is not a zip: {err}")))?;
+    let mut budget = u64::try_from(body.len())
+        .unwrap_or(u64::MAX)
+        .saturating_mul(MAX_DOWNLOAD_EXPANSION);
     let meta = match archive.index_for_name(META_ENTRY) {
-        Some(index) => read_entry(&mut archive, index).map_err(fail)?.1,
+        Some(index) => read_entry(&mut archive, index, &mut budget).map_err(fail)?,
         None => return Err(fail(format!("the zip has no {META_ENTRY} entry"))),
     };
     let names: HashMap<String, String> = entry_names(&meta)
@@ -180,13 +198,18 @@ pub fn decode_download_zip(body: &[u8]) -> Result<Vec<MediaFile>, JobError> {
         .collect();
     let mut files = Vec::new();
     for index in 0..archive.len() {
-        let (entry, data) = read_entry(&mut archive, index).map_err(fail)?;
+        let entry = match archive.name_for_index(index) {
+            Some(Ok(name)) => name.into_owned(),
+            Some(Err(err)) => return Err(fail(format!("zip entry {index}: {err}"))),
+            None => return Err(fail(format!("zip entry {index} is missing"))),
+        };
         if entry == META_ENTRY {
             continue;
         }
         let Some(name) = names.get(&entry) else {
             return Err(fail(format!("zip entry {entry:?} is not in {META_ENTRY}")));
         };
+        let data = read_entry(&mut archive, index, &mut budget).map_err(fail)?;
         files.push(MediaFile {
             name: name.clone(),
             data,
@@ -195,26 +218,38 @@ pub fn decode_download_zip(body: &[u8]) -> Result<Vec<MediaFile>, JobError> {
     Ok(files)
 }
 
-/// The name and bytes of the entry at `index`, stored or deflated.
-fn read_entry(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize) -> Result<(String, Vec<u8>), String> {
-    let mut entry = archive
+/// The bytes of the entry at `index`, stored or deflated, taken from
+/// `budget`: at most [`MAX_DOWNLOAD_ENTRY_BYTES`] and at most what `budget`
+/// has left. One byte past either limit fails, and nothing past it is read.
+fn read_entry(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, budget: &mut u64) -> Result<Vec<u8>, String> {
+    let entry = archive
         .by_index(index)
         .map_err(|err| format!("zip entry {index}: {err}"))?;
-    let name = entry
-        .name()
-        .map_err(|err| format!("zip entry {index}: {err}"))?
-        .into_owned();
     if !matches!(
         entry.compression(),
         CompressionMethod::Stored | CompressionMethod::Deflated
     ) {
-        return Err(format!("zip entry {name:?} is neither stored nor deflated"));
+        return Err(format!("zip entry {index} is neither stored nor deflated"));
     }
+    let limit = MAX_DOWNLOAD_ENTRY_BYTES.min(*budget);
+    // The buffer grows with the bytes read, never from the declared size: an
+    // entry may declare far more than it holds.
     let mut data = Vec::new();
     entry
+        .take(limit.saturating_add(1))
         .read_to_end(&mut data)
-        .map_err(|err| format!("zip entry {name:?}: {err}"))?;
-    Ok((name, data))
+        .map_err(|err| format!("zip entry {index}: {err}"))?;
+    let read = u64::try_from(data.len()).unwrap_or(u64::MAX);
+    if read > MAX_DOWNLOAD_ENTRY_BYTES {
+        return Err(format!(
+            "zip entry {index} expands past {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
+        ));
+    }
+    if read > *budget {
+        return Err(format!("the zip expands past {MAX_DOWNLOAD_EXPANSION} times its size"));
+    }
+    *budget -= read;
+    Ok(data)
 }
 
 /// `_meta` of a downloaded zip: an object mapping entry names to real names
