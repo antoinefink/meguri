@@ -128,3 +128,15 @@ fsrsWeights
 desiredRetention
 loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
+# timed-operations.md: package entries and kinds, sync protocol headers, the
+# browser's sort-column config values and the search keywords of its queries.
+colpkg
+collection.anki21b
+anki-sync
+anki-original-size
+noteFld
+cardDue
+sortType
+prop
+rated
+lastUnburied

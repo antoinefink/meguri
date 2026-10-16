@@ -15,27 +15,8 @@
         }
       },
       {
-        "add_note": {
-          "cards": ["#c2"],
-          "note": "#n2"
-        }
-      },
-      {
-        "add_note": {
-          "cards": ["#c3"],
-          "note": "#n3"
-        }
-      },
-      {
-        "add_note": {
-          "cards": ["#c4"],
-          "note": "#n4"
-        }
-      },
-      {
-        "add_note": {
-          "cards": ["#c5"],
-          "note": "#n5"
+        "db_exec": {
+          "rows": []
         }
       },
       {
@@ -85,36 +66,36 @@
                   {
                     "children": [],
                     "collapsed": true,
-                    "name": "a"
+                    "name": "de"
                   },
                   {
                     "children": [],
                     "collapsed": true,
-                    "name": "b"
+                    "name": "fr"
                   }
                 ],
                 "collapsed": false,
-                "name": "BAR"
+                "name": "eu"
               }
             ],
             "collapsed": true,
-            "name": "foo"
+            "name": "GEO"
           },
           {
             "children": [
               {
                 "children": [],
                 "collapsed": true,
-                "name": "two"
+                "name": "extra"
               }
             ],
             "collapsed": true,
-            "name": "one"
+            "name": "lesson"
           },
           {
             "children": [],
             "collapsed": true,
-            "name": "one1"
+            "name": "lesson9"
           }
         ]
       },
@@ -131,13 +112,19 @@
               "collapsed": 1,
               "config": null,
               "tag": "Bar::x",
+              "usn": 0
+            },
+            "GEO::eu": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "GEO::eu",
               "usn": -1
             },
-            "FOO::bar::b": {
+            "GEO::eu::de": {
               "collapsed": 1,
               "config": null,
-              "tag": "FOO::bar::b",
-              "usn": -1
+              "tag": "GEO::eu::de",
+              "usn": 0
             },
             "a!": {
               "collapsed": 1,
@@ -155,36 +142,30 @@
               "collapsed": 1,
               "config": null,
               "tag": "bar::y",
-              "usn": -1
+              "usn": 0
             },
-            "foo::BAR": {
-              "collapsed": 0,
-              "config": null,
-              "tag": "foo::BAR",
-              "usn": -1
-            },
-            "foo::BAR::a": {
+            "geo::EU::fr": {
               "collapsed": 1,
               "config": null,
-              "tag": "foo::BAR::a",
-              "usn": -1
+              "tag": "geo::EU::fr",
+              "usn": 0
             },
-            "one": {
+            "lesson": {
               "collapsed": 1,
               "config": null,
-              "tag": "one",
+              "tag": "lesson",
               "usn": -1
             },
-            "one1": {
+            "lesson9": {
               "collapsed": 1,
               "config": null,
-              "tag": "one1",
+              "tag": "lesson9",
               "usn": -1
             },
-            "one::two": {
+            "lesson::extra": {
               "collapsed": 1,
               "config": null,
-              "tag": "one::two",
+              "tag": "lesson::extra",
               "usn": -1
             }
           }
@@ -194,10 +175,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "driver_sha256": "aa9c419b2bb8c40c3847fadaf9b4ac1480307922948ebbd6fc0490b9c054df93",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "tags/tree/structure",
-  "scenario_sha256": "a8ceed81d933532e2d947fd3b29ec02cdbbe33b16571d5181e64622b6abd36e0",
+  "scenario_sha256": "ae088a75c103275c6357c10694035af2d7234a7890b44b24ad7e5bc88683bddd",
   "tz": "UTC"
 }

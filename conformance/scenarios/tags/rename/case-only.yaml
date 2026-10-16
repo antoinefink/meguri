@@ -1,6 +1,11 @@
-# A rename that changes only letter case (specs/tags/tags.md T7, R1176):
-# the old rows go first, so the new spelling is stored in the notes and the
-# registry, descendants included.
+# A rename that changes only letter case (specs/tags/tags.md T7, R1176,
+# R1467): the old rows go first, so the new spelling is stored in the notes
+# and the registry, descendants included. Each new row takes its old row's
+# collapsed state and config, with usn -1 (T7 step 5): after the first
+# rename `Verbs` and `Verbs::x` are expanded, `Verbs` and `Verbs::y` hold a
+# config, and every row has usn 0 as after a sync. Anki's rows after the
+# second rename are new rows, collapsed with config NULL (deviation
+# tags-rename-carries-columns-case-only).
 id: tags/rename/case-only
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 setup:
@@ -13,5 +18,12 @@ steps:
   - add_note: {notetype: Plain, fields: ["n2"], tags: ["verbs::y"]}
   - advance: 1h
   - rename_tag: {from: verbs, to: Verbs}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - set_tag_collapsed: {tags: [Verbs, "Verbs::x"], collapsed: false}
+  - db_exec: {sql: "UPDATE tags SET usn = 0"}
+  - db_exec: {sql: "UPDATE tags SET config = X'0801' WHERE tag IN ('Verbs', 'Verbs::y')"}
+  - advance: 1h
+  - rename_tag: {from: Verbs, to: VERBS}
   - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
   - observe: [{db_dump: {tables: [tags]}}]

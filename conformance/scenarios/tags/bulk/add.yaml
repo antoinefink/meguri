@@ -12,15 +12,15 @@ setup:
       fields: [Text]
       templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
 steps:
-  - add_note: {notetype: Plain, fields: ["n1"], tags: ["XYZ", deF, aaa]}
+  - add_note: {notetype: Plain, fields: ["n1"], tags: ["VERB", kaNA, art]}
   - add_note: {notetype: Plain, fields: ["n2"]}
-  - add_note: {notetype: Plain, fields: ["n3"], tags: [def, xyz, abc]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: [kana, verb, idiom]}
   - add_note: {notetype: Plain, fields: ["n4"], tags: [zz, a]}
   - db_exec: {sql: "UPDATE notes SET tags = ' zz a zz ' WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 3)"}
   - add_note: {notetype: Plain, fields: ["n5"], tags: [b]}
   - db_exec: {sql: "UPDATE notes SET tags = ' b a ' WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 4)"}
   - advance: 1h
-  - add_note_tags: {notes: ["#n1", "#n2", "#n3", "#n4"], tags: "xyz abc DEF new\tone"}
+  - add_note_tags: {notes: ["#n1", "#n2", "#n3", "#n4"], tags: "verb idiom KANA mix\tup"}
   - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
   - observe: [{db_dump: {tables: [tags]}}]
   - advance: 1h

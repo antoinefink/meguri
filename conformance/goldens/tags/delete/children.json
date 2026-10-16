@@ -47,7 +47,7 @@
           "rows": [
             [" keep ", 1894705200, -1],
             ["", 1894705200, -1],
-            [" ab ", 1894701600, -1],
+            [" inky ", 1894701600, -1],
             [" b c ", 1894701600, -1],
             [" b::x ", 1894701600, -1]
           ]
@@ -56,12 +56,6 @@
       {
         "db_dump": {
           "tags": {
-            "ab": {
-              "collapsed": 1,
-              "config": null,
-              "tag": "ab",
-              "usn": -1
-            },
             "b": {
               "collapsed": 1,
               "config": null,
@@ -78,6 +72,12 @@
               "collapsed": 1,
               "config": null,
               "tag": "c",
+              "usn": -1
+            },
+            "inky": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "inky",
               "usn": -1
             },
             "keep": {
@@ -134,7 +134,7 @@
           "rows": [
             [" keep ", 1894705200, -1],
             ["", 1894705200, -1],
-            [" ab ", 1894701600, -1],
+            [" inky ", 1894701600, -1],
             ["", 1894708800, -1],
             ["", 1894708800, -1]
           ]
@@ -143,10 +143,10 @@
       {
         "db_dump": {
           "tags": {
-            "ab": {
+            "inky": {
               "collapsed": 1,
               "config": null,
-              "tag": "ab",
+              "tag": "inky",
               "usn": -1
             },
             "keep": {
@@ -162,10 +162,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "driver_sha256": "aa9c419b2bb8c40c3847fadaf9b4ac1480307922948ebbd6fc0490b9c054df93",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "tags/delete/children",
-  "scenario_sha256": "e3632ecdfbd651d8024b056f038270f9b495183ab6725e66d53fb6042f22ce12",
+  "scenario_sha256": "79a0c6bc1d571bf3b853b63bc6e6e6791a0ddbf1e869cb9adb98651a7acef0a8",
   "tz": "UTC"
 }

@@ -10,11 +10,11 @@ goldens `tags/canon/*` and with every expectation the scenarios state.
 
 | Spec section | Anki files read | Read for |
 |---|---|---|
-| tags T1, T2 | `rslib/src/tags/mod.rs`, `rslib/src/tags/register.rs`, `rslib/src/text.rs` (NFC); `Cargo.lock` (unicode-normalization 0.1.24) | separators, per-component normalization order (NFC, removal, trim, `blank`), refusal of an empty result |
-| tags T3, T4 | `rslib/src/tags/register.rs`, `rslib/src/notes/mod.rs` (tags canonicalized on add and update), `rslib/src/storage/tag/mod.rs`, `rslib/src/storage/tag/*.sql` | existing-row spelling through the `unicase` key, nearest registered ancestor, dedupe and sort by the `unicase` order, new-row columns |
+| tags T1, T2 | `rslib/src/tags/mod.rs`, `rslib/src/tags/register.rs`, `rslib/src/text.rs` (NFC); `Cargo.lock` (unicode-normalization 0.1.24); `rslib/src/tags/tree.rs`, `rslib/src/storage/tag/get.sql` and the `tags` table's `unicase` key (rows read in key order) | separators, per-component normalization order (NFC, removal, trim, `blank`), refusal of an empty result; nodes and the tree spelling of implicit parents (first row in key order) |
+| tags T3, T4 | `rslib/src/tags/register.rs`, `rslib/src/notes/mod.rs` (tags canonicalized on add and update), `rslib/src/storage/tag/mod.rs`, `rslib/src/storage/tag/*.sql` | existing-row spelling through the `unicase` key, nearest registered ancestor only (the parent lookup is an equality query on rows, so implicit parents lend nothing: T3's deviation, R892), dedupe and sort by the `unicase` order, new-row columns |
 | tags T5 | `rslib/src/tags/matcher.rs`; `Cargo.lock` (regex 1.11.2, regex-syntax 0.8.6, Unicode 16.0 simple case folding) | escaped names, case-insensitive alternation, `::` or end after the name, first alternative wins |
 | tags T6 | `rslib/src/tags/matcher.rs`, `rslib/src/tags/rename.rs`, `rslib/src/tags/reparent.rs`, `rslib/src/tags/remove.rs`, `rslib/src/notes/mod.rs` (`NoteTags` stamping) | in-place replacement with no sort or dedupe, every matched note written |
-| tags T7 | `rslib/src/tags/rename.rs`, `rslib/src/tags/service.rs`, `qt/aqt/browser/sidebar/tree.py`, `qt/aqt/operations/tag.py` | refusals, early exit with no matching note, prefix spelled before the old rows go (the deviations), sidebar rename input |
+| tags T7 | `rslib/src/tags/rename.rs`, `rslib/src/tags/service.rs`, `rslib/src/storage/tag/add.sql` (insert without `config`), `qt/aqt/browser/sidebar/tree.py`, `qt/aqt/operations/tag.py` | refusals, early exit with no matching note, prefix spelled before the old rows go (the deviations), old rows removed and new rows registered fresh (the carried-columns deviation, R1467), sidebar rename input |
 | tags T8 | `rslib/src/tags/reparent.rs`, `rslib/src/tags/service.rs`, `qt/aqt/browser/sidebar/tree.py` | skip rules (exact text prefix with the same first component), first source wins, the failure when a note uses a skipped source next to a kept one (probe: a panic that poisons the backend) |
 | tags T9, T10 | `rslib/src/tags/remove.rs`, `rslib/src/tags/bulkadd.rs`, `pylib/anki/tags.py`, `qt/aqt/browser/browser.py` | registry removal without matching notes, add re-sorts only changed notes, removal leaves rows |
 | tags T11 | `rslib/src/tags/remove.rs`, `rslib/src/storage/note/mod.rs` (tags in notes with ancestors) | used names, full folding |
@@ -56,3 +56,14 @@ Tag completion and tag find-and-replace rows are deferred to the units that
 own them (U88's search-text services, U86's Find and Replace); the legacy
 Python helpers (`canonify`, `rem_from_str`, the legacy register and bulk
 wrappers) have no Meguri counterpart.
+
+Revision 2026-10-16 (review findings F1, F3, F5 of U30): the scenario and
+spec inputs that had come from Anki's tag tests (`register.rs`, `tree.rs`,
+`bulkadd.rs`, `remove.rs`, `reparent.rs` test modules) were replaced with
+Meguri-authored names showing the same rules (R1881). T7 steps 5 and 6
+(carried `collapsed` and `config`) and T3's implicit-parent spelling are
+Meguri's rules (R1467, R892, the plan's U30 Approach and test scenario);
+the goldens of `tags/canon/spelling`, `tags/collapse/set`,
+`tags/rename/rows`, `tags/rename/case-only` and `tags/rename/implicit-parent`
+record Anki's behavior, and `conformance/deviations.yaml` holds the
+differences.
