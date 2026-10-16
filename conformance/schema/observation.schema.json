@@ -272,6 +272,30 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "add_note_tags": { "description": "specs/conformance/tag-ops.md G1: notes written.", "$ref": "#/$defs/op_count" },
+        "remove_note_tags": { "description": "tag-ops.md G2: notes written.", "$ref": "#/$defs/op_count" },
+        "delete_tags": { "description": "tag-ops.md G3: notes written.", "$ref": "#/$defs/op_count" },
+        "rename_tag": {
+          "description": "tag-ops.md G4: notes written, or the rejection invalid_name.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_name"] } } }] }
+          ]
+        },
+        "reparent_tags": { "description": "tag-ops.md G5: notes written.", "$ref": "#/$defs/op_count" },
+        "clear_unused_tags": { "description": "tag-ops.md G6: registry rows removed.", "$ref": "#/$defs/op_count" },
+        "set_flag": {
+          "description": "tag-ops.md G8: cards written, or the rejection invalid_flag.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_flag"] } } }] }
+          ]
+        },
+        "tag_tree": {
+          "description": "tag-ops.md G9: top-level nodes of the tag tree (specs/tags/tags.md T13).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/tag_node" }
+        },
         "undo": {
           "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]
@@ -369,6 +393,22 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "op_count": {
+      "type": "object",
+      "required": ["count"],
+      "additionalProperties": false,
+      "properties": { "count": { "type": "integer", "minimum": 0 } }
+    },
+    "tag_node": {
+      "type": "object",
+      "required": ["name", "collapsed", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "collapsed": { "type": "boolean" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/tag_node" } }
+      }
+    },
     "undo_step": {
       "description": "undo-ops.md V4: the id of an undo step's name.",
       "enum": [

@@ -1,0 +1,23 @@
+# Removing tags from listed notes (specs/tags/tags.md T10 Remove). Matching
+# tags go with their descendants, in any case; the other tags keep their
+# order and duplicates (#n1, stored by another client); `mix*` is literal.
+# The registry keeps every row.
+id: tags/bulk/remove
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [c, a, b]}
+  - db_exec: {sql: "UPDATE notes SET tags = ' c b a b ' WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1)"}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["a::x", "A", other]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: [mix, mixed]}
+  - advance: 1h
+  - remove_note_tags: {notes: ["#n1"], tags: "a"}
+  - remove_note_tags: {notes: ["#n2", "#n3"], tags: "A mix*"}
+  - remove_note_tags: {notes: ["#n3"], tags: "MIX"}
+  - remove_note_tags: {notes: ["#n3"], tags: "nothing"}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

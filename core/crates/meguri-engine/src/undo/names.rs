@@ -50,6 +50,14 @@ pub const UPDATE_NOTE: &str = "Update Note";
 pub const UPDATE_NOTE_TYPE: &str = "Update Note Type";
 pub const UPDATE_TAG: &str = "Update Tag";
 
+/// Meguri's own step for the tag sidebar's collapsed state
+/// (`specs/tags/tags.md` T12): Anki records none. Not in V4, which lists
+/// Anki's steps; no scenario observes it.
+pub const EXPAND_COLLAPSE: &str = "Expand/Collapse";
+/// Meguri's own step for renaming a flag or restoring its default name
+/// (`specs/tags/flags-and-marked.md` F4): Anki records none. Not in V4.
+pub const RENAME_FLAG: &str = "Rename Flag";
+
 /// Every name, in V4's order.
 pub const ALL: [&str; 38] = [
     ADD_DECK,
