@@ -5,10 +5,12 @@
 //! ordered change stream and in-core observers (C2), the collection
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
 //! registry, the ports, cancellation and progress; U25 adds undo and redo
-//! (C3); U30 the tags, flags and marked notes (`specs/tags/`). Specs:
+//! (C3); U30 the tags, flags and marked notes (`specs/tags/`); U83 the
+//! browser and search config writes (`specs/browser/config-keys.md`). Specs:
 //! `specs/engine/op-model.md`, `change-stream.md`, `lifecycle.md`,
 //! `jobs.md`, `undo.md`.
 
+pub mod browser_config;
 pub mod cancel;
 pub mod changes;
 pub mod collection;
