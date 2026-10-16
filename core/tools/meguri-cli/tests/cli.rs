@@ -28,7 +28,15 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
         json["supports"]["ops"],
-        serde_json::json!(["advance", "db_exec", "handoff", "open", "reopen", "set_clock", "set_config"])
+        serde_json::json!([
+            "advance",
+            "db_exec",
+            "handoff",
+            "open",
+            "reopen",
+            "set_clock",
+            "set_config"
+        ])
     );
     assert_eq!(
         json["supports"]["observations"],
