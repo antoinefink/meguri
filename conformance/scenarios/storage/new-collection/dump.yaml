@@ -1,0 +1,14 @@
+# A new collection compared row by row with Anki's (specs/storage/
+# new-collection.md B2-B8; plan U28): every stored row of the tables that hold
+# no stock template text, blobs and config values by digest, and the schema
+# objects (storage/schema-18 S6). Note types, fields and templates hold each
+# client's own stock text and CSS (R908, R1959): their structure is U29's
+# notetypes/records/stock-new-collection. Starts with the day query both
+# sides run (sched/day-clock D14.2); at UTC it writes rollover only.
+id: storage/new-collection/dump
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe: [timing]
+  - observe:
+      - db_dump: {tables: [col, config, decks, deck_config, graves, tags, notes, cards, revlog]}
+  - observe: [schema_objects]

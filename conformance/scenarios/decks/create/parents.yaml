@@ -1,0 +1,18 @@
+# Creating decks (specs/decks/decks.md D3, D4, D5; R55, R57): the missing
+# ancestors of A::B::C are created nearest first, each with its own id from
+# the frozen clock, and the typed deck last, all stamped and collapsed in both
+# scopes. A name the collection already has, ignoring case, returns that deck
+# and writes nothing. A new deck under an existing one takes the existing
+# ancestor's spelling; whitespace and ":" around components go. Ops and kinds:
+# specs/conformance/deck-ops.md.
+id: decks/create/parents
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_deck: {name: "A::B::C"}
+  - observe: [decks]
+  - advance: 1m
+  - add_deck: {name: "a::b"}
+  - add_deck: {name: "  a :: x ::y "}
+  - add_deck: {name: Solo}
+  - observe: [decks, deck_tree]
+  - db_exec: {sql: "SELECT mod FROM col"}

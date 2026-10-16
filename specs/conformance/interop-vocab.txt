@@ -115,3 +115,21 @@ fsrsWeights
 desiredRetention
 loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
+# Deck ops and kinds (deck-ops.md): op and kind names and rejection kinds.
+add_deck
+rename_deck
+reparent_decks
+delete_decks
+set_deck_collapsed
+set_current_deck
+add_preset
+clone_preset
+rename_preset
+remove_preset
+set_deck_preset
+deck_tree
+filtered_parent
+too_deep
+under_descendant
+default_preset
+filtered_deck

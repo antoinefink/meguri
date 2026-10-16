@@ -1,0 +1,26 @@
+# Removing a preset after a sync (specs/decks/deck-presets.md P8; R733,
+# R1475): the default preset is refused; removing another moves every deck
+# that used it, and a deck whose preset id names no preset, to the fallback,
+# stamped; decks of other presets stay; the row goes without a grave; scm is
+# set to now, past ls. "ls = scm" stands for a sync (specs/conformance/
+# deck-ops.md K13); the removal runs confirmed (K9). Deck D gets a preset id
+# that names no preset (config_id 999999) with db_exec.
+id: decks/presets/remove
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [A, B, C, D]
+steps:
+  - add_preset: {name: Old}
+  - add_preset: {name: Keep}
+  - set_deck_preset: {deck: A, preset: Old}
+  - set_deck_preset: {deck: B, preset: Old}
+  - set_deck_preset: {deck: C, preset: Keep}
+  - db_exec: {sql: "UPDATE decks SET kind = X'0a0408bf843d' WHERE name = 'D'"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - db_exec: {sql: "SELECT scm, ls, mod FROM col"}
+  - advance: 1m
+  - remove_preset: {preset: Default, fallback: Keep}
+  - remove_preset: {preset: Old, fallback: Keep}
+  - observe: [decks]
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM deck_config ORDER BY id"}
+  - db_exec: {sql: "SELECT scm, ls, mod, (SELECT count() FROM graves) FROM col"}

@@ -272,6 +272,65 @@
             }
           ]
         },
+        "add_deck": {
+          "description": "specs/conformance/deck-ops.md K2: the stored human name of the deck returned, or a rejection.",
+          "anyOf": [
+            { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" } } },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["filtered_parent", "too_deep"] } } }] }
+          ]
+        },
+        "rename_deck": {
+          "description": "deck-ops.md K3: the deck's stored human name after the op, or a rejection (under_descendant is Meguri's only).",
+          "anyOf": [
+            { "type": "object", "required": ["name"], "additionalProperties": false, "properties": { "name": { "type": "string" } } },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["filtered_parent", "too_deep", "under_descendant"] } } }] }
+          ]
+        },
+        "reparent_decks": {
+          "description": "deck-ops.md K4: the number of listed decks that moved, or a rejection.",
+          "anyOf": [
+            { "type": "object", "required": ["count"], "additionalProperties": false, "properties": { "count": { "type": "integer", "minimum": 0 } } },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["filtered_parent"] } } }] }
+          ]
+        },
+        "delete_decks": {
+          "description": "deck-ops.md K5: the number of cards removed.",
+          "type": "object",
+          "required": ["count"],
+          "additionalProperties": false,
+          "properties": { "count": { "type": "integer", "minimum": 0 } }
+        },
+        "remove_preset": {
+          "description": "deck-ops.md K9: the op has no output, so only a rejection appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["default_preset"] } } }]
+        },
+        "set_deck_preset": {
+          "description": "deck-ops.md K10: the op has no output, so only a rejection appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["filtered_deck"] } } }]
+        },
+        "decks": {
+          "description": "deck-ops.md K11: every deck, keyed by its stored name in human form.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["id", "filtered", "config_id", "study_collapsed", "browser_collapsed", "mtime_secs", "usn"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "integer" },
+              "filtered": { "type": "boolean" },
+              "config_id": { "type": ["integer", "null"] },
+              "study_collapsed": { "type": "boolean" },
+              "browser_collapsed": { "type": "boolean" },
+              "mtime_secs": { "type": "integer" },
+              "usn": { "type": "integer" }
+            }
+          }
+        },
+        "deck_tree": {
+          "description": "deck-ops.md K12: the top-level nodes of the deck tree in order (decks/decks.md D12).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/deck_tree_node" }
+        },
         "converge": {
           "description": "sync-ops.md S7.5.",
           "type": "object",
@@ -290,6 +349,15 @@
             "dump": { "$ref": "#/$defs/db_dump" }
           }
         }
+      }
+    },
+    "deck_tree_node": {
+      "type": "object",
+      "required": ["name", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/deck_tree_node" } }
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },

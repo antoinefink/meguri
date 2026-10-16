@@ -1,0 +1,46 @@
+# Deleting a deck with a subdeck (specs/decks/decks.md D8; R66, R1473): the
+# deck, its subdeck and all their cards go, including the deck's card that
+# sits in a filtered deck; each card's note, left without cards, goes too;
+# graves for cards, notes and both decks; the decks' "_deck_<id>_..." config
+# keys go, but a key named exactly "_deck_<id>_" stays; another deck's card
+# in the filtered deck, curDeck and the other deck stay. The count is the
+# cards removed. Cards are moved into the filtered deck with db_exec as
+# Anki's build leaves them (specs/conformance/deck-ops.md K13). Home gets the
+# first deck id, 1894701600000 (setup order: decks before note types).
+id: decks/delete/subtree
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home, "Home::Sub", Other]
+  notes:
+    - {notetype: Pair, deck: Home, fields: [h1, a]}
+    - {notetype: Pair, deck: Home, fields: [h2, a]}
+    - {notetype: Pair, deck: "Home::Sub", fields: [s1, a]}
+    - {notetype: Pair, deck: "Home::Sub", fields: [s2, a]}
+    - {notetype: Pair, deck: Other, fields: [o1, a]}
+    - {notetype: Pair, deck: Other, fields: [o2, a]}
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO decks (id, name, mtime_secs, usn, common, kind)
+        VALUES (100, 'Filt', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')
+  - db_exec:
+      sql: >-
+        UPDATE cards SET odid = did, odue = due, did = 100, due = -100000
+        WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)
+  - db_exec:
+      sql: >-
+        UPDATE cards SET odid = did, odue = due, did = 100, due = -99999
+        WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)
+  - set_config: {key: "_deck_1894701600000_", value: 1}
+  - set_current_deck: {deck: "Home::Sub"}
+  - db_exec: {sql: "SELECT KEY FROM config WHERE substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - advance: 1m
+  - delete_decks: {decks: [Home]}
+  - observe: [card, decks]
+  - db_exec: {sql: "SELECT type, count(), min(usn), max(usn) FROM graves GROUP BY type ORDER BY type"}
+  - db_exec: {sql: "SELECT KEY FROM config WHERE substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - db_exec: {sql: "SELECT (SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'curDeck'), (SELECT count() FROM notes), (SELECT mod FROM col)"}

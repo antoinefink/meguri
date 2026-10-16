@@ -1,0 +1,78 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T03:30:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894676400,
+          "now": 1894674600,
+          "utc_offset_secs": 3600
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, 1894590000, 0, 1894674600000, 18, 0, 0, 0, "", "", "", "", ""]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["activeDecks", 0, 0, "blob", "[1]"],
+            ["addToCur", 0, 0, "blob", "true"],
+            ["collapseTime", 0, 0, "blob", "1200"],
+            ["creationOffset", 0, 0, "blob", "-60"],
+            ["curDeck", 0, 0, "blob", "1"],
+            ["curModel", -1, 1894674600, "blob", "1894674600000"],
+            ["dayLearnFirst", 0, 0, "blob", "false"],
+            ["dueCounts", 0, 0, "blob", "true"],
+            ["estTimes", 0, 0, "blob", "true"],
+            ["localOffset", -1, 1894674600, "blob", "-60"],
+            ["newSpread", 0, 0, "blob", "0"],
+            ["nextPos", 0, 0, "blob", "1"],
+            ["rollover", -1, 1894674600, "blob", "4"],
+            ["sched2021", 0, 0, "blob", "true"],
+            ["schedVer", 0, 0, "blob", "2"],
+            ["sortBackwards", 0, 0, "blob", "false"],
+            ["sortType", 0, 0, "blob", "\"noteFld\""],
+            ["timeLim", 0, 0, "blob", "0"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, "44656661756C74", 0, 0, "08011001", "0A020801"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, "Default", 0, 0, "0A080000803F00002041120400002041221C0000803F0000803F0000803F0000803F0000803F0000803F0000803F481450C8015D00002040656666A63F6D9A99993F7D0000803F8001949D02880101900101980104A80101B00108C0013CAD026666663FC5026666663FE00201"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [6, 0, 0, 0, 0, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "storage/new-collection/rows",
+  "scenario_sha256": "4a8240f591c75200d7aa9c795a21589134cdcc1b24181ba1d2ce3c08c69471f7",
+  "tz": "Europe/Paris"
+}

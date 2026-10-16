@@ -1,0 +1,16 @@
+# Renaming a deck under its own old name (specs/decks/decks.md D6 steps 5 to
+# 8): A to A::Z::A creates A::Z under the old A first, which then moves with
+# the subtree, and new A::Z and A are created at the end, nearest first. P::Q
+# to P::Q::R, a name its own subdeck holds, becomes P::Q::R+ with the subdeck
+# under it, and a new P::Q is created. Neither is under a current descendant,
+# so Meguri does not refuse them.
+id: decks/rename/own-subtree
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["A::B", "P::Q::R"]
+steps:
+  - advance: 1m
+  - rename_deck: {deck: A, name: "A::Z::A"}
+  - advance: 1m
+  - rename_deck: {deck: "P::Q", name: "P::Q::R"}
+  - observe: [decks]

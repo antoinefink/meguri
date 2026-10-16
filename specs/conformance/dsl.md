@@ -143,6 +143,15 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
 | `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
 | `set_config` | `{key, value}`: one collection config key and its JSON value | none | stable (`record-ops.md` W4) |
+| `add_deck` | `{name}`: a typed deck name | `{name}`: the stored name of the deck returned; rejections `filtered_parent`, `too_deep` | stable (`deck-ops.md` K2) |
+| `rename_deck` | `{deck, name}` | `{name}`; rejections `filtered_parent`, `too_deep`, `under_descendant` (Meguri's only) | stable (`deck-ops.md` K3) |
+| `reparent_decks` | `{decks: [...], parent}`: `parent` empty for the top level | `{count}`; rejection `filtered_parent` | stable (`deck-ops.md` K4) |
+| `delete_decks` | `{decks: [...]}` | `{count}`: cards removed | stable (`deck-ops.md` K5) |
+| `set_deck_collapsed` | `{decks: [...], scope: study \| browser, collapsed}` | none | stable (`deck-ops.md` K6) |
+| `set_current_deck` | `{deck}` | none | stable (`deck-ops.md` K7) |
+| `add_preset`, `clone_preset`, `rename_preset` | `{name}`, `{preset, name}`, `{preset, name}` | none | stable (`deck-ops.md` K8) |
+| `remove_preset` | `{preset, fallback}` | none; rejection `default_preset` | stable (`deck-ops.md` K9) |
+| `set_deck_preset` | `{deck, preset, subtree?}` | none; rejection `filtered_deck` | stable (`deck-ops.md` K10) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |

@@ -307,6 +307,8 @@ Deck names are stored in native form: the components of the hierarchy joined by 
   1. Split at each `::`, scanning left to right without overlap (`a:::b` gives `a` and `:b`).
   2. In each component: normalize to Unicode NFC; remove every ASCII control character (U+0000 to U+001F and U+007F); remove leading and trailing characters that are Unicode White_Space or `:`; if nothing is left, use `blank`.
   3. Join the components with U+001F.
+
+  A stored deck name is normalized once more whenever a deck is written (`decks/decks#D1`), so a component is NFC also when removing a control character lets a combining mark compose: `e` U+0001 U+0301 is stored as `é`. `decks/decks#D1` gives the steps in the order that yields the stored result in one pass.
 - Nothing else changes: emoji, mixed scripts and other characters round-trip byte for byte.
 
 | Human input | Native result (U+001F shown as `␟`) | Human output |

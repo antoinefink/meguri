@@ -11,7 +11,7 @@ What each observation kind records, how values are written, and how the runner c
 
 - A run's observations are `{"steps": [<output of step 0>, <output of step 1>, ...]}`, one output per scenario step, so `/steps/<i>/...` points into step `i`.
 - An op step's output is `{}`, `{<op>: <op output>}` (`dsl.md` D7.2) or a rejection `{<op>: {"error": <kind>}}` (`dsl.md` D7.3). An observe step's output is `{<kind>: <value>, ...}` with one member per requested kind. A `handoff` step's output is `{}`.
-- Values are plain JSON keyed by logical ids (`#nN`, `#cN`). A real id appears only in the `ids` kind, or where a value is a real id by definition (revlog row ids are review instants, fuzz-table card ids are inputs, a `db_dump` holds the stored rows).
+- Values are plain JSON keyed by logical ids (`#nN`, `#cN`). A real id appears only in the `ids` kind, or where a value is a real id by definition (revlog row ids are review instants, fuzz-table card ids are inputs, a `db_dump` holds the stored rows, `decks` reports each deck's id and preset id).
 - In an actor scenario (`sync-ops.md`), an observe step runs on the current actor's collection (S2.3).
 - No localized text is ever an observation (R1887): errors and results are kinds, counts and enums. Driver-authored English (`detail` of a protocol error) is never compared.
 
@@ -45,7 +45,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `net_probe` | `{host, port, timeout_ms?}` | `{connected, error}` (diagnostic, oracle only: proves the worker has no route out) |
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
-| `deck_tree` | none | draft (sched): deck names with their counts, nested |
+| `deck_tree` | none | `[{name, children}]`: the deck tree's top-level nodes in order, nested (`deck-ops.md` K12); the queue area (U41) adds counts |
+| `decks` | none | `{<name>: {id, filtered, config_id, study_collapsed, browser_collapsed, mtime_secs, usn}}`: every deck by its stored human name (`deck-ops.md` K11) |
 | `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |

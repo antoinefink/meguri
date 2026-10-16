@@ -1,0 +1,20 @@
+# Creating decks that Anki refuses (specs/decks/decks.md D3, D5; R62): under a
+# filtered deck, also when the filtered deck is only the nearest existing
+# ancestor; and a name of 12 or more components whose 11 nearest ancestors
+# are all missing (too_deep). Twelve components succeed when the top-level
+# ancestor exists; thirteen do not when only that one exists. The filtered
+# deck is inserted with db_exec (specs/conformance/deck-ops.md K13).
+id: decks/create/refused
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec:
+      sql: >-
+        INSERT INTO decks (id, name, mtime_secs, usn, common, kind)
+        VALUES (100, 'Filt', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')
+  - add_deck: {name: "Filt::Sub"}
+  - add_deck: {name: "filt::sub::leaf"}
+  - add_deck: {name: "1::2::3::4::5::6::7::8::9::10::11::12"}
+  - add_deck: {name: "1"}
+  - add_deck: {name: "1::a::b::c::d::e::f::g::h::i::j::k"}
+  - add_deck: {name: "1::m::n::o::p::q::r::s::t::u::v::w::x"}
+  - db_exec: {sql: "SELECT replace(name, char(31), '::') FROM decks ORDER BY id"}

@@ -1,0 +1,51 @@
+# Interface names the decks specs use that are not ordinary words: deck and
+# preset record fields, legacy deck JSON keys, collection config keys the
+# preset and deck operations read or write, and the new collection's config
+# keys. Names already listed by other areas (model, storage, fixtures) are
+# repeated where these specs depend on them.
+# Deck record fields and legacy keys
+study_collapsed
+browser_collapsed
+browserCollapsed
+config_id
+extend_new
+extend_review
+extendNew
+extendRev
+learning_studied
+markdown_description
+sharedFrom
+idx_decks_name
+# Preset record fields
+deck_config
+fsrs_params_4
+fsrs_params_5
+fsrs_params_6
+ignore_revlogs_before_date
+param_search
+easy_days_percentages
+# Config keys
+curDeck
+activeDecks
+curModel
+lastNotetype
+lastDeck
+cardStateCustomizer
+newCardsIgnoreReviewLimit
+applyAllParentLimits
+fsrsHealthCheck
+addToCur
+collapseTime
+creationOffset
+dayLearnFirst
+dueCounts
+estTimes
+newSpread
+nextPos
+sched2021
+schedVer
+sortBackwards
+sortType
+noteFld
+timeLim
+localOffset

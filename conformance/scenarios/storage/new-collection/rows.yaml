@@ -1,0 +1,21 @@
+# What a new collection holds (specs/storage/new-collection.md B3-B8), read
+# as text: the col row, every config key with its stamps and value, the
+# default deck and the default preset with their blob bytes, and empty
+# tables. Created in Europe/Paris before 04:00, so crt is the previous day's
+# 04:00 and creationOffset is -60 (sched/day-clock D11). The first step is
+# the day query both sides run before reading timing keys (D14.2): it writes
+# rollover and localOffset, nothing else. Stock note types are U29's
+# (notetypes/records/stock-new-collection); only their count is read here.
+id: storage/new-collection/rows
+clock: {tz: Europe/Paris, start: "2030-01-15T03:30:00"}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, crt, mod, scm, ver, dty, usn, ls, conf, models, decks, dconf, tags FROM col"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, typeof(val), CAST(val AS TEXT) FROM config ORDER BY KEY"}
+  - db_exec: {sql: "SELECT id, hex(name), mtime_secs, usn, hex(common), hex(kind) FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - db_exec:
+      sql: >-
+        SELECT (SELECT count() FROM notetypes), (SELECT count() FROM notes),
+        (SELECT count() FROM cards), (SELECT count() FROM revlog),
+        (SELECT count() FROM graves), (SELECT count() FROM tags)

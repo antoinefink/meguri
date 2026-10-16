@@ -76,6 +76,41 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/decks/decks.md D6 step 4, D15.1 (R62): Meguri refuses to rename a
+  # deck under one of its own descendants; Anki renames it there and creates
+  # new empty decks for the names the subtree left.
+  - id: decks-rename-under-descendant-refused
+    requirement: R62
+    summary: Renaming A to A::B::A while A::B exists is refused with under_descendant; Anki renames it.
+    test: decks/rename/under-descendant
+    scenarios: [decks/rename/under-descendant]
+    pointer: /steps/1
+    transform: {replace: {rename_deck: {error: under_descendant}}}
+  - id: decks-rename-under-descendant-rows
+    requirement: R62
+    summary: After the refused rename the decks are as before; Anki has A::B::A, A::B::A::B and new A and A::B.
+    test: decks/rename/under-descendant
+    scenarios: [decks/rename/under-descendant]
+    pointer: /steps/2/db_exec/rows
+    transform: {replace: [["Default", 0], ["A", 1894701600], ["A::B", 1894701600]]}
+  # specs/decks/decks.md D7 step 2.2, D15.2 (R62, R63): Meguri skips a drop
+  # only onto the deck itself or one of its descendants; Anki compares the
+  # stored names as byte strings and also skips a drop onto a sibling whose
+  # name starts with the dragged deck's name.
+  - id: decks-move-prefix-sibling-count
+    requirement: R63
+    summary: Dropping a::b onto its sibling a::bc moves it (count 1); Anki skips it (count 0).
+    test: decks/move/prefix-sibling
+    scenarios: [decks/move/prefix-sibling]
+    pointer: /steps/1
+    transform: {replace: {reparent_decks: {count: 1}}}
+  - id: decks-move-prefix-sibling-rows
+    requirement: R63
+    summary: After the drop a::b is a::bc::b, stamped; Anki leaves it as a::b.
+    test: decks/move/prefix-sibling
+    scenarios: [decks/move/prefix-sibling]
+    pointer: /steps/2/db_exec/rows
+    transform: {replace: [["Default", 0], ["a", 1894701600], ["a::bc::b", 1894701660], ["a::bc", 1894701600]]}
   # specs/conformance/float-determinism.md F8, F9 (KTD24): Meguri uses the
   # platform math library, as Anki does. On macOS the expected FSRS next-state
   # values come from the Apple oracle's overlay (conformance/goldens-apple/)
