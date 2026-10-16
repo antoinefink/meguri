@@ -42,7 +42,7 @@ pub use meguri_model::changes::{ChangeKind, ChangeSet, OpSource};
 pub use ports::{ChangeObserver, GenerationListener, OpenStep, PortKind, Ports, SuspendParticipant};
 pub use progress::{Progress, ProgressListener, ProgressPhase, ProgressSink};
 pub use readers::{ReaderLease, Snapshot};
-pub use threads::{Qos, ThreadInfo, ThreadRegistry};
+pub use threads::{Qos, RegisteredThread, ThreadInfo, ThreadRegistry};
 pub use undo::entry::{EntryId, RestorerState, SessionId, StepInfo, StepKind};
 pub use undo::holdback::{HeldBackRun, HeldRow, SyncHold, SyncMerge};
 pub use undo::reasons::{ClearCause, DisabledReason, SourceEffect, source_effect};

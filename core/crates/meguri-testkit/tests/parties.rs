@@ -14,7 +14,7 @@ use meguri_model::rng::RandomSource;
 use meguri_testkit::exec::sync_guard::ANKIWEB_HOST;
 use meguri_testkit::exec::{ExecError, MeguriExecutor, OpResult, OracleExecutor, Registry, Session};
 use meguri_testkit::report::Report;
-use meguri_testkit::scenario::{ObservationRequest, Setup, Step, SyncKind};
+use meguri_testkit::scenario::{ObservationRequest, Setup, Step, SyncKind, SyncSpec};
 use meguri_testkit::suite::{LiveRun, OraclePin, Outcome, Status, Suite};
 use serde_json::{Value, json};
 
@@ -346,7 +346,7 @@ fn meguri_actor(sync_op: meguri_testkit::exec::OpFn, raw_dump: meguri_testkit::e
     let mut registry: Registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.actor(raw_dump);
     registry.new_collection(new_collection);
-    registry.op_rejecting("sync", &["clock_incorrect", "network"], sync_op);
+    registry.op_rejecting("sync", &SyncSpec::REJECTIONS, sync_op);
     registry.op("add_note", add_note);
     registry.observation("timing", timing);
     registry.observation("db_dump", |_, _| Ok(json!({})));

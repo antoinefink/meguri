@@ -55,6 +55,25 @@ pulldown-cmark = { version = "=0.13.4", default-features = false, features = ["h
 # meguri-storage issues SQL against a collection.
 rusqlite = { version = "0.40.2", default-features = false, features = ["backup", "bundled", "cache", "collation", "functions"] }
 
+# Sync transport (KTD14, rust-stack §3, meguri-sync; tokio and reqwest only
+# there and in meguri-servers). reqwest's `rustls` is aws-lc-rs plus the
+# platform verifier; no `http2`, no `system-proxy` (Swift resolves the proxy
+# per job, U114), and never reqwest's `zstd` (Content-Encoding decoding):
+# sync bodies are raw zstd, compressed and checked by hand. rustls is named
+# only to classify TLS failures (and by the test stub's server side); it must
+# stay the 0.23 line reqwest uses. url is the WHATWG parser of endpoint
+# normalisation (specs/sync/login-endpoints.md L1).
+bytes = "1.10.1"
+futures-core = { version = "0.3.31", default-features = false }
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream"] }
+rustls = { version = "0.23.45", default-features = false, features = ["std"] }
+tokio = { version = "1.53.2", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+url = "2.5.4"
+zstd = { version = "0.14.2", default-features = false }
+# The sync stub's certificates (meguri-testkit sync_stub, transport.md T13),
+# on the aws-lc-rs provider reqwest already brings.
+rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }
+
 # Per-op spans in the engine's executor (U24, rust-stack §5): name, source,
 # rows, plan and write-phase time. Macros only; no subscriber in the core.
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
