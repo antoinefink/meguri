@@ -283,6 +283,7 @@ An endpoint is the base URL a client syncs with. The worker derives every endpoi
 When an actor scenario has at least one Meguri actor, Meguri needs (dsl.md D8):
 
 - the op `actor`: Meguri's executor can play an actor, with a collection of its own, driven by the parties executor;
+- the new collection (dsl.md D8), from which every actor starts (S2.2);
 - the setup sections, when the first actor is a Meguri actor;
 - every op and observation kind of the steps that Meguri actors run;
 - `advance` and `set_clock`, when the scenario uses them;

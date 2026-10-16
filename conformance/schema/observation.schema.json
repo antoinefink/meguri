@@ -272,6 +272,24 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "undo": {
+          "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]
+        },
+        "redo": {
+          "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_redo", "changed_externally"] } } }]
+        },
+        "undo_status": {
+          "description": "undo-ops.md V2: the step an undo and a redo would apply now, or null.",
+          "type": "object",
+          "required": ["undo", "redo"],
+          "additionalProperties": false,
+          "properties": {
+            "undo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] },
+            "redo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] }
+          }
+        },
         "search": {
           "description": "specs/conformance/search-ops.md S1: one output per request, in request order.",
           "type": "array",
@@ -351,6 +369,17 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "undo_step": {
+      "description": "undo-ops.md V4: the id of an undo step's name.",
+      "enum": [
+        "add_deck", "add_note", "add_note_type", "answer_card", "build_deck", "bury", "change_deck", "change_note_type",
+        "clear_unused_tags", "custom_study", "deck_options", "delete_deck", "delete_note", "empty", "empty_cards",
+        "find_and_replace", "grade_now", "image_occlusion", "import", "preferences", "remove_note_type", "remove_tag",
+        "rename_deck", "rename_tag", "reposition", "reset_card", "select_deck", "set_due_date", "set_flag", "suspend",
+        "toggle_load_balancer", "unbury_unsuspend", "update_card", "update_config", "update_deck", "update_note",
+        "update_note_type", "update_tag"
+      ]
+    },
     "search_error": {
       "description": "specs/search/errors.md E1 kinds; provided and context per E2, backticks replaced by apostrophes (search-ops.md S3).",
       "type": "object",

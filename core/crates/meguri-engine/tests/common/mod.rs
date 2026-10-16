@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod steps;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

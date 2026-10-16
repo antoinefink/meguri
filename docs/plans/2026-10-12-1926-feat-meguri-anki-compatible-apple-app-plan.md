@@ -5243,7 +5243,9 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Catalog test: every registered op has an undoability class; destructive non-undoable ops declare confirmation and backup.
 - Undo of an answer at 150k cards: core time p95 well under the R1811 50 ms budget (U12 bench).
 
-**Verification:** `conformance/scenarios/undo/` match goldens; property test 10k cases clean; catalog test green.
+**Verification:** every `conformance/scenarios/undo/` scenario, played on the engine's undo by `core/crates/meguri-engine/tests/undo_conformance.rs`, matches its golden with the deviations `conformance/deviations.yaml` lists for it; property test 10k cases clean; catalog test green.
+
+Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). This line first asked for `conformance/scenarios/undo/` to match its goldens on Meguri's executor. Every undo scenario starts from the fresh collection of `specs/conformance/dsl.md` D6, which U28's bootstrap creates, and uses `undo`, `redo` and `undo_status`, whose adapter `specs/conformance/undo-ops.md` V6 places once the conformance session runs ops through the engine (U38's `CoreHost::open`; only meguri-engine and meguri-host may open the engine). Nine of the ten also use the `notetypes`, `decks` and `notes` setup sections (U27, U28, U29); eight of them use `edit_note` or `delete_notes` (U27), and `undo/revlog-taken-id` uses `answer` and the `card` and `revlog` observations (U44). U27, U28 and U38 depend on U25, so U25 cannot run them without building their collection, deck, note type and note logic ahead of the core. U38 now builds the undo adapter, and each undo scenario becomes active in the unit that lands the last op, setup section or observation it uses: U27, U28, U38 or U44, whose Verification lines say so. Until then `undo_conformance.rs` plays every undo scenario on the engine against its golden, with stand-ins for the new collection, the setup sections and the note and answer ops (amended again after review round 3, A2: it first played `undo/config-writes` alone).
 
 ### U26. Derived store
 
@@ -5348,12 +5350,14 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - `core/crates/meguri-host/src/lib.rs`, `src/open.rs` (`CoreHost::open`, `close`), `src/config.rs` (`HostConfig`), `src/wiring/mod.rs`, `src/wiring/pending.rs`
 - `core/crates/meguri-host/tests/ports.rs`, `tests/headless_parity.rs`
 - `specs/engine/host.md` (Meguri design doc)
+- `core/crates/meguri-testkit/src/exec/undo.rs` (Meguri's undo adapter, moved from U25)
 
 **Approach:**
 - `CoreHost::open(HostConfig)` takes the collection directory, the backups directory, the App Group snapshot path, the clock and the `DiskSpaceProvider`. It opens the engine through its raw open entry point, which only this crate may call (U5 layering-check rule), and registers every port implementation.
 - Wiring is per area under `src/wiring/`: U127 adds `backup.rs` (package BackupService), U95 and U100 add `stats.rs` (stats observers, widget builder), U113 adds `sync.rs` (session and lifecycle events fed into the sync policy). Until a provider unit lands, its port uses the engine's explicit `Unavailable` provider listed in `wiring/pending.rs`; that list must be empty when M1 closes.
 - Callers: meguri-ffi (U37), meguri-servers (U135) for headless contract runs, and every testkit or cli path that executes engine ops from this unit on (U117, U250). None of them registers ports itself.
 - `core/crates/meguri-host/AGENTS.md` records the traps: no business logic here, only construction and wiring; a new port needs a wiring entry and a `ports.rs` case.
+- Undo adapter (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1): once the conformance session runs ops through `CoreHost::open`, this unit builds Meguri's undo adapter (`specs/conformance/undo-ops.md` V1–V3, V6): `undo`, `redo` and `undo_status` in `exec/undo.rs`, `set_config`'s `undoable` and `remove_config` beside `set_config`, and `db_exec` emptying both histories after a statement that is not a select (`specs/conformance/record-ops.md` W1). The engine side exists (U25; `core/crates/meguri-engine/tests/undo_conformance.rs` plays every undo scenario on it, with stand-ins this adapter and the area units replace).
 
 **Execution note:** Meguri-designed contract; no spec-writer pass. Land the crate with an empty wiring table right after U32 so U37 and the area units can add to it.
 
@@ -5365,7 +5369,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - A crate other than meguri-host that calls the engine's raw open → `core-lint` fails (U5 rule).
 - `close` after open → every registered thread idle, writer and readers closed, no `-wal` content left after the final checkpoint.
 
-**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`.
+**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`. Meguri's undo adapter is registered, and every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U33. Schema-11 legacy writer
 
@@ -5530,7 +5534,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Regenerating after a template add across 20k notes → progress ≤ ~10 Hz, cancel before commit leaves no cards, completion equals the oracle's card set.
 - LocalApi add → `curModel` and last-deck keys unchanged; Add-screen add → all three written.
 
-**Verification:** notes and cardgen scenarios (including harvested ones) match goldens; add-note p95 < 5 ms at 150k cards (U12).
+**Verification:** notes and cardgen scenarios (including harvested ones) match goldens; add-note p95 < 5 ms at 150k cards (U12). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; nine of the ten use the `notes` setup section, eight `edit_note` or `delete_notes`) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U28. Decks, deck presets and new-collection defaults
 
@@ -5574,7 +5578,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Emoji and mixed-script deck names round-trip unchanged.
 - New collection → normalized dump (ids and times masked, stock template text excluded) equals the oracle's new collection plus the IO notetype; the oracle opens it and adds a note (T1).
 
-**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes.
+**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes. Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; all ten start from the fresh collection) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U31. Media service: names, store, change journal, staging, trash (C9)
 
@@ -6186,7 +6190,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Fault injection (U24 test hook) fails the revlog insert: no card, deck, sibling or tag change persists.
 - Perf: the answer op commit ≤ 5 ms release at 14.4k cards; the 1 s durability bound (R2006) is asserted in U43.
 
-**Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys).
+**Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; `undo/revlog-taken-id` uses `answer`, `card` and `revlog`) passes on Meguri's executor on the macOS and Linux lanes, `undo/revlog-taken-id` with its three `undo-revlog-taken-id-*` deviations, and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U43. Review session (contract C5)
 

@@ -26,11 +26,11 @@ use serde_json::Value;
 use crate::scenario::LoadedScenario;
 pub use crate::scenario::Needs;
 pub use meguri::{
-    FinishFn, HandoffFn, MeguriExecutor, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat, Session,
-    SetupFn, SyncAccount, actor_seed,
+    FinishFn, HandoffFn, MeguriExecutor, NewCollectionFn, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat,
+    Session, SetupFn, SyncAccount, actor_seed,
 };
 pub use oracle::{Hello, OracleExecutor};
-pub use storage::{Storage, normalize_sql};
+pub use storage::{Storage, db_dump_table, db_exec_rows, normalize_sql};
 
 /// A failed run: a protocol error kind (`unknown_ref`, `invalid_scenario`,
 /// `unsupported_op`, `anki_error`, `worker_died`, ...), the step when known and

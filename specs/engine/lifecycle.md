@@ -82,7 +82,7 @@ Every swap of the collection file goes through this procedure; U124's verified-r
 1. The phase becomes `Replacing`. Every reader is closed (waiting for readers in use), then the writer: checkpoint and close (`storage/open-and-connections` C10).
 2. The swap runs with the collection path and nothing open. The engine notes which file the path names, its size, its modification and change times and its WAL's size before the swap, and compares them after it.
 3. The file is opened through the open gate, whether the swap succeeded or not. If that fails the state becomes `Failed{reason}`.
-4. If the swap succeeded, or failed after it changed the file (any of the noted values differ): the generation increases by one; readers open lazily on the new file; `CollectionReplaced{generation}` is published once; every `GenerationListener` is told (U25 clears undo, U26 invalidates derived data, R1489). A failed swap still returns its error, and the exclusive phase's handle is the new generation's. A swap that failed before changing the file leaves the generation, and every handle, as they were.
+4. If the swap succeeded, or failed after it changed the file (any of the noted values differ): the undo history is cleared with `ClearedByOneWay` on the writer, before any op of the new generation (`engine/undo` M6). The generation increases by one; readers open lazily on the new file; `CollectionReplaced{generation}` is published once; every `GenerationListener` is told (U26 invalidates derived data, R1489). A failed swap still returns its error, and the exclusive phase's handle is the new generation's. A swap that failed before changing the file leaves the generation, and every handle, as they were.
 5. Handles of older generations now fail with `StaleGeneration` (L3).
 
 ## L9. Which job takes which tier
@@ -99,7 +99,7 @@ Every swap of the collection file goes through this procedure; U124's verified-r
 
 ## L10. Close
 
-Admission stops (queued ops still commit), parked ops fail with `CollectionUnavailable`, readers close, the writer checkpoints and closes (C10), the writer thread ends and the state becomes `NoCollection`. The long-operation slot is freed and an exclusive phase ends (L5, L7). Once the writer is stopping, every task submitted to it fails at once with `CollectionUnavailable`, a replace's included, so nothing waits on a writer that is gone.
+Admission stops (queued ops still commit), parked ops fail with `CollectionUnavailable`, readers close, the undo history is dropped (`engine/undo` M6), the writer checkpoints and closes (C10), the writer thread ends and the state becomes `NoCollection`. The long-operation slot is freed and an exclusive phase ends (L5, L7). Once the writer is stopping, every task submitted to it fails at once with `CollectionUnavailable`, a replace's included, so nothing waits on a writer that is gone.
 
 ## L11. Readers
 
