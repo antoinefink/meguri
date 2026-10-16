@@ -14,9 +14,11 @@ use meguri_engine::notetypes::{
 use meguri_model::clock::Clock;
 use meguri_model::col::Col;
 use meguri_model::config::ConfigEntry;
-use meguri_model::deck::{human_name, native_name};
-use meguri_model::ids::DeckId;
+use meguri_model::deck::{Deck, human_name, native_name};
+use meguri_model::deck_config::DeckConfig;
+use meguri_model::ids::{DeckConfigId, DeckId};
 use meguri_model::notetype::Notetype;
+use meguri_model::proto::{BlobMessage, ProtoBlob};
 use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
 use meguri_sched::timing::new_collection_timing;
@@ -76,15 +78,55 @@ fn unknown_ref(detail: impl Into<String>) -> ExecError {
     ExecError::new("unknown_ref", detail)
 }
 
+/// T10.2's default deck `common`: collapsed in the deck list and in the
+/// browser (`model/protobuf-records` P6.4).
+const DEFAULT_DECK_COMMON: &str = "08011001";
+/// T10.2's default deck `kind`: a normal deck using preset 1 (P6.5).
+const DEFAULT_DECK_KIND: &str = "0a020801";
+/// T10.2's default preset `config`: P6.6's example, the built-in defaults.
+const DEFAULT_PRESET_CONFIG: &str = "0a080000803f00002041120400002041221c0000803f0000803f0000803f0000803f0000803f0000803f0000803f481450c8015d00002040656666a63f6d9a99993f7d0000803f8001949d02880101900101980104a80101b00108c0013cad026666663fc5026666663fe00201";
+
+/// T10.2: the default deck and the default preset of a new collection: id
+/// 1, `Default`, unstamped (`mtime_secs` and `usn` 0), with the blobs' bytes
+/// as given. The oracle adds notes to deck 1, and refuses to when it is
+/// missing (`notetypes/records/stock-render-handoff`).
+fn default_deck_and_preset(scope: &mut WriteScope<'_>) -> Result<(), ExecError> {
+    fn blob<M: BlobMessage>(what: &str, hex: &str) -> Result<ProtoBlob<M>, ExecError> {
+        let bytes = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(hex.get(i..i + 2).unwrap_or("-"), 16))
+            .collect::<Result<Vec<u8>, _>>()
+            .map_err(|e| core(format!("the default {what}: {e}")))?;
+        ProtoBlob::decode(&bytes).map_err(|e| core(format!("the default {what}: {e}")))
+    }
+    let preset = DeckConfig {
+        id: DeckConfigId(1),
+        name: "Default".to_owned(),
+        mtime: EpochSecs(0),
+        usn: Usn(0),
+        config: blob("preset", DEFAULT_PRESET_CONFIG)?,
+    };
+    let deck = Deck {
+        id: DeckId(1),
+        name: "Default".to_owned(),
+        mtime: EpochSecs(0),
+        usn: Usn(0),
+        common: blob("deck's common", DEFAULT_DECK_COMMON)?,
+        kind: blob("deck's kind", DEFAULT_DECK_KIND)?,
+    };
+    scope.put(&preset).map_err(core)?;
+    scope.put(&deck).map_err(core)?;
+    Ok(())
+}
+
 /// T10.2: the new collection at the clock's instant, made with the storage
 /// area's create path: a schema-18 `col` row with `crt` and the
 /// `creationOffset` key of `sched/day-clock` D11 (`col.mod` 0, `scm` now),
 /// `schedVer` 2, the two browser keys a new collection holds
 /// (`browser/config-keys` K1: `sortType` `"noteFld"`, `sortBackwards`
-/// false), and the six stock kinds and `curModel` as `notetypes/stock-kinds`
-/// K2 says, written by meguri-engine's stock-kind code. The default deck,
-/// the default preset and the other new-collection config keys come with
-/// U28.
+/// false), the default deck and preset, and the six stock kinds and
+/// `curModel` as `notetypes/stock-kinds` K2 says, written by meguri-engine's
+/// stock-kind code. The other new-collection config keys come with U28.
 fn new_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
     let now_ms = session.clock.now_ms();
     let timing = new_collection_timing(now_ms.div_euclid(1000), session.clock.as_ref());
@@ -112,6 +154,7 @@ fn new_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
     ];
     let random = session.random.clone();
     super::storage::create_collection(session, &col, &config, |scope| {
+        default_deck_and_preset(scope)?;
         notetypes::stock::add_to_new_collection(scope, random.as_ref())
             .map(|_| ())
             .map_err(core)
