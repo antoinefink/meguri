@@ -12,8 +12,8 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario,
-    Side, Step, SyncKind, TemplateRequest, TextRequest,
+    ActorName, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind,
+    RefKind, Scenario, Side, Step, SyncKind, TemplateRequest, TextRequest,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -322,14 +322,17 @@ fn package_name(value: &Value) -> Result<(), FormatError> {
 const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "tags"];
 
 /// The schema's rules for the mapping form of an observation request.
-/// observations.md O2: a kind whose value is a list (`template`) is
-/// requested at most once per step; two lists do not merge.
+/// observations.md O2: a kind whose value is a list (`template`,
+/// `fields_check`) is requested at most once per step; two lists do not
+/// merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
-    let templates = requests.iter().filter(|r| r.kind == ObservationKind::Template).count();
-    if templates > 1 {
-        return Err(FormatError::new(
-            "observation template is requested more than once in one step",
-        ));
+    for kind in [ObservationKind::Template, ObservationKind::FieldsCheck] {
+        if requests.iter().filter(|r| r.kind == kind).count() > 1 {
+            return Err(FormatError::new(format!(
+                "observation {} is requested more than once in one step",
+                kind.name()
+            )));
+        }
     }
     Ok(())
 }
@@ -429,6 +432,10 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         // render-ops.md Q1.1-Q1.3, Q1.6.
         ObservationKind::Template => {
             TemplateRequest::from_mapping(map)?;
+        }
+        // note-ops.md N4.
+        ObservationKind::FieldsCheck => {
+            FieldsCheckRequest::from_mapping(map)?;
         }
         ObservationKind::DbDump => {
             if let Some(key) = map.keys().find(|k| k.as_str() != "tables") {

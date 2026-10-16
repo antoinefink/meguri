@@ -32,7 +32,7 @@ def _text(value, what: str) -> str:
     return value
 
 
-def _set_fields(note, fields, owner: str) -> None:
+def set_fields(note, fields, owner: str) -> None:
     """fields as add_note takes them, onto note; owner names its note type."""
     if isinstance(fields, list):
         if len(fields) > len(note.fields):
@@ -65,7 +65,7 @@ def add(session, spec) -> dict:
         raise invalid(f"note type {name!r} is not in setup.notetypes or not in the current collection")
     col = session.col
     note = col.new_note(col.models.get(session.notetypes[name]))
-    _set_fields(note, spec.get("fields", []), f"note type {name!r}")
+    set_fields(note, spec.get("fields", []), f"note type {name!r}")
     note.tags = _tags(spec.get("tags", []))
     col.add_note(note, deck_id(session, spec.get("deck")))
     session.notes.append(note.id)
@@ -99,7 +99,7 @@ def edit_note(session, args):
     tags = _tags(args["tags"]) if "tags" in args else None
     note = session.col.get_note(nid)
     if "fields" in args:
-        _set_fields(note, args["fields"], f"{ref}'s note type")
+        set_fields(note, args["fields"], f"{ref}'s note type")
     if tags is not None:
         note.tags = tags
     session.col.update_note(note)
