@@ -80,12 +80,37 @@ import AppModel
         #expect(sidebar.section == .home)
         #expect(sidebar.sidebarSelection == .deck(deck))
 
+        // The tab layout shows Home, with the deck still selected (R13).
         let compact = relaunch(navigation, through: store)
         compact.adoptLaunchLayout(.compact)
         #expect(compact.section == .home)
         #expect(compact.compactTab == .decks)
         #expect(compact.compactPath(.decks).isEmpty)
-        #expect(compact.selectedDeck == nil)
+        #expect(compact.selectedDeck == deck)
+        #expect(compact.homeDeckPage == nil)
+        // Home in the sidebar layout too, after a layout switch (R5).
+        #expect(compact.sidebarSelection == .section(.home))
+    }
+
+    /// A launch in the tab layout keeps the deck it does not show: the next
+    /// launch in the sidebar layout (an iPad out of Slide Over, an unfolded
+    /// iPhone) opens its page again (R13).
+    @Test func aTabLayoutLaunchDoesNotForgetTheSelectedDeck() throws {
+        let scratch = try ScratchDefaults()
+        let store = UIStateStore(defaults: scratch.defaults)
+        let navigation = AppNavigation()
+        navigation.openDeckPage(deck)
+
+        let compact = relaunch(navigation, through: store)
+        compact.adoptLaunchLayout(.compact)
+        // What the tab layout's Decks stack writes back when it shows Home.
+        compact.setCompactPath([], for: .decks)
+        #expect(compact.selectedDeck == deck)
+
+        let sidebar = relaunch(compact, through: store)
+        sidebar.adoptLaunchLayout(.sidebar)
+        #expect(sidebar.sidebarSelection == .deck(deck))
+        #expect(sidebar.homeDeckPage == deck)
     }
 
     @Test func aRelaunchRestoresTheLastSectionInBothLayouts() throws {
@@ -124,12 +149,14 @@ import AppModel
         // As before the relaunch: the tab layout's Decks tab holds its page.
         #expect(sidebar.compactPath(.decks) == [.deckPage(deck)])
 
-        // The tab layout opens on Home in the Decks tab, not the deck page.
+        // The tab layout opens on Home in the Decks tab, not the deck page,
+        // and keeps the deck selected.
         let compact = relaunch(navigation, through: store)
         compact.adoptLaunchLayout(.compact)
         #expect(compact.section == .browse)
         #expect(compact.compactPath(.decks).isEmpty)
-        #expect(compact.selectedDeck == nil)
+        #expect(compact.selectedDeck == deck)
+        #expect(relaunch(compact, through: store).selectedDeck == deck)
     }
 
     @Test func quittingMidReviewDoesNotRelaunchIntoTheReview() throws {
@@ -148,16 +175,17 @@ import AppModel
 
     /// Only the launch layout decides: a state set after launch (a route, a
     /// deep link) is never dropped by a later layout change.
-    @Test func onlyTheFirstLayoutAfterARestoreDropsTheDeckPage() throws {
+    @Test func onlyTheFirstLayoutAfterARestoreHidesTheDeckPage() throws {
         let navigation = AppNavigation(restoring: UIState(section: .home, selectedDeck: deck, sidebarVisible: true))
         navigation.adoptLaunchLayout(.sidebar)
         navigation.adoptLaunchLayout(.compact)
-        #expect(navigation.selectedDeck == deck)
+        #expect(navigation.homeDeckPage == deck)
+        #expect(navigation.compactPath(.decks) == [.deckPage(deck)])
 
         let fresh = AppNavigation()
         fresh.openDeckPage(deck)
         fresh.adoptLaunchLayout(.compact)
-        #expect(fresh.selectedDeck == deck)
+        #expect(fresh.homeDeckPage == deck)
     }
 
     @Test func aStoreWithoutDefaultsKeepsNothing() {

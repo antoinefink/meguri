@@ -9,8 +9,10 @@ import SwiftUI
 /// reading it.
 ///
 /// - The current `section` and the `selectedDeck`, whose page the Home
-///   section shows: the sidebar layout as the Home section's root, the tab
-///   layout pushed on the Decks tab. Another section keeps the deck selected.
+///   section shows (`homeDeckPage`): the sidebar layout as the Home
+///   section's root, the tab layout pushed on the Decks tab. Another
+///   section keeps the deck selected, and so does a relaunch in the tab
+///   layout, which shows Home rather than the page (R13).
 /// - One stack per section (R19), `path(_:)`.
 /// - The open sheet (R25) and the review (R21–R23).
 /// - The sidebar's visibility (R20) and per-screen scroll positions.
@@ -19,9 +21,14 @@ import SwiftUI
 @Observable
 public final class AppNavigation {
     public private(set) var section: AppSection = .home
-    /// The deck whose page the Home section shows, if any. It stays selected
-    /// while another section is shown.
+    /// The deck the user last opened, if any. It stays selected while
+    /// another section is shown, and while Home shows its own root after a
+    /// relaunch in the tab layout (R13).
     public private(set) var selectedDeck: DeckID?
+    /// Whether the Home section shows the selected deck's page rather than
+    /// its own root. Only a relaunch in the tab layout hides the page of a
+    /// selected deck; leaving the page (Home, a pop) deselects the deck.
+    private var showsDeckPage = false
     public var sheet: SheetRoute?
     public private(set) var review: ReviewPresentation?
     /// The sidebar layout's columns. The sidebar's own toggle, ⌃⌘S and the
@@ -50,7 +57,8 @@ public final class AppNavigation {
     public init(restoring state: UIState) {
         section = state.section
         selectedDeck = state.selectedDeck
-        restoredDeckPagePending = selectedDeck != nil
+        showsDeckPage = selectedDeck != nil
+        restoredDeckPagePending = showsDeckPage
         if state.section.tab == .settings {
             settingsTabSection = state.section
         }
@@ -73,12 +81,18 @@ public final class AppNavigation {
         setPath(path(section) + [destination], for: section)
     }
 
+    /// The deck whose page the Home section shows, if it shows one.
+    public var homeDeckPage: DeckID? {
+        showsDeckPage ? selectedDeck : nil
+    }
+
     // MARK: Sidebar layout (R17, R21, R22)
 
-    /// The sidebar row of the current section, or of the selected deck.
+    /// The sidebar row of the current section, or of the deck whose page
+    /// Home shows.
     public var sidebarSelection: SidebarItem {
-        if section == .home, let selectedDeck {
-            return .deck(selectedDeck)
+        if section == .home, let homeDeckPage {
+            return .deck(homeDeckPage)
         }
         return .section(section)
     }
@@ -91,7 +105,7 @@ public final class AppNavigation {
         switch item {
         case let .section(section):
             if section == .home {
-                setSelectedDeck(nil)
+                closeDeckPage()
             }
             show(section)
         case let .deck(deck):
@@ -109,12 +123,12 @@ public final class AppNavigation {
 
     public var compactTab: CompactTab { section.tab }
 
-    /// A tab's stack. The Decks tab holds the selected deck's page above
+    /// A tab's stack. The Decks tab holds the deck page Home shows above
     /// Home, the Settings tab Note Types above Settings.
     public func compactPath(_ tab: CompactTab) -> [Destination] {
         switch tab {
         case .decks:
-            return selectedDeck.map { [.deckPage($0)] + path(.home) } ?? path(.home)
+            return homeDeckPage.map { [.deckPage($0)] + path(.home) } ?? path(.home)
         case .settings:
             return settingsTabSection == .noteTypes ? [.noteTypes] + path(.noteTypes) : path(.settings)
         case .browse, .stats:
@@ -127,10 +141,12 @@ public final class AppNavigation {
         switch tab {
         case .decks:
             if case let .deckPage(deck)? = newPath.first {
-                setSelectedDeck(deck)
+                showDeckPage(deck)
                 setPath(Array(newPath.dropFirst()), for: .home)
             } else {
-                setSelectedDeck(nil)
+                // A pop off the deck page, or Home's own stack: a hidden
+                // page's deck stays selected.
+                closeDeckPage()
                 setPath(newPath, for: .home)
             }
         case .settings:
@@ -179,7 +195,7 @@ public final class AppNavigation {
     /// the Decks tab pushes its page. An open review ends.
     public func openDeckPage(_ deck: DeckID) {
         endReview()
-        setSelectedDeck(deck)
+        showDeckPage(deck)
         setPath([], for: .home)
         show(.home)
     }
@@ -187,15 +203,27 @@ public final class AppNavigation {
     /// Home, at its root.
     public func openHome() {
         endReview()
-        setSelectedDeck(nil)
+        closeDeckPage()
         setPath([], for: .home)
         show(.home)
     }
 
-    /// A new deck page starts with an empty stack on it.
-    private func setSelectedDeck(_ deck: DeckID?) {
-        guard deck != selectedDeck else { return }
+    /// Selects `deck` and shows its page in Home. A new deck page starts
+    /// with an empty stack on it, as does a page shown again over Home's
+    /// root.
+    private func showDeckPage(_ deck: DeckID) {
+        guard deck != homeDeckPage else { return }
         selectedDeck = deck
+        showsDeckPage = true
+        setPath([], for: .home)
+    }
+
+    /// Leaves the deck page Home shows, which deselects its deck. With no
+    /// page shown, nothing changes.
+    private func closeDeckPage() {
+        guard showsDeckPage else { return }
+        selectedDeck = nil
+        showsDeckPage = false
         setPath([], for: .home)
     }
 
@@ -262,13 +290,14 @@ public final class AppNavigation {
     }
 
     /// Tells a restored navigation which layout the app launched in: the tab
-    /// layout opens on Home rather than on the last deck page (R13). Only the
-    /// first call after a restore does anything.
+    /// layout opens on Home rather than on the last deck page, with the deck
+    /// still selected, so the next launch in the sidebar layout opens its
+    /// page again (R13). Only the first call after a restore does anything.
     public func adoptLaunchLayout(_ layout: ShellLayout) {
         guard restoredDeckPagePending else { return }
         restoredDeckPagePending = false
         if layout == .compact {
-            setSelectedDeck(nil)
+            showsDeckPage = false
         }
     }
 

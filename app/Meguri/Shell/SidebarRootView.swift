@@ -37,9 +37,9 @@ struct SidebarRootView: View {
         }
     }
 
-    /// The selected deck's page in the Home section, else the section's root.
+    /// The deck page Home shows in the Home section, else the section's root.
     private var root: SectionDestinationView.Screen {
-        if navigation.section == .home, let deck = navigation.selectedDeck {
+        if navigation.section == .home, let deck = navigation.homeDeckPage {
             return .deckPage(deck)
         }
         return .root(navigation.section)

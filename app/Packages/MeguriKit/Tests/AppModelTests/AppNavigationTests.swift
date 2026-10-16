@@ -160,6 +160,41 @@ import AppModel
         #expect(navigation.compactPath(.decks) == [.deckPage(spanishMining)])
     }
 
+    /// A tab-layout relaunch selects the deck without showing its page
+    /// (R13): both layouts show Home, and opening a deck from there works
+    /// as from any Home.
+    @Test func aSelectedDeckWhosePageIsHiddenShowsHomeInBothLayouts() {
+        let navigation = AppNavigation(restoring: UIState(section: .home, selectedDeck: spanishMining, sidebarVisible: true))
+        navigation.adoptLaunchLayout(.compact)
+        let before = Snapshot(navigation)
+        #expect(navigation.selectedDeck == spanishMining)
+        #expect(navigation.homeDeckPage == nil)
+        #expect(navigation.compactPath(.decks).isEmpty)
+        #expect(navigation.sidebarSelection == .section(.home))
+        #expect(navigation.detailPath.isEmpty)
+        // Reselecting Decks or selecting the Home row already shown changes nothing.
+        navigation.selectTab(.decks)
+        navigation.select(.section(.home))
+        #expect(navigation.selectedDeck == spanishMining)
+        #expect(navigation.path(.home).isEmpty)
+        #expect(Snapshot(navigation).selectedDeck == before.selectedDeck)
+
+        // Tapping a deck on Home pushes its page; going back closes it.
+        navigation.setCompactPath([.deckPage(japanese)], for: .decks)
+        #expect(navigation.homeDeckPage == japanese)
+        #expect(navigation.sidebarSelection == .deck(japanese))
+        navigation.setCompactPath([], for: .decks)
+        #expect(navigation.homeDeckPage == nil)
+        #expect(navigation.selectedDeck == nil)
+
+        // The sidebar's deck row opens the page that was hidden.
+        let restored = AppNavigation(restoring: UIState(section: .home, selectedDeck: spanishMining, sidebarVisible: true))
+        restored.adoptLaunchLayout(.compact)
+        restored.select(.deck(spanishMining))
+        #expect(restored.homeDeckPage == spanishMining)
+        #expect(restored.compactPath(.decks) == [.deckPage(spanishMining)])
+    }
+
     @Test func featureStateIsHeldByTheNavigationNotByAView() {
         let navigation = AppNavigation()
         let first = navigation.featureState { FeatureModel() }
