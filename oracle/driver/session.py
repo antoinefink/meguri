@@ -275,6 +275,9 @@ class Session:
         self.next_step = 0  # interactive mode: the next scenario step (ad-hoc steps do not move it)
         self.step_index: int | None = None  # the scenario index of the step running now
         self.caller_dumps: dict | None = None  # raw dumps sent with the step running now
+        # A run request's fsrs_context (protocol.json): next_states fills it,
+        # keyed by card pointer, when the request asked for it.
+        self.fsrs_context: dict[str, dict] | None = None
         self.resources: dict[str, Any] = {}
         try:
             if resume:
