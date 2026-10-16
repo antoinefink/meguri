@@ -1,0 +1,302 @@
+/*
+ * Meguri card page: the stylesheet that comes before every card's own CSS.
+ * Written for Meguri from specs/render/card-runtime.md C4 (R479-R487,
+ * R1959). Values are exact text, and selectors keep the specificity the spec
+ * gives them. Read AGENTS.md in this directory before changing the order.
+ */
+
+/* Tokens, light appearance (C4.1, C4.2). */
+:root {
+  color-scheme: light;
+  --accent-card: #60a5fa;
+  --accent-danger: #ef4444;
+  --accent-note: #22c55e;
+  --blur: 20px;
+  --border: #c4c4c4;
+  --border-focus: #3b82f6;
+  --border-radius: 5px;
+  --border-radius-large: 15px;
+  --border-radius-medium: 12px;
+  --border-strong: #858585;
+  --border-subtle: #e4e4e4;
+  --button-bg: #fcfcfc;
+  --button-disabled: rgba(214, 214, 214, 0.5);
+  --button-gradient-end: #fcfcfc;
+  --button-gradient-start: white;
+  --button-hover-border: #999999;
+  --button-primary-bg: rgb(18.7843137255%, 41.8823529412%, 92.5490196078%);
+  --button-primary-disabled: #93c5fd;
+  --button-primary-gradient-end: rgb(18.7843137255%, 41.8823529412%, 92.5490196078%);
+  --button-primary-gradient-start: #3b82f6;
+  --canvas: #f5f5f5;
+  --canvas-code: white;
+  --canvas-elevated: white;
+  --canvas-glass: rgba(255, 255, 255, 0.4);
+  --canvas-inset: white;
+  --canvas-overlay: #fcfcfc;
+  --fg: #020202;
+  --fg-disabled: #858585;
+  --fg-faint: #afafaf;
+  --fg-link: #1d4ed8;
+  --fg-subtle: #737373;
+  --flag-7: #a855f7;
+  --flag-6: #2dd4bf;
+  --flag-5: #e879f9;
+  --flag-4: #3b82f6;
+  --flag-3: #4ade80;
+  --flag-2: #fb923c;
+  --flag-1: #ef4444;
+  --focus-color: #6366f1;
+  --font-size: 15px;
+  --highlight-bg: rgba(37, 99, 235, 0.5);
+  --highlight-fg: black;
+  --scrollbar-bg: #d6d6d6;
+  --scrollbar-bg-active: #afafaf;
+  --scrollbar-bg-hover: #c4c4c4;
+  --selected-bg: rgba(214, 214, 214, 0.5);
+  --selected-fg: black;
+  --shadow: #c4c4c4;
+  --shadow-focus: #6366f1;
+  --shadow-inset: #454545;
+  --shadow-subtle: #737373;
+  --state-buried: #f59e0b;
+  --state-learn: #dc2626;
+  --state-marked: #6366f1;
+  --state-new: #3b82f6;
+  --state-review: #16a34a;
+  --state-suspended: #facc15;
+  --transition: 180ms;
+  --transition-medium: 500ms;
+  --transition-slow: 1000ms;
+}
+
+/* Tokens, dark appearance: <html class="night-mode"> (C4.1, C5). */
+:root.night-mode {
+  color-scheme: dark;
+  --accent-card: #93c5fd;
+  --accent-danger: #f87171;
+  --accent-note: #4ade80;
+  --border: #202020;
+  --border-focus: #3b82f6;
+  --border-strong: #020202;
+  --border-subtle: #252525;
+  --button-bg: rgb(25.1176470588%, 25.1176470588%, 25.1176470588%);
+  --button-disabled: rgba(69, 69, 69, 0.5);
+  --button-gradient-end: rgb(25.1176470588%, 25.1176470588%, 25.1176470588%);
+  --button-gradient-start: rgb(29.0588235294%, 29.0588235294%, 29.0588235294%);
+  --button-hover-border: #141414;
+  --button-primary-bg: rgb(15.0392156863%, 32.3333333333%, 81.0392156863%);
+  --button-primary-disabled: rgb(26.8039215686%, 51.862745098%, 92.8039215686%);
+  --button-primary-gradient-end: rgb(15.0392156863%, 32.3333333333%, 81.0392156863%);
+  --button-primary-gradient-start: rgb(18.3921568627%, 40.2745098039%, 88.2745098039%);
+  --canvas: #2c2c2c;
+  --canvas-code: #252525;
+  --canvas-elevated: #363636;
+  --canvas-glass: rgba(54, 54, 54, 0.4);
+  --canvas-inset: #2c2c2c;
+  --canvas-overlay: #2c2c2c;
+  --fg: #fcfcfc;
+  --fg-disabled: #737373;
+  --fg-faint: #545454;
+  --fg-link: #bfdbfe;
+  --fg-subtle: #858585;
+  --flag-7: #c084fc;
+  --flag-6: #5eead4;
+  --flag-5: #f0abfc;
+  --flag-4: #60a5fa;
+  --flag-3: #86efac;
+  --flag-2: #fdba74;
+  --flag-1: #f87171;
+  --highlight-bg: rgba(147, 197, 253, 0.5);
+  --highlight-fg: white;
+  --scrollbar-bg: #454545;
+  --scrollbar-bg-active: #636363;
+  --scrollbar-bg-hover: #545454;
+  --selected-bg: rgba(147, 197, 253, 0.5);
+  --selected-fg: white;
+  --shadow: #141414;
+  --shadow-focus: #6366f1;
+  --shadow-inset: #202020;
+  --shadow-subtle: #363636;
+  --state-buried: #92400e;
+  --state-learn: #f87171;
+  --state-marked: #a855f7;
+  --state-new: #93c5fd;
+  --state-review: #22c55e;
+  --state-suspended: #fef9c3;
+}
+
+/* The Mac body's focus colour (C4.2). */
+:root .isMac {
+  --focus-color: rgba(0 103 244 / 0.247);
+}
+
+/* Document and text (C4.3). No rule sets a font size (R486). */
+* {
+  box-sizing: content-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+body {
+  margin: 20px;
+  overflow-wrap: break-word;
+  overscroll-behavior: none;
+  color: var(--fg);
+  background: var(--canvas);
+  background-attachment: fixed;
+  background-position: top;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+body.nightMode {
+  color: var(--fg);
+  background-color: var(--canvas);
+}
+
+a {
+  text-decoration: none;
+  color: var(--fg-link);
+}
+
+button {
+  margin: 1em .5em;
+}
+
+h1 {
+  margin-bottom: .2em;
+}
+
+hr {
+  height: 1px;
+  border: none;
+  margin: 1em 0;
+  background-color: #737373;
+}
+
+img {
+  max-height: 95vh;
+  max-width: 100%;
+}
+
+li {
+  text-align: start;
+}
+
+pre {
+  text-align: left;
+}
+
+/* The flag and mark indicators (C3.2, C4.4). */
+#_flag,
+#_mark {
+  -webkit-text-stroke-color: #000;
+  -webkit-text-stroke-width: 1px;
+  font-size: 30px;
+  position: fixed;
+  top: 0;
+}
+
+#_mark {
+  color: #ff0;
+}
+
+[dir=ltr] #_flag,
+[dir=rtl] #_mark {
+  right: 10px;
+}
+
+[dir=ltr] #_mark,
+[dir=rtl] #_flag {
+  left: 10px;
+}
+
+/* Type-in answers (C4.4). */
+#typeans {
+  box-sizing: border-box;
+  line-height: 1.75;
+  width: 100%;
+}
+
+code#typeans {
+  font-variant-ligatures: none;
+  white-space: pre-wrap;
+}
+
+.typeBad,
+.typeGood,
+.typeMissed {
+  color: #000;
+}
+
+.typeBad {
+  background: #faa;
+}
+
+.typeGood {
+  background: #afa;
+}
+
+.typeMissed {
+  background: #ccc;
+}
+
+/* Replay buttons (C4.4). */
+.replay-button {
+  display: inline-flex;
+  margin: 3px;
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+.replay-button svg {
+  height: 40px;
+  width: 40px;
+}
+
+.replay-button svg path {
+  fill: #414141;
+}
+
+.replay-button svg circle {
+  stroke: #414141;
+  fill: #fff;
+}
+
+/* LaTeX images and drawings: the only content night mode inverts (R492). */
+.drawing {
+  zoom: 50%;
+}
+
+.nightMode .latex {
+  filter: invert(100%);
+}
+
+.nightMode img.drawing {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Image occlusion layout; mask colours are the note type's (C5). */
+#image-occlusion-container {
+  max-height: calc(95vh - 40px);
+  margin: 0 auto;
+  position: relative;
+}
+
+#image-occlusion-canvas,
+#image-occlusion-container img {
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+#image-occlusion-container img {
+  max-height: unset;
+  max-width: unset;
+}

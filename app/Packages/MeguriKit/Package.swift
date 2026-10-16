@@ -46,7 +46,21 @@ let package = Package(
             ],
             swiftSettings: settings
         ),
-        .target(name: "CardRendering", dependencies: ["DesignSystem"], swiftSettings: settings),
+        .target(
+            name: "CardRendering",
+            dependencies: ["DesignSystem"],
+            exclude: ["Resources/CardRuntime/AGENTS.md"],
+            // Copied flat into the bundle; CardRuntime serves them under
+            // /_anki/ (specs/render/card-runtime.md).
+            resources: [
+                .copy("Resources/CardRuntime/page.html"),
+                .copy("Resources/CardRuntime/base.css"),
+                .copy("Resources/CardRuntime/runtime.js"),
+                .copy("Resources/CardRuntime/interaction.js"),
+                .copy("Resources/CardRuntime/vendor/jquery-3.7.1.min.js"),
+            ],
+            swiftSettings: settings
+        ),
         .target(name: "HeatmapKit", swiftSettings: settings),
         .testTarget(
             name: "AppModelTests",
@@ -58,6 +72,7 @@ let package = Package(
             name: "CardRenderingTests",
             dependencies: ["CardRendering", .product(name: "Instrumentation", package: "MeguriCore")],
             exclude: ["AGENTS.md"],
+            resources: [.copy("Fixtures")],
             swiftSettings: settings
         ),
     ] + features.map { name in

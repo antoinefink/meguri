@@ -1,0 +1,12 @@
+<p>front</p>
+<button id="tap" type="button">tap</button>
+<script>
+(function () {
+  // AnkiMobile's bridge: a tap zone message through the cb handler.
+  document.getElementById("tap").addEventListener("click", function () {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cb) {
+      window.webkit.messageHandlers.cb.postMessage(JSON.stringify({ scheme: "ankitap", msg: "midCenter" }));
+    }
+  });
+})();
+</script>

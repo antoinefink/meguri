@@ -1,0 +1,48 @@
+<div class="mgk-front">漢字 言葉</div>
+<hr id="answer">
+<div id="mgk-definition">漢字[かんじ;h] 言葉[ことば;h]</div>
+<script>null.x; // A broken first script, as many shared decks carry.
+</script>
+<script>
+(function () {
+  // Draws a small pitch graph after every `.word` from its data-pitch.
+  function drawPitch(root) {
+    var words = (root || document).querySelectorAll(".word");
+    for (var i = 0; i < words.length; i++) {
+      var word = words[i];
+      if (word.querySelector("svg.pitch")) continue;
+      var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "pitch");
+      svg.setAttribute("width", "24");
+      svg.setAttribute("height", "12");
+      var line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      line.setAttribute("points", word.getAttribute("data-pitch") === "h" ? "2,10 12,2 22,2" : "2,2 12,10 22,10");
+      line.setAttribute("fill", "none");
+      line.setAttribute("stroke", "currentColor");
+      svg.appendChild(line);
+      word.appendChild(svg);
+    }
+  }
+  window.mgkDrawPitch = drawPitch;
+  if (document.readyState === "complete") {
+    log("pitch:complete");
+    drawPitch();
+  } else {
+    document.addEventListener("DOMContentLoaded", function () {
+      log("pitch:loading");
+      drawPitch();
+    });
+  }
+})();
+</script>
+<script>
+(function () {
+  // Turns `kanji[kana;pitch]` into ruby words and asks for their graphs.
+  var box = document.getElementById("mgk-definition");
+  box.innerHTML = box.innerHTML.replace(/([^\s\[\]>]+)\[([^;\]]+);([a-z]+)\]/g, function (all, kanji, kana, pitch) {
+    return '<span class="word" data-pitch="' + pitch + '"><ruby>' + kanji + "<rt>" + kana + "</rt></ruby></span>";
+  });
+  log("support");
+  window.mgkDrawPitch(box);
+})();
+</script>
