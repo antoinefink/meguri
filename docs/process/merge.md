@@ -6,13 +6,16 @@
 
 1. Refuses when the unit has an open escalation, when the branch does not contain the integration head (merge the integration branch into the unit branch first), or when the branch's worktree is not clean at the branch tip.
 2. Runs `tools/mg gate --base <integration head>` in the branch's worktree, with the branch's own tiers and tools: the worktree-safe T0 and T1 runs (docs/process/tiers.md).
-3. Runs the `where: main` runs from the main checkout against the branch's tree: `static-checks --rev <tip>` (which also reads `oracle/`) and `similarity --rev <tip>` (which needs `refs/`).
-4. Evaluates one receipt for the tip with the branch's gate (`build/mg/merge/<run>/receipt.json`).
-5. Fast-forwards the integration branch to the tip only when that receipt passes, is complete and is for a clean tree, and only when neither branch moved meanwhile. Otherwise the integration branch does not move and the result says why.
+3. Runs what the worktree left, in the plan's order and under the gate's rules (nothing after a failed canary; T1 only when T0 has nothing blocking):
+   - the `where: main` runs from the main checkout against the branch's tree: `static-checks --rev <tip>` (which also reads `oracle/`) and `similarity --rev <tip>` (which needs `refs/`);
+   - the `deferred-tip` and `needs-oracle-tree` runs in a full checkout of the tip at `build/mg/merge-tip`: the branch's own tools and `oracle/`, and the main checkout's similarity corpus (`MG_SIMILARITY_REFS`). That checkout is removed when the merge ends; their results are copied to `build/mg/merge/<run>/tip/`. One merge at a time: an existing `build/mg/merge-tip` is refused (`git worktree remove --force` it once no merge runs).
+4. Checks that the worktree is still clean at the tip and that no run changed the main checkout or the tip checkout.
+5. Evaluates one receipt for the tip with the branch's gate (`build/mg/merge/<run>/receipt.json`), keeping the worktree receipt's own blockers (`tree-changed`).
+6. Fast-forwards the integration branch to the tip only when that receipt passes, is complete and is for a clean tree, and only when neither branch moved meanwhile. Otherwise the integration branch does not move and the result says why.
 
-## Oracle runs and `--receipt`
+## Oracle runs
 
-An oracle-image run uses the main checkout's `oracle/` from an implementer worktree. When the branch changes `oracle/` (a spec side's driver change), that tree is not the branch's: the run reports `needs-oracle-tree`. Run `tools/mg gate --base <integration head>` in a checkout of the same tip that has `oracle/` (a full worktree of the branch), then pass its receipt: `tools/mg merge <branch> --receipt <that receipt.json>`. Such a receipt only supplies runs that could not run in the worktree; it never replaces a result the worktree's gate already has.
+From a sparse role worktree, an oracle-image run uses the main checkout's `oracle/` when that is exactly the branch's (same tree id, nothing changed under it). When the branch changes `oracle/` (a spec side's driver change), the worktree's gate leaves the run to the merge (`deferred-tip`); a job that refuses its tree anyway (`oracle test` always does without its own `oracle/`) reports `needs-oracle-tree`. The merge runs both kinds in its tip checkout, against the branch's exact tree.
 
 ## What reaches the implementer, and escalations
 

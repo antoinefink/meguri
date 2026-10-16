@@ -2,12 +2,15 @@
 # Self-tests for the test tiers, merge gate, quarantine and scheduled runs
 # (U19: R1950-R1953, R1880, R1876, R1937, R1991; AE82 ordering). Each test
 # runs a sandbox repository with the gate's own families (gate, merge,
-# quarantine, nightly, milestone, session) and a tiers.yaml of made-up runs:
-# `t-job <name>` reports what $FX/<name>.* says (status, a status sequence,
-# failure ids, counts, details), and a fake `similarity` scan flags a file on
-# demand. The planning, evaluation, static checks, receipts, escalations and
-# fast-forwards are the real ones. A test that checks the real tiers.yaml
-# against the real job registry closes the file.
+# quarantine, nightly, milestone, session, and host and oracle for their
+# helpers) and a tiers.yaml of made-up runs: `t-job <name>` reports what
+# $FX/<name>.* says (status, a status sequence, failure ids, counts, details),
+# a fake `similarity` scan flags a file on demand, and the fake oracle jobs
+# pick their oracle/ with the real mg_oracle__tree and mg_oracle__own_tree.
+# Implementer worktrees are sparse without oracle/, as `tools/mg worktree new`
+# makes them. The planning, evaluation, static checks, receipts, escalations,
+# tip checkouts and fast-forwards are the real ones. A test that checks the
+# real tiers.yaml against the real job registry closes the file.
 
 bats_require_minimum_version 1.5.0
 # bats file_tags=gate
@@ -17,12 +20,12 @@ TRAILERS=$'Role: implementer\nSpec: sched/answer#A1\nSession: s-20261016T000000Z
 
 setup_file() {
   local t="$BATS_FILE_TMPDIR/template" f
-  mkdir -p "$t/core" "$t/docs" "$t/conformance/scenarios/smoke" "$t/conformance/scenarios/sched"
+  mkdir -p "$t/core" "$t/docs" "$t/conformance/scenarios/smoke" "$t/conformance/scenarios/sched" "$t/oracle/driver"
   cp -R "$REPO_ROOT/tools" "$t/tools"
   cp "$REPO_ROOT/.gitignore" "$t/"
   for f in "$t"/tools/mg.d/*.sh; do
     case "$(basename "$f")" in
-      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | session.sh) ;;
+      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | session.sh | host.sh | oracle.sh) ;;
       *) rm -f "$f" ;;
     esac
   done
@@ -30,6 +33,9 @@ setup_file() {
   printf 'id: sched/b\n' >"$t/conformance/scenarios/sched/b.yaml"
   printf '# notes\n' >"$t/docs/notes.md"
   printf '[workspace]\n' >"$t/core/Cargo.toml"
+  printf 'FROM scratch\n' >"$t/oracle/Dockerfile"
+  printf 'print("op")\n' >"$t/oracle/driver/ops.py"
+  printf 'main\n' >"$t/tools/similarity/marker.txt"
   cat >"$t/tools/gate/tiers.yaml" <<'EOF'
 version: 1
 tiers:
@@ -47,9 +53,10 @@ runs:
   - {id: ui, job: t-job, args: [ui], tier: T0, placement: vm, needs: [simulator], class: ui, triggers: [app/], budget_s: 60}
   - {id: slow, job: t-job, args: [slow], tier: T0, placement: host, class: tooling, triggers: [tools/slow/], budget_s: 1}
   - {id: sim, job: similarity, args: [--base, "{base}"], merge_args: [--rev, "{tip}", --base, "{base}"], tier: T0, placement: [host, docker:similarity], needs: [refs], class: similarity, triggers: [core/, app/], budget_s: 60, local: false, where: main}
+  - {id: stest, job: t-scan-selftest, tier: T0, placement: [host, docker:similarity], needs: [refs], class: tooling, triggers: [tools/similarity/], budget_s: 60, local: false, where: tip}
   - {id: later, job: notices, tier: T0, placement: host, class: static, triggers: [core/], budget_s: 60, pending: U16}
   - id: live
-    job: t-job
+    job: t-oracle
     args: [live]
     tier: T1
     placement: [host, docker:oracle]
@@ -62,11 +69,13 @@ runs:
       core/: [smoke]
       core/crates/meguri-sched/: [sched]
       conformance/: ["*"]
+      tools/mg.d/oracle.sh: ["*"]
+  - {id: otest, job: t-oracle-own, args: [otest], tier: T1, placement: [host, docker:oracle], needs: [oracle], oracle: true, local: false, class: tooling, triggers: [oracle/, tools/mg.d/oracle.sh], budget_s: 60}
   - {id: fuzz, job: t-job, args: [fuzz, --seed, "{seed}"], tier: T2, schedule: nightly, placement: docker:fuzz, class: unit, budget_s: 60}
   - {id: soak, job: t-job, args: [soak], tier: T2, schedule: weekly, placement: [host, docker:oracle], needs: [oracle, sync-server], class: sync, budget_s: 60}
   - id: harvest
     job: t-job
-    args: [harvest]
+    args: [harvest, --live-report, "{artifact:live:t1-live.json}"]
     tier: T3
     placement: host
     class: conformance
@@ -84,10 +93,15 @@ utilities:
   - {job: nightly, why: T2}
   - {job: milestone, why: T3}
   - {job: session, why: sessions}
+  - {job: oracle, why: its tree helpers}
+  - {job: mac-ui, why: host.sh}
 EOF
   cat >"$t/tools/mg.d/zz-fakes.sh" <<'EOF'
 mg_job t-job host t_job "fake run: t-job <name> [args...]; reports what \$FX/<name>.* says"
 mg_job similarity host t_similarity "fake similarity scan: flags core/x.rs when \$FX/similarity.flag exists"
+mg_job t-oracle host t_oracle "fake oracle-image run (conformance --live): t-oracle <name> [args...]"
+mg_job t-oracle-own host t_oracle_own "fake oracle test: t-oracle-own <name> [args...]"
+mg_job t-scan-selftest host t_scan_selftest "fake similarity-selftest"
 # $FX/<name>@<checkout basename>.* overrides $FX/<name>.* in that checkout.
 t_job() {
   local name="$1" root f status=pass line
@@ -110,6 +124,23 @@ t_job() {
   if [ -f "$FX/$name.details" ]; then
     jq -c 'to_entries[] | {(.key): .value}' "$FX/$name.details" >>"$MG_STATE/details.jsonl"
   fi
+  # $FX/<name>.rows: harvest rows [{scenario, classification, status}], as
+  # harvest-report counts them: a --live-report's statuses replace `live` and
+  # `pending` for the scenarios it ran.
+  if [ -f "$FX/$name.rows" ]; then
+    local live="" prev="" a
+    for a in "$@"; do
+      [ "$prev" != --live-report ] || live="$a"
+      prev="$a"
+    done
+    jq -c --slurpfile t1 "${live:-/dev/null}" '
+      ([$t1[0].scenarios[]? | {(.scenario): .status}] | add // {}) as $ran
+      | map(if (.status == "live" or .status == "pending") and $ran[.scenario] then .status = $ran[.scenario] else . end)
+      | {harvest: {by_classification: (group_by(.classification) | map({key: .[0].classification,
+          value: {rows: length, statuses: (group_by(.status) | map({key: .[0].status, value: length}) | from_entries)}})
+          | from_entries)}}' "$FX/$name.rows" >>"$MG_STATE/details.jsonl"
+    mg_count unclassified "$(jq '[.[] | select(.classification == "unclassified")] | length' "$FX/$name.rows")"
+  fi
   case "$status" in
     queued) mg_detail queued true; status=warn ;;
     fail | error)
@@ -122,6 +153,44 @@ t_job() {
   esac
   mg_message "t-job $name: $status"
   mg_status "$status"
+}
+# The oracle jobs' contracts (tools/mg.d/oracle.sh, conformance.sh): an
+# oracle-image job uses this checkout's oracle/, or the main checkout's when
+# that is the branch's (mg_oracle__tree), and otherwise fails as `conformance
+# --live` does: status fail with oracle-tree-differs among its failures. Its
+# T1 report is $FX/<name>.t1. `oracle test` refuses a checkout without its own
+# oracle/ (mg_oracle__own_tree: error, no-oracle-tree).
+t_oracle() {
+  local root
+  root="$(basename "$MG_ROOT")"
+  if ! mg_oracle__tree; then
+    echo "t-oracle $* @$root refused" >>"$STUB_LOG"
+    mg_message "t-oracle $1: failed"
+    mg_status fail
+    return 0
+  fi
+  echo "t-oracle $* @$root oracle=$([ "$MG_ORACLE_DIR" = "$MG_ROOT/oracle" ] && echo own || echo main)" >>"$STUB_LOG"
+  if [ -f "$FX/$1.t1" ]; then cp "$FX/$1.t1" "$MG_RUN_DIR/t1-live.json"; else echo '{"tier": "t1", "scenarios": []}' >"$MG_RUN_DIR/t1-live.json"; fi
+  mg_artifact report "$MG_RUN_DIR/t1-live.json" "T1 report (live)"
+  t_job "$@"
+}
+t_oracle_own() {
+  local root
+  root="$(basename "$MG_ROOT")"
+  mg_oracle__own_tree "test copies oracle/ into its host checks" || { echo "t-oracle-own $* @$root refused" >>"$STUB_LOG"; return 0; }
+  echo "t-oracle-own $* @$root" >>"$STUB_LOG"
+  t_job "$@"
+}
+# similarity-selftest's contract: refused in a role worktree, the checkout's
+# own scanner tests, the corpus from MG_SIMILARITY_REFS or refs/ (calibration
+# skipped, warn, without one).
+t_scan_selftest() {
+  local refs="${MG_SIMILARITY_REFS:-$MG_ROOT/refs}"
+  case "$(mg_session_role)" in
+    implementer | fixer) mg_failure implementer-worktree "refused in a role worktree"; mg_status error; return 0 ;;
+  esac
+  echo "t-scan-selftest @$(basename "$MG_ROOT") marker=$(cat "$MG_ROOT/tools/similarity/marker.txt") refs=$refs" >>"$STUB_LOG"
+  if [ -d "$refs/anki" ]; then mg_status pass; else mg_status warn; fi
 }
 t_similarity() {
   echo "similarity $* @$(basename "$MG_ROOT")" >>"$STUB_LOG"
@@ -140,6 +209,8 @@ t_similarity() {
 }
 EOF
   git -C "$t" init -q -b trunk
+  # Sparse settings stay per worktree, as in the real repository.
+  git -C "$t" config extensions.worktreeConfig true
   git -C "$t" add -A
   git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template
 }
@@ -155,6 +226,8 @@ setup() {
   export FX STUB_LOG="$BATS_TEST_TMPDIR/stub.log" MG_GATE_NOW=2026-10-16T12:00:00Z
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$FX" "$HOME"
+  # The similarity corpus, untracked in the main checkout only.
+  mkdir -p "$SB/refs/anki"
   : >"$STUB_LOG"
 }
 
@@ -197,9 +270,13 @@ fx() {
 }
 
 # worktree <dir> <branch> [role]: a worktree on a new branch from trunk,
-# marked with a role the way tools/mg worktree new marks it.
+# marked with a role and, for implementers and fixers, sparse without oracle/,
+# the way tools/mg worktree new makes it.
 worktree() {
   git -C "$SB" worktree add -q -b "$2" "$1" trunk
+  case "${3:-}" in
+    implementer | fixer) git -C "$1" sparse-checkout set --no-cone '/*' '!/oracle/' ;;
+  esac
   [ -z "${3:-}" ] || jq -n --arg r "$3" '{role: $r, session: "s-20261016T000000Z-0badcafe"}' \
     >"$(git -C "$1" rev-parse --absolute-git-dir)/meguri-session.json"
 }
@@ -384,6 +461,49 @@ $TRAILERS"
   jq -e --arg t "quarantine-expired:unit:$t" '.failures[] | select(.id == $t)' "$result"
 }
 
+@test "a quarantined canary failure does not stop the gate, and runs a gate did not start keep a receipt from merging" {
+  local t='layering-check::canary_pins$cargo_lock_matches_the_pins' failed passed dir
+  commit_in "$SB" core/Cargo.lock 'name = "rand"' "Bump rand
+
+$TRAILERS"
+  printf 'fail\npass\n' >"$FX/pin-canary.seq"
+  printf '%s\n' "$t" >"$FX/pin-canary.failures"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  failed="$(field .run_id)"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  passed="$(field .run_id)"
+  mg quarantine add --run pin-canary --test "$t" --class unit --owner U45 --reason "the pin probe races the lock file" \
+    --deadline 2026-10-30 --failed "$failed" --passed "$passed" --approved-by antoine
+  [ "$status" -eq 0 ]
+  git -C "$SB" commit -qam "Quarantine the pin canary"
+
+  printf 'fail\n' >"$FX/pin-canary.seq"
+  : >"$STUB_LOG"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(outcome pin-canary)" = quarantined ]
+  [ "$(called '^t-job unit @main$')" = 1 ]
+  [ "$(called '^t-job conf @main$')" = 1 ]
+  [ "$(called '^t-job live smoke @main$')" = 1 ]
+  [ "$(rq '[.runs[] | select(.outcome == "skipped-after-canary")] | length')" = 0 ]
+  [ "$(rq .merge_ready)" = true ]
+
+  # Required runs the gate did not start never make a receipt merge-ready,
+  # even when nothing that ran blocks.
+  dir="$(dirname "$result")"
+  jq -c 'select(.id == "pin-canary")' "$dir/results.jsonl" >"$BATS_TEST_TMPDIR/results.jsonl"
+  jq -c '.runs[] | select(.action == "run" and .id != "pin-canary") | {id, outcome: "skipped-after-canary", message: "not run"}' \
+    "$dir/plan.json" >>"$BATS_TEST_TMPDIR/results.jsonl"
+  python3 -B -I "$SB/tools/gate/gate.py" evaluate --config "$dir/config.json" --plan "$dir/plan.json" \
+    --results "$BATS_TEST_TMPDIR/results.jsonl" --now "$MG_GATE_NOW" --commit "$(git -C "$SB" rev-parse HEAD)" \
+    --out "$BATS_TEST_TMPDIR/receipt.json"
+  [ "$(jq -r '.runs[] | select(.id == "pin-canary") | .outcome' "$BATS_TEST_TMPDIR/receipt.json")" = quarantined ]
+  [ "$(jq .merge_ready "$BATS_TEST_TMPDIR/receipt.json")" = false ]
+  jq -e '.incomplete | index("unit")' "$BATS_TEST_TMPDIR/receipt.json"
+}
+
 @test "a hand-written quarantine entry without approval or evidence fails the gate" {
   cat >>"$SB/tools/gate/quarantine.yaml" <<'EOF'
   - test: "x$y"
@@ -519,6 +639,25 @@ $TRAILERS"
   validate "$result"
 }
 
+@test "merge does not move the integration branch when a job of the worktree's gate wrote to the tested tree" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  printf 'stray.txt\n' >"$FX/unit.write"
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+  [ "$(rq .merge_ready)" = false ]
+  [[ "$(field .message)" == *"trunk not moved"* ]]
+  # The worktree gate's own verdict reaches the merge's receipt...
+  jq -e '.failures[] | select(.id == "tree-changed")' "$result"
+  [ "$(rq '[.receipt_blocking[].id] | join(" ")')" = "tree-changed worktree-changed" ]
+  # ...and the merge checks the worktree again before it moves anything.
+  jq -e '.failures[] | select(.id == "worktree-changed")' "$result"
+}
+
 @test "merge refuses a branch that does not contain the integration head, a dirty worktree, and runs only in the main checkout" {
   local wt="$BATS_TEST_TMPDIR/U90"
   worktree "$wt" unit/U90 implementer
@@ -591,30 +730,122 @@ $TRAILERS"
   [ "$status" -eq 2 ]
 }
 
-@test "an oracle run the worktree cannot run is supplied by a full checkout's receipt for the same tip" {
-  local wt="$BATS_TEST_TMPDIR/U90" full="$BATS_TEST_TMPDIR/full" tip
+# wt_outcome <run id>: the run's outcome in the worktree gate a merge ran.
+wt_outcome() {
+  jq -r --arg id "$1" '.details.receipt.runs[] | select(.id == $id) | .outcome' \
+    "$(jq -r '.artifacts[] | select(.kind == "gate-result") | .path' "$result")"
+}
+
+@test "a branch that changes oracle/ gets its oracle runs from the merge, in a full checkout of the tip" {
+  local wt="$BATS_TEST_TMPDIR/U90" spec="$BATS_TEST_TMPDIR/U90-spec" tip live
   worktree "$wt" unit/U90 implementer
+  worktree "$spec" spec/U90 oracle-maintainer
+  commit_in "$spec" oracle/driver/ops.py 'print("a new op")' "Add a driver op"
+  git -C "$wt" merge -q --no-edit spec/U90
+  [ ! -e "$wt/oracle" ]
   commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
 
 $TRAILERS"
   tip="$(git -C "$wt" rev-parse HEAD)"
-  printf 'error\n' >"$FX/live@U90.status"
-  printf 'oracle-tree-differs\n' >"$FX/live.failures"
   mg merge unit/U90
-  [ "$status" -eq 1 ]
-  [ "$(outcome live)" = needs-oracle-tree ]
-  [[ "$(jq -r '.failures[] | select(.id == "run:live") | .message' "$result")" == *"--receipt"* ]]
-
-  git -C "$SB" worktree add -q --detach "$full" "$tip"
-  mg_in "$full" gate --base "$BASE0"
-  [ "$status" -eq 0 ]
-  [ "$(outcome live)" = pass ]
-  local extra
-  extra="$(receipt)"
-  mg merge unit/U90 --receipt "$extra"
   [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
   [ "$(git -C "$SB" rev-parse trunk)" = "$tip" ]
-  [ "$(rq '.runs[] | select(.id == "live") | .supplied_by')" = "$extra" ]
+  # The worktree left them to the merge: the main checkout's oracle/ is not
+  # this branch's, so they never ran there.
+  [ "$(wt_outcome live)" = deferred-tip ]
+  [ "$(wt_outcome otest)" = deferred-tip ]
+  [ "$(called '^t-oracle.* @U90 ')" = 0 ]
+  [ "$(called '^t-oracle live sched smoke @merge-tip oracle=own$')" = 1 ]
+  [ "$(called '^t-oracle-own otest @merge-tip$')" = 1 ]
+  [ "$(outcome live)" = pass ]
+  [ "$(outcome otest)" = pass ]
+  # Their results outlive the checkout, which is gone again.
+  live="$(rq '.runs[] | select(.id == "live") | .result')"
+  [[ "$live" == "$(dirname "$result")/tip/live/"* ]]
+  [ -f "$live" ]
+  [ -f "$(jq -r '.artifacts[] | select(.label == "T1 report (live)") | .path' "$live")" ]
+  [ ! -e "$SB/build/mg/merge-tip" ]
+  [ -z "$(git -C "$SB" worktree list | grep merge-tip)" ]
+  validate "$result"
+}
+
+@test "oracle test refuses an implementer worktree (no-oracle-tree), so the merge runs it in a full checkout of the tip" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  printf '\n# a note\n' >>"$wt/tools/mg.d/oracle.sh"
+  git -C "$wt" commit -qam "Touch the oracle jobs"
+  mg merge unit/U90
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(called '^t-oracle-own otest @U90 refused$')" = 1 ]
+  [ "$(wt_outcome otest)" = needs-oracle-tree ]
+  [ "$(called '^t-oracle-own otest @merge-tip$')" = 1 ]
+  [ "$(outcome otest)" = pass ]
+  # The live suites ran in the worktree: the main checkout's oracle/ is this branch's.
+  [ "$(called '^t-oracle live @U90 oracle=main$')" = 1 ]
+  [ "$(outcome live)" = pass ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$(git -C "$wt" rev-parse HEAD)" ]
+}
+
+@test "the merge's tip checkout serves one merge at a time, and a run that writes to it keeps the branch unmerged" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  printf '\n# a note\n' >>"$wt/tools/mg.d/oracle.sh"
+  git -C "$wt" commit -qam "Touch the oracle jobs"
+  mkdir -p "$SB/build/mg/merge-tip"
+  : >"$SB/build/mg/merge-tip/busy"
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  jq -e '.failures[] | select(.id == "tip-checkout")' "$result"
+  [ "$(outcome otest)" = error ]
+  [ -f "$SB/build/mg/merge-tip/busy" ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+
+  rm -rf "$SB/build/mg/merge-tip"
+  printf 'stray.txt\n' >"$FX/otest.write"
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  [ "$(outcome otest)" = pass ]
+  jq -e '.failures[] | select(.id == "tree-changed:tip")' "$result"
+  [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+  [ ! -e "$SB/build/mg/merge-tip" ]
+}
+
+@test "an oracle job that refuses its oracle/ needs the branch's tree, whether it fails or errs" {
+  commit_in "$SB" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  local dir r="$BATS_TEST_TMPDIR/live-result.json" o="$BATS_TEST_TMPDIR/otest-result.json"
+  dir="$(dirname "$result")"
+  # conformance --live when mg_oracle__tree refuses: it runs its other lanes
+  # and ends fail; oracle test ends error.
+  jq -n '{status: "fail", message: "conformance: T0 and T1 failed",
+    failures: [{id: "oracle-tree-differs", message: "this branch changes oracle/"}, {id: "live/plan", message: "could not list"}]}' >"$r"
+  jq -n '{status: "error", message: "oracle: refused", failures: [{id: "no-oracle-tree", message: "no oracle/"}]}' >"$o"
+  jq -c --arg r "$r" 'if .id == "live" then .result = $r else . end' "$dir/results.jsonl" >"$BATS_TEST_TMPDIR/results.jsonl"
+  python3 -B -I "$SB/tools/gate/gate.py" evaluate --config "$dir/config.json" --plan "$dir/plan.json" \
+    --results "$BATS_TEST_TMPDIR/results.jsonl" --now "$MG_GATE_NOW" --out "$BATS_TEST_TMPDIR/receipt.json"
+  [ "$(jq -r '.runs[] | select(.id == "live") | .outcome' "$BATS_TEST_TMPDIR/receipt.json")" = needs-oracle-tree ]
+  [[ "$(jq -r '.blocking[] | select(.id == "run:live") | .message' "$BATS_TEST_TMPDIR/receipt.json")" == *"full checkout of the tip"* ]]
+
+  jq -c --arg o "$o" 'if .id == "live" then .result = $o else . end' "$dir/results.jsonl" >"$BATS_TEST_TMPDIR/results.jsonl"
+  python3 -B -I "$SB/tools/gate/gate.py" evaluate --config "$dir/config.json" --plan "$dir/plan.json" \
+    --results "$BATS_TEST_TMPDIR/results.jsonl" --now "$MG_GATE_NOW" --out "$BATS_TEST_TMPDIR/receipt.json"
+  [ "$(jq -r '.runs[] | select(.id == "live") | .outcome' "$BATS_TEST_TMPDIR/receipt.json")" = needs-oracle-tree ]
+}
+
+@test "a branch's similarity self-test runs the branch's scanner in a full checkout of the tip, with the main checkout's corpus" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" tools/similarity/marker.txt "branch" "Change the scanner"
+  mg_in "$wt" gate --base "$BASE0"
+  [ "$(outcome stest)" = deferred-tip ]
+  mg merge unit/U90
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(called "^t-scan-selftest @merge-tip marker=branch refs=$SB/refs$")" = 1 ]
+  [ "$(called '^t-scan-selftest @main ')" = 0 ]
+  [ "$(outcome stest)" = pass ]
 }
 
 # --- nightly and milestone runs ----------------------------------------------
@@ -637,8 +868,20 @@ $TRAILERS"
 
   mg nightly --print-schedule
   [ "$status" -eq 0 ]
-  grep -q '<string>nightly</string>' "$(dirname "$result")/com.meguri.nightly.plist"
-  grep -q '<string>--weekly</string>' "$(dirname "$result")/com.meguri.nightly.weekly.plist"
+  # launchd treats a missing calendar key as "every": the weekly entry needs
+  # its minute, or it starts again each minute of 04:00-04:59.
+  python3 - "$(dirname "$result")" <<'PY'
+import plistlib, sys
+d = sys.argv[1]
+with open(d + "/com.meguri.nightly.plist", "rb") as f:
+    nightly = plistlib.load(f)
+with open(d + "/com.meguri.nightly.weekly.plist", "rb") as f:
+    weekly = plistlib.load(f)
+assert nightly["StartCalendarInterval"] == {"Hour": 2, "Minute": 30}, nightly["StartCalendarInterval"]
+assert weekly["StartCalendarInterval"] == {"Weekday": 0, "Hour": 4, "Minute": 0}, weekly["StartCalendarInterval"]
+assert nightly["ProgramArguments"][1:] == ["nightly"], nightly["ProgramArguments"]
+assert weekly["ProgramArguments"][1:] == ["nightly", "--weekly"], weekly["ProgramArguments"]
+PY
 }
 
 @test "a milestone run fails on one unclassified harvest row (R1880) and waits on device runs" {
@@ -667,6 +910,37 @@ $TRAILERS"
   [ "$status" -eq 1 ]
   [[ "$(jq -r '.failures[] | select(.id == "t-job:R1880-in-scope") | .message' "$result")" == *"1 pending"* ]]
   [ "$(outcome audit)" = pending ]
+}
+
+@test "a release run gives harvest coverage the live oracle run's T1 report, so a harvested live chain that passed counts (R1880)" {
+  local report
+  printf '%s\n' '[{"scenario": "storage/open/oracle-made-reopen", "classification": "in-scope", "status": "live"},
+    {"scenario": "sched/b", "classification": "in-scope", "status": "pass"}]' >"$FX/harvest.rows"
+  printf '%s\n' '{"tier": "t1", "scenarios": [{"scenario": "storage/open/oracle-made-reopen", "status": "pass"}]}' >"$FX/live.t1"
+  mg milestone release
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(outcome harvest)" = pass ]
+  report="$(dirname "$(rq '.runs[] | select(.id == "live") | .result')")/t1-live.json"
+  [ -f "$report" ]
+  [ "$(called "^t-job harvest --live-report $report @main$")" = 1 ]
+
+  # Without a live pass the chain stays `live`, which a release refuses.
+  printf '%s\n' '{"tier": "t1", "scenarios": []}' >"$FX/live.t1"
+  mg milestone release
+  [ "$status" -eq 1 ]
+  [[ "$(jq -r '.failures[] | select(.id == "t-job:R1880-in-scope") | .message' "$result")" == *"1 live"* ]]
+}
+
+@test "a run whose {artifact:...} an earlier run did not write is unresolved and fails the run" {
+  printf 'unclassified 0\n' >"$FX/harvest.counts"
+  printf 'fail\n' >"$FX/unit.status"
+  mg milestone M1
+  [ "$status" -eq 1 ]
+  # T0 failed, so T1 (the live run) did not start and wrote no report.
+  [ "$(outcome live)" = skipped-after-t0 ]
+  [ "$(outcome harvest)" = unresolved ]
+  [ "$(called 't-job harvest')" = 0 ]
+  [[ "$(jq -r '.failures[] | select(.id == "run:harvest") | .message' "$result")" == *"{artifact:live:t1-live.json}"* ]]
 }
 
 @test "a milestone run fails while a sync test is quarantined" {
@@ -725,6 +999,8 @@ s = open(p).read()
 s = s.replace("  - {id: ui, job: t-job, args: [ui], tier: T0, placement: vm,", "  - {id: ui, job: t-job, args: [ui], tier: T0, placement: docker:dev,")
 s = s.replace("needs: [oracle]\n    oracle: true\n    local: false", "needs: [oracle]\n    oracle: true\n    local: true")
 s = s.replace("{id: fuzz, job: t-job, args: [fuzz, --seed, \"{seed}\"], tier: T2, schedule: nightly", "{id: fuzz, job: t-job, args: [fuzz, --seed, \"{sed}\"], tier: T2, schedule: nightly")
+s = s.replace("budget_s: 60, local: false, where: tip}", "budget_s: 60, local: true, where: tip}")
+s = s.replace("{artifact:live:t1-live.json}", "{artifact:device:t1-live.json}")
 open(p, "w").write(s)
 PY
   mg gate --plan
@@ -732,6 +1008,8 @@ PY
   jq -e '.failures[] | select(.message | test("run ui: needs simulator, which run on the host or the test VM"))' "$result"
   jq -e '.failures[] | select(.message | test("run live: an oracle-image run cannot run in gate --local"))' "$result"
   jq -e '.failures[] | select(.message | test("unknown placeholder \\{sed\\}"))' "$result"
+  jq -e '.failures[] | select(.message | test("run stest: a where: tip run cannot run in gate --local"))' "$result"
+  jq -e '.failures[] | select(.message | test("run harvest: \\{artifact:device:t1-live.json\\} names run device, which does not run before it"))' "$result"
 }
 
 @test "the real tiers.yaml gives every registered tools/mg job a tier, with valid placements and filters" {
@@ -750,6 +1028,11 @@ PY
   jq -e '.runs[] | select(.id == "core-fuzz" and .tier == "T2" and (.args | index("{seed}")))' "$out" >/dev/null
   jq -e '.runs[] | select(.id == "private-suite" and .tier == "T3" and .where == "main")' "$out" >/dev/null
   jq -e '.runs[] | select(.id == "harvest-coverage" and (.require | map(.id) | index("R1880-unclassified")))' "$out" >/dev/null
+  # Harvest coverage reads the live run's T1 report, the file conformance --live writes.
+  jq -e '.runs[] | select(.id == "harvest-coverage" and .args == ["--live-report", "{artifact:live-oracle:t1-live.json}"])' "$out" >/dev/null
+  grep -qF 'live="$MG_RUN_DIR/t1-live.json"' "$REPO_ROOT/tools/mg.d/conformance.sh"
+  # The scanner's own tests run the branch's scanner, in a full checkout of the tip.
+  jq -e '.runs[] | select(.id == "similarity-selftest" and .where == "tip" and .merge_args == null)' "$out" >/dev/null
 
   # The sched change of the plan's scenario selects sched's live suites and the scan.
   printf 'core/crates/meguri-sched/src/answer.rs\0' >"$BATS_TEST_TMPDIR/changed"

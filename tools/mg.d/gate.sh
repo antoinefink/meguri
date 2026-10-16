@@ -56,10 +56,10 @@ mg_gate__changed() {
   } >"$2"
 }
 
-# mg_gate__tree_state: a digest of the working tree's status (tracked and
-# untracked), to tell whether the gate's own jobs changed it.
+# mg_gate__tree_state [<checkout>]: a digest of the working tree's status
+# (tracked and untracked), to tell whether the gate's own jobs changed it.
 mg_gate__tree_state() {
-  git -C "$MG_ROOT" status --porcelain=v1 -z --untracked-files=all 2>/dev/null | cksum
+  git -C "${1:-$MG_ROOT}" status --porcelain=v1 -z --untracked-files=all 2>/dev/null | cksum
 }
 
 # mg_gate__python <args...>: gate.py with the host's python3 (stdlib only).
@@ -111,13 +111,35 @@ mg_gate__load() {
   fi
 }
 
+# mg_gate__oracle_tree: whose oracle/ this checkout's oracle-image runs would
+# use (gate.py plan --oracle-tree): `own` (this checkout has one), `same` (the
+# main checkout's, which is exactly this HEAD's: one tree id, and nothing
+# changed or untracked under it there) or `differs`. A sparse role worktree
+# defers its oracle-image runs to the merge's tip checkout when it differs.
+mg_gate__oracle_tree() {
+  local main ours theirs
+  if [ -f "$MG_ROOT/oracle/Dockerfile" ]; then
+    echo own
+    return 0
+  fi
+  main="$(mg_gate__main_checkout)"
+  ours="$(git -C "$MG_ROOT" rev-parse -q --verify HEAD:oracle 2>/dev/null)"
+  theirs="$( [ -n "$main" ] && git -C "$main" rev-parse -q --verify HEAD:oracle 2>/dev/null)"
+  if [ -n "$main" ] && [ "$ours" = "$theirs" ] &&
+    [ -z "$(git --no-optional-locks -C "$main" status --porcelain --untracked-files=all -- oracle 2>/dev/null | head -n 1)" ]; then
+    echo same
+  else
+    echo differs
+  fi
+}
+
 # mg_gate__plan <config> <changed NUL file or ""> <mode> <out> [gate.py plan options...]
 mg_gate__plan() {
   local config="$1" changed="$2" mode="$3" out="$4" capable=no errors="$MG_RUN_DIR/plan-errors.json"
   shift 4
   mg_gate__in_main && capable=yes
   if ! mg_gate__python plan --config "$config" --changed "$changed" --mode "$mode" --main-capable "$capable" \
-    --out "$out" "$@" >"$errors"; then
+    --oracle-tree "$(mg_gate__oracle_tree)" --out "$out" "$@" >"$errors"; then
     jq -c '.errors[]? | {id: "plan", message: ., repro: "tools/mg gate --plan"}' "$errors" >>"$MG_STATE/failures.jsonl"
     [ -s "$MG_STATE/failures.jsonl" ] || mg_failure plan "planning failed; see log.txt"
     mg_message "$MG_JOB: planning failed"
@@ -139,20 +161,49 @@ mg_gate__evaluate() {
     --commit "$MG_COMMIT_SHA" --dirty "${MG_COMMIT_DIRTY:-false}" --out "$out" "$@"
 }
 
-# mg_gate__run_one <run JSON> <results file> [--merge]: one nested tools/mg
-# call; appends {id, result, exit_code} to the results. With --merge, the
-# run's merge_args. Sets MG_GATE_LAST_STATUS to the job's status.
+# mg_gate__artifact <{artifact:<run>:<file>}> <results file>: the path of that
+# file among the artifacts of <run>'s result in these results, or nothing.
+mg_gate__artifact() {
+  local spec="${1#\{artifact:}" run file result path
+  spec="${spec%\}}"
+  run="${spec%%:*}"
+  file="${spec#*:}"
+  result="$(jq -r --arg id "$run" 'select(.id == $id) | .result // empty' "$2" | tail -n 1)"
+  [ -n "$result" ] && [ -f "$result" ] || return 0
+  path="$(jq -r --arg f "$file" '[.artifacts[]? | select(.path | split("/") | last == $f) | .path][0] // empty' "$result")"
+  [ -n "$path" ] && [ -f "$path" ] && printf '%s\n' "$path"
+  return 0
+}
+
+# mg_gate__run_one <run JSON> <results file> [args|merge_args [<tools/mg>]]:
+# one nested tools/mg call with the run's args (or its merge_args; another
+# checkout's tools/mg runs it in that checkout); appends {id, result,
+# exit_code} to the results. An argument {artifact:<run>:<file>} becomes that
+# file of an earlier run in the same results; when there is none the run does
+# not start and is recorded unresolved. Sets MG_GATE_LAST_STATUS to the job's
+# status.
 mg_gate__run_one() {
-  local item="$1" results="$2" key=args id job out rc result a
-  [ "${3:-}" = --merge ] && key=merge_args
+  local item="$1" results="$2" key="${3:-args}" mg="${4:-$MG_TOOLS/mg}" id job out rc result a path
   id="$(jq -r .id <<<"$item")"
   job="$(jq -r .job <<<"$item")"
+  MG_GATE_LAST_STATUS=""
   local args=()
   while IFS= read -r -d '' a; do
+    case "$a" in
+      "{artifact:"*"}")
+        path="$(mg_gate__artifact "$a" "$results")"
+        if [ -z "$path" ]; then
+          echo "$MG_JOB: [$id] not run: no earlier run of this gate wrote $a" >&2
+          jq -nc --arg id "$id" --arg a "$a" '{id: $id, outcome: "unresolved", message: ("not run: no earlier run of this gate wrote " + $a)}' >>"$results"
+          return 0
+        fi
+        a="$path"
+        ;;
+    esac
     args[${#args[@]}]="$a"
   done < <(jq -j --arg k "$key" '.[$k][]? | . + "\u0000"' <<<"$item")
   echo "$MG_JOB: [$id] tools/mg $job${args[0]+ ${args[*]}}" >&2
-  out="$("$MG_TOOLS/mg" "$job" ${args[0]+"${args[@]}"} </dev/null)"
+  out="$("$mg" "$job" ${args[0]+"${args[@]}"} </dev/null)"
   rc=$?
   result="$(printf '%s\n' "$out" | tail -n 1)"
   [ -f "$result" ] || result=""
@@ -162,11 +213,31 @@ mg_gate__run_one() {
     '{id: $id, result: (if $r == "" then null else $r end), exit_code: $rc}' >>"$results"
 }
 
+# mg_gate__receipt_blocks <receipt> <id|tier> <value>: whether a run with that
+# id, or of that tier, blocks in the receipt (a `run:<id>` blocker).
+mg_gate__receipt_blocks() {
+  jq -e --arg f "$2" --arg v "$3" '[.runs[] | select(.[$f] == $v) | "run:" + .id] as $ids
+    | any(.blocking[]; .id as $b | $ids | index($b) != null)' "$1" >/dev/null 2>&1
+}
+
+# mg_gate__partial_blocks <config> <plan> <results> <id|tier> <value>: the
+# same for the results so far, evaluated (quarantine applied) by gate.py; a
+# results file it cannot evaluate counts as blocking.
+mg_gate__partial_blocks() {
+  local partial="$MG_RUN_DIR/receipt-partial.json" rc=0
+  if mg_gate__evaluate "$1" "$2" "$3" "$partial" >/dev/null 2>&1; then
+    mg_gate__receipt_blocks "$partial" "$4" "$5" || rc=1
+  fi
+  rm -f "$partial"
+  return "$rc"
+}
+
 # mg_gate__execute <config> <plan> <results>: runs the plan's runs in order.
-# A failing canary stops the run (AE82: a pin bump fails before anything
-# else); T1 starts only when T0 has nothing blocking.
+# A canary whose failure blocks stops the run (AE82: a pin bump fails before
+# anything else; a quarantined failure does not block, so it stops nothing);
+# T1 starts only when T0 has nothing blocking.
 mg_gate__execute() {
-  local config="$1" plan="$2" results="$3" n i item stage tier id stop="" t1="" status
+  local config="$1" plan="$2" results="$3" n i item stage tier id stop="" t1=""
   : >"$results"
   n="$(jq '.runs | length' "$plan")"
   i=0
@@ -182,22 +253,14 @@ mg_gate__execute() {
       continue
     fi
     if [ "$tier" = T1 ] && [ -z "$t1" ]; then
-      mg_gate__evaluate "$config" "$plan" "$results" "$MG_RUN_DIR/receipt-t0.json" >/dev/null 2>&1
-      if jq -e '[.runs[] | select(.tier == "T0" and .blocking and (.outcome | IN("fail", "error", "unresolved", "needs-oracle-tree")))] | length > 0' \
-        "$MG_RUN_DIR/receipt-t0.json" >/dev/null 2>&1; then
-        t1=skip
-      else
-        t1=run
-      fi
-      rm -f "$MG_RUN_DIR/receipt-t0.json"
+      if mg_gate__partial_blocks "$config" "$plan" "$results" tier T0; then t1=skip; else t1=run; fi
     fi
     if [ "$t1" = skip ] && [ "$tier" = T1 ]; then
       jq -nc --arg id "$id" '{id: $id, outcome: "skipped-after-t0", message: "not run: T0 failed"}' >>"$results"
       continue
     fi
     mg_gate__run_one "$item" "$results"
-    status="$MG_GATE_LAST_STATUS"
-    if [ "$stage" = canary ] && [ "$status" != pass ] && [ "$status" != warn ]; then
+    if [ "$stage" = canary ] && mg_gate__partial_blocks "$config" "$plan" "$results" id "$id"; then
       stop="$id"
       echo "$MG_JOB: canary $id failed; the remaining runs do not start (AE82 ordering)" >&2
     fi
@@ -273,21 +336,28 @@ mg_gate() {
     mg_status pass
     return 0
   fi
-  local before after
+  local before after blocker=()
   before="$(mg_gate__tree_state)"
   mg_gate__execute "$config" "$plan" "$results"
   after="$(mg_gate__tree_state)"
   mg_artifact results "$results" "job results"
-  if ! mg_gate__evaluate "$config" "$plan" "$results" "$receipt" >"$MG_RUN_DIR/evaluate-errors.json"; then
+  # A receipt-level blocker: a merge's evaluation carries it over.
+  [ "$before" = "$after" ] || blocker=(--blocker "$(mg_gate__tree_blocker tree-changed "a job of this gate")")
+  if ! mg_gate__evaluate "$config" "$plan" "$results" "$receipt" ${blocker[0]+"${blocker[@]}"} \
+    >"$MG_RUN_DIR/evaluate-errors.json"; then
     mg_failure evaluate "evaluating the results failed: $(cat "$MG_RUN_DIR/evaluate-errors.json")"
     mg_status error
     return 0
   fi
-  if [ "$before" != "$after" ]; then
-    jq '.blocking += [{id: "tree-changed", message: "a job of this gate changed the working tree (git status differs before and after); a receipt is for a commit, so no job may write tracked or untracked files", repro: "git status"}]
-      | .pass = false | .merge_ready = false' "$receipt" >"$receipt.tmp" && mv "$receipt.tmp" "$receipt"
-  fi
   mg_gate__record "$receipt" "$mode"
+}
+
+# mg_gate__tree_blocker <id> <who> [<checkout>]: the receipt-level blocker
+# (gate.py evaluate --blocker) for jobs that changed a checkout's working tree.
+mg_gate__tree_blocker() {
+  jq -nc --arg id "$1" --arg who "$2" --arg dir "${3:-$MG_ROOT}" '{id: $id,
+    message: ($who + " changed the working tree of " + $dir + " (git status differs before and after); a receipt is for a commit, so no job may write tracked or untracked files"),
+    repro: ("git -C " + $dir + " status")}'
 }
 
 # tools/mg static-checks [--base <rev>] [--rev <rev>] [--check <name>]...

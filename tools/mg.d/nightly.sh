@@ -16,7 +16,8 @@ mg_job nightly host mg_nightly \
 MG_NIGHTLY_LABEL="com.meguri.nightly"
 
 # mg_nightly__plist <label> <args...>: a launchd agent that runs tools/mg from
-# this checkout at 02:30 (daily) or 04:00 on Sundays (weekly).
+# this checkout at 02:30 (daily) or 04:00 on Sundays (weekly). launchd reads
+# a missing calendar key as "every", so each entry names its minute.
 mg_nightly__plist() {
   local label="$1" weekly="$2"
   cat <<EOF
@@ -32,7 +33,7 @@ mg_nightly__plist() {
   </array>
   <key>WorkingDirectory</key><string>$MG_ROOT</string>
   <key>StartCalendarInterval</key>
-  <dict>$([ "$weekly" = yes ] && printf '<key>Weekday</key><integer>0</integer><key>Hour</key><integer>4</integer>' || printf '<key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer>')</dict>
+  <dict>$([ "$weekly" = yes ] && printf '<key>Weekday</key><integer>0</integer><key>Hour</key><integer>4</integer><key>Minute</key><integer>0</integer>' || printf '<key>Hour</key><integer>2</integer><key>Minute</key><integer>30</integer>')</dict>
   <key>StandardOutPath</key><string>$MG_ROOT/build/mg/nightly/launchd.log</string>
   <key>StandardErrorPath</key><string>$MG_ROOT/build/mg/nightly/launchd.log</string>
 </dict>

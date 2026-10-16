@@ -5,17 +5,22 @@
 # branch checked out in the main checkout). There is no git remote, so this
 # job, not a push hook, enforces the receipt. It runs `tools/mg gate` in the
 # branch's worktree at its tip (the worktree-safe T0 and T1 runs, with that
-# branch's own tiers and tools), then the `where: main` runs from the main
-# checkout against the branch's tree (the similarity scan, which needs refs/,
-# and the static checks over the whole tree), evaluates both with the branch's
-# gate, and fast-forwards only when that receipt passes and is complete.
+# branch's own tiers and tools), then the runs the worktree left, in the
+# plan's order: `where: main` runs from the main checkout against the
+# branch's tree (the similarity scan, which needs refs/, and the static checks
+# over the whole tree), and the others (`where: tip` runs, oracle-image runs
+# that need the branch's own oracle/) in a full checkout of the tip at
+# build/mg/merge-tip, removed afterwards. It evaluates everything with the
+# branch's gate, the worktree receipt's own blockers included, checks the
+# worktree again, and fast-forwards only when that receipt passes and is
+# complete.
 #
 # docs/process/provenance/escalations.jsonl is append-only: an `add` line per
 # escalation and a `resolve` line when Antoine settles it; the last line of an
 # id is its state. A unit with an open escalation is never merged.
 
 mg_job merge host mg_merge \
-  "Merge a unit branch into the integration branch (the main checkout's branch), only path to it (R1951): <branch> [--worktree <dir>] [--unit <id>] [--receipt <receipt.json>]...; gate in the branch's worktree, similarity scan and static checks from the main checkout against the branch's tree, fast-forward only on a passing complete receipt"
+  "Merge a unit branch into the integration branch (the main checkout's branch), only path to it (R1951): <branch> [--worktree <dir>] [--unit <id>]; gate in the branch's worktree, similarity scan and static checks from the main checkout against the branch's tree, where: tip and oracle runs in a full checkout of the tip, fast-forward only on a passing complete receipt"
 mg_job escalation host mg_escalation \
   "Escalations for Antoine (docs/process/provenance/escalations.jsonl): add --kind behavior-gap|approval|blocked-red|stop-condition --unit <id> --summary <text> [--detail <JSON>] | resolve <id> --by <name> --resolution <text> | list [--open] [--unit <id>]"
 
@@ -142,23 +147,87 @@ mg_merge__worktree() {
     $0 == "branch " ref { print wt; exit }'
 }
 
-# tools/mg merge <branch> [--worktree <dir>] [--unit <id>] [--receipt <file>]...
+# The tip checkout: a full checkout of the branch tip (its code and its
+# oracle/) for the runs its worktree could not run. One merge at a time: an
+# existing one is refused, never reused, and it is removed when the merge
+# ends. Its fixed path keeps one compose project for every merge.
+MG_MERGE_TIP_DIR=""
+
+# mg_merge__tip_open <tip>: creates it at build/mg/merge-tip and sets
+# MG_MERGE_TIP_DIR; returns 1 with the reason in MG_MERGE_TIP_ERROR.
+mg_merge__tip_open() {
+  local dir="$MG_ROOT/build/mg/merge-tip"
+  MG_MERGE_TIP_ERROR=""
+  if [ -e "$dir" ]; then
+    MG_MERGE_TIP_ERROR="$dir exists: another merge is using it, or one was killed; when no merge runs, remove it with git worktree remove --force $dir"
+    return 1
+  fi
+  mkdir -p "$(dirname "$dir")"
+  if ! git -C "$MG_ROOT" worktree add -q --detach "$dir" "$1" >&2; then
+    MG_MERGE_TIP_ERROR="git worktree add --detach $dir $1 failed; see log.txt"
+    return 1
+  fi
+  MG_MERGE_TIP_DIR="$(cd "$dir" && pwd -P)"
+  mg_on_exit mg_merge__tip_close
+}
+
+mg_merge__tip_close() {
+  [ -n "$MG_MERGE_TIP_DIR" ] || return 0
+  git -C "$MG_ROOT" worktree remove --force "$MG_MERGE_TIP_DIR" >&2 ||
+    echo "merge: could not remove $MG_MERGE_TIP_DIR; remove it with git worktree remove --force" >&2
+  MG_MERGE_TIP_DIR=""
+}
+
+# mg_merge__keep_tip_results <results>: copies each run directory the tip
+# checkout wrote under this run's directory, and points the results and the
+# copied result's artifacts there, since the checkout goes away.
+mg_merge__keep_tip_results() {
+  local results="$1" out="$1.tmp" line id result dir dest
+  : >"$out"
+  while IFS= read -r line; do
+    result="$(jq -r '.result // empty' <<<"$line")"
+    case "$result" in
+      "$MG_MERGE_TIP_DIR"/*)
+        id="$(jq -r .id <<<"$line")"
+        dir="$(dirname "$result")"
+        dest="$MG_RUN_DIR/tip/$id"
+        mkdir -p "$MG_RUN_DIR/tip"
+        rm -rf "$dest"
+        cp -R "$dir" "$dest"
+        jq --arg from "$dir/" --arg to "$dest/" '.artifacts |= (. // [] | map(if (.path // "") | startswith($from)
+            then .path = $to + (.path | ltrimstr($from)) else . end))' "$dest/result.json" >"$dest/result.json.tmp" &&
+          mv "$dest/result.json.tmp" "$dest/result.json"
+        line="$(jq -c --arg r "$dest/result.json" '.result = $r' <<<"$line")"
+        ;;
+    esac
+    printf '%s\n' "$line" >>"$out"
+  done <"$results"
+  mv "$out" "$results"
+}
+
+# mg_merge__evaluate <worktree> <gate run dir> <results> <tip> <out>
+# [gate.py evaluate options...]: one receipt for the tip by the branch's own
+# gate, from its worktree receipt and the merge's runs.
+mg_merge__evaluate() {
+  local wt="$1" dir="$2" results="$3" tip="$4" out="$5"
+  shift 5
+  python3 -B -I "$wt/$MG_GATE_PY" evaluate --config "$dir/config.json" --plan "$dir/plan.json" \
+    --receipt "$dir/receipt.json" --results "$results" --now "$(mg_gate__now)" --commit "$tip" --dirty false \
+    --out "$out" "$@"
+}
+
+# tools/mg merge <branch> [--worktree <dir>] [--unit <id>]
 mg_merge() {
-  local branch="" wt="" unit="" receipts=()
+  local branch="" wt="" unit=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --worktree) wt="${2:-}"; shift 2 || shift ;;
       --unit) unit="${2:-}"; shift 2 || shift ;;
-      --receipt)
-        [ -f "${2:-}" ] || { mg_merge__fail usage "--receipt needs a receipt.json" "" error; return 0; }
-        receipts[${#receipts[@]}]="$(cd "$(dirname "$2")" && pwd -P)/$(basename "$2")"
-        shift 2
-        ;;
       -*) mg_merge__fail usage "unknown option '$1'" "" error; return 0 ;;
       *) [ -z "$branch" ] || { mg_merge__fail usage "one branch per merge" "" error; return 0; }; branch="$1"; shift ;;
     esac
   done
-  [ -n "$branch" ] || { mg_merge__fail usage "usage: tools/mg merge <branch> [--worktree <dir>] [--unit <id>] [--receipt <receipt.json>]..." "" error; return 0; }
+  [ -n "$branch" ] || { mg_merge__fail usage "usage: tools/mg merge <branch> [--worktree <dir>] [--unit <id>]" "" error; return 0; }
   if ! mg_gate__in_main; then
     mg_merge__fail not-main "tools/mg merge runs in the main checkout ($(mg_gate__main_checkout)), which holds refs/ and the integration branch" "" error
     return 0
@@ -229,35 +298,85 @@ mg_merge() {
     mg_merge__fail receipt-commit "the worktree's receipt is not for $tip on a clean tree" "" fail
     return 0
   fi
-  local r
-  for r in ${receipts[0]+"${receipts[@]}"}; do
-    if [ "$(jq -r .commit "$r")" != "$tip" ] || [ "$(jq -r .dirty "$r")" != false ] || [ "$(jq -r .mode "$r")" != full ]; then
-      mg_merge__fail receipt-commit "$r is not a full gate receipt for $tip on a clean tree" "" error
-      return 0
-    fi
-  done
 
-  # 2. Runs that belong to the main checkout, against the branch's tree.
-  local results="$run_dir/main-results.jsonl" n i item
+  # 2. The runs the worktree left, in the plan's order and under the gate's
+  # rules: nothing starts after a failed canary, T1 only when T0 has nothing
+  # blocking (AE82). `where: main` runs run here with their merge_args
+  # against the branch's tree; the others (`where: tip` runs, oracle runs
+  # that need the branch's own oracle/) run with their args in the tip
+  # checkout, with this checkout's similarity corpus.
+  local results="$run_dir/results.jsonl" partial="$run_dir/receipt-partial.json" blockers=()
+  local ids id item outcome tier stopped t1="" tip_state="" tip_before="" main_before refs=""
   : >"$results"
-  n="$(jq '[.runs[] | select(.outcome == "deferred-main")] | length' "$gate_receipt")"
-  i=0
-  while [ "$i" -lt "$n" ]; do
-    item="$(jq -c "[.runs[] | select(.outcome == \"deferred-main\")][$i]" "$gate_receipt")"
-    i=$((i + 1))
-    mg_gate__run_one "$item" "$results" --merge
+  [ ! -d "$MG_ROOT/refs/anki" ] || refs="$MG_ROOT/refs"
+  stopped="$(jq -r 'any(.runs[]; .outcome == "skipped-after-canary")' "$gate_receipt")"
+  ids="$(jq -r '.runs[] | select(.outcome | IN("deferred-main", "deferred-tip", "needs-oracle-tree")) | .id' "$gate_receipt")"
+  main_before="$(mg_gate__tree_state)"
+  for id in $ids; do
+    item="$(jq -c --arg id "$id" '.runs[] | select(.id == $id)' "$gate_dir/plan.json")"
+    outcome="$(jq -r --arg id "$id" '.runs[] | select(.id == $id) | .outcome' "$gate_receipt")"
+    tier="$(jq -r .tier <<<"$item")"
+    if [ "$stopped" = true ]; then
+      jq -nc --arg id "$id" '{id: $id, outcome: "skipped-after-canary", message: "not run: a canary failed in the worktree gate"}' >>"$results"
+      continue
+    fi
+    if [ "$tier" = T1 ] && [ -z "$t1" ]; then
+      t1=skip
+      if mg_merge__evaluate "$wt" "$gate_dir" "$results" "$tip" "$partial" >/dev/null 2>&1 &&
+        ! mg_gate__receipt_blocks "$partial" tier T0; then
+        t1=run
+      fi
+      rm -f "$partial"
+    fi
+    if [ "$tier" = T1 ] && [ "$t1" = skip ]; then
+      jq -nc --arg id "$id" '{id: $id, outcome: "skipped-after-t0", message: "not run: T0 failed"}' >>"$results"
+      continue
+    fi
+    if [ "$outcome" = deferred-main ]; then
+      mg_gate__run_one "$item" "$results" merge_args
+      continue
+    fi
+    if [ -z "$tip_state" ]; then
+      if mg_merge__tip_open "$tip"; then
+        tip_state=open
+        tip_before="$(mg_gate__tree_state "$MG_MERGE_TIP_DIR")"
+      else
+        tip_state=failed
+        mg_failure tip-checkout "$MG_MERGE_TIP_ERROR" "git worktree list"
+      fi
+    fi
+    if [ "$tip_state" = failed ]; then
+      jq -nc --arg id "$id" --arg m "$MG_MERGE_TIP_ERROR" '{id: $id, outcome: "error", message: ("not run: no checkout of the tip: " + $m)}' >>"$results"
+      continue
+    fi
+    MG_SIMILARITY_REFS="$refs" mg_gate__run_one "$item" "$results" args "$MG_MERGE_TIP_DIR/tools/mg"
   done
-  mg_artifact results "$results" "main checkout runs"
+  # A receipt is for a commit: no run may change a checkout it ran in.
+  [ "$(mg_gate__tree_state)" = "$main_before" ] ||
+    blockers[${#blockers[@]}]="$(mg_gate__tree_blocker tree-changed:main "a run of this merge")"
+  if [ "$tip_state" = open ]; then
+    [ "$(mg_gate__tree_state "$MG_MERGE_TIP_DIR")" = "$tip_before" ] ||
+      blockers[${#blockers[@]}]="$(mg_gate__tree_blocker tree-changed:tip "a run of this merge" "$MG_MERGE_TIP_DIR")"
+    mg_merge__keep_tip_results "$results"
+    mg_merge__tip_close
+  fi
+  mg_artifact results "$results" "runs of the main checkout and the tip checkout"
+  # The worktree's gate tested its tree at the tip: it must still be that.
+  if [ "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" != "$tip" ] ||
+    [ -n "$(git -C "$wt" status --porcelain --untracked-files=all 2>/dev/null | head -n 1)" ]; then
+    blockers[${#blockers[@]}]="$(jq -nc --arg wt "$wt" --arg t "$tip" '{id: "worktree-changed",
+      message: ("after its gate, " + $wt + " is no longer clean at " + $t + ": a job wrote to the tested tree, or something changed it during the merge"),
+      repro: ("git -C " + $wt + " status")}')"
+  fi
 
   # 3. One receipt for the tip, evaluated by the branch's own gate.
-  local receipt="$run_dir/receipt.json" args=()
-  for r in ${receipts[0]+"${receipts[@]}"}; do
-    args[${#args[@]}]=--receipt
-    args[${#args[@]}]="$r"
+  local receipt="$run_dir/receipt.json" args=() b
+  for b in ${blockers[0]+"${blockers[@]}"}; do
+    args[${#args[@]}]=--blocker
+    args[${#args[@]}]="$b"
   done
-  if ! python3 -B -I "$wt/$MG_GATE_PY" evaluate --config "$gate_dir/config.json" --plan "$gate_dir/plan.json" \
-    --receipt "$gate_receipt" ${args[0]+"${args[@]}"} --results "$results" --now "$(mg_gate__now)" \
-    --commit "$tip" --dirty false --out "$receipt" >"$run_dir/evaluate-errors.json"; then
+  if ! mg_merge__evaluate "$wt" "$gate_dir" "$results" "$tip" "$receipt" ${args[0]+"${args[@]}"} \
+    >"$run_dir/evaluate-errors.json"; then
     mg_merge__fail evaluate "evaluating the receipt failed: $(cat "$run_dir/evaluate-errors.json")" "" error
     return 0
   fi

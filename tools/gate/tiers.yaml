@@ -10,10 +10,14 @@
 #   id            unique slug; receipts and quarantine entries name it
 #   job, args     the tools/mg call. Placeholders: {base} (the commit the
 #                 change is measured from), {tip} (the commit under test),
-#                 {seed} (the nightly seed, R1937), {milestone}
+#                 {seed} (the nightly seed, R1937), {milestone}; and, as a
+#                 whole argument, {artifact:<run id>:<file name>}: that file
+#                 among the artifacts of an earlier run of the same gate (the
+#                 run is unresolved, and blocks, when there is none)
 #   tier          T0..T4
-#   stage         static and canary run before every other run; a failing
-#                 canary stops the gate (AE82 ordering). Default main.
+#   stage         static and canary run before every other run; a canary
+#                 whose failure blocks (not quarantined) stops the gate (AE82
+#                 ordering). Default main.
 #   triggers      path globs (`**`, `*`, trailing `/`, leading `!` excludes);
 #                 absent: every change. T2-T4 runs have none.
 #   filters       instead of triggers, for conformance: path glob -> scenario
@@ -26,10 +30,14 @@
 #   budget_s      time budget; a run over it is reported, not failed
 #   local         runs in `tools/mg gate --local` (default true); the
 #                 similarity scan and oracle-image runs do not (U2)
-#   where         worktree (default) or main: `tools/mg merge` runs a main
-#                 run from the main checkout with merge_args, against the
-#                 branch's tree
-#   oracle        an oracle-image run (needs the branch's oracle/)
+#   where         worktree (default), main or tip. Outside the main checkout,
+#                 `tools/mg merge` runs a main run from the main checkout with
+#                 merge_args, against the branch's tree, and a tip run with
+#                 its args in a full checkout of the branch tip (the branch's
+#                 code and oracle/, the main checkout's similarity corpus)
+#   oracle        an oracle-image run: it needs the branch's own oracle/. A
+#                 checkout without one uses the main checkout's when that is
+#                 this HEAD's; otherwise the merge runs it in its tip checkout
 #   class         unit, conformance, sync, data-safety, ui, perf, static,
 #                 tooling or similarity; quarantined tests of a conformance,
 #                 sync or data-safety run fail every milestone run (R1953)
@@ -330,6 +338,7 @@ runs:
     budget_s: 600
     local: false
     where: main
+  # The branch's own scanner and its tests, with the main checkout's corpus.
   - id: similarity-selftest
     job: similarity-selftest
     tier: T0
@@ -339,8 +348,7 @@ runs:
     triggers: [tools/similarity/, docker/similarity.Dockerfile, tools/mg.d/similarity.sh]
     budget_s: 1200
     local: false
-    where: main
-    merge_args: []
+    where: tip
 
   # --- T1: live oracle ----------------------------------------------------------
   - id: live-oracle
@@ -552,9 +560,11 @@ runs:
     class: perf
     budget_s: 7200
   # R1880: zero unclassified harvest rows at every milestone; at release every
-  # in-scope and preservation-only scenario passes.
+  # in-scope and preservation-only scenario passes. The live oracle run's T1
+  # report gives the live chains their statuses (otherwise they stay `live`).
   - id: harvest-coverage
     job: harvest-report
+    args: [--live-report, "{artifact:live-oracle:t1-live.json}"]
     tier: T3
     placement: [host, docker:dev]
     class: conformance

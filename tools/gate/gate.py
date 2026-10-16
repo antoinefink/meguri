@@ -10,8 +10,9 @@ else should. Commands:
             /usr/bin/python3 (3.9) runs it on the host.
   plan      config.json + changed paths + mode -> plan.json (what runs, in
             which order, with which arguments, and why the rest does not).
-  evaluate  plan.json + job results (and receipts) -> receipt.json: one
-            outcome per run, quarantine applied, and the verdict.
+  evaluate  plan.json + job results (and a merge's worktree receipt) ->
+            receipt.json: one outcome per run, quarantine applied, the
+            caller's receipt-level blockers, and the verdict.
   quarantine-entry  checks a new quarantine entry against two gate receipts
             of one commit (the gate-recorded evidence) and prints its YAML.
 
@@ -38,6 +39,15 @@ DOCKER_NEEDS = ("oracle", "sync-server", "image-diff", "frame-extraction")
 HOST_NEEDS = ("simulator", "device", "mac-ui", "vm")
 MODES = ("local", "full", "nightly", "weekly", "milestone", "release")
 SCHEDULES = ("nightly", "weekly")
+# worktree: runs where the gate runs. main: tools/mg merge runs merge_args from
+# the main checkout against the branch's tree. tip: tools/mg merge runs args in
+# a full checkout of the branch tip (the branch's code and oracle/, the main
+# checkout's corpus).
+WHERE = ("worktree", "main", "tip")
+# Whose oracle/ this checkout's oracle-image runs would use (gate.sh): its
+# own, the main checkout's when that is exactly this HEAD's, or neither.
+ORACLE_TREES = ("own", "same", "differs")
+RECEIPT_VERSION = 2
 RUN_KEYS = {
     "id", "job", "args", "merge_args", "tier", "stage", "placement", "class", "triggers", "filters",
     "budget_s", "local", "where", "oracle", "needs", "schedule", "pending", "disabled", "blocking",
@@ -51,17 +61,26 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 PLACEMENT = re.compile(r"^(host|vm|docker:[a-z][a-z0-9-]*)$")
 PLACEHOLDER = re.compile(r"\{([a-z]+)\}")
 PLACEHOLDERS = ("base", "tip", "seed", "milestone")
+BRACED = re.compile(r"\{([^{}]*)\}")
+# A whole argument naming a file an earlier run of the same gate wrote (an
+# artifact of its result); tools/mg resolves it when the run starts.
+ARTIFACT = re.compile(r"^\{artifact:([a-z][a-z0-9-]*):([A-Za-z0-9._-]+)\}$")
 # Outcomes that never block. `queued`: a VM job without the VM (warn with
 # details.queued); the verification is recorded as queued (root AGENTS.md).
 NONBLOCKING = ("pass", "warn", "queued", "quarantined", "pending", "disabled", "not-triggered",
                "skipped-local", "user-step")
 # Outcomes that leave a receipt incomplete for a merge: the run still has to
-# happen somewhere (the main checkout, or a checkout that has the branch's
-# oracle/).
-INCOMPLETE = ("skipped-local", "deferred-main")
+# happen somewhere (the main checkout, or a full checkout of the branch tip).
+INCOMPLETE = ("skipped-local", "deferred-main", "deferred-tip")
 # Runs the gate did not start because an earlier failure decided the verdict:
-# that failure blocks, these do not add to it.
+# that failure blocks, these do not add to it. A receipt with one is never
+# merge-ready: a required run did not run.
 CONSEQUENCES = ("skipped-after-canary", "skipped-after-t0")
+# Failure ids with which an oracle job refuses the oracle/ it would use
+# (tools/mg.d/oracle.sh): `conformance --live` reports one in a failing
+# result, `oracle test` in an error result. Either way the run needs a
+# checkout that has the branch's own oracle/.
+ORACLE_TREE_FAILURES = ("oracle-tree-differs", "no-oracle-tree")
 
 
 class Invalid(Exception):
@@ -151,11 +170,20 @@ def is_str_list(value):
     return isinstance(value, list) and all(isinstance(v, str) and v for v in value)
 
 
-def check_placeholders(where, args, errors):
+def check_placeholders(where, args, errors, artifacts=True):
+    """The {artifact:<run>:<file>} references among the args, as (run, file)."""
+    refs = []
     for a in args:
-        for name in PLACEHOLDER.findall(a):
+        m = ARTIFACT.match(a)
+        if m and artifacts:
+            refs.append((m.group(1), m.group(2)))
+            continue
+        for name in BRACED.findall(a):
             if name not in PLACEHOLDERS:
-                errors.append("%s: unknown placeholder {%s} (known: %s)" % (where, name, ", ".join(PLACEHOLDERS)))
+                errors.append("%s: unknown placeholder {%s} (known: %s%s)" % (
+                    where, name, ", ".join(PLACEHOLDERS),
+                    ", and in args a whole argument {artifact:<run id>:<file name>}" if artifacts else ""))
+    return refs
 
 
 def check_run(run, index, tiers, registry, conformance, errors):
@@ -191,7 +219,7 @@ def check_run(run, index, tiers, registry, conformance, errors):
     }
     if not is_str_list(out["args"]) and out["args"] != []:
         errors.append("%s: args must be a list of strings" % where)
-    check_placeholders(where, out["args"] if isinstance(out["args"], list) else [], errors)
+    out["artifacts"] = check_placeholders(where, out["args"] if is_str_list(out["args"]) else [], errors)
     if out["stage"] not in STAGES:
         errors.append("%s: stage must be one of %s" % (where, ", ".join(STAGES)))
     elif out["stage"] != "main" and tier != "T0":
@@ -203,17 +231,17 @@ def check_run(run, index, tiers, registry, conformance, errors):
     for flag in ("local", "oracle", "blocking", "release_only"):
         if not isinstance(out[flag], bool):
             errors.append("%s: %s must be true or false" % (where, flag))
-    if out["where"] not in ("worktree", "main"):
-        errors.append("%s: where must be worktree or main" % where)
+    if out["where"] not in WHERE:
+        errors.append("%s: where must be %s" % (where, ", ".join(WHERE)))
     if out["where"] == "main":
         if not is_str_list(out["merge_args"]) and out["merge_args"] != []:
             errors.append("%s: a where: main run needs merge_args (the main checkout's arguments against the branch's tree)" % where)
         else:
-            check_placeholders(where, out["merge_args"], errors)
-        if out["local"]:
-            errors.append("%s: a where: main run cannot run in gate --local (set local: false)" % where)
+            check_placeholders(where, out["merge_args"], errors, artifacts=False)
     elif out["merge_args"] is not None:
         errors.append("%s: merge_args only belong to where: main runs" % where)
+    if out["where"] in ("main", "tip") and out["local"]:
+        errors.append("%s: a where: %s run cannot run in gate --local (set local: false)" % (where, out["where"]))
     if out["oracle"] and out["local"]:
         errors.append("%s: an oracle-image run cannot run in gate --local (set local: false)" % where)
     if not is_str_list(out["needs"]) and out["needs"] != []:
@@ -333,6 +361,14 @@ def load_tiers(data, registry, conformance):
             errors.append("run %s: duplicate id" % out["id"])
         seen.add(out["id"])
         runs.append(out)
+    # An {artifact:...} names a run that starts before this one (plan order:
+    # stage, then tier, then this file's order).
+    order = {r["id"]: (STAGE_ORDER.get(r["stage"], 0), TIER_ORDER[r["tier"]], i) for i, r in enumerate(runs)}
+    for r in runs:
+        for ref, name in r["artifacts"]:
+            if ref not in order or order[ref] >= order[r["id"]]:
+                errors.append("run %s: {artifact:%s:%s} names run %s, which does not run before it"
+                              % (r["id"], ref, name, ref))
     utilities = {}
     for i, u in enumerate(data.get("utilities") or []):
         if not isinstance(u, dict) or set(u) != {"job", "why"} or not all(isinstance(u[k], str) and u[k] for k in u):
@@ -476,7 +512,7 @@ def substitute(args, values):
     return out
 
 
-def plan_runs(config, changed, mode, main_capable, values, all_paths=False, only=None):
+def plan_runs(config, changed, mode, main_capable, values, all_paths=False, only=None, oracle_tree="own"):
     """Every run of the modes' tiers, in execution order, with action run or
     skip and the reason."""
     if mode in ("local", "full"):
@@ -537,13 +573,21 @@ def plan_runs(config, changed, mode, main_capable, values, all_paths=False, only
             elif run["where"] == "main" and not main_capable:
                 item["action"], item["outcome"] = "skip", "deferred-main"
                 item["reason"] = "runs from the main checkout (tools/mg merge)"
+            elif run["where"] == "tip" and not main_capable:
+                item["action"], item["outcome"] = "skip", "deferred-tip"
+                item["reason"] = ("needs the branch's own code with the main checkout's corpus; "
+                                  "tools/mg merge runs it in a full checkout of the tip")
+            elif run["oracle"] and oracle_tree == "differs":
+                item["action"], item["outcome"] = "skip", "deferred-tip"
+                item["reason"] = ("this checkout has no oracle/ and the main checkout's is not this branch's; "
+                                  "tools/mg merge runs it in a full checkout of the tip")
         try:
             item["args"] = substitute(item["args"], values)
             if item["merge_args"] is not None:
                 item["merge_args"] = substitute(item["merge_args"], values)
         except Invalid as e:
             # Only a run that would run needs its values.
-            if item["action"] == "run" or item["outcome"] == "deferred-main":
+            if item["action"] == "run" or item["outcome"] in ("deferred-main", "deferred-tip"):
                 item["action"], item["outcome"], item["reason"] = "skip", "unresolved", str(e)
                 item["blocking"] = True
         items.append(item)
@@ -574,7 +618,7 @@ def cmd_plan(a):
             json.dump({"errors": ["unknown run id(s) for --only: %s" % ", ".join(sorted(unknown))]}, sys.stdout)
             print()
             return 1
-    items = plan_runs(config, changed, a.mode, a.main_capable == "yes", values, a.all, only)
+    items = plan_runs(config, changed, a.mode, a.main_capable == "yes", values, a.all, only, a.oracle_tree)
     write_json(a.out, {"mode": a.mode, "values": values, "changed": changed, "runs": items})
     return 0
 
@@ -622,14 +666,17 @@ def assess(item, entry, quarantine, day):
         rec["over_budget"] = True
     details = res.get("details") or {}
     status = rec["status"]
+    ids = [f["id"] for f in rec["failures"]]
     if status == "pass":
         rec["outcome"] = "pass"
     elif status == "warn":
         rec["queued"] = details.get("queued") is True
         rec["outcome"] = "queued" if rec["queued"] else "warn"
+    elif any(i in ORACLE_TREE_FAILURES for i in ids):
+        # Whatever else failed ran against another oracle/ than the branch's.
+        rec["outcome"] = "needs-oracle-tree"
     elif status == "fail":
         active = {e["test"]: e for e in quarantine if e["run"] == item["id"] and e["deadline"] >= day}
-        ids = [f["id"] for f in rec["failures"]]
         if ids and all(i in active for i in ids):
             rec["outcome"] = "quarantined"
             rec["quarantined"] = ids
@@ -637,8 +684,7 @@ def assess(item, entry, quarantine, day):
             rec["outcome"] = "fail"
             rec["quarantined"] = [i for i in ids if i in active]
     else:
-        ids = [f["id"] for f in rec["failures"]]
-        rec["outcome"] = "needs-oracle-tree" if "oracle-tree-differs" in ids else "error"
+        rec["outcome"] = "error"
     # Pass rules on the result itself (R1880's harvest rules and the like).
     if rec["outcome"] in ("pass", "warn"):
         for r in item.get("require") or []:
@@ -678,18 +724,28 @@ def cmd_evaluate(a):
     day = today(a.now)
     quarantine = config["quarantine"]["entries"]
     records = {}
-    # Receipts first (a merge's worktree receipt, or a full checkout's receipt
-    # for runs that need the branch's oracle/), then this run's executions.
-    for i, path in enumerate(a.receipt or []):
-        receipt = read_json(path)
+    # Receipt-level blockers: what the gate found beside its runs (a job that
+    # changed the tested tree, a worktree a merge found changed). A merge
+    # carries its worktree receipt's, so none is lost on re-evaluation.
+    receipt_blocking = []
+    # A merge's worktree receipt first, then this run's executions, which
+    # replace the runs it records.
+    if a.receipt:
+        receipt = read_json(a.receipt)
+        if receipt.get("receipt_version") != RECEIPT_VERSION:
+            raise Invalid("%s: receipt_version %r; this gate reads version %d only"
+                          % (a.receipt, receipt.get("receipt_version"), RECEIPT_VERSION))
         for rec in receipt.get("runs", []):
-            prev = records.get(rec["id"])
-            if i == 0:
-                records[rec["id"]] = rec
-            elif prev is not None and prev["outcome"] == "needs-oracle-tree":
-                if rec["outcome"] in ("pass", "warn", "queued", "quarantined", "fail", "error"):
-                    rec = dict(rec, supplied_by=path)
-                    records[rec["id"]] = rec
+            records[rec["id"]] = rec
+        receipt_blocking += receipt.get("receipt_blocking", [])
+    for raw in a.blocker or []:
+        try:
+            b = json.loads(raw)
+        except ValueError:
+            b = None
+        if not isinstance(b, dict) or not all(isinstance(b.get(k), str) and b[k] for k in ("id", "message")):
+            raise Invalid("--blocker takes a JSON object with id and message, got %r" % raw)
+        receipt_blocking.append({"id": b["id"], "message": b["message"], "repro": b.get("repro") or "git status"})
     entries = []
     if a.results:
         with open(a.results, encoding="utf-8") as f:
@@ -721,7 +777,7 @@ def cmd_evaluate(a):
             continue
         first = rec["failures"][0]["message"] if rec["failures"] else rec["message"]
         reason = {
-            "needs-oracle-tree": "this branch changes oracle/: run it in a checkout that has the branch's oracle/ and pass that receipt to tools/mg merge --receipt",
+            "needs-oracle-tree": "the oracle/ it used is not this branch's (%s); tools/mg merge runs it in a full checkout of the tip" % first,
             "not-run": "planned but not run",
         }.get(rec["outcome"], first)
         blocking.append({"id": "run:" + rec["id"], "message": "%s (%s): %s" % (rec["id"], rec["outcome"], reason),
@@ -747,9 +803,10 @@ def cmd_evaluate(a):
             blocking.append({"id": "quarantine-protected:%s:%s" % (e["run"], e["test"]),
                              "message": "%s:%s is a quarantined %s test; a milestone gate fails while any conformance, sync or data-safety test is quarantined (R1953)"
                              % (e["run"], e["test"], e["class"]), "repro": "tools/mg quarantine check"})
-    incomplete = [r["id"] for r in runs if r["outcome"] in INCOMPLETE]
+    blocking += receipt_blocking
+    incomplete = [r["id"] for r in runs if r["outcome"] in INCOMPLETE + CONSEQUENCES]
     receipt = {
-        "receipt_version": 1,
+        "receipt_version": RECEIPT_VERSION,
         "mode": plan["mode"],
         "commit": a.commit or None,
         "dirty": a.dirty == "true",
@@ -763,6 +820,7 @@ def cmd_evaluate(a):
                        for e in q["entries"] if e["deadline"] >= day],
             "expired": expired, "invalid": q["invalid"], "protected": protected,
         },
+        "receipt_blocking": receipt_blocking,
         "blocking": blocking,
         "incomplete": incomplete,
         "pass": not blocking,
@@ -865,6 +923,7 @@ def main(argv):
     s.add_argument("--changed", default="")
     s.add_argument("--mode", required=True, choices=MODES)
     s.add_argument("--main-capable", choices=("yes", "no"), default="no")
+    s.add_argument("--oracle-tree", choices=ORACLE_TREES, default="own")
     s.add_argument("--var", action="append")
     s.add_argument("--all", action="store_true")
     s.add_argument("--only", default="")
@@ -873,7 +932,8 @@ def main(argv):
     s.add_argument("--config", required=True)
     s.add_argument("--plan", required=True)
     s.add_argument("--results", default="")
-    s.add_argument("--receipt", action="append")
+    s.add_argument("--receipt", default="")
+    s.add_argument("--blocker", action="append")
     s.add_argument("--now", required=True)
     s.add_argument("--commit", default="")
     s.add_argument("--dirty", default="false")
