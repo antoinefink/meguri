@@ -228,7 +228,7 @@ fn db_exec(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
     session.storage.baseline = baseline;
     // W1's reset after a write has nothing to clear: the session runs no
     // engine yet, so it keeps no cached view and no undo history (U38).
-    Ok(OpResult::Output(json!({ "rows": rows_value(&rows) })))
+    Ok(OpResult::Output(json!({ "rows": db_exec_rows(&rows) })))
 }
 
 /// A scenario's JSON value as a config value (W4): a number with a fraction
@@ -303,7 +303,8 @@ fn digest_value(bytes: &[u8]) -> Value {
     json!({ "sha256": hex })
 }
 
-fn rows_value(rows: &RawRows) -> Value {
+/// W1's output rows: each row the list of its values by storage class.
+pub fn db_exec_rows(rows: &RawRows) -> Value {
     Value::Array(
         rows.rows
             .iter()
@@ -444,6 +445,12 @@ fn dump_table(collection: &OpenedCollection, table: &str) -> Result<Value, ExecE
         .writer()
         .execute_raw(&format!("SELECT * FROM {table}"), &[])
         .map_err(core)?;
+    db_dump_table(table, &rows)
+}
+
+/// O8: one table's rows, as `SELECT * FROM <table>` returns them, keyed by
+/// their primary key and with the random values hidden.
+pub fn db_dump_table(table: &str, rows: &RawRows) -> Result<Value, ExecError> {
     // A key column is found in any letter case: releases at schemas 14 to
     // 16 created config's as `key`.
     let keys: Vec<usize> = key_columns(table)

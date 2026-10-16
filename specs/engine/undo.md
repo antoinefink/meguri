@@ -3,7 +3,7 @@
 Spec: engine/undo
 Requirements: R719, R720, R721, R725 (as KTD7 reconciles it), R1795, R1796, R2020; supports R365, R366, R370, R371, R723, R726, R1811
 Anki: none for sections M1 to M12 (Meguri design from KTD5, KTD6, KTD7 and spec-flow C3, Q1, Q4, Q11; written by the implementer, U25). Sections A1 to A11 are Anki's observable results at 26.09.3, written by the spec writer; A11 lists what they change in M1 to M12.
-Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_merge.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `undo_holdback_memory.rs`, `op_catalog.rs`; `undo_conformance.rs` plays `undo/config-writes` on the engine against its golden until the runner's undo adapter runs the area (`undo-ops.md` V6)
+Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_merge.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `undo_holdback_memory.rs`, `op_catalog.rs`; `undo_conformance.rs` plays every undo scenario on the engine against its golden, deviations applied, with stand-ins for the new collection, the setup and the note and answer ops, until the runner's undo adapter runs the area (`undo-ops.md` V6)
 
 The undo manager of one open collection (C3): the steps it records from committed ops, what every other op does to them, undo and redo as ops, the reasons a step is unavailable, the held-back run a normal sync keeps local, and the rule that no uploaded step is ever undone. Ops, sources and journals are `engine/op-model`; the change set is `engine/change-stream`.
 
