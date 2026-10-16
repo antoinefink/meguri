@@ -68,12 +68,13 @@ perf_result() {
 SIM='{"kind": "simulator", "id": "vm/meguri-ui/iPhone 17 Pro/24A434", "model": "iPhone 17 Pro", "os": "iOS 27.0", "os_build": "24A434"}'
 IPHONE='{"kind": "device", "id": "iPhone18,1/24A434", "model": "iPhone 17 Pro", "os": "iOS 27.0"}'
 
-# smoke <p95 ms> [configuration] [attachments]: SmokePerfTests' probe.
+# smoke <p50 ms> [configuration] [attachments]: SmokePerfTests' probe (the
+# catalog judges it at p50).
 smoke() {
   jq -nc --argjson v "$1" --arg c "${2:-Profile}" --argjson a "${3:-0}" --argjson r "$SIM" '{schema_version: 1,
     suite: "SmokePerfTests", kind: "ui", configuration: $c, attachments: $a, runner: $r, results: [
       {name: "probe.syntheticDelay", test: "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()",
-       metric: "duration", unit: "ms", percentile: "p95", value: $v, samples: 5}]}'
+       metric: "duration", unit: "ms", percentile: "p50", value: $v, samples: 5}]}'
 }
 
 open_bench() {
