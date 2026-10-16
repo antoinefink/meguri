@@ -5,7 +5,7 @@
 mod common;
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use common::steps::{self, ANSWER_CARD, BURY, SUSPEND, UPDATE_NOTE};
@@ -756,6 +756,62 @@ fn a_step_of_a_long_write_reports_it_and_its_undo_and_redo_declare_it() {
         })
         .collect();
     assert_eq!(delays, ["undo_long_write", "redo_long_write"]);
+}
+
+/// The writer's `WriteDelay` events among `events`, as (op, declared).
+fn write_delays(events: &[Arc<meguri_engine::Event>]) -> Vec<(&'static str, Duration)> {
+    events
+        .iter()
+        .filter_map(|event| match event.kind {
+            EventKind::WriteDelay { op, declared } => Some((op, declared)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_undo_queued_behind_a_long_write_declares_that_write_when_it_undoes_its_step() {
+    let h = Harness::open();
+    let notes = common::add_notes(&h.collection, 20, "bulk");
+    let (_, cid) = note_with_card(&h, "a");
+    steps::suspend(&h.collection, None, cid).unwrap();
+    let declared = Duration::from_millis(400);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let bulk = h.collection.submit(
+        OpSpec::new(catalog::BULK_OP, OpSource::UserUndoable)
+            .declare_long_write(declared)
+            .undo_step("Find and Replace", StepKind::Other),
+        move |ctx| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            for nid in &notes {
+                steps::set_first_field(ctx, *nid, "replaced".to_owned())?;
+            }
+            Ok(())
+        },
+    );
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    // The bulk op holds the writer and has recorded nothing yet: the caller
+    // sees the short step on top and submits a plain undo.
+    assert_eq!(peek_name(&h), Some(SUSPEND));
+    let events = h.engine.stream().subscribe();
+    let undo = h.collection.submit_undo(UndoScope::Global);
+    release_tx.send(()).unwrap();
+    bulk.wait().unwrap();
+    let undone = undo.wait().unwrap();
+
+    assert_eq!(
+        undone.value.name, "Find and Replace",
+        "the undo takes the top step when it runs"
+    );
+    assert_eq!(undone.value.long_write, Some(declared));
+    assert_eq!(
+        write_delays(&drain(&events, Duration::from_millis(100))),
+        [("undo_long_write", declared)],
+        "the undo of the bulk step declares the bulk op's write"
+    );
+    assert_eq!(peek_name(&h), Some(SUSPEND));
 }
 
 /// One call a restorer got: direction, step name, state, cards changed.

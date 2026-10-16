@@ -31,7 +31,7 @@ use crate::progress::ProgressPhase;
 use crate::threads::ThreadActivity;
 use crate::undo::reasons::DisabledReason;
 use crate::undo::restorers::Direction;
-use crate::undo::{Applied, CommitInfo, UndoNotes};
+use crate::undo::{Applied, CommitInfo, Restore, UndoNotes};
 
 /// One item of the writer's queues.
 pub(crate) struct Task {
@@ -48,6 +48,9 @@ pub(crate) struct TaskMeta {
     pub park: bool,
     pub cancel: Option<Arc<CancelToken>>,
     pub declared: Option<Duration>,
+    /// An undo or redo op (`engine/undo` M4.1): the writer resolves its step,
+    /// catalog op and declared write as it takes the op.
+    pub restore: Option<Restore>,
     pub submitted: Duration,
     /// Control tasks bypass admission and the generation check.
     pub control: bool,
@@ -96,6 +99,8 @@ pub(crate) fn run(
             }
             WriterWake::Stop => break,
         };
+        let mut task = task;
+        resolve_restore(&shared, &mut task.meta);
         {
             let _busy = activity.busy();
             // A catalog long write/maintenance task may hold the thread past
@@ -137,6 +142,20 @@ pub(crate) fn run(
     {
         tracing::warn!(%error, "closing the collection when the writer stopped");
     }
+}
+
+/// `engine/undo` M4.1: an undo or redo acts on the step on top of its scope
+/// when the writer takes it, and from then on runs as the catalog op for
+/// that step, declaring its write (O8), so the WAL flush before a long
+/// write and its `WriteDelay` follow the step it restores.
+fn resolve_restore(shared: &ExecShared, meta: &mut TaskMeta) {
+    let Some(restore) = meta.restore.as_mut() else {
+        return;
+    };
+    let resolved = shared.undo.resolve(restore.action);
+    restore.target = Some(resolved.target);
+    meta.name = resolved.def.name();
+    meta.declared = resolved.declared;
 }
 
 /// Group nearby commits. Start early enough to leave room for a normal
@@ -305,6 +324,7 @@ fn run_op<T>(
         media_removed: Vec::new(),
         undo: &shared.undo,
         undo_notes: UndoNotes::default(),
+        restore: meta.restore,
         last_seq: shared.last_seq(),
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&mut context)));

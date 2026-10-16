@@ -91,6 +91,36 @@ impl UndoAction {
             UndoAction::Redo(_) => Direction::Redo,
         }
     }
+
+    /// The catalog op it runs as: the long-write variant for a step whose
+    /// op declared a long write (M4).
+    fn def(self, long_write: bool) -> catalog::OpDef {
+        match (self, long_write) {
+            (UndoAction::Undo(_), false) => catalog::UNDO,
+            (UndoAction::Redo(_), false) => catalog::REDO,
+            (UndoAction::Undo(_), true) => catalog::UNDO_LONG_WRITE,
+            (UndoAction::Redo(_), true) => catalog::REDO_LONG_WRITE,
+        }
+    }
+}
+
+/// An undo or redo op on the writer's queue (M4.1). The writer resolves its
+/// step when it takes the op, before the op's write phase starts, so the op
+/// declares the write of the step it restores even when that step was
+/// recorded after the op was submitted.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Restore {
+    pub action: UndoAction,
+    /// The step on top of the action's scope when the writer took the op,
+    /// or why there was none; `None` until then.
+    pub target: Option<Result<EntryId, DisabledReason>>,
+}
+
+/// What the writer resolved for an undo or redo op it takes.
+pub(crate) struct Resolved {
+    pub target: Result<EntryId, DisabledReason>,
+    pub def: catalog::OpDef,
+    pub declared: Option<std::time::Duration>,
 }
 
 /// What the op spec says about undo: the step it records and how.
@@ -180,6 +210,20 @@ impl UndoManager {
 
     pub(crate) fn peek(&self, side: Side, scope: UndoScope) -> UndoStatus {
         self.lock().peek(side, scope)
+    }
+
+    /// M4.1, on the writer as it takes an undo or redo op: the step the op
+    /// acts on and the catalog op and write it runs with.
+    pub(crate) fn resolve(&self, action: UndoAction) -> Resolved {
+        let (target, declared) = match self.lock().target(action.side(), action.scope()) {
+            Ok(entry) => (Ok(entry.info.id), entry.info.long_write),
+            Err(reason) => (Err(reason), None),
+        };
+        Resolved {
+            target,
+            def: action.def(declared.is_some()),
+            declared,
+        }
     }
 
     /// M6: replacement and close.
@@ -318,15 +362,26 @@ impl<'c> OpContext<'_, 'c> {
         })
     }
 
-    /// The undo or redo itself (M4, M5), inside the op's transaction.
-    fn restore_top(&mut self, action: UndoAction) -> Result<StepInfo, EngineError> {
+    /// The undo or redo itself (M4, M5), inside the op's transaction, on the
+    /// step the writer resolved as it took the op (M4.1).
+    fn restore_top(&mut self) -> Result<StepInfo, EngineError> {
+        let Some(Restore {
+            action,
+            target: Some(target),
+        }) = self.restore
+        else {
+            return Err(EngineError::internal("an undo or redo op ran without a resolved step"));
+        };
+        let unavailable = |reason| EngineError::UndoUnavailable { reason };
         let side = action.side();
+        let id = target.map_err(unavailable)?;
+        // A clear from another thread may have dropped the step since.
         let entry = self
             .undo
             .lock()
-            .target(side, action.scope())
+            .resolved_target(side, action.scope(), id)
             .cloned()
-            .map_err(|reason| EngineError::UndoUnavailable { reason })?;
+            .map_err(unavailable)?;
         if !entry.still_applied(self.scope)? {
             self.undo.lock().drop_changed(side, entry.info.id);
             return Err(EngineError::UndoUnavailable {
@@ -378,24 +433,13 @@ impl Collection {
     }
 
     fn submit_restore(&self, action: UndoAction) -> Pending<OpResult<StepInfo>> {
-        // A step of a job-run op is undone with its declared write (M4);
-        // only then is the op a catalog long write.
-        let declared = match self.core.exec.undo.peek(action.side(), action.scope()) {
-            UndoStatus::Available(step) => step.long_write,
-            UndoStatus::Unavailable(_) => None,
-        };
-        let def = match (action, declared.is_some()) {
-            (UndoAction::Undo(_), false) => catalog::UNDO,
-            (UndoAction::Redo(_), false) => catalog::REDO,
-            (UndoAction::Undo(_), true) => catalog::UNDO_LONG_WRITE,
-            (UndoAction::Redo(_), true) => catalog::REDO_LONG_WRITE,
-        };
-        let mut spec = OpSpec::new(def, OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
-        if let Some(declared) = declared {
-            spec = spec.declare_long_write(declared);
-        }
+        // Which step it restores, and so whether it runs as the long-write
+        // variant with that step's declared write, is settled on the writer
+        // as it takes the op (M4.1): a step recorded meanwhile, such as a
+        // bulk op's that was running at submit, is the one it restores.
+        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
         spec.undo.action = Some(action);
-        self.submit(spec, move |ctx| ctx.restore_top(action))
+        self.submit(spec, |ctx| ctx.restore_top())
     }
 
     /// Clears the whole history (M6): rollover, Check Database, an outside

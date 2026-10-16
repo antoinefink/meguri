@@ -19,7 +19,7 @@ use crate::executor::preconditions::Precondition;
 use crate::lifecycle::Generation;
 use crate::progress::ProgressSink;
 use crate::undo::entry::{SessionId, StepKind};
-use crate::undo::{UndoManager, UndoNotes, UndoSpec};
+use crate::undo::{Restore, UndoManager, UndoNotes, UndoSpec};
 
 /// How an op is to run.
 #[derive(Clone, Debug)]
@@ -158,6 +158,8 @@ pub struct OpContext<'s, 'c> {
     pub(crate) media_removed: Vec<String>,
     pub(crate) undo: &'c UndoManager,
     pub(crate) undo_notes: UndoNotes,
+    /// For an undo or redo op, the step the writer resolved for it (M4.1).
+    pub(crate) restore: Option<Restore>,
     /// The seq of the last committed op: what a snapshot begun now sees.
     pub(crate) last_seq: Seq,
 }

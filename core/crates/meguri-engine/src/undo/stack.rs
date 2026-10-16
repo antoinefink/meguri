@@ -78,6 +78,19 @@ impl UndoStack {
         }
     }
 
+    /// M4.1: step `id`, which the writer resolved for an undo or redo op,
+    /// while it is still the step `scope` acts on; otherwise why not.
+    /// Only the writer adds steps, so between the resolve and the op another
+    /// thread can only drop the step (a clear) or change its upload state.
+    pub(crate) fn resolved_target(&self, side: Side, scope: UndoScope, id: EntryId) -> Result<&Entry, DisabledReason> {
+        let entry = self.target(side, scope)?;
+        if entry.info.id == id {
+            Ok(entry)
+        } else {
+            Err(DisabledReason::None)
+        }
+    }
+
     pub(crate) fn peek(&self, side: Side, scope: UndoScope) -> UndoStatus {
         match self.target(side, scope) {
             Ok(entry) => UndoStatus::Available(entry.info.clone()),

@@ -289,6 +289,7 @@ impl ExecShared {
             park: false,
             cancel: None,
             declared: None,
+            restore: None,
             submitted: crate::monotonic::now(),
             control: false,
         }
@@ -332,6 +333,10 @@ impl ExecShared {
         meta.park = spec.park;
         meta.cancel = spec.cancel.clone();
         meta.declared = spec.declared;
+        meta.restore = spec
+            .undo
+            .action
+            .map(|action| crate::undo::Restore { action, target: None });
         self.submit(Task {
             meta,
             body: Box::new(OpTask { spec, op, reply }),
