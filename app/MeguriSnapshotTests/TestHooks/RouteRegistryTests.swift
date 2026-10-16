@@ -9,9 +9,9 @@ import Testing
 /// Launch routes (U7, R1963), in the app process.
 @MainActor
 @Suite struct RouteRegistryTests {
-    static let standardRoutes = "designsystem/gallery, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical"
+    static let standardRoutes = "designsystem/gallery, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
 
-    @Test func theStandardRegistryHasTheSampleGalleryPerfAndShellRoutes() {
+    @Test func theStandardRegistryHasTheSampleGalleryPerfShellAndSpikeRoutes() {
         #expect(TestHooks.RouteRegistry.standard.routes.map(\.path).joined(separator: ", ") == Self.standardRoutes)
     }
 
@@ -24,6 +24,8 @@ import Testing
         ("sample/deck-overview/typical", .screen),
         ("sample/touch-targets", .screen),
         ("perf/probe", .screen),
+        ("spike/card-swap", .screen),
+        ("spike/media-seek/audio", .screen),
     ])
     func eachRouteHasItsPresentation(path: String, style: InitialPresentation.Style) throws {
         let presentation = try TestHooks.RouteRegistry.standard.presentation(for: TestHooks.Route(path), configuration: LaunchConfiguration())

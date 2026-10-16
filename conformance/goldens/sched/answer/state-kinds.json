@@ -1,0 +1,1014 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "next_states": {
+          "#c1": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 86400
+            },
+            "current": {
+              "kind": "new",
+              "position": 1
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 10
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 259200
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 172800
+            }
+          },
+          "#c2": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 86400
+            },
+            "current": {
+              "kind": "new",
+              "position": 2
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 9
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 259200
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 172800
+            }
+          },
+          "#c3": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 86400
+            },
+            "current": {
+              "kind": "new",
+              "position": 3
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 8
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 259200
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 172800
+            }
+          },
+          "#c4": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 90
+            },
+            "current": {
+              "kind": "new",
+              "position": 4
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 8
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 72000
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 36045
+            }
+          },
+          "#c5": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 90
+            },
+            "current": {
+              "kind": "new",
+              "position": 5
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 9
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 72000
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 36045
+            }
+          },
+          "#c6": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 90
+            },
+            "current": {
+              "kind": "new",
+              "position": 6
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 9
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 72000
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 36045
+            }
+          },
+          "#c7": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 6.4133,
+                "stability": 0.212
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 60
+            },
+            "current": {
+              "kind": "new",
+              "position": 7
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 8.2956
+              },
+              "scheduled_days": 10
+            },
+            "good": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118104,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 600
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 5.1121707,
+                "stability": 1.2931
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 330
+            }
+          },
+          "#c8": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 8.341763,
+                  "stability": 0.8845261
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.3,
+                "elapsed_days": 0,
+                "lapses": 1,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 8.341763,
+                  "stability": 0.8845261
+                },
+                "scheduled_days": 1
+              }
+            },
+            "current": {
+              "ease_factor": 2.5,
+              "elapsed_days": 4,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 5.0,
+                "stability": 4.5
+              },
+              "scheduled_days": 4
+            },
+            "easy": {
+              "ease_factor": 2.65,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 3.3144615,
+                "stability": 23.97144
+              },
+              "scheduled_days": 26
+            },
+            "good": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 4.990228,
+                "stability": 14.896411
+              },
+              "scheduled_days": 16
+            },
+            "hard": {
+              "ease_factor": 2.35,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.6659956,
+                "stability": 10.752401
+              },
+              "scheduled_days": 12
+            }
+          },
+          "#c9": {
+            "again": {
+              "kind": "relearning",
+              "learning": {
+                "elapsed_secs": 0,
+                "memory_state": {
+                  "difficulty": 8.341763,
+                  "stability": 0.8845261
+                },
+                "remaining_steps": 1,
+                "scheduled_secs": 600
+              },
+              "review": {
+                "ease_factor": 2.3,
+                "elapsed_days": 0,
+                "lapses": 1,
+                "leeched": false,
+                "memory_state": {
+                  "difficulty": 8.341763,
+                  "stability": 0.8845261
+                },
+                "scheduled_days": 1
+              }
+            },
+            "current": {
+              "ease_factor": 2.5,
+              "elapsed_days": 4,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 5.0,
+                "stability": 4.5
+              },
+              "scheduled_days": 4
+            },
+            "easy": {
+              "ease_factor": 2.65,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 3.3144615,
+                "stability": 23.97144
+              },
+              "scheduled_days": 27
+            },
+            "good": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 4.990228,
+                "stability": 14.896411
+              },
+              "scheduled_days": 17
+            },
+            "hard": {
+              "ease_factor": 2.35,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 6.6659956,
+                "stability": 10.752401
+              },
+              "scheduled_days": 13
+            }
+          }
+        },
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894705200,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 6.413,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 1,
+              "s": 0.212
+            },
+            "did": "Long",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894705200,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 3,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {
+              "d": 5.112,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 2,
+              "s": 1.2931
+            },
+            "did": "Long",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894705200,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 3,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 3,
+              "s": 2.3065
+            },
+            "did": "Long",
+            "due": 3,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894705200,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 3,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {
+              "d": 6.413,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 4,
+              "s": 0.212
+            },
+            "did": "Hours",
+            "due": 1894705303,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894705200,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {
+              "d": 5.112,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 5,
+              "s": 1.2931
+            },
+            "did": "Hours",
+            "due": 1894741438,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894705200,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 6,
+              "s": 2.3065
+            },
+            "did": "Hours",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894705200,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 3,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {
+              "d": 2.118,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "pos": 7,
+              "s": 2.3065
+            },
+            "did": "Inbox",
+            "due": 1894705937,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894705200,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {
+              "d": 8.342,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "s": 0.8845
+            },
+            "did": "Inbox",
+            "due": 1894705917,
+            "factor": 2300,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 1,
+            "lapses": 1,
+            "left": 1,
+            "mod": 1894705200,
+            "nid": "#n8",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 4,
+            "type": 3,
+            "usn": -1
+          },
+          "#c9": {
+            "data": {
+              "d": 6.666,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705200,
+              "s": 10.7524
+            },
+            "did": "Inbox",
+            "due": 13,
+            "factor": 2350,
+            "flags": 0,
+            "id": "#c9",
+            "ivl": 13,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705200,
+            "nid": "#n9",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 1,
+              "factor": 701,
+              "id": 1894705200000,
+              "ivl": 1,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 2,
+              "factor": 557,
+              "id": 1894705200001,
+              "ivl": 2,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c3": [
+            {
+              "cid": "#c3",
+              "ease": 3,
+              "factor": 224,
+              "id": 1894705200002,
+              "ivl": 3,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c4": [
+            {
+              "cid": "#c4",
+              "ease": 1,
+              "factor": 701,
+              "id": 1894705200003,
+              "ivl": -90,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c5": [
+            {
+              "cid": "#c5",
+              "ease": 2,
+              "factor": 557,
+              "id": 1894705200004,
+              "ivl": -36045,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c6": [
+            {
+              "cid": "#c6",
+              "ease": 3,
+              "factor": 224,
+              "id": 1894705200005,
+              "ivl": 1,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c7": [
+            {
+              "cid": "#c7",
+              "ease": 3,
+              "factor": 224,
+              "id": 1894705200006,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ],
+          "#c8": [
+            {
+              "cid": "#c8",
+              "ease": 1,
+              "factor": 916,
+              "id": 1894705200007,
+              "ivl": -600,
+              "lastIvl": 4,
+              "time": 1000,
+              "type": 1,
+              "usn": -1
+            }
+          ],
+          "#c9": [
+            {
+              "cid": "#c9",
+              "ease": 2,
+              "factor": 730,
+              "id": 1894705200008,
+              "ivl": 13,
+              "lastIvl": 4,
+              "time": 1000,
+              "type": 1,
+              "usn": -1
+            }
+          ]
+        }
+      },
+      {},
+      {
+        "next_states": {
+          "#c7": {
+            "again": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 7.3944683,
+                "stability": 0.7750839
+              },
+              "remaining_steps": 2,
+              "scheduled_secs": 60
+            },
+            "current": {
+              "elapsed_secs": 600,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 2.118,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 600
+            },
+            "easy": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 1.0,
+                "stability": 3.9460542
+              },
+              "scheduled_days": 3
+            },
+            "good": {
+              "ease_factor": 2.5,
+              "elapsed_days": 0,
+              "kind": "review",
+              "lapses": 0,
+              "leeched": false,
+              "memory_state": {
+                "difficulty": 2.1111104,
+                "stability": 2.3065
+              },
+              "scheduled_days": 2
+            },
+            "hard": {
+              "elapsed_secs": 0,
+              "kind": "learning",
+              "memory_state": {
+                "difficulty": 4.7527895,
+                "stability": 2.3065
+              },
+              "remaining_steps": 1,
+              "scheduled_secs": 600
+            }
+          }
+        },
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894705800,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c7": {
+            "data": {
+              "d": 2.111,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894705800,
+              "pos": 7,
+              "s": 2.3065
+            },
+            "did": "Inbox",
+            "due": 2,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 2,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894705800,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 2,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c7": [
+            {
+              "cid": "#c7",
+              "ease": 3,
+              "factor": 224,
+              "id": 1894705200006,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            },
+            {
+              "cid": "#c7",
+              "ease": 3,
+              "factor": 223,
+              "id": 1894705800000,
+              "ivl": 2,
+              "lastIvl": -600,
+              "time": 1000,
+              "type": 0,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "4e0df1bf9c5ea41100d1ce14ab30872923da68c62659c78f340d963b5844ea4c",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/answer/state-kinds",
+  "scenario_sha256": "1deba517064ca7d3e8ff85cde387ebcccbf9ab2c091796d93dc33f1d63fe2129",
+  "tz": "UTC"
+}

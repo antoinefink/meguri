@@ -274,7 +274,16 @@ steps:
     let needs = parsed.needs();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["cards", "config", "decks", "notes", "notetypes", "presets", "revlog"]
+        [
+            "cards",
+            "config",
+            "decks",
+            "new_collection",
+            "notes",
+            "notetypes",
+            "presets",
+            "revlog"
+        ]
     );
     assert!(needs.ops.contains("build_filtered") && needs.ops.contains("reopen"));
     assert!(!needs.ops.contains("observe"));
@@ -575,6 +584,121 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
 }
 
+/// undo-ops.md V1-V3: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn undo_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: undo/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{undo: {}}, {redo: {}}, {remove_config: {key: k}}, {set_config: {key: k, value: 1, undoable: true}}, \
+         {set_config: {key: k, value: 1, undoable: false}}, {set_config: {key: k, value: 1}}, \
+         {observe: [undo_status, {undo_status: null}]}]",
+    )
+    .unwrap();
+    let undoable: Vec<bool> = parsed
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::SetConfig(args) => Some(args.undoable),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(undoable, [true, false, false]);
+    assert!(matches!(&parsed.steps[2], Step::RemoveConfig(args) if args.key == "k"));
+    let needs = parsed.needs();
+    for op in ["undo", "redo", "remove_config", "set_config"] {
+        assert!(needs.ops.contains(op), "{op}");
+    }
+    assert!(needs.observations.contains("undo_status"));
+    for (bad, why) in [
+        ("[{undo: {steps: 1}}]", "unknown key"),
+        ("[{undo: null}]", "takes a mapping"),
+        ("[{redo: []}]", "takes a mapping"),
+        ("[{remove_config: {}}]", "key"),
+        ("[{remove_config: {key: \"\"}}]", "non-empty key"),
+        ("[{remove_config: {key: k, undoable: true}}]", "unknown field"),
+        ("[{remove_config: k}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: null}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: 1}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: \"true\"}}]", "invalid type"),
+        ("[{observe: [\"undo_status(#c1)\"]}]", "does not take"),
+        ("[{observe: [{undo_status: {}}]}]", "undo_status"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// tag-ops.md G1-G9: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn tag_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: tags/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{add_note_tags: {notes: [\"#n1\", \"#n2\"], tags: \"a b\"}}, {remove_note_tags: {notes: [\"#n1\"], tags: \"\"}}, \
+         {delete_tags: {tags: \"x y\"}}, {rename_tag: {from: \"C++\", to: \"a b\"}}, \
+         {reparent_tags: {tags: [a, \"b::c\"], parent: \"\"}}, {clear_unused_tags: {}}, \
+         {set_tag_collapsed: {tags: [a], collapsed: false}}, {set_flag: {cards: [\"#c1\"], flag: 8}}, \
+         {observe: [tag_tree, {tag_tree: null}]}]",
+    )
+    .unwrap();
+    assert!(matches!(&parsed.steps[0], Step::AddNoteTags(args) if args.notes.len() == 2 && args.tags == "a b"));
+    assert!(matches!(&parsed.steps[3], Step::RenameTag(args) if args.from == "C++" && args.to == "a b"));
+    assert!(matches!(&parsed.steps[4], Step::ReparentTags(args) if args.parent.is_empty() && args.tags.len() == 2));
+    assert!(matches!(&parsed.steps[6], Step::SetTagCollapsed(args) if !args.collapsed));
+    assert!(matches!(&parsed.steps[7], Step::SetFlag(args) if args.flag == 8));
+    let needs = parsed.needs();
+    for op in [
+        "add_note_tags",
+        "remove_note_tags",
+        "delete_tags",
+        "rename_tag",
+        "reparent_tags",
+        "clear_unused_tags",
+        "set_tag_collapsed",
+        "set_flag",
+    ] {
+        assert!(needs.ops.contains(op), "{op}");
+        assert!(Step::NAMES.contains(&op), "{op}");
+    }
+    assert!(needs.observations.contains("tag_tree"));
+    assert!(parsed.starts_from_new_collection(), "tag_tree reads the collection");
+    for (bad, why) in [
+        ("[{add_note_tags: {notes: [], tags: a}}]", "at least one note"),
+        (
+            "[{remove_note_tags: {notes: [\"#c1\"], tags: a}}]",
+            "not a note reference",
+        ),
+        ("[{add_note_tags: {notes: [\"#n1\"]}}]", "tags"),
+        ("[{add_note_tags: {notes: [\"#n1\"], tags: 1}}]", "invalid type"),
+        ("[{delete_tags: {tags: [a]}}]", "invalid type"),
+        ("[{rename_tag: {from: \"\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: \"a b\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: \"a\u{3000}b\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: a}}]", "to"),
+        ("[{reparent_tags: {tags: [], parent: p}}]", "at least one tag"),
+        ("[{reparent_tags: {tags: [\"\"], parent: p}}]", "non-empty tag names"),
+        ("[{reparent_tags: {tags: [a]}}]", "parent"),
+        ("[{clear_unused_tags: {all: true}}]", "unknown key"),
+        ("[{set_tag_collapsed: {tags: [], collapsed: true}}]", "at least one tag"),
+        ("[{set_tag_collapsed: {tags: [a], collapsed: 1}}]", "invalid type"),
+        ("[{set_flag: {cards: [], flag: 1}}]", "at least one card"),
+        ("[{set_flag: {cards: [\"#c1\"], flag: -1}}]", "invalid value"),
+        ("[{set_flag: {cards: [\"#n1\"], flag: 1}}]", "not a card reference"),
+        ("[{observe: [{tag_tree: {}}]}]", "tag_tree"),
+        ("[{observe: [\"tag_tree(#c1)\"]}]", "does not take"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn text_requests_follow_the_schema() {
     let parse = |request: &str| {
@@ -868,10 +992,78 @@ fn actor_scenarios_are_checked_when_they_load() {
 }
 
 #[test]
+fn a_login_says_how_it_derives_its_credentials() {
+    use meguri_testkit::scenario::{Credentials, SyncKind};
+
+    // sync-ops.md S4.5: after a login, a second sync step with these
+    // arguments; `account` is the default.
+    let second = |args: &str| {
+        actor_scenario(&format!(
+            "id: sync/creds\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nactors: [meguri]\n\
+             steps: [{{sync: {{kind: login}}}}, {{sync: {args}}}]\n"
+        ))
+    };
+    for (args, kind, credentials) in [
+        ("{kind: login}", SyncKind::Login, Credentials::Account),
+        (
+            "{kind: login, credentials: account}",
+            SyncKind::Login,
+            Credentials::Account,
+        ),
+        (
+            "{kind: login, credentials: wrong_password}",
+            SyncKind::Login,
+            Credentials::WrongPassword,
+        ),
+        ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+    ] {
+        let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
+        let Step::Sync(spec) = &parsed.steps[1] else {
+            panic!("{args}: not a sync step")
+        };
+        assert_eq!((spec.kind, spec.credentials), (kind, credentials), "{args}");
+    }
+    for (args, why) in [
+        ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: full_upload, credentials: wrong_password}", "credentials"),
+        ("{kind: login, credentials: other}", "other"),
+        ("{kind: login, credentials: null}", "credentials"),
+        ("{kind: login, credentials: 1}", "credentials"),
+        ("{kind: login, credentials: [account]}", "credentials"),
+        ("{kind: login, password: secret}", "password"),
+    ] {
+        let err = second(args).expect_err(args);
+        assert!(err.contains(why), "{args}: {err}");
+    }
+
+    // The committed scenario parses with the wrong password on its first login.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/transport/login-wrong-password.yaml")).unwrap();
+    assert!(matches!(
+        &loaded.scenario.steps[1],
+        Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
+    ));
+}
+
+#[test]
+fn the_wrong_password_is_the_accounts_password_followed_by_wrong() {
+    use meguri_testkit::scenario::{Credentials, SyncSpec};
+
+    // sync-ops.md S4.5: every executor derives it the same way.
+    assert_eq!(Credentials::Account.password("meguri-test-a"), "meguri-test-a");
+    assert_eq!(
+        Credentials::WrongPassword.password("meguri-test-a"),
+        "meguri-test-a-wrong"
+    );
+    // S4.4: the closed list of rejections, auth_failed among them.
+    assert_eq!(SyncSpec::REJECTIONS, ["auth_failed", "clock_incorrect", "network"]);
+}
+
+#[test]
 fn meguri_actors_need_what_they_run_and_nothing_else() {
     let path = conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml");
     let loaded = scenario::load(&path).unwrap();
-    // sync-ops.md S10.2: `actor`; no setup (client_a runs it); the ops and
+    // sync-ops.md S10.2: `actor`; the new collection it starts from (S2.2,
+    // dsl.md D8) but no setup section (client_a runs the setup); the ops and
     // observations of meguri's steps; advance (the scenario uses it); db_dump
     // for converge. client_a's full_upload is the oracle's business.
     let needs = loaded.scenario.needs_of_meguri_actors();
@@ -883,7 +1075,10 @@ fn meguri_actors_need_what_they_run_and_nothing_else() {
         needs.observations.iter().map(String::as_str).collect::<Vec<_>>(),
         ["card", "db_dump"]
     );
-    assert!(needs.setup.is_empty());
+    assert_eq!(
+        needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["new_collection"]
+    );
 
     // Without a Meguri actor, nothing.
     let two = scenario::load(&conformance_dir().join("scenarios/smoke/sync/two-party.yaml")).unwrap();
@@ -909,13 +1104,89 @@ steps:
     let needs = actor_scenario(text).unwrap().needs_of_meguri_actors();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["decks", "notetypes"]
+        ["decks", "new_collection", "notetypes"]
     );
     assert_eq!(
         needs.ops.iter().map(String::as_str).collect::<Vec<_>>(),
         ["actor", "reopen", "set_clock", "sync"]
     );
     assert!(needs.observations.is_empty());
+}
+
+#[test]
+fn a_scenario_starts_from_the_new_collection_unless_it_opens_a_fixture_or_reads_none() {
+    // dsl.md D8: the new collection is the setup capability `new_collection`.
+    let load = |setup: &str, steps: &str| {
+        let text = format!("id: smoke/d8\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{setup}steps:\n{steps}");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap()
+    };
+    let needs_it = |setup: &str, steps: &str| {
+        let parsed = load(setup, steps);
+        let needs = parsed.needs().setup.contains(scenario::NEW_COLLECTION);
+        assert_eq!(needs, parsed.starts_from_new_collection(), "{steps}");
+        needs
+    };
+    let template = |case: &str| {
+        format!(
+            "  - observe:\n      - template:\n          notetype: {{name: P, fields: [Front, Back]}}\n          cases: [{case}]\n"
+        )
+    };
+    let new_note = r#"{front: "{{Front}}", back: "{{Back}}", fields: [a, b]}"#;
+    // No setup and only steps that touch no collection: nothing.
+    for steps in [
+        " []\n".to_owned(),
+        "  - advance: 1d\n  - set_clock: \"2030-03-31T03:00:00\"\n".to_owned(),
+        "  - observe: [{text: {fns: [strip_markup], inputs: [\"<b>a</b>\"]}}]\n".to_owned(),
+        "  - observe: [{cloze: {fns: [numbers], inputs: [\"{{c1::a}}\"]}}]\n".to_owned(),
+        "  - observe: [{fsrs_next: {param_sets: {default: []}, inputs: [{id: 0, card_id: 1, reps: 1, s: 1.0, d: 5.0, elapsed_days: 1, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}]}}]\n".to_owned(),
+        "  - observe: [{canonical_search: [\"deck:a\", \"a or\"]}]\n".to_owned(),
+        template(new_note),
+    ] {
+        assert!(!needs_it("", &steps), "{steps}");
+    }
+    // A step that reads or writes a collection, or any setup section.
+    for steps in [
+        "  - observe: [timing]\n".to_owned(),
+        "  - db_exec: {sql: \"SELECT 1\"}\n".to_owned(),
+        "  - set_config: {key: k, value: 1}\n".to_owned(),
+        "  - advance: 1d\n  - observe: [undo_status]\n".to_owned(),
+        template(&format!(
+            r##"{new_note}, {{card: "#c1", front: "{{{{Front}}}}", back: "x"}}"##
+        )),
+    ] {
+        assert!(needs_it("", &steps), "{steps}");
+    }
+    assert!(needs_it("setup: {decks: [A]}\n", " []\n"));
+    // A scenario that opens a fixture first starts from that fixture.
+    assert!(!needs_it(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - db_exec: {sql: \"SELECT 1\"}\n"
+    ));
+
+    // A live scenario: the side that runs the first segment (D9.2).
+    let chain = load("", "  - advance: 1d\n  - handoff: oracle\n  - observe: [timing]\n");
+    assert!(
+        chain
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    assert!(
+        !chain
+            .needs_on(scenario::Side::Oracle)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    let opened = load(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - handoff: oracle\n  - observe: [timing]\n",
+    );
+    assert!(
+        !opened
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
 }
 
 #[test]

@@ -7,12 +7,39 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# AnkiWeb build switch (KTD21); off in the App Store build.
+# AnkiWeb build switch (KTD21); off in the App Store build. Without it no
+# AnkiWeb name is compiled in (tools/mg core-lint scans the library).
 ankiweb = []
-# Test-only code (KTD18): the sync endpoint guard (R1876). meguri-testkit
-# turns it on.
+# Test-only code (KTD18): the sync endpoint guard (R1876), which the transport
+# applies to every URL and proxy, and the AnkiWeb stand-in names, name pins
+# and extra trusted roots tests use (specs/sync/transport.md T12).
+# meguri-testkit turns it on.
 test-hooks = []
+
+[dependencies]
+bytes.workspace = true
+futures-core.workspace = true
+# The job's cancel token and progress sink (U24, `engine/jobs` J4, J5).
+meguri-engine.workspace = true
+# The session key's random source (R1875).
+meguri-model.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+url.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+# The scripted stub server (`sync_stub`). Through it every test build has this
+# crate's `test-hooks` and `ankiweb` features.
+meguri-testkit.workspace = true
 
 [[test]]
 name = "endpoint_guard"
 required-features = ["test-hooks"]
+
+[[test]]
+name = "transport"
+required-features = ["test-hooks", "ankiweb"]

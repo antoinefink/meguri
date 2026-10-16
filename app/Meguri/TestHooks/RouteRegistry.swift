@@ -50,6 +50,7 @@ extension TestHooks {
             DesignSystemRoutes.register(in: &registry)
             PerfRoutes.register(in: &registry)
             ShellRoutes.register(in: &registry)
+            SpikeRoutes.register(in: &registry)
             return registry
         }
 
