@@ -3,7 +3,7 @@
 Spec: engine/undo
 Requirements: R719, R720, R721, R725 (as KTD7 reconciles it), R1795, R1796, R2020; supports R365, R366, R370, R371, R723, R726, R1811
 Anki: none for sections M1 to M12 (Meguri design from KTD5, KTD6, KTD7 and spec-flow C3, Q1, Q4, Q11; written by the implementer, U25). Sections A1 to A11 are Anki's observable results at 26.09.3, written by the spec writer; A11 lists what they change in M1 to M12.
-Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `op_catalog.rs`
+Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_merge.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `undo_holdback_memory.rs`, `op_catalog.rs`
 
 The undo manager of one open collection (C3): the steps it records from committed ops, what every other op does to them, undo and redo as ops, the reasons a step is unavailable, the held-back run a normal sync keeps local, and the rule that no uploaded step is ever undone. Ops, sources and journals are `engine/op-model`; the change set is `engine/change-stream`.
 
@@ -85,7 +85,7 @@ Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo 
 ## M8. The held-back run (KTD6, spec-flow Q11)
 
 - `held_back_run(session)` is the contiguous run of steps at the top of the history that belong to that session and are neither uploaded nor upload-pending, down to and including the newest answer among them. It is empty when there is no session, when the top step is not that session's, is uploaded or pending, or when no such answer is reached before the run ends.
-- Its value: the steps (ids, names, kinds) and the rows they touched, each with its before-image from the oldest step of the run that touched it (absent when the run created it). The `col` row is not in it.
+- Its value: the steps (ids, names, kinds) and the rows they touched, each with its before-image from the oldest step of the run that touched it (absent when the run created it). The `col` row is not in it. The value keeps the steps' journals and reads an image only when asked, for one row by its key or one row at a time as an iteration over the rows reaches it, from memory or from the journal's spill file (M1). Taking the run, at a sync's barrier on the writer or through `held_back_run`, reads no image, so a run with a large step (a session-scoped bulk edit) costs no memory beyond its journals and holds the writer no longer than a small one (R1851). The journals live as long as the value, also after their steps leave the history.
 - The session for hold-back ends when U43 says so (the summary or congrats screen is dismissed, KTD6); U43 then stops passing it.
 
 ## M9. Sync

@@ -11,8 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::Harness;
 use common::steps::{self, ANSWER_CARD, BURY, UPDATE_NOTE};
 use meguri_engine::{
-    Collection, DisabledReason, EngineError, OpResult, OpSpec, SessionId, StepKind, SyncHold, SyncMerge, UndoScope,
-    UndoStatus,
+    Collection, DisabledReason, EngineError, HeldBackRun, HeldRow, OpResult, OpSpec, SessionId, StepKind, SyncHold,
+    SyncMerge, UndoScope, UndoStatus,
 };
 use meguri_model::changes::OpSource;
 use meguri_model::clock::Clock;
@@ -53,6 +53,11 @@ fn local_revlog(c: &Collection) -> BTreeSet<i64> {
         .collect()
 }
 
+/// Every row of a run with its image from before the run.
+fn rows(run: &HeldBackRun) -> Vec<HeldRow> {
+    run.rows().collect::<Result<_, _>>().unwrap()
+}
+
 /// A model sync server: the review-log rows it received.
 #[derive(Default, Debug)]
 struct Server {
@@ -81,8 +86,8 @@ fn sync_begin_op(c: &Collection, session: Option<SessionId>) -> ((SyncHold, BTre
                 .collect();
             let held: BTreeSet<i64> = hold
                 .run
-                .rows
-                .iter()
+                .rows()
+                .map(Result::unwrap)
                 .filter_map(|row| match (row.table, &row.key, &row.before) {
                     (Table::Revlog, RowKey::Id(id), None) => Some(*id),
                     _ => None,
@@ -177,7 +182,8 @@ fn the_run_reaches_down_to_the_newest_answer_and_a_sync_uploads_the_rest() {
 
     let mut server = Server::default();
     let hold = sync(c, &mut server, Some(S1), Vec::new());
-    assert_eq!(hold.run, run);
+    assert_eq!(hold.run.steps, run.steps);
+    assert_eq!(rows(&hold.run), rows(&run));
     let sent: BTreeSet<i64> = server.revlog.difference(&fixture_rows).copied().collect();
     assert_eq!(sent, BTreeSet::from([answer1.value.0]), "answer2's row held back");
 
@@ -205,7 +211,7 @@ fn after_undoing_the_held_answer_the_next_sync_holds_nothing_back() {
 
     let hold = sync(c, &mut server, Some(S1), Vec::new());
     assert!(hold.run.is_empty(), "the top step is uploaded");
-    assert!(hold.run.rows.is_empty(), "nothing substituted");
+    assert!(rows(&hold.run).is_empty(), "nothing substituted");
     // sanityCheck2's review-log count (U107 leg): both sides hold the same
     // rows, answer1's among them, and nothing was substituted.
     assert_eq!(server.revlog, local_revlog(c));
@@ -345,22 +351,21 @@ fn the_run_gives_each_row_its_image_from_before_the_run() {
     steps::bury(c, Some(S1), card).unwrap();
     let run = c.held_back_run(Some(S1)).unwrap();
     assert_eq!(run.steps.len(), 2);
-    let card_row = run
-        .rows
-        .iter()
-        .find(|row| row.table == Table::Cards && row.key == RowKey::Id(card.0))
-        .unwrap();
+    let held = rows(&run);
+    let card_row = run.before(Table::Cards, &RowKey::Id(card.0)).unwrap().unwrap();
+    assert!(held.contains(&card_row));
     let before = <meguri_model::card::Card as meguri_storage::Record>::from_cells(card_row.before.as_deref().unwrap());
     assert_eq!(
         format!("{:?}", before.unwrap()),
         format!("{original:?}"),
         "the card before the answer"
     );
-    let revlog_row = run.rows.iter().find(|row| row.table == Table::Revlog).unwrap();
+    let revlog_row = held.iter().find(|row| row.table == Table::Revlog).unwrap();
     assert_eq!(revlog_row.key, RowKey::Id(answered.value.0));
     assert_eq!(revlog_row.before, None, "the run created it");
-    assert!(run.rows.iter().all(|row| row.table != Table::Col));
-    assert_eq!(run.rows.len(), 2);
+    assert!(held.iter().all(|row| row.table != Table::Col));
+    assert_eq!(held.len(), 2);
+    assert!(run.before(Table::Col, &RowKey::Id(1)).unwrap().is_none());
 }
 
 #[test]

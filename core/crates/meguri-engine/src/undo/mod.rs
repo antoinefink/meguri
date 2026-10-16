@@ -358,7 +358,7 @@ impl<'c> OpContext<'_, 'c> {
         let run = self.undo.lock().begin_sync(session, snapshot);
         Ok(SyncHold {
             snapshot,
-            run: holdback::run_value(&run)?,
+            run: holdback::run_value(&run),
         })
     }
 
@@ -452,7 +452,7 @@ impl Collection {
     /// The held-back run of `session` now (M8).
     pub fn held_back_run(&self, session: Option<SessionId>) -> Result<HeldBackRun, EngineError> {
         let run = self.undo_manager()?.lock().run(session);
-        holdback::run_value(&run)
+        Ok(holdback::run_value(&run))
     }
 
     /// M9.2: the sync sent its `finish` request; pending steps are uploaded
