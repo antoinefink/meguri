@@ -8,7 +8,7 @@ steps:
       - canonical_search:
           - '"and"'
           - '"OR"'
-          - '"aNd"'
+          - '"AnD"'
           - '"-"'
           - '"-a"'
           - '"a-b"'
@@ -28,7 +28,7 @@ steps:
           - 'tag:and'
           - 'tag:\-x'
           - '"note:a b"'
-          - '"card:Card 1"'
+          - '"card:Side two"'
           - '"w:a b"'
           - '"nc:(x)"'
           - '"has-cd:a b"'

@@ -6,8 +6,8 @@ steps:
   - observe:
       - canonical_search:
           # term boundaries
-          - 'a"b"(c)'
-          - '"f o o"bar'
+          - 'p"q"(r)'
+          - '"k l m"no'
           - 'a(b)'
           - '(x)(y)'
           - '"x""y"'
@@ -23,14 +23,14 @@ steps:
           - '"a\"b"'
           - 'a\"b'
           - '"\("'
-          - '"\)\("'
-          - '")("'
+          - '"x\)\(y"'
+          - '")x("'
           - '"a:b c"'
           - '"a\:b c"'
           - '"日本 語"'
           - 'ü'
-          - '"foo" "b a r"'
-          - '"field:va\"lue"'
+          - '"cedar" "p q r"'
+          - '"stem:le\"af"'
           # partly quoted terms: the quote must follow the first colon directly
           - 'key:"value with spaces"'
           - 'key: "value"'
@@ -38,8 +38,8 @@ steps:
           - 'deck:"a b"c'
           - 'x:"a" y'
           - 'a:b:"c"'
-          - 'field:"foo"'
-          - 'field:"va\"lue"'
+          - 'stem:"oak"'
+          - 'stem:"le\"af"'
           - 'DECK:"a b"'
           - 'a\":"b"'
           # keys inside quotes are still keys
@@ -50,4 +50,4 @@ steps:
           - '"and"'
           - '"OR"'
           - '"Or"'
-          - '"aNd" "oR"'
+          - '"Or"  "aND"'

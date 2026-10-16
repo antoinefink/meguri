@@ -120,37 +120,37 @@ A range is never empty and always lies inside the text.
 
 Meguri's own wording, in plain English, naming the offending text (R1075). Implementers take these strings only from here.
 
-- A message is `Invalid search: ` followed by the text below for its kind, character for character. The block lists one kind per line as `<kind>: <text>`; the text starts after the first `: `.
+- A message is the text below for its kind, character for character, and nothing else: no shared prefix comes before it. The block lists one kind per line as `<kind>: <text>`; the text starts after the first `: `.
 - `{provided}` and `{context}` stand for the E2 texts, with each backtick (U+0060) in them replaced by an apostrophe (U+0027) so that the code spans stay intact. `{pattern}` and `{reason}` are defined in `text-matching.md` (U81).
 - Backticks mark code spans: the browser may render them as code; AnkiConnect returns the string as it is.
 - `search_failed` has one text per cause of E3.
 
 ```text
-misplaced_and: an `and` must stand between two search terms. To search for the word, put it in double quotes: `"and"`.
-misplaced_or: an `or` must stand between two search terms. To search for the word, put it in double quotes: `"or"`.
-empty_group: there is nothing to search for between `(` and `)`. To search for brackets, put them in double quotes: `"( )"`.
-unopened_group: a `)` closes a group that was never opened. To search for `)`, put it in double quotes or write `\)`.
-unclosed_group: a `(` opens a group that is never closed. To search for `(`, put it in double quotes or write `\(`.
-empty_quote: there is nothing to search for between the double quotes `""`. To search for double quotes, write `\"\"`.
-unclosed_quote: a double quote `"` is never closed. To search for `"`, write `\"`.
-missing_key: a colon `:` needs a keyword before it. To search for `:`, write `\:`.
-unknown_escape: the escape `{provided}` does not exist. To search for a backslash, write `\\`.
-invalid_state: `is:` does not accept `{provided}`.
-invalid_flag: `flag:` needs a flag number: 1 red, 2 orange, 3 green, 4 blue, 5 pink, 6 turquoise, 7 purple or 0 for no flag.
-invalid_property: `prop:` does not accept `{provided}`.
-invalid_operator: `prop:{provided}` needs one of the comparisons `=`, `!=`, `<`, `>`, `<=` or `>=`.
-invalid_number: expected a number in `{context}`, found `{provided}`.
-invalid_whole_number: expected a whole number in `{context}`, found `{provided}`.
-invalid_positive_whole_number: expected a whole number of 0 or more in `{context}`, found `{provided}`.
-invalid_negative_whole_number: expected a whole number of 0 or less in `{context}`, found `{provided}`.
-invalid_answer_button: expected an answer button from 1 to 4 in `{context}`, found `{provided}`.
-invalid_id_list: `{context}` takes only ids separated by commas.
-invalid_dupe: `dupe:` needs a note type id, a comma and the text.
-malformed: check the search for typing mistakes.
-invalid_regex: the regular expression `{pattern}` is not valid: {reason}
-search_failed (negated operator word): a `-` cannot stand directly before `and` or `or`. To search for the word, put it in double quotes: `-"and"`.
+misplaced_and: `and` has to sit between two search terms. To find the word itself, quote it: `"and"`.
+misplaced_or: `or` has to sit between two search terms. To find the word itself, quote it: `"or"`.
+empty_group: The brackets `( )` hold nothing to look for. To find brackets themselves, quote them: `"( )"`.
+unopened_group: This `)` has no `(` before it. To find the bracket itself, quote it or write `\)`.
+unclosed_group: This `(` is never closed by a `)`. To find the bracket itself, quote it or write `\(`.
+empty_quote: The quote marks `""` hold nothing to look for. To find quote marks themselves, write `\"\"`.
+unclosed_quote: This quote mark `"` has no partner to close it. To find the quote mark itself, write `\"`.
+missing_key: A colon `:` must follow a keyword or a field name. To find the colon itself, write `\:`.
+unknown_escape: `{provided}` is not a valid escape. To find a backslash itself, write `\\`.
+invalid_state: `{provided}` is not a card state that `is:` knows.
+invalid_flag: `flag:` takes 0 for no flag, or 1 to 7 for red, orange, green, blue, pink, turquoise and purple.
+invalid_property: `prop:{provided}` does not begin with a card property that can be compared.
+invalid_operator: Follow `prop:{provided}` with a comparison: `<`, `<=`, `=`, `!=`, `>=` or `>`.
+invalid_number: `{context}` needs a number, and `{provided}` is not one.
+invalid_whole_number: `{context}` needs a whole number, and `{provided}` is not one.
+invalid_positive_whole_number: `{context}` needs a whole number of zero or more, and `{provided}` is not one.
+invalid_negative_whole_number: `{context}` needs a whole number of zero or less, and `{provided}` is not one.
+invalid_answer_button: `{context}` needs an answer button from 1 to 4, and `{provided}` is not one.
+invalid_id_list: `{context}` takes ids made of digits, with a single comma between two ids.
+invalid_dupe: `dupe:` takes a note type id, then a comma, then the text.
+malformed: This search could not be read. Look for a typing slip.
+invalid_regex: `{pattern}` is not a valid regular expression: {reason}
+search_failed (negated operator word): A `-` cannot negate `and` or `or`. To leave out the word itself, quote it: `-"and"`.
 search_failed (id list): `{context}` takes ids written with the digits 0 to 9 only.
-search_failed (database refusal): this search is too large to run. Split it into smaller searches.
+search_failed (database refusal): This search is too large to run. Split it into smaller searches.
 ```
 
 For `search_failed (id list)`, `{context}` is the key as typed, then `:`.

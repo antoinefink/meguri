@@ -1401,11 +1401,11 @@ flowchart TB
 - R970. `{{c1,2,3::text}}` belongs to cards 1, 2 and 3 (numbers deduplicated and sorted), and hints work with it.
 - R971. The same number used several times hides every occurrence on that card.
 - R972. Clozes nest up to 10 levels deep, and a `}}` outside any open cloze is literal text.
-- R973. Cloze parsing ignores `}}` inside MathJax `\(…\)` and `\[…\]` so a cloze around math does not close early, and HTML inside MathJax in cloze output is stripped, even though MathJax rendering is out of scope.
+- R973. Cloze parsing does not look at MathJax: a `}}` inside `\(…\)` or `\[…\]` closes a cloze like any other, as in Anki. HTML inside MathJax in `cloze:` output is stripped, even though MathJax rendering is out of scope, and where that removes one tag of a cloze span and not the other, the output stays unbalanced, as in Anki. (Amended 2026-10-16 to match the oracle, as R1907 requires: this first said that parsing ignores `}}` inside MathJax so a cloze around math does not close early, which Anki's main branch does and the pinned 26.09.3 does not; `docs/process/review-log/U61.md`, A1.)
 - R974. Front output for the active cloze is `<span class="cloze" data-cloze="<entity-encoded content>" data-ordinal="N">[...]</span>` (or `[hint]`), back output is `<span class="cloze" data-ordinal="N">content</span>`, and other clozes are `<span class="cloze-inactive" data-ordinal="M">content</span>` on both sides.
 - R975. A `{{cloze:Field}}` whose field contains no cloze for the current card renders as the empty string.
 - R976. A card whose cloze number appears in no field renders a "missing cloze" message, and a normal card whose front renders empty renders a "front of card is blank" message (both outside Browse).
-- R977. `{{type:cloze:Field}}` compares against the current card's cloze contents, collapsing identical answers to one and otherwise joining them with ", ".
+- R977. `{{type:cloze:Field}}` compares against the current card's cloze contents: the one answer when all of them are identical, and otherwise all of them in order, duplicates included, joined with ", ", as in Anki. (Amended 2026-10-16 to match the oracle: this first said "collapsing identical answers to one and otherwise joining them", which U61 read as dropping every duplicate; `docs/process/review-log/U61.md`, A2.)
 
 **Media in notes: naming and adding**
 
@@ -3265,6 +3265,7 @@ Product Contract preservation: changed, reconciling internal contradictions foun
 - R1451: full case folding, as Anki's pinned `unicase` does.
 - R1877 and R1885: test counts and the lock-file pin, matching the 26.09.3 tag.
 - R953, R959, R960, R964, R965 and R968: the template language as the oracle shows it, which R1907's string-identical output requires (amended 2026-10-16 after U60's review, `docs/process/review-log/U60.md`, A1).
+- R973 and R977: cloze parsing around MathJax and cloze type-in answers as the oracle shows them, for the same reason (amended 2026-10-16 after U61's review, `docs/process/review-log/U61.md`, A1 and A2).
 
 Readings of Product Contract conflicts settled during review, with the Product Contract text unchanged:
 - R239 and R387: ⌘⌫ deletes the note at once with the Undo toast, as the ⋯ menu does (U181).
@@ -6638,7 +6639,7 @@ Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: th
 
 **Goal:** Cloze parsing and rendering (`cloze:`, `cloze-only:`), cloze-number extraction and type-in cloze extraction, identical to the oracle.
 
-**Requirements:** R963, R969–R975, R977 (extraction side), R973 (MathJax-aware parsing; R563 depends on it); supports AE33 (c0 rule, with U27).
+**Requirements:** R963, R969–R975, R977 (extraction side), R973 (parsing that ignores MathJax, and HTML stripped inside math in the output; R563 depends on it); supports AE33 (c0 rule, with U27).
 
 **Dependencies:** U60, U20.
 
@@ -6650,9 +6651,9 @@ Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: th
 - `conformance/scenarios/render/cloze/**.yaml`, `conformance/goldens/render/cloze/**.json`
 
 **Approach:**
-- The tokenizer handles multi-ordinal markers, hints, nesting up to the R972 limit, and MathJax spans (R973). It hands cloze bodies that start with the image-occlusion prefix to U64's IO renderer, behind a hook that returns empty until U64 lands.
+- The tokenizer handles multi-ordinal markers, hints and nesting up to the R972 limit. It does not look at MathJax: the `cloze:` output strips HTML inside MathJax spans afterwards (R973). It hands cloze bodies that start with the image-occlusion prefix to U64's IO renderer, behind a hook that returns empty until U64 lands.
 - `numbers.rs` returns the set of cloze numbers in a string, with c0 excluded. U27 consumes it for card generation (AE33) and U190/U200 for the card picker (R931).
-- `typing.rs` extracts the current card's cloze answers for `{{type:cloze:}}`, collapsing duplicates or joining them per R977. U64 consumes it.
+- `typing.rs` extracts the current card's cloze answers for `{{type:cloze:}}`: one answer when all are identical, otherwise all of them joined, per R977. U64 consumes it.
 - The `data-cloze` attribute is entity-encoded (R974). This is what keeps hidden `[sound:]` out of front-side AV extraction (R1020, R545; verified in U64).
 
 **Execution note:** Spec writer first (KTD1), then implementer test-first against oracle goldens.
@@ -6664,14 +6665,16 @@ Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: th
 - `{{c1,3,3,2::x}}` is active on cards 1, 2 and 3 with ordinal attribute `1,2,3` (R970).
 - c1 used three times hides all three on card 1 (R971).
 - Ten nested levels render as the oracle does, an eleventh level matches the oracle, and a stray `}}` stays literal (R972).
-- `{{c1::\(a}}b\)}}` does not close inside math, and HTML inside math in the output is stripped (R973).
+- `{{c1::\(a}}b\)}}` closes at the `}}` inside the math, as the oracle does, so cloze 1 holds `\(a`. HTML inside math in the `cloze:` output is stripped, which leaves the back's span unclosed, `<span class="cloze" data-ordinal="1">\(ab\)}}`, as in the oracle (R973).
 - `{{cloze:Extra}}`, where Extra has no c2, renders an empty string on card 2 (R975).
 - `cloze-only:` on the front gives hints or `...`, and on the back the answers joined by ", " (R963).
-- Type-in extraction of `{{c1::a}} {{c1::a}} {{c1::b}}` gives `a, b`; of `{{c1::a}} {{c1::a}}` gives `a` (R977).
+- Type-in extraction of `{{c1::a}} {{c1::a}} {{c1::b}}` gives `a, a, b`; of `{{c1::a}} {{c1::a}}` gives `a` (R977).
 - Numbers of `{{c1::a}}{{c3::b}}{{c0::l}}{{c700::z}}` are {1, 3, 700}; the ordinal cap is applied by U27 (AE33).
-- Fuzz: arbitrary field text never panics, and the output never contains an unbalanced span.
+- Fuzz: arbitrary field text never panics, and the `cloze:` output has balanced spans whenever the MathJax strip finds nothing to match (`specs/render/cloze.md` C12); only that strip may unbalance it (R973).
 
 **Verification:** All `conformance/scenarios/render/cloze/` scenarios and the harvested Anki cloze scenarios match their goldens.
+
+Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: the Requirements, Approach and test scenarios follow R973 as amended (parsing ignores MathJax, `specs/render/cloze.md` C8 and C13), and the fuzz property holds where C12 says. A2: the type-in scenario follows R977 as amended (C10, C13): it first expected `a, b`.
 
 ### U62. Card render pipeline, AV tags and display transform
 

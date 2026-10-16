@@ -12,8 +12,8 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario,
-    SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
+    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind,
+    RefKind, Scenario, SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -431,6 +431,10 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         }
         ObservationKind::Text => {
             TextRequest::from_mapping(map)?;
+        }
+        // cloze-ops.md Z1.
+        ObservationKind::Cloze => {
+            ClozeRequest::from_mapping(map)?;
         }
         ObservationKind::FsrsNext => {
             FsrsNextRequest::from_mapping(map)?;

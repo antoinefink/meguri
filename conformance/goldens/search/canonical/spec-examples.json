@@ -14,9 +14,6 @@
             "text": "re:a b"
           },
           {
-            "text": "a b (c)"
-          },
-          {
             "text": "(x) (y)"
           },
           {
@@ -122,10 +119,10 @@
             "text": "prop:cdn:k<NaN"
           },
           {
-            "text": "\"-foo\""
+            "text": "\"-bloom\""
           },
           {
-            "text": "\"prop:cds:abc=foo bar\""
+            "text": "\"prop:cds:tip=one two\""
           },
           {
             "text": "- OR "
@@ -136,10 +133,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "ec3dc745ddeea78ba0180c50ca68c9d4438b159c4a1bf58075b1f0b16cf81959",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/canonical/spec-examples",
-  "scenario_sha256": "6ea1ceb276de8a09654fbd02813783bf05bfedf6d1f05d153a1e5cb95a1a5f1c",
+  "scenario_sha256": "cea75a9081ac8d7485b277d3456ff02ab6c3aad7a0a1f27ad596b7d1c1e4a904",
   "tz": "UTC"
 }

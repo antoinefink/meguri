@@ -34,6 +34,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         json["supports"]["observations"],
         serde_json::json!([
             "canonical_search",
+            "cloze",
             "db_dump",
             "fsrs_next",
             "schema_objects",

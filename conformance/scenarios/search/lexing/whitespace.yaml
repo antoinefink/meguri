@@ -44,7 +44,7 @@ steps:
           - "a \u00a0\u0009 b"
           - "\u0009 a\u3000"
           - "\u3000a\u3000"
-          - '  t   t2  '
+          - '   m2  n   '
           - "(\u0009a\u000ab\u00a0)"
           # whitespace inside quotes and raw values
           - "\"a\u0009b\""

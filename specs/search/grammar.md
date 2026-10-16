@@ -22,7 +22,7 @@ Every later rule reads the text after G1. "Space" below means U+0020.
 
 ## G2. Items and sequences
 
-The search, and the inside of every group, is a sequence of items. Spaces between items are optional wherever the boundary is clear: `a"b"(c)` is the three items `a`, `"b"` and `(c)`, and `(x)(y)` is two groups.
+The search, and the inside of every group, is a sequence of items. Spaces between items are optional wherever the boundary is clear: `p"q"(r)` is the three items `p`, `"q"` and `(r)`, and `(x)(y)` is two groups.
 
 An item is one of:
 
@@ -56,7 +56,7 @@ A term is one of three forms. At a position where an item can start, the forms a
 3. **Unquoted term.** A run of characters that ends before a space, an unescaped `"`, `(` or `)`, or the end of the text. A backslash takes the next character into the term whatever it is (`a\"b`, `\(`, `a\)` stay in one term), except a space.
    - A backslash followed by a space is `unknown_escape`. The offending text is the backslash and everything after it up to the end of the text (G1 applied): `foo\ bar baz` reports `\ bar baz`.
    - A backslash as the last character of the text is `unknown_escape` with the offending text `\` (`abc\`).
-   - Spaces need not separate terms from quotes and brackets: `a"b"` is `a` then `"b"`, `"f o o"bar` is `"f o o"` then `bar`, `a(b)` is `a` then the group `(b)`.
+   - Spaces need not separate terms from quotes and brackets: `a"b"` is `a` then `"b"`, `"k l m"no` is `"k l m"` then `no`, `a(b)` is `a` then the group `(b)`.
 
 At a position where none of the three forms and no group can start, the reading of the sequence stops there. That position holds `)` or is the end of the text (G5).
 
@@ -110,7 +110,7 @@ Each value (and each field name) is read as one of these kinds:
 | R (raw) | Kept exactly as written, escapes included. Nothing is an error. |
 
 - "Not itself escaped" counts backslashes: a run of an odd number of backslashes ends with an escaping one; `\\x` is a literal backslash then `x` (valid), `\\\x` is invalid (`\x`).
-- The valid escapes of plain text are therefore exactly `\\`, `\"`, `\:`, `\(`, `\)`, `\-`, `\*` and `\_` (R1028). `\x`, `\%`, `\f`, a backslash before a space and a trailing backslash are errors; the U check reports `\x` for `\x\y`, `\f` for `\foo` and `\x` for `a\\\x`.
+- The valid escapes of plain text are therefore exactly `\\`, `\"`, `\:`, `\(`, `\)`, `\-`, `\*` and `\_` (R1028). `\x`, `\%`, `\f`, a backslash before a space and a trailing backslash are errors; the U check reports `\x` for `\x\y`, `\f` for `\fern` and `\x` for `a\\\x`.
 - Raw kinds still go through the term rules of G3, so `re:a\ b` is `unknown_escape` (`\ b`) and an unquoted `re:a\` is `unknown_escape` (`\`).
 - The field-name kind is U; the U check runs on the field name before the value.
 
@@ -149,7 +149,7 @@ Each value (and each field name) is read as one of these kinds:
 The value is a property, an operator and an operand, with nothing between them.
 
 1. **Property.** The value must start with one of these, tried in this order, the first that matches being taken: `ivl`, `due`, `reps`, `lapses`, `ease`, `pos`, `rated`, `resched`, `s`, `d`, `r`, `cdn:` followed by one or more ASCII letters or digits (as many as there are), `cds:` followed by the same. Matching is case-sensitive and takes a prefix only: `prop:dueish>1` takes `due`, `prop:rx>1` takes `r`, `prop:stability>1` takes `s`. No match is `invalid_property` with `provided` the whole value (`prop:foo>1` gives `foo>1`, `prop:IVL>1` gives `IVL>1`, `prop:cdn:é=1` gives `cdn:é=1`, `prop:` gives empty).
-2. **Operator.** The rest must start with `<=`, `>=`, `!=`, `=`, `<` or `>`, tried in that order. Otherwise `invalid_operator` with `provided` the property as matched (`prop:ivl~1` gives `ivl`, `prop:cdn:abc_d=1` gives `cdn:abc`, `prop:lapses` gives `lapses`). The operator is never doubled: in `prop:ivl==1` the operator is `=` and the operand `=1`.
+2. **Operator.** The rest must start with `<=`, `>=`, `!=`, `=`, `<` or `>`, tried in that order. Otherwise `invalid_operator` with `provided` the property as matched (`prop:ivl~1` gives `ivl`, `prop:cdn:abc_d=1` gives `cdn:abc`, `prop:pos` gives `pos`). The operator is never doubled: in `prop:ivl==1` the operator is `=` and the operand `=1`.
 3. **Operand.** Everything after the operator. The context of every operand error is the whole value (after `prop:`), and `provided` is the operand text:
 
    | Property | Operand | Error |

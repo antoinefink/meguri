@@ -26,7 +26,7 @@
             "text": "deck:a*"
           },
           {
-            "text": "note:Basic"
+            "text": "note:Vocab"
           },
           {
             "text": "\"note:my type\""
@@ -35,7 +35,7 @@
             "text": "note:a*"
           },
           {
-            "text": "preset:Default"
+            "text": "preset:Daily"
           },
           {
             "text": "\"preset:my preset\""
@@ -89,7 +89,7 @@
             "text": "card:Forward"
           },
           {
-            "text": "\"card:Card 1\""
+            "text": "\"card:Side two\""
           },
           {
             "text": "card:-1"
@@ -248,7 +248,7 @@
             "text": "\"w:a b\""
           },
           {
-            "text": "has-cd:r"
+            "text": "has-cd:pq"
           },
           {
             "text": "f:x"
@@ -287,10 +287,10 @@
             "text": "dupe:1,a,b"
           },
           {
-            "text": "prop:ivl>3"
+            "text": "prop:ivl>4"
           },
           {
-            "text": "prop:ivl>=5"
+            "text": "prop:ivl>=6"
           },
           {
             "text": "prop:due=-1"
@@ -314,10 +314,10 @@
             "text": "prop:pos=3"
           },
           {
-            "text": "prop:ease<=3.3"
+            "text": "prop:ease<=2.7"
           },
           {
-            "text": "prop:ease>1"
+            "text": "prop:ease>3"
           },
           {
             "text": "prop:s>1"
@@ -347,16 +347,16 @@
             "text": "prop:resched=-2"
           },
           {
-            "text": "prop:cdn:abc<=1"
+            "text": "prop:cdn:xyz<=2"
           },
           {
-            "text": "prop:cdn:abc>1.5"
+            "text": "prop:cdn:xyz>1.5"
           },
           {
             "text": "prop:cdn:k!=1000"
           },
           {
-            "text": "prop:cds:abc=foo"
+            "text": "prop:cds:mood=calm"
           },
           {
             "text": "prop:cds:k="
@@ -373,10 +373,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/canonical/leaves",
-  "scenario_sha256": "e77c6394867e273cc5a13e81630e5c6e4dc94d50e71e8a56b35c601a508cd499",
+  "scenario_sha256": "88bdd1c9e4187b8c028ee1698330c2e57c97f889a60d6b47b1294d945fcca980",
   "tz": "UTC"
 }

@@ -10,9 +10,9 @@ steps:
           - 'a:b:c'
           - 'a::'
           - 'rid:1:2'
-          - 'field:val:ue'
-          - '"field:val:ue"'
-          - 'field:"val:ue"'
+          - 'leaf:ve:in'
+          - '"leaf:ve:in"'
+          - 'leaf:"ve:in"'
           - 'tag:a::b'
           - 'deck:a::b'
           # escaped colons

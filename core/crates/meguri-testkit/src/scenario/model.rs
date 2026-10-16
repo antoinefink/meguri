@@ -1118,6 +1118,8 @@ pub enum ObservationKind {
     BlobDecode,
     PackageCol,
     Text,
+    /// cloze-ops.md Z1.
+    Cloze,
     /// float-determinism.md F5.
     FsrsNext,
 }
@@ -1140,7 +1142,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 22] = [
+    pub const ALL: [ObservationKind; 23] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1162,6 +1164,7 @@ impl ObservationKind {
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
         ObservationKind::Text,
+        ObservationKind::Cloze,
         ObservationKind::FsrsNext,
     ];
 
@@ -1188,6 +1191,7 @@ impl ObservationKind {
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
+            ObservationKind::Cloze => "cloze",
             ObservationKind::FsrsNext => "fsrs_next",
         }
     }
@@ -1213,6 +1217,7 @@ impl ObservationKind {
             | ObservationKind::PackageCol
             | ObservationKind::Template
             | ObservationKind::Text
+            | ObservationKind::Cloze
             | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
             ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
@@ -1515,6 +1520,115 @@ impl TextRequest {
             TextInputs::Strings(strings.ok_or_else(|| bad("inputs are strings"))?)
         };
         Ok(TextRequest { fns, inputs })
+    }
+}
+
+/// The functions of the `cloze` kind (cloze-ops.md Z2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ClozeFunction {
+    Numbers,
+    Front,
+    Back,
+    OnlyFront,
+    OnlyBack,
+    Typing,
+}
+
+impl ClozeFunction {
+    pub const ALL: [ClozeFunction; 6] = [
+        ClozeFunction::Numbers,
+        ClozeFunction::Front,
+        ClozeFunction::Back,
+        ClozeFunction::OnlyFront,
+        ClozeFunction::OnlyBack,
+        ClozeFunction::Typing,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ClozeFunction::Numbers => "numbers",
+            ClozeFunction::Front => "front",
+            ClozeFunction::Back => "back",
+            ClozeFunction::OnlyFront => "only_front",
+            ClozeFunction::OnlyBack => "only_back",
+            ClozeFunction::Typing => "typing",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<ClozeFunction> {
+        ClozeFunction::ALL.into_iter().find(|f| f.name() == name)
+    }
+}
+
+/// The highest card number a `cloze` input names (`render/cloze#C1`).
+pub const CLOZE_MAX_CARD: u16 = u16::MAX;
+
+/// The inputs of a `cloze` request: strings for `numbers`, `[text, card]`
+/// pairs for every other function (cloze-ops.md Z1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClozeInputs {
+    Texts(Vec<String>),
+    /// Card numbers are 1 to [`CLOZE_MAX_CARD`].
+    Cards(Vec<(String, u16)>),
+}
+
+/// A `cloze` observation request: `{fns, inputs}` (cloze-ops.md Z1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClozeRequest {
+    pub fns: Vec<ClozeFunction>,
+    pub inputs: ClozeInputs,
+}
+
+impl ClozeRequest {
+    /// Reads the request with Z1's rules: exactly `fns` and `inputs`;
+    /// distinct known functions, at least one; `numbers` alone, on strings;
+    /// every other function on `[string, integer 1-65535]` pairs. A card
+    /// written as a float, a string or a boolean is refused.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<ClozeRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation cloze: {why}"));
+        if map.len() != 2 || !map.contains_key("fns") || !map.contains_key("inputs") {
+            return Err(bad("takes exactly {fns, inputs}"));
+        }
+        let names = map["fns"]
+            .as_array()
+            .ok_or_else(|| bad("fns is a list of function names"))?;
+        if names.is_empty() {
+            return Err(bad("fns names at least one function"));
+        }
+        let mut fns = Vec::with_capacity(names.len());
+        for name in names {
+            let f = name
+                .as_str()
+                .and_then(ClozeFunction::from_name)
+                .ok_or_else(|| bad(&format!("{name} is not a cloze function")))?;
+            if fns.contains(&f) {
+                return Err(bad(&format!("{} appears twice in fns", f.name())));
+            }
+            fns.push(f);
+        }
+        let items = map["inputs"].as_array().ok_or_else(|| bad("inputs is a list"))?;
+        let inputs = if fns.contains(&ClozeFunction::Numbers) {
+            if fns.len() > 1 {
+                return Err(bad("numbers shares a request with no other function"));
+            }
+            let texts = items
+                .iter()
+                .map(|v| v.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>();
+            ClozeInputs::Texts(texts.ok_or_else(|| bad("numbers inputs are strings"))?)
+        } else {
+            let pair = |item: &Value| match item.as_array().map(Vec::as_slice) {
+                Some([Value::String(text), card]) => card
+                    .as_u64()
+                    .and_then(|card| u16::try_from(card).ok())
+                    .filter(|&card| card >= 1)
+                    .map(|card| (text.clone(), card)),
+                _ => None,
+            };
+            let pairs = items.iter().map(pair).collect::<Option<Vec<_>>>();
+            ClozeInputs::Cards(pairs.ok_or_else(|| bad("inputs are [text, card] pairs with a card from 1 to 65535"))?)
+        };
+        Ok(ClozeRequest { fns, inputs })
     }
 }
 

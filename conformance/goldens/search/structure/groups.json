@@ -35,10 +35,10 @@
             "text": "-(x y) OR -z"
           },
           {
-            "text": "t t2"
+            "text": "u1 v"
           },
           {
-            "text": "hello -(world \"foo:bar baz\") OR test"
+            "text": "sky -(sea \"hill:low road\") OR stone"
           },
           {
             "text": "-(a b)"
@@ -67,10 +67,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/structure/groups",
-  "scenario_sha256": "36d9563efeb5ef4ddf7ef34f638ea6a8da3d95e537dcd8c59d27eb14aabc0463",
+  "scenario_sha256": "2c6961406cd2eb32a29e63bc97e36d14e4b3b34306440bb746688922fe23b44e",
   "tz": "UTC"
 }

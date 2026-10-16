@@ -1,20 +1,20 @@
 # specs/search/query-model.md Q2, Q5, Q6: the empty search returns every card
 # in cards mode and every note in notes mode, also cards whose note row is gone
-# and notes without cards. #c3 loses its note (#n3), #n2 loses its card (#c2).
-# Needs only the whole-collection term.
+# and notes without cards. Needs only the whole-collection term.
+# No setup (specs/conformance/storage-ops.md P1.3): the collection is the
+# schema-18 storage fixture with its notes and cards replaced, through db_exec,
+# by three notes of its first note type (ids 1893456000001 to ...003) with one
+# card each (ids 1893456000101 to ...103). Then card ...103 loses its note
+# (...003) and note ...002 loses its card (...102). Rows no logical id names are
+# reported by real id (search-ops.md S1).
 id: search/structure/whole-collection
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
-setup:
-  notetypes:
-    - name: Single
-      fields: [Front, Back]
-      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
-      css: ".card { margin: 0; }"
-  notes:
-    - {notetype: Single, fields: [dog, x]}
-    - {notetype: Single, fields: [cat, x]}
-    - {notetype: Single, fields: [fish, x]}
 steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "DELETE FROM cards"}
+  - db_exec: {sql: "DELETE FROM notes"}
+  - db_exec: {sql: "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (1893456000001, 'mgWhole1', (SELECT min(id) FROM notetypes), 1893456000, 0, '', 'otter' || char(31) || 'x', 'otter', 2256459996, 0, ''), (1893456000002, 'mgWhole2', (SELECT min(id) FROM notetypes), 1893456000, 0, '', 'heron' || char(31) || 'x', 'heron', 1489442673, 0, ''), (1893456000003, 'mgWhole3', (SELECT min(id) FROM notetypes), 1893456000, 0, '', 'newt' || char(31) || 'x', 'newt', 3410268296, 0, '')"}
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1893456000101, 1893456000001, 1, 0, 1893456000, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, '{}'), (1893456000102, 1893456000002, 1, 0, 1893456000, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, '{}'), (1893456000103, 1893456000003, 1, 0, 1893456000, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, '{}')"}
   - observe:
       - search:
           - {query: ''}
@@ -23,12 +23,12 @@ steps:
           - {query: '   ', kind: notes}
           - {query: "\u0009\u000a"}
           - {query: "\u0009\u000a", kind: notes}
-  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
-  - db_exec: {sql: "DELETE FROM cards WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "DELETE FROM notes WHERE id = 1893456000003"}
+  - db_exec: {sql: "DELETE FROM cards WHERE id = 1893456000102"}
   - observe:
       - search:
           - {query: ''}
           - {query: '', kind: notes}
-          - {query: "\u3000"}
-          - {query: "\u3000", kind: notes}
-      - canonical_search: ["", " \u3000 "]
+          - {query: "　"}
+          - {query: "　", kind: notes}
+      - canonical_search: ["", " 　 "]

@@ -20,13 +20,13 @@
             "text": "rid:1:2"
           },
           {
-            "text": "field:val:ue"
+            "text": "leaf:ve:in"
           },
           {
-            "text": "field:val:ue"
+            "text": "leaf:ve:in"
           },
           {
-            "text": "field:val:ue"
+            "text": "leaf:ve:in"
           },
           {
             "text": "tag:a::b"
@@ -133,10 +133,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/lexing/colons",
-  "scenario_sha256": "cf00f36b4d9bcf6474336c40544f001a0e24968ef2f5133d1ed2e305ac756dcb",
+  "scenario_sha256": "b160ce217585aa0f97f3dbf252862e36abb258d23a419ace1532239b9449fb5f",
   "tz": "UTC"
 }
