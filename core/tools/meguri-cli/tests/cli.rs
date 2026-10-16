@@ -43,11 +43,21 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "text"
         ])
     );
-    // dsl.md D7.2: 26 ops besides observe, the actor ops of sync-ops.md, the
-    // model ops of model-ops.md, storage-ops.md's open and record-ops.md's
-    // set_config among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 26);
-    for op in ["actor", "sync", "net_fault", "converge", "reopen", "open", "set_config"] {
+    // dsl.md D7.2: 31 ops besides observe, the actor ops of sync-ops.md, the
+    // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
+    // set_config and the note type ops of notetype-ops.md among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 31);
+    for op in [
+        "actor",
+        "sync",
+        "net_fault",
+        "converge",
+        "reopen",
+        "open",
+        "set_config",
+        "add_notetype",
+        "update_notetype",
+    ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
@@ -81,9 +91,10 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .iter()
             .any(|k| k == "legacy_json")
     );
-    // observations.md O4: blob_decode and package_col are kinds of the
-    // language, which Meguri's executor does not run yet (model-ops.md L5).
-    for kind in ["blob_decode", "package_col"] {
+    // observations.md O4: blob_decode and package_col (model-ops.md L5) and
+    // notetype_structure (notetype-ops.md T8) are kinds of the language,
+    // which Meguri's executor does not run yet.
+    for kind in ["blob_decode", "package_col", "notetype_structure"] {
         assert!(
             json["language"]["observations"]
                 .as_array()

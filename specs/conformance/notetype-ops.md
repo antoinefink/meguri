@@ -127,7 +127,8 @@ The structure of note types, without template text, CSS, LaTeX values or ids, so
 ## T10. Status
 
 - These ops and the kind are stable (`dsl.md` D7.2, `observations.md` O4): the oracle driver implements T2 to T8 through Anki's own note type operations, with the meanings above, and the scenarios that use them have goldens. The protocol's step description lists the ops and the kind.
-- **Meguri** (U29's implementer, with the adapters): the testkit model reads these shapes (`core/crates/meguri-testkit/src/scenario/`), and the notetypes adapter implements `setup.notetypes` (`dsl.md` D6.4, each entry added as `add_notetype` adds it), `add_notetype`, `add_stock_notetype`, `clone_notetype`, `ensure_io_notetype`, the plain-save part of `update_notetype` (T10.1) and `notetype_structure`; U34 adds the rest of `update_notetype`. Until the testkit model reads them, T0 reports the scenarios that use them as `invalid`.
+- The testkit model (`core/crates/meguri-testkit/src/scenario/`) reads these shapes with the load-time rules of the schema (non-empty note type names, field and template lists), and a scenario's needs hold the capabilities of T10.1.
+- **Meguri** (U29's implementer, with the adapters): the notetypes adapter implements `setup.notetypes` (`dsl.md` D6.4, each entry added as `add_notetype` adds it), `add_notetype`, `add_stock_notetype`, `clone_notetype`, `ensure_io_notetype`, the plain-save part of `update_notetype` (T10.1) and `notetype_structure`; U34 adds the rest of `update_notetype`. Until then T0 reports the scenarios that use them as `pending`.
 
 ### T10.1 Capabilities of `update_notetype`
 
