@@ -37,4 +37,4 @@ The `cloze` observation kind evaluates the cloze functions of `specs/render/cloz
 
 ## Z4. Scenarios
 
-`conformance/scenarios/render/cloze/*.yaml` (`render/cloze#C14`). They define no note type and need no setup; the card numbers in their inputs are the cards' template ordinals plus one.
+`conformance/scenarios/render/cloze/*.yaml` (`render/cloze#C14`). Those that use this kind define no note type and need no setup; the card numbers in their inputs are the cards' template ordinals plus one. `render/cloze/blank-check` and `render/cloze/templates` use the `template` kind instead (`render-ops.md` Q1).

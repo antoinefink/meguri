@@ -1,11 +1,11 @@
 # Cloze parsing, rendering and cloze utilities
 
 Spec: render/cloze
-Requirements: R963, R969, R970, R971, R972, R973, R974, R975, R977 (extraction side), R563 (via C8); supports AE33 (C5, with U27)
+Requirements: R963, R969, R970, R971, R972, R973, R974, R975, R976 (the missing-cloze check, C15), R977 (extraction side), R563 (via C8); supports AE33 (C5, with U27)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/render/cloze/
 
-How field text with cloze deletions (`{{c1::...}}`) is read, what the `cloze:` and `cloze-only:` template filters output, which cloze numbers a text contains, and what a cloze type-in field expects. Every output here is compared with the oracle string for string (R1907). The observation that exposes these functions to scenarios is `specs/conformance/cloze-ops.md`.
+How field text with cloze deletions (`{{c1::...}}`) is read, what the `cloze:` and `cloze-only:` template filters output, which cloze numbers a text contains, what a cloze type-in field expects, and when a card of a cloze note type is blank. Every output here is compared with the oracle string for string (R1907). The observation that exposes these functions to scenarios is `specs/conformance/cloze-ops.md`; the `template` observation (`specs/conformance/render-ops.md`) runs the filters and the blank check inside templates.
 
 Pattern conventions ("shortest", leftmost-first, "any character" includes line breaks) are `text/strip-html#H1`.
 
@@ -89,7 +89,7 @@ With eleven nested opening markers `{{c1::` … `{{c11::` followed by `x` and el
   | `{{c1::open` | none |
   | `ÄÖÜ öäü` | none |
 
-- Card generation (over all fields of the note, U27) and the "missing cloze" check (U62 defines its texts) work on the union of the numbers of several texts.
+- Card generation (over the note's fields only, U27) and the blank check of cloze cards (over every value of the card's field map, C15) work on the union of the numbers of several texts.
 - **Top-level presence**: a text *has a cloze* when one of its top-level clozes has a number other than 0. Nested clozes are not looked at: `{{c0::a {{c1::b}}}}` has cloze numbers {1} but has no cloze in this sense. U27's note field check (missing cloze, cloze in a non-cloze field, cloze in a standard note type) uses this test.
 
 ## C6. The `cloze:` filter
@@ -212,7 +212,7 @@ The input is the field's stored text and the output keeps its HTML as written (`
 
 ## C14. Scenarios
 
-All use the `cloze` observation (`specs/conformance/cloze-ops.md`) and need no collection setup.
+None needs collection setup. All but the last two use the `cloze` observation (`specs/conformance/cloze-ops.md`); `blank-check` and `templates` use the `template` observation's new-note cases (`specs/conformance/render-ops.md` Q1.2), so they run the filters and the blank check through the template engine.
 
 | Scenario | Covers |
 |---|---|
@@ -227,3 +227,31 @@ All use the `cloze` observation (`specs/conformance/cloze-ops.md`) and need no c
 | `render/cloze/numbers` | C5 |
 | `render/cloze/only` | C9 (R963) |
 | `render/cloze/typing` | C10 (R977) |
+| `render/cloze/blank-check` | C15 on cloze note types: numbers in used and unused fields, empty and cloze-free question templates, nested, zero, unclosed and listed numbers, the top card number 500, special values that count, a note field that hides a special |
+| `render/cloze/templates` | C1, C6, C8, C9 inside templates: side by template, FrontSide carrying the front, card number from the ordinal, chains with `text`, `cloze`, `cloze-only` and an unknown filter (`filters.md` F1), `{{type:cloze:F}}`, the filters on other fields, sections and specials, and on a standard note type |
+
+## C15. Blank cards of cloze note types
+
+What `template-syntax.md` T10 decides for a card of a cloze note type (R976's missing-cloze case; U62 shows the notice and its text):
+
+- The card with number N (C1) is **blank** when N is not among the cloze numbers (C5) of any value of the card's field map (`special-fields.md` P2). The map holds the note's fields and the special values `Tags`, `Type`, `Deck`, `Subdeck`, `Card`, `CardFlag`, `CardID` and `c<N>`, each unless a note field of the same name replaced it. `FrontSide` is never in the map and never counts.
+- Special values count like fields. A note whose tags, note type name, template name or deck name hold `{{c3::…}}` has a card 3 that is not blank, even with no cloze 3 in any field. A note field named like a special replaces it here too: with a field `Tags`, that field's text counts and the note's tags do not.
+- The templates play no part, and T11.2's analysis is not used. A card is not blank when its number appears only in a field that no template uses, or when its question template is empty or renders nothing. It is blank when its question template shows a field in full but no value holds N.
+- Numbers are C5's: nested clozes count, 0 matches no card (N ≥ 1), and unclosed clozes and dropped markers count for nothing.
+- The check runs after the question rendered without error (T9, T10). The question output is kept as rendered: often the empty string, since `cloze:` renders nothing without an active cloze (C6).
+- Card generation (U27) reads the note's fields only (C5), not the special values.
+
+| Field map (cloze note type, fields `Text`, `Extra`) | Question template | Card | Blank? | Question output |
+|---|---|---|---|---|
+| Text `{{c1::a}} {{c2::b}}` | `{{cloze:Text}}` | 3 | yes | empty |
+| Text `plain`, Extra `{{c2::x}}` | `{{cloze:Text}}` | 2 | no | empty |
+| Text `{{c1::a}}` | empty template, or `{{Extra}}` with Extra empty | 1 | no | empty |
+| Text `no clozes` | `{{Text}}` | 1 | yes | `no clozes` |
+| Text `{{c0::a {{c2::b}}}}` | `{{cloze:Text}}` | 2 | no | the C6 front |
+| Text `{{c1::open` or `{{c0::label}}` | `{{cloze:Text}}` | 1 | yes | empty |
+| Text `{{c500::x}}` | `{{cloze:Text}}` | 500 | no | the C6 front |
+| Text `{{c1::a}}`, tags `{{c3::t}}` | `{{cloze:Text}}` | 3 | no | empty |
+| Text `{{c1::a}}`, template name `{{c4::card}}` | `{{cloze:Text}}` | 4 | no | empty |
+| Text `{{c1::a}}`, note type name `Gap {{c5::type}}` | `{{cloze:Text}}` | 5 / 6 | no / yes | empty |
+| fields `Text`, `Tags`: Text `{{c1::a}}`, field Tags empty, note tags `{{c3::t}}` | `{{cloze:Text}}` | 3 | yes | empty |
+| the same with field Tags `{{c3::f}}` | `{{cloze:Text}}` | 3 | no | empty |
