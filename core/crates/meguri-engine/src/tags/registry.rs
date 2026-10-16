@@ -254,14 +254,22 @@ mod tests {
     }
 
     #[test]
-    fn the_t13_table() {
-        let t = tree(&rows(&[("foo::BAR::a", false), ("FOO::bar::b", false)]));
-        assert_eq!(show(&t), "foo*(BAR*(a b))");
+    fn the_t13_rules() {
+        // Implicit parents, spelled as the first row in unicase order spells
+        // them, and collapsed.
+        let t = tree(&rows(&[("KITE::wing::right", false), ("kite::WING::left", false)]));
+        assert_eq!(show(&t), "kite*(WING*(left right))");
         assert!(t[0].implicit && t[0].children[0].implicit);
-        assert_eq!(t[0].children[0].children[1].full_name, "FOO::bar::b");
+        assert_eq!(t[0].children[0].children[1].full_name, "KITE::wing::right");
+        // `-` sorts before `:`, yet a child stays under its parent and the
+        // longer sibling comes after it.
         assert_eq!(
-            show(&tree(&rows(&[("one", false), ("one1", false), ("one::two", false)]))),
-            "one(two) one1"
+            show(&tree(&rows(&[
+                ("lamp-post", false),
+                ("lamp::shade", false),
+                ("lamp", false)
+            ]))),
+            "lamp(shade) lamp-post"
         );
         assert_eq!(show(&tree(&rows(&[("Bar::x", false), ("bar::y", false)]))), "Bar*(x y)");
         assert_eq!(

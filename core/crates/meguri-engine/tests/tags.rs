@@ -6,12 +6,16 @@
 
 mod common;
 
-use common::Harness;
-use common::tagging::{fresh, names, raw, resave_note, row, rows, save_note, stored_note, tags_of};
+use std::thread;
+use std::time::Duration;
+
+use common::tagging::{fresh, names, raw, resave_note, row, rows, save_note, setup_spec, stored_note, tags_of};
+use common::{Gate, Harness};
 use meguri_engine::tags::{self, RunOptions, TagNode};
 use meguri_engine::undo::names::{CLEAR_UNUSED_TAGS, EXPAND_COLLAPSE, REMOVE_TAG, RENAME_TAG, UPDATE_TAG};
 use meguri_engine::{EngineError, UndoScope, UndoStatus, marked};
 use meguri_model::usn::Usn;
+use meguri_storage::ReadRows;
 use meguri_storage::raw::SqlValue;
 
 fn opts() -> RunOptions {
@@ -252,17 +256,17 @@ fn the_first_source_in_list_order_decides() {
 fn delete_removes_descendants_from_notes_and_rows_even_unused() {
     let h = fresh();
     let c = &h.collection;
-    let keep = save_note(c, &["a", "keep"]);
-    let gone = save_note(c, &["a::b", "A::b::c"]);
-    let ab = save_note(c, &["ab"]);
-    tags::set_collapsed(c, &["a::zz"], false).unwrap();
+    let keep = save_note(c, &["vine", "keep"]);
+    let gone = save_note(c, &["vine::leaf", "VINE::leaf::tip"]);
+    let vineyard = save_note(c, &["vineyard"]);
+    tags::set_collapsed(c, &["vine::bud"], false).unwrap();
     h.clock.step_ms(3_600_000);
-    assert_eq!(tags::delete(c, "A", &opts()).unwrap().value, 2);
+    assert_eq!(tags::delete(c, "Vine", &opts()).unwrap().value, 2);
     assert_eq!(
-        (tags_of(c, keep), tags_of(c, gone), tags_of(c, ab)),
-        (" keep ".into(), String::new(), " ab ".into())
+        (tags_of(c, keep), tags_of(c, gone), tags_of(c, vineyard)),
+        (" keep ".into(), String::new(), " vineyard ".into())
     );
-    assert_eq!(names(c), ["ab", "keep"]);
+    assert_eq!(names(c), ["keep", "vineyard"]);
     assert_eq!(top_step(&h), Some(REMOVE_TAG));
 
     // A registry-only tag: no note written, but the row goes and col.mod
@@ -345,17 +349,20 @@ fn set_collapsed_skips_an_unchanged_row_and_sets_the_row_it_registers() {
 fn add_and_remove_change_only_the_notes_that_need_it() {
     let h = fresh();
     let c = &h.collection;
-    let n1 = save_note(c, &["XYZ", "deF", "aaa"]);
+    let n1 = save_note(c, &["Pine", "elm", "OAK"]);
+    assert_eq!(tags_of(c, n1), " elm OAK Pine ");
     let n2 = save_note(c, &[]);
-    save_note(c, &["abc"]);
-    let unsorted = stored_note(c, " zz a zz ");
+    save_note(c, &["birch"]);
+    let unsorted = stored_note(c, " yew ash yew ");
     let done = stored_note(c, " b a ");
     h.clock.step_ms(3_600_000);
-    let added = tags::add_to_notes(c, &[n1, n2, unsorted], "xyz abc DEF new\tone", &opts()).unwrap();
+    // Each tag takes its registered spelling, the tab goes (T2), and the
+    // missing tags join the stored ones, deduplicated and sorted.
+    let added = tags::add_to_notes(c, &[n1, n2, unsorted], "pine BIRCH oak fir\tcone", &opts()).unwrap();
     assert_eq!(added.value, 3);
-    assert_eq!(tags_of(c, n1), " aaa abc deF newone XYZ ");
-    assert_eq!(tags_of(c, n2), " abc deF newone XYZ ");
-    assert_eq!(tags_of(c, unsorted), " a abc deF newone XYZ zz ");
+    assert_eq!(tags_of(c, n1), " birch elm fircone OAK Pine ");
+    assert_eq!(tags_of(c, n2), " birch fircone OAK Pine ");
+    assert_eq!(tags_of(c, unsorted), " ash birch fircone OAK Pine yew ");
     assert_eq!(top_step(&h), Some(UPDATE_TAG));
 
     // A note that already has the tags is not written, even unsorted, and
@@ -366,10 +373,11 @@ fn add_and_remove_change_only_the_notes_that_need_it() {
     assert_eq!(tags::add_to_notes(c, &[done], "fresh", &opts()).unwrap().value, 1);
     assert_eq!(tags_of(c, done), " a b fresh ");
 
-    let removed = tags::remove_from_notes(c, &[n1, n2, done], "ABC fresh", &opts()).unwrap();
+    let removed = tags::remove_from_notes(c, &[n1, n2, done], "BIRCH fresh", &opts()).unwrap();
     assert_eq!(removed.value, 3);
+    assert_eq!(tags_of(c, n1), " elm fircone OAK Pine ");
     assert_eq!(tags_of(c, done), " a b ");
-    assert!(row(c, "abc").is_some() && row(c, "fresh").is_some(), "rows stay");
+    assert!(row(c, "birch").is_some() && row(c, "fresh").is_some(), "rows stay");
     assert_eq!(top_step(&h), Some(REMOVE_TAG));
     let stored = stored_note(c, " c b a b ");
     assert_eq!(tags::remove_from_notes(c, &[stored], "a", &opts()).unwrap().value, 1);
@@ -466,6 +474,43 @@ fn toggling_a_mark_follows_the_current_note() {
     assert_eq!((tags_of(c, current), tags_of(c, other)), (" q ".into(), String::new()));
 }
 
+#[test]
+fn a_toggle_decides_on_the_current_note_as_its_write_phase_finds_it() {
+    // Another write marks the current note after the toggle has read it
+    // unmarked and before the toggle's write phase: the toggle unmarks it,
+    // as the note stands when it writes (M2), instead of re-adding a tag the
+    // note already has.
+    let h = fresh();
+    let c = &h.collection;
+    let current = save_note(c, &["q"]);
+    let gate = Gate::new();
+    let concurrent = {
+        let inner = gate.clone();
+        c.submit(setup_spec(), move |ctx| {
+            let mut note = ctx.scope().note(current)?.expect("the note exists");
+            note.tags = " marked q ".to_owned();
+            ctx.scope().put(&note)?;
+            // Uncommitted until the gate opens: readers still see ` q `.
+            inner.enter_and_wait();
+            Ok(())
+        })
+    };
+    gate.wait_entered();
+    let toggle = {
+        let c = c.clone();
+        thread::spawn(move || marked::toggle_mark(&c, current, &[current], &RunOptions::default()))
+    };
+    // The toggle reads the note unmarked and queues behind the held writer.
+    thread::sleep(Duration::from_millis(50));
+    gate.open();
+    let concurrent = concurrent.wait().unwrap();
+    let toggled = toggle.join().unwrap().unwrap();
+    assert!(toggled.seq > concurrent.seq, "the toggle wrote after the other write");
+    assert_eq!(toggled.value, 1);
+    assert_eq!(tags_of(c, current), " q ");
+    assert_eq!(top_step(&h), Some(REMOVE_TAG));
+}
+
 fn show(nodes: &[TagNode]) -> String {
     nodes
         .iter()
@@ -486,9 +531,9 @@ fn the_tree_adds_implicit_parents_and_orders_children_by_unicase() {
     let h = fresh();
     let c = &h.collection;
     assert!(tags::tag_tree(c).unwrap().is_empty());
-    save_note(c, &["foo::BAR::a"]);
-    save_note(c, &["FOO::bar::b"]);
-    save_note(c, &["one", "one1", "one::two"]);
+    save_note(c, &["kite::WING::left"]);
+    save_note(c, &["KITE::wing::right"]);
+    save_note(c, &["lamp", "lamp-post", "lamp::shade"]);
     save_note(c, &["Bar::x"]);
     save_note(c, &["bar::y"]);
     raw(
@@ -496,21 +541,31 @@ fn the_tree_adds_implicit_parents_and_orders_children_by_unicase() {
         "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('a!', 0, 1, NULL), ('B2', 0, 0, NULL), ('b2::c', 0, 0, NULL)",
         &[],
     );
-    tags::set_collapsed(c, &["foo::BAR"], false).unwrap();
+    // Expanding an implicit parent registers it with the tree's spelling.
+    tags::set_collapsed(c, &["kite::WING"], false).unwrap();
     let tree = tags::tag_tree(c).unwrap();
-    assert_eq!(show(&tree), "a!* B2(c) Bar*(x* y*) foo*(BAR(a* b*)) one*(two*) one1*");
+    // `-` sorts before `:`, yet `lamp::shade` stays under `lamp`, and
+    // `lamp-post` comes after `lamp` (T13 step 3).
+    assert_eq!(
+        show(&tree),
+        "a!* B2(c) Bar*(x* y*) kite*(WING(left* right*)) lamp*(shade*) lamp-post*"
+    );
     let bar = &tree[2];
     assert!(bar.implicit);
     assert_eq!(bar.children[1].full_name, "bar::y");
-    assert_eq!(tree[3].children[0].full_name, "foo::BAR");
+    let kite = &tree[3];
+    assert!(kite.implicit && !kite.children[0].implicit);
+    assert_eq!(kite.children[0].full_name, "kite::WING");
 }
 
 #[test]
-fn rename_touching_ten_thousand_of_a_large_collection_writes_only_those_and_undoes_in_one_step() {
-    use meguri_storage::{ReadRows, ReaderRole};
+fn rename_touching_ten_thousand_of_150k_notes_writes_only_those_and_undoes_in_one_step() {
+    use meguri_storage::ReaderRole;
     use meguri_testkit::bench::fixtures;
 
-    let generated = fixtures::profile_collection("150k").expect("the 150k collection");
+    // Profiles are sized in cards: 175k cards give over 150k notes (152,120
+    // at generator version 4), the collection the plan's scenario names.
+    let generated = fixtures::profile_collection("175k").expect("the 175k-card collection");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("collection.anki2");
     std::fs::copy(generated.dir.join("collection.anki2"), &path).unwrap();
@@ -521,7 +576,7 @@ fn rename_touching_ten_thousand_of_a_large_collection_writes_only_those_and_undo
         .unwrap()
         .ids_after(meguri_storage::Table::Notes, None, usize::MAX)
         .unwrap();
-    assert!(all.len() >= 50_000, "{} notes", all.len());
+    assert!(all.len() >= 150_000, "{} notes", all.len());
     let chosen: Vec<meguri_model::ids::NoteId> = all
         .iter()
         .step_by(all.len() / 10_000)

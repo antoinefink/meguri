@@ -130,13 +130,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalization_follows_the_t2_table() {
+    fn normalization_follows_the_t2_rules() {
         for (input, normalized) in [
             ("x\ty", "xy"),
             ("a b", "ab"),
             ("a::::b", "a::blank::b"),
             ("a:::b", "a:::b"),
-            ("foo::", "foo::blank"),
+            ("kin::", "kin::blank"),
             ("::", "blank::blank"),
             ("::lead", "blank::lead"),
             ("\u{a0}q\u{a0}", "q"),
