@@ -1,0 +1,32 @@
+# specs/search/grammar.md G4: `-` negates the item right after it; a lone `-`
+# is a term; a term that must start with `-` is escaped or quoted (R1030).
+id: search/lexing/hyphens
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          - '-'
+          - '--'
+          - '-\-'
+          - '\-'
+          - '--a'
+          - '- a'
+          - 'a-b'
+          - 'a -b'
+          - '-a'
+          - '-"a"'
+          - '"-a"'
+          - '\-a'
+          - '-(a)'
+          - '-(-a)'
+          - '(-)'
+          - 'a-'
+          - 'A\-'
+          - '"-A"'
+          - '\-A'
+          - '-A'
+          - '-deck:a'
+          - '-"x y"'
+          - '- '
+          - 'a - '
+          - '---a'
