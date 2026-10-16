@@ -33,7 +33,7 @@ use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
 use meguri_storage::raw::SqlValue;
 use meguri_storage::rusqlite;
-use meguri_storage::{ReadRows, ReaderRole, Table};
+use meguri_storage::{ReadRows, ReaderRole, StampMode, Table};
 use meguri_testkit::bench::fixtures;
 
 const WAIT: Duration = Duration::from_secs(60);
@@ -1915,6 +1915,131 @@ fn suspend_marks_the_store_clean_and_resume_marks_it_in_use() {
     participant.flush().unwrap();
     assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
     opened.close();
+}
+
+/// A day-rollover write as the unbury makes it (U40): rows as given and
+/// `col.mod` left alone, so the store's mark does not move. Returns the
+/// op's seq.
+fn rollover_due(collection: &Collection, id: CardId, due: i64) -> Seq {
+    collection
+        .run(
+            OpSpec::named("unbury", OpSource::Rollover).stamp(StampMode::Raw),
+            move |ctx| {
+                let mut card = ctx.scope().card(id)?.expect("the card exists");
+                card.due = i32::try_from(due).unwrap();
+                ctx.scope().put(&card)?;
+                Ok(())
+            },
+        )
+        .unwrap()
+        .seq
+}
+
+/// The collection's `col.mod`.
+fn col_mod(collection: &Collection) -> i64 {
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    reader.col().unwrap().modified.0
+}
+
+/// Opens the collection with the mirror ready and one card, suspends the
+/// store (`clean` 1) and resumes it while its file cannot be written; then a
+/// rollover write gives the card due 2. Returns once the file can be
+/// written again.
+fn resume_failed_while_unwritable(path: &Path) -> (Opened, CardId) {
+    let opened = open(path);
+    opened.settle();
+    let id = add_cards(&opened.collection, &[1])[0];
+    opened.host.flush().unwrap();
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    let participant = opened.ports.suspend_participants[0].clone();
+    participant.suspend().unwrap();
+    assert_eq!(stamp_clean(&opened.collection), 1, "suspended clean");
+    let _ = opened.readiness_envelopes();
+
+    let lock = WriteLock::take(path);
+    assert!(
+        participant.resume().is_err(),
+        "a resume that could not write `clean` 0 succeeded"
+    );
+    let before = col_mod(&opened.collection);
+    rollover_due(&opened.collection, id, 2);
+    assert_eq!(col_mod(&opened.collection), before, "a rollover write moves no mark");
+    opened.host.flush().unwrap();
+    assert_eq!(opened.readiness(), Readiness::Stale);
+    assert_eq!(opened.host.path(), None, "the store is unbound");
+    drop(lock);
+    (opened, id)
+}
+
+/// After [`resume_failed_while_unwritable`] and a close: the file says
+/// `clean` 0, so the next open does not take the mirror's rows for fresh
+/// and repairs them (D5.2); the card's due is `due`.
+fn next_open_repairs(path: &Path, id: CardId, due: i64) {
+    assert_eq!(file_clean(path), 0, "the file still says clean");
+    let reopened = open(path);
+    reopened.settle();
+    assert_ne!(
+        (reopened.builds(), reopened.catch_ups()),
+        (0, 0),
+        "the store is not fresh"
+    );
+    assert_eq!(reopened.readiness(), Readiness::Ready);
+    let rows = mirrored(&reopened.collection);
+    assert!(rows.iter().any(|r| r.0 == id.0 && r.4 == due), "{rows:?}");
+    assert_eq!(rows, expected(&reopened.collection));
+    reopened.close();
+}
+
+#[test]
+fn a_failed_resume_unbinds_the_store_and_the_next_commit_marks_its_file_in_use() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let (opened, id) = resume_failed_while_unwritable(&path);
+    let later = rollover_due(&opened.collection, id, 3);
+    opened.settle();
+    // Before any close: a process killed now leaves a file the next open
+    // repairs.
+    assert_eq!(file_clean(&path), 0, "a commit left the file clean");
+    {
+        let lease = opened.collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        assert_eq!(snapshot.seq(), later);
+        assert!(!opened.host.is_current(MIRROR, &snapshot));
+    }
+    assert_eq!(opened.host.path(), None, "the store stays unbound");
+    opened.close();
+    next_open_repairs(&path, id, 3);
+}
+
+#[test]
+fn a_failed_resume_is_answered_once_the_file_says_it_is_in_use() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let (opened, id) = resume_failed_while_unwritable(&path);
+    let participant = opened.ports.suspend_participants[0].clone();
+    participant.resume().unwrap();
+    assert_eq!(file_clean(&path), 0, "a resume left the file clean");
+    assert_eq!(opened.host.path(), None, "the store stays unbound");
+    opened.close();
+    next_open_repairs(&path, id, 2);
+}
+
+#[test]
+fn a_store_suspended_again_after_a_failed_resume_leaves_its_file_in_use() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let (opened, id) = resume_failed_while_unwritable(&path);
+    let participant = opened.ports.suspend_participants[0].clone();
+    participant.suspend().unwrap();
+    assert_eq!(file_clean(&path), 0, "a suspend left the file clean");
+    participant.resume().unwrap();
+    opened.close();
+    next_open_repairs(&path, id, 2);
+}
+
+#[test]
+fn a_store_closed_after_a_failed_resume_leaves_its_file_in_use() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let (opened, id) = resume_failed_while_unwritable(&path);
+    opened.close();
+    next_open_repairs(&path, id, 2);
 }
 
 #[test]

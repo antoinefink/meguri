@@ -228,7 +228,9 @@ enum Msg {
     Invalidate(Invalidation),
     Flush(SyncSender<()>),
     Suspend(SyncSender<()>),
-    Resume(SyncSender<()>),
+    /// Answered once the file says the store is in use, or with why it
+    /// cannot (D11).
+    Resume(SyncSender<Result<(), EngineError>>),
     Close(SyncSender<()>),
 }
 
@@ -505,7 +507,8 @@ impl DerivedHost {
     /// Returns once every commit observed before the call is applied or
     /// kept by a refresh.
     pub fn flush(&self) -> Result<(), EngineError> {
-        ask(&self.sender, Msg::Flush)
+        let _ = ask(&self.sender, Msg::Flush);
+        Ok(())
     }
 
     /// Waits until everything sent before the call is handled and no refresh
@@ -541,12 +544,12 @@ impl DerivedHost {
     /// Applies what is pending, marks the store clean and closes it (D11).
     /// Call it after `Engine::close`.
     pub fn close(&self) -> Result<(), EngineError> {
-        let result = ask(&self.sender, Msg::Close);
+        let _ = ask(&self.sender, Msg::Close);
         let writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(writer) = writer {
             let _ = writer.join();
         }
-        result
+        Ok(())
     }
 }
 
@@ -558,15 +561,12 @@ impl Drop for DerivedHost {
     }
 }
 
-/// Sends a message with an acknowledgement and waits for it; a stopped
-/// writer counts as done.
-fn ask(sender: &Sender<Msg>, message: impl FnOnce(SyncSender<()>) -> Msg) -> Result<(), EngineError> {
-    let (ack, done) = mpsc::sync_channel(1);
-    if sender.send(message(ack)).is_err() {
-        return Ok(());
-    }
-    let _ = done.recv();
-    Ok(())
+/// Sends a message with an acknowledgement and waits for its answer;
+/// `None` once the writer has stopped, which counts as done.
+fn ask<T>(sender: &Sender<Msg>, message: impl FnOnce(SyncSender<T>) -> Msg) -> Option<T> {
+    let (ack, answer) = mpsc::sync_channel(1);
+    sender.send(message(ack)).ok()?;
+    answer.recv().ok()
 }
 
 /// The collection mark and the seq of one snapshot of `collection`.
@@ -698,15 +698,19 @@ impl SuspendParticipant for HostPort {
     }
 
     fn flush(&self) -> Result<(), EngineError> {
-        ask(&self.sender, Msg::Flush)
+        let _ = ask(&self.sender, Msg::Flush);
+        Ok(())
     }
 
     fn suspend(&self) -> Result<(), EngineError> {
-        ask(&self.sender, Msg::Suspend)
+        let _ = ask(&self.sender, Msg::Suspend);
+        Ok(())
     }
 
+    /// An error: the store could not record that it is in use, so it
+    /// unbound (D11).
     fn resume(&self) -> Result<(), EngineError> {
-        ask(&self.sender, Msg::Resume)
+        ask(&self.sender, Msg::Resume).unwrap_or(Ok(()))
     }
 }
 
@@ -847,6 +851,11 @@ struct Worker {
     /// Failed refreshes in a row, per component.
     failures: Vec<u32>,
     suspended: bool,
+    /// The last stamp this writer wrote says `clean` 1 (D11).
+    marked_clean: bool,
+    /// The file, let go of while it said `clean` 1: kept until it says
+    /// `clean` 0 (D11).
+    owed: Option<DerivedFile>,
     stop: bool,
 }
 
@@ -873,6 +882,8 @@ impl Worker {
             suspend_acks: Vec::new(),
             failures: vec![0; count],
             suspended: false,
+            marked_clean: false,
+            owed: None,
             stop: false,
         }
     }
@@ -906,6 +917,9 @@ impl Worker {
         match message {
             Msg::Bind { collection, mark, seq } => self.bind(collection, mark, seq),
             Msg::Commit(commit) => {
+                // Ops commit again: a file let go of while it said clean
+                // must say otherwise, whether the store applies them or not.
+                let _ = self.pay_unclean();
                 let mut batch = vec![commit];
                 // Several queued commits in one transaction.
                 while batch.len() < 256 {
@@ -941,6 +955,9 @@ impl Worker {
                 let _ = ack.send(());
             }
             Msg::Suspend(ack) => {
+                // A suspended process may be killed: the last chance of a
+                // file let go of while it said clean.
+                let _ = self.pay_unclean();
                 // The running refresh stops at its next batch; the writer
                 // goes on serving messages (refusing that refresh's batches)
                 // and answers once its builder let go of its snapshot.
@@ -950,9 +967,7 @@ impl Worker {
                 self.ack_suspend();
             }
             Msg::Resume(ack) => {
-                self.suspended = false;
-                self.mark_clean(false);
-                let _ = ack.send(());
+                let _ = ack.send(self.resume());
             }
             Msg::Close(ack) => {
                 self.close();
@@ -968,12 +983,30 @@ impl Worker {
         if self.suspend_acks.is_empty() || !self.builders.is_empty() {
             return;
         }
-        if self.suspended {
-            self.mark_clean(true);
+        if self.suspended
+            && let Err(error) = self.mark_clean(true)
+        {
+            tracing::warn!(%error, "writing the derived stamp");
         }
         for ack in self.suspend_acks.drain(..) {
             let _ = ack.send(());
         }
+    }
+
+    /// D11: the file says the store is in use again before ops commit. When
+    /// that cannot be written, it would pass the rows as fresh at the next
+    /// open while ops commit without reaching them (a `Raw` write moves no
+    /// mark, D5.2): the store unbinds, still owing `clean` 0, and the caller
+    /// gets the error.
+    fn resume(&mut self) -> Result<(), EngineError> {
+        self.suspended = false;
+        self.pay_unclean()?;
+        if let Err(error) = self.mark_clean(false) {
+            tracing::warn!(%error, "the derived store cannot record that it is in use");
+            self.unbind(None);
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// D5.
@@ -1045,6 +1078,9 @@ impl Worker {
         };
         self.epoch += 1;
         self.file = Some(file);
+        // The stamp says `clean` 0 now, whatever an earlier file owed.
+        self.marked_clean = false;
+        self.owed = None;
         self.collection = Some(collection.clone());
         self.generation = Some(collection.generation());
         self.bind_seq = seq;
@@ -1090,6 +1126,7 @@ impl Worker {
         let Some(file) = self.file.as_mut() else { return };
         let mut failed: Vec<(usize, Seq)> = Vec::new();
         let mut mark = self.mark;
+        let mut stamped = false;
         let result = (|| -> Result<(), EngineError> {
             let tx = file.begin()?;
             for commit in commits {
@@ -1133,6 +1170,7 @@ impl Worker {
                 && mark != self.mark.unwrap_or(mark)
             {
                 tx.set_stamp(&Stamp { mark, clean: false })?;
+                stamped = true;
             }
             tx.set_seq(held)?;
             tx.commit()?;
@@ -1141,6 +1179,9 @@ impl Worker {
         match result {
             Ok(()) => {
                 self.mark = mark;
+                if stamped {
+                    self.marked_clean = false;
+                }
                 for (slot, cause) in failed {
                     self.queue_refresh(slot, Kind::Rebuild, Some(cause));
                 }
@@ -1188,18 +1229,18 @@ impl Worker {
         Ok(())
     }
 
-    /// `ready` 0 could not be written: the file may still say `ready` 1 for
-    /// a component that misses commits, and any later stamp would make its
-    /// rows pass as current (D8) or, marked clean, fresh at the next open.
-    /// So nothing more is written to it, as after a crash: readers stop
-    /// attaching it and every component is `Stale` until the next bind
-    /// assesses it (D5.2) or a replacement empties it (D10).
+    /// `ready` 0 (or, at a resume, `clean` 0) could not be written: the file
+    /// may still say `ready` 1 for a component that misses commits, and any
+    /// later stamp would make its rows pass as current (D8) or, marked clean,
+    /// fresh at the next open. So nothing more is written to it, as after a
+    /// crash, but `clean` 0 when it says clean (D11): readers stop attaching
+    /// it and every component is `Stale` until the next bind assesses it
+    /// (D5.2) or a replacement empties it (D10).
     fn unbind(&mut self, cause: Option<Seq>) {
         // Its staging tables go at the next bind (D5.1).
         self.abort_running();
         self.queue.clear();
-        // Without a checkpoint: nothing more for a file that fails.
-        drop(self.file.take());
+        self.release_file();
         let mut state = self.shared.lock();
         state.bound = None;
         for slot in 0..self.slots.len() {
@@ -1208,6 +1249,46 @@ impl Worker {
             if let Some(generation) = self.generation {
                 self.shared
                     .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
+            }
+        }
+    }
+
+    /// Lets go of the file, without a checkpoint: nothing more for a file
+    /// that fails. One this writer marked clean is kept until it says
+    /// `clean` 0 (D11): until then, ops that commit without reaching it would
+    /// find its rows fresh at the next open.
+    fn release_file(&mut self) {
+        if let Some(file) = self.file.take()
+            && self.marked_clean
+        {
+            self.owed = Some(file);
+        }
+    }
+
+    /// Writes `clean` 0 into the file let go of while it said `clean` 1,
+    /// keeping its mark and `seq`, then lets go of it: the one write an
+    /// unbound file gets (D6, D11). An error while it is still owed.
+    fn pay_unclean(&mut self) -> Result<(), EngineError> {
+        let Some(file) = self.owed.as_mut() else {
+            return Ok(());
+        };
+        let written = (|| -> Result<(), EngineError> {
+            let tx = file.begin()?;
+            if let Some(stamp) = tx.stamp()? {
+                tx.set_stamp(&Stamp { clean: false, ..stamp })?;
+            }
+            tx.commit()?;
+            Ok(())
+        })();
+        match written {
+            Ok(()) => {
+                self.owed = None;
+                self.marked_clean = false;
+                Ok(())
+            }
+            Err(error) => {
+                tracing::warn!(%error, "the derived store's file cannot record that the collection is in use");
+                Err(error)
             }
         }
     }
@@ -1560,6 +1641,9 @@ impl Worker {
             Ok(())
         });
         let usable = matches!(reset, Some(Ok(()))) && mark.is_some();
+        if usable {
+            self.marked_clean = false;
+        }
         if let Some(Err(error)) = &reset {
             tracing::warn!(%error, "emptying the derived store after a replacement");
         }
@@ -1596,9 +1680,7 @@ impl Worker {
             // Nothing can be read through a store that does not describe the
             // new collection.
             drop(state);
-            if let Some(file) = self.file.take() {
-                let _ = file.close();
-            }
+            self.release_file();
         }
     }
 
@@ -1632,24 +1714,30 @@ impl Worker {
         }
     }
 
-    /// Writes `clean` and checkpoints (D11).
-    fn mark_clean(&mut self, clean: bool) {
-        let Some(mark) = self.mark else { return };
-        let Some(file) = self.file.as_mut() else { return };
-        let written = file.begin().and_then(|tx| {
-            tx.set_stamp(&Stamp { mark, clean })?;
-            tx.commit()
-        });
-        if let Err(error) = written {
-            tracing::warn!(%error, "writing the derived stamp");
-        } else if clean && let Err(error) = file.checkpoint() {
+    /// Writes `clean`, then checkpoints when clean (D11). Nothing to write
+    /// while the store is unbound: an unbound file is never marked clean.
+    fn mark_clean(&mut self, clean: bool) -> Result<(), EngineError> {
+        let (Some(mark), Some(file)) = (self.mark, self.file.as_mut()) else {
+            return Ok(());
+        };
+        let tx = file.begin()?;
+        tx.set_stamp(&Stamp { mark, clean })?;
+        tx.commit()?;
+        if clean && let Err(error) = file.checkpoint() {
             tracing::warn!(%error, "checkpointing the derived store");
         }
+        self.marked_clean = clean;
+        Ok(())
     }
 
     fn close(&mut self) {
+        // The last chance of a file let go of while it said clean.
+        let _ = self.pay_unclean();
+        self.owed = None;
         self.requeue_running();
-        self.mark_clean(true);
+        if let Err(error) = self.mark_clean(true) {
+            tracing::warn!(%error, "writing the derived stamp");
+        }
         if let Some(file) = self.file.take()
             && let Err(error) = file.close()
         {
