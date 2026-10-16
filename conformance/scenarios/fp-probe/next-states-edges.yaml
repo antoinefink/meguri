@@ -1,0 +1,54 @@
+# FSRS next states of review cards at the edges of the probe ranges
+# (specs/conformance/float-determinism.md F2.2, F5). Input 4 is the review
+# card of smoke/fsrs-new-card step 6, so its row must equal that golden's
+# next states. Parameter sets as in corpora/fp-probe/generate.py.
+id: fp-probe/next-states-edges
+tags: [clock-free]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - fsrs_next:
+          param_sets:
+            default: []
+            fsrs4-a: [0.5512, 1.3904, 4.2051, 11.3107, 5.2209, 1.1503, 0.9102, 0.0405, 1.5903, 0.1407, 0.9908, 2.0511, 0.0802, 0.3311, 1.5102, 0.2304, 2.7509]
+            fsrs5-a: [0.3891, 1.2207, 3.3014, 14.9056, 7.1213, 0.5502, 1.1024, 0.0201, 1.5809, 0.1611, 1.0457, 1.9102, 0.0899, 0.3108, 2.1503, 0.2602, 2.8104, 0.4703, 0.6012]
+            fsrs6-a: [0.1544, 0.8813, 2.9105, 11.2071, 6.8114, 0.7103, 2.6541, 0.0052, 1.6812, 0.1801, 0.8724, 1.5932, 0.0712, 0.2891, 1.7524, 0.5103, 2.0542, 0.4817, 0.1123, 0.0841, 0.1305]
+            fsrs6-b: [0.3105, 1.6012, 3.4407, 9.8016, 7.3402, 0.9105, 3.4012, 0.0201, 1.4307, 0.2205, 1.1043, 1.8124, 0.0911, 0.3302, 2.0105, 0.4502, 2.2018, 0.6203, 0.0742, 0.1204, 0.3412]
+            fsrs6-c: [0.0821, 0.5501, 4.8302, 25.6011, 5.9203, 0.6012, 1.9501, 0.0013, 2.1204, 0.1402, 0.7105, 1.2203, 0.0503, 0.2204, 1.3302, 0.6801, 2.8805, 0.3501, 0.2402, 0.0405, 0.6003]
+          inputs:
+            # Smallest and largest stability and difficulty.
+            - {id: 0, card_id: 1700000000000, reps: 1, s: 0.001, d: 1.0, elapsed_days: 0, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}
+            - {id: 1, card_id: 1700000000001, reps: 3, s: 0.001, d: 10.0, elapsed_days: 1, scheduled_days: 1, dr: 0.7, params: default, max_ivl: 36500}
+            - {id: 2, card_id: 1700000000002, reps: 40, s: 36500.0, d: 1.0, elapsed_days: 20000, scheduled_days: 36500, dr: 0.9, params: default, max_ivl: 36500}
+            - {id: 3, card_id: 1700000000003, reps: 41, s: 36500.0, d: 10.0, elapsed_days: 0, scheduled_days: 36500, dr: 0.99, params: default, max_ivl: 36500}
+            # smoke/fsrs-new-card step 6: same card id, reps, memory state and preset.
+            - {id: 4, card_id: 1894698000000, reps: 2, s: 2.3065, d: 2.111, elapsed_days: 3, scheduled_days: 2, dr: 0.9, params: default, max_ivl: 36500}
+            # Maximum interval 1: every interval is 1 day.
+            - {id: 5, card_id: 1700000000005, reps: 9, s: 10.0, d: 5.0, elapsed_days: 10, scheduled_days: 10, dr: 0.9, params: default, max_ivl: 1}
+            # Current interval above the maximum interval.
+            - {id: 6, card_id: 1700000000006, reps: 12, s: 100.0, d: 5.0, elapsed_days: 100, scheduled_days: 100, dr: 0.9, params: default, max_ivl: 30}
+            # Interval shrank far below the current one: no minimum (sched/fuzz Z5 rule 4).
+            - {id: 7, card_id: 1700000000007, reps: 15, s: 50.0, d: 5.0, elapsed_days: 50, scheduled_days: 400, dr: 0.9, params: default, max_ivl: 36500}
+            # Reviewed again on the same day (short-term stability).
+            - {id: 8, card_id: 1700000000008, reps: 2, s: 0.5, d: 8.0, elapsed_days: 0, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}
+            - {id: 9, card_id: 1700000000009, reps: 6, s: 4.0, d: 3.0, elapsed_days: 4, scheduled_days: 3, dr: 0.95, params: default, max_ivl: 36500}
+            # One input per parameter set.
+            - {id: 10, card_id: 1700000000010, reps: 8, s: 20.0, d: 4.5, elapsed_days: 25, scheduled_days: 20, dr: 0.85, params: fsrs6-a, max_ivl: 36500}
+            - {id: 11, card_id: 1700000000011, reps: 7, s: 3.5, d: 7.25, elapsed_days: 2, scheduled_days: 4, dr: 0.8, params: fsrs6-b, max_ivl: 36500}
+            - {id: 12, card_id: 1700000000012, reps: 20, s: 400.0, d: 2.0, elapsed_days: 600, scheduled_days: 365, dr: 0.9, params: fsrs6-c, max_ivl: 3650}
+            - {id: 13, card_id: 1700000000013, reps: 11, s: 12.5, d: 6.0, elapsed_days: 14, scheduled_days: 12, dr: 0.9, params: fsrs5-a, max_ivl: 36500}
+            - {id: 14, card_id: 1700000000014, reps: 10, s: 7.75, d: 5.5, elapsed_days: 8, scheduled_days: 7, dr: 0.9, params: fsrs4-a, max_ivl: 36500}
+            # Very late and very early reviews.
+            - {id: 15, card_id: 1700000000015, reps: 5, s: 5.0, d: 5.0, elapsed_days: 500, scheduled_days: 5, dr: 0.9, params: default, max_ivl: 36500}
+            - {id: 16, card_id: 1700000000016, reps: 14, s: 30.0, d: 5.0, elapsed_days: 3, scheduled_days: 30, dr: 0.9, params: default, max_ivl: 36500}
+            # Smallest and largest card ids and review counts (fuzz seeds).
+            - {id: 17, card_id: 1, reps: 0, s: 15.0, d: 5.0, elapsed_days: 15, scheduled_days: 15, dr: 0.9, params: default, max_ivl: 36500}
+            - {id: 18, card_id: 9007199254740991, reps: 4294967294, s: 15.0, d: 5.0, elapsed_days: 15, scheduled_days: 15, dr: 0.9, params: default, max_ivl: 36500}
+            # Lowest and highest desired retention.
+            - {id: 19, card_id: 1700000000019, reps: 4, s: 1.0, d: 1.0, elapsed_days: 1, scheduled_days: 1, dr: 0.7, params: fsrs6-a, max_ivl: 36500}
+            - {id: 20, card_id: 1700000000020, reps: 30, s: 1000.0, d: 9.5, elapsed_days: 900, scheduled_days: 1000, dr: 0.99, params: fsrs6-c, max_ivl: 36500}
+            # Same-day reviews with the filled parameter forms.
+            - {id: 21, card_id: 1700000000021, reps: 3, s: 2.0, d: 9.0, elapsed_days: 0, scheduled_days: 2, dr: 0.9, params: fsrs5-a, max_ivl: 36500}
+            - {id: 22, card_id: 1700000000022, reps: 2, s: 0.1, d: 3.0, elapsed_days: 0, scheduled_days: 1, dr: 0.9, params: fsrs4-a, max_ivl: 36500}
+            # An unrounded interval near the start of fuzz (2.5 days).
+            - {id: 23, card_id: 1700000000023, reps: 4, s: 2.5, d: 5.0, elapsed_days: 2, scheduled_days: 2, dr: 0.9, params: default, max_ivl: 36500}

@@ -1,0 +1,48 @@
+# Special fields of a note and card not yet added (specs/render/special-fields.md
+# P2-P5, R955, R960): every value, the default template name, emptiness in
+# sections, FrontSide on both sides and with filters, and note fields named like
+# specials, which win except over FrontSide in a replacement.
+id: render/special-fields/new-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Lang Probe, fields: [Front, Back]}
+          cases:
+            - front: "{{Front}}|{{Tags}}|{{Type}}|{{Deck}}|{{Subdeck}}|{{Card}}|{{CardFlag}}|{{CardID}}|{{c1}}"
+              name: Recognition
+              fields: [neko, cat]
+              tags: [animal, jlpt-n5]
+            - {front: "{{Front}}|{{Card}}|{{c3}}", ord: 2, fields: [neko, cat]}
+            - {front: "{{Front}}|{{Tags}}", fields: [neko, cat], tags: [zeta, alpha, "日本語", "a::b"]}
+            - front: "{{Front}}|{{#Tags}}T{{/Tags}}{{^Tags}}-{{/Tags}}{{#Type}}Y{{/Type}}{{#Deck}}D{{/Deck}}{{#Subdeck}}S{{/Subdeck}}{{#Card}}C{{/Card}}{{#CardFlag}}F{{/CardFlag}}{{^CardFlag}}-{{/CardFlag}}{{#CardID}}I{{/CardID}}{{#c1}}1{{/c1}}"
+              fields: [neko, cat]
+            - front: "{{Front}}|{{#Tags}}T{{/Tags}}{{^Tags}}-{{/Tags}}"
+              fields: [neko, cat]
+              tags: [animal]
+            - front: "Q:{{Front}}[{{FrontSide}}][{{text:FrontSide}}]"
+              back: "A:{{FrontSide}}|{{type:FrontSide}}|{{hint:FrontSide}}|{{unknown:FrontSide}}|{{Back}}"
+              fields: ["<b>neko</b>", cat]
+            - {front: "{{Front}}", back: "{{FrontSide}}{{FrontSide}}", fields: [neko, cat]}
+            - {front: "{{Front}}{{#FrontSide}}x{{/FrontSide}}", fields: [neko, cat]}
+            - {front: "{{Front}}", back: "{{^FrontSide}}x{{/FrontSide}}", fields: [neko, cat]}
+            - {front: "{{tags}}", fields: [neko, cat]}
+  - observe:
+      - template:
+          notetype: {name: Shadow Probe, fields: [Front, Tags, FrontSide, c1, Type, Deck, CardFlag]}
+          cases:
+            - front: "{{Front}}|{{Tags}}|{{FrontSide}}|{{c1}}|{{Type}}|{{Deck}}|{{CardFlag}}|{{Subdeck}}|{{Card}}"
+              back: "{{FrontSide}}"
+              fields: [f, "", real front side, "", real type, real deck, ""]
+              tags: [t1]
+            - front: "{{Front}}|{{#Tags}}T{{/Tags}}{{^Tags}}-{{/Tags}}|{{#c1}}C{{/c1}}{{^c1}}-{{/c1}}|{{#FrontSide}}FS{{/FrontSide}}|{{#CardFlag}}F{{/CardFlag}}{{^CardFlag}}-{{/CardFlag}}"
+              fields: [f, "", real front side, "", real type, real deck, ""]
+              tags: [t1]
+            - front: "{{Front}}|{{c2}}|{{#c1}}C1{{/c1}}{{^c1}}-{{/c1}}|{{#c2}}C2{{/c2}}"
+              ord: 1
+              fields: [f, x, y, "", z]
+            - front: "{{Front}}|{{c1}}|{{#c1}}C1{{/c1}}"
+              fields: [f, x, y, "<br>", z]
+            - front: "{{Front}}|{{c1}}|{{#c1}}C1{{/c1}}"
+              fields: [f, x, y, "one", z]
+            - {front: "{{FrontSide}}", back: "{{Front}}", fields: [f, x, real front side]}
