@@ -95,3 +95,15 @@ deviations:
     scenarios: [notetypes/records/preserve-on-edit]
     pointer: /steps/7/db_exec/rows
     transform: {replace: [[1, 1, 1]]}
+  # specs/conformance/float-determinism.md F8, F9 (KTD24): Meguri uses the
+  # platform math library, as Anki does. On macOS the expected FSRS next-state
+  # values come from the Apple oracle's overlay (conformance/goldens-apple/)
+  # where it differs from the Linux golden inside this class; on Linux the
+  # transform does nothing.
+  - id: fp-libm-boundary
+    requirement: R1889
+    summary: On macOS, an FSRS next-state interval may differ from the Linux oracle's golden by one day at a rounding boundary, a stability by up to relative 1e-4 or 1e-5 days, and a difficulty by up to relative 1e-5, as Anki on macOS does; the runner expects the Apple oracle's value there.
+    test: core/crates/meguri-testkit/tests/overlay.rs overlay_applies_on_macos_only
+    scenarios: ["*"]
+    pointer: /steps/*
+    transform: {apple_overlay: true}
