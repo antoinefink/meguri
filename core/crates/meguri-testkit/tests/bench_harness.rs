@@ -144,7 +144,17 @@ fn the_memory_sampler_sees_touched_pages_while_they_live() {
     std::thread::sleep(Duration::from_millis(50));
     drop(block);
     let peak = sampler.stop();
-    assert!(peak >= base + (60 << 20), "peak {peak}, base {base}");
+    // The lock ends with a test's body, not with its libtest thread. Under
+    // `cargo test` the thread of the 10k open bench can still release about
+    // 35 MB as it exits while this test measures, so `base` may count memory
+    // that is gone by the peak. The footprint once the block is freed is the
+    // other reading without the block; the peak must clear the lower one.
+    let after = memory::process_footprint_bytes().expect("this platform reports a footprint");
+    let without_block = base.min(after);
+    assert!(
+        peak >= without_block + (60 << 20),
+        "peak {peak}, base {base}, after {after}"
+    );
 }
 
 fn rows<'a>(doc: &'a Value, name: &str, metric: &str) -> Vec<&'a Value> {
