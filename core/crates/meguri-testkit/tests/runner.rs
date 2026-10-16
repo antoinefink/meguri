@@ -328,7 +328,7 @@ fn a_scenario_with_an_op_meguri_lacks_is_pending_and_t0_still_passes() {
 fn search_differences_pass_only_under_a_deviation_entry() {
     let dir = tree();
     let root = dir.path();
-    let scenario = "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: {query: \"über\"}}]\n";
+    let scenario = "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: [{query: \"über\"}]}]\n";
     write(root, "scenarios/search/folding/umlaut.yaml", scenario);
     write(
         root,
@@ -338,9 +338,9 @@ fn search_differences_pass_only_under_a_deviation_entry() {
     golden_for(
         root,
         "search/folding/umlaut",
-        json!({"steps": [{"search": {"ids": ["#n1"]}}]}),
+        json!({"steps": [{"search": [{"ids": ["#n1"]}]}]}),
     );
-    let meguri = Canned(json!({"steps": [{"search": {"ids": ["#n1", "#n2"]}}]}));
+    let meguri = Canned(json!({"steps": [{"search": [{"ids": ["#n1", "#n2"]}]}]}));
 
     let report = Suite::open(root).unwrap().run(&[], &meguri, "test");
     assert_eq!(report.outcomes[0].status, Status::Fail);
@@ -348,7 +348,7 @@ fn search_differences_pass_only_under_a_deviation_entry() {
     write(
         root,
         "deviations.yaml",
-        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
+        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/*/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
     );
     let report = Suite::open(root).unwrap().run(&[], &meguri, "test");
     assert_eq!(report.outcomes[0].status, Status::Pass);
@@ -729,23 +729,23 @@ fn deviations_apply_to_meguri_comparisons_and_not_to_oracle_replays() {
     write(
         root,
         "scenarios/search/folding/umlaut.yaml",
-        "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: {query: \"über\"}}]\n",
+        "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: [{query: \"über\"}]}]\n",
     );
     write(
         root,
         "scenarios/search/area.yaml",
         "area: search\nactive: [folding/*]\n",
     );
-    let oracle_says = json!({"steps": [{"search": {"ids": ["#n1"]}}]});
+    let oracle_says = json!({"steps": [{"search": [{"ids": ["#n1"]}]}]});
     golden_for(root, "search/folding/umlaut", oracle_says.clone());
     write(
         root,
         "deviations.yaml",
-        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
+        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/*/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
     );
     let suite = Suite::open(root).unwrap();
     // T0: Meguri's deliberate difference passes under the entry.
-    let meguri_says = Canned(json!({"steps": [{"search": {"ids": ["#n1", "#n2"]}}]}));
+    let meguri_says = Canned(json!({"steps": [{"search": [{"ids": ["#n1", "#n2"]}]}]}));
     let t0 = suite.run(&[], &meguri_says, "test");
     assert_eq!(t0.outcomes[0].status, Status::Pass, "{}", t0.render_text());
     // T1: the oracle still reproduces its golden, untransformed.

@@ -1105,7 +1105,10 @@ pub enum ObservationKind {
     Render,
     /// render-ops.md Q1.
     Template,
+    /// search-ops.md S1.
     Search,
+    /// search-ops.md S2.
+    CanonicalSearch,
     DbDump,
     /// storage-ops.md P3.
     SchemaObjects,
@@ -1134,10 +1137,12 @@ pub(super) enum ArgShape {
     Mapping,
     /// No arguments or a mapping.
     OptionalMapping,
+    /// A required non-empty list of values that are not references.
+    List,
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 22] = [
+    pub const ALL: [ObservationKind; 23] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1150,6 +1155,7 @@ impl ObservationKind {
         ObservationKind::Render,
         ObservationKind::Template,
         ObservationKind::Search,
+        ObservationKind::CanonicalSearch,
         ObservationKind::DbDump,
         ObservationKind::SchemaObjects,
         ObservationKind::Stats,
@@ -1176,6 +1182,7 @@ impl ObservationKind {
             ObservationKind::Render => "render",
             ObservationKind::Template => "template",
             ObservationKind::Search => "search",
+            ObservationKind::CanonicalSearch => "canonical_search",
             ObservationKind::DbDump => "db_dump",
             ObservationKind::SchemaObjects => "schema_objects",
             ObservationKind::Stats => "stats",
@@ -1205,7 +1212,6 @@ impl ObservationKind {
             }
             ObservationKind::FuzzTable
             | ObservationKind::NetProbe
-            | ObservationKind::Search
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
@@ -1214,6 +1220,7 @@ impl ObservationKind {
             | ObservationKind::Cloze
             | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
+            ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }
 }
@@ -1225,6 +1232,8 @@ pub enum ObservationArgs {
     None,
     Refs(Vec<LogicalRef>),
     Mapping(Map<String, Value>),
+    /// The items of a kind that takes a list (`search`, `canonical_search`).
+    List(Vec<Value>),
 }
 
 /// One entry of an `observe` list (observations.md O2).
@@ -1277,6 +1286,7 @@ impl ObservationRequest {
             Value::Object(map) => ObservationArgs::Mapping(map),
             // `{ids: []}` is every id, like `ids`; a card list is never empty.
             Value::Array(items) if items.is_empty() && kind.shape() == ArgShape::AnyRefs => ObservationArgs::None,
+            Value::Array(items) if kind.shape() == ArgShape::List => ObservationArgs::List(items),
             Value::Array(items) if items.is_empty() => {
                 return Err(FormatError::new(format!(
                     "observation {name} needs at least one reference"
@@ -1299,10 +1309,11 @@ impl ObservationRequest {
     fn checked(kind: ObservationKind, args: ObservationArgs) -> Result<ObservationRequest, FormatError> {
         let name = kind.name();
         let ok = match (kind.shape(), &args) {
-            (_, ObservationArgs::None) => !matches!(kind.shape(), ArgShape::Mapping),
+            (_, ObservationArgs::None) => !matches!(kind.shape(), ArgShape::Mapping | ArgShape::List),
             (ArgShape::AnyRefs, ObservationArgs::Refs(_)) => true,
             (ArgShape::CardRefs, ObservationArgs::Refs(refs)) => refs.iter().all(|r| r.kind == RefKind::Card),
             (ArgShape::Mapping | ArgShape::OptionalMapping, ObservationArgs::Mapping(_)) => true,
+            (ArgShape::List, ObservationArgs::List(_)) => true,
             _ => false,
         };
         if !ok {
@@ -1310,8 +1321,10 @@ impl ObservationRequest {
                 "observation {name} does not take these arguments"
             )));
         }
-        if let ObservationArgs::Mapping(map) = &args {
-            super::validate::observation_mapping(kind, map)?;
+        match &args {
+            ObservationArgs::Mapping(map) => super::validate::observation_mapping(kind, map)?,
+            ObservationArgs::List(items) => super::validate::observation_list(kind, items)?,
+            ObservationArgs::None | ObservationArgs::Refs(_) => {}
         }
         Ok(ObservationRequest { kind, args })
     }
@@ -1319,6 +1332,77 @@ impl ObservationRequest {
 
 fn unknown_kind(name: &str) -> FormatError {
     FormatError::new(format!("unknown observation kind {name:?}"))
+}
+
+/// The mode of one `search` request (search-ops.md S1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SearchKind {
+    Cards,
+    Notes,
+}
+
+/// One request of a `search` observation: `{query, kind?}`, `kind` cards when
+/// missing (search-ops.md S1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchRequest {
+    pub query: String,
+    pub kind: SearchKind,
+}
+
+impl SearchRequest {
+    /// Reads a `search` list with scenario.schema.json's rules: at least one
+    /// request, each exactly `query` (a string) and an optional `kind`.
+    pub fn from_list(items: &[Value]) -> Result<Vec<SearchRequest>, FormatError> {
+        let bad = |why: String| FormatError::new(format!("observation search: {why}"));
+        if items.is_empty() {
+            return Err(bad("needs at least one request".to_owned()));
+        }
+        items
+            .iter()
+            .enumerate()
+            .map(|(k, item)| {
+                let map = item
+                    .as_object()
+                    .ok_or_else(|| bad(format!("request {k} is a {{query, kind?}} mapping")))?;
+                if let Some(key) = map.keys().find(|key| !matches!(key.as_str(), "query" | "kind")) {
+                    return Err(bad(format!("request {k} takes {{query, kind?}}, not {key:?}")));
+                }
+                let query = map
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| bad(format!("request {k} needs a query string")))?;
+                let kind = match map.get("kind") {
+                    None => SearchKind::Cards,
+                    Some(kind) => match kind.as_str() {
+                        Some("cards") => SearchKind::Cards,
+                        Some("notes") => SearchKind::Notes,
+                        _ => return Err(bad(format!("request {k}: kind is cards or notes"))),
+                    },
+                };
+                Ok(SearchRequest {
+                    query: query.to_owned(),
+                    kind,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Reads a `canonical_search` list (search-ops.md S2): at least one search
+/// text, every item a string.
+pub fn canonical_search_texts(items: &[Value]) -> Result<Vec<String>, FormatError> {
+    let bad = |why: &str| FormatError::new(format!("observation canonical_search: {why}"));
+    if items.is_empty() {
+        return Err(bad("needs at least one search text"));
+    }
+    items
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| bad("every item is a string"))
+        })
+        .collect()
 }
 
 /// The functions of the `text` kind (observations.md O9).
