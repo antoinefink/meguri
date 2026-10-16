@@ -92,4 +92,5 @@ Registration tells a changed file by its modification time (Anki compares whole 
 ## F13. Driver and executor status
 
 - The oracle driver has the setup section, the five ops and the three observations (U31's oracle step), and `conformance/goldens/media/` holds their goldens. They are stable in `dsl.md` D6.8 and D7.2 and `observations.md` O4.
+- The goldens are the Linux oracle's, whose volume is case-sensitive. The native macOS oracle (`float-determinism.md`) runs on a case-insensitive volume, where Anki names case variants differently (`media/media-files#M14`): `tools/mg oracle compare --platform apple media` fails 7 of the 13 scenarios by design. These are not floating-point differences (R1889), so media scenarios get no overlays: never record them with `--platform apple`.
 - Meguri's executor needs the testkit model (`core/crates/meguri-testkit/src/scenario/`) and a media adapter (U31's implementer step). Until the model reads them, T0 reports the media scenarios as `invalid`; until the adapter runs them, `pending`.

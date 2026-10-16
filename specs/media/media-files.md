@@ -58,7 +58,7 @@ The path for every new file whose name Meguri chooses: the editor's attach and p
 
 Row a is the same-content dedupe, case-insensitive (R980, R984, R1570): `Photo.JPG` finds `photo.jpg` with the same bytes and stores nothing. Row b lowercases new names (R981) and leaves existing mixed-case files alone. Row c never overwrites (R982, R1570).
 
-When every present file's name equals its own case key (a folder written only by this path, the normal case), these rules choose exactly Anki's names, also on a case-sensitive volume. M14 lists where they differ from Anki for folders holding mixed-case names.
+When every present file's name equals its own case key (a folder written only by this path, the normal case), these rules choose exactly the names Anki chooses on a case-sensitive volume, the Linux oracle's. M14 lists where they differ from it for folders holding mixed-case names, and where Anki on a case-insensitive volume differs.
 
 Examples (A and B are two different contents, `<A>` and `<B>` their content hashes):
 
@@ -243,7 +243,7 @@ Editor attachments outside a note transaction are written at once; a file whose 
 
 ## M14. Differences from Anki
 
-Anki 26.09.3 decides with the files of the volume it runs on, so on a case-sensitive volume (the oracle's) it keeps case variants apart, and on a case-insensitive one it returns the spelling it was given rather than the file's. Meguri treats names case-insensitively everywhere (R984, R1570) and keeps every trashed version (R2018). Where a golden records the difference, `conformance/deviations.yaml` holds it:
+Anki 26.09.3 decides with the files of the volume it runs on, so on a case-sensitive volume (the Linux oracle's, which records the goldens) it keeps case variants apart, and on a case-insensitive one it returns the spelling it was given rather than the file's. Meguri treats names case-insensitively everywhere (R984, R1570) and keeps every trashed version (R2018). Where a golden records the difference, `conformance/deviations.yaml` holds it:
 
 | Situation | Anki (case-sensitive volume) | Meguri | Deviation |
 |---|---|---|---|
@@ -261,6 +261,13 @@ Differences no golden records, because Anki fails or the scenario vocabulary avo
 - Trashing a list in which a name has no file: Anki stops moving files at that name, yet marks every listed name it records as deleted, moved or not; Meguri handles each name on its own.
 - Trashing an outside file that no registration has seen yet: Anki records no deletion; Meguri registers first (M7.3), so it records one.
 - With two case variants both present (case-sensitive volume) and the bytes matching one that is neither N nor L: Anki writes a hash name; Meguri reuses that file (M3 row a).
+
+On a case-insensitive volume (the native macOS oracle of `conformance/float-determinism`, on APFS), Anki agrees with Meguri where a case variant holds other bytes: an add writes the hash name of the lowercase candidate (`MixedCase.png` present, other bytes added as `MixedCase.png` → `mixedcase-<B>.png`), and a restore whose name a case variant holds adds the hash name (`media-restore-case-variant` gives exactly Anki's folder and pending entries there). Where a case variant holds the same bytes, Anki differs from both Meguri and its Linux self:
+
+- it returns the spelling it was given (`Photo.JPG` for a present `photo.jpg`, `mixedcase.png` and `MIXEDCASE.PNG` for `MixedCase.png`, `Ǆ.png` for `ǆ.png`) and writes nothing, so the field holds a name that only a case-insensitive volume resolves;
+- the next media sync would send a deletion for each such spelling, since the folder lists the file under its own name only.
+
+Meguri returns the file's own name and records nothing (M3 row a, M11), on every volume. Seven of the thirteen media scenarios differ on that oracle for these reasons; the goldens stay the Linux oracle's (`conformance/media-ops#F13`).
 
 ## M15. Scenarios
 
