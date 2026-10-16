@@ -8,9 +8,9 @@ import SwiftUI
 /// positions and an open review (R5). Neither layout writes the state just by
 /// reading it.
 ///
-/// - The current `section` and, in the Home section, the `selectedDeck`
-///   whose page is shown: the sidebar layout shows that page as the Home
-///   section's root, the tab layout pushes it on the Decks tab.
+/// - The current `section` and the `selectedDeck`, whose page the Home
+///   section shows: the sidebar layout as the Home section's root, the tab
+///   layout pushed on the Decks tab. Another section keeps the deck selected.
 /// - One stack per section (R19), `path(_:)`.
 /// - The open sheet (R25) and the review (R21–R23).
 /// - The sidebar's visibility (R20) and per-screen scroll positions.
@@ -19,7 +19,8 @@ import SwiftUI
 @Observable
 public final class AppNavigation {
     public private(set) var section: AppSection = .home
-    /// The deck whose page is open in the Home section, if any.
+    /// The deck whose page the Home section shows, if any. It stays selected
+    /// while another section is shown.
     public private(set) var selectedDeck: DeckID?
     public var sheet: SheetRoute?
     public private(set) var review: ReviewPresentation?
@@ -48,7 +49,7 @@ public final class AppNavigation {
     /// `adoptLaunchLayout(_:)` once the first layout is known.
     public init(restoring state: UIState) {
         section = state.section
-        selectedDeck = state.section == .home ? state.selectedDeck : nil
+        selectedDeck = state.selectedDeck
         restoredDeckPagePending = selectedDeck != nil
         if state.section.tab == .settings {
             settingsTabSection = state.section
@@ -255,7 +256,7 @@ public final class AppNavigation {
     public var uiState: UIState {
         UIState(
             section: section,
-            selectedDeck: section == .home ? selectedDeck : nil,
+            selectedDeck: selectedDeck,
             sidebarVisible: (columnVisibilityBeforeReview ?? columnVisibility) != .detailOnly
         )
     }

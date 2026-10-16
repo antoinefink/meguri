@@ -1,10 +1,10 @@
 import Foundation
 
 /// The UI state a relaunch restores (R12, R13, R20): the last section, the
-/// deck whose page was open, and whether the sidebar was shown. Never a
-/// review: R455's resume after a termination is the review session's own
-/// (U175). The Mac window's frame, full-screen state and sidebar width are
-/// the `Window` scene's restoration (R12).
+/// selected deck (whatever the section) and whether the sidebar was shown.
+/// Never a review: R455's resume after a termination is the review
+/// session's own (U175). The Mac window's frame, full-screen state and
+/// sidebar width are the `Window` scene's restoration (R12).
 nonisolated public struct UIState: Codable, Equatable, Sendable {
     public var section: AppSection
     public var selectedDeck: DeckID?

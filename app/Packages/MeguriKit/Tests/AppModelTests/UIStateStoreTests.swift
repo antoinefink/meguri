@@ -105,6 +105,33 @@ import AppModel
         #expect(sidebar.sidebarSelection == .section(.noteTypes))
     }
 
+    /// The selected deck outlives a move to another section (R5), so a
+    /// relaunch restores it too (R13): the sidebar layout opens on Browse
+    /// with the deck still selected, as the app was left.
+    @Test func aRelaunchFromAnotherSectionKeepsTheSelectedDeck() throws {
+        let scratch = try ScratchDefaults()
+        let store = UIStateStore(defaults: scratch.defaults)
+        let navigation = AppNavigation()
+        navigation.openDeckPage(deck)
+        navigation.select(.section(.browse))
+        #expect(navigation.selectedDeck == deck)
+
+        let sidebar = relaunch(navigation, through: store)
+        sidebar.adoptLaunchLayout(.sidebar)
+        #expect(sidebar.section == .browse)
+        #expect(sidebar.sidebarSelection == .section(.browse))
+        #expect(sidebar.selectedDeck == deck)
+        // As before the relaunch: the tab layout's Decks tab holds its page.
+        #expect(sidebar.compactPath(.decks) == [.deckPage(deck)])
+
+        // The tab layout opens on Home in the Decks tab, not the deck page.
+        let compact = relaunch(navigation, through: store)
+        compact.adoptLaunchLayout(.compact)
+        #expect(compact.section == .browse)
+        #expect(compact.compactPath(.decks).isEmpty)
+        #expect(compact.selectedDeck == nil)
+    }
+
     @Test func quittingMidReviewDoesNotRelaunchIntoTheReview() throws {
         let scratch = try ScratchDefaults()
         let store = UIStateStore(defaults: scratch.defaults)
