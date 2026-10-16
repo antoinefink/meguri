@@ -1,7 +1,7 @@
 # Browser and search configuration keys
 
 Spec: browser/config-keys
-Requirements: R1115, R1134, R1135, R1137, R1138, R1141, R1265, R1266, R1267, R1038, R1196, R1198; supports R1037, R1112, R1133, R1139, R1146, R1157, R1171, R1172, R1173, R1218, R2020
+Requirements: R1115, R1134, R1135, R1137, R1138, R1141, R1265, R1266, R1267, R1038, R1196, R1198; supports R42, R366, R725, R1037, R1112, R1133, R1139, R1146, R1157, R1171, R1172, R1173, R1218, R2020
 Anki: 26.09.3
 Scenarios: conformance/scenarios/browser/config/
 
@@ -280,15 +280,18 @@ The shape, the shown names and the Rename Flag and Restore Default Name writes a
 
 ### K10.2 Undo
 
+The undo classes are U25's. The plan reads R42 with R366 and R725 this way: only the current-deck selection is a write that neither records nor clears undo; every other write the user cannot undo clears the whole undo and redo history.
+
 | Keys and writes | Anki | Meguri |
 |---|---|---|
-| `browserTableShowNotesMode`, `activeCols`, `activeNoteCols`, the four sort keys, the `collapse*` keys, `previewBothSides` | no undo step; earlier undo steps stay undoable; redo steps are dropped | no undo entry; earlier undo entries stay undoable (U25's skip-undo class, the one the current-deck selection uses, R42) |
-| `defaultSearchText`, `ignoreAccentsInSearch` | saved by the preferences dialog together with the other preferences, as one undoable step | written by Settings › Browse, with the undo class of Settings writes (U25) |
+| `browserTableShowNotesMode`, `activeCols`, `activeNoteCols`, the four sort keys, the `collapse*` keys, `previewBothSides` | no undo step; earlier undo steps stay undoable; redo steps are dropped | non-undoable writes (op source `UserNonUndoable`): no undo entry, and a write that changes the key clears the undo and redo history (reason `ClearedByNonUndoableOp`) |
+| `defaultSearchText`, `ignoreAccentsInSearch` | saved by the preferences dialog together with the other preferences, as one undoable step | written by Settings › Browse like every Settings write (`UserNonUndoable`): no undo entry, and the history is cleared when the key changes |
 | `savedFilters` | no undo step, as the first row | one undoable entry per write, named "Save Search", "Update Saved Search", "Rename Saved Search" or "Delete Saved Search" (R2020); a write that changes nothing makes no entry |
 | `flagLabels` | no undo step, as the first row | "Rename Flag" (`tags/flags-and-marked` F4) |
 | `setDueBrowser`, `restorePositionBrowser`, `resetCountsBrowser` | inside the Set Due Date or Reset step, undone with it | the same (U48, U87) |
 
-A write that clears the whole undo history would discard the user's undo steps at every sort, column or section change, which Anki never does; the first row's writes therefore never clear it.
+- An action that writes nothing (K4.2, K5.2, K7.2, `storage/config-table` C4) changes no data: it records no entry and leaves the history as it is (R725 clears only for actions that change data). Showing a column that is already displayed therefore keeps the user's undo steps.
+- The first row differs from Anki, whose browser keeps the user's undo steps across sort, column, mode, section and previewer changes. The plan lists this among its deferred product decisions ("Expand and collapse writes and undo", under Open Questions). Its default is the table above: the `collapse*` keys, like the other writes in the row, clear the history. Its alternative puts the row in the current-deck selection's skip-undo class (R42): no entry and no clearing, as in Anki. If the alternative is chosen, only the row's undo class changes. The stored values, the change reports and the K13 tests that are not about undo stay the same.
 
 ## K11. Device-only Browse state
 
@@ -309,4 +312,4 @@ The keys travel with the whole config table (`storage/config-table` C9). A sync 
 | `browser/config/other-keys-untouched` | K9, K10.1: a `flagLabels` write changes no other key | recorded |
 | `browser/config/live-roundtrip` | values written by Anki read in Meguri, values written by Meguri read in Anki (T1) | recorded |
 
-The oracle runs Anki's collection library, not its desktop browser, so the scenarios observe stored values and Anki's own reads of them (`browser-config-ops.md` B2). Meguri's interpretation of those values (K4, K5.1, K6.4, K7.1) and its actions (K4.2, K4.3, K5.2, K7.2, K10.2) are tested in U83's Rust tests with the tables of this file: every K4.4, K5.1, K5.2, K6.4 and K7.2 row, the refusals, a read of every key on an empty config leaving the file's bytes unchanged, a notes-mode toggle making one write and no undo entry, and an undoable test-hooks operation followed by a Save Search, after which undo names "Save Search" and two undos restore the saved searches and then the earlier rows.
+The oracle runs Anki's collection library, not its desktop browser, so the scenarios observe stored values and Anki's own reads of them (`browser-config-ops.md` B2). Meguri's interpretation of those values (K4, K5.1, K6.4, K7.1) and its actions (K4.2, K4.3, K5.2, K7.2, K10.2) are tested in U83's Rust tests with the tables of this file: every K4.4, K5.1, K5.2, K6.4 and K7.2 row, the refusals, a read of every key on an empty config leaving the file's bytes unchanged, a notes-mode toggle making one write and no undo entry and clearing an earlier undoable entry, showing an already displayed column writing nothing and keeping that entry, and an undoable test-hooks operation followed by a Save Search, after which undo names "Save Search" and two undos restore the saved searches and then the earlier rows.
