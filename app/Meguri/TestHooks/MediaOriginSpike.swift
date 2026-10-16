@@ -96,6 +96,9 @@ extension TestHooks {
                 let first: Int?
                 let contentRange: String?
                 let length: Int
+                /// What a ranged request got back (`rangeProblems` compares it
+                /// with the file).
+                let body: Data?
             }
 
             var files: [String: (data: Data, type: String)] = [:]
@@ -137,9 +140,13 @@ extension TestHooks {
             /// What is wrong with the answers to ranged requests for `path`
             /// (R495): each must be a 206 whose `Content-Range` names the
             /// first byte asked for, the last one asked for (or the file's
-            /// last), and the file's length, with exactly those bytes.
-            func rangeProblems(_ path: String, total: Int) -> [String] {
-                answers.filter { $0.path == path && $0.requested != nil }.compactMap { answer in
+            /// last), and the file's length, with exactly those bytes of the
+            /// file. The expected range comes from `bounds`, which
+            /// MediaOriginSpikeHandlerTests holds to fixed answers.
+            func rangeProblems(_ path: String) -> [String] {
+                guard let file = files[path]?.data else { return ["\(path): no such file"] }
+                let total = file.count
+                return answers.filter { $0.path == path && $0.requested != nil }.compactMap { answer in
                     let requested = answer.requested ?? ""
                     guard let bounds = Self.bounds(requested, total: total) else {
                         return "\(requested): not a satisfiable single range"
@@ -147,6 +154,9 @@ extension TestHooks {
                     let expected = "bytes \(bounds.first)-\(bounds.last)/\(total)"
                     guard answer.status == 206, answer.contentRange == expected, answer.length == bounds.last - bounds.first + 1 else {
                         return "\(requested): \(answer.status) \(answer.contentRange ?? "no Content-Range") with \(answer.length) bytes, not 206 \(expected)"
+                    }
+                    guard answer.body == file.subdata(in: bounds.first..<(bounds.last + 1)) else {
+                        return "\(requested): 206 \(expected), but not the file's bytes \(bounds.first)-\(bounds.last)"
                     }
                     return nil
                 }
@@ -159,7 +169,9 @@ extension TestHooks {
                 var headers = headers
                 headers["Content-Length"] = String(body.count)
                 answers.append(
-                    Answer(path: path, requested: requested, status: status, first: first, contentRange: headers["Content-Range"], length: body.count))
+                    Answer(
+                        path: path, requested: requested, status: status, first: first, contentRange: headers["Content-Range"], length: body.count,
+                        body: requested == nil ? nil : body))
                 task.didReceive(HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!)
                 task.didReceive(body)
                 task.didFinish()
@@ -415,7 +427,7 @@ extension TestHooks {
                 result = "running: the audio"
                 outcome.audio = await page.run(Self.script, ["id": await page.run(Self.audioElement)], within: 50)
                 (outcome.audioRanged, outcome.audioLate) = ranged("/_long.mp3", mp3.count)
-                outcome.badRanges = handler.rangeProblems("/_long.mp3", total: mp3.count)
+                outcome.badRanges = handler.rangeProblems("/_long.mp3")
             } else {
                 result = "running: encoding the video"
                 if let mp4 = try? await MediaOriginSpike.mp4() {
@@ -423,7 +435,7 @@ extension TestHooks {
                     result = "running: the video"
                     outcome.video = await page.run(Self.script, ["id": await page.run(Self.video)], within: 50)
                     (outcome.videoRanged, outcome.videoLate) = ranged("/_clip.mp4", mp4.count)
-                    outcome.badRanges = handler.rangeProblems("/_clip.mp4", total: mp4.count)
+                    outcome.badRanges = handler.rangeProblems("/_clip.mp4")
                 } else {
                     outcome.video = "no MP4 encoder"
                 }

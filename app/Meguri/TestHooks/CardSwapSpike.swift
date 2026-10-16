@@ -8,6 +8,8 @@ import SwiftUI
 import WebKit
 #if os(macOS)
 import AppKit
+import CoreMedia
+import ScreenCaptureKit
 #else
 import UIKit
 import notify
@@ -36,8 +38,10 @@ extension TestHooks {
     final class CardSwapSpike: NSObject, WKScriptMessageHandler {
         enum Mode: String {
             case timing
-            /// iOS: each page swap also captures the screen at the presented
-            /// frame and checks the card's colour (S1(c)).
+            /// Each page swap's frame is captured and must show the new
+            /// card's marker (S1(c)): on iOS a render of the window at the
+            /// swap's frame, on the Mac every frame of the app's own window
+            /// (ScreenCaptureKit, no permission needed for one's own windows).
             case capture
             /// Cards with `#typeans`, focused from page script after the
             /// swap (S1(e), R534).
@@ -80,10 +84,27 @@ extension TestHooks {
             var inputToHandlerP95Ms = 0.0
             var frontRAFPerSecond = 0
             var beneathRAFPerSecond = 0
+            /// S1(c): page swaps whose frame showed the new card's marker;
+            /// captures that showed no card's marker (white, the page's own
+            /// background, anything else), or an older card's.
             var captured = 0
             var blank = 0
             var stale = 0
-            var captureControl = ""
+            /// The check run on known screens before any swap, as
+            /// `classify` named them: card 1 shown and expected (`card`),
+            /// card 1 shown while card 2 or card 3 is expected (`stale`
+            /// twice), the front page's card hidden (`blank`), and card 1
+            /// again (`card`).
+            var captureControls: [String] = []
+            /// The Mac's window capture: the frames it saw, those that came
+            /// with no display time (their arrival time stands in), those
+            /// that still showed the previous card less than a frame after
+            /// the swap's estimated frame (display-link estimates run late),
+            /// and why the capture did not start, if it did not.
+            var capturedFrames = 0
+            var framesWithoutDisplayTime = 0
+            var lateWithinAFrame = 0
+            var captureError = ""
             var focused = ""
             /// Confirmation messages received, and what the last confirmation
             /// script returned.
@@ -94,6 +115,8 @@ extension TestHooks {
         }
 
         struct Burst: Codable {
+            /// Each card kept 64 KB in its page (the memory check's control).
+            var retaining = false
             var swaps = 0
             var footprintAt100KB = 0
             var footprintAt1000KB = 0
@@ -180,6 +203,9 @@ extension TestHooks {
             triggers = [
                 SpikeTrigger("cardSwapDrive") { [weak self] in self?.drive() },
                 SpikeTrigger("cardSwapBurst") { [weak self] in Task { await self?.burst() } },
+                // The memory check's control: every card keeps 64 KB in its
+                // page's script heap.
+                SpikeTrigger("cardSwapBurstRetaining") { [weak self] in Task { await self?.burst(retaining: true) } },
             ]
             Task { await load() }
         }
@@ -189,6 +215,10 @@ extension TestHooks {
             triggers = []
             (displayLink as? CADisplayLink)?.invalidate()
             displayLink = nil
+            #if os(macOS)
+            windowCapture?.stop()
+            windowCapture = nil
+            #endif
         }
 
         private func load() async {
@@ -204,9 +234,7 @@ extension TestHooks {
             async let beneathRate = back.run(Self.rafCounter)
             report.frontRAFPerSecond = Int(await frontRate) ?? -1
             report.beneathRAFPerSecond = Int(await beneathRate) ?? -1
-            #if !os(macOS)
-            if mode == .capture { report.captureControl = captureColor().map(Self.describe) ?? "none" }
-            #endif
+            if mode == .capture { await captureControls() }
             report.ready = true
             publish()
         }
@@ -330,10 +358,13 @@ extension TestHooks {
             await prepare(nextCard)
         }
 
+        /// Cards keep 64 KB each in their page (the burst's memory control).
+        @ObservationIgnored private var retaining = false
+
         /// Puts `card` in the page beneath; settled after a double
         /// requestAnimationFrame there.
         private func prepare(_ card: Int64) async {
-            let result = await back.run(Self.prepareScript, ["id": card, "html": Self.card(card, mode: mode)])
+            let result = await back.run(Self.prepareScript, ["id": card, "html": Self.card(card, mode: mode, retaining: retaining)])
             settled = result == String(card)
             publish()
         }
@@ -362,6 +393,9 @@ extension TestHooks {
         @ObservationIgnored private var confirmLags: [TimeInterval] = []
 
         private func publish() {
+            #if os(macOS)
+            if mode == .capture { checkFrames() }
+            #endif
             report.periodMs = period * 1000
             report.web = stats(records.filter(\.web))
             report.baseline = stats(records.filter { !$0.web })
@@ -423,8 +457,9 @@ extension TestHooks {
         /// closes (both pages drop their card) and memory is read again
         /// after 3 s; last, the pages collect their garbage and the
         /// finalized card elements are counted.
-        private func burst() async {
+        private func burst(retaining: Bool = false) async {
             var burst = Burst()
+            burst.retaining = retaining
             let pages = [ObjectIdentifier(front), ObjectIdentifier(back)]
             let views: [WKWebView] = [front.webView, back.webView]
             for page in [front!, back!] { _ = await page.run("window.trackCards = true; return 'ok';") }
@@ -432,6 +467,11 @@ extension TestHooks {
             burst.webContentWarmKB = warm
             for cycle in 1...1000 {
                 while !settled { try? await Task.sleep(for: .milliseconds(2)) }
+                if cycle == 1, retaining {
+                    // The card already beneath was made before: remake it.
+                    self.retaining = true
+                    await prepare(nextCard)
+                }
                 guard let token = swapPages(input: CACurrentMediaTime()) else { continue }
                 // The confirmation comes after the commit and two frames:
                 // registered in this turn, it cannot be missed. A second
@@ -519,10 +559,12 @@ extension TestHooks {
         /// The footprint of the web content processes that render `views`,
         /// in bytes, or nil when the system does not tell. Each pid comes
         /// from `_webProcessIdentifier` (WebKit SPI, read only in test hooks)
-        /// and its footprint from `proc_pid_rusage`, which iOS does not
-        /// offer; the Mac's app sandbox may refuse it too.
+        /// and its footprint from `proc_pid_rusage`. iOS has no public way
+        /// to read another process's footprint, but the simulator's
+        /// processes are this Mac's (or the test VM's), unsandboxed, and its
+        /// libSystem has the call; the Mac's app sandbox refuses it.
         static func webContentFootprint(_ views: [WKWebView]) throws(Unreadable) -> Int {
-            #if os(macOS)
+            #if os(macOS) || targetEnvironment(simulator)
             let selector = NSSelectorFromString("_webProcessIdentifier")
             var pids: Set<pid_t> = []
             for view in views {
@@ -530,12 +572,21 @@ extension TestHooks {
                 else { throw Unreadable(why: "no web content process identifier") }
                 pids.insert(pid)
             }
+            #if os(macOS)
+            let rusage: @convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Int32 = { pid, flavor, buffer in
+                proc_pid_rusage(pid, flavor, buffer?.assumingMemoryBound(to: rusage_info_t?.self))
+            }
+            #else
+            // libproc.h is not in the iOS SDK.
+            guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "proc_pid_rusage") else {
+                throw Unreadable(why: "no proc_pid_rusage in this simulator's libSystem")
+            }
+            let rusage = unsafeBitCast(symbol, to: (@convention(c) (Int32, Int32, UnsafeMutableRawPointer?) -> Int32).self)
+            #endif
             var bytes = 0
             for pid in pids {
                 var usage = rusage_info_v4()
-                let result = withUnsafeMutablePointer(to: &usage) { pointer in
-                    pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
-                }
+                let result = withUnsafeMutablePointer(to: &usage) { rusage(pid, RUSAGE_INFO_V4, UnsafeMutableRawPointer($0)) }
                 guard result == 0 else { throw Unreadable(why: "proc_pid_rusage refused: errno \(errno)") }
                 bytes += Int(usage.ri_phys_footprint)
             }
@@ -556,12 +607,146 @@ extension TestHooks {
             return result == KERN_SUCCESS ? Int(info.phys_footprint) : 0
         }
 
-        // MARK: S1(c) on iOS
+        // MARK: S1(c)
 
-        #if !os(macOS)
+        /// What a capture of the pages' middle showed, against the card that
+        /// should be there.
+        enum Shown: String {
+            /// The expected card's marker.
+            case card
+            /// The marker of one of the two cards before it: the other page's
+            /// last card, or this page's.
+            case stale
+            /// No card's marker: white, the page's own background, anything
+            /// else.
+            case blank
+        }
+
+        static func classify(_ color: RGB, expected card: Int64) -> Shown {
+            func near(_ a: RGB, _ b: RGB) -> Bool { abs(a.0 - b.0) <= 16 && abs(a.1 - b.1) <= 16 && abs(a.2 - b.2) <= 16 }
+            if near(color, marker(card)) { return .card }
+            if near(color, marker(card - 1)) || near(color, marker(card - 2)) { return .stale }
+            return .blank
+        }
+
+        /// The check, run on known screens before any swap: card 1 in
+        /// front. Each must come out as named (`Report.captureControls`), or
+        /// the check could not tell a stale or blank frame from the card.
+        private func captureControls() async {
+            #if os(macOS)
+            await startWindowCapture()
+            #endif
+            var controls: [String] = []
+            guard let shown = await captureNow() else {
+                report.captureControls = ["no capture"]
+                return
+            }
+            for expected: Int64 in [1, 2, 3] { controls.append(Self.classify(shown, expected: expected).rawValue) }
+            // The front page's card hidden: only the page's background shows.
+            _ = await front.run("document.getElementById('qa').style.visibility = 'hidden';" + Self.painted)
+            controls.append((await captureNow()).map { Self.classify($0, expected: 1).rawValue } ?? "no capture")
+            _ = await front.run("document.getElementById('qa').style.visibility = '';" + Self.painted)
+            controls.append((await captureNow()).map { Self.classify($0, expected: 1).rawValue } ?? "no capture")
+            report.captureControls = controls
+        }
+
+        /// Waits until the page has painted its last change.
+        static let painted = """
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            return "painted";
+            """
+
+        #if os(macOS)
+        @ObservationIgnored private var windowCapture: WindowCapture?
+        /// Every frame the window capture saw, in order.
+        @ObservationIgnored private var frames: [WindowCapture.Frame] = []
+
+        private func startWindowCapture() async {
+            // A hidden launch (tools/mg xcode-check's route launches on this
+            // Mac) has nothing on screen to check: never capture there.
+            guard !NSApp.isHidden else {
+                report.captureError = "the app is hidden"
+                return
+            }
+            guard let window = stage.window else {
+                report.captureError = "the stage has no window"
+                return
+            }
+            let capture = WindowCapture()
+            do {
+                let middle = stage.pagesArea.convert(CGPoint(x: stage.pagesArea.bounds.midX, y: stage.pagesArea.bounds.midY), to: nil)
+                // Window coordinates from the frame's top left.
+                try await capture.start(
+                    windowID: CGWindowID(window.windowNumber), scale: window.backingScaleFactor,
+                    at: CGPoint(x: middle.x, y: window.frame.height - middle.y)
+                ) { [weak self] frame in
+                    self?.received(frame)
+                }
+                windowCapture = capture
+            } catch {
+                report.captureError = "\(error)"
+            }
+        }
+
+        /// What the window shows now: the capture sends a frame whenever the
+        /// window changes, so once the last change has had time to arrive,
+        /// the last frame is the screen.
+        private func captureNow() async -> RGB? {
+            guard windowCapture != nil else { return nil }
+            try? await Task.sleep(for: .milliseconds(300))
+            return frames.last?.color
+        }
+
+        /// A frame arrived: the S1(c) counts are published when they change
+        /// (publishing changes the report on screen, which sends a frame).
+        private func received(_ frame: WindowCapture.Frame) {
+            frames.append(frame)
+            let before = (report.captured, report.blank, report.stale, report.lateWithinAFrame)
+            checkFrames()
+            if before != (report.captured, report.blank, report.stale, report.lateWithinAFrame) { publish() }
+        }
+
+        /// S1(c) on the Mac, over every captured frame from the first page
+        /// swap on. A frame shows the card of the last page swap handled
+        /// before it; until one frame after that swap's frame (or while its
+        /// frame is not known yet) it may still show the card before. No
+        /// frame may show no card's marker (`blank`) or an older card
+        /// (`stale`). Frames that showed the card before after the swap's
+        /// estimated frame, but within one frame of it, are counted apart
+        /// (`lateWithinAFrame`): display-link estimates run late.
+        private func checkFrames() {
+            let swaps = records.filter(\.web)
+            report.capturedFrames = frames.count
+            report.framesWithoutDisplayTime = frames.filter { !$0.displayed }.count
+            guard windowCapture != nil, let first = swaps.first else { return }
+            var blank = 0, stale = 0, late = 0
+            var seen: Set<Int64> = []
+            for frame in frames where frame.time >= first.handled {
+                guard let swap = swaps.last(where: { $0.handled <= frame.time }) else { continue }
+                switch Self.classify(frame.color, expected: swap.card) {
+                case .card:
+                    seen.insert(swap.card)
+                case .blank:
+                    blank += 1
+                case .stale:
+                    guard Self.classify(frame.color, expected: swap.card - 1) == .card else {
+                        stale += 1
+                        continue
+                    }
+                    // The card before: fine until the swap's frame.
+                    guard let shown = swap.presented, frame.time >= shown else { continue }
+                    if frame.time < shown + period { late += 1 } else { stale += 1 }
+                }
+            }
+            report.captured = seen.count
+            report.blank = blank
+            report.stale = stale
+            report.lateWithinAFrame = late
+        }
+        #else
         /// What the screen shows at the middle of the pages, from a render
         /// of the window's current frame.
-        private func captureColor() -> (Int, Int, Int)? {
+        private func captureColor() -> RGB? {
             let view = stage.pagesArea
             let renderer = UIGraphicsImageRenderer(bounds: view.bounds, format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }())
             let image = renderer.image { _ in _ = view.drawHierarchy(in: view.bounds, afterScreenUpdates: false) }
@@ -576,34 +761,45 @@ extension TestHooks {
             return (Int(pixel[0]), Int(pixel[1]), Int(pixel[2]))
         }
 
-        private func check(card: Int64) {
-            guard let color = captureColor() else { return }
-            report.captured += 1
-            let expected = Self.rgb(card)
-            let previous = Self.rgb(card - 1)
-            func near(_ a: (Int, Int, Int), _ b: (Int, Int, Int)) -> Bool {
-                abs(a.0 - b.0) <= 16 && abs(a.1 - b.1) <= 16 && abs(a.2 - b.2) <= 16
-            }
-            if near(color, expected) { return }
-            if near(color, previous) { report.stale += 1 } else { report.blank += 1 }
+        /// The screen as it is now, once the last commit is on it.
+        private func captureNow() async -> RGB? {
+            try? await Task.sleep(for: .milliseconds(100))
+            return captureColor()
         }
 
-        static func describe(_ color: (Int, Int, Int)) -> String { "\(color.0),\(color.1),\(color.2)" }
+        private func check(card: Int64) {
+            guard let color = captureColor() else { return }
+            switch Self.classify(color, expected: card) {
+            case .card: report.captured += 1
+            case .stale: report.stale += 1
+            case .blank: report.blank += 1
+            }
+        }
         #endif
 
         // MARK: Pages
 
-        /// CSS named colours: odd cards papayawhip, even ones lightsteelblue;
-        /// never white, so a blank frame cannot pass for a card.
-        static func rgb(_ card: Int64) -> (Int, Int, Int) { card % 2 == 1 ? (255, 239, 213) : (176, 196, 222) }
+        typealias RGB = (Int, Int, Int)
 
-        static func card(_ id: Int64, mode: Mode) -> String {
-            let background = id % 2 == 1 ? "papayawhip" : "lightsteelblue"
+        /// Each card's marker colour: a band across the middle of the page
+        /// whose colour names the card. Each channel is one of 64, 112, 160
+        /// and 208, so any two cards fewer than 64 apart differ by 48 or
+        /// more in a channel, and none is near white, black or the page's
+        /// own background (`skeleton`): a blank page, a page whose card did
+        /// not paint, and a page still showing an older card all fail.
+        static func marker(_ card: Int64) -> RGB {
+            let card = Int(((card % 64) + 64) % 64)
+            return (64 + 48 * (card % 4), 64 + 48 * (card / 4 % 4), 64 + 48 * (card / 16))
+        }
+
+        static func card(_ id: Int64, mode: Mode, retaining: Bool = false) -> String {
+            let (red, green, blue) = marker(id)
             let typein = mode == .typein ? #"<input id="typeans" type="text" autocomplete="off">"# : ""
+            let keep = retaining ? " window.kept = (window.kept || []); window.kept.push(new Uint8Array(65536).fill(window.cards % 251 + 1));" : ""
             return """
-                <style>body { background: \(background); }</style>
+                <div class="marker" style="background: rgb(\(red), \(green), \(blue))"></div>
                 <h1>Card \(id)</h1>\(typein)<img src="_img.png" width="64" height="64">
-                <p>\(String(repeating: "Meguri ", count: 30))</p><script>window.cards += 1;</script>
+                <p>\(String(repeating: "Meguri ", count: 30))</p><script>window.cards += 1;\(keep)</script>
                 """
         }
 
@@ -612,7 +808,12 @@ extension TestHooks {
         static let skeleton = """
             <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
             <base href="meguri-media://media/">
-            <style>html, body { margin: 0; height: 100%; font: -apple-system-body; } #qa { padding: 16px; }</style>
+            <style>
+            html, body { margin: 0; height: 100%; font: -apple-system-body; background: rgb(253, 246, 227); }
+            #qa { padding: 16px; }
+            /* S1(c): each card's marker, a band across the middle of the page. */
+            .marker { position: fixed; left: 0; right: 0; top: 30%; height: 40%; }
+            </style>
             <script>
             window.cards = 0;
             window.cardsRegistered = 0;
@@ -985,6 +1186,107 @@ extension TestHooks {
         }
         #endif
     }
+
+    #if os(macOS)
+    /// S1(c) on the Mac: every frame of the app's own window, through
+    /// ScreenCaptureKit. `SCShareableContent.currentProcess` offers a
+    /// process its own windows without the Screen Recording permission,
+    /// so this runs in the test VM and on this Mac alike. Each frame
+    /// reports the colour at one point of the window and when it was
+    /// displayed.
+    nonisolated final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
+        struct Frame: Sendable {
+            /// When the frame was displayed (its `displayTime`), in seconds
+            /// on `CACurrentMediaTime`'s clock, and when it arrived here.
+            let time: TimeInterval
+            let arrived: TimeInterval
+            let color: (Int, Int, Int)
+            /// Whether `time` is the frame's display time.
+            let displayed: Bool
+        }
+
+        struct Failure: Error, CustomStringConvertible {
+            let description: String
+        }
+
+        // Set before the capture starts, read on its queue after.
+        private var stream: SCStream?
+        private let queue = DispatchQueue(label: "spike.windowCapture")
+        /// The sampled point, in points from the window frame's top left.
+        private var point = CGPoint.zero
+        private var onFrame: (@MainActor @Sendable (Frame) -> Void)?
+        private static let timebase: mach_timebase_info_data_t = {
+            var info = mach_timebase_info_data_t()
+            mach_timebase_info(&info)
+            return info
+        }()
+
+        /// Starts capturing the window `windowID` (`NSWindow.windowNumber`)
+        /// at its backing `scale`, sampling `point`.
+        func start(
+            windowID: CGWindowID, scale: CGFloat, at point: CGPoint, onFrame: @escaping @MainActor @Sendable (Frame) -> Void
+        ) async throws {
+            self.point = point
+            self.onFrame = onFrame
+            let content = try await SCShareableContent.currentProcess
+            guard let target = content.windows.first(where: { $0.windowID == windowID }) else {
+                throw Failure(description: "ScreenCaptureKit does not offer the app's own window (\(content.windows.count) windows offered)")
+            }
+            let filter = SCContentFilter(desktopIndependentWindow: target)
+            let configuration = SCStreamConfiguration()
+            configuration.width = Int(target.frame.width * scale)
+            configuration.height = Int(target.frame.height * scale)
+            configuration.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+            configuration.pixelFormat = kCVPixelFormatType_32BGRA
+            configuration.colorSpaceName = CGColorSpace.sRGB
+            configuration.showsCursor = false
+            configuration.ignoreShadowsSingleWindow = true
+            configuration.queueDepth = 8
+            let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+            try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+            try await stream.startCapture()
+            self.stream = stream
+        }
+
+        func stop() {
+            stream?.stopCapture { _ in }
+            stream = nil
+        }
+
+        func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+            let arrived = CACurrentMediaTime()
+            guard type == .screen, sampleBuffer.isValid,
+                let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+                let info = attachments.first,
+                let raw = info[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
+                let pixels = sampleBuffer.imageBuffer
+            else { return }
+            // Where the window is in the buffer, and how points map to it.
+            let contentRect = (info[.contentRect] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) } ?? .zero
+            let contentScale = info[.contentScale] as? CGFloat ?? 1
+            let scaleFactor = info[.scaleFactor] as? CGFloat ?? 1
+            let x = Int((contentRect.minX + point.x * contentScale) * scaleFactor)
+            let y = Int((contentRect.minY + point.y * contentScale) * scaleFactor)
+            CVPixelBufferLockBaseAddress(pixels, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(pixels), x >= 0, y >= 0, x < CVPixelBufferGetWidth(pixels), y < CVPixelBufferGetHeight(pixels)
+            else { return }
+            let pixel = base.advanced(by: y * CVPixelBufferGetBytesPerRow(pixels) + x * 4).assumingMemoryBound(to: UInt8.self)
+            // BGRA.
+            let color = (Int(pixel[2]), Int(pixel[1]), Int(pixel[0]))
+            var time = arrived
+            var displayed = false
+            if let display = info[.displayTime] as? UInt64, display > 0 {
+                time = Double(display) * Double(Self.timebase.numer) / Double(Self.timebase.denom) / 1e9
+                displayed = true
+            }
+            let frame = Frame(time: time, arrived: arrived, color: color, displayed: displayed)
+            Task { @MainActor [onFrame] in onFrame?(frame) }
+        }
+
+        func stream(_ stream: SCStream, didStopWithError error: any Error) {}
+    }
+    #endif
 
     /// Listens for `<bundle id>.testhooks.<name>` (Darwin on iOS,
     /// distributed on the Mac), as PerfProbeTrigger does.

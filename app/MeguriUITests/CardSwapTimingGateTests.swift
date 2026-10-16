@@ -13,7 +13,7 @@ final class CardSwapTimingGateTests: XCTestCase {
             {"ready": true, "probe": "metal", "periodMs": 8.33, "inputs": 400, "web": \(stats), "baseline": \(stats),
              "unsettled": 0, "unpresented": 0, "confirmed": 200, "wrongCard": 0, "unconfirmed": 0, "confirmP95Ms": 20,
              "inputToHandlerP95Ms": 1, "frontRAFPerSecond": 120, "beneathRAFPerSecond": 120, "captured": 0, "blank": 0,
-             "stale": 0, "captureControl": "", "focused": "", "messages": 200, "lastConfirm": "posted", "terminations": 0}
+             "stale": 0, "captureControls": [], "capturedFrames": 0, "framesWithoutDisplayTime": 0, "lateWithinAFrame": 0, "captureError": "", "focused": "", "messages": 200, "lastConfirm": "posted", "terminations": 0}
             """
         return try JSONDecoder().decode(CardSwapTimingSpikeTests.Report.self, from: Data(json.utf8))
     }

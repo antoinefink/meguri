@@ -364,11 +364,13 @@ extension RenderingSpikes {
             // a few of the card elements registered were collected.
             #expect(burst.registered == 4000)
             #expect(burst.finalized * 100 >= burst.registered * 95, "\(burst.summary)")
-            // S1(f) is open for web content memory (decision record S1): on
-            // this harness the web content processes grow up to 20 MB over
-            // the burst and keep it after the session closes, though no card
-            // stays alive. The check stays, so a run that meets R1853 shows.
-            withKnownIssue("S1(f) open: web content memory over 1,000 swaps (decision record S1)", isIntermittent: true) {
+            // S1(f) failed for web content memory (decision record S1,
+            // escalated): here and on screen in the app, the web content
+            // processes grow about 10 MB over the burst and keep it after the
+            // session closes, though no card stays alive; WebKit gives it back
+            // only to its own memory-pressure release. The check stays, so a
+            // run that meets R1853 shows.
+            withKnownIssue("S1(f) failed: web content memory over 1,000 swaps (decision record S1, escalated)", isIntermittent: true) {
                 #expect(burst.webContentProblems.isEmpty, "\(burst.webContentProblems): \(burst.summary)")
             }
         }

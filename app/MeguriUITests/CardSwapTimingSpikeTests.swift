@@ -37,6 +37,7 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
     }
 
     struct Burst: Decodable {
+        var retaining: Bool
         var swaps: Int
         var footprintAt100KB: Int
         var footprintAt1000KB: Int
@@ -73,7 +74,11 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
         var captured: Int
         var blank: Int
         var stale: Int
-        var captureControl: String
+        var captureControls: [String]
+        var capturedFrames: Int
+        var framesWithoutDisplayTime: Int
+        var lateWithinAFrame: Int
+        var captureError: String
         var focused: String
         var messages: Int
         var lastConfirm: String
@@ -129,22 +134,27 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
 
     // MARK: S1(c)
 
-    /// S1(c), iOS: at every page swap's presented frame the screen shows the
-    /// new card's colour, never white or the previous card. The control is a
-    /// capture of the first card before any swap.
+    /// S1(c): every page swap's frame shows the new card's marker, a band
+    /// whose colour names the card, never one with no card's marker (white,
+    /// the page's own background) or an older card's. On iOS the window is
+    /// rendered at each swap's frame; on the Mac every frame of the app's own
+    /// window is captured (ScreenCaptureKit). Controls first: the check, run
+    /// on known screens before any swap, must name card 1 shown as the card,
+    /// as stale where card 2 or card 3 is expected, and as blank once the
+    /// front page's card is hidden; or it could not tell those frames apart.
     func testNoBlankOrStaleFrameAtThePageSwap() throws {
-        #if os(macOS)
-        throw XCTSkip("the Mac has no in-process capture of web content: S1(c) on the Mac is open (decision record S1)")
-        #else
         let app = launch(MeguriLaunch(animations: false, route: "spike/card-swap/capture"))
         var report = try waitForReport(app) { $0.ready }
-        XCTAssertEqual(report.captureControl, "255,239,213", "the capture does not show web content; S1(c) cannot be checked this way")
+        record(report, "S1(c) controls")
+        XCTAssertEqual(report.captureError, "", "the window capture did not start")
+        XCTAssertEqual(report.captureControls, ["card", "stale", "stale", "blank", "card"], "the check cannot tell a blank or stale frame from the card")
         input(app, count: Self.inputsPerRun, expectingTotal: Self.inputsPerRun)
-        report = try waitForReport(app) { $0.captured >= Self.inputsPerRun / 2 }
+        let swaps = Self.inputsPerRun / 2
+        report = try waitForReport(app, orLatest: true) { $0.captured + $0.blank + $0.stale >= swaps && $0.web.count >= swaps }
         record(report, "S1(c)")
+        XCTAssertEqual(report.captured, swaps, "page swaps whose new card showed")
         XCTAssertEqual(report.blank, 0)
         XCTAssertEqual(report.stale, 0)
-        #endif
     }
 
     // MARK: S1(e)
@@ -187,36 +197,65 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
     /// pages in their window, the DOM the same size, and the app's memory
     /// within R1853's 5 MB from swap 100 to 1,000; once the session closes,
     /// all but a few of the cards' elements have been collected. Web content
-    /// memory is checked where the app may read it (not on iOS; the Mac's
-    /// sandbox refused it in the test VM). S1(f) is open for it (decision
-    /// record S1), so that check is an expected failure, and a run that
-    /// meets it shows as passing.
+    /// memory is read where the app can read it (the iOS simulator, whose
+    /// processes are the VM's; not a device, and the Mac's app sandbox
+    /// refuses it) and held to R1853 as U245 reads it (KTD11's call-out):
+    /// within 5 MB from swap 100 to 1,000, and back within 10 MB of the warm
+    /// level once the session closed. S1(f) failed that reading on screen
+    /// as off screen (decision record S1, escalated): it is an expected
+    /// failure until the plan decides, and a run that meets it shows.
     func testAThousandSwapsKeepTheSamePagesAndFlatMemory() throws {
-        let app = launch(MeguriLaunch(animations: false, route: "spike/card-swap"))
-        _ = try waitForReport(app) { $0.ready }
-        post("\(try BuildUnderTest.current().expectedBundleIdentifier).testhooks.cardSwapBurst")
-        let report = try waitForReport(app, timeout: 600) { $0.burst?.swaps == 1000 }
-        record(report, "S1(f)")
-        let burst = try XCTUnwrap(report.burst)
+        let burst = try runBurst(trigger: "cardSwapBurst", title: "S1(f)")
+        XCTAssertFalse(burst.retaining)
         XCTAssertEqual(burst.pages, 2)
         XCTAssertEqual(burst.windowMoves, [1, 1])
         XCTAssertEqual(burst.nodesAt1000, burst.nodesAt100)
         XCTAssertLessThan(burst.footprintAt1000KB - burst.footprintAt100KB, 5 * 1024)
         // The 1,000 cards prepared during the burst, each with five
-        // elements (style, heading, image, paragraph, script).
+        // elements (marker, heading, image, paragraph, script).
         XCTAssertEqual(burst.cardElementsRegistered, 5000)
         XCTAssertGreaterThanOrEqual(burst.cardElementsFinalized * 100, burst.cardElementsRegistered * 95, "old cards stayed alive in their pages")
-        XCTAssertEqual(report.terminations, 0)
-        guard burst.webContentAt100KB >= 0, burst.webContentWarmKB >= 0, burst.webContentClosedKB >= 0 else {
-            XCTContext.runActivity(named: "S1(f): web content memory not readable here: \(burst.webContentNote)") { _ in }
-            return
-        }
+        guard Self.webContentReadable(burst) else { return }
         let options = XCTExpectedFailure.Options()
         options.isStrict = false
-        XCTExpectFailure("S1(f) open: web content memory over 1,000 swaps (decision record S1)", options: options) {
+        XCTExpectFailure("S1(f) failed for web content memory (decision record S1, escalated)", options: options) {
             XCTAssertLessThan(burst.webContentAt1000KB - burst.webContentAt100KB, 5 * 1024, "web content growth from swap 100 to 1,000")
             XCTAssertLessThan(burst.webContentClosedKB - burst.webContentWarmKB, 10 * 1024, "web content above warm after the session closed")
         }
+    }
+
+    /// The web content check's control: cards that each keep 64 KB in their
+    /// page's script heap (57.6 MB from swap 100 to 1,000) keep the DOM the
+    /// same size and the app's memory flat, but the web content check sees
+    /// most of what they keep.
+    func testTheMemoryCheckCatchesCardsThatRetainMemoryInTheirPages() throws {
+        let burst = try runBurst(trigger: "cardSwapBurstRetaining", title: "S1(f) control, cards keeping 64 KB")
+        XCTAssertTrue(burst.retaining)
+        XCTAssertEqual(burst.nodesAt1000, burst.nodesAt100)
+        guard Self.webContentReadable(burst) else { return }
+        XCTAssertGreaterThanOrEqual(burst.webContentAt1000KB - burst.webContentAt100KB, 40 * 1024, "the web content check missed what the cards kept")
+    }
+
+    /// Launches the harness, starts a burst with `trigger` and returns it
+    /// once 1,000 swaps are done.
+    private func runBurst(trigger: String, title: String) throws -> Burst {
+        let app = launch(MeguriLaunch(animations: false, route: "spike/card-swap"))
+        _ = try waitForReport(app) { $0.ready }
+        post("\(try BuildUnderTest.current().expectedBundleIdentifier).testhooks.\(trigger)")
+        let report = try waitForReport(app, timeout: 600) { $0.burst?.swaps == 1000 }
+        record(report, title)
+        XCTAssertEqual(report.terminations, 0)
+        return try XCTUnwrap(report.burst)
+    }
+
+    /// Whether the burst read the web content processes' memory; records why
+    /// not when it did not.
+    private static func webContentReadable(_ burst: Burst) -> Bool {
+        guard burst.webContentAt100KB >= 0, burst.webContentAt1000KB >= 0, burst.webContentWarmKB >= 0, burst.webContentClosedKB >= 0 else {
+            XCTContext.runActivity(named: "S1(f): web content memory not readable here: \(burst.webContentNote)") { _ in }
+            return false
+        }
+        return true
     }
 
     // MARK: S2(a), S2(d)
