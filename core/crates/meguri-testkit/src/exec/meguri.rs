@@ -177,6 +177,8 @@ pub struct Session<'a> {
     pub actor: Option<Seat>,
     /// The session directory and the open collection (`exec/storage.rs`).
     pub storage: super::storage::Storage,
+    /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
+    pub day: meguri_engine::DayCache,
 }
 
 /// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
@@ -288,6 +290,7 @@ impl MeguriExecutor {
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
             actor: None,
             storage: Default::default(),
+            day: Default::default(),
         })
     }
 
@@ -440,6 +443,7 @@ impl MeguriExecutor {
                 cards: Vec::new(),
                 actor: None,
                 storage: Default::default(),
+                day: Default::default(),
             };
             self.new_collection(&mut session)?;
             sessions.insert(name.clone(), session);

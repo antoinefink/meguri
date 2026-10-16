@@ -1,0 +1,17 @@
+# R1900: a collection created in Asia/Tokyo (crt 2030-01-15 04:00 JST,
+# creationOffset -540) studied in America/Los_Angeles. The scenario stores
+# the Tokyo creation values before the first day query; days roll at 04:00
+# Los Angeles time and localOffset becomes 480.
+id: sched/day/created-tokyo-studied-los-angeles
+clock: {tz: America/Los_Angeles, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - db_exec: {sql: "UPDATE col SET crt = 1894647600"}
+  - set_config: {key: creationOffset, value: -540}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]

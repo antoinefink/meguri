@@ -219,7 +219,8 @@ fn rollover_clears_the_history_with_its_reason() {
         DisabledReason::ClearedByRollover
     );
 
-    // A rollover op that writes clears too.
+    // A day clock write keeps the history (sched/day-clock D10): only the
+    // rollover op of a day change clears it (D9, tests/rollover.rs).
     steps::answer(&h.collection, None, cid).unwrap();
     h.collection
         .run(OpSpec::named("rollover_unbury", OpSource::Rollover), move |ctx| {
@@ -227,7 +228,7 @@ fn rollover_clears_the_history_with_its_reason() {
             Ok(())
         })
         .unwrap();
-    assert_eq!(peek(&h), UndoStatus::Unavailable(DisabledReason::ClearedByRollover));
+    assert_eq!(peek(&h).name(), Some(ANSWER_CARD));
 }
 
 #[test]

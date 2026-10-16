@@ -36,6 +36,8 @@ impl ChangeObserver for SeqRecorder {
 fn a_thousand_ops_from_four_threads_reach_the_observer_and_the_stream_once_in_seq_order() {
     let recorder = Arc::new(SeqRecorder::default());
     let h = Harness::open_with(Ports::default().observer(recorder.clone()));
+    // The day clock's first check at open (`sched/day-clock` D8) wrote.
+    recorder.0.lock().unwrap().clear();
     let subscription = h.engine.stream().subscribe();
 
     let threads: Vec<_> = (0..4)
