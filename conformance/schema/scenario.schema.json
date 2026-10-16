@@ -273,7 +273,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|answer_labels|queue|deck_tree|render|db_dump|schema_objects|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -286,6 +286,7 @@
             "card": { "$ref": "#/$defs/card_refs" },
             "revlog": { "$ref": "#/$defs/card_refs" },
             "next_states": { "$ref": "#/$defs/card_refs" },
+            "answer_labels": { "description": "observations.md O10.", "$ref": "#/$defs/card_refs" },
             "render": { "$ref": "#/$defs/card_refs" },
             "fuzz_table": {
               "type": "object",

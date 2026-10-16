@@ -1,0 +1,62 @@
+# Relearning steps (R655, R654, specs/sched/steps.md L9 and
+# specs/sched/fsrs-transitions.md T9). Presets: Relearn (relearning steps 10m
+# 1h), NoRelearn (no relearning steps) and RelearnDay (1d), all with a minimum
+# lapse interval of 3 days, which FSRS scheduling does not use.
+#   c1 review card of Relearn, due today: Again starts relearning.
+#   c2 relearning card of Relearn on its first step, c3 on its last step.
+#   c4 relearning card of NoRelearn (no step left).
+#   c5 relearning card of RelearnDay in the interday queue, due today.
+#   c6 review card of NoRelearn: Again goes straight to review.
+#   c7 relearning card of NoRelearn whose Again interval is above half a day:
+#     Again leaves relearning with a fuzzed interval.
+# In relearning, Again restarts the steps, Hard repeats the step, Good moves to
+# the next step or back to review with FSRS's Good interval fuzzed, and Easy
+# returns to review above the fuzzed Good interval.
+id: sched/steps/relearning
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Relearn, learn_steps: [1m, 10m], relearn_steps: [10m, 1h], min_lapse_interval_days: 3, desired_retention: 0.9}
+    - {name: NoRelearn, learn_steps: [1m, 10m], relearn_steps: [], min_lapse_interval_days: 3, desired_retention: 0.9}
+    - {name: RelearnDay, learn_steps: [1m, 10m], relearn_steps: [1d], min_lapse_interval_days: 3, desired_retention: 0.9}
+  decks:
+    - {name: Relearn, preset: Relearn}
+    - {name: NoRelearn, preset: NoRelearn}
+    - {name: RelearnDay, preset: RelearnDay}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Relearn, fields: [c1, back]}
+    - {notetype: Pair, deck: Relearn, fields: [c2, back]}
+    - {notetype: Pair, deck: Relearn, fields: [c3, back]}
+    - {notetype: Pair, deck: NoRelearn, fields: [c4, back]}
+    - {notetype: Pair, deck: RelearnDay, fields: [c5, back]}
+    - {notetype: Pair, deck: NoRelearn, fields: [c6, back]}
+    - {notetype: Pair, deck: NoRelearn, fields: [c7, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 8, lapses = 2, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: ['{"s":10.0,"d":5.0,"lrt":1893837600}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 3, queue = ?, due = ?, left = ?, ivl = 1, factor = 2300, reps = 9, lapses = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 2, '{"s":1.3919,"d":8.3418,"lrt":1894701000}', 1]
+  - db_exec:
+      sql: "UPDATE cards SET type = 3, queue = ?, due = ?, left = ?, ivl = 1, factor = 2300, reps = 10, lapses = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 1, '{"s":1.3919,"d":8.3418,"lrt":1894698000}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = 3, queue = ?, due = ?, left = ?, ivl = 1, factor = 2300, reps = 9, lapses = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 0, '{"s":1.3919,"d":8.3418,"lrt":1894701000}', 3]
+  - db_exec:
+      sql: "UPDATE cards SET type = 3, queue = ?, due = ?, left = ?, ivl = 1, factor = 2300, reps = 9, lapses = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [3, 0, 1, '{"s":1.3919,"d":8.3418,"lrt":1894615200}', 4]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 10, factor = 2500, reps = 6, lapses = 0, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 5)"
+      params: ['{"s":10.0,"d":5.0,"lrt":1893837600}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 3, queue = ?, due = ?, left = ?, ivl = 5, factor = 2300, reps = 11, lapses = 2, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 1894701600, 0, '{"s":5.0,"d":5.0,"lrt":1894528800}', 6]
+  - observe: [next_states]

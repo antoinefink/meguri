@@ -1,0 +1,66 @@
+# Hard on the first learning step (R640, specs/sched/steps.md L4): the average
+# of the first two steps, or with a single step the smaller of 1.5 times the
+# step and the step plus one day; a delay over one day is rounded to whole days
+# (exactly one day is not). Each preset has one new card, which answers as at
+# its first step (R642). Expected Hard delays in seconds:
+#   Ten [10m] 900; TwoDays [2d] 259200; TwentyFiveHours [25h] 172800 (135000
+#   rounded); TwentyThreeHours [23h] 86400 (124200 rounded); SixteenHours [16h]
+#   86400 (not rounded); OneDay [1d] 172800 (129600, a day and a half, rounded
+#   up); Seconds [30s 2m] 75; TenThenDay [10m 1d] 43500; DayThenThree [1d 3d]
+#   172800; TwentyThenFortyNine [20h 49h] 86400 (124200 rounded).
+# c11 and c12 are learning cards of ThreeSteps on its second and third step:
+# Hard repeats the current step (600 and 3600).
+id: sched/steps/hard-delays
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Ten, learn_steps: [10m]}
+    - {name: TwoDays, learn_steps: [2d]}
+    - {name: TwentyFiveHours, learn_steps: [25h]}
+    - {name: TwentyThreeHours, learn_steps: [23h]}
+    - {name: SixteenHours, learn_steps: [16h]}
+    - {name: OneDay, learn_steps: [1d]}
+    - {name: Seconds, learn_steps: [30s, 2m]}
+    - {name: TenThenDay, learn_steps: [10m, 1d]}
+    - {name: DayThenThree, learn_steps: [1d, 3d]}
+    - {name: TwentyThenFortyNine, learn_steps: [20h, 49h]}
+    - {name: ThreeSteps, learn_steps: [1m, 10m, 1h]}
+  decks:
+    - {name: Ten, preset: Ten}
+    - {name: TwoDays, preset: TwoDays}
+    - {name: TwentyFiveHours, preset: TwentyFiveHours}
+    - {name: TwentyThreeHours, preset: TwentyThreeHours}
+    - {name: SixteenHours, preset: SixteenHours}
+    - {name: OneDay, preset: OneDay}
+    - {name: Seconds, preset: Seconds}
+    - {name: TenThenDay, preset: TenThenDay}
+    - {name: DayThenThree, preset: DayThenThree}
+    - {name: TwentyThenFortyNine, preset: TwentyThenFortyNine}
+    - {name: ThreeSteps, preset: ThreeSteps}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Ten, fields: [c01, back]}
+    - {notetype: Pair, deck: TwoDays, fields: [c02, back]}
+    - {notetype: Pair, deck: TwentyFiveHours, fields: [c03, back]}
+    - {notetype: Pair, deck: TwentyThreeHours, fields: [c04, back]}
+    - {notetype: Pair, deck: SixteenHours, fields: [c05, back]}
+    - {notetype: Pair, deck: OneDay, fields: [c06, back]}
+    - {notetype: Pair, deck: Seconds, fields: [c07, back]}
+    - {notetype: Pair, deck: TenThenDay, fields: [c08, back]}
+    - {notetype: Pair, deck: DayThenThree, fields: [c09, back]}
+    - {notetype: Pair, deck: TwentyThenFortyNine, fields: [c10, back]}
+    - {notetype: Pair, deck: ThreeSteps, fields: [c11, back]}
+    - {notetype: Pair, deck: ThreeSteps, fields: [c12, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = 2, reps = 2, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 10)"
+      params: [1894701600, '{"s":2.3065,"d":2.118,"lrt":1894701000}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = ?, left = 1, reps = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 11)"
+      params: [1894701600, '{"s":2.3065,"d":2.118,"lrt":1894698000}']
+  - observe: [next_states]

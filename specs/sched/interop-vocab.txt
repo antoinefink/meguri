@@ -42,3 +42,22 @@ StdRng
 seed_from_u64
 random_range
 fuzz_table
+# U45 (steps, fsrs-transitions, fuzz, answer-labels): card columns, state
+# message fields, preset and config keys, and the fsrs and rand crate API.
+left
+queue
+lastIvl
+leeched
+position
+learn_steps
+relearn_steps
+initialFactor
+minInt
+collapseTime
+cardStateCustomizer
+fsrsParams7
+FSRSError
+InvalidParameters
+InvalidInput
+SeedableRng
+answer_labels

@@ -1,0 +1,45 @@
+# Labels of review and relearning cards (R656; specs/sched/answer-labels.md).
+# The learn-ahead limit is the default 1200 s. c1 is a review card with
+# stability 10 (Again shows its 10-minute relearning step with <, the others
+# days); c2 a review card with stability 400, interval 400 (years); c3 one with
+# stability 60 (months); c4 a relearning card on the first of its steps 10m 1h;
+# c5 a review card of a preset without relearning steps whose Again goes to
+# review (1 day). Every label equals the delay of the matching next state.
+id: sched/labels/review
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Review, relearn_steps: [10m, 1h], desired_retention: 0.9}
+    - {name: NoRelearn, relearn_steps: [], desired_retention: 0.9}
+  decks:
+    - {name: Review, preset: Review}
+    - {name: NoRelearn, preset: NoRelearn}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Review, fields: [c1, back]}
+    - {notetype: Pair, deck: Review, fields: [c2, back]}
+    - {notetype: Pair, deck: Review, fields: [c3, back]}
+    - {notetype: Pair, deck: Review, fields: [c4, back]}
+    - {notetype: Pair, deck: NoRelearn, fields: [c5, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 10, 2500, 6, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 0]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 400, 2500, 12, 0, '{"s":400.0,"d":3.0,"lrt":1860141600}', 1]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 60, 2500, 9, 0, '{"s":60.0,"d":4.0,"lrt":1889517600}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [3, 1, 1894701600, 2, 2300, 10, 1, 2, '{"s":1.4,"d":8.3,"lrt":1894701000}', 3]
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [2, 2, 0, 10, 2500, 7, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 4]
+  - observe: [answer_labels, next_states]

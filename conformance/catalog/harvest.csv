@@ -750,12 +750,12 @@ hf03d0a912671,python,tag,sched,unclassified,,,open
 hf248f368b2b9,python,tag,sched,unclassified,,,open
 hf44d25b35e71,python,tag,sched,unclassified,,,open
 hf76a58bb5a76,python,tag,sched,unclassified,,,open
-h00a233a3c403,rust,tag,sched,unclassified,,,open
-h010d3289404d,rust,tag,sched,unclassified,,,open
+h00a233a3c403,rust,tag,sched,in-scope,Hard repeats the current learning step,sched/steps/learning-progress sched/steps/hard-delays,done
+h010d3289404d,rust,tag,sched,in-scope,Good on a relearning step stays in relearning,sched/steps/relearning,done
 h0348591aa08e,rust,tag,sched,unclassified,,,open
 h04ac07a21de7,rust,tag,sched,unclassified,,,open
 h05a411d3dbbc,rust,tag,sched,unclassified,,,open
-h0875e3e791c6,rust,tag,sched,unclassified,,,open
+h0875e3e791c6,rust,tag,sched,out-of-scope,SM-2 hard interval multiplier; Meguri schedules with FSRS,,done
 h0c5d8c72ae63,rust,tag,sched,unclassified,,,open
 h0cc7ca135634,rust,tag,sched,unclassified,,,open
 h0d55a293e421,rust,tag,sched,unclassified,,,open
@@ -768,24 +768,24 @@ h1a440165e319,rust,tag,sched,unclassified,,,open
 h1a6dc1b4024f,rust,tag,sched,unclassified,,,open
 h1d5bffd22663,rust,tag,sched,unclassified,,,open
 h2023616b1a59,rust,tag,sched,unclassified,,,open
-h20b239907832,rust,tag,sched,unclassified,,,open
-h23a9ff8b09f0,rust,tag,sched,unclassified,,,open
+h20b239907832,rust,tag,sched,in-scope,Easy graduates from any learning step,sched/steps/learning-progress,done
+h23a9ff8b09f0,rust,tag,sched,in-scope,Leech threshold and every half threshold after it,sched/fsrs/review-again,done
 h23b15f93e355,rust,tag,sched,unclassified,,,open
 h23fc56a0a5b6,rust,tag,sched,unclassified,,,open
-h256ac6828508,rust,tag,sched,unclassified,,,open
-h279126fd92b9,rust,tag,sched,unclassified,,,open
+h256ac6828508,rust,tag,sched,out-of-scope,SM-2 Easy in relearning (interval + 1 day); Meguri schedules with FSRS,,done
+h279126fd92b9,rust,tag,sched,in-scope,"Minimum and maximum review intervals, the maximum at least 1",sched/fsrs/max-interval,done
 h2bf702951408,rust,tag,sched,unclassified,,,open
 h319667c38026,rust,tag,sched,unclassified,,,open
-h34810b99051e,rust,tag,sched,unclassified,,,open
+h34810b99051e,rust,tag,sched,in-scope,"Hard without learning steps leaves learning (FSRS interval, or short-term)",sched/fsrs/short-term,done
 h37681aedbc38,rust,tag,sched,unclassified,,,open
-h3ba7c0fbc8f2,rust,tag,sched,unclassified,,,open
+h3ba7c0fbc8f2,rust,tag,sched,in-scope,Again without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
 h3d0ce2bbaef8,rust,tag,sched,unclassified,,,open
-h3dbeef95c3db,rust,tag,sched,unclassified,,,open
+h3dbeef95c3db,rust,tag,sched,out-of-scope,SM-2 interval modifier; Meguri schedules with FSRS,,done
 h3dcf94a2f6fe,rust,tag,sched,unclassified,,,open
 h3f11a775e29c,rust,tag,sched,unclassified,,,open
-h4037ce91c431,rust,tag,sched,unclassified,,,open
+h4037ce91c431,rust,tag,sched,in-scope,Easy leaves relearning,sched/steps/relearning,done
 h40a4438f58cc,rust,tag,sched,unclassified,,,open
-h40e3819d7877,rust,tag,sched,unclassified,,,open
+h40e3819d7877,rust,tag,sched,in-scope,"Again, Hard and Good delays of learning steps",sched/steps/hard-delays sched/steps/learning-progress,done
 h419067ffeea3,rust,tag,sched,unclassified,,,open
 h431af1c97841,rust,tag,sched,unclassified,,,open
 h4705ef5c9c23,rust,tag,sched,unclassified,,,open
@@ -794,45 +794,45 @@ h49565ba9b7dc,rust,tag,sched,unclassified,,,open
 h4ad2bd959137,rust,tag,sched,unclassified,,,open
 h4d0c7354dfcd,rust,tag,sched,unclassified,,,open
 h4dcd915bda8e,rust,tag,sched,unclassified,,,open
-h4eb04b88ea52,rust,tag,sched,unclassified,,,open
+h4eb04b88ea52,rust,tag,sched,in-scope,"Again without learning steps leaves learning (FSRS interval, or short-term)",sched/fsrs/short-term,done
 h53acbb05c3fb,rust,tag,sched,unclassified,,,open
-h53ef76bc5048,rust,tag,sched,unclassified,,,open
-h557e34da0263,rust,tag,sched,unclassified,,,open
-h55e6099a6eb9,rust,tag,sched,unclassified,,,open
+h53ef76bc5048,rust,tag,sched,in-scope,Again in relearning restarts the relearning steps,sched/steps/relearning,done
+h557e34da0263,rust,tag,sched,in-scope,Hard leaving relearning without steps with the FSRS interval,sched/steps/relearning,done
+h55e6099a6eb9,rust,tag,sched,in-scope,Easy graduates above the Good interval,sched/steps/learning-progress sched/steps/new-card-buttons,done
 h561dc186a5dc,rust,tag,sched,unclassified,,,open
 h567aebc9fabb,rust,tag,sched,unclassified,,,open
-h5811eae76235,rust,tag,sched,unclassified,,,open
-h5b374d4c4d55,rust,tag,sched,unclassified,,,open
-h5ba74e3a7864,rust,tag,sched,unclassified,,,open
+h5811eae76235,rust,tag,sched,in-scope,Delays over a day rounded to whole days,sched/steps/hard-delays,done
+h5b374d4c4d55,rust,tag,sched,in-scope,"No-regression minimum of a review interval, inside and outside the fuzz range",sched/fsrs/review-buttons,done
+h5ba74e3a7864,rust,tag,sched,in-scope,"Review-interval fuzz range and pick, with bounds",sched/fuzz/table-bounds fp-probe/corpus/fuzz-table,done
 h5c6480ebd12f,rust,tag,sched,unclassified,,,open
 h5e228991cac8,rust,tag,sched,unclassified,,,open
 h6139479db902,rust,tag,sched,unclassified,,,open
 h63e4063e58e3,rust,tag,sched,unclassified,,,open
-h6a2f74d641e5,rust,tag,sched,unclassified,,,open
+h6a2f74d641e5,rust,tag,sched,in-scope,Leaving relearning without steps on Again with the FSRS interval,sched/steps/relearning,done
 h6a6910e0bd6f,rust,tag,sched,unclassified,,,open
 h6b7f3a469b26,rust,tag,sched,unclassified,,,open
-h72885e1b6734,rust,tag,sched,unclassified,,,open
+h72885e1b6734,rust,tag,sched,in-scope,Fuzz bounds when the minimum is above the maximum interval,sched/fsrs/max-interval sched/fuzz/table-bounds,done
 h72fe93fb7887,rust,supplementary,sched,unclassified,,,open
 h74c71d98d02e,rust,tag,sched,unclassified,,,open
 h77ff41ec7a24,rust,tag,sched,unclassified,,,open
 h78e12bdba938,rust,tag,sched,unclassified,,,open
-h78eed3fe65c6,rust,tag,sched,unclassified,,,open
+h78eed3fe65c6,rust,tag,sched,in-scope,"Elapsed seconds of a learning card's current state, intraday and interday",sched/steps/learning-fuzz sched/steps/interday,done
 h7ae0194021c8,rust,tag,sched,unclassified,,,open
-h7b1a4d17232a,rust,tag,sched,unclassified,,,open
-h7bbb73ef0d28,rust,tag,sched,unclassified,,,open
+h7b1a4d17232a,rust,tag,sched,in-scope,Hard without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
+h7bbb73ef0d28,rust,tag,sched,in-scope,Again resets two relearning steps to the first,sched/steps/relearning,done
 h7bd9a5ed79b8,rust,tag,sched,unclassified,,,open
-h7c2050819592,rust,tag,sched,unclassified,,,open
+h7c2050819592,rust,tag,sched,in-scope,Hard repeats the relearning step,sched/steps/relearning,done
 h837dc023b887,rust,tag,sched,unclassified,,,open
 h847bead54db9,rust,tag,sched,unclassified,,,open
-h881b1bb6d254,rust,tag,sched,unclassified,,,open
+h881b1bb6d254,rust,tag,sched,in-scope,Good leaving relearning with the FSRS interval,sched/steps/relearning,done
 h8c930cc4ef19,rust,tag,sched,unclassified,,,open
 h8e0d45cd0649,rust,tag,sched,unclassified,,,open
 h91b2e4482736,rust,tag,sched,unclassified,,,open
 h969273d973dd,rust,tag,sched,unclassified,,,open
-h971848f00f1e,rust,tag,sched,unclassified,,,open
+h971848f00f1e,rust,tag,sched,in-scope,Short-term Again keeps a card in relearning,sched/steps/relearning sched/fsrs/short-term,done
 h9a5ca7ceecd6,rust,tag,sched,unclassified,,,open
 h9f3550e3fa5f,rust,tag,sched,unclassified,,,open
-ha2425ed999f7,rust,tag,sched,unclassified,,,open
+ha2425ed999f7,rust,tag,sched,in-scope,Good on the last learning step graduates,sched/steps/learning-progress,done
 ha258d562e101,rust,tag,sched,unclassified,,,open
 ha338afcecf02,rust,tag,sched,unclassified,,,open
 ha8aa8d31b248,rust,tag,sched,unclassified,,,open
@@ -849,15 +849,15 @@ hbafc4dc77cce,rust,tag,sched,unclassified,,,open
 hbc3d71afcb34,rust,tag,sched,unclassified,,,open
 hc05411e145f1,rust,tag,sched,unclassified,,,open
 hc3bd9890e06a,rust,tag,sched,unclassified,,,open
-hc67d7d3b1875,rust,tag,sched,unclassified,,,open
-hc96dda7dd94f,rust,tag,sched,unclassified,,,open
+hc67d7d3b1875,rust,tag,sched,in-scope,Easy leaving relearning uses the FSRS interval above the fuzzed Good interval,sched/steps/relearning,done
+hc96dda7dd94f,rust,tag,sched,in-scope,Again in learning returns to the first step,sched/steps/learning-progress,done
 hcbe165cda562,rust,tag,sched,unclassified,,,open
 hccc87afa9021,rust,tag,sched,unclassified,,,open
 hceea58e626d5,rust,tag,sched,unclassified,,,open
-hcf4081192234,rust,tag,sched,unclassified,,,open
+hcf4081192234,rust,tag,sched,in-scope,Good on a learning step moves to the next step,sched/steps/learning-progress,done
 hd5745d5de78c,rust,tag,sched,unclassified,,,open
 hd79744504c35,rust,tag,sched,unclassified,,,open
-hda7aa551feeb,rust,tag,sched,unclassified,,,open
+hda7aa551feeb,rust,tag,sched,in-scope,"Answer button labels (seconds, minutes, months)",sched/labels/units,done
 hda9e7531d7db,rust,tag,sched,unclassified,,,open
 hdb3d8a73ac7b,rust,tag,sched,unclassified,,,open
 hdbe181187e8a,rust,tag,sched,unclassified,,,open
@@ -866,22 +866,22 @@ hdeb239c0cf40,rust,tag,sched,unclassified,,,open
 hdf5b05a2842f,rust,tag,sched,unclassified,,,open
 he2dcd7bd5b1c,rust,tag,sched,unclassified,,,open
 he31eded34d00,rust,tag,sched,unclassified,,,open
-he4c4fc933d44,rust,tag,sched,unclassified,,,open
+he4c4fc933d44,rust,tag,sched,in-scope,Good on the last relearning step leaves relearning,sched/steps/relearning,done
 he544632aa73a,rust,tag,sched,unclassified,,,open
 he594f0a7a983,rust,tag,sched,unclassified,,,open
 he71ab01c9816,rust,tag,sched,unclassified,,,open
 he7fa6992322b,rust,tag,sched,unclassified,,,open
 heceeaa17fdbb,rust,tag,sched,unclassified,,,open
-hee209ed2ac1b,rust,tag,sched,unclassified,,,open
+hee209ed2ac1b,rust,tag,sched,in-scope,Short-term Good keeps a card in relearning,sched/fsrs/short-term,done
 hee2d6b23e65c,rust,tag,sched,unclassified,,,open
-hf37768bcec15,rust,tag,sched,unclassified,,,open
+hf37768bcec15,rust,tag,sched,out-of-scope,SM-2 lapse multiplier (New interval); Meguri schedules lapses with FSRS (R653),,done
 hf54cd97685d7,rust,tag,sched,unclassified,,,open
 hf55838aff7f6,rust,tag,sched,unclassified,,,open
 hf70661f6f3cb,rust,tag,sched,unclassified,,,open
 hf8783ee88750,rust,tag,sched,unclassified,,,open
-hf87bc805c0cf,rust,tag,sched,unclassified,,,open
-hfa3da761639b,rust,tag,sched,unclassified,,,open
-hfb93da3c2901,rust,tag,sched,unclassified,,,open
+hf87bc805c0cf,rust,tag,sched,in-scope,Good on a relearning step lowers the remaining count,sched/steps/relearning,done
+hfa3da761639b,rust,tag,sched,in-scope,Hard keeps the remaining count of two relearning steps,sched/steps/relearning,done
+hfb93da3c2901,rust,tag,sched,in-scope,Short-term Hard keeps a card in relearning,sched/fsrs/short-term,done
 hfea722b04230,rust,tag,sched,unclassified,,,open
 h6d2b664432d7,python,tag,search,unclassified,,,open
 hce3457dc5c85,python,tag,search,unclassified,,,open

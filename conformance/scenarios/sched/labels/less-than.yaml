@@ -1,0 +1,31 @@
+# The < prefix (R656; specs/sched/answer-labels.md A5): a label whose delay is
+# shorter than the learn-ahead limit (collapseTime, seconds) starts with <; a
+# delay equal to the limit does not. c1's preset has steps 5m 20m, c2's 19m59s
+# 20m, c3's 10m. The limit is 1200 s (the default), then two days, then 0.
+id: sched/labels/less-than
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false, collapseTime: 1200}
+  presets:
+    - {name: Five, learn_steps: [5m, 20m], relearn_steps: [10m]}
+    - {name: Nearly, learn_steps: [19m59s, 20m], relearn_steps: [10m]}
+    - {name: Ten, learn_steps: [10m], relearn_steps: [10m]}
+  decks:
+    - {name: Five, preset: Five}
+    - {name: Nearly, preset: Nearly}
+    - {name: Ten, preset: Ten}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Five, fields: [c1, back]}
+    - {notetype: Pair, deck: Nearly, fields: [c2, back]}
+    - {notetype: Pair, deck: Ten, fields: [c3, back]}
+steps:
+  - observe: [answer_labels]
+  - set_config: {key: collapseTime, value: 172800}
+  - observe: [answer_labels]
+  - set_config: {key: collapseTime, value: 0}
+  - observe: [answer_labels]

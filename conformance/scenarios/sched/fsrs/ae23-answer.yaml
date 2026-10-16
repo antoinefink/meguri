@@ -1,0 +1,26 @@
+# AE23 with the load balancer off, through an answer (R659-R662; needs the
+# answer op, U44): the review card whose FSRS Good interval is about 30.4 days
+# (c1 of sched/fsrs/review-buttons, same id, review count and memory state) is
+# answered Good. The stored interval and due day equal the Good state's
+# scheduled days, and the review-log row's ivl equals them too.
+id: sched/fsrs/ae23-answer
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Review, relearn_steps: [10m], max_interval_days: 36500, desired_retention: 0.9}
+  decks: [{name: Review, preset: Review}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Review, fields: [c1, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 1, ivl = 10, factor = 2500, reps = 6, lapses = 0, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: ['{"s":10.0,"d":5.0,"lrt":1893924000}']
+  - observe: [ids, "next_states(#c1)"]
+  - answer: {card: "#c1", rating: good, time_ms: 5000}
+  - observe: ["card(#c1)", "revlog(#c1)"]

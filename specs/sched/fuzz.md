@@ -1,18 +1,20 @@
 # Interval fuzz
 
 Spec: sched/fuzz
-Requirements: R652, R659, R660, R661, R662, R664, R1892
+Requirements: R652, R659, R660, R661, R662, R663, R664, R666, R1892
 Anki: 26.09.3
-Scenarios: conformance/scenarios/fp-probe/
+Scenarios: conformance/scenarios/sched/fuzz/, conformance/scenarios/fp-probe/
 
 How Anki spreads a review interval over a range of nearby days, so that cards answered together do not stay together. Fuzz cannot be turned off (R664): Anki has no setting for it, and every interval below goes through it.
 
-This file was written for the floating-point probe (U14, `conformance/float-determinism`). It covers review-interval fuzz, the no-regression minimum and the fuzz-delta observation. U45 adds learning-step fuzz (R663) as a further section; U44 adds the load balancer, which replaces the pick of Z4 when it is on (R666).
+Z1 to Z6 were written for the floating-point probe (U14, `conformance/float-determinism`): review-interval fuzz, the no-regression minimum and the fuzz-delta observation. U45 adds learning-step fuzz (Z7) and where review fuzz is applied, with the hook through which the load balancer (U44, R666) replaces Z4's pick (Z8).
 
 ## Z1. Seed
 
 - The seed of an answer is the card id plus the card's review count before the answer (`cards.reps`), both read as unsigned 64-bit integers and added with wrap-around (R659). Card ids are positive and below 2^63, and `reps` is below 2^32, so the sum never wraps for stored cards.
 - Recomputing a fuzzed interval that an earlier answer already gave (the fuzz-delta observation, Z6) uses the review count minus one instead, floored at 0.
+- The card id is read as the unsigned 64-bit integer with the same bits (two's complement). A negative id, which only a damaged collection holds, therefore wraps: id −1 with 5 reviews gives the seed 4, the same as id 4 with 0 reviews or id 0 with 4 (golden `sched/fuzz/table-bounds`: the rows of [4, 0], [0, 4], [3, 1] and [1, 3] are equal).
+- The current state of an intraday learning card uses the review count minus one in unsigned 32-bit arithmetic, so 0 reviews give 4,294,967,295 (`sched/steps#L8`, Z7).
 
 ## Z2. Fuzz factor
 
@@ -45,7 +47,7 @@ Given an unrounded interval `x` (`f32` days), a minimum `m` and a maximum `M` (u
 2. `x' = x` clamped to `[m', M]` (as `f32`).
 3. `lower = round(x' − Δ(x'))` and `upper = round(x' + Δ(x'))`, each subtraction or sum done in `f32`, rounding halves away from zero, then converted to an unsigned integer.
 4. `lower` and `upper` are each clamped to `[m', M]`.
-5. When `lower = upper` and `upper > 2` and `upper < M`, `upper` becomes `lower + 1`.
+5. When `lower = upper` and `upper > 2` and `upper < M`, `upper` becomes `lower + 1`. (With the inputs this file gives, this step never changes a result: below `x' = 2.5` the bounds are at most 2, and from 2.5 on `upper` is at least `m' + 1` unless `M` caps it. Unit tests exercise it on bounds directly.)
 6. The result is `floor(L + f × N)` converted to an unsigned integer, where `L` is `lower` as `f32`, `N` is `1 + upper − lower` (an integer) as `f32`, `f` is the factor of Z2, and the product and the sum are each rounded to `f32`. Since `f < 1`, the result lies in `[lower, upper]`.
 
 So intervals below 2.5 days are only rounded and clamped (R661), and `x` itself is never rounded on the way: only `x' − Δ` and `x' + Δ` are.
@@ -61,6 +63,10 @@ No oracle observation can fix the factor (it always comes from a seed), so these
 | 4 | 5 | 36500 | 5, 6 (x' = 5; the minimum lifts `lower`) | 5 | 6 | 6 |
 | 200 | 1 | 150 | 141, 150 (x' = 150) | 141 | 146 | 150 |
 | 1 | 4 | 4 | 4, 4 (no widening at the maximum) | 4 | 4 | 4 |
+| 2.5 | 1 | 36500 | 2, 4 (`2.5 − 1` rounds to 2, `2.5 + 1` to 4) | 2 | 3 | 4 |
+| 2 | 3 | 36500 | 3, 4 (x' = 3) | 3 | 4 | 4 |
+| 2 | 3 | 3 | 3, 3 | 3 | 3 | 3 |
+| 100 | 1 | 99 | 92, 99 (x' = 99) | 92 | 96 | 99 |
 
 ## Z5. No-regression minimum
 
@@ -89,3 +95,55 @@ Examples (oracle, `conformance/goldens/smoke/fuzz-table-small.json`, maximum int
 | 1 | 0 | 0 | 0 | 1 | 2 | 2 | 5 | 34 |
 | 1 | 1 | 0 | 0 | −1 | −2 | −3 | −6 | −44 |
 | 1894680000001 | 2 | 0 | 0 | 0 | 1 | 1 | 2 | 13 |
+
+The `fuzz_table` rows of a card whose preset has a small maximum show the clamping (golden `sched/fuzz/table-bounds`): with maximum 3, intervals 3 and above all fuzz into [2, 3] (seed 4: deltas 0 at 3, −1 at 4, −4 at 7); with maximum 1 every interval becomes 1 (delta `1 − i`).
+
+## Z7. Learning-step fuzz (R663)
+
+A learning or relearning delay that stays in seconds (`sched/steps#L7`) gets a random extra that is never shown on the buttons:
+
+1. `E` = the delay `d` (unsigned 32-bit) converted to `f32`, times 0.25 in `f32`, then the smaller of that and 300.0, rounded down, as an unsigned integer.
+2. When `E` is 0, the fuzzed delay is `d`.
+3. Otherwise it is the first value that `rand` 0.9.4 returns for `Rng::random_range(d..d + E)` over `u32` on a generator made by `StdRng::seed_from_u64(seed)`: a whole number of seconds in `[d, d + E)`. This is a fresh generator, not the one of Z2, and the draw is an integer range, not Z2's float.
+
+- Seeds: the answer that puts a card in the intraday learning queue (U44) uses the seed of Z1 (card id + reviews before the answer); its due time is now + the fuzzed delay. The current state of a card in that queue reconstructs the time of the last answer with the card id + (reviews − 1) taken in 32 bits (`sched/steps#L8`).
+- Delays that become days are not fuzzed this way (`sched/steps#L7`); review fuzz (Z4) never applies to steps.
+- Bounds: `E` is at most 300 s and at most a quarter of the delay. 3 s has no room (`E` 0), 4 s has `E` = 1 (the draw is always 4), 30 s draws from [30, 37), 600 s from [600, 750), 7200 s and longer from [d, d + 300).
+
+| Card id | Reviews counted | Delay | Fuzzed |
+|---|---|---|---|
+| 1894701600002 | 0 | 30 | 33 |
+| 1894701600003 | 4294967295 | 30 | 31 |
+| 1894701600004 | 1 | 30 | 34 |
+| 1894701600005 | 0 | 600 | 705 |
+| 1894701600006 | 999 | 600 | 719 |
+| 1894701600007 | 2 | 7200 | 7360 |
+| 1894701600008 | 3 | 72000 | 72267 |
+| 1894701600012 | 5 | 600 | 722 |
+| 1894747200004 | 0 | 600 | 676 (an answer: due = now + 676) |
+
+(Goldens `sched/steps/learning-fuzz`, where "reviews counted" is the card's reviews minus one, and `sched/steps/rollover-answer` c5.)
+
+## Z8. Where review fuzz is applied, and the fuzzed-day chooser (R664, R666)
+
+Z4 is applied, always with the factor of the answer's seed, at exactly these points (`sched/fsrs-transitions`):
+
+- leaving the learning steps on Again, Hard or Good (T8): once;
+- Easy from a new or learning card (T8) and from a relearning card (T9): twice, first for the Good interval that sets the minimum, then for the result;
+- Hard, Good and Easy on a review card (T5): once each, in that order;
+- leaving relearning on Again, Hard or Good (T9): once.
+
+The review part of Again on a review card (T4) and of a relearning step state is never fuzzed. Nothing can turn fuzz off (R664).
+
+The engine takes an optional fuzzed-day chooser. At each point above it first offers the chooser the same `(x, m, M)` that Z4 would get (the unrounded or rounded interval exactly as Z4 receives it, the minimum and the maximum). A chooser that returns a day gives the result; one that declines leaves Z4's pick. Without a chooser every point uses Z4. The load balancer (U44) is such a chooser: it is present only when `loadBalancerEnabled` is on and declines the intervals R666 leaves to plain fuzz; with it off, results are those of this file (AE23).
+
+## Z9. Scenarios
+
+| Scenario | Covers |
+|---|---|
+| `fp-probe/corpus/fuzz-table` | Z1 to Z4 and Z6 on 10,000 (card id, reps) pairs at 20 intervals with maximum 36,500 (R1892); U45 activates it with its `fuzz_table` adapter |
+| `sched/fuzz/table-bounds` | Z1 (shared seeds, the largest ids and review counts), Z4 clamping under maximums 36,500, 100, 3 and 1 |
+| `sched/steps/learning-fuzz`, `sched/steps/rollover-answer` | Z7 |
+| `sched/fsrs/*`, `sched/steps/*` | Z4, Z5 and Z8 inside the transitions |
+
+All goldens are recorded. Z4's table, the widening of step 5 and Z1's negative ids are unit tests.

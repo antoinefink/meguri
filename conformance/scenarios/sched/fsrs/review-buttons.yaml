@@ -1,0 +1,101 @@
+# Hard, Good and Easy on review cards (R652, R587, R649, AE23;
+# specs/sched/fsrs-transitions.md T3-T5, specs/sched/fuzz.md Z4, Z5). Every
+# card is a review card in a normal deck with a memory state and its last
+# review time; the load balancer is off. The cards:
+#   c1 AE23: FSRS Good about 30.4 days, reviewed one day early.
+#   c2 Good below the current interval, inside the fuzz range.
+#   c3 Good far below the current interval: no minimum.
+#   c4 on time.
+#   c5 one day late.
+#   c6 ten days late.
+#   c7 a hundred days late.
+#   c8 five days early.
+#   c9 reviewed an hour ago.
+#   c10 as c4, desired retention 0.7.
+#   c11 as c4, desired retention 0.99.
+#   c12 ease 1.4.
+#   c13 ease 1.3.
+#   c14 ease 5.0.
+#   c15 every interval grows past the current one.
+# c1 is AE23: its Good state and label equal the interval answering Good stores
+# (sched/fsrs/ae23-answer).
+id: sched/fsrs/review-buttons
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Review, relearn_steps: [10m], max_interval_days: 36500, desired_retention: 0.9}
+    - {name: Seventy, relearn_steps: [10m], max_interval_days: 36500, desired_retention: 0.7}
+    - {name: NinetyNine, relearn_steps: [10m], max_interval_days: 36500, desired_retention: 0.99}
+  decks:
+    - {name: Review, preset: Review}
+    - {name: Seventy, preset: Seventy}
+    - {name: NinetyNine, preset: NinetyNine}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Review, fields: [c1, back]}
+    - {notetype: Pair, deck: Review, fields: [c2, back]}
+    - {notetype: Pair, deck: Review, fields: [c3, back]}
+    - {notetype: Pair, deck: Review, fields: [c4, back]}
+    - {notetype: Pair, deck: Review, fields: [c5, back]}
+    - {notetype: Pair, deck: Review, fields: [c6, back]}
+    - {notetype: Pair, deck: Review, fields: [c7, back]}
+    - {notetype: Pair, deck: Review, fields: [c8, back]}
+    - {notetype: Pair, deck: Review, fields: [c9, back]}
+    - {notetype: Pair, deck: Seventy, fields: [c10, back]}
+    - {notetype: Pair, deck: NinetyNine, fields: [c11, back]}
+    - {notetype: Pair, deck: Review, fields: [c12, back]}
+    - {notetype: Pair, deck: Review, fields: [c13, back]}
+    - {notetype: Pair, deck: Review, fields: [c14, back]}
+    - {notetype: Pair, deck: Review, fields: [c15, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [1, 10, 2500, 6, 0, '{"s":10.0,"d":5.0,"lrt":1893924000}', 0]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [20, 22, 2500, 7, 0, '{"s":15.0,"d":5.0,"lrt":1894528800}', 1]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [95, 100, 2500, 8, 0, '{"s":10.0,"d":5.0,"lrt":1894269600}', 2]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [0, 10, 2500, 9, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 3]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [-1, 10, 2500, 10, 0, '{"s":10.0,"d":5.0,"lrt":1893751200}', 4]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [-10, 10, 2500, 11, 0, '{"s":10.0,"d":5.0,"lrt":1892973600}', 5]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [-100, 10, 2500, 12, 0, '{"s":10.0,"d":5.0,"lrt":1885197600}', 6]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [5, 10, 2500, 13, 0, '{"s":10.0,"d":5.0,"lrt":1894269600}', 7]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [30, 30, 2500, 14, 0, '{"s":30.0,"d":5.0,"lrt":1894698000}', 8]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [0, 10, 2500, 9, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 9]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [0, 10, 2500, 9, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 10]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [0, 10, 1400, 15, 4, '{"s":10.0,"d":5.0,"lrt":1893837600}', 11]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [0, 10, 1300, 16, 5, '{"s":10.0,"d":5.0,"lrt":1893837600}', 12]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [0, 10, 5000, 17, 0, '{"s":10.0,"d":5.0,"lrt":1893837600}', 13]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET ?)"
+      params: [-1, 2, 2500, 4, 0, '{"s":3.0,"d":2.0,"lrt":1894442400}', 14]
+  - observe: [next_states]
