@@ -1105,6 +1105,11 @@ dependencies = [
 [[package]]
 name = "meguri-search"
 version = "0.0.0"
+dependencies = [
+ "meguri-model",
+ "regex",
+ "rusqlite",
+]
 
 [[package]]
 name = "meguri-servers"

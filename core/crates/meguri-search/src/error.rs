@@ -1,0 +1,279 @@
+//! Search errors (`specs/search/errors.md`): the closed list of kinds (E1),
+//! the texts each carries (E2), the run errors (E3), ranges (E5) and Meguri's
+//! messages (E7).
+
+use std::fmt;
+use std::ops::Range;
+
+/// A search that cannot be read or run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchError {
+    kind: ErrorKind,
+    range: Range<usize>,
+}
+
+/// E1: Anki's parse error categories, then the two run errors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ErrorKind {
+    MisplacedAnd,
+    MisplacedOr,
+    EmptyGroup,
+    UnopenedGroup,
+    UnclosedGroup,
+    EmptyQuote,
+    UnclosedQuote,
+    MissingKey,
+    UnknownEscape {
+        provided: String,
+    },
+    InvalidState {
+        provided: String,
+    },
+    InvalidFlag,
+    InvalidProperty {
+        provided: String,
+    },
+    InvalidOperator {
+        provided: String,
+    },
+    InvalidNumber {
+        provided: String,
+        context: String,
+    },
+    InvalidWholeNumber {
+        provided: String,
+        context: String,
+    },
+    InvalidPositiveWholeNumber {
+        provided: String,
+        context: String,
+    },
+    InvalidNegativeWholeNumber {
+        provided: String,
+        context: String,
+    },
+    InvalidAnswerButton {
+        provided: String,
+        context: String,
+    },
+    InvalidIdList {
+        context: String,
+    },
+    InvalidDupe,
+    /// Anki's fallback; no input is known to reach it, and Meguri never
+    /// raises it (E1).
+    Malformed,
+    /// Raised by the text-matching unit (U81) while a plan is built; the
+    /// pattern and reason are defined there (`text-matching.md`).
+    InvalidRegex {
+        pattern: String,
+        reason: String,
+    },
+    SearchFailed(SearchFailure),
+}
+
+/// E3: why a search that parses cannot run. Each cause has its own message
+/// (E7); none is observed (`specs/conformance/search-ops.md` S3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SearchFailure {
+    /// A negated operator word (`-and`, `-or`; `grammar.md` G4).
+    NegatedOperator,
+    /// An id list with a digit other than ASCII `0`-`9`; `context` is the
+    /// key as typed, then `:`.
+    IdList { context: String },
+    /// The database refused the statement built for the search.
+    DatabaseRefusal,
+}
+
+impl ErrorKind {
+    /// The kind's name in observations and the schema (`invalid_state`).
+    pub fn code(&self) -> &'static str {
+        match self {
+            ErrorKind::MisplacedAnd => "misplaced_and",
+            ErrorKind::MisplacedOr => "misplaced_or",
+            ErrorKind::EmptyGroup => "empty_group",
+            ErrorKind::UnopenedGroup => "unopened_group",
+            ErrorKind::UnclosedGroup => "unclosed_group",
+            ErrorKind::EmptyQuote => "empty_quote",
+            ErrorKind::UnclosedQuote => "unclosed_quote",
+            ErrorKind::MissingKey => "missing_key",
+            ErrorKind::UnknownEscape { .. } => "unknown_escape",
+            ErrorKind::InvalidState { .. } => "invalid_state",
+            ErrorKind::InvalidFlag => "invalid_flag",
+            ErrorKind::InvalidProperty { .. } => "invalid_property",
+            ErrorKind::InvalidOperator { .. } => "invalid_operator",
+            ErrorKind::InvalidNumber { .. } => "invalid_number",
+            ErrorKind::InvalidWholeNumber { .. } => "invalid_whole_number",
+            ErrorKind::InvalidPositiveWholeNumber { .. } => "invalid_positive_whole_number",
+            ErrorKind::InvalidNegativeWholeNumber { .. } => "invalid_negative_whole_number",
+            ErrorKind::InvalidAnswerButton { .. } => "invalid_answer_button",
+            ErrorKind::InvalidIdList { .. } => "invalid_id_list",
+            ErrorKind::InvalidDupe => "invalid_dupe",
+            ErrorKind::Malformed => "malformed",
+            ErrorKind::InvalidRegex { .. } => "invalid_regex",
+            ErrorKind::SearchFailed(_) => "search_failed",
+        }
+    }
+
+    /// E2's `provided`, as the text holds it (backticks not yet replaced).
+    pub fn provided(&self) -> Option<&str> {
+        match self {
+            ErrorKind::UnknownEscape { provided }
+            | ErrorKind::InvalidState { provided }
+            | ErrorKind::InvalidProperty { provided }
+            | ErrorKind::InvalidOperator { provided }
+            | ErrorKind::InvalidNumber { provided, .. }
+            | ErrorKind::InvalidWholeNumber { provided, .. }
+            | ErrorKind::InvalidPositiveWholeNumber { provided, .. }
+            | ErrorKind::InvalidNegativeWholeNumber { provided, .. }
+            | ErrorKind::InvalidAnswerButton { provided, .. } => Some(provided),
+            _ => None,
+        }
+    }
+
+    /// E2's `context`. A failed id list keeps its key for the message only.
+    pub fn context(&self) -> Option<&str> {
+        match self {
+            ErrorKind::InvalidNumber { context, .. }
+            | ErrorKind::InvalidWholeNumber { context, .. }
+            | ErrorKind::InvalidPositiveWholeNumber { context, .. }
+            | ErrorKind::InvalidNegativeWholeNumber { context, .. }
+            | ErrorKind::InvalidAnswerButton { context, .. }
+            | ErrorKind::InvalidIdList { context } => Some(context),
+            _ => None,
+        }
+    }
+
+    /// Raised while the text is read (so also by canonicalization), not when
+    /// it runs (E1).
+    pub fn is_parse_error(&self) -> bool {
+        !matches!(self, ErrorKind::InvalidRegex { .. } | ErrorKind::SearchFailed(_))
+    }
+
+    /// E7's text for this kind, after `Invalid search: `.
+    fn message_text(&self) -> String {
+        let p = apostrophes;
+        match self {
+            ErrorKind::MisplacedAnd => {
+                r#"an `and` must stand between two search terms. To search for the word, put it in double quotes: `"and"`."#.to_owned()
+            }
+            ErrorKind::MisplacedOr => {
+                r#"an `or` must stand between two search terms. To search for the word, put it in double quotes: `"or"`."#.to_owned()
+            }
+            ErrorKind::EmptyGroup => {
+                r#"there is nothing to search for between `(` and `)`. To search for brackets, put them in double quotes: `"( )"`."#.to_owned()
+            }
+            ErrorKind::UnopenedGroup => {
+                r"a `)` closes a group that was never opened. To search for `)`, put it in double quotes or write `\)`.".to_owned()
+            }
+            ErrorKind::UnclosedGroup => {
+                r"a `(` opens a group that is never closed. To search for `(`, put it in double quotes or write `\(`.".to_owned()
+            }
+            ErrorKind::EmptyQuote => {
+                r#"there is nothing to search for between the double quotes `""`. To search for double quotes, write `\"\"`."#.to_owned()
+            }
+            ErrorKind::UnclosedQuote => r#"a double quote `"` is never closed. To search for `"`, write `\"`."#.to_owned(),
+            ErrorKind::MissingKey => r"a colon `:` needs a keyword before it. To search for `:`, write `\:`.".to_owned(),
+            ErrorKind::UnknownEscape { provided } => {
+                format!(r"the escape `{}` does not exist. To search for a backslash, write `\\`.", p(provided))
+            }
+            ErrorKind::InvalidState { provided } => format!("`is:` does not accept `{}`.", p(provided)),
+            ErrorKind::InvalidFlag => {
+                "`flag:` needs a flag number: 1 red, 2 orange, 3 green, 4 blue, 5 pink, 6 turquoise, 7 purple or 0 for no flag."
+                    .to_owned()
+            }
+            ErrorKind::InvalidProperty { provided } => format!("`prop:` does not accept `{}`.", p(provided)),
+            ErrorKind::InvalidOperator { provided } => format!(
+                "`prop:{}` needs one of the comparisons `=`, `!=`, `<`, `>`, `<=` or `>=`.",
+                p(provided)
+            ),
+            ErrorKind::InvalidNumber { provided, context } => {
+                format!("expected a number in `{}`, found `{}`.", p(context), p(provided))
+            }
+            ErrorKind::InvalidWholeNumber { provided, context } => {
+                format!("expected a whole number in `{}`, found `{}`.", p(context), p(provided))
+            }
+            ErrorKind::InvalidPositiveWholeNumber { provided, context } => format!(
+                "expected a whole number of 0 or more in `{}`, found `{}`.",
+                p(context),
+                p(provided)
+            ),
+            ErrorKind::InvalidNegativeWholeNumber { provided, context } => format!(
+                "expected a whole number of 0 or less in `{}`, found `{}`.",
+                p(context),
+                p(provided)
+            ),
+            ErrorKind::InvalidAnswerButton { provided, context } => format!(
+                "expected an answer button from 1 to 4 in `{}`, found `{}`.",
+                p(context),
+                p(provided)
+            ),
+            ErrorKind::InvalidIdList { context } => format!("`{}` takes only ids separated by commas.", p(context)),
+            ErrorKind::InvalidDupe => "`dupe:` needs a note type id, a comma and the text.".to_owned(),
+            ErrorKind::Malformed => "check the search for typing mistakes.".to_owned(),
+            ErrorKind::InvalidRegex { pattern, reason } => {
+                format!("the regular expression `{pattern}` is not valid: {reason}")
+            }
+            ErrorKind::SearchFailed(SearchFailure::NegatedOperator) => {
+                r#"a `-` cannot stand directly before `and` or `or`. To search for the word, put it in double quotes: `-"and"`."#.to_owned()
+            }
+            ErrorKind::SearchFailed(SearchFailure::IdList { context }) => {
+                format!("`{}` takes ids written with the digits 0 to 9 only.", p(context))
+            }
+            ErrorKind::SearchFailed(SearchFailure::DatabaseRefusal) => {
+                "this search is too large to run. Split it into smaller searches.".to_owned()
+            }
+        }
+    }
+}
+
+impl SearchError {
+    /// `range` is a half-open interval of character offsets into the text as
+    /// the caller gave it (E5).
+    pub fn new(kind: ErrorKind, range: Range<usize>) -> SearchError {
+        SearchError { kind, range }
+    }
+
+    pub fn kind(&self) -> &ErrorKind {
+        &self.kind
+    }
+
+    /// E5: characters (Unicode scalar values) of the caller's text, before
+    /// whitespace normalization. The FFI converts them to UTF-16 offsets.
+    pub fn range(&self) -> Range<usize> {
+        self.range.clone()
+    }
+
+    pub fn code(&self) -> &'static str {
+        self.kind.code()
+    }
+
+    /// E2: `provided` when the kind has it, otherwise the characters of
+    /// `text` (the search this error came from) that the range covers.
+    pub fn offending_text(&self, text: &str) -> String {
+        match self.kind.provided() {
+            Some(provided) => provided.to_owned(),
+            None => text.chars().skip(self.range.start).take(self.range.len()).collect(),
+        }
+    }
+
+    /// E7: `Invalid search: ` and the kind's text, naming the offending text.
+    /// The browser and the AnkiConnect server show this string.
+    pub fn message(&self) -> String {
+        format!("Invalid search: {}", self.kind.message_text())
+    }
+}
+
+impl fmt::Display for SearchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for SearchError {}
+
+/// Every backtick (U+0060) replaced by an apostrophe (U+0027): how E2's texts
+/// appear in messages (E7) and observations (search-ops.md S3).
+pub fn apostrophes(text: &str) -> String {
+    text.replace('`', "'")
+}

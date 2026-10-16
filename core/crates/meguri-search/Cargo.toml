@@ -5,3 +5,20 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[features]
+# Test-only (KTD18): the AsciiCompat fold mode (search/query-model Q8), for
+# the differential runs against the oracle (U91). Never on by default or in
+# Release.
+test-hooks = []
+
+[dependencies]
+meguri-model.workspace = true
+# Unicode decimal digits (category Nd) in id lists (search/grammar G8), with
+# the pinned regex-syntax tables.
+regex.workspace = true
+
+[dev-dependencies]
+# The plan's own tests (src/plan) run its statements on in-memory card and
+# note tables; collections are only ever read through meguri-storage.
+rusqlite.workspace = true
