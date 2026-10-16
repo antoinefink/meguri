@@ -389,6 +389,12 @@ fn run_op<T>(
         notes: undo_notes,
     });
     shared.undo.notify_restorers(&applied, &change_set);
+    // The day clock computes afresh after a change of its keys or of `col`
+    // (`sched/day-clock` D6, D8). Noted before anyone hears of the commit, so
+    // a check made on its event never takes the cached day.
+    if !change_set.is_empty() && shared.day_clock.note_commit(&change_set) {
+        shared.day_clock.schedule_check(shared);
+    }
     if change_set.is_empty() {
         reservation.give_up();
     } else {
@@ -419,11 +425,6 @@ fn run_op<T>(
             let message = crate::error::panic_message(payload.as_ref());
             tracing::error!(op = meta.name, %message, "a commit hook panicked");
         }
-    }
-    // The day clock computes afresh after a change of its keys or of `col`
-    // (`sched/day-clock` D6, D8).
-    if !change_set.is_empty() && shared.day_clock.note_commit(&change_set) {
-        shared.day_clock.schedule_check(shared);
     }
     drop(delay);
 
@@ -531,12 +532,12 @@ where
 
 /// What a replace leaves (`engine/lifecycle` L8).
 pub(crate) struct Replaced {
-    /// Why the swap or the reopen failed; `factory` says whether a
-    /// collection is open again.
+    /// Why the swap, the reopen or the new generation's first day check
+    /// failed; `factory` says whether a collection is open again.
     pub error: Option<EngineError>,
-    /// The new generation, when a file the swap changed was reopened: after
-    /// every successful swap, and after a failed one that had already
-    /// changed the file.
+    /// The new generation, when a file the swap changed was reopened and its
+    /// first day check committed: after every successful swap, and after a
+    /// failed one that had already changed the file.
     pub generation: Option<NewGeneration>,
     /// Readers of the collection open now: the new file, or the old one when
     /// the swap failed before changing it; `None` when nothing is open.
@@ -606,23 +607,48 @@ impl TaskBody for ReplaceTask {
                 factory: None,
             },
             Ok(collection) => {
-                let factory = Some(collection.reader_factory());
+                let factory = collection.reader_factory();
                 *env.collection = Some(collection);
                 env.touched.reset(*shared.lock_commit());
-                let generation = replacing.then(|| {
+                if replacing {
                     let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
-                    NewGeneration {
-                        generation,
-                        announce: shared.stream.reserve(),
+                    let announce = shared.stream.reserve();
+                    match first_day_check(env) {
+                        Ok(()) => Replaced {
+                            error: swapped.err(),
+                            generation: Some(NewGeneration { generation, announce }),
+                            factory: Some(factory),
+                        },
+                        Err(check_error) => {
+                            // As an open whose day check fails (L2): nothing
+                            // stays open, no reader ever opens on the new
+                            // file, and nobody hears of its generation.
+                            drop(announce);
+                            if let Some(collection) = env.collection.take()
+                                && let Err(error) = collection.close()
+                            {
+                                tracing::warn!(%error, "closing the collection after its first day check failed");
+                            }
+                            let error = match swapped {
+                                Ok(()) => check_error,
+                                Err(swap_error) => {
+                                    tracing::warn!(error = %check_error, "the first day check after a failed swap");
+                                    swap_error
+                                }
+                            };
+                            Replaced {
+                                error: Some(error),
+                                generation: None,
+                                factory: None,
+                            }
+                        }
                     }
-                });
-                if generation.is_some() {
-                    first_day_check(env);
-                }
-                Replaced {
-                    error: swapped.err(),
-                    generation,
-                    factory,
+                } else {
+                    Replaced {
+                        error: swapped.err(),
+                        generation: None,
+                        factory: Some(factory),
+                    }
                 }
             }
         };
@@ -642,18 +668,16 @@ impl TaskBody for ReplaceTask {
 /// `sched/day-clock` D8), run by the replace task itself: the day clock
 /// forgets the old collection's day and what it reported, then writes and
 /// unburies on the new file in a `Rollover` op, while the readers are still
-/// closed and before anyone hears of the generation. A failure is logged;
-/// the next check computes afresh.
-fn first_day_check(env: &mut WriterEnv<'_>) {
+/// closed and before anyone hears of the generation. Its error fails the
+/// replace, as it fails an open.
+fn first_day_check(env: &mut WriterEnv<'_>) -> Result<(), EngineError> {
     let shared = env.shared;
     shared.day_clock.reset();
     let day_clock = Arc::clone(&shared.day_clock);
     let spec = crate::sched::day_clock::op_spec();
     let mut meta = shared.meta(spec.def.name(), spec.source);
     meta.planned = Some(shared.generation());
-    if let Err(error) = run_op(env, &meta, spec, move |ctx| day_clock.run(ctx)) {
-        tracing::warn!(%error, "the day clock's first check on the new generation");
-    }
+    run_op(env, &meta, spec, move |ctx| day_clock.run(ctx)).map(drop)
 }
 
 /// Closes the collection (`engine/lifecycle` L10).

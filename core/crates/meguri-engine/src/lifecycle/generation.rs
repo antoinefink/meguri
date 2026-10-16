@@ -35,7 +35,8 @@ pub(crate) struct Replacement {
 /// reopens through the open gate, and, when the file changed, moves to the
 /// next generation, whose first day check the writer has committed by
 /// then; then opens the readers, publishes `CollectionReplaced` once and
-/// tells every `GenerationListener`.
+/// tells every `GenerationListener`. A first check that fails leaves
+/// nothing open, as a failed reopen does.
 pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Privilege, swap: Swap) -> Replacement {
     engine.set_exclusive_phase(core, ExclusivePhase::Replacing);
     core.exec.wait_idle();

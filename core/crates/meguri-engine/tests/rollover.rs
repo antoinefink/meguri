@@ -6,15 +6,18 @@
 
 mod common;
 
-use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, mpsc};
+use std::task::{Context, Wake, Waker};
 use std::time::Duration;
 
 use common::day::{self, Timing};
 use common::steps::{self, UPDATE_NOTE};
 use common::{col_mod, drain};
 use meguri_engine::{
-    Collection, DayReport, DisabledReason, Engine, EngineError, Event, EventKind, LongOp, OpSpec, Ports, Subscription,
-    UndoScope, UndoStatus,
+    Collection, DayReport, DisabledReason, Engine, EngineError, Event, EventKind, FailedReason, LifecycleState, LongOp,
+    OpSpec, Ports, Subscription, UndoScope, UndoStatus,
 };
 use meguri_model::card::{Card, CardQueue, CardType};
 use meguri_model::changes::OpSource;
@@ -360,6 +363,66 @@ fn a_synced_rollover_change_recomputes_at_once_and_reports_once() {
     assert_eq!(shown(&events), shown(&[next_at(BOUNDARY + 2 * 3600)]));
     assert_eq!(d.check(), report(5, BOUNDARY + 2 * 3600, None));
     assert!(day_events(&drain(&subscription, Duration::from_millis(100))).is_empty());
+}
+
+/// How long [`HoldAtPublication`] holds the writer at most: a check that
+/// goes to the writer cannot finish while it is held.
+const HOLD: Duration = Duration::from_millis(500);
+
+/// An async receiver's waker. The stream wakes it on the writer thread as
+/// it publishes the next event; it then tells a checker and holds the writer
+/// there until the checker is done, or for [`HOLD`].
+struct HoldAtPublication {
+    published: Mutex<Option<mpsc::Sender<()>>>,
+    checked: Mutex<mpsc::Receiver<()>>,
+}
+
+impl Wake for HoldAtPublication {
+    fn wake(self: Arc<Self>) {
+        if let Some(published) = self.published.lock().unwrap().take() {
+            let _ = published.send(());
+            let _ = self.checked.lock().unwrap().recv_timeout(HOLD);
+        }
+    }
+}
+
+#[test]
+fn a_check_made_on_a_timing_change_event_computes_afresh() {
+    // D6, D8, D12.2: whoever hears of a change of `rollover` and checks at
+    // once gets the new day, even while the writer is still publishing the
+    // change: 4 to 12 at 10:00 on day 5 goes back to day 4 until 12:00,
+    // never the cached day 5.
+    let d = Day::paris(Timing::New);
+    d.at(DAY5_MORNING);
+    assert_eq!(d.check(), report(5, BOUNDARY, Some(0)));
+    let subscription = d.subscribe();
+    let (published, on_publication) = mpsc::channel();
+    let (done, checked) = mpsc::channel();
+    let waker = Waker::from(Arc::new(HoldAtPublication {
+        published: Mutex::new(Some(published)),
+        checked: Mutex::new(checked),
+    }));
+    let mut next = subscription.next();
+    assert!(Pin::new(&mut next).poll(&mut Context::from_waker(&waker)).is_pending());
+    let checker = {
+        let c = d.c.clone();
+        std::thread::spawn(move || {
+            on_publication.recv().unwrap();
+            let report = c.check_rollover();
+            let _ = done.send(());
+            report
+        })
+    };
+    sync_config(&d.c, &[("rollover", ConfigValue::from(12_i64))]);
+    let heard = checker.join().unwrap().unwrap();
+    // 2030-01-20 12:00 +01:00.
+    assert_eq!((heard.today, heard.next_day_at), (4, DAY5_MORNING + 2 * 3600));
+    let event = subscription.try_recv().expect("the change's event");
+    assert!(
+        matches!(&event.kind, EventKind::Changes(changes) if changes.source == OpSource::SyncIncoming),
+        "the checker heard of the change: {:?}",
+        event.kind
+    );
 }
 
 #[test]
@@ -741,6 +804,73 @@ fn whoever_hears_of_a_generation_change_sees_its_first_check_committed() {
     assert_eq!(first.0.generation, new.generation());
     assert_eq!(replaced.generation, new.generation());
     assert!(day_events(&later).is_empty(), "{:?}", shown(&day_events(&later)));
+}
+
+#[test]
+fn a_replacement_whose_first_check_fails_is_never_read_or_announced() {
+    // L2, L8, D8: the new generation's first check fails (a trigger refuses
+    // its unbury here; a failed commit returns the same way). The replace
+    // fails as an open whose day check fails does: nothing stays open, so
+    // nobody reads the replacement's card still buried, and nobody hears of
+    // its generation.
+    let listener = Arc::new(Looking::default());
+    let clock = Arc::new(StepClock::new(T0 * 1000, offset(CET), "Europe/Paris"));
+    let (_dir, path) = day::new_collection(clock.as_ref(), Timing::New);
+    let (engine, c) = day::open(
+        &path,
+        clock.clone(),
+        Ports::default().generation_listener(listener.clone()),
+    );
+    assert!(listener.engine.set(engine.clone()).is_ok());
+    clock.set_now_ms(DAY5_EVENING * 1000);
+    assert_eq!(c.check_rollover().unwrap().today, 5);
+    let (_source_dir, source) = replacement();
+    day::raw(
+        &source,
+        clock.as_ref(),
+        &[(
+            "CREATE TRIGGER refuse_unbury BEFORE UPDATE OF queue ON cards BEGIN SELECT RAISE(ABORT, 'unbury \
+             refused'); END",
+            Vec::new(),
+        )],
+    );
+
+    let subscription = engine.stream().subscribe();
+    let slot = engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(false).unwrap();
+    let error = exclusive
+        .replace(move |live| {
+            std::fs::copy(&source, live)
+                .map(drop)
+                .map_err(|e| EngineError::Internal { message: e.to_string() })
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("unbury refused"), "{error}");
+    drop(exclusive);
+    drop(slot);
+
+    assert!(
+        matches!(
+            engine.state(),
+            LifecycleState::Failed {
+                reason: FailedReason::Replace { .. }
+            }
+        ),
+        "{:?}",
+        engine.state()
+    );
+    // No reader opens, through a handle of either generation.
+    assert!(c.reader(ReaderRole::Query).is_err());
+    assert!(engine.collection().unwrap().reader(ReaderRole::Query).is_err());
+    assert!(listener.heard.lock().unwrap().is_empty(), "no listener was told");
+    let events = drain(&subscription, Duration::from_millis(100));
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e.kind, EventKind::CollectionReplaced { .. } | EventKind::Changes(_))),
+        "{:?}",
+        events.iter().map(|e| &e.kind).collect::<Vec<_>>()
+    );
 }
 
 #[test]
