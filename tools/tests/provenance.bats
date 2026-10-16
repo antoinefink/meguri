@@ -359,8 +359,9 @@ commit_with() {
 }
 
 @test "worktree new removes the worktree when its record commit fails" {
-  printf '#!/bin/sh\necho "pre-commit: refused" >&2\nexit 1\n' >"$SB/.git/hooks/pre-commit"
-  chmod +x "$SB/.git/hooks/pre-commit"
+  # A hook tools/mg does not install (it owns commit-msg and pre-commit).
+  printf '#!/bin/sh\necho "prepare-commit-msg: refused" >&2\nexit 1\n' >"$SB/.git/hooks/prepare-commit-msg"
+  chmod +x "$SB/.git/hooks/prepare-commit-msg"
   mg worktree new --role implementer w5
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-commit ]

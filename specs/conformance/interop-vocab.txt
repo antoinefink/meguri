@@ -76,6 +76,10 @@ lrt
 nextPos
 localOffset
 db-check
+# collection-check.md K11: config keys the schedule step reads or writes
+curDeck
+activeDecks
+collapseTime
 # Floating-point probe and the macOS native oracle lane
 # (float-determinism.md): the observation, its inputs and row, overlay
 # goldens, the deviation class, protocol and report members, lock and lane
