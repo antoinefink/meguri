@@ -126,6 +126,5 @@ The structure of note types, without template text, CSS, LaTeX values or ids, so
 
 ## T10. Status
 
-- These ops and the kind are draft (`dsl.md` D7.2, `observations.md` O4) until the oracle driver implements them; the scenarios that use them have no goldens until then. The schema already gives their final shapes.
-- **Oracle driver** (oracle maintainer): implements T2 to T8 through Anki's own note type operations, with the meanings above; its notes are spec-side (`oracle/provenance/notetypes.md`). The protocol's step description lists the ops and the kind.
+- These ops and the kind are stable (`dsl.md` D7.2, `observations.md` O4): the oracle driver implements T2 to T8 through Anki's own note type operations, with the meanings above, and the scenarios that use them have goldens. The protocol's step description lists the ops and the kind.
 - **Meguri** (U29's implementer, with the adapters): the testkit model reads these shapes (`core/crates/meguri-testkit/src/scenario/`), and the notetypes adapter implements `add_notetype`, `add_stock_notetype`, `clone_notetype`, `ensure_io_notetype`, the plain-save part of `update_notetype` and `notetype_structure`; U34 adds the rest of `update_notetype`. Until the testkit model reads them, T0 reports the scenarios that use them as `invalid`.

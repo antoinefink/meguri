@@ -160,11 +160,11 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |
 | `converge` | `{}` | `{differences, dump}` (`sync-ops.md` S7.5) | stable (actor scenarios, `sync-ops.md` S7) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
-| `add_notetype` | `{name, kind?, fields, templates, css?}` as a `setup.notetypes` entry: a note type from scratch, with the template checks | `{name}`: the stored name; rejections `notetype-ops.md` T7 | draft (notetypes; `notetype-ops.md` T2) |
-| `add_stock_notetype` | `{kind, name?}`: one of the six stock kinds | `{name}`; rejections T7 | draft (notetypes; `notetype-ops.md` T3) |
-| `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | draft (notetypes; `notetype-ops.md` T4) |
-| `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | draft (notetypes; `notetype-ops.md` T5) |
-| `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | draft (notetypes; `notetype-ops.md` T6) |
+| `add_notetype` | `{name, kind?, fields, templates, css?}` as a `setup.notetypes` entry: a note type from scratch, with the template checks | `{name}`: the stored name; rejections `notetype-ops.md` T7 | stable (`notetype-ops.md` T2) |
+| `add_stock_notetype` | `{kind, name?}`: one of the six stock kinds | `{name}`; rejections T7 | stable (`notetype-ops.md` T3) |
+| `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | stable (`notetype-ops.md` T4) |
+| `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | stable (`notetype-ops.md` T5) |
+| `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | stable (`notetype-ops.md` T6) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 
