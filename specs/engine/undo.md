@@ -2,8 +2,8 @@
 
 Spec: engine/undo
 Requirements: R719, R720, R721, R725 (as KTD7 reconciles it), R1795, R1796, R2020; supports R365, R366, R370, R371, R723, R726, R1811
-Anki: none for sections M1 to M12 (Meguri design from KTD5, KTD6, KTD7 and spec-flow C3, Q1, Q4, Q11; written by the implementer, U25). The observable results of undoing each op are Anki's (26.09.3) and come from the spec writer: pending, see the last section.
-Scenarios: `conformance/scenarios/undo/` (pending, spec writer); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `op_catalog.rs`
+Anki: none for sections M1 to M12 (Meguri design from KTD5, KTD6, KTD7 and spec-flow C3, Q1, Q4, Q11; written by the implementer, U25). Sections A1 to A11 are Anki's observable results at 26.09.3, written by the spec writer; A11 lists what they change in M1 to M12.
+Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `op_catalog.rs`
 
 The undo manager of one open collection (C3): the steps it records from committed ops, what every other op does to them, undo and redo as ops, the reasons a step is unavailable, the held-back run a normal sync keeps local, and the rule that no uploaded step is ever undone. Ops, sources and journals are `engine/op-model`; the change set is `engine/change-stream`.
 
@@ -119,4 +119,130 @@ Undo of an answer (one card row, one review-log row and `col`) returns within R1
 
 ## Observable results of undoing each op
 
-Pending: the spec writer records, per op, what undoing and redoing it leaves in the collection compared with the oracle's `undo` (names, rows, graves, `col.mod`), with scenarios under `conformance/scenarios/undo/`.
+A1 to A10 say what Anki's undo and redo leave in the collection and in the two histories, for the ops that scenarios run today (`specs/conformance/record-ops.md` W2 to W4, `undo-ops.md` V3, `dsl.md`'s `answer`). The scenarios under `conformance/scenarios/undo/` record it from the oracle through the ops and the observation of `specs/conformance/undo-ops.md`. Meguri matches all of it except A8, a deviation. A11 lists what this changes in M1 to M12.
+
+### A1. Step names (R370, R719)
+
+Every step carries the name of the operation that made it; Anki shows it as "Undo Update Note" and "Redo Update Note". The names for today's scenario ops:
+
+| Scenario op | Anki operation | Step |
+|---|---|---|
+| `edit_note` | note update | Update Note (merged per A3) |
+| `delete_notes` | note removal | Delete Note |
+| `add_note`, `setup.notes` | note addition | Add Note |
+| `answer` | answer | Answer Card |
+| `suspend` | suspend | Suspend |
+| `set_config` with `undoable: true`, `remove_config` | config write, config removal | Update Config |
+| `set_config` (W4) | config write without an undo entry | none (A2) |
+| `db_exec` not beginning with `select`, `check_db`, `reopen` | raw write, Check Database, close | none: both histories emptied (A2) |
+
+`undo-ops.md` V4 lists every name Anki 26.09.3 gives, with the ids `undo_status` reports. Where R719's examples differ, V4 has Anki's wording: "Reset Card" (not "Reset") and "Unbury/Unsuspend" (not "Unbury"). Renaming and moving a tag are both "Rename Tag", renaming and moving a deck both "Rename Deck", and building and rebuilding a filtered deck both "Build Deck".
+
+### A2. What each op does to the two histories
+
+- **Recording.** An undoable operation that changed at least one row records one step (A3's merge aside). At most 30 steps are kept: the 31st drops the oldest, so after 31 edits 30 undos succeed and the first edit stays.
+- **Every operation empties the redo history**, whether or not it changed anything and whether or not it records a step: an `edit_note` that saves the note unchanged (`storage/ids-usn-mtime` S4), a config write without an undo entry (W4), a config write of the value the key already holds, the removal of a missing key. Only undo and redo leave it as it is.
+- **A config write without an undo entry (W4) keeps the undo steps**: it writes the key and moves `col.mod` as usual, and the steps below it can still be undone (A7 shows its effect on `col.mod`).
+- **Both histories are emptied** by a `db_exec` statement that does not begin with `select` (also one that changes nothing), by Check Database and by closing the collection. A `select` leaves both.
+- **`delete_notes` whose notes no longer exist** runs no operation (`record-ops.md` W3): both histories stay as they are.
+- Undo moves its step to the redo history and redo moves it back; neither touches any other step. With nothing to apply they are refused (`undo-ops.md` V1).
+
+Scenarios: `undo/redo-cleared`, `undo/thirty-steps`.
+
+### A3. Merged note edits
+
+A note update that changes exactly one note row and no other row besides `col` (no tag registered, no card generated) records no step of its own when both of these hold:
+
+- the top step of the undo history is an "Update Note" step that changed exactly the same note row and no other row besides `col`;
+- that step was recorded less than 60 seconds ago: the clock's current second minus the second at which the step's first operation began is below 60 (both whole epoch seconds, rounded down; a clock moved back counts as 0).
+
+The top step then covers both edits. Its time stays that of its first operation, so edits at 0 s, 30 s and 59 s form one step and an edit at 60 s starts a new one, even 1 s after the previous edit. A step put back by a redo counts as recorded at the redo, so an edit within 60 s of a redo can merge into the redone step.
+
+- Undoing the merged step puts the note back as it was before its first edit, and `col.mod` to its value before that edit (A7).
+- Redoing it puts the note back as it was when the undo ran, which is the last merged edit's row with that edit's `mod`.
+- An edit of another note, and an edit that registers a new tag or generates a card, records a step of its own, and no later edit is merged into such a step. An edit that changes the note's tags only to tags already registered is a plain note change and merges.
+- The rule looks at the rows changed, so it holds for any note update (an editor save as much as `edit_note`).
+
+Scenarios: `undo/edit-note-merge`, `undo/edit-note-new-card`.
+
+### A4. `edit_note` (note update)
+
+The operation changes the note row (`mod` now in seconds, `usn` -1), adds a `tags` row (`usn` -1) for each tag not yet registered, adds a card row for each card the new content generates (U27), and sets `col.mod` to now.
+
+- **Undo** writes the note row back exactly as it was before the edit, every column included: its `mod`, and its `usn` even when that was a server `usn`. It deletes the tag rows and the card rows the edit added; the deleted cards get no grave. Any other row the edit changed gets its earlier content back. `col.mod`: A7.
+- **Redo** writes back the rows as they were when the undo ran: the edited note with the edit's `mod` and `usn` -1, the tag rows and the generated cards with their ids and stamps. `col.mod`: A7.
+
+Scenarios: `undo/edit-note`, `undo/edit-note-new-card`.
+
+### A5. `delete_notes` (note removal)
+
+The operation deletes each note and its cards and adds their graves with `usn` -1, keeping a grave that already exists as it is (`storage/graves` G2, G3), and sets `col.mod` to now.
+
+- **Undo** inserts every deleted card row and note row again exactly as stored before, each with its own `mod` and `usn`. It deletes every grave of the deleted cards and notes, including a grave that existed before the deletion (G6: an object re-created under an id that was deleted before, whose old grave stayed). After the undo no grave remains for them. `col.mod`: A7.
+- **Redo** deletes the rows again and adds back every grave the undo removed, each with `usn` -1, a grave that had a server `usn` before the deletion included: after a deletion, its undo and its redo, all the deletion's graves are pending. `col.mod`: A7.
+- Anki writes a restored note's `flags` as 0 and `data` as empty, the values every note Anki writes holds, and a restored card's `data` in its own encoding (`specs/model/card-data-json.md`). Meguri restores the stored rows whole, so the two differ only for rows whose `flags` or `data` another writer set. No scenario shows it; a scenario that does needs a deviation (for card data, the `card-data-unknown-keys` family).
+
+Scenarios: `undo/delete-notes`, `undo/delete-note-existing-grave`.
+
+### A6. Config writes
+
+For the writes that record a step (`undo-ops.md` V3):
+
+- **Undo** of a write that added the key deletes its row; of a write that changed it, writes the earlier row back exactly (`val` bytes, `usn`, `mtime_secs`), a server `usn` included; of a removal, inserts the removed row again exactly. `col.mod`: A7.
+- **Redo** writes back the row as it was when the undo ran (the written value with the write's `mtime_secs` and `usn` -1), or deletes it again for a removal. `col.mod`: A7.
+- A write of the value the key holds, or the removal of a missing key, writes nothing, records nothing and leaves `col.mod`; it empties the redo history (A2).
+- A config write without an undo entry (W4) records nothing, and an undo or redo of another step never touches its row.
+
+Scenarios: `undo/config-writes` (harvest row `hde5c73b93e34`), `undo/col-mod`.
+
+### A7. `col.mod` (`storage/ids-usn-mtime` S5)
+
+- **Undo** sets `col.mod` to the value it had just before the undone operation ran.
+- **Redo** sets `col.mod` to the value it had when the undo of that step ran. That is the value the operation set, unless something moved `col.mod` after the operation without emptying the undo history, such as a config write without an undo entry (W4): the redo then restores that later value.
+- The undo of a redone step sets `col.mod` to the value it had when the redo ran, which is the value from before the operation unless something moved it in between.
+- Neither undo nor redo sets `col.mod` to now, and neither changes `col.usn`.
+- `col.scm`, for a step that changed it (a schema change, U29), follows the same rule. No scenario shows it yet.
+
+Scenario: `undo/col-mod`; the other scenarios show the plain case.
+
+### A8. A review-log row restored under a taken id (`storage/ids-usn-mtime` I4)
+
+A redo of an answer inserts the answer's review-log row again under its id. When a row with that id exists by then, Anki inserts nothing and keeps the existing row, and applies the rest of the redo (the card is answered again, `col.mod` per A7). The step the redo records still counts the review-log row as its own: an undo of it deletes whatever row then holds that id (seen in a spec-writer probe of the oracle; the scenario stops before it).
+
+In Anki only a writer outside the undo history can take the id between the undo and the redo, since every operation empties the redo history; the scenario uses an SQL trigger as that writer.
+
+Meguri differs: its check (M4.2) finds a row where the step's after-image has none, so it refuses the redo with `ChangedExternally` (`changed_externally` in the scenario, `undo-ops.md` V1) and drops it. The undo of the answer agrees with Anki: the card row is back with its `mod` and `usn`, the answer's review-log row is gone (the trigger's row takes its place on both), and `col.mod` is back. Deviations `undo-revlog-taken-id-redo`, `undo-revlog-taken-id-status` and `undo-revlog-taken-id-card` in `conformance/deviations.yaml` (R1796).
+
+Scenario: `undo/revlog-taken-id` (harvest row `hf7664c5a108b`).
+
+### A9. Rows of other tables
+
+Every row a step changed, in any table, comes back as A4 to A6 describe for notes, cards, tags and config: an inserted row is deleted, a deleted row is inserted again, a changed row is written back whole with its own stamps; redo does the reverse with the rows as the undo found them. Graves are the one exception (A5).
+
+### A10. Scenarios
+
+| Scenario | Covers | Golden |
+|---|---|---|
+| `undo/edit-note` | A1, A4 and A7 for one edit, the note's server `usn` restored; refusals at both ends | pending (oracle maintainer) |
+| `undo/edit-note-merge` | A3: edits at 0, 30 and 59 s merge, one at 60 s and an edit of another note do not; undo and redo of the merged step | pending |
+| `undo/edit-note-new-card` | A3, A4: an edit that registers a tag and generates a card, and a later edit that is not merged into it; the undo deletes the card without a grave and the tag row | pending |
+| `undo/delete-notes` | A5: cards and notes back with their stamps, graves gone; redone and undone again | pending |
+| `undo/delete-note-existing-grave` | A5 with G6: graves that existed before the deletion are removed by the undo and come back pending with the redo | pending |
+| `undo/config-writes` | A6: an added, a changed and a removed key, undone and redone; a same-value write and a missing-key removal; harvest `hde5c73b93e34` | pending |
+| `undo/col-mod` | A7 with a config write without an undo entry between an edit and its undo | pending |
+| `undo/redo-cleared` | A2: which ops empty the redo history, which keep the undo steps, and the refusals | pending |
+| `undo/thirty-steps` | A2: the 30-step limit | pending |
+| `undo/revlog-taken-id` | A8; harvest `hf7664c5a108b`; deviations `undo-revlog-taken-id-*` | pending |
+
+`conformance/scenarios/undo/area.yaml` lists none as active yet: the implementer marks them active with the undo adapter (`undo-ops.md` V6).
+
+### A11. What this changes in M1 to M12
+
+Anki's results above that the mechanism does not produce yet; the implementer updates the M sections with the code.
+
+1. **Redo emptied by every op (A2).** M1's "an op that changed nothing records nothing and leaves redo alone" and M2's skip-undo op that "is neither recorded nor clears anything" become: every op of source `UserUndoable` empties the redo history when it runs, whether or not it changed something; a skip-undo op (W4's config write, and R42's deck selection, where Anki records a "Select Deck" step and so empties redo too) keeps the undo steps and empties redo. Undo and redo keep it.
+2. **Merging (A3).** A step needs the second at which its first op began (the clock seam's time, rounded down to whole seconds; a redone step takes the time of the redo). When an "Update Note" op merges into the top step, the step keeps its before-images and takes the op's after-images, so that M4.2's check accepts the next undo; its id, kind, session and touched set stay.
+3. **Graves on redo (A5).** A redo of a deletion writes every grave its undo removed with `usn` -1, also one that held another `usn` before the deletion. M4.3's removal of the earlier grave is right; its redo puts the grave back pending, not with the earlier `usn`.
+4. **`col.mod` on redo (A7).** The redo step takes as its `col.mod` value the one `col.mod` held when the undo ran, and the step a redo records takes the one it held when the redo ran, instead of the step's own values swapped (M4.5, M5).
+5. **Names (A1).** The steps of these ops carry the names of `undo-ops.md` V4 exactly: "Update Note", "Delete Note", "Add Note", "Answer Card", "Suspend", "Update Config".
+6. **Unchanged, for the record.** Anki's operations without an undo record (Check Database, raw statements) empty both histories even when they change nothing; M2 gives an op that changed nothing no effect. The scenario ops of that kind are `check_db` and `db_exec`, which Meguri clears explicitly (M6, `record-ops.md` W1), so no scenario shows a difference; the units that add other such ops decide.

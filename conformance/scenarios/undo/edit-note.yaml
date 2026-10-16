@@ -1,0 +1,36 @@
+# Undoing a note edit writes the note row back as it was, its mod and its
+# server usn included, and puts col.mod back to its value before the edit.
+# Redo writes the edited row back with the edit's stamps and puts col.mod
+# back to the value the undo found. The step is "Update Note"; with nothing
+# left, undo and redo are refused (specs/engine/undo.md A1, A2, A4, A7).
+# Needs db_exec, edit_note, undo, redo and undo_status
+# (specs/conformance/record-ops.md W1, W2; specs/conformance/undo-ops.md V1,
+# V2).
+id: undo/edit-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [cat, gato], tags: [animal]}
+    - {notetype: Single, deck: Inbox, fields: [dog, perro]}
+steps:
+  # A server usn, as after a sync. Like any statement that is not a select,
+  # it also empties the undo history the setup leaves (undo-ops.md V5).
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, tags]}}]
+  - advance: 1h
+  # The tag animal stays registered: the edit changes the note row only.
+  - edit_note: {note: "#n1", fields: {Back: gata}, tags: []}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, tags]}}]
+  - advance: 1h
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, tags]}}]
+  - undo: {}
+  - advance: 1h
+  - redo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, tags]}}]
+  - redo: {}

@@ -49,12 +49,13 @@ When a sync applies the other side's deletions, it removes each listed note, car
 
 ## G6. Undo
 
-Undoing a deletion restores the rows and deletes the graves the deletion added; redo adds them again (U25). In Anki the undo deletes the grave with that (`oid`, `type`) even when the deletion's insert was ignored because the grave already existed (G2); Meguri's write journal records no change for an ignored insert, so its undo leaves such an earlier grave in place. U25 decides whether to match Anki here and records a deviation with an undo scenario if not; this edge needs an object re-created under a deleted id, for example by an import.
+Undoing a deletion restores the rows and deletes the graves of the deleted cards, notes and decks; redo adds them again with `usn` -1 (`engine/undo` A5). The undo also deletes a grave that existed before the deletion, whose insert G2 ignored: an object re-created under a deleted id (an import that keeps ids) loses its old grave, and after the redo that grave is pending whatever `usn` it had. Meguri does the same, although its write journal records no change for the ignored insert (`engine/undo` M4.3, A11).
 
 ## G7. Scenarios
 
 | Scenario | Covers | Golden |
 |---|---|---|
 | `storage/graves/delete-note` | G2, G3 for a note with three cards, a pre-existing grave and a repeated deletion | recorded |
+| `undo/delete-notes`, `undo/delete-note-existing-grave` | G6 | pending (U25) |
 
 The ops are specified in `specs/conformance/record-ops.md`.

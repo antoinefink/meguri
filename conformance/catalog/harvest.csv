@@ -294,14 +294,14 @@ h56ce4672d339,rust,tag,engine,unclassified,,,open
 h74b7d2e31f18,rust,tag,engine,unclassified,,,open
 h7b088f7049ca,rust,tag,engine,unclassified,,,open
 h85e031554808,rust,tag,engine,unclassified,,,open
-h876dbf5f6be7,rust,tag,engine,unclassified,,,open
-h8c7ca9736257,rust,tag,engine,unclassified,,,open
+h876dbf5f6be7,rust,tag,engine,in-scope,Undo and redo move steps between the two histories; a new op empties redo and an op without undo record empties both,undo/edit-note undo/redo-cleared,done
+h8c7ca9736257,rust,tag,engine,in-scope,Quick successive edits of one note merge into one Update Note step,undo/edit-note-merge,done
 h8e35ff39a69f,rust,tag,engine,unclassified,,,open
 h9a09160808bf,rust,tag,engine,unclassified,,,open
 h9a4da0026b9a,rust,tag,engine,in-scope,A config write that changes nothing leaves col.mod alone; a real change moves it,storage/config/rewrite-same-value storage/config/current-deck,done
 h9e254f805a25,rust,tag,engine,unclassified,,,open
 hbcc38ba4659c,rust,tag,engine,unclassified,,,open
-hc80955057f3f,rust,tag,engine,unclassified,,,open
+hc80955057f3f,rust,tag,engine,not-applicable,Custom undo steps and merging later operations into one step are the add-on interface; Meguri has no add-ons and runs a composite change as one op,,done
 hd962000e6d0c,rust,tag,engine,unclassified,,,open
 hea8cbd8d6720,rust,tag,engine,unclassified,,,open
 hfa50e8665fce,rust,tag,engine,unclassified,,,open
@@ -348,7 +348,7 @@ he051a468be4b,python,tag,model,not-applicable,Anki's Python API surface (copies 
 h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong type takes the default,model/card-data/lenient model/schema11/notetype-values model/schema11/deck-values model/schema11/preset-values,done
 h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
 had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",,deferred
-hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes restores the earlier row, removes an added key and restores a removed one; scenarios come with the undo op (U25)",,deferred
+hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes deletes an added key and writes a changed or removed row back exactly, stamps included; redo writes them again",undo/config-writes,done
 h00dd7a3ecf58,python,tag,notes,unclassified,,,open
 h086997a07e68,python,tag,notes,unclassified,,,open
 h093e8eefc4fb,python,tag,notes,unclassified,,,open
@@ -1004,7 +1004,7 @@ heba033e5deec,rust,supplementary,storage,in-scope,closing without a downgrade ke
 hebd3170b0ca5,rust,tag,storage,in-scope,Check Database keeps review logs with repaired card ids; specified with Check Database (U128),,deferred
 hf00ddf9dbca8,rust,supplementary,storage,in-scope,"notes, cards, decks, presets and note types survive the downgrade to 11 and the upgrade back",storage/upgrade/from-11,done
 hf613c9b636bd,rust,supplementary,storage,unclassified,,,open
-hf7664c5a108b,rust,supplementary,storage,in-scope,A review-log row arriving with a taken id from sync or import or undo is not inserted; scenarios come with those ops,,deferred
+hf7664c5a108b,rust,supplementary,storage,in-scope,"A review-log row arriving with a taken id is not inserted; for undo, Meguri refuses the redo instead (deviation); sync and import scenarios come with those ops (U107, U122)",undo/revlog-taken-id,deferred
 hfb0061ec0b9b,rust,supplementary,storage,unclassified,,,open
 h39fa0055ea4c,python,tag,sync,unclassified,,,open
 h51a52fc54a83,python,tag,sync,unclassified,,,open
