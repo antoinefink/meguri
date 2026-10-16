@@ -155,7 +155,7 @@ Fields are read with the tokenizer below, never with an HTML parser that repairs
 | after a `script` start tag | raw content up to the first `</script` | as text |
 | anything else | text run up to the next `<` that starts one of the forms above | as text |
 
-An attribute is a name (characters other than whitespace, `/`, `>`, `=`), optionally followed by `=` and a value: `"` to the next `"`, `'` to the next `'`, or unquoted up to whitespace or `>`. A tag or `<!`/`<?` form with no closing `>` before the field's end is not a tag: the `<` and what follows are a text run.
+An attribute is a name (characters other than whitespace, `/`, `>`, `=`), optionally followed by `=` and a value. As in HTML's attribute syntax, whitespace may stand before and after the `=`; it is kept, with the name and the `=`. So `title = "Note"` is `title` with the value `Note`, and in `hidden class="x"` the name `hidden`, followed by whitespace and a name rather than `=`, has no value. A value is `"` to the next `"`, `'` to the next `'`, or unquoted up to whitespace or `>` (empty when `>` comes right after the `=` and its whitespace). A tag or `<!`/`<?` form with no closing `>` before the field's end is not a tag: the `<` and what follows are a text run.
 
 ### A6.2 Attribute values
 
@@ -481,6 +481,7 @@ Field `<b>Hund</b> {{c1::der Hund::animal}} [sound:dog.mp3]` → `<b>` + 1 upper
 | `Tom &amp; Jerry&nbsp;<br>` | `Xxx &amp; Xxxxx&nbsp;<br>` |
 | `caf&eacute;` | 4 letters, the last from the 2-byte lower-case pool |
 | `<span style="color: rgb(255, 0, 0);" title="Note">Rot</span>` | style kept, `title` 4 letters, `Xxx` |
+| `<span title = "Note">x</span>` | ` = ` and the quotes kept, `title` 4 letters, `x` a lower-case letter |
 | `<a href="https://example.org/x">x</a>` | `https` kept, the rest of the URL replaced (`://`, `.`, `/` kept) |
 | `{{c1,2::a}} {{c1::x {{c2::y}} z}} {{c3::` | every opener and `}}` kept, `a`, `x`, `y`, `z` replaced |
 | `{{x1::y}}` | `{{` + a lower-case letter other than `c` + a digit + `::` + a letter + `}}` (not an opener shape, so the digit is replaced too) |
