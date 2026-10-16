@@ -46,7 +46,7 @@ What each source does to the undo history (recorded, cleared, truncated, the syn
 ## O3. One transaction per op
 
 - Every op is one `BEGIN IMMEDIATE` write scope with the journal on (R1490). It commits when the closure returns a value and rolls back when it returns an error, panics, or is cancelled (O5). After a rollback the collection is exactly as before the op (R1860, R2002). A panic is caught on the writer thread, which goes on with the next op; the op's result is `Panicked` with the panic message.
-- A composite op runs several steps in its one transaction. A step runs inside a savepoint: when the step fails, its writes and its journal entries are rolled back to the savepoint and the op decides whether to go on. The op still has one journal, one seq and one change set, so it is one undo entry for U25 (U140's create-then-delete move).
+- A composite op runs several steps in its one transaction. A step runs inside a savepoint: when the step fails, its writes and its journal entries are rolled back to the savepoint, together with what the step noted for its op (media files, the restorer state of `engine/undo` M10, a sync merge report of M9.4), and the op decides whether to go on. The op still has one journal, one seq and one change set, so it is one undo entry for U25 (U140's create-then-delete move).
 - The journal keeps before-images in memory up to 8 MiB per op (U23's default threshold); further before-images spill to an unnamed temporary file in the collection's directory, removed when the journal drops.
 
 ## O4. Sequence numbers and the result

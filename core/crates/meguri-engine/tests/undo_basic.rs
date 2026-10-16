@@ -827,6 +827,41 @@ fn restorers_get_each_undo_and_redo_with_the_state_the_op_attached() {
 }
 
 #[test]
+fn a_substep_that_fails_takes_its_restorer_state_back_with_its_rows() {
+    let h = Harness::open();
+    let recorder = Arc::new(Recorder::default());
+    h.collection.add_undo_restorer(recorder.clone());
+    let (_, cid) = note_with_card(&h, "a");
+    h.collection
+        .run(
+            OpSpec::named("answer_card", OpSource::UserUndoable).undo_step(ANSWER_CARD, StepKind::Answer),
+            move |ctx| {
+                ctx.step(|ctx| {
+                    ctx.set_undo_state(Arc::new("kept".to_owned()));
+                    Ok(())
+                })?;
+                let failed = ctx.step(|ctx| {
+                    ctx.set_undo_state(Arc::new("rolled back".to_owned()));
+                    Err::<(), _>(EngineError::InvalidArgument {
+                        message: "the step fails".to_owned(),
+                    })
+                });
+                assert!(failed.is_err(), "the op handles the failed step");
+                let mut card = ctx.scope().card(cid)?.unwrap();
+                card.reps += 1;
+                ctx.scope().put(&card)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(
+        *recorder.seen.lock().unwrap(),
+        [(Direction::Undo, ANSWER_CARD, Some("kept".to_owned()), 1)]
+    );
+}
+
+#[test]
 fn a_tag_whose_letter_case_the_step_changed_is_restored() {
     let h = Harness::open();
     h.collection

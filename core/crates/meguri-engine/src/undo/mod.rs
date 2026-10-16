@@ -113,6 +113,23 @@ pub(crate) struct UndoNotes {
     pub col_mod: Option<i64>,
 }
 
+impl UndoNotes {
+    /// Takes in the notes of a substep that committed (`OpContext::step`):
+    /// what it set replaces what the op had set before it.
+    pub(crate) fn absorb(&mut self, step: UndoNotes) {
+        let UndoNotes {
+            state,
+            merge,
+            restored,
+            col_mod,
+        } = step;
+        self.state = state.or(self.state.take());
+        self.merge = merge.or(self.merge.take());
+        self.restored = restored.or(self.restored);
+        self.col_mod = col_mod.or(self.col_mod);
+    }
+}
+
 /// A committed op, as the undo manager sees it.
 pub(crate) struct CommitInfo<'a> {
     pub seq: Seq,

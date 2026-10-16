@@ -195,15 +195,21 @@ impl<'c> OpContext<'_, 'c> {
     }
 
     /// Runs one step of a composite op in a savepoint (O3): when the step
-    /// returns an error, its writes, journal entries and media notes are
-    /// rolled back and the error is returned for the op to handle. The op
-    /// keeps one transaction and one journal.
+    /// returns an error, its writes, journal entries, media notes and undo
+    /// notes (restorer state, sync merge) are rolled back and the error is
+    /// returned for the op to handle. The op keeps one transaction and one
+    /// journal.
     pub fn step<T>(&mut self, step: impl FnOnce(&mut Self) -> Result<T, EngineError>) -> Result<T, EngineError> {
         let savepoint = self.scope.savepoint()?;
         let media = (self.media_added.len(), self.media_removed.len());
-        match step(self) {
+        // The step notes into an empty set, kept only when it commits.
+        let before = std::mem::take(&mut self.undo_notes);
+        let outcome = step(self);
+        let noted = std::mem::replace(&mut self.undo_notes, before);
+        match outcome {
             Ok(value) => {
                 self.scope.release_savepoint(savepoint)?;
+                self.undo_notes.absorb(noted);
                 Ok(value)
             }
             Err(error) => {
