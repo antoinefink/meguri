@@ -26,12 +26,15 @@ mg_app_products() {
   esac
 }
 
-# mg_app_build <mac|ios-sim> <config> [plan] [scheme]: UI lint first (AE90),
-# core XCFramework and build-for-testing of the plan (UI by default;
-# snapshots build Snapshot; perf-ui builds Performance with the
-# Meguri-Profile scheme). On failure records it and returns 1.
+# mg_app_build <mac|ios-sim> <config> [plan] [scheme] [build settings...]: UI
+# lint first (AE90), core XCFramework and build-for-testing of the plan (UI
+# by default; snapshots build Snapshot; perf-ui builds Performance with the
+# Meguri-Profile scheme; unit-sim builds Unit with ARCHS=arm64, since package
+# test products do not take the app's arm64-only setting). On failure
+# records it and returns 1.
 mg_app_build() {
-  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts
+  local platform="$1" config="$2" plan="${3:-UI}" scheme="${4:-Meguri}" dest result log rc counts settings=()
+  [ "$#" -le 4 ] || settings=("${@:5}")
   if [ "$platform" = mac ] && ! mg_word_in "$config" "Debug Profile"; then
     mg_failure usage "the Mac builds only Debug and Profile here: $config carries the daily-driver ids (tools/mg xcode-check builds and unregisters it)"
     mg_status error
@@ -53,7 +56,7 @@ mg_app_build() {
   rm -rf "$result"
   echo "$MG_JOB: xcodebuild build-for-testing ($platform, $config, $plan plan)" >&2
   xcodebuild build-for-testing -project app/Meguri.xcodeproj -scheme "$scheme" -testPlan "$plan" -configuration "$config" \
-    -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" >"$log" 2>&1
+    -destination "$dest" -derivedDataPath "$MG_APP_DD" -resultBundlePath "$result" ${settings[0]+"${settings[@]}"} >"$log" 2>&1
   rc=$?
   mg_artifact log "$log" "xcodebuild build-for-testing ($platform, $config, $plan plan)"
   counts="$(xcrun xcresulttool get build-results --path "$result" 2>/dev/null |

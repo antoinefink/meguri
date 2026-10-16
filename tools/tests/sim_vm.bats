@@ -106,6 +106,15 @@ host_stubs() {
   stub "$BIN/caffeinate" 'echo "caffeinate $*" >>"$STUB_LOG"; exec sleep 600'
   stub "$BIN/osascript" 'echo false'
   stub "$BIN/xcodebuild" 'echo "host-xcodebuild $*" >>"$STUB_LOG"; exit 70'
+  # plutil -convert json|xml1 -o <out|-> <in|->, through plistlib.
+  stub "$BIN/plutil" 'exec python3 -c "
+import json, plistlib, sys
+a = sys.argv[1:]
+fmt, out, src = a[a.index(\"-convert\") + 1], a[a.index(\"-o\") + 1], a[-1]
+data = sys.stdin.buffer.read() if src == \"-\" else open(src, \"rb\").read()
+res = plistlib.dumps(json.loads(data)) if fmt == \"xml1\" else json.dumps(plistlib.loads(data)).encode()
+(sys.stdout.buffer if out == \"-\" else open(out, \"wb\")).write(res)
+" "$@"'
   stub "$BIN/xcrun" '
 a=("$@")
 for ((i = 0; i < ${#a[@]}; i++)); do
@@ -252,6 +261,20 @@ mg_app_build() {
   local p="$MG_ROOT/build/app/DerivedData/Build/Products" plan="${3:-UI}"
   mkdir -p "$p/$2-iphonesimulator/Meguri.app" "$p/$2-iphonesimulator/MeguriUITests-Runner.app"
   printf 'built from %s\n' "$MG_ROOT" >"$p/$2-iphonesimulator/Meguri.app/Info.plist"
+  if [ "$plan" = Unit ]; then
+    # Hostless package bundles, as Xcode writes them (unit-sim hosts some).
+    local t targets=""
+    for t in CardRenderingTests AppModelTests; do
+      targets="$targets<dict><key>BlueprintName</key><string>$t</string>
+<key>TestBundlePath</key><string>__TESTROOT__/$2-iphonesimulator/$t.xctest</string>
+<key>TestHostPath</key><string>__PLATFORMS__/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/xctest</string>
+<key>TestingEnvironmentVariables</key><dict><key>DYLD_INSERT_LIBRARIES</key><string>/usr/lib/libRPAC.dylib</string></dict></dict>
+"
+    done
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>TestConfigurations</key><array><dict><key>Name</key><string>Default</string><key>TestTargets</key><array>\n%s</array></dict></array><key>__xctestrun_metadata__</key><dict><key>FormatVersion</key><integer>2</integer></dict></dict></plist>\n' \
+      "$targets" >"$p/Meguri_${plan}_iphonesimulator27.0-arm64.xctestrun"
+    return 0
+  fi
   printf '<plist><string>__TESTROOT__/%s-iphonesimulator/MeguriUITests-Runner.app</string></plist>\n' "$2" \
     >"$p/Meguri_${plan}_iphonesimulator27.0-arm64.xctestrun"
 }
@@ -410,6 +433,50 @@ assert_host_untouched() {
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
   assert_host_untouched
   validate "$result"
+}
+
+@test "unit-sim runs the Unit plan's CardRenderingTests on a simulator in the VM: Unit build, only that bundle, the result back" {
+  mg unit-sim --platform ipad
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.sim_runner)" = vm ]
+  [ "$(field .details.host_lease)" = null ]
+  [ "$(field '.details.only | join(",")')" = CardRenderingTests/WebKitSuites/CardRuntimeSuites ]
+  [ "$(field '.summary | "\(.passed) \(.failed)"')" = "12 0" ]
+  [ "$(field .message)" = "unit-sim: 12 passed, 0 skipped on ipad (CardRenderingTests/WebKitSuites/CardRuntimeSuites)" ]
+  called "^fake build ios-sim Debug Unit Meguri ARCHS=arm64\$"
+  local u
+  u="$(field .details.device.udid)"
+  [ "$(field .details.device.kind)" = ipad ]
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_Unit_iphonesimulator27.0-arm64.xctestrun -destination id=$u -resultBundlePath $SB/build/mg/unit-sim/[^ ]+/unit.xcresult -collect-test-diagnostics never -only-testing:CardRenderingTests/WebKitSuites/CardRuntimeSuites\$"
+  [ -d "$(dirname "$result")/unit.xcresult" ]
+  # CardRenderingTests is hosted in the Debug app (window scenes); other
+  # bundles stay hostless.
+  [ "$(field '.details.hosted | join(",")')" = CardRenderingTests ]
+  plutil -convert json -o "$BATS_TEST_TMPDIR/run.json" "$SB/build/app/DerivedData/Build/Products/Meguri_Unit_iphonesimulator27.0-arm64.xctestrun"
+  [ "$(jq -r '.TestConfigurations[0].TestTargets[] | select(.BlueprintName == "CardRenderingTests")
+    | "\(.TestHostPath) \(.TestHostBundleIdentifier) \(.IsAppHostedTestBundle) \(.TestingEnvironmentVariables | "\(.DYLD_INSERT_LIBRARIES) \(.XCInjectBundleInto)")"' \
+    "$BATS_TEST_TMPDIR/run.json")" = "__TESTROOT__/Debug-iphonesimulator/Meguri.app com.antoinefink.meguri.dev true __PLATFORMS__/iPhoneSimulator.platform/Developer/usr/lib/libXCTestBundleInject.dylib:/usr/lib/libRPAC.dylib unused" ]
+  [ "$(jq -r '.TestConfigurations[0].TestTargets[] | select(.BlueprintName == "AppModelTests") | "\(.TestHostPath) \(.TestHostBundleIdentifier)"' \
+    "$BATS_TEST_TMPDIR/run.json")" = "__PLATFORMS__/iPhoneSimulator.platform/Developer/Library/Xcode/Agents/xctest null" ]
+  [ ! -e "$(vm_lease "$u")" ]
+  assert_host_untouched
+  validate "$result"
+
+  mg unit-sim --only 'CardRenderingTests/WebKitSuites' --only AppModelTests
+  [ "$(field .status)" = pass ]
+  called "-only-testing:CardRenderingTests/WebKitSuites -only-testing:AppModelTests\$"
+}
+
+@test "unit-sim refuses a bad platform or --only before building" {
+  local args
+  for args in "--platform mac" "--only" "--only Card;Rendering" "--frobnicate"; do
+    # shellcheck disable=SC2086
+    mg unit-sim $args
+    [ "$status" -eq 2 ] || { echo "unit-sim $args exited $status"; return 1; }
+    [ "$(field '.failures[0].id')" = usage ]
+  done
+  not_called '^fake build'
 }
 
 @test "a locked Mac with its display asleep does not hold up simulator jobs in the VM" {
