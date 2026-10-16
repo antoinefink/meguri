@@ -1,0 +1,148 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "prop:ease<1"
+          },
+          {
+            "text": "prop:ease>1"
+          },
+          {
+            "text": "prop:ease>1"
+          },
+          {
+            "text": "prop:ease>2.5"
+          },
+          {
+            "text": "prop:ease>1000"
+          },
+          {
+            "text": "prop:ease>1000"
+          },
+          {
+            "text": "prop:ease>0.5"
+          },
+          {
+            "text": "prop:ease>0.5"
+          },
+          {
+            "text": "prop:ease>0.1"
+          },
+          {
+            "text": "prop:ease>0.33333334"
+          },
+          {
+            "text": "prop:ease>0.0000000001"
+          },
+          {
+            "text": "prop:ease>16777216"
+          },
+          {
+            "text": "prop:ease>123456790"
+          },
+          {
+            "text": "prop:ease>inf"
+          },
+          {
+            "text": "prop:ease>inf"
+          },
+          {
+            "text": "prop:ease>inf"
+          },
+          {
+            "text": "prop:ease>inf"
+          },
+          {
+            "text": "prop:ease>inf"
+          },
+          {
+            "text": "prop:ease>-inf"
+          },
+          {
+            "text": "prop:ease>NaN"
+          },
+          {
+            "text": "prop:ease>NaN"
+          },
+          {
+            "text": "prop:ease>0"
+          },
+          {
+            "text": "prop:ease>-0"
+          },
+          {
+            "text": "prop:ease>-0"
+          },
+          {
+            "text": "prop:s>340000000000000000000000000000000000000"
+          },
+          {
+            "text": "prop:d<0.000001"
+          },
+          {
+            "text": "prop:r>=5"
+          },
+          {
+            "text": "prop:cdn:k=-2.25"
+          },
+          {
+            "text": "prop:ivl>=6"
+          },
+          {
+            "text": "prop:ivl>7"
+          },
+          {
+            "text": "prop:due=0"
+          },
+          {
+            "text": "prop:due>3"
+          },
+          {
+            "text": "prop:due<-2147483648"
+          },
+          {
+            "text": "prop:reps=4294967295"
+          },
+          {
+            "text": "mid:5"
+          },
+          {
+            "text": "mid:7"
+          },
+          {
+            "text": "dupe:1,a"
+          },
+          {
+            "text": "dupe:0,a"
+          },
+          {
+            "text": "flag:7"
+          },
+          {
+            "text": "card:7"
+          },
+          {
+            "text": "added:7"
+          },
+          {
+            "text": "rated:7:4"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/canonical/numbers",
+  "scenario_sha256": "46509390ffd004df700b684abdf0d40a96b77cd0d747e123f1b4b2cdb060b438",
+  "tz": "UTC"
+}

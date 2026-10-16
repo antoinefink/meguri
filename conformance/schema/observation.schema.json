@@ -272,6 +272,47 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "search": {
+          "description": "specs/conformance/search-ops.md S1: one output per request, in request order.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["ids"],
+                "additionalProperties": false,
+                "properties": {
+                  "ids": {
+                    "description": "#cN (cards mode) or #nN (notes mode) in logical-id order, then real ids of unnamed rows in ascending order.",
+                    "type": "array",
+                    "items": { "anyOf": [{ "type": "string", "pattern": "^#[nc][1-9][0-9]*$" }, { "type": "integer" }] }
+                  }
+                }
+              },
+              { "$ref": "#/$defs/search_error" }
+            ]
+          }
+        },
+        "canonical_search": {
+          "description": "specs/conformance/search-ops.md S2: one output per query text, in order; parse errors only.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["text"],
+                "additionalProperties": false,
+                "properties": { "text": { "type": "string" } }
+              },
+              {
+                "allOf": [
+                  { "$ref": "#/$defs/search_error" },
+                  { "properties": { "error": { "not": { "enum": ["invalid_regex", "search_failed"] } } } }
+                ]
+              }
+            ]
+          }
+        },
         "sync": {
           "description": "specs/conformance/sync-ops.md S4: a result, or a rejection of the op's closed list.",
           "anyOf": [
@@ -378,6 +419,55 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "search_error": {
+      "description": "specs/search/errors.md E1 kinds; provided and context per E2, backticks replaced by apostrophes (search-ops.md S3).",
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "enum": [
+            "misplaced_and", "misplaced_or", "empty_group", "unopened_group", "unclosed_group", "empty_quote",
+            "unclosed_quote", "missing_key", "unknown_escape", "invalid_state", "invalid_flag", "invalid_property",
+            "invalid_operator", "invalid_number", "invalid_whole_number", "invalid_positive_whole_number",
+            "invalid_negative_whole_number", "invalid_answer_button", "invalid_id_list", "invalid_dupe", "malformed",
+            "invalid_regex", "search_failed"
+          ]
+        },
+        "provided": { "type": "string" },
+        "context": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "error": { "enum": ["unknown_escape", "invalid_state", "invalid_property", "invalid_operator"] } } },
+          "then": { "required": ["provided"], "not": { "required": ["context"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "error": {
+                "enum": ["invalid_number", "invalid_whole_number", "invalid_positive_whole_number", "invalid_negative_whole_number", "invalid_answer_button"]
+              }
+            }
+          },
+          "then": { "required": ["provided", "context"] }
+        },
+        {
+          "if": { "properties": { "error": { "const": "invalid_id_list" } } },
+          "then": { "required": ["context"], "not": { "required": ["provided"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "error": {
+                "enum": ["misplaced_and", "misplaced_or", "empty_group", "unopened_group", "unclosed_group", "empty_quote", "unclosed_quote", "missing_key", "invalid_flag", "invalid_dupe", "malformed", "invalid_regex", "search_failed"]
+              }
+            }
+          },
+          "then": { "properties": { "provided": false, "context": false } }
+        }
+      ]
+    },
     "decode_status": { "enum": ["ok", "invalid_blob"] },
     "objects_by_id": {
       "description": "schema11-json S12: decimal id -> schema-11 object.",

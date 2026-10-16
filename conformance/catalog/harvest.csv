@@ -896,7 +896,7 @@ h1e765459935f,rust,tag,search,unclassified,,,open
 h1f546a2494d6,rust,tag,search,unclassified,,,open
 h239bcdef1181,rust,tag,search,unclassified,,,open
 h2e49ab2ea87a,rust,tag,search,unclassified,,,open
-h3007a5ce27b9,rust,tag,search,unclassified,,,open
+h3007a5ce27b9,rust,tag,search,in-scope,"search text read into items, terms, keys and values: whitespace, quoting, escapes, negation and groups",search/lexing/whitespace search/lexing/terms search/lexing/escapes search/lexing/colons search/lexing/keys search/lexing/hyphens search/structure/groups search/structure/negation search/canonical/leaves,done
 h39a4ffc60079,rust,tag,search,unclassified,,,open
 h3b56f50b724c,rust,tag,search,unclassified,,,open
 h3cb2e631185c,rust,tag,search,unclassified,,,open
@@ -907,7 +907,7 @@ h555785228ea2,rust,tag,search,unclassified,,,open
 h565039430e2d,rust,tag,search,unclassified,,,open
 h5b05256eb14d,rust,tag,search,unclassified,,,open
 h5cdce206bbe1,rust,tag,search,unclassified,,,open
-h63a23874d7e3,rust,tag,search,unclassified,,,open
+h63a23874d7e3,rust,tag,search,in-scope,"canonical search text: redundant quotes and escapes dropped, needed ones added, OR in capitals, numbers normalized",search/canonical/quoting search/canonical/leaves search/canonical/numbers search/canonical/round-trips search/structure/operators,done
 h66aebcbc4027,rust,tag,search,unclassified,,,open
 h66d9a93ef6e9,rust,tag,search,unclassified,,,open
 h6b3ffb448b14,rust,tag,search,unclassified,,,open
@@ -917,7 +917,7 @@ h75a546f3b68f,rust,tag,search,unclassified,,,open
 h75c01d18f14a,rust,tag,search,unclassified,,,open
 h765dd9e980ae,rust,tag,search,unclassified,,,open
 h7669cd3519d0,rust,tag,search,unclassified,,,open
-h79e4ec8d2c86,rust,tag,search,unclassified,,,open
+h79e4ec8d2c86,rust,tag,search,in-scope,a committed search of several items keeps its items and loses only an outer group's brackets,search/canonical/top-level search/structure/groups,done
 h7c1c920002b6,rust,tag,search,unclassified,,,open
 h855ecd06d4e6,rust,tag,search,unclassified,,,open
 h88ad03350510,rust,tag,search,unclassified,,,open
@@ -925,31 +925,31 @@ h8b9aff97d516,rust,tag,search,unclassified,,,open
 h8f79a3f11361,rust,tag,search,unclassified,,,open
 h944eb618c913,rust,tag,search,unclassified,,,open
 h993a80697567,rust,tag,search,unclassified,,,open
-h9d1214dbd878,rust,tag,search,unclassified,,,open
+h9d1214dbd878,rust,tag,search,in-scope,a card search returns the matching card ids,search/structure/precedence-results search/structure/card-note-modes,done
 ha95e1702a2fa,rust,tag,search,unclassified,,,open
 haaeb313b212e,rust,tag,search,unclassified,,,open
 habf4018f4772,rust,tag,search,unclassified,,,open
 had58959b0fc6,rust,tag,search,unclassified,,,open
 hb32e7c6fa35a,rust,tag,search,unclassified,,,open
 hb42dc5c927d9,rust,tag,search,unclassified,,,open
-hba8e30116b92,rust,tag,search,unclassified,,,open
-hc2037626ba58,rust,tag,search,unclassified,,,open
+hba8e30116b92,rust,tag,search,in-scope,committing an invalid search text is a parse error,search/errors/kinds,done
+hc2037626ba58,rust,tag,search,in-scope,a committed search of one item is written without extra brackets,search/canonical/top-level,done
 hc3217305a1d5,rust,tag,search,unclassified,,,open
 hc518b95b631b,rust,tag,search,unclassified,,,open
 hc6331517314c,rust,tag,search,unclassified,,,open
-hc98944e6bdef,rust,tag,search,unclassified,,,open
+hc98944e6bdef,rust,tag,search,in-scope,"which rows a search tests in cards and notes mode, from the scopes of its terms",search/structure/damaged-rows search/structure/whole-collection search/structure/card-note-modes,done
 hcd65bea8e67f,rust,tag,search,unclassified,,,open
 hcf4fefe3e9ef,rust,tag,search,unclassified,,,open
 hd007ebca9ed4,rust,tag,search,unclassified,,,open
-hdff0242575ab,rust,tag,search,unclassified,,,open
+hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
 he244355f799a,rust,tag,search,unclassified,,,open
 he2a0ba83d1b8,rust,tag,search,unclassified,,,open
 he56ed2a516b3,rust,tag,search,unclassified,,,open
 he8cfded7f1d7,rust,tag,search,unclassified,,,open
-he8f1b333539e,rust,tag,search,unclassified,,,open
+he8f1b333539e,rust,tag,search,in-scope,search parse error kinds and the texts each reports,search/errors/kinds search/errors/order search/errors/escapes search/errors/arguments,done
 he93785c73a0f,rust,tag,search,unclassified,,,open
 hfa4a20b50574,rust,tag,search,unclassified,,,open
-hfd43294d32a2,rust,tag,search,unclassified,,,open
+hfd43294d32a2,rust,tag,search,in-scope,a note search returns the notes with a matching card,search/structure/precedence-results search/structure/card-note-modes,done
 h36e914747858,python,tag,stats,unclassified,,,open
 ha2f22cc588c8,python,tag,stats,unclassified,,,open
 haf31e8129655,python,tag,stats,unclassified,,,open

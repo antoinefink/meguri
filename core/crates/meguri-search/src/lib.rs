@@ -1,2 +1,24 @@
 //! Search: lexer and parser, canonical writer, SQL writer, matchers, browser
 //! rows and accelerators.
+//!
+//! U80 (`specs/search/grammar.md`, `errors.md`, `canonical-form.md`,
+//! `query-model.md`): search text becomes a typed [`Query`] or a
+//! [`SearchError`] with Anki's kind and details and Meguri's own range and
+//! message; [`Query::canonical_text`] writes Anki's canonical text; a
+//! [`Plan`] compiles a query for cards mode or notes mode against a
+//! [`SearchContext`]. Nothing here recurses on the input's nesting depth.
+
+pub mod ast;
+pub mod canonical;
+pub mod context;
+pub mod error;
+mod lexer;
+mod parser;
+pub mod plan;
+
+pub use ast::{Node, NodeId, NodeKind, Query, Scope, Term};
+pub use canonical::canonical_text;
+pub use context::{ContextReads, ContextValue, FoldMode, SearchContext};
+pub use error::{ErrorKind, SearchError, SearchFailure};
+pub use parser::parse;
+pub use plan::{BuildError, Param, Plan, Rows, SearchMode};

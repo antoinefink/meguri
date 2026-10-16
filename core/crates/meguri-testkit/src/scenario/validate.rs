@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 use super::FormatError;
 use super::model::{
     ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind,
-    RefKind, Scenario, Side, Step, SyncKind, TemplateRequest, TextRequest,
+    RefKind, Scenario, SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -353,19 +353,39 @@ fn package_name(value: &Value) -> Result<(), FormatError> {
 /// The `col` columns `package_col` reads (model-ops.md L7).
 const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "tags"];
 
-/// The schema's rules for the mapping form of an observation request.
-/// observations.md O2: a kind whose value is a list (`template`) is
-/// requested at most once per step; two lists do not merge.
+/// The schema's rules for the list form of an observation request
+/// (search-ops.md S1, S2).
+pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result<(), FormatError> {
+    match kind {
+        ObservationKind::Search => SearchRequest::from_list(items).map(drop),
+        ObservationKind::CanonicalSearch => canonical_search_texts(items).map(drop),
+        other => Err(FormatError::new(format!(
+            "observation {} does not take a list",
+            other.name()
+        ))),
+    }
+}
+
+/// observations.md O2: a kind whose value is a list (`template`, `search`,
+/// `canonical_search`) is requested at most once per step; two lists do not
+/// merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
-    let templates = requests.iter().filter(|r| r.kind == ObservationKind::Template).count();
-    if templates > 1 {
-        return Err(FormatError::new(
-            "observation template is requested more than once in one step",
-        ));
+    for kind in [
+        ObservationKind::Template,
+        ObservationKind::Search,
+        ObservationKind::CanonicalSearch,
+    ] {
+        if requests.iter().filter(|r| r.kind == kind).count() > 1 {
+            return Err(FormatError::new(format!(
+                "observation {} is requested more than once in one step",
+                kind.name()
+            )));
+        }
     }
     Ok(())
 }
 
+/// The schema's rules for the mapping form of an observation request.
 pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value>) -> Result<(), FormatError> {
     let name = kind.name();
     let bad = |why: &str| Err(FormatError::new(format!("observation {name}: {why}")));
@@ -402,17 +422,6 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                 || map.get("timeout_ms").is_some_and(|t| !uint(t))
             {
                 return bad("takes {host, port, timeout_ms?}");
-            }
-        }
-        ObservationKind::Search => {
-            if !map.get("query").is_some_and(Value::is_string) {
-                return bad("needs a query string");
-            }
-            if map
-                .get("kind")
-                .is_some_and(|k| !matches!(k.as_str(), Some("cards" | "notes")))
-            {
-                return bad("kind is cards or notes");
             }
         }
         ObservationKind::Queue => {
