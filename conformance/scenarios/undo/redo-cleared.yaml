@@ -1,0 +1,64 @@
+# Which ops empty the redo history and which keep the undo steps. Every op
+# empties redo, also one that writes nothing: a config write without an undo
+# entry (which keeps the undo steps), the same value written again, a note
+# saved unchanged. A select keeps both histories; delete_notes of a note that
+# no longer exists runs nothing and keeps them; a statement that is not a
+# select empties both, even when it changes nothing. With nothing to apply,
+# undo and redo are refused (specs/engine/undo.md A2,
+# specs/conformance/undo-ops.md V1). Needs db_exec, edit_note, delete_notes,
+# set_config, undo, redo and undo_status.
+id: undo/redo-cleared
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [cat, gato]}
+    - {notetype: Single, deck: Inbox, fields: [dog, perro]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - undo: {}
+  - redo: {}
+  - observe: [undo_status]
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: a}}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: b}}
+  - undo: {}
+  - observe: [undo_status]
+  # A config write without an undo entry: redo emptied, the first edit kept.
+  - set_config: {key: undoProbe, value: 1}
+  - observe: [undo_status]
+  - redo: {}
+  - undo: {}
+  - observe: [undo_status]
+  # The note saved with the text it holds: nothing written, redo emptied.
+  - edit_note: {note: "#n1", fields: {Back: gato}}
+  - observe: [undo_status]
+  - db_exec: {sql: "SELECT flds, mod, usn FROM notes ORDER BY id"}
+  - redo: {}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: c}}
+  - undo: {}
+  # A select keeps both histories.
+  - db_exec: {sql: "SELECT count() FROM notes"}
+  - observe: [undo_status]
+  # The value undoProbe already holds: nothing written, redo emptied.
+  - set_config: {key: undoProbe, value: 1}
+  - observe: [undo_status]
+  - advance: 1h
+  - delete_notes: {notes: ["#n2"]}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: d}}
+  - undo: {}
+  # #n2 no longer exists: nothing runs, both histories stay.
+  - delete_notes: {notes: ["#n2"]}
+  - observe: [undo_status]
+  # A statement that is not a select empties both, though it changes nothing.
+  - db_exec: {sql: "UPDATE notes SET usn = usn WHERE 0"}
+  - observe: [undo_status]
+  - undo: {}
+  - redo: {}

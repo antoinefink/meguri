@@ -766,28 +766,31 @@ mod tests {
   validate "$result"
 }
 
-@test "core-lint fails naming the forbidden edges: tokio in sched, engine in sched, stats in package" {
+@test "core-lint fails naming the forbidden edges: tokio in sched, sched in search, stats in package" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   copy_core
   vendor_crate tokio MIT
   add_dep crates/meguri-sched 'tokio = { path = "../../../vendor/tokio" }'
-  add_dep crates/meguri-sched 'meguri-engine.workspace = true'
+  # An upward edge to a crate that does not depend on the source: since U40
+  # meguri-engine depends on meguri-sched, so sched -> engine is a cycle that
+  # cargo refuses before layering-check runs.
+  add_dep crates/meguri-search 'meguri-sched.workspace = true'
   add_dep crates/meguri-package 'meguri-stats.workspace = true'
   mg core-lint
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(failure_ids)" = "layering/edge/meguri-package -> meguri-stats
-layering/edge/meguri-sched -> meguri-engine
+layering/edge/meguri-search -> meguri-sched
 layering/restricted/meguri-sched -> tokio" ]
   local m
   m="$(jq -r '.failures[] | select(.id == "layering/restricted/meguri-sched -> tokio") | .message' "$result")"
   [[ "$m" == *"meguri-sched depends on tokio"* ]]
-  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-sched -> meguri-engine") | .message' "$result")"
-  [[ "$m" == *"edges.toml row 6"*"(row 7)"* ]]
+  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-search -> meguri-sched") | .message' "$result")"
+  [[ "$m" == *"edges.toml row 5"*"(row 6)"* ]]
   m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-package -> meguri-stats") | .message' "$result")"
   [[ "$m" == *"edges.toml row 8"*"(row 8)"*siblings* ]]
   [ "$(field '.failures[0].repro')" = "tools/mg core-lint" ]
-  [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
+  [ "$(field -c .summary)" = '{"total":4,"passed":3,"failed":1,"skipped":0}' ]
   validate "$result"
 }
 
@@ -805,6 +808,22 @@ layering/restricted/meguri-sched -> tokio" ]
   [[ "$ids" == *"fmt/crates/meguri-search/src/lib.rs"* ]]
   [ "$(field '.failures | length')" -eq 2 ]
   [[ "$(jq -r '.failures[] | select(.id | startswith("clippy/")) | .message' "$result")" == *"std::time::SystemTime::now"* ]]
+  validate "$result"
+}
+
+@test "core-lint's AnkiWeb scan flags a name meguri-sync compiles in without its features, not a gated one" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate meguri-sync '#[cfg(feature = "ankiweb")]
+pub static GATED: &str = "sync.ankiweb.example";
+pub static LEAKED: &str = "Sync with AnkiWeb";'
+  printf '\n[features]\nankiweb = []\n' >>"$SB/core/crates/meguri-sync/Cargo.toml"
+  mg core-lint
+  [ "$status" -eq 1 ]
+  # The stand-in workspace has no layering-check; that failure is expected.
+  [ "$(failure_ids | grep -c '^ankiweb/')" -eq 1 ]
+  [[ "$(jq -r '.failures[] | select(.id | startswith("ankiweb/")) | .message' "$result")" == *'holds "AnkiWeb" in '* ]]
+  [ -s "$(jq -r '.artifacts[] | select(.kind == "ankiweb-scan-jsonl") | .path' "$result")" ]
   validate "$result"
 }
 
@@ -1499,7 +1518,8 @@ dockerfiles() {
   export PATH="$stubs:$PATH"
   for args in "" "frobnicate" "bump" "bump 26.x" "record --jobs 0" "hello --verbose" "build extra" \
     "check" "check a b" "check --bogus a" "check a --now" "hello --platform linux" "compare --platform x" \
-    "lock --platform" "lock --platform windows" "lock extra"; do
+    "lock --platform" "lock --platform windows" "lock extra" "time" "time a b" "time --bogus a" "time a --op" \
+    "time a --platform windows" "time a --platform"; do
     # shellcheck disable=SC2086 # each case is a word list
     mg oracle $args
     [ "$status" -eq 2 ]
@@ -1510,19 +1530,21 @@ dockerfiles() {
   done
 }
 
-@test "oracle check reports a missing collection before touching Docker" {
+@test "oracle check and time report a missing collection before touching Docker" {
   local stubs="$BATS_TEST_TMPDIR/oracle-stubs"
   mkdir -p "$stubs" "$BATS_TEST_TMPDIR/empty"
   printf '#!/bin/sh\necho "docker must not run" >&2\nexit 97\n' >"$stubs/docker"
   chmod +x "$stubs/docker"
   export PATH="$stubs:$PATH"
   for dir in "$BATS_TEST_TMPDIR/empty" "$BATS_TEST_TMPDIR/none"; do
-    mg oracle check "$dir" --tz UTC
-    [ "$status" -eq 2 ]
-    [ "$(field .status)" = error ]
-    [ "$(field '.failures[0].id')" = no_collection ]
-    [[ "$stderr" != *"docker must not run"* ]]
-    validate "$result"
+    for job in check time; do
+      mg oracle "$job" "$dir" --tz UTC
+      [ "$status" -eq 2 ]
+      [ "$(field .status)" = error ]
+      [ "$(field '.failures[0].id')" = no_collection ]
+      [[ "$stderr" != *"docker must not run"* ]]
+      validate "$result"
+    done
   done
 }
 

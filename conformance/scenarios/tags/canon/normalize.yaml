@@ -1,0 +1,41 @@
+# Normalizing tag names when a note is added (specs/tags/tags.md T2, T4).
+# Each note holds names not used by another note, except n18, which shows a
+# control-only name taking the spelling `blank` that n11 registered. A list
+# item with a space or U+3000 is split; within a name, controls go, the trim
+# set goes from the ends, empty components become `blank`, NFC runs before
+# the removal and quotation marks stay. The registry rows that the adds made
+# have usn -1, collapsed 1 and config NULL.
+id: tags/canon/normalize
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: ["a　b\tc\"d"]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["x\ty"]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: ["　", "", " "]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: ["d::::e"]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: ["f:::g"]}
+  - add_note: {notetype: Plain, fields: ["n6"], tags: ["h::"]}
+  - add_note: {notetype: Plain, fields: ["n7"], tags: ["::"]}
+  - add_note: {notetype: Plain, fields: ["n8"], tags: ["::lead"]}
+  - add_note: {notetype: Plain, fields: ["n9"], tags: [" q "]}
+  - add_note: {notetype: Plain, fields: ["n10"], tags: ["r s"]}
+  - add_note: {notetype: Plain, fields: ["n11"], tags: [" "]}
+  - add_note: {notetype: Plain, fields: ["n12"], tags: ["\u0085p\u0085"]}
+  - add_note: {notetype: Plain, fields: ["n13"], tags: [" zz"]}
+  - add_note: {notetype: Plain, fields: ["n14"], tags: ["t​u"]}
+  - add_note: {notetype: Plain, fields: ["n15"], tags: ["é"]}
+  - add_note: {notetype: Plain, fields: ["n16"], tags: ["e\u0001́"]}
+  - add_note: {notetype: Plain, fields: ["n17"], tags: ["Å\u0002"]}
+  - add_note: {notetype: Plain, fields: ["n18"], tags: ["\u0001"]}
+  - add_note: {notetype: Plain, fields: ["n19"], tags: ["k::\u0001::m"]}
+  - add_note: {notetype: Plain, fields: ["n20"], tags: ["say\"hi\""]}
+  - add_note: {notetype: Plain, fields: ["n21"], tags: ["kana kanji", "kanji"]}
+  - add_note: {notetype: Plain, fields: ["n22"], tags: ["w "]}
+  - add_note: {notetype: Plain, fields: ["n23"], tags: ["\u007f"]}
+  - add_note: {notetype: Plain, fields: ["n24"], tags: ["v\u001fw"]}
+  - db_exec: {sql: "SELECT tags FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

@@ -10,7 +10,7 @@
 #                      (TZ, ORACLE_SCRATCH and the other ORACLE_* variables)
 #   hello [--tz Z]     one worker's hello response on stdout
 #   harness <args>     python -m driver.harness natively (record-apple,
-#                      compare-apple); its workers are `run-native.sh worker`
+#                      compare-apple, time); its workers are `run-native.sh worker`
 #
 # A worker runs under libfaketime, injected with DYLD_INSERT_LIBRARIES and
 # DYLD_FORCE_FLAT_NAMESPACE, with the container's clock-file variables. The
@@ -173,9 +173,16 @@ worker() {
   python_env
   export ORACLE_SCRATCH="$scratch" \
     FAKETIME_TIMESTAMP_FILE="$scratch/clock" \
-    FAKETIME_NO_CACHE=1 \
     FAKETIME_FMT=%s \
     DONT_FAKE_MONOTONIC=1
+  # A timing worker reads its clock file once (entrypoint.sh, T2.3).
+  if [ "${ORACLE_CLOCK_CACHE:-}" = 1 ]; then
+    unset FAKETIME_NO_CACHE
+    export FAKETIME_CACHE_DURATION=2147483647
+  else
+    unset FAKETIME_CACHE_DURATION
+    export FAKETIME_NO_CACHE=1
+  fi
   if [ "${ORACLE_NATIVE_FAKETIME:-1}" = 0 ]; then
     unset DYLD_INSERT_LIBRARIES DYLD_FORCE_FLAT_NAMESPACE
   else

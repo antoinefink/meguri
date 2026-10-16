@@ -273,7 +273,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest|undo_status|tag_tree|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -283,6 +283,7 @@
             "ids": { "type": "array", "items": { "type": "string", "pattern": "^#[nc][1-9][0-9]*$" } },
             "timing": { "type": "null" },
             "schema_objects": { "description": "storage-ops.md P3.", "type": "null" },
+            "undo_status": { "description": "undo-ops.md V2.", "type": "null" },
             "card": { "$ref": "#/$defs/card_refs" },
             "revlog": { "$ref": "#/$defs/card_refs" },
             "next_states": { "$ref": "#/$defs/card_refs" },
@@ -316,6 +317,7 @@
               "properties": { "deck": { "type": "string" } }
             },
             "deck_tree": { "type": "null" },
+            "tag_tree": { "description": "tag-ops.md G9.", "type": "null" },
             "search": {
               "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
               "type": "array",
@@ -624,11 +626,88 @@
           "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } }
         },
         "set_config": {
-          "description": "Stable, with its final shape (record-ops.md W4): one collection config key and its JSON value (null included).",
+          "description": "Stable (record-ops.md W4): one collection config key and its JSON value (null included); undoable true records an Update Config undo step (undo-ops.md V3.1).",
           "type": "object",
           "required": ["key", "value"],
           "additionalProperties": false,
-          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true }
+          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true, "undoable": { "type": "boolean" } }
+        },
+        "remove_config": {
+          "description": "Stable (undo-ops.md V3.2): remove one collection config key as an undoable Update Config step; a missing key changes nothing.",
+          "type": "object",
+          "required": ["key"],
+          "additionalProperties": false,
+          "properties": { "key": { "type": "string", "minLength": 1 } }
+        },
+        "undo": {
+          "description": "Stable (undo-ops.md V1): apply the top step of the undo history.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "redo": {
+          "description": "Stable (undo-ops.md V1): apply the top step of the redo history.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "add_note_tags": {
+          "description": "tag-ops.md G1: add the tags of the text (split at U+0020 and U+3000) to the notes (tags/tags.md T10).",
+          "type": "object",
+          "required": ["notes", "tags"],
+          "additionalProperties": false,
+          "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 }, "tags": { "type": "string" } }
+        },
+        "remove_note_tags": {
+          "description": "tag-ops.md G2: remove the matching tags from the notes (tags/tags.md T10).",
+          "type": "object",
+          "required": ["notes", "tags"],
+          "additionalProperties": false,
+          "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 }, "tags": { "type": "string" } }
+        },
+        "delete_tags": {
+          "description": "tag-ops.md G3: remove the tags and their descendants from every note and from the registry (tags/tags.md T9).",
+          "type": "object",
+          "required": ["tags"],
+          "additionalProperties": false,
+          "properties": { "tags": { "type": "string" } }
+        },
+        "rename_tag": {
+          "description": "tag-ops.md G4: rename a tag and its descendants (tags/tags.md T7); rejection invalid_name.",
+          "type": "object",
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "properties": { "from": { "type": "string", "minLength": 1, "pattern": "^[^ \u3000]+$" }, "to": { "type": "string" } }
+        },
+        "reparent_tags": {
+          "description": "tag-ops.md G5: move tags under parent, or to the top level when parent is empty (tags/tags.md T8).",
+          "type": "object",
+          "required": ["tags", "parent"],
+          "additionalProperties": false,
+          "properties": {
+            "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+            "parent": { "type": "string" }
+          }
+        },
+        "clear_unused_tags": {
+          "description": "tag-ops.md G6: remove registry rows no note uses (tags/tags.md T11).",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "set_tag_collapsed": {
+          "description": "tag-ops.md G7: set the collapsed state of the named tags, registering missing ones (tags/tags.md T12).",
+          "type": "object",
+          "required": ["tags", "collapsed"],
+          "additionalProperties": false,
+          "properties": {
+            "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+            "collapsed": { "type": "boolean" }
+          }
+        },
+        "set_flag": {
+          "description": "tag-ops.md G8: write a flag to the cards (tags/flags-and-marked.md F2); rejection invalid_flag above 7.",
+          "type": "object",
+          "required": ["cards", "flag"],
+          "additionalProperties": false,
+          "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "flag": { "$ref": "#/$defs/uint" } }
         },
         "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
         "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
@@ -712,11 +791,16 @@
           "$ref": "#/$defs/actor_name"
         },
         "sync": {
-          "description": "sync-ops.md S4.",
+          "description": "sync-ops.md S4; credentials only with kind login (S4.5).",
           "type": "object",
           "required": ["kind"],
           "additionalProperties": false,
-          "properties": { "kind": { "enum": ["login", "normal", "full_upload", "full_download"] } }
+          "properties": {
+            "kind": { "enum": ["login", "normal", "full_upload", "full_download"] },
+            "credentials": { "enum": ["account", "wrong_password"] }
+          },
+          "if": { "required": ["credentials"] },
+          "then": { "properties": { "kind": { "const": "login" } } }
         },
         "net_fault": {
           "description": "sync-ops.md S5.",

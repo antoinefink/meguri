@@ -3,7 +3,7 @@
 mg_job core-test docker:dev mg_core_test \
   "Rust tests: cargo nextest on core/ (no retries), canary_* test binaries first; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
-  "Rust lint: cargo fmt --check, clippy -D warnings on all targets and features, layering-check (edges.toml)"
+  "Rust lint: cargo fmt --check, clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features"
 mg_job core-deny docker:dev mg_core_deny \
   "Rust dependency gate: cargo deny check on core/ (licenses, advisories, bans, sources); args after -- name checks"
 
@@ -136,7 +136,7 @@ mg_core_test() {
   fi
 }
 
-# tools/mg core-lint: rustfmt, clippy and layering-check. All three run, so one
+# tools/mg core-lint: rustfmt, clippy, layering-check and the AnkiWeb scan. All four run, so one
 # run reports every kind of finding.
 mg_core_lint() {
   [ "${1:-}" = "--" ] && shift
@@ -212,17 +212,47 @@ mg_core_lint() {
     fi
   fi
 
-  for n in fmt clippy layering; do
+  # ankiweb-scan (KTD21, specs/sync/login-endpoints.md L3): meguri-sync built
+  # without `ankiweb` and `test-hooks` (as the App Store core is) holds no
+  # AnkiWeb name in its object code. The build also checks the crate's
+  # compile-time assertion that only the self-hosted server is offered.
+  local scan="$MG_RUN_DIR/ankiweb-scan-build.jsonl" hits="$MG_RUN_DIR/ankiweb-scan.jsonl" rlib
+  if [ -f core/crates/meguri-sync/Cargo.toml ]; then
+    (cd core && cargo build -p meguri-sync --lib --message-format json-render-diagnostics) >"$scan"
+    rc=$?
+    rlib="$(jq -r 'select(.reason == "compiler-artifact" and .target.name == "meguri_sync")
+      | .filenames[] | select(endswith(".rlib"))' "$scan" 2>/dev/null | tail -n 1)"
+    if [ "$rc" -ne 0 ] || [ -z "$rlib" ]; then
+      mg_failure "ankiweb-scan-build" "building meguri-sync without its features failed (cargo exit $rc); see log.txt" "$repro"
+      failed_steps="$failed_steps ankiweb"
+    else
+      python3 tools/scripts/ankiweb-scan.py "$rlib" >"$hits"
+      rc=$?
+      mg_artifact ankiweb-scan-jsonl "$hits"
+      if [ "$rc" -eq 1 ]; then
+        jq -c --arg repro "$repro" '{id: ("ankiweb/" + .member + ":" + (.offset | tostring)),
+          message: ("meguri-sync built without the ankiweb feature holds \"" + .text + "\" in " + .member
+            + " at byte " + (.offset | tostring) + "; gate it behind #[cfg(feature = \"ankiweb\")] (KTD21)"),
+          repro: $repro}' "$hits" >>"$MG_STATE/failures.jsonl"
+        failed_steps="$failed_steps ankiweb"
+      elif [ "$rc" -ne 0 ]; then
+        mg_failure "ankiweb-scan-exit-$rc" "tools/scripts/ankiweb-scan.py could not read $rlib; see log.txt" "$repro"
+        failed_steps="$failed_steps ankiweb"
+      fi
+    fi
+  fi
+
+  for n in fmt clippy layering ankiweb; do
     case " $failed_steps " in
       *" $n "*) failed=$((failed + 1)) ;;
       *) passed=$((passed + 1)) ;;
     esac
   done
-  mg_count total 3
+  mg_count total 4
   mg_count passed "$passed"
   mg_count failed "$failed"
   if [ "$failed" -eq 0 ]; then
-    mg_message "core-lint: rustfmt, clippy and layering-check clean"
+    mg_message "core-lint: rustfmt, clippy, layering-check and the AnkiWeb scan clean"
     mg_status pass
   else
     mg_message "core-lint: failed:$failed_steps"

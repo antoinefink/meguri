@@ -96,6 +96,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
         notetype_op(step).map_err(at)?;
         record_op(step).map_err(at)?;
+        tag_op(step).map_err(at)?;
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
@@ -247,7 +248,8 @@ fn check(shape: Arg, value: &Value) -> Result<(), String> {
     }
 }
 
-/// record-ops.md W1, W3, W4: what the schema requires beyond the types.
+/// record-ops.md W1, W3, W4 and undo-ops.md V3.2: what the schema requires
+/// beyond the types.
 fn record_op(step: &Step) -> Result<(), FormatError> {
     match step {
         Step::DbExec(args) if args.sql.is_empty() => Err(FormatError::new("db_exec needs a non-empty sql")),
@@ -255,6 +257,32 @@ fn record_op(step: &Step) -> Result<(), FormatError> {
             Err(FormatError::new("delete_notes needs at least one note"))
         }
         Step::SetConfig(args) if args.key.is_empty() => Err(FormatError::new("set_config needs a non-empty key")),
+        Step::RemoveConfig(args) if args.key.is_empty() => Err(FormatError::new("remove_config needs a non-empty key")),
+        _ => Ok(()),
+    }
+}
+
+/// tag-ops.md G1 to G8: what the schema requires beyond the types.
+fn tag_op(step: &Step) -> Result<(), FormatError> {
+    let names = |op: &str, names: &[String]| {
+        if names.is_empty() {
+            Err(FormatError::new(format!("{op} needs at least one tag")))
+        } else if names.iter().any(String::is_empty) {
+            Err(FormatError::new(format!("{op} needs non-empty tag names")))
+        } else {
+            Ok(())
+        }
+    };
+    match step {
+        Step::AddNoteTags(args) | Step::RemoveNoteTags(args) if args.notes.is_empty() => {
+            Err(FormatError::new(format!("{} needs at least one note", step.name())))
+        }
+        Step::RenameTag(args) if args.from.is_empty() || args.from.contains([' ', '\u{3000}']) => Err(
+            FormatError::new("rename_tag needs a non-empty from without U+0020 or U+3000"),
+        ),
+        Step::ReparentTags(args) => names("reparent_tags", &args.tags),
+        Step::SetTagCollapsed(args) => names("set_tag_collapsed", &args.tags),
+        Step::SetFlag(args) if args.cards.is_empty() => Err(FormatError::new("set_flag needs at least one card")),
         _ => Ok(()),
     }
 }
