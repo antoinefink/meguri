@@ -11,6 +11,10 @@ publish.workspace = true
 # histories, and its seeded ChaCha streams (both parity pins).
 fsrs.workspace = true
 granit-parser.workspace = true
+# The anonymizer (U15, specs/fixtures/anonymizer.md): H3's entity grammar,
+# judged at one position (A5.3), and A5.1's character classes (both parity
+# pins, as meguri-text uses them).
+htmlescape.workspace = true
 # Benchmarks (U12): per-operation samples (bench::timing).
 hdrhistogram.workspace = true
 jiff.workspace = true
@@ -33,7 +37,12 @@ meguri-sync = { workspace = true, features = ["test-hooks"] }
 # The render area's `template` observation (exec/render.rs).
 meguri-template.workspace = true
 meguri-text.workspace = true
+# statvfs: the private vault refuses a source that is not on a read-only
+# mount (U15, R1938); on Apple hosts also the process footprint
+# (phys_footprint) that bench::memory samples (R1864).
+libc.workspace = true
 rand.workspace = true
+regex.workspace = true
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:
@@ -44,11 +53,6 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 # The session directory of a scenario that opens a collection.
 tempfile.workspace = true
-
-# The process footprint (phys_footprint) that bench::memory samples on Apple
-# hosts (R1864).
-[target.'cfg(target_vendor = "apple")'.dependencies]
-libc.workspace = true
 
 [dev-dependencies]
 # Wall-clock suites (benches/*.rs) and the harness tests that drive them.
