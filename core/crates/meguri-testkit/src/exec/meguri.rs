@@ -248,7 +248,15 @@ impl MeguriExecutor {
 
     /// The areas that have adapters, by name.
     pub const AREAS: [&'static str; 9] = [
-        "browser", "clock", "notetypes", "render", "sched", "search", "storage", "tags", "text",
+        "browser",
+        "clock",
+        "notetypes",
+        "render",
+        "sched",
+        "search",
+        "storage",
+        "tags",
+        "text",
     ];
 
     /// Every area adapter that exists.
