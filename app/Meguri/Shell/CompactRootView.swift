@@ -22,6 +22,10 @@ struct CompactRootView: View {
                 } label: {
                     Label { Text(tab.title) } icon: { Image(systemName: tab.systemImage) }
                 }
+                // The tab bar button's own (R1964): without it the button
+                // takes its symbol's name, which its image has too. SwiftUI
+                // sets it a moment after launch.
+                .accessibilityIdentifier("shell.root.tab.\(tab.rawValue)")
             }
         }
         .fullScreenCover(item: Binding(get: { navigation.review }, set: { if $0 == nil { navigation.endReview() } })) { review in

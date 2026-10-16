@@ -37,6 +37,14 @@ final class NavigationLayoutTests: XCTestCase {
         let tabBar = app.tabBars.firstMatch
         XCTAssert(tabBar.waitForExistence(timeout: 15), "no tab bar at compact width")
         XCTAssertEqual(tabBar.buttons.allElementsBoundByIndex.map(\.label), ["Decks", "Browse", "Stats", "Settings"])
+        // Each tab button has its own identifier (R1964), so tests and agents
+        // reach a tab whatever the language. SwiftUI sets them a moment
+        // after launch.
+        let identifiers = ["decks", "browse", "stats", "settings"].map { "shell.root.tab.\($0)" }
+        XCTAssert(
+            waitUntil { tabBar.buttons.allElementsBoundByIndex.map(\.identifier) == identifiers },
+            "\(tabBar.buttons.allElementsBoundByIndex.map(\.identifier))"
+        )
         XCTAssertFalse(element(app, "shell.root.sidebar.home").exists, "the sidebar shows at compact width")
         #endif
     }
@@ -63,7 +71,8 @@ final class NavigationLayoutTests: XCTestCase {
         #else
         let app = try launch(route: "shell/root/browse-pushed", sizeClass: "compact")
         XCTAssert(element(app, "testhooks.shell.noteTypes.row.1").waitForExistence(timeout: 15), "Note Types is not pushed on Browse")
-        let browseTab = app.tabBars.firstMatch.buttons["Browse"]
+        let browseTab = element(app, "shell.root.tab.browse")
+        XCTAssert(browseTab.waitForExistence(timeout: 5), "no Browse tab")
         browseTab.tap()
         XCTAssert(element(app, "testhooks.shell.browse.row.20").waitForExistence(timeout: 5), "the first reselect did not pop to Browse")
         keepScreen(app, "reselect-first")
@@ -101,7 +110,8 @@ final class NavigationLayoutTests: XCTestCase {
         XCTAssert(app.tabBars.firstMatch.waitForExistence(timeout: 10), "no tab bar")
         XCTAssert(element(app, "testhooks.shell.noteTypes.row.1").waitForExistence(timeout: 5))
         XCTAssertEqual(navigationState(app), before)
-        XCTAssertTrue(app.tabBars.firstMatch.buttons["Browse"].isSelected)
+        let browseTab = element(app, "shell.root.tab.browse")
+        XCTAssert(waitUntil { browseTab.exists && browseTab.isSelected }, "the Browse tab is not selected")
 
         // Back on Browse's root: still at row 20.
         app.navigationBars.buttons.element(boundBy: 0).tap()
