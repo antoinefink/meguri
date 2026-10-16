@@ -254,7 +254,8 @@ fn check(shape: Arg, value: &Value) -> Result<(), String> {
     }
 }
 
-/// record-ops.md W1, W3, W4: what the schema requires beyond the types.
+/// record-ops.md W1, W3, W4 and undo-ops.md V3.2: what the schema requires
+/// beyond the types.
 fn record_op(step: &Step) -> Result<(), FormatError> {
     match step {
         Step::DbExec(args) if args.sql.is_empty() => Err(FormatError::new("db_exec needs a non-empty sql")),
@@ -262,6 +263,7 @@ fn record_op(step: &Step) -> Result<(), FormatError> {
             Err(FormatError::new("delete_notes needs at least one note"))
         }
         Step::SetConfig(args) if args.key.is_empty() => Err(FormatError::new("set_config needs a non-empty key")),
+        Step::RemoveConfig(args) if args.key.is_empty() => Err(FormatError::new("remove_config needs a non-empty key")),
         _ => Ok(()),
     }
 }
