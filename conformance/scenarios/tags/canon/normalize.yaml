@@ -33,7 +33,7 @@ steps:
   - add_note: {notetype: Plain, fields: ["n18"], tags: ["\u0001"]}
   - add_note: {notetype: Plain, fields: ["n19"], tags: ["k::\u0001::m"]}
   - add_note: {notetype: Plain, fields: ["n20"], tags: ["say\"hi\""]}
-  - add_note: {notetype: Plain, fields: ["n21"], tags: ["one two", "two"]}
+  - add_note: {notetype: Plain, fields: ["n21"], tags: ["kana kanji", "kanji"]}
   - add_note: {notetype: Plain, fields: ["n22"], tags: ["w "]}
   - add_note: {notetype: Plain, fields: ["n23"], tags: ["\u007f"]}
   - add_note: {notetype: Plain, fields: ["n24"], tags: ["v\u001fw"]}

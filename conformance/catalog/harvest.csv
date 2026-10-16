@@ -1077,7 +1077,7 @@ h762285c157a4,rust,tag,tags,in-scope,clearing unused tags keeps their collapsed 
 h8838c90310d2,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
 h8a531508a003,rust,tag,tags,in-scope,renaming a tag and its descendants,tags/rename/basic,done
 h9f3686b61815,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
-h9f452a4faaf3,rust,tag,tags,in-scope,"tag tree with implicit parents, case and order",tags/tree/structure,done
+h9f452a4faaf3,rust,tag,tags,in-scope,"tag tree with implicit parents, case and order",tags/tree/structure tags/canon/spelling,done
 hab1bc9fa2604,rust,tag,tags,in-scope,"reparenting rules, merges and moves to the top level",tags/reparent/rules,done
 hac48d18d7071,rust,tag,tags,in-scope,a blank new name is refused and nothing changes,tags/rename/refused,done
 hafc1cda6babf,rust,tag,tags,in-scope,moving a tag to the top level,tags/reparent/rules,done

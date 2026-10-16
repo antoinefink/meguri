@@ -71,7 +71,7 @@ A note is marked when it stores a tag equal to `marked` (`tags/tags#T1`, full fo
 
 ## M2. Marking and unmarking
 
-- **Mark**: add the tag `marked` to the notes (`tags/tags#T10` Add). It takes the registered spelling when one exists, so with a row `Marked` the notes store `Marked`. Undo step "Update Tag".
+- **Mark**: add the tag `marked` to the notes (`tags/tags#T10` Add). It takes `tags/tags#T3`'s spelling, so with a row `Marked`, or only a row `Marked::x`, the notes store `Marked` (Anki stores `marked` in the second case, T3's deviation). Undo step "Update Tag".
 - **Unmark**: remove the tag `marked` from the notes (`tags/tags#T10` Remove). Every matching tag goes, so `Marked` and `marked::x` are removed together; `markedly` stays. Undo step "Remove Tag".
 - **Toggle**: in review (the `*` key and the ⋯ menu), unmark the current note when it is marked (M1), else mark it. In Browse (⌘K, R1192), the focused row's note decides for all selected notes: unmark them all when it is marked, else mark them all.
 

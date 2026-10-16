@@ -48,7 +48,7 @@ The scenario ops (`dsl.md` D7.2) and the observation kind (`observations.md` O4)
 ## G7. `set_tag_collapsed`
 
 - **Argument** `{tags: [<name>, ...], collapsed: <boolean>}`: at least one name.
-- **Effect** `tags/tags#T12` with the names in order. The oracle runs Anki's set-collapsed operation once per name; Meguri runs one operation for the list. The rows they leave are the same.
+- **Effect** `tags/tags#T12` with the names in order. The oracle runs Anki's set-collapsed operation once per name; Meguri runs one operation for the list. The rows they leave are the same, except where `tags/tags#T3`'s implicit-parent deviation spells a new row.
 - **Output** none (`{}`).
 - Scenarios give names that T2 leaves unchanged, and never set a row to the state it already has: both cases differ from Anki by design (`tags/tags#T12`).
 
