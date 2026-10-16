@@ -117,7 +117,7 @@ A list of `{card: #cN, <column>: <value>, ...}` written into the stored card row
 
 A list of review-history rows `{card: #cN, id, ease, ivl, lastIvl, factor, time, type}` (integers; `id` is the review instant in epoch milliseconds), inserted in order. The scheduler area finalizes it with the driver support.
 
-### D6.8 media_files (draft)
+### D6.8 media_files
 
 A list of files and empty subdirectories created directly in the collection's media folder, bypassing the media store, as an outside program would: `{name, text}`, `{name, fill: {size, byte?}}` or `{name, dir: true}` (`media-ops.md` F2, F3).
 
@@ -157,11 +157,11 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |
 | `export` | `{format: apkg \| colpkg, name: <file name>, ...options}`; the legacy package form is exactly `{format: apkg, name, legacy: true}` (`model-ops.md` L6) | legacy form: `{notes: <count>}`; other forms: `{name, sha256}` of the file written | draft (package); the legacy form is stable (`model-ops.md` L6) |
 | `check_db` | `{}` | the problem counts of Anki's Check Database (`collection-check.md` K5, K10); rejection `corrupt` | stable (`collection-check.md` K10) |
-| `media_outside` | list of `media_files` entries (D6.8) and `{name, remove: true}`: change the media folder directly, bypassing the store | none | draft (media; `media-ops.md` F4) |
-| `add_media` | `{name, text}` or `{name, fill}`: add a file through the media store with this desired name | `{name}`: the stored name; rejections `invalid_name`, `ignored_name` (Meguri only) | draft (media; `media-ops.md` F5) |
-| `trash_media` | `{names: [...]}`: move these files to the media trash | none | draft (media; `media-ops.md` F6) |
-| `restore_media_trash` | `{}` | none | draft (media; `media-ops.md` F7) |
-| `empty_media_trash` | `{}` | none | draft (media; `media-ops.md` F8) |
+| `media_outside` | list of `media_files` entries (D6.8) and `{name, remove: true}`: change the media folder directly, bypassing the store | none | stable (`media-ops.md` F4) |
+| `add_media` | `{name, text}` or `{name, fill}`: add a file through the media store with this desired name | `{name}`: the stored name; rejections `invalid_name`, `ignored_name` (Meguri only) | stable (`media-ops.md` F5) |
+| `trash_media` | `{names: [...]}`: move these files to the media trash | none | stable (`media-ops.md` F6) |
+| `restore_media_trash` | `{}` | none | stable (`media-ops.md` F7) |
+| `empty_media_trash` | `{}` | none | stable (`media-ops.md` F8) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |

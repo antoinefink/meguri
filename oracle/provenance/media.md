@@ -39,3 +39,18 @@ Driver hints for the oracle maintainer (U31 role work):
 - `media_pending`: zero `meta.dirMod` in `collection.media.db2` when the file exists, start `col.sync_media` with a `SyncAuth` whose endpoint cannot be reached (the worker has no network), wait until `media_sync_status()` is inactive or raises, then read `media` rows with `dirty = 1` (`csum` hex, NULL for a deletion). The registration runs before the network call and commits on its own. Never compare against the sync error text.
 - `media_files` and `media_outside`: write with plain file I/O, then `os.utime` every written file and the folder to the frozen clock's instant.
 - Check under the frozen clock that three recordings agree, in particular for `trash/trash-restore-empty` and `register/outside-changes`.
+
+## Driver (`driver/ops/media.py`, U31 oracle step)
+
+Oracle-maintainer notes, read at tag 26.09.3; no code was copied.
+
+| Driver part | Anki files read | Read for |
+|---|---|---|
+| `add_media`, `trash_media`, `restore_media_trash`, `empty_media_trash` | `pylib/anki/media.py`, `rslib/src/media/service.rs`, `rslib/src/media/mod.rs`, `rslib/src/media/check.rs`, `rslib/src/media/files.rs` | the pylib calls and what each backend call does to the folder, the trash and the media database |
+| `media_pending` | `rslib/src/backend/sync.rs`, `rslib/src/sync/media/syncer.rs`, `rslib/src/sync/media/database/client/changetracker.rs`, `rslib/src/sync/media/database/client/schema.sql`, `pylib/anki/collection.py` | the background media sync and its status call (an error is raised once, then the task is gone), registration before the first request, the folder marker in milliseconds and file times in whole seconds, the `media` and `meta` columns |
+| `media_files`, `media_outside` | `pylib/anki/media.py` (folder created when the collection opens) | the folder's path and existence |
+
+- `Collection::media()` opens the media database for each call, so the driver may write `meta` and read `media` with sqlite3 between calls.
+- The registration compares a file's whole-second time with the stored one; Anki's own adds store milliseconds, so the next registration always hashes them again and keeps their dirty flag when the bytes are the same. Only outside writes need the clock's times.
+- A media sync to `http://127.0.0.1:1/` in the oracle image fails with `NetworkError` within milliseconds.
+- Three recordings (`tools/mg oracle record media`, then `compare media` twice) agree exactly for all 13 scenarios.

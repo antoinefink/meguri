@@ -1,0 +1,64 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "photo.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "photo.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "photo-6ef3f8a1bc81edc6dea508e133426e933230f59b.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "photo-6ef3f8a1bc81edc6dea508e133426e933230f59b.jpg"
+        }
+      },
+      {
+        "add_media": {
+          "name": "diagram.png"
+        }
+      },
+      {
+        "media_dir": {
+          "diagram.png": {
+            "sha1": "471b959d4d3539372fe836c86c5ae87fdbdf6843",
+            "size": 13
+          },
+          "photo-6ef3f8a1bc81edc6dea508e133426e933230f59b.jpg": {
+            "sha1": "6ef3f8a1bc81edc6dea508e133426e933230f59b",
+            "size": 17
+          },
+          "photo.jpg": {
+            "sha1": "a4583eea050ee17f629e62e3f2365352429cb5fb",
+            "size": 11
+          }
+        },
+        "media_pending": {
+          "diagram.png": "471b959d4d3539372fe836c86c5ae87fdbdf6843",
+          "photo-6ef3f8a1bc81edc6dea508e133426e933230f59b.jpg": "6ef3f8a1bc81edc6dea508e133426e933230f59b",
+          "photo.jpg": "a4583eea050ee17f629e62e3f2365352429cb5fb"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/add/ae36",
+  "scenario_sha256": "674ee8d0287880a26fbae1d36c5d8fb6a55d4148a5e97ab82bca712e88d0b6c5",
+  "tz": "UTC"
+}

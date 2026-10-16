@@ -1,0 +1,39 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_media": {
+          "name": "mixedcase.png"
+        }
+      },
+      {
+        "media_dir": {
+          "MixedCase.png": {
+            "sha1": "b746d79201944bf54f6a239c59d0b4a71be42873",
+            "size": 5
+          },
+          "mixedcase.png": {
+            "sha1": "37c6c57bedf4305ef41249c1794760b5cb8fad17",
+            "size": 7
+          }
+        },
+        "media_pending": {
+          "MixedCase.png": "b746d79201944bf54f6a239c59d0b4a71be42873",
+          "mixedcase.png": "37c6c57bedf4305ef41249c1794760b5cb8fad17"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/case/other-content-variant",
+  "scenario_sha256": "5cc41c1eeabf6c530c84d9e0f9bf51c46dadc23bfd0913de993df9789074ed30",
+  "tz": "UTC"
+}

@@ -7,6 +7,7 @@ from . import (  # noqa: F401
     decks,
     handoff,
     maintenance,
+    media,
     model,
     notes,
     notetypes,

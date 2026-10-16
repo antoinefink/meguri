@@ -1,0 +1,101 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "media_dir": {
+          ".DS_Store": {
+            "sha1": "0121bc05e0945dfa630b80cba86e207b6d4ca829",
+            "size": 7
+          },
+          "Thumbs.DB": {
+            "sha1": "0121bc05e0945dfa630b80cba86e207b6d4ca829",
+            "size": 7
+          },
+          "Upper.PNG": {
+            "sha1": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+            "size": 4
+          },
+          "_font.ttf": {
+            "sha1": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+            "size": 4
+          },
+          "a b.png": {
+            "sha1": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+            "size": 4
+          },
+          "a:b.png": {
+            "sha1": "392b277a81d9a54c11763cf0ab1370ddc0536d58",
+            "size": 14
+          },
+          "con.jpg": {
+            "sha1": "392b277a81d9a54c11763cf0ab1370ddc0536d58",
+            "size": 14
+          },
+          "empty.png": {
+            "sha1": "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+            "size": 0
+          },
+          "my.ds_store": {
+            "sha1": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+            "size": 4
+          },
+          "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn": {
+            "sha1": "392b277a81d9a54c11763cf0ab1370ddc0536d58",
+            "size": 14
+          },
+          "ok.png": {
+            "sha1": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+            "size": 4
+          },
+          "sub": {
+            "dir": true
+          },
+          "thumbs.db.png": {
+            "sha1": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+            "size": 4
+          },
+          "thumbs_db": {
+            "sha1": "0121bc05e0945dfa630b80cba86e207b6d4ca829",
+            "size": 7
+          },
+          "thumbſ-db": {
+            "sha1": "0121bc05e0945dfa630b80cba86e207b6d4ca829",
+            "size": 7
+          },
+          "trail.": {
+            "sha1": "392b277a81d9a54c11763cf0ab1370ddc0536d58",
+            "size": 14
+          },
+          "xds_store": {
+            "sha1": "0121bc05e0945dfa630b80cba86e207b6d4ca829",
+            "size": 7
+          },
+          "ſDS_STORE": {
+            "sha1": "0121bc05e0945dfa630b80cba86e207b6d4ca829",
+            "size": 7
+          }
+        },
+        "media_pending": {
+          "Upper.PNG": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+          "_font.ttf": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+          "a b.png": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+          "my.ds_store": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+          "ok.png": "1e61fe1e47593d783345ac78ef213cc0446fd78c",
+          "thumbs.db.png": "1e61fe1e47593d783345ac78ef213cc0446fd78c"
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "252219e0b6ce03b4f55b5a7450dcf4dcf2fec9e81df560681b569e45046102cd",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "media/register/ignored",
+  "scenario_sha256": "dcbb9793e54d01ebfb73424e12bac84239171dd96b8f6d53affc16be5975f508",
+  "tz": "UTC"
+}

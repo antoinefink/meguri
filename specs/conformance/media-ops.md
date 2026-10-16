@@ -91,5 +91,5 @@ Registration tells a changed file by its modification time (Anki compares whole 
 
 ## F13. Driver and executor status
 
-- The oracle driver needs the setup section, the five ops and the three observations; until it has them, `tools/mg oracle record media` cannot write goldens. The oracle maintainer adds them (U31's oracle step) and then marks them stable in `dsl.md` D6.8 and D7.2 and `observations.md` O4.
+- The oracle driver has the setup section, the five ops and the three observations (U31's oracle step), and `conformance/goldens/media/` holds their goldens. They are stable in `dsl.md` D6.8 and D7.2 and `observations.md` O4.
 - Meguri's executor needs the testkit model (`core/crates/meguri-testkit/src/scenario/`) and a media adapter (U31's implementer step). Until the model reads them, T0 reports the media scenarios as `invalid`; until the adapter runs them, `pending`.

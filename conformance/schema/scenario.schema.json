@@ -645,7 +645,7 @@
           "maxProperties": 0
         },
         "media_outside": {
-          "description": "Draft, final shape (media-ops.md F4): change the media folder directly, bypassing the store: create or rewrite files, create empty subdirectories, remove entries.",
+          "description": "Stable (media-ops.md F4): change the media folder directly, bypassing the store: create or rewrite files, create empty subdirectories, remove entries.",
           "type": "array",
           "minItems": 1,
           "items": {
@@ -661,7 +661,7 @@
           }
         },
         "add_media": {
-          "description": "Draft, final shape (media-ops.md F5): add a file through the media store; name is the desired name, any string.",
+          "description": "Stable (media-ops.md F5): add a file through the media store; name is the desired name, any string.",
           "type": "object",
           "required": ["name"],
           "additionalProperties": false,
@@ -673,19 +673,19 @@
           "oneOf": [{ "required": ["text"] }, { "required": ["fill"] }]
         },
         "trash_media": {
-          "description": "Draft, final shape (media-ops.md F6): move these files to the media trash.",
+          "description": "Stable (media-ops.md F6): move these files to the media trash.",
           "type": "object",
           "required": ["names"],
           "additionalProperties": false,
           "properties": { "names": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }
         },
         "restore_media_trash": {
-          "description": "Draft, final shape (media-ops.md F7): restore every media trash entry.",
+          "description": "Stable (media-ops.md F7): restore every media trash entry.",
           "type": "object",
           "maxProperties": 0
         },
         "empty_media_trash": {
-          "description": "Draft, final shape (media-ops.md F8): delete every media trash entry permanently.",
+          "description": "Stable (media-ops.md F8): delete every media trash entry permanently.",
           "type": "object",
           "maxProperties": 0
         },
