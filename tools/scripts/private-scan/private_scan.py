@@ -18,7 +18,7 @@ space) and `meta.json` (counts only) beside it.
 
 `scan` reports the files that contain a token, as whole words: whole files
 for paths (folders are walked), or the lines a commit adds for `--staged`
-(binary files whole, as runs of printable text: see PRINTABLE_RUN). A line
+(binary files whole, as runs of printable text: see PRINTABLE). A line
 also counts when its HTML entities, JSON or Python escapes, or URL
 percent-escapes hide a token. It prints the files and line numbers, never a
 token.
@@ -33,28 +33,25 @@ the containers.
 """
 
 import argparse
-import collections
 import html
 import json
-import math
 import os
 import re
 import subprocess
 import sys
 import unicodedata
 import urllib.parse
+import zlib
 
 WORD = re.compile(r"[^\W_]+")
 MIN_CHARS = 4
 # Binary files are scanned as runs of printable characters: valid UTF-8 other
-# than C0 controls, DEL and U+FFFD (SQLite pages keep text as is, between
-# record headers, integers and the 0x1f field separator). A run of LONG_RUN
-# characters or more is scanned wherever it is. A shorter run (MIN_CHARS or
-# more) is scanned only where the bytes around it do not look compressed:
-# PNG, JPEG or zip data holds about ten such runs per megabyte that equal a
-# four-letter word by chance. Runs under MIN_CHARS are never scanned.
-PRINTABLE_RUN = re.compile(
-    rb"(?:[\x20-\x7e]"
+# than C0 controls, DEL and U+FFFD. SQLite keeps text as is, between record
+# headers and integers. 0x1f belongs to a run as a separator: Anki puts it
+# between a note's fields and between a deck name's components, so a nested
+# deck name reads as its words.
+PRINTABLE = (
+    rb"(?:[\x1f-\x7e]"
     rb"|[\xc2-\xdf][\x80-\xbf]"
     rb"|\xe0[\xa0-\xbf][\x80-\xbf]"
     rb"|[\xe1-\xec\xee][\x80-\xbf]{2}"
@@ -63,14 +60,16 @@ PRINTABLE_RUN = re.compile(
     rb"|\xf0[\x90-\xbf][\x80-\xbf]{2}"
     rb"|[\xf1-\xf3][\x80-\xbf]{3}"
     rb"|\xf4[\x80-\x8f][\x80-\xbf]{2})"
-    rb"{%d,}" % MIN_CHARS
 )
-LONG_RUN = 8
-# Compressed-looking: the byte entropy of the NOISE_WINDOW bytes around a
-# short run is NOISE_BITS per byte or more. Compressed data measures about
-# 7.9 over 4 KiB; database pages of text and integers stay under 7.
-NOISE_WINDOW = 4096
-NOISE_BITS = 7.0
+TEXT_RUN = re.compile(PRINTABLE + rb"+")
+# Every run is scanned, whatever its length, except in the ranges a file's
+# format marks as compressed data, fixed numbers or tables (opaque_ranges:
+# PNG, JPEG, zip, zstd). There printable runs equal short words by chance (a
+# megabyte of deflate data holds thousands of two-to-seven-letter words), so
+# only a token of LONG_TOKEN UTF-8 bytes or more counts. Such a token takes
+# two characters at least. A file in any other format is text throughout.
+LONG_TOKEN = 8
+OPAQUE_RUN = re.compile(PRINTABLE + rb"{2,}")
 SURROGATE_PAIR = re.compile(r"\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re.IGNORECASE)
 ESCAPE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2}))")
 SNIFF = 8192
@@ -162,27 +161,269 @@ def line_hits(matcher, text, first=1):
     return hits
 
 
-def byte_entropy(data):
-    """Shannon entropy of `data`, in bits per byte."""
-    total = len(data)
-    return -sum(n / total * math.log2(n / total) for n in collections.Counter(data).values())
+# ------------------------------------------------------------ binary files
+#
+# opaque_ranges marks the byte ranges a known format defines as compressed
+# data, fixed numbers or tables. Everything else (names, comments, metadata,
+# stored data, unknown chunks, bytes past the end, any file of another
+# format, and a format whose structure does not check out from the point
+# where it stops) is text. Each parser returns at the first byte that breaks
+# its format, keeping the ranges it has checked.
 
 
-def looks_compressed(data, at):
-    """Whether the NOISE_WINDOW bytes around `at` (the whole of a smaller
-    file) look like compressed data."""
-    start = max(0, min(at - NOISE_WINDOW // 2, len(data) - NOISE_WINDOW))
-    return byte_entropy(data[start:start + NOISE_WINDOW]) >= NOISE_BITS
+def _u16(data, at, order="little"):
+    return int.from_bytes(data[at:at + 2], order)
+
+
+def _u32(data, at, order="little"):
+    return int.from_bytes(data[at:at + 4], order)
+
+
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+# Chunks whose data is image data, numbers or palettes, never text. iDOT is
+# Apple's (integers locating the image data): every screenshot and snapshot
+# test image made on a Mac or an iPhone has one.
+PNG_OPAQUE = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"sBIT", b"bKGD", b"hIST",
+              b"pHYs", b"tIME", b"acTL", b"fcTL", b"fdAT", b"iDOT"}
+
+
+def _png(data, start, end, out):
+    """The signature, each chunk's length, type and CRC (a chunk counts only
+    when its CRC matches), the data of PNG_OPAQUE chunks, and the compressed
+    text of zTXt, iCCP and a compressed iTXt (their keywords are text)."""
+    out.append((start, start + 8))
+    p = start + 8
+    while p + 12 <= end:
+        length = _u32(data, p, "big")
+        kind, body, tail = data[p + 4:p + 8], p + 8, p + 8 + length
+        if tail + 4 > end or zlib.crc32(data[p + 4:tail]) != _u32(data, tail, "big"):
+            return
+        out += [(p, body), (tail, tail + 4)]
+        nul = data.find(b"\0", body, tail)
+        if kind in PNG_OPAQUE:
+            out.append((body, tail))
+        elif kind in (b"zTXt", b"iCCP") and nul >= 0:
+            # keyword NUL method compressed-text
+            out.append((nul + 1, tail))
+        elif kind == b"iTXt" and nul >= 0 and nul + 1 < tail and data[nul + 1] == 1:
+            # keyword NUL flag method language NUL translated-keyword NUL text
+            language = data.find(b"\0", nul + 3, tail)
+            translated = data.find(b"\0", language + 1, tail) if language >= 0 else -1
+            if translated >= 0:
+                out.append((translated + 1, tail))
+        p = tail + 4
+        if kind == b"IEND":
+            return
+
+
+def _jpeg(data, start, end, out):
+    """Markers, segment lengths, the data of every segment but APPn and COM
+    (tables, frame and scan headers), and the entropy-coded data after each
+    scan header. Bytes after the end marker are text."""
+    out.append((start, start + 2))
+    p = start + 2
+    while p + 2 <= end:
+        if data[p] != 0xFF:
+            return
+        marker = data[p + 1]
+        if marker == 0xFF:  # fill byte
+            out.append((p, p + 1))
+            p += 1
+            continue
+        if marker == 0xD9 or 0xD0 <= marker <= 0xD7 or marker == 0x01:
+            out.append((p, p + 2))
+            p += 2
+            if marker == 0xD9:
+                return
+            continue
+        if p + 4 > end:
+            return
+        length = _u16(data, p + 2, "big")
+        body, tail = p + 4, p + 2 + length
+        if length < 2 or tail > end:
+            return
+        out.append((p, body))
+        if not (0xE0 <= marker <= 0xEF or marker == 0xFE):
+            out.append((body, tail))
+        p = tail
+        if marker == 0xDA:
+            # Entropy-coded data runs to the next marker: 0xFF 0x00 is a
+            # stuffed 0xFF and 0xFF 0xD0-0xD7 a restart, both inside it.
+            q = p
+            while True:
+                q = data.find(b"\xff", q, end - 1)
+                if q < 0:
+                    q = end
+                    break
+                if data[q + 1] == 0 or 0xD0 <= data[q + 1] <= 0xD7:
+                    q += 2
+                    continue
+                break
+            out.append((p, q))
+            p = q
+
+
+def _zip(data, start, end, out):
+    """The fixed fields of the end record, central directory entries, local
+    headers and data descriptors, and the data of each entry that is not
+    stored (compressed or encrypted). A stored entry's data is classified in
+    turn. Zip64 archives are not read: they are text."""
+    eocd = data.rfind(b"PK\x05\x06", max(start, end - 22 - 0xFFFF), end)
+    if eocd < 0 or eocd + 22 > end or eocd + 22 + _u16(data, eocd + 20) > end:
+        return
+    count, cd_size, cd_offset = _u16(data, eocd + 10), _u32(data, eocd + 12), _u32(data, eocd + 16)
+    cd_start = start + cd_offset
+    if count == 0xFFFF or cd_offset == 0xFFFFFFFF or cd_start + cd_size > eocd:
+        return
+    found = [(eocd, eocd + 22)]
+    entries = []
+    p = cd_start
+    for _ in range(count):
+        if p + 46 > eocd or data[p:p + 4] != b"PK\x01\x02":
+            return
+        flags, method, size, local = _u16(data, p + 8), _u16(data, p + 10), _u32(data, p + 20), _u32(data, p + 42)
+        if size == 0xFFFFFFFF or local == 0xFFFFFFFF:
+            return
+        found.append((p, p + 46))
+        entries.append((start + local, flags, method, size))
+        p += 46 + _u16(data, p + 28) + _u16(data, p + 30) + _u16(data, p + 32)
+    out += found
+    previous = start
+    for local, flags, method, size in sorted(entries):
+        if local < previous or local + 30 > cd_start or data[local:local + 4] != b"PK\x03\x04":
+            return
+        body = local + 30 + _u16(data, local + 26) + _u16(data, local + 28)
+        tail = body + size
+        if tail > cd_start:
+            return
+        out.append((local, local + 30))
+        if method == 0 and not flags & 1:
+            _classify(data, body, tail, out)
+        else:
+            out.append((body, tail))
+        previous = tail
+        if flags & 8:
+            # Data descriptor: an optional signature, CRC and two sizes.
+            descriptor = 16 if data[tail:tail + 4] == b"PK\x07\x08" else 12
+            out.append((tail, min(tail + descriptor, cd_start)))
+            previous = tail + descriptor
+
+
+ZSTD_MAGIC = 0xFD2FB528
+
+
+def _zstd_literals(data, body, tail):
+    """A compressed block's ranges: all of it, except raw literals, which are
+    stored as they are."""
+    head = data[body]
+    form = head >> 2 & 3
+    literals = body + (1, 2, 1, 3)[form]
+    if head & 3 != 0 or literals > tail:
+        return [(body, tail)]
+    if form in (0, 2):
+        size = head >> 3
+    elif form == 1:
+        size = (head >> 4) + (data[body + 1] << 4)
+    else:
+        size = (head >> 4) + (data[body + 1] << 4) + (data[body + 2] << 12)
+    if literals + size > tail:
+        return [(body, tail)]
+    return [(body, literals), (literals + size, tail)]
+
+
+def _zstd(data, start, end, out):
+    """zstd frames: the frame header, block headers, compressed blocks
+    (their raw literals are text), RLE bytes and checksums. Raw blocks and
+    the user data of skippable frames are text."""
+    p = start
+    while p + 8 <= end:
+        magic = _u32(data, p)
+        if magic & 0xFFFFFFF0 == 0x184D2A50:
+            size = _u32(data, p + 4)
+            if p + 8 + size > end:
+                return
+            out.append((p, p + 8))
+            p += 8 + size
+            continue
+        descriptor = data[p + 4]
+        if magic != ZSTD_MAGIC or descriptor & 0x08:
+            return
+        single = descriptor >> 5 & 1
+        q = p + 5 + (1 - single) + (0, 1, 2, 4)[descriptor & 3] + (single, 2, 4, 8)[descriptor >> 6]
+        frame = [(p, q)]
+        while True:
+            if q + 3 > end:
+                return
+            header = int.from_bytes(data[q:q + 3], "little")
+            last, kind, size = header & 1, header >> 1 & 3, header >> 3
+            body = q + 3
+            tail = body + (1 if kind == 1 else size)
+            if kind == 3 or tail > end or (kind == 2 and size == 0):
+                return
+            frame.append((q, body))
+            if kind == 1:
+                frame.append((body, tail))
+            elif kind == 2:
+                frame += _zstd_literals(data, body, tail)
+            q = tail
+            if last:
+                break
+        if descriptor & 0x04:
+            if q + 4 > end:
+                return
+            frame.append((q, q + 4))
+            q += 4
+        out += frame
+        p = q
+
+
+def _classify(data, start, end, out):
+    """Adds the opaque ranges of data[start:end], by the format its first
+    bytes name, to `out`."""
+    head = data[start:start + 8]
+    if head == PNG_SIGNATURE:
+        _png(data, start, end, out)
+    elif head[:3] == b"\xff\xd8\xff":
+        _jpeg(data, start, end, out)
+    elif head[:4] in (b"PK\x03\x04", b"PK\x05\x06"):
+        _zip(data, start, end, out)
+    elif len(head) >= 4 and (_u32(head, 0) == ZSTD_MAGIC or _u32(head, 0) & 0xFFFFFFF0 == 0x184D2A50):
+        _zstd(data, start, end, out)
+
+
+def opaque_ranges(data):
+    """The (start, end) byte ranges of `data` that only long tokens can hit,
+    sorted."""
+    out = []
+    _classify(data, 0, len(data), out)
+    return sorted(r for r in out if r[0] < r[1])
+
+
+def _runs_hit(matcher, data, start, end, run, min_bytes):
+    """Whether a printable run of data[start:end] holds a token of
+    `min_bytes` UTF-8 bytes or more."""
+    for m in run.finditer(data, start, end):
+        if m.end() - m.start() < min_bytes:
+            continue
+        text = m.group(0).decode("utf-8")
+        for v in variants(text):
+            for token in matcher.find(words(v)):
+                if sum(len(w.encode("utf-8")) for w in token) >= min_bytes:
+                    return True
+    return False
 
 
 def binary_hit(matcher, data):
-    """Whether a binary file's printable runs hold a token (see PRINTABLE_RUN)."""
-    for m in PRINTABLE_RUN.finditer(data):
-        run = m.group(0).decode("utf-8")
-        if not any(matcher.hit(v) for v in variants(run)):
-            continue
-        if len(run) >= LONG_RUN or not looks_compressed(data, m.start()):
+    """Whether a binary file holds a token: in any printable run of its
+    text, or as a long token in its opaque ranges (see PRINTABLE)."""
+    pos = 0
+    for start, end in opaque_ranges(data) + [(len(data), len(data))]:
+        if start > pos and _runs_hit(matcher, data, pos, start, TEXT_RUN, 1):
             return True
+        start = max(start, pos)
+        if end > start and _runs_hit(matcher, data, start, end, OPAQUE_RUN, LONG_TOKEN):
+            return True
+        pos = max(pos, end)
     return False
 
 
