@@ -186,6 +186,9 @@ fn open(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     }
     fs::copy(&fixture, &path).map_err(|e| ExecError::new("fixture_error", format!("{}: {e}", fixture.display())))?;
     let opened = open_collection(&path, &OpenOptions::new(&*session.clock, &*session.random));
+    // Another file: the cached day goes (D6); the open gate runs no day
+    // query (`sched/day-clock` D14.2).
+    session.day.clear();
     match opened {
         Ok(collection) => {
             session.storage.opened(collection)?;
@@ -226,8 +229,11 @@ fn db_exec(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
         .map_err(core)?;
     let baseline = object_set(collection(session)?)?;
     session.storage.baseline = baseline;
-    // W1's reset after a write has nothing to clear: the session runs no
-    // engine yet, so it keeps no cached view and no undo history (U38).
+    // W1's reset after a write: the cached day goes (`sched/day-clock` D6).
+    // The session keeps no other view and no undo history yet (U38).
+    if !args.sql.trim_start().to_ascii_lowercase().starts_with("select") {
+        session.day.clear();
+    }
     Ok(OpResult::Output(json!({ "rows": db_exec_rows(&rows) })))
 }
 
@@ -282,9 +288,26 @@ fn set_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecEr
         .writer()
         .begin_write(StampMode::Local, &*clock, None)
         .map_err(core)?;
-    scope.set_config(&args.key, &value).map_err(core)?;
+    let written = scope.set_config(&args.key, &value).map_err(core)?;
     scope.commit().map_err(core)?;
+    // The engine's day clock computes afresh right after a change of its
+    // keys (`sched/day-clock` D8, D14.2).
+    if written.changed() && matches!(args.key.as_str(), "rollover" | "creationOffset") {
+        session.day.clear();
+        super::sched::day_query_now(session)?;
+    }
     Ok(OpResult::Done)
+}
+
+/// sync-ops.md S6: closes the session's collection and opens it again from
+/// its file through the gate.
+pub(super) fn reopen_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
+    collection(session)?;
+    session.storage.close()?;
+    let path = session.storage.dir()?.join(COLLECTION);
+    let collection = open_collection(&path, &OpenOptions::new(&*session.clock, &*session.random))
+        .map_err(|e| core(format!("reopening the collection: {e}")))?;
+    session.storage.opened(collection)
 }
 
 /// A stored value by its storage class (P2.2, O8).
@@ -533,6 +556,7 @@ fn hand_in(session: &mut Session<'_>, dir: &Path) -> Result<(), ExecError> {
         &OpenOptions::new(&*session.clock, &*session.random),
     )
     .map_err(|e| ExecError::new("handoff_error", format!("opening the handed-over collection: {e}")))?;
+    session.day.clear();
     session.storage.opened(collection)
 }
 

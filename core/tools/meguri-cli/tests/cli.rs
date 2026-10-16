@@ -28,7 +28,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
         json["supports"]["ops"],
-        serde_json::json!(["advance", "db_exec", "handoff", "open", "set_clock", "set_config"])
+        serde_json::json!(["advance", "db_exec", "handoff", "open", "reopen", "set_clock", "set_config"])
     );
     assert_eq!(
         json["supports"]["observations"],
@@ -40,7 +40,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "schema_objects",
             "search",
             "template",
-            "text"
+            "text",
+            "timing"
         ])
     );
     // dsl.md D7.2: 29 ops besides observe, the actor ops of sync-ops.md, the
