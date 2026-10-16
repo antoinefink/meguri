@@ -51,7 +51,8 @@ impl fmt::Display for DisabledReason {
 /// Why the whole history is cleared without an op (M6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ClearCause {
-    /// The day changed (U40), even when rollover wrote nothing.
+    /// The day changed (U40, `sched/day-clock` D9), even when the rollover
+    /// op wrote nothing.
     Rollover,
     /// Check Database ran (U128).
     CheckDatabase,
@@ -81,6 +82,10 @@ pub enum SourceEffect {
     TruncateIntersecting,
     /// The sync merge rule (M9.4, KTD7).
     SyncMerge,
+    /// Neither recorded nor clearing: the day clock's writes
+    /// (`sched/day-clock` D10). Its rollover op clears the history itself
+    /// when the day changes (M6, D9).
+    Kept,
 }
 
 /// The undo effect of every op source (M2, R2020).
@@ -92,7 +97,7 @@ pub fn source_effect(source: OpSource) -> SourceEffect {
         }
         OpSource::LocalApi => SourceEffect::TruncateIntersecting,
         OpSource::SyncIncoming => SourceEffect::SyncMerge,
-        OpSource::Rollover => SourceEffect::ClearAll(DisabledReason::ClearedByRollover),
+        OpSource::Rollover => SourceEffect::Kept,
     }
 }
 

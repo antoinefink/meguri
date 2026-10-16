@@ -177,6 +177,8 @@ pub struct Session<'a> {
     pub actor: Option<Seat>,
     /// The session directory and the open collection (`exec/storage.rs`).
     pub storage: super::storage::Storage,
+    /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
+    pub day: meguri_engine::DayCache,
 }
 
 /// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
@@ -230,7 +232,9 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 7] = ["clock", "render", "sched", "search", "storage", "tags", "text"];
+    pub const AREAS: [&'static str; 8] = [
+        "browser", "clock", "render", "sched", "search", "storage", "tags", "text",
+    ];
 
     /// Every area adapter that exists.
     pub fn core_registry() -> Registry {
@@ -247,6 +251,7 @@ impl MeguriExecutor {
         let mut registry = Registry::default();
         for area in areas {
             match *area {
+                "browser" => super::browser::register(&mut registry),
                 "clock" => super::clock::register(&mut registry),
                 "render" => super::render::register(&mut registry),
                 "sched" => super::sched::register(&mut registry),
@@ -285,6 +290,7 @@ impl MeguriExecutor {
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
             actor: None,
             storage: Default::default(),
+            day: Default::default(),
         })
     }
 
@@ -437,6 +443,7 @@ impl MeguriExecutor {
                 cards: Vec::new(),
                 actor: None,
                 storage: Default::default(),
+                day: Default::default(),
             };
             self.new_collection(&mut session)?;
             sessions.insert(name.clone(), session);

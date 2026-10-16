@@ -1,0 +1,13 @@
+# R596 (D11): created at 03:30 CEST on the day Paris moves its clocks forward.
+# crt is the previous day's 04:00 taken with the offset in effect at creation
+# (+02:00), while creationOffset is the offset in effect at crt (+01:00).
+id: sched/day/creation-dst-spring
+clock: {tz: Europe/Paris, start: "2030-03-31T03:30:00", mode: step}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "SELECT crt FROM col"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - set_clock: "2030-03-31T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]

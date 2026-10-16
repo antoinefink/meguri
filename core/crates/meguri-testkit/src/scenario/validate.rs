@@ -8,6 +8,7 @@
 
 use std::collections::BTreeSet;
 
+use meguri_search::config::{Key, Shape};
 use serde_json::{Map, Value};
 
 use super::FormatError;
@@ -104,6 +105,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
         record_op(step).map_err(at)?;
         tag_op(step).map_err(at)?;
+        browser_config_op(step).map_err(at)?;
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
@@ -291,6 +293,42 @@ fn tag_op(step: &Step) -> Result<(), FormatError> {
         Step::SetTagCollapsed(args) => names("set_tag_collapsed", &args.tags),
         Step::SetFlag(args) if args.cards.is_empty() => Err(FormatError::new("set_flag needs at least one card")),
         _ => Ok(()),
+    }
+}
+
+/// browser-config-ops.md B1: one of the 22 browser config keys (every
+/// browser key but `normalize_note_text`) and a value of its shape.
+fn browser_config_op(step: &Step) -> Result<(), FormatError> {
+    let Step::BrowserConfigSet(args) = step else {
+        return Ok(());
+    };
+    let Some(key) = Key::from_name(&args.key).filter(|key| key.writable()) else {
+        return Err(FormatError::new(format!(
+            "browser_config_set: {:?} is not one of the 22 browser config keys",
+            args.key
+        )));
+    };
+    let fits = match (key.shape(), &args.value) {
+        (Shape::Boolean(_), Value::Bool(_)) => true,
+        (Shape::Text(_) | Shape::SortColumn, Value::String(_)) => true,
+        (Shape::Columns, Value::Array(items)) => items.iter().all(Value::is_string),
+        (Shape::Names, Value::Object(members)) => members.values().all(Value::is_string),
+        _ => false,
+    };
+    if fits {
+        Ok(())
+    } else {
+        Err(FormatError::new(format!(
+            "browser_config_set: {} takes {}, found {}",
+            args.key,
+            match key.shape() {
+                Shape::Boolean(_) => "a boolean",
+                Shape::Text(_) | Shape::SortColumn => "a string",
+                Shape::Columns => "an array of strings",
+                Shape::Names => "an object of strings",
+            },
+            args.value
+        )))
     }
 }
 
