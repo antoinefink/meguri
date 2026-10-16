@@ -170,3 +170,4 @@ border-radius-large
 transition-medium
 transition-slow
 focus-color
+QWebChannel

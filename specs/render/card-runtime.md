@@ -47,8 +47,8 @@ The page document has exactly this structure (R473, R474). Whitespace between el
 
 - `<html>` has no `lang` attribute. The document has no `<title>` (C15 D16).
 - `#qa` is a direct child of `<body>`. There is no wrapper element anywhere: no `.card` div, no `#content`.
-- `<base href>` is the root of the media origin with a trailing `/` (R493; the origin's exact form comes from U65 S2 and U67). So `foo.jpg`, `./foo.jpg` and `/foo.jpg` in card content all resolve to the media folder.
-- The page document itself is served from the media origin, under the reserved `/_anki/` prefix (R496), so its URL never equals a media file's. If U65 S2 forces the file-URL fallback, U67 states the equivalent. The base stylesheet, runtime and jQuery may be served there too, or be inline. A template cannot tell the difference, apart from `document.scripts` and `document.styleSheets` counts.
+- `<base href>` is the root of the media origin with a trailing `/` (R493). U65's S2 record (`docs/design/decisions/s2-custom-scheme-media.md`) fixes the origin as `meguri-media://media`, so the element is `<base href="meguri-media://media/">`; U67 owns the constant. So `foo.jpg`, `./foo.jpg` and `/foo.jpg` in card content all resolve to the media folder.
+- The page document itself is served from the media origin, under the reserved `/_anki/` prefix (R496), so its URL never equals a media file's. S2 needs no file-URL fallback. The base stylesheet, runtime and jQuery may be served there too, or be inline. A template cannot tell the difference, apart from `document.scripts` and `document.styleSheets` counts.
 - There is no Content Security Policy, as a `<meta>` or a header, so `eval`, `new Function` and inline `on…` attributes work (R504).
 - `data-bs-theme` is `dark` in dark appearance and `light` otherwise (C5).
 
@@ -90,7 +90,7 @@ The answer side passes no class string, so the body classes stay as the question
 
 ### C3.2 `#_flag` and `#_mark`
 
-The two elements stay in the page for its whole life, outside `#qa`. Their content is fixed: ★ (U+2605) in `#_mark`, ⚑ (U+2691) in `#_flag`. Meguri changes them only through `_drawFlag` and `_drawMark` (C10.1, C10.2): the `hidden` attribute and the inline `color` of `#_flag`. Native calls them when a card is shown and when its flag or mark changes. They are not queued behind updates (R478). Native draws no second indicator. A template that hides or moves these elements with its own CSS keeps working (C4.4 notes the specificity this needs).
+The two elements stay in the page for its whole life, outside `#qa`. Their content is fixed: ★ (U+2605) in `#_mark`, ⚑ (U+2691) in `#_flag`. Meguri changes them only through `_drawFlag` and `_drawMark` (C10.1, C10.2): the `hidden` attribute and the inline `color` of `#_flag`. Native calls both in a page right after it starts a card's question update there, so a page prepared beneath already shows the right flag and mark when it comes to the front, and again whenever the card's flag or mark changes. They are not queued behind updates (R478). As in Anki, the indicators therefore change before the question's content does. Native draws no second indicator. A template that hides or moves these elements with its own CSS keeps working (C4.4 notes the specificity this needs).
 
 ## C4. Base stylesheet
 
@@ -287,7 +287,7 @@ Dark appearance is the app's appearance (R488). In dark appearance, all of these
 
 No filter, inversion or colour change applies to card content except the two C4.4 rules: `.nightMode .latex` (any element with class `latex` inside the dark body, which in practice means pre-generated LaTeX images, R565) and `.nightMode img.drawing` (R492). Image occlusion mask colours come from the note type's CSS and the IO runtime (U68). The base stylesheet has no night-mode rule for them. Canvas colours are the C4.1 desktop tokens on every platform (R491).
 
-An appearance change while a side is shown switches exactly these classes, the attribute and the web view appearance, without an update (R490, U67). The runtime does nothing else for it.
+An appearance change while a side is shown switches exactly these classes, the attribute and the web view appearance, without an update (R490, U67). Classes being added go to the end of the list: `night-mode` on `<html>`, and `night_mode`, `nightMode`, `macos-dark-mode` in that order on `<body>`. Classes being removed are removed wherever they are. Every other class stays where it is. So after a switch to dark on Mac the body reads `card card1 isMac night_mode nightMode macos-dark-mode`, as in Anki, until the next question sets the C3.1 string again. The runtime does nothing else for it.
 
 ## C6. Side updates
 
@@ -336,14 +336,16 @@ During steps 3 to 8, card code that reads `#qa.style.opacity` sees `0`. A templa
 | answer | if `bodyclass` is a non-empty string, set `<body>`'s `class` to it. Then, without waiting, once every `<img>` in the document has finished loading (C7.3), scroll the element with id `answer` into view, aligned to the top, if there is one. | nothing |
 | `_updateQA` call | the `onupdate` argument | the `onshown` argument |
 
-- R534 on iOS: focusing `#typeans` from the shown callback brings up the software keyboard only if U65 S1(e) found public API for it. If it did not, S1(e) records the fallback and the deviation, and that record replaces this sentence.
+- R534 on iOS: U65's S1(e) (`docs/design/decisions/s1-occluded-page-swap.md`) found that `focus()` from page script after the swap raises the software keyboard with no tap, provided native has made the newly front web view first responder in the swap's turn (U67). The question's internal shown callback is that `focus()`: it runs at presentation (C6.6), after the swap, so no keyboard-specific code is needed in the runtime. S1(e) passed on the simulator; the device check is a U256 checkpoint.
 
 ### C6.5 Script walk
 
 After insertion, every `<script>` element in `#qa` is made to run by replacing it with a new script element that has the same attributes (same names, same values, same order) and the same text (R467, R518, R519).
 
 - Order: by position, in document order, over the scripts in `#qa` at the moment the walk reaches each position. A script that an earlier script adds inside `#qa` after the walk's current position is therefore also replaced, and so runs again if it already ran on insertion (case SS13). A script that an earlier script removes is skipped. When a running script removes a script at or before the walk's current position (itself included), the later scripts move down one position, so the one that moves into the current position is skipped and never runs. Anki has the same quirk, so templates do not rely on it.
-- Attributes are copied unchanged. So the template's `type` decides how a script runs. With no `type`, or a JavaScript type, it is a classic script in sloppy mode. `type="module"` gives a module. Any other type does not run. `data-*`, `onload`, `onerror`, `async`, `defer`, `nomodule` and `crossorigin` are copied too. Meguri never adds `type`, `"use strict"` or any wrapper (R518).
+- **Which elements.** Every element named `script` in `#qa`'s tree, in the HTML namespace or inside inline `<svg>`, but not inside the contents of a `<template>` element. An SVG `<script>` is replaced by an HTML script element like any other, so it runs as a classic script, and only a `src` attribute is a script source (`href` and `xlink:href` are copied but load nothing).
+- **Text.** The new element's text is the old element's text content: the data of its text nodes, concatenated as the DOM holds them, never re-serialized markup. For SVG scripts this is the decoded text: `a &amp;&amp; b` in the source runs as `a && b` (C15 D21).
+- **Attributes.** Copying an attribute never fails: a name the HTML parser accepted is copied as it is, even when a by-name setter such as `setAttribute` would refuse it, for example a name containing `"` or `'` (C15 D22). Attributes are copied unchanged. So the template's `type` decides how a script runs. With no `type`, or a JavaScript type, it is a classic script in sloppy mode. `type="module"` gives a module. Any other type does not run. `data-*`, `onload`, `onerror`, `async`, `defer`, `nomodule` and `crossorigin` are copied too. Meguri never adds `type`, `"use strict"` or any wrapper (R518).
 - A copy made with `cloneNode` keeps the engine's "already started" state and would not run. The new element has to be created fresh.
 - **Waiting:** after replacing a script, the walk goes on at once, except for a script with a `src` attribute that the engine will actually fetch. That means: no `type` or a JavaScript type and no `nomodule`, or `type="module"`. For such a script, the walk waits until the new element fires `load` or `error`, with the cap for remote scripts in C7.4. A `src` script the engine will not fetch never fires either event, so the walk does not wait for it (C15 D9).
 - **Timing between scripts:** an inline classic script runs while it is being inserted. Promise jobs that a script's top-level code queues run before the next script starts. Timers, events and rendering do not happen between two scripts, unless the walk is waiting on a `src` script.
@@ -356,9 +358,13 @@ After insertion, every `<script>` element in `#qa` is made to run by replacing i
 This section exists because Meguri pre-renders the next card in the hidden page (R445, R465; Anki has a single visible page). From a template's point of view, the order of C6.3 does not change. Only the moment of step 9 does.
 
 - **Presented page** (the answer side, a re-render of the side on screen, a preview): step 9 runs right after step 8, as in Anki.
-- **Unpresented page** (a pre-rendered question): after step 8 the update **settles**. It waits until the document's fonts have no load in progress, but at most 800 ms after step 8. Then it waits for two animation frames, one requested from inside the callback of the other, so that the visible content has been painted beneath. Then it reports `settled` with its identity (C14). Then it waits.
-- **Presentation**: when native marks the page presented, the runtime first resumes held media (C8.2). Then it runs the shown phase of the update that is waiting, if there is one, and reports `shown`. If presentation comes before step 8, step 9 runs right after step 8 with no settling.
-- **Superseded**: when another update is queued for this page while an update waits for presentation, the waiting update finishes without its shown phase. Its internal shown callback does not run either, so `getTypedAnswer` and focus keep their previous state. Then the next update starts.
+- **Unpresented page** (a pre-rendered question): after step 8 the update **settles**, in the sense of U65's S1 record (inserted, scripts run, images decoded, fonts ready, then painted beneath). It waits until both hold, but at most 800 ms after step 8:
+  - the document's fonts have no load in progress;
+  - every `<img>` element in `#qa` whose `loading` attribute is not `lazy` has finished loading (it is complete, or it has fired `load` or `error`), and a decode requested for each of them has resolved or rejected.
+
+  Then it waits for two animation frames, one requested from inside the callback of the other, so that the visible content has been painted beneath. Then it reports `settled` with its identity (C14). Then it waits.
+- **Presentation**: when native marks the page presented, the runtime first resumes held media (C8.2). Then it runs the shown phase of the update that is waiting, if there is one, and reports `shown`. If presentation comes before step 8, step 9 runs right after step 8 with no settling. If it comes while the update is settling, the settling stops at once, no `settled` is reported, and step 9 runs.
+- **Superseded**: an update in an unpresented page that has passed step 8 finishes without its shown phase as soon as another update is queued for this page, or at once when one was queued before it passed step 8. If it was still settling, it reports no `settled`. Its internal shown callback does not run either, so `getTypedAnswer` and focus keep their previous state. Then the next update starts.
 - `#qa` has opacity `1` in a settled hidden page, so the swap shows the finished side.
 
 ### C6.7 Failed updates
@@ -477,7 +483,7 @@ The runtime may need to wrap built-in prototype methods for the listener registr
 
 ### C10.3 `getTypedAnswer()`
 
-Returns the current `value` of the element the most recent question's internal shown callback remembered (C6.4), or `null` when it remembered none or no question has been shown in this page yet. The element is not looked up again. On the answer side, after the question's `#typeans` was replaced, it still returns the detached input's value.
+Returns the current `value` of the element the most recent question's internal shown callback remembered (C6.4), or `null` when it remembered none, when no question has been shown in this page yet, or when that element's `value` is `undefined` or `null` (an element with id `typeans` that is not a form control). The element is not looked up again. On the answer side, after the question's `#typeans` was replaced, it still returns the detached input's value.
 
 Native reads the typed answer by calling the page's `getTypedAnswer` by name, before it starts the answer update. A string is the typed text. `null` or anything else counts as empty. A throw counts as empty and is recorded (R536; a template that overrides it supplies its own typed text, as in Anki).
 
@@ -651,9 +657,11 @@ Each difference has its own test (R1889). The test names are suggestions in the 
 | D15 | R473, R487 | no viewport meta, no `-webkit-text-size-adjust` | both present | `BaseCSSTests.viewportAndTextSizeAdjust` |
 | D16 | R473 | page title `main webview` | no `<title>` (`document.title` is empty) | `GlobalsSurfaceTests.documentHasNoTitle` |
 | D17 | R506 | `pycmd("ans")` on the answer side shows the answer again (scripts rerun) | ignored | `GlobalsSurfaceTests.ansOnAnswerIgnored` (native part in U67) |
-| D18 | R445 | no font wait before display | an unpresented page waits up to 800 ms for fonts before it settles | `SideUpdateTests.settleWaitsForFonts` |
+| D18 | R445 | no font or image wait before display beyond the preload budget | an unpresented page waits up to 800 ms for fonts and for the images in `#qa` to load and decode before it settles (C6.6) | `SideUpdateTests.settleWaitsForFonts`, `SideUpdateTests.settleWaitsForImageDecode` |
 | D19 | R476 | body also has `fancy` (unless minimalist mode) | never | `NightModeTests.bodyClassesExact` |
 | D20 | R475 | `<html>` platform classes come from the user agent, `mac chrome` on Mac | set natively, `mac safari` on Mac | `NightModeTests.htmlClassesExact` (U67 sets them) |
+| D21 | R467 | a script's text is copied by re-serializing it, so an SVG `<script>` whose text holds `&`, `<` or `>` reaches the engine with entities (`&amp;`) and fails to compile | the text content is copied, so such a script runs (C6.5) | `ScriptSemanticsTests.svgScriptRunsWithDecodedText` |
+| D22 | R467 | attributes are copied by name, so a name the engine's by-name setter refuses stops the update and shows an error message in place of the side | every parsed attribute is copied and the side runs (C6.5) | `ScriptSemanticsTests.unusualAttributeNameIsCopied` |
 
 Also not reproduced, with no template-visible effect expected: Anki desktop's Backspace guard on `document`, its IME focus workaround (a temporary invisible button on `focusout`) and its drag-and-drop blocker on `document` (`ondragenter`, `ondragover`, `ondrop` set). Navigation on drop is U70's.
 
@@ -677,8 +685,10 @@ Synthetic content only: no Anki templates or CSS (R1959, R1960), and no Migaku c
 | SU10 | unpresented page, side with an `@font-face` (`_f.woff2`, `font-display: block`) used by visible text | `settled` comes after `document.fonts.check("12px F")` is true (or after 800 ms) |
 | SU11 | side with `<img src="_big.png">` only; the server delays it 1 s | insertion happens about 200 ms after the call |
 | SU12 | listener registry: (a) side script adds `keydown` on `document`; (b) side with `<div id=t onclick="">` and a sibling `<p>`; (c) plain side; (d) `document.onkeydown = f`, then `null`; (e) card N adds a `touchstart` listener on `window`, card N+1 in the same page has no script, then the listener is removed | (a) key: yes; (b) tap on `#t`'s child: yes, on the `<p>`: no; (c) no for both sets; (d) yes, then no; (e) yes on N+1, no after removal; Meguri's IME tracking never counts |
+| SU13 | unpresented page; (a) side with `<img src="_slow.png">` that the server answers after 600 ms; (b) side with only `<img loading="lazy" src="_never.png">` 5,000 px below the top, whose request never answers; (c) side with only `<img src="_never.png">`, never answered | (a) when `settled` arrives, the image is `complete` with `naturalWidth` > 0; (b) `settled` comes well under 800 ms after step 8; (c) `settled` comes about 800 ms after step 8 |
+| SU14 | unpresented page, side as SU13 (c) with a shown hook; the page is presented 100 ms after step 8 | no `settled` for that update; the shown hook runs at once and `shown` follows |
 
-### C16.2 ScriptSemanticsTests (S10; R468, R469, R518–R521)
+### C16.2 ScriptSemanticsTests (S9, S10; R468, R469, R503, R518–R521)
 
 | # | Input | Observed |
 |---|---|---|
@@ -697,8 +707,12 @@ Synthetic content only: no Anki templates or CSS (R1959, R1960), and no Migaku c
 | SS13 | script 1 appends `<script>window.__d=(window.__d\|\|0)+1</script>` (created with `createElement`, so it runs on insertion) to the end of `#qa` | `__d === 2` after the walk |
 | SS14 | `<script type="module">log(document.currentScript)</script>` | `null` is logged (a module ran) |
 | SS15 | `<script src="{other origin}/slow.js"></script><script>log("x")</script>`, where the other origin is not the media origin and the test makes it never answer (for example a second test scheme handler that holds the request) | `x` logged at most about 800 ms after the walk started |
+| SS16 | `<svg><script>window.__s = 1 &amp;&amp; 2; log("svg")</script></svg>` | `svg` logged; `__s === 2` |
+| SS17 | `<script a"b="v">log(document.currentScript.getAttribute('a"b'))</script><script>log("next")</script>` | `v, next`; no `updateFailed` |
+| SS18 | `<template><script>window.__t = 1</script></template><script>log(typeof window.__t)</script>` | `undefined` |
+| SS19 | S9, a persistence round trip in the style of the community persistence scripts, written for the test: the question logs `typeof sessionStorage`, `typeof py` and `typeof qt`, then stores `k` = `v` in `sessionStorage`; the answer logs `sessionStorage.getItem("k")`; then a second page (as for the next card) logs the same item on its first question | `object`, `undefined`, `undefined`; `v`; `null` (R503) |
 
-### C16.3 GlobalsSurfaceTests (R505–R517, R563, R2038)
+### C16.3 GlobalsSurfaceTests (S15; R505–R517, R563, R2038)
 
 | # | Check | Expected |
 |---|---|---|
@@ -716,6 +730,7 @@ Synthetic content only: no Anki templates or CSS (R1959, R1960), and no Migaku c
 | GS12 | `anki.mutateNextCardStates("k", t)` with a spy `t` | resolves `undefined`; `t` never called |
 | GS13 | AE18, page part: a front whose script, only when `typeof pycmd !== "undefined"`, hides `#qa` and calls `pycmd("ans")` | Mac: an `ans` `command` signal; iPhone: no exception, `#qa` shown with the question |
 | GS14 | `document.title` | empty string |
+| GS15 | S15, the page side of AnkiMobile's bridge: on iPhone, with the `cb` handler registered as U67's configuration does, `typeof webkit.messageHandlers.cb.postMessage`, then `postMessage(JSON.stringify({scheme: "ankitap", msg: "midCenter"}))`; on Mac, `typeof webkit`; on both, `typeof AnkiDroidJS` | `"function"`, and the call returns without throwing (what native does with it is U67's test); `"undefined"`; `"undefined"` |
 
 ### C16.4 BaseCSSTests (R479–R487)
 
@@ -766,6 +781,7 @@ Each case dispatches synthetic events on an element of the question side. The qu
 | TI9 | the same Enter on the answer side | no reveal |
 | TI10 | question with `<input id=typeans>`, unpresented then presented | `document.activeElement` is not `#typeans` before presentation and is after |
 | TI11 | type `abc` in `#typeans`; `getTypedAnswer()`; then show the answer | `"abc"`, and still `"abc"` after the answer replaced the input; `null` on a page whose questions never had `#typeans` |
+| TI12 | question with `<div id=typeans>x</div>`, presented | `getTypedAnswer()` is `null` |
 
 ### C16.7 AE15 (R467, R468, R521, R522)
 
@@ -809,6 +825,7 @@ Defaults this spec takes until the owner decides otherwise:
 
 1. **`pycmd` callback value.** R507 and the U66 test list say the callback gets `undefined`. Anki desktop's bridge delivers `null`, the JSON null of the reviewer's empty reply, and C10.5 follows Anki. If Antoine prefers `undefined`, only C10.5 and case GS5 change.
 2. **Root font size.** R486 keeps 16 px "so rem-sized templates render as in Anki", but Anki desktop's reviewer sets the root to 15 px (C15 D2). This spec follows R486's explicit 16 px. If Antoine wants desktop parity, C4.3 adds `html { font-size: var(--font-size) }` and D2 goes away.
-3. **No `window.webkit` in the Mac page world** (C9.3). U67 plans one message handler per world. Under this spec, Meguri's handler is registered only in isolated worlds, plus `cb` in the iOS page world, and page-world traffic goes through the isolated world (C14).
+3. **No `window.webkit` in the Mac page world** (C9.3). U67 plans one message handler per world. Under this spec, Meguri's handler is registered only in isolated worlds, plus `cb` in the iOS page world, and page-world traffic goes through the isolated world (C14). U65's S1 record agrees: its confirmation handler is added for Meguri's isolated world only, and the page world cannot reach it.
 4. **Things a hidden page still does** (C8.2, C15 D7): Web Audio, speech synthesis, timers and dialogs (`alert`, `confirm`, `prompt`, U70) started by a pre-rendered question happen before the card is shown. A dialog requested by an unpresented page must not block its settling, or the prepare would never settle. U70 decides how such dialogs are deferred or refused. U175 may decide not to pre-render such cards.
-5. **R534 keyboard on iOS** depends on U65 S1(e) (C6.4).
+5. **R534 keyboard on iOS.** Settled on the simulator by U65's S1(e) (C6.4); the device check is a U256 checkpoint. If the device check fails, the fallback S1(e) names (keyboard on first tap) and its deviation replace the C6.4 sentence.
+6. **U65 records not yet integrated.** C2.1, C6.4 and C6.6 cite U65's S1 and S2 records in `docs/design/decisions/`, which are on `unit/U65` while its review is open (`docs/process/review-log/U65.md`). The open findings there concern the Mac frame gate, iOS audio seeking and WebContent memory, not the origin form, the settled definition or S1(e). If U65's integration changes any of these three, this spec follows.
