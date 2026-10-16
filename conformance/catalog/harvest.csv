@@ -752,7 +752,7 @@ hf44d25b35e71,python,tag,sched,unclassified,,,open
 hf76a58bb5a76,python,tag,sched,unclassified,,,open
 h00a233a3c403,rust,tag,sched,unclassified,,,open
 h010d3289404d,rust,tag,sched,unclassified,,,open
-h0348591aa08e,rust,tag,sched,unclassified,,,open
+h0348591aa08e,rust,tag,sched,in-scope,A new collection is on day 0 with its next boundary in the future.,sched/day/creation-after-rollover-tokyo,done
 h04ac07a21de7,rust,tag,sched,unclassified,,,open
 h05a411d3dbbc,rust,tag,sched,unclassified,,,open
 h0875e3e791c6,rust,tag,sched,unclassified,,,open
@@ -786,14 +786,14 @@ h3f11a775e29c,rust,tag,sched,unclassified,,,open
 h4037ce91c431,rust,tag,sched,unclassified,,,open
 h40a4438f58cc,rust,tag,sched,unclassified,,,open
 h40e3819d7877,rust,tag,sched,unclassified,,,open
-h419067ffeea3,rust,tag,sched,unclassified,,,open
+h419067ffeea3,rust,tag,sched,in-scope,Day count from the creation date and offset and the current offset and rollover hour.,sched/day/matrix/europe-paris sched/day/dst-america-new-york sched/day/created-tokyo-studied-los-angeles,done
 h431af1c97841,rust,tag,sched,unclassified,,,open
 h4705ef5c9c23,rust,tag,sched,unclassified,,,open
 h4833ddf59228,rust,tag,sched,unclassified,,,open
 h49565ba9b7dc,rust,tag,sched,unclassified,,,open
 h4ad2bd959137,rust,tag,sched,unclassified,,,open
 h4d0c7354dfcd,rust,tag,sched,unclassified,,,open
-h4dcd915bda8e,rust,tag,sched,unclassified,,,open
+h4dcd915bda8e,rust,tag,sched,in-scope,Next day boundary before and after the rollover hour.,sched/day/matrix/utc sched/day/ae84-kathmandu,done
 h4eb04b88ea52,rust,tag,sched,unclassified,,,open
 h53acbb05c3fb,rust,tag,sched,unclassified,,,open
 h53ef76bc5048,rust,tag,sched,unclassified,,,open
@@ -834,13 +834,13 @@ h9a5ca7ceecd6,rust,tag,sched,unclassified,,,open
 h9f3550e3fa5f,rust,tag,sched,unclassified,,,open
 ha2425ed999f7,rust,tag,sched,unclassified,,,open
 ha258d562e101,rust,tag,sched,unclassified,,,open
-ha338afcecf02,rust,tag,sched,unclassified,,,open
+ha338afcecf02,rust,tag,sched,in-scope,Buried cards return to their queues at the first day query of a later day.,sched/unbury-on-rollover/both-kinds sched/unbury-on-rollover/last-unburied-window,done
 ha8aa8d31b248,rust,tag,sched,unclassified,,,open
 hab96efc6f164,rust,tag,sched,unclassified,,,open
 habaf407e202f,rust,tag,sched,unclassified,,,open
 habc95d948b8b,rust,tag,sched,unclassified,,,open
 had8092d884ac,rust,tag,sched,unclassified,,,open
-hb4123149e0de,rust,tag,sched,unclassified,,,open
+hb4123149e0de,rust,tag,sched,in-scope,Legacy day count of collections without a creation offset; the v1 count it also checks is out of scope because v1 collections are refused.,sched/day/legacy-timing,done
 hb46e7a2d004c,rust,tag,sched,unclassified,,,open
 hb643b497ade7,rust,tag,sched,unclassified,,,open
 hb7be1ced7f3a,rust,tag,sched,unclassified,,,open
@@ -856,13 +856,13 @@ hccc87afa9021,rust,tag,sched,unclassified,,,open
 hceea58e626d5,rust,tag,sched,unclassified,,,open
 hcf4081192234,rust,tag,sched,unclassified,,,open
 hd5745d5de78c,rust,tag,sched,unclassified,,,open
-hd79744504c35,rust,tag,sched,unclassified,,,open
+hd79744504c35,rust,tag,sched,in-scope,Offsets stored as minutes west of UTC in the timing config keys.,sched/day/creation-after-rollover-tokyo sched/day/config-values,done
 hda7aa551feeb,rust,tag,sched,unclassified,,,open
 hda9e7531d7db,rust,tag,sched,unclassified,,,open
 hdb3d8a73ac7b,rust,tag,sched,unclassified,,,open
 hdbe181187e8a,rust,tag,sched,unclassified,,,open
 hdd2d2f703388,rust,tag,sched,unclassified,,,open
-hdeb239c0cf40,rust,tag,sched,unclassified,,,open
+hdeb239c0cf40,rust,tag,sched,in-scope,A new collection starts its day 0 at the 04:00 boundary at or before its creation.,sched/day/creation-before-rollover sched/day/creation-at-rollover-utc sched/day/creation-after-rollover-tokyo,done
 hdf5b05a2842f,rust,tag,sched,unclassified,,,open
 he2dcd7bd5b1c,rust,tag,sched,unclassified,,,open
 he31eded34d00,rust,tag,sched,unclassified,,,open

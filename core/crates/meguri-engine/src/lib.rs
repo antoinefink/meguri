@@ -5,9 +5,10 @@
 //! ordered change stream and in-core observers (C2), the collection
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
 //! registry, the ports, cancellation and progress; U25 adds undo and redo
-//! (C3); U30 the tags, flags and marked notes (`specs/tags/`). Specs:
-//! `specs/engine/op-model.md`, `change-stream.md`, `lifecycle.md`,
-//! `jobs.md`, `undo.md`.
+//! (C3), U30 the tags, flags and marked notes (`specs/tags/`), and U40 the
+//! day clock (C6, `sched`). Specs: `specs/engine/op-model.md`,
+//! `change-stream.md`, `lifecycle.md`, `jobs.md`, `undo.md`,
+//! `specs/sched/day-clock.md`.
 
 pub mod cancel;
 pub mod changes;
@@ -22,6 +23,7 @@ pub mod monotonic;
 pub mod ports;
 pub mod progress;
 pub mod readers;
+pub mod sched;
 pub mod tags;
 pub mod threads;
 pub mod undo;
@@ -46,6 +48,7 @@ pub use meguri_model::changes::{ChangeKind, ChangeSet, OpSource};
 pub use ports::{ChangeObserver, GenerationListener, OpenStep, PortKind, Ports, SuspendParticipant};
 pub use progress::{Progress, ProgressListener, ProgressPhase, ProgressSink};
 pub use readers::{ReaderLease, Snapshot};
+pub use sched::{DayCache, DayClock, DayQuery, DayReport, day_query};
 pub use threads::{Qos, RegisteredThread, ThreadInfo, ThreadRegistry};
 pub use undo::entry::{EntryId, RestorerState, SessionId, StepInfo, StepKind};
 pub use undo::holdback::{HeldBackRun, HeldRow, SyncHold, SyncMerge};

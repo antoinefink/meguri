@@ -1,0 +1,173 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-10T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894330800,
+          "now": 1894266000,
+          "utc_offset_secs": 3600
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 4294967294,
+          "next_day_at": 1894590000,
+          "now": 1894586400,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894762800,
+          "now": 1894680000,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894762800,
+          "now": 1894762799,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894762800,
+          "now": 1894762800,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894849200,
+          "now": 1894762801,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 3,
+          "next_day_at": 1895108400,
+          "now": 1895108399,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 4,
+          "next_day_at": 1895108400,
+          "now": 1895108400,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 4,
+          "next_day_at": 1895194800,
+          "now": 1895108401,
+          "utc_offset_secs": 3600
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["lastUnburied", -1, 1895108400, "4"],
+            ["localOffset", -1, 1894266000, "-60"],
+            ["rollover", -1, 1894266000, "4"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 5,
+          "next_day_at": 1895310000,
+          "now": 1895309999,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1895310000,
+          "now": 1895310000,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1895396400,
+          "now": 1895310001,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 8,
+          "next_day_at": 1895526000,
+          "now": 1895525999,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 9,
+          "next_day_at": 1895526000,
+          "now": 1895526000,
+          "utc_offset_secs": 3600
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["lastUnburied", -1, 1895526000, "9"],
+            ["localOffset", -1, 1894266000, "-60"],
+            ["rollover", -1, 1895310001, "0"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "42673b66d36a95ebe3e7e6b7a586aa876d2478a1710b602d8bdaad7b4db37e8f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/day/legacy-timing",
+  "scenario_sha256": "1aad788e8fd8b97b3e9dd79e3723b36dc9311787be4049ef01b3081611999f8d",
+  "tz": "Europe/Paris"
+}

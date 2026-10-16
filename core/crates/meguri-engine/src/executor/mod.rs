@@ -27,6 +27,7 @@ use crate::changes::stream::{ChangeStream, Seq};
 use crate::error::EngineError;
 use crate::lifecycle::Generation;
 use crate::ports::ChangeObserver;
+use crate::sched::day_clock::DayClock;
 use crate::undo::UndoManager;
 use exclusive::{Admission, Decision, Privilege};
 use op::{OpContext, OpResult, OpSpec, Pending, WriteDelay};
@@ -57,6 +58,8 @@ pub(crate) struct ExecShared {
     /// The undo history (`engine/undo`), changed on the writer after each
     /// commit.
     pub(crate) undo: UndoManager,
+    /// The collection's day clock (`sched/day-clock` D8).
+    pub(crate) day_clock: Arc<DayClock>,
 }
 
 struct QueueState {
@@ -98,6 +101,7 @@ impl ExecShared {
             commit: Mutex::new(last_seq),
             delay: Mutex::new(None),
             generation_cell,
+            day_clock: Arc::new(DayClock::new(Arc::clone(&clock), stream.clone())),
             stream,
             observers,
             clock,

@@ -79,10 +79,7 @@ fn every_op_source_declares_its_undo_effect() {
                 OpSource::Optimizer,
                 SourceEffect::ClearAll(DisabledReason::ClearedByNonUndoableOp)
             ),
-            (
-                OpSource::Rollover,
-                SourceEffect::ClearAll(DisabledReason::ClearedByRollover)
-            ),
+            (OpSource::Rollover, SourceEffect::Kept),
             (
                 OpSource::Maintenance,
                 SourceEffect::ClearAll(DisabledReason::ClearedByNonUndoableOp)

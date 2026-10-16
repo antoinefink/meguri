@@ -38,6 +38,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "open",
             "remove_note_tags",
             "rename_tag",
+            "reopen",
             "reparent_tags",
             "set_clock",
             "set_config",
@@ -56,7 +57,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "search",
             "tag_tree",
             "template",
-            "text"
+            "text",
+            "timing"
         ])
     );
     // dsl.md D7.2: 37 ops besides observe, the actor ops of sync-ops.md, the
