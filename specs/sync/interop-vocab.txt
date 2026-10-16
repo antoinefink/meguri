@@ -1,0 +1,26 @@
+# Interface names the sync specs use that are not ordinary words: the
+# protocol's HTTP header names and content type, the URL path prefixes and
+# method names of sync protocol v11, the client-version member of the status
+# check, the job result's redirected endpoint, and the AnkiWeb name of the
+# build switch and default endpoint. Short ordinary words (meta, start,
+# chunk, finish, abort, upload, download, begin, key, sync) stay unmasked.
+# Headers and content type
+anki-sync
+anki-original-size
+octet-stream
+# Path prefix and methods
+msync
+hostKey
+applyGraves
+applyChanges
+applyChunk
+sanityCheck2
+mediaChanges
+uploadChanges
+downloadFiles
+mediaSanity
+# Body members
+cv
+newEndpoint
+# Build switch and default endpoint
+ankiweb
