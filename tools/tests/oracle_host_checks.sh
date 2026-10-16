@@ -170,8 +170,9 @@ EOF
 
 # tools/mg oracle check (specs/conformance/collection-check.md) on a copy of a
 # committed fixture: a clean report with the zone and clock from the manifest,
-# a planted problem (fail), and the K7 errors. Nested tools/mg runs of this
-# checkout; the outer run rewrites build/mg/oracle/latest when it ends.
+# the same with --schedule (K11), a planted problem (fail), and the K7 errors.
+# Nested tools/mg runs of this checkout; the outer run rewrites
+# build/mg/oracle/latest when it ends.
 CHECK_DIR="$WORK/check"
 
 check_run() { # <out var> <args...>: the result.json path of one run
@@ -206,6 +207,10 @@ t_check_job_reports_problems_and_errors() {
     expect "artifact equals details.check" \
       "$(jq -S . "$(dirname "$r")/check.json" | mg_oracle__sha256)" "$(jq -S .details.check "$r" | mg_oracle__sha256)" || return 1
   cp "$(dirname "$r")/check.json" "$CHECK_DIR/clean-report.json"
+  check_run r "$col" --schedule || return 1
+  expect "schedule status" "$(jq -r .status "$r")" pass &&
+    expect "schedule cards" "$(jq -r '.details.check.schedule.cards == .details.check.counts.cards' "$r")" true || return 1
+  cp "$(dirname "$r")/check.json" "$CHECK_DIR/schedule-report.json"
   check_run r "$bad" || return 1
   # The repaired row also changes the revlog table.
   expect "planted problem" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["fail",["revlog_properties","changed_revlog"]]' || return 1
@@ -222,13 +227,14 @@ t_check_job_reports_problems_and_errors() {
     expect "nothing added beside it" "$(ls "$col" | tr '\n' ' ')" "collection.anki2 manifest.json "
 }
 
-# The check's worker transcript against protocol.json and the report of the
-# previous check against collection-check.schema.json, with jsonschema in the
-# dev image.
+# The check's worker transcript against protocol.json and the reports of the
+# previous test's checks (without and with --schedule) against
+# collection-check.schema.json, with jsonschema in the dev image.
 t_check_transcript_and_report_match_the_schemas() {
   local req="$WORK/check-requests.jsonl" resp="$WORK/check-responses.jsonl" report="$CHECK_DIR/clean-report.json"
-  [ -s "$report" ] || {
-    echo "no report from t_check_job_reports_problems_and_errors"
+  local schedule_report="$CHECK_DIR/schedule-report.json"
+  [ -s "$report" ] && [ -s "$schedule_report" ] || {
+    echo "no reports from t_check_job_reports_problems_and_errors"
     return 1
   }
   cat >"$req" <<'EOF'
@@ -236,18 +242,22 @@ t_check_transcript_and_report_match_the_schemas() {
 {"cmd":"check","id":1,"dir":"/in/collection","now":1894701600,"decks":["Lang","Nope"],"render_notes":[1788249600238,1]}
 {"cmd":"check","id":2,"dir":"/in/nothing","now":1894701600}
 {"cmd":"check","id":3,"dir":"/in/collection"}
+{"cmd":"check","id":4,"dir":"/in/collection","now":1894701600,"schedule":true}
 EOF
   mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" -e TZ=Asia/Kathmandu -v "$CHECK_DIR/col:/in/collection:ro" oracle <"$req" >"$resp" || return 1
-  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 4 &&
-    expect "error kinds" "$(jq -sc '[.[] | .error.kind // "ok"]' "$resp")" '["ok","ok","no_collection","protocol_error"]' &&
+  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 5 &&
+    expect "error kinds" "$(jq -sc '[.[] | .error.kind // "ok"]' "$resp")" '["ok","ok","no_collection","protocol_error","ok"]' &&
     expect "rendered cards" "$(jq -sc '.[1].check.render | [keys, (.["1788249600238"] | length > 0), .["1"]]' "$resp")" \
-      '[["1","1788249600238"],true,null]' || return 1
+      '[["1","1788249600238"],true,null]' &&
+    expect "schedule only when asked" "$(jq -sc '[(.[1].check | has("schedule")), (.[4].check | has("schedule"))]' "$resp")" \
+      '[false,true]' || return 1
   local rel_req="${req#"$REPO"/}" rel_resp="${resp#"$REPO"/}" rel_report="${report#"$REPO"/}"
+  local rel_schedule="${schedule_report#"$REPO"/}"
   mg_compose build dev >"$WORK/dev-build.log" 2>&1 || {
     tail -20 "$WORK/dev-build.log"
     return 1
   }
-  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel_req" "$rel_resp" "$rel_report" <<'EOF'
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel_req" "$rel_resp" "$rel_report" "$rel_schedule" <<'EOF'
 import json, sys
 from jsonschema import Draft202012Validator
 protocol = json.load(open("conformance/schema/protocol.json"))
@@ -266,12 +276,17 @@ for name, v, path in (("request", validator("request"), sys.argv[1]), ("response
         for err in v.iter_errors(msg):
             print(f"{name} {n}: {err.json_path}: {err.message}"); bad += 1
 report = Draft202012Validator(report_schema)
-for err in report.iter_errors(json.load(open(sys.argv[3]))):
-    print(f"report: {err.json_path}: {err.message}"); bad += 1
-check = json.loads(open(sys.argv[2]).readlines()[1])["check"]
-full = {"report_version": 1, "oracle": {"anki_version": "26.9.3", "lock_sha256": "0" * 64, "driver_sha256": "0" * 64}, "dir": "x", **check}
-for err in report.iter_errors(full):
-    print(f"worker check as a report: {err.json_path}: {err.message}"); bad += 1
+for path in sys.argv[3:5]:
+    for err in report.iter_errors(json.load(open(path))):
+        print(f"report {path}: {err.json_path}: {err.message}"); bad += 1
+if "schedule" not in json.load(open(sys.argv[4])):
+    print("the --schedule report has no schedule"); bad += 1
+lines = open(sys.argv[2]).readlines()
+for n in (1, 4):
+    check = json.loads(lines[n])["check"]
+    full = {"report_version": 1, "oracle": {"anki_version": "26.9.3", "lock_sha256": "0" * 64, "driver_sha256": "0" * 64}, "dir": "x", **check}
+    for err in report.iter_errors(full):
+        print(f"worker check {n + 1} as a report: {err.json_path}: {err.message}"); bad += 1
 sys.exit(1 if bad else 0)
 EOF
 }
