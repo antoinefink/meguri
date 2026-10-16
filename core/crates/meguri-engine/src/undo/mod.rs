@@ -9,6 +9,7 @@
 
 pub mod entry;
 pub mod holdback;
+pub mod names;
 pub mod reasons;
 pub mod restorers;
 pub(crate) mod stack;
@@ -16,7 +17,7 @@ pub(crate) mod stack;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meguri_model::changes::{ChangeSet, OpSource};
-use meguri_storage::{Journal, StampMode};
+use meguri_storage::{Journal, ReadRows, StampMode};
 
 use crate::changes::stream::Seq;
 use crate::collection::Collection;
@@ -108,11 +109,15 @@ pub(crate) struct UndoNotes {
     pub merge: Option<SyncMerge>,
     /// The step an undo or redo op restored.
     pub restored: Option<EntryId>,
+    /// `col.mod` when that undo or redo ran (A7).
+    pub col_mod: Option<i64>,
 }
 
 /// A committed op, as the undo manager sees it.
 pub(crate) struct CommitInfo<'a> {
     pub seq: Seq,
+    /// The epoch second at which the op began (A3).
+    pub began: i64,
     pub name: &'static str,
     pub source: OpSource,
     pub spec: &'a UndoSpec,
@@ -180,16 +185,25 @@ impl UndoManager {
                     step: entry.info.clone(),
                     state: entry.state.clone(),
                 };
-                entry.inverse(commit.seq.into(), journal, commit.changes)
+                entry.inverse(
+                    commit.seq.into(),
+                    journal,
+                    commit.changes,
+                    commit.notes.col_mod,
+                    commit.began,
+                )
             });
             return applied;
         }
         if commit.spec.skip {
+            // Keeps the steps; every op but undo and redo empties redo (A2).
+            stack.clear_redo();
             return Applied::Nothing;
         }
         match source_effect(commit.source) {
             SourceEffect::Recorded => {
                 let Some(journal) = commit.journal.filter(|_| changed) else {
+                    stack.clear_redo();
                     return Applied::Nothing;
                 };
                 let (name, kind) = commit.spec.step.unwrap_or((commit.name, StepKind::Other));
@@ -200,13 +214,14 @@ impl UndoManager {
                     session: commit.spec.session,
                     long_write: commit.declared,
                 };
-                stack.record(Entry::recorded(
-                    info.clone(),
+                let holder = stack.record(Entry::recorded(
+                    info,
                     journal,
                     commit.changes,
                     commit.notes.state,
+                    commit.began,
                 ));
-                Applied::Recorded(info)
+                Applied::Recorded(holder)
             }
             SourceEffect::ClearAll(reason) => {
                 if changed {
@@ -301,8 +316,10 @@ impl<'c> OpContext<'_, 'c> {
                 reason: DisabledReason::ChangedExternally,
             });
         }
-        entry.restore(self.scope)?;
+        let col_mod = self.scope.col()?.modified.0;
+        entry.restore(self.scope, action.direction())?;
         self.undo_notes.restored = Some(entry.info.id);
+        self.undo_notes.col_mod = Some(col_mod);
         Ok(entry.info)
     }
 }

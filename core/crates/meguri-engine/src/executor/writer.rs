@@ -277,6 +277,9 @@ fn run_op<T>(
         progress.set_phase(ProgressPhase::Committing);
     }
     let shared = env.shared;
+    // The second the op began: what merges note edits into one step
+    // (engine/undo A3).
+    let began = shared.clock.now_ms().div_euclid(1000);
     let delay = meta
         .declared
         .map(|declared| DelayGuard::start(shared, meta.name, declared));
@@ -343,6 +346,7 @@ fn run_op<T>(
     // The history changes before anyone sees the commit (engine/undo M2).
     let applied = shared.undo.after_commit(CommitInfo {
         seq,
+        began,
         name: meta.name,
         source: spec.source,
         spec: &spec.undo,

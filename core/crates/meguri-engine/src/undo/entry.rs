@@ -15,9 +15,15 @@ use meguri_storage::{Cell, ReadRows, RowImage, RowKey, Table, WriteScope};
 
 use crate::changes::stream::Seq;
 use crate::error::EngineError;
+use crate::undo::names;
+use crate::undo::restorers::Direction;
 
 /// `col.mod`, by column index.
 const COL_MOD: usize = 2;
+/// `graves.usn`, by column index.
+const GRAVE_USN: usize = 2;
+/// How long after its first op began a step takes in note edits (A3).
+const MERGE_SECS: i64 = 60;
 
 /// A step's id: the seq of the op that made it (M1), so "made after a
 /// sync's snapshot" is a comparison of seqs.
@@ -88,9 +94,14 @@ pub(crate) struct Entry {
     pub journal: Arc<Journal>,
     /// The notes the step changed, and the notes of the cards it changed.
     pub touched_notes: Arc<BTreeSet<i64>>,
-    /// `col.mod` to restore when this step is undone, and the value the
-    /// step set (M4.4, M4.5).
-    pub col_mod: Option<(i64, i64)>,
+    /// `col.mod` to restore when this step is undone or redone (M4.4, A7):
+    /// its value just before the step's first op ran, or, for a step an
+    /// undo or a redo made, when that undo or redo ran. `None` when the op
+    /// did not write `col`.
+    pub col_mod: Option<i64>,
+    /// The epoch second at which the step's first op began, or the redo
+    /// that put it back (A3).
+    pub began: i64,
     pub upload: UploadState,
     pub state: Option<RestorerState>,
 }
@@ -106,27 +117,38 @@ impl fmt::Debug for Entry {
 }
 
 impl Entry {
-    /// A step made by a committed op from its journal and change set.
+    /// A step made by a committed op that began at epoch second `began`,
+    /// from its journal and change set.
     pub(crate) fn recorded(
         info: StepInfo,
         journal: Arc<Journal>,
         changes: &ChangeSet,
         state: Option<RestorerState>,
+        began: i64,
     ) -> Entry {
-        let col_mod = col_mod_change(&journal);
+        let col_mod = col_mod_before(&journal);
         Entry {
             info,
             touched_notes: Arc::new(touched_notes(changes)),
             journal,
             col_mod,
+            began,
             upload: UploadState::Local,
             state,
         }
     }
 
-    /// The step an undo or redo of `self` leaves: the restoring op's journal
-    /// under `self`'s name, with `col.mod` swapped (M4.5, M5).
-    pub(crate) fn inverse(&self, id: EntryId, journal: Arc<Journal>, changes: &ChangeSet) -> Entry {
+    /// The step an undo or redo of `self` leaves (M4.5, M5): the restoring
+    /// op's journal under `self`'s name, made at epoch second `began`, with
+    /// `col_mod` the value `col.mod` held when the restoring op ran (A7).
+    pub(crate) fn inverse(
+        &self,
+        id: EntryId,
+        journal: Arc<Journal>,
+        changes: &ChangeSet,
+        col_mod: Option<i64>,
+        began: i64,
+    ) -> Entry {
         Entry {
             info: StepInfo {
                 id,
@@ -134,9 +156,41 @@ impl Entry {
             },
             touched_notes: Arc::new(touched_notes(changes)),
             journal,
-            col_mod: self.col_mod.map(|(restore, set)| (set, restore)),
+            col_mod: self.col_mod.and(col_mod),
+            began,
             upload: UploadState::Local,
             state: self.state.clone(),
+        }
+    }
+
+    /// A3: takes `later`, a step just made, into this one when both are
+    /// "Update Note" steps of the same session that changed one and the
+    /// same note row and nothing else but `col`, this one is still local
+    /// (never uploaded or pending, M9), and `later` began less than 60
+    /// seconds after this step's first op (a clock moved back counts as 0).
+    /// This step keeps its before-images, id, `col.mod` and time and takes
+    /// `later`'s after-images, so its undo puts back the note as before its
+    /// first edit and M4.2's check accepts it. Returns whether it merged.
+    pub(crate) fn absorb(&mut self, later: &Entry) -> bool {
+        let mergeable = self.upload == UploadState::Local
+            && self.info.name == names::UPDATE_NOTE
+            && later.info.name == names::UPDATE_NOTE
+            && self.info.session == later.info.session
+            && (later.began - self.began).max(0) < MERGE_SECS
+            && single_note(&self.journal).is_some()
+            && single_note(&self.journal) == single_note(&later.journal);
+        if !mergeable {
+            return false;
+        }
+        match self.journal.then(&later.journal) {
+            Ok(journal) => {
+                self.journal = Arc::new(journal);
+                true
+            }
+            Err(error) => {
+                tracing::warn!(%error, step = %self.info.id, "note edits not merged");
+                false
+            }
         }
     }
 
@@ -193,8 +247,8 @@ impl Entry {
     }
 
     /// M4.3, M4.4: writes every before-image back, in a `CallerSupplied`
-    /// scope.
-    pub(crate) fn restore(&self, scope: &mut WriteScope<'_>) -> Result<(), EngineError> {
+    /// scope. A redo writes the graves its undo removed back pending (A5).
+    pub(crate) fn restore(&self, scope: &mut WriteScope<'_>, direction: Direction) -> Result<(), EngineError> {
         let rows: Vec<&JournalEntry> = self
             .journal
             .entries()
@@ -208,7 +262,10 @@ impl Entry {
             }
         }
         for entry in &rows {
-            if let Some(before) = self.before(entry)? {
+            if let Some(mut before) = self.before(entry)? {
+                if direction == Direction::Redo && entry.table() == Table::Graves && !entry.exists_after() {
+                    before[GRAVE_USN] = Cell::Integer(-1);
+                }
                 scope.restore(entry.table(), entry.key(), Some(&before))?;
             }
         }
@@ -243,7 +300,7 @@ impl Entry {
                 }
             }
         }
-        if let Some((restore, _)) = self.col_mod {
+        if let Some(restore) = self.col_mod {
             image[COL_MOD] = Cell::Integer(restore);
         }
         if image != current {
@@ -268,14 +325,19 @@ fn touched_notes(changes: &ChangeSet) -> BTreeSet<i64> {
         .collect()
 }
 
-/// `col.mod` before and after the op, from its journal.
-fn col_mod_change(journal: &Journal) -> Option<(i64, i64)> {
+/// `col.mod` before the op, from its journal, when the op wrote `col`.
+fn col_mod_before(journal: &Journal) -> Option<i64> {
     let entry = journal.entries().find(|entry| entry.table() == Table::Col)?;
-    let before = journal.before(entry).ok().flatten()?;
-    let After::Row(after) = entry.after() else {
-        return None;
-    };
-    Some((before.get(COL_MOD)?.as_i64()?, after.get(COL_MOD)?.as_i64()?))
+    journal.before(entry).ok().flatten()?.get(COL_MOD)?.as_i64()
+}
+
+/// The key of the one note row a journal changed (there before and after),
+/// when it changed nothing else but `col` (A3).
+fn single_note(journal: &Journal) -> Option<&RowKey> {
+    let mut rows = journal.entries().filter(|entry| entry.table() != Table::Col);
+    let note = rows.next()?;
+    (rows.next().is_none() && note.table() == Table::Notes && note.existed_before() && note.exists_after())
+        .then(|| note.key())
 }
 
 fn changed_columns(before: &[Cell], after: &[Cell]) -> Vec<usize> {

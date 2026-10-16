@@ -15,6 +15,7 @@ use meguri_engine::{
     UndoStatus,
 };
 use meguri_model::changes::OpSource;
+use meguri_model::clock::Clock;
 use meguri_model::ids::{CardId, DeckId, NoteId};
 use meguri_model::rng::{RandomSource, SeededRandom};
 use meguri_storage::raw::SqlValue;
@@ -450,6 +451,11 @@ struct MStep {
     keys: BTreeSet<(Table, RowKey)>,
     notes: BTreeSet<i64>,
     upload: Upload,
+    /// The epoch second its first op (or the redo that put it back) began.
+    began: i64,
+    /// The note, when the step changed that one note row and nothing else
+    /// but `col` (A3).
+    note_only: Option<i64>,
 }
 
 impl MStep {
@@ -467,6 +473,8 @@ struct Model {
     redo: Vec<MStep>,
     floor: DisabledReason,
     sync: Option<(u64, BTreeSet<u64>)>,
+    /// How many steps the top step took in (A3).
+    merges: usize,
 }
 
 impl Model {
@@ -476,15 +484,33 @@ impl Model {
             redo: Vec::new(),
             floor: DisabledReason::None,
             sync: None,
+            merges: 0,
         }
     }
 
-    fn record(&mut self, step: MStep) {
+    /// A new step on top, unless the top step takes it in (A3).
+    fn push(&mut self, step: MStep) {
+        if let Some(top) = self.undo.last()
+            && top.upload == Upload::Local
+            && top.name == UPDATE_NOTE
+            && step.name == UPDATE_NOTE
+            && top.session == step.session
+            && (step.began - top.began).max(0) < 60
+            && top.note_only.is_some()
+            && top.note_only == step.note_only
+        {
+            self.merges += 1;
+            return;
+        }
         self.undo.push(step);
         if self.undo.len() > 30 {
             self.undo.remove(0);
             self.floor = DisabledReason::None;
         }
+    }
+
+    fn record(&mut self, step: MStep) {
+        self.push(step);
         self.redo.clear();
     }
 
@@ -658,7 +684,16 @@ impl Walk {
         }
     }
 
+    /// The clock's epoch second.
+    fn now(&self) -> i64 {
+        self.h.clock.now_ms().div_euclid(1000)
+    }
+
     fn step(&mut self) {
+        // Some actions follow within the 60 s of a note-edit merge (A3),
+        // some after it.
+        let wait = [0, 5_000, 30_000, 61_000][self.pick(4)];
+        self.h.clock.step_ms(wait);
         let (nid, cid) = self.cards[self.pick(CARDS)];
         let roll = self.pick(100);
         match roll {
@@ -678,6 +713,8 @@ impl Walk {
                     ]),
                     notes: BTreeSet::from([nid.0]),
                     upload: Upload::Local,
+                    began: self.now(),
+                    note_only: None,
                 });
             }
             20..=27 => {
@@ -685,7 +722,10 @@ impl Walk {
                 self.log.push(format!("bury {cid:?} in {session:?}"));
                 let result = steps::bury(self.c(), session, cid).unwrap();
                 self.seen(&result);
-                if !result.changes.is_empty() {
+                if result.changes.is_empty() {
+                    // Records nothing, empties redo (A2).
+                    self.model.redo.clear();
+                } else {
                     self.model.record(MStep {
                         id: result.seq.0,
                         name: BURY,
@@ -694,6 +734,8 @@ impl Walk {
                         keys: BTreeSet::from([(Table::Cards, RowKey::Id(cid.0))]),
                         notes: BTreeSet::from([nid.0]),
                         upload: Upload::Local,
+                        began: self.now(),
+                        note_only: None,
                     });
                 }
             }
@@ -711,6 +753,8 @@ impl Walk {
                     keys: BTreeSet::from([(Table::Notes, RowKey::Id(nid.0))]),
                     notes: BTreeSet::from([nid.0]),
                     upload: Upload::Local,
+                    began: self.now(),
+                    note_only: Some(nid.0),
                 });
             }
             36..=53 => self.undo_or_redo(false),
@@ -759,6 +803,8 @@ impl Walk {
                     )
                     .unwrap();
                 self.seen(&result);
+                // Keeps the steps, empties redo (A11.1).
+                self.model.redo.clear();
             }
             _ => self.sync_step(),
         }
@@ -812,13 +858,13 @@ impl Walk {
                     let inside = table == "col" || row.is_some_and(|row| step.keys.contains(&row));
                     self.check(inside, || format!("{table} {key:?} changed outside step {}", step.id));
                 }
+                // The step the undo or redo leaves is its own journal, made
+                // now; a note row it did not change takes it out of A3.
                 step.id = done.seq.0;
+                step.began = self.now();
+                step.note_only = step.note_only.filter(|note| done.changes.note(NoteId(*note)).is_some());
                 if redo {
-                    self.model.undo.push(step);
-                    if self.model.undo.len() > 30 {
-                        self.model.undo.remove(0);
-                        self.model.floor = DisabledReason::None;
-                    }
+                    self.model.push(step);
                 } else {
                     self.model.redo.push(step);
                 }
@@ -931,9 +977,10 @@ impl Walk {
 }
 
 /// Runs `cases` seeded walks of 40 actions each; returns how often each kind
-/// of action ran.
-fn walk_cases(cases: std::ops::RangeInclusive<u64>) -> BTreeMap<String, usize> {
+/// of action ran, and how many steps merged into the top step (A3).
+fn walk_cases(cases: std::ops::RangeInclusive<u64>) -> (BTreeMap<String, usize>, usize) {
     let mut actions = BTreeMap::<String, usize>::new();
+    let mut merges = 0;
     for seed in cases {
         let h = Harness::open();
         let cards: Vec<(NoteId, CardId)> = (0..CARDS)
@@ -960,14 +1007,16 @@ fn walk_cases(cases: std::ops::RangeInclusive<u64>) -> BTreeMap<String, usize> {
                 .entry(line.split(' ').next().unwrap_or("").to_owned())
                 .or_default() += 1;
         }
+        merges += walk.model.merges;
     }
-    actions
+    (actions, merges)
 }
 
 #[test]
 fn random_histories_never_undo_an_uploaded_step_or_touch_rows_outside_a_step() {
-    let actions = walk_cases(1..=64);
+    let (actions, merges) = walk_cases(1..=64);
     assert_eq!(actions.values().sum::<usize>(), 64 * 40);
+    assert!(merges > 0, "no edit or redo merged into the top step");
     // Every kind of action ran.
     for kind in [
         "answer", "bury", "edit", "undo", "redo", "api", "rollover", "sync", "finish", "merge",
@@ -984,6 +1033,7 @@ fn random_histories_never_undo_an_uploaded_step_or_touch_rows_outside_a_step() {
 #[test]
 #[ignore = "about a minute; the verification run of U25"]
 fn ten_thousand_random_histories() {
-    let actions = walk_cases(1..=10_000);
+    let (actions, merges) = walk_cases(1..=10_000);
     assert_eq!(actions.values().sum::<usize>(), 10_000 * 40);
+    assert!(merges > 0);
 }
