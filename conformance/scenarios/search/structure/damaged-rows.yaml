@@ -1,0 +1,43 @@
+# specs/search/query-model.md Q5, Q6: which rows a query tests depends on the
+# scopes of its terms. #c3 loses its note (#n3) and #n2 loses its card (#c2).
+# Needs the plain-text, deck and state terms (U81, U82).
+id: search/structure/damaged-rows
+tags: [needs-text, needs-deck, needs-state]
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Single, fields: [dog, x]}
+    - {notetype: Single, fields: [cat, x]}
+    - {notetype: Single, fields: [fish, x]}
+steps:
+  - db_exec: {sql: "DELETE FROM notes WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "DELETE FROM cards WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe:
+      - search:
+          - {query: ''}
+          - {query: '', kind: notes}
+          - {query: 'deck:*'}
+          - {query: 'deck:*', kind: notes}
+          - {query: 'is:new'}
+          - {query: 'is:new', kind: notes}
+          - {query: '-is:new'}
+          - {query: '-is:new', kind: notes}
+          - {query: 'dog'}
+          - {query: 'dog', kind: notes}
+          - {query: '-dog'}
+          - {query: '-dog', kind: notes}
+          - {query: 'cat'}
+          - {query: 'cat', kind: notes}
+          - {query: 'fish'}
+          - {query: 'fish', kind: notes}
+          - {query: 'is:new or cat'}
+          - {query: 'is:new or cat', kind: notes}
+          - {query: 'is:new -dog'}
+          - {query: 'is:new -dog', kind: notes}
+          - {query: '(cat)'}
+          - {query: '(cat)', kind: notes}

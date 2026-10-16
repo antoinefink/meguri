@@ -48,7 +48,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
 | `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
-| `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
+| `search` | list of `{query, kind?: cards \| notes}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
+| `canonical_search` | list of search texts | `search-ops.md` S2: one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
