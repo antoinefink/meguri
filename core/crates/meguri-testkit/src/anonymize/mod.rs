@@ -48,8 +48,6 @@ const WORK: &str = ".anonymize-work";
 const IMAGE_OCCLUSION_KIND: i32 = 6;
 /// SQLite's result code for a file that is not a database.
 const SQLITE_NOTADB: i32 = 26;
-/// The `sqlite_stat4` indexes whose samples hold names (A14.2).
-const STAT4_NAME_INDEXES: &[&str] = &["idx_decks_name", "ix_notes_csum", "sqlite_autoindex_tags_1"];
 /// Notes read and written per batch.
 const NOTE_BATCH: i64 = 2_000;
 
@@ -173,8 +171,8 @@ impl Status {
 #[derive(Clone, Debug)]
 pub struct Report {
     pub json: serde_json::Value,
-    /// V4: `fail` when a name column or media name holds a token, `warn`
-    /// when only review items remain.
+    /// V4: `fail` when a name column, a `sqlite_stat4` sample or a media
+    /// name holds a token, `warn` when only review items remain.
     pub leak: Status,
     /// V2.
     pub rows: Status,
@@ -207,6 +205,9 @@ pub struct Hooks {
     /// Leaves this deck's name as the source has it (V4's failing case,
     /// A20).
     pub keep_deck_name: Option<i64>,
+    /// Leaves the `sqlite_stat4` samples of the `tags` table (V4's failing
+    /// case, A20).
+    pub keep_tag_samples: bool,
 }
 
 /// A2.1: anonymizes the source directory `source` into `out` (which must
@@ -899,9 +900,10 @@ impl<'a> Run<'a> {
         if present.is_empty() {
             return Ok(0);
         }
-        let list = STAT4_NAME_INDEXES
+        let list = checks::STAT4_NAME_INDEXES
             .iter()
-            .map(|i| format!("'{i}'"))
+            .filter(|idx| !(self.hooks.keep_tag_samples && **idx == "tags"))
+            .map(|idx| format!("'{idx}'"))
             .collect::<Vec<_>>()
             .join(", ");
         let n = self

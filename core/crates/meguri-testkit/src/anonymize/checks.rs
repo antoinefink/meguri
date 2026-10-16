@@ -199,8 +199,18 @@ fn quoted(name: &str) -> String {
 /// The config keys A13.5 rewrites.
 pub const REWRITTEN_CONFIG: &[&str] = &["defaultSearchText", "savedFilters", "flagLabels"];
 
+/// The `sqlite_stat4` `idx` values whose samples hold names (A14.2). The
+/// `tags` table is WITHOUT ROWID: SQLite files its key samples under the
+/// table's own name, never under `sqlite_autoindex_tags_1`.
+pub const STAT4_NAME_INDEXES: &[&str] = &["idx_decks_name", "ix_notes_csum", "tags"];
+
+fn sql_list(items: &[&str]) -> String {
+    items.iter().map(|i| sql_text(i)).collect::<Vec<_>>().join(", ")
+}
+
 /// V2's digests of a database: every table A4 keeps whole, and the kept
-/// columns of `notes`, `decks` and `config`; `tags` by count.
+/// columns of `notes`, `decks` and `config`; `tags` by count;
+/// `sqlite_stat4` without A14.2's rows.
 pub fn row_digests(db: &PlainDatabase) -> Result<BTreeMap<String, (u64, String)>, AnonymizeError> {
     let mut out = BTreeMap::new();
     for table in tables(db)? {
@@ -208,19 +218,20 @@ pub fn row_digests(db: &PlainDatabase) -> Result<BTreeMap<String, (u64, String)>
             "notes" => "SELECT id, guid, mid, mod, usn, flags, data FROM notes ORDER BY id".to_owned(),
             "decks" => "SELECT id, mtime_secs, usn, common FROM decks ORDER BY id".to_owned(),
             "config" => {
-                let list = REWRITTEN_CONFIG
-                    .iter()
-                    .map(|k| format!("'{k}'"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
                 out.insert(
                     "config:keys".to_owned(),
                     digest(db, "SELECT KEY, usn, mtime_secs FROM config ORDER BY KEY")?,
                 );
-                format!("SELECT KEY, usn, mtime_secs, val FROM config WHERE KEY NOT IN ({list}) ORDER BY KEY")
+                format!(
+                    "SELECT KEY, usn, mtime_secs, val FROM config WHERE KEY NOT IN ({}) ORDER BY KEY",
+                    sql_list(REWRITTEN_CONFIG)
+                )
             }
             "tags" => "SELECT count(*) FROM tags".to_owned(),
-            "sqlite_stat4" => continue,
+            "sqlite_stat4" => format!(
+                "SELECT tbl, idx, neq, nlt, ndlt, sample FROM sqlite_stat4 WHERE idx NOT IN ({}) ORDER BY 1, 2, 3, 4, 5, 6",
+                sql_list(STAT4_NAME_INDEXES)
+            ),
             other => {
                 let n = column_names(db, other)?.len().max(1);
                 let order: Vec<String> = (1..=n).map(|i| i.to_string()).collect();
@@ -285,10 +296,16 @@ pub fn tokens<'a>(sources: impl Iterator<Item = &'a str>, structure_names: &Hash
 /// V4: scans the clone's values and media file names for tokens.
 pub fn leak_scan(db: &PlainDatabase, media: &[Written], tokens: &HashSet<String>) -> Result<Leak, AnonymizeError> {
     let mut leak = Leak::default();
-    let fail_at =
-        |table: &str, column: &str| matches!((table, column), ("decks", "name") | ("tags", "tag") | ("notes", "tags"));
+    let fail_at = |table: &str, column: &str| {
+        matches!(
+            (table, column),
+            ("decks", "name") | ("tags", "tag") | ("notes", "tags") | ("sqlite_stat4", "sample")
+        )
+    };
+    // deck_config is unchanged but scanned: a preset's param_search can
+    // name decks or tags (A4).
     for table in tables(db)? {
-        if matches!(table.as_str(), "notetypes" | "fields" | "templates" | "deck_config") {
+        if matches!(table.as_str(), "notetypes" | "fields" | "templates") {
             continue;
         }
         let q = quoted(&table);
@@ -393,4 +410,73 @@ pub fn media(map: &NameMap<'_>, written: &[Written], out_media: &std::path::Path
         seen += 1;
     }
     seen == expected.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A database whose ANALYZE samples A14.2's three indexes and one other.
+    fn analyzed(dir: &std::path::Path) -> PlainDatabase {
+        // An empty file is an empty database (PlainDatabase never creates).
+        let path = dir.join("stat4.db");
+        std::fs::write(&path, b"").unwrap();
+        let db = PlainDatabase::open(&path).unwrap();
+        db.execute_batch(
+            "CREATE TABLE d (name TEXT); CREATE INDEX idx_decks_name ON d (name);
+             CREATE TABLE n (csum INTEGER); CREATE INDEX ix_notes_csum ON n (csum);
+             CREATE TABLE tags (tag TEXT PRIMARY KEY) WITHOUT ROWID;
+             CREATE TABLE c (nid INTEGER); CREATE INDEX ix_cards_nid ON c (nid);",
+        )
+        .unwrap();
+        for i in 0..40 {
+            let name = RawValue::text(&format!("name {i}"));
+            db.execute("INSERT INTO d VALUES (?1)", std::slice::from_ref(&name))
+                .unwrap();
+            db.execute("INSERT INTO tags VALUES (?1)", &[name]).unwrap();
+            db.execute("INSERT INTO n VALUES (?1)", &[RawValue::Integer(i)])
+                .unwrap();
+            db.execute("INSERT INTO c VALUES (?1)", &[RawValue::Integer(i % 7)])
+                .unwrap();
+        }
+        db.execute_batch("ANALYZE").unwrap();
+        db
+    }
+
+    fn count(db: &PlainDatabase, idx: &str) -> i64 {
+        match db
+            .rows(
+                "SELECT count(*) FROM sqlite_stat4 WHERE idx = ?1",
+                &[RawValue::text(idx)],
+            )
+            .unwrap()[0][0]
+        {
+            RawValue::Integer(n) => n,
+            ref other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn v2_allows_only_the_name_samples_to_go() {
+        // V2 (A17): sqlite_stat4 holds the source's rows minus those A14.2
+        // removes, each unchanged.
+        let dir = tempfile::tempdir().unwrap();
+        let db = analyzed(dir.path());
+        for idx in ["idx_decks_name", "ix_notes_csum", "tags", "ix_cards_nid"] {
+            assert!(count(&db, idx) > 0, "ANALYZE sampled {idx}");
+        }
+        let source = row_digests(&db).unwrap();
+        db.execute(
+            "DELETE FROM sqlite_stat4 WHERE idx IN ('idx_decks_name', 'ix_notes_csum', 'tags')",
+            &[],
+        )
+        .unwrap();
+        assert_eq!(row_digests(&db).unwrap(), source, "the name samples may go");
+        db.execute(
+            "DELETE FROM sqlite_stat4 WHERE rowid = (SELECT min(rowid) FROM sqlite_stat4 WHERE idx = 'ix_cards_nid')",
+            &[],
+        )
+        .unwrap();
+        assert_ne!(row_digests(&db).unwrap(), source, "every other sample stays");
+    }
 }

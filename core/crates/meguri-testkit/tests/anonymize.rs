@@ -145,6 +145,8 @@ struct Spec {
     tags: Vec<&'static str>,
     config: Vec<ConfigEntry>,
     media: Vec<(String, Vec<u8>)>,
+    /// The default preset's FSRS optimizer search (`param_search`).
+    preset_search: &'static str,
 }
 
 impl Spec {
@@ -155,6 +157,7 @@ impl Spec {
             tags: Vec::new(),
             config: Vec::new(),
             media: Vec::new(),
+            preset_search: "",
         }
     }
 }
@@ -183,13 +186,15 @@ fn build(dir: &Path, spec: Spec) {
     .unwrap();
     {
         let mut scope = builder.begin(StampMode::Raw, &clock).unwrap();
+        let mut preset = DeckConfigMessage::default();
+        preset.param_search = spec.preset_search.to_owned();
         scope
             .put(&DeckConfig {
                 id: DeckConfigId(1),
                 name: "Default".to_owned(),
                 mtime: EpochSecs(CRT),
                 usn: Usn(0),
-                config: ProtoBlob::new(DeckConfigMessage::default()),
+                config: ProtoBlob::new(preset),
             })
             .unwrap();
         for d in &spec.decks {
@@ -281,8 +286,9 @@ const A19_REFERENCES: &str = "<img src=\"Photo.JPG\"> <img src=\"a&amp;b.png\"> 
                               <img src=\"日本.png\"> <img src=\"a b.jpg\"> <img src=\"_font.woff2\">";
 
 /// The A20 collection: A19's fields and media, A11.1's decks, A12's tags,
-/// a filtered deck and A13.5's config keys.
-fn standard(dir: &Path, extra_config: bool) {
+/// a filtered deck and A13.5's config keys. `kept_names` adds the places
+/// that keep a deck name on purpose (V4's review items).
+fn standard(dir: &Path, kept_names: bool) {
     let mut spec = Spec::new();
     spec.decks.extend([
         normal_deck(1_700_000_000_001, "german", ""),
@@ -327,7 +333,7 @@ fn standard(dir: &Path, extra_config: bool) {
                  {{c2::image-occlusion:text:left=.5:top=.5:text=Leber\\:Herz:scale=1}}",
                 "<img src=\"occl.png\">",
                 "<img src=\"occl2.jpg\">",
-                "",
+                "Leber links",
             ],
             "",
         ),
@@ -348,9 +354,11 @@ fn standard(dir: &Path, extra_config: bool) {
         ),
         config("flagLabels", r#"{"1":"Wichtig","2":"später"}"#),
     ];
-    if extra_config {
-        // A key outside A13.5 that names a deck: copied, and V4 lists it.
+    if kept_names {
+        // A key outside A13.5 that names a deck, and a preset's optimizer
+        // search (A4): copied, and V4 lists them.
         spec.config.push(config("addonDecks", "\"Japanese\""));
+        spec.preset_search = "deck:Japanese";
     }
     spec.media = vec![
         ("dog.mp3".into(), vec![3u8; 1234]),
@@ -418,10 +426,10 @@ fn assert_shape(actual: &str, pattern: &str) {
     assert!(re.is_match(actual), "{actual:?} does not have the shape {pattern}");
 }
 
-fn standard_clone(extra_config: bool) -> (tempfile::TempDir, Clone) {
+fn standard_clone(kept_names: bool) -> (tempfile::TempDir, Clone) {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("source");
-    standard(&source, extra_config);
+    standard(&source, kept_names);
     let clone = run(&source, &dir.path().join("clone"));
     (dir, clone)
 }
@@ -519,6 +527,9 @@ fn a19_source_texts_get_their_clone_shapes() {
         &occlusion[0],
         r"\{\{c1::image-occlusion:rect:left=\.25:top=\.1:width=\.2:height=\.1:oi=1\}\} \{\{c2::image-occlusion:text:left=\.5:top=\.5:text=[A-Z][a-z]{4}\\:[A-Z][a-z]{3}:scale=1\}\}",
     );
+    // A10.2: no field of an image-occlusion note is kept whole; the
+    // comments are text.
+    assert_shape(&occlusion[3], "[A-Z][a-z]{4} [a-z]{5}");
 
     let han = "[\u{4E00}-\u{9FA5}]";
     let hira = "[\u{3041}-\u{3096}]";
@@ -883,15 +894,23 @@ fn every_table_the_spec_keeps_is_unchanged_and_name_samples_are_gone() {
         all_rows(&out, "SELECT count(*) FROM tags")
     );
 
-    let names =
-        "SELECT count(*) FROM sqlite_stat4 WHERE idx IN ('idx_decks_name', 'ix_notes_csum', 'sqlite_autoindex_tags_1')";
-    let RawValue::Integer(before) = all_rows(&src, names)[0][0] else {
-        panic!()
-    };
-    assert!(before > 0, "ANALYZE sampled the name indexes");
-    assert_eq!(all_rows(&out, names)[0][0], RawValue::Integer(0));
-    let others = "SELECT * FROM sqlite_stat4 WHERE idx NOT IN ('idx_decks_name', 'ix_notes_csum', 'sqlite_autoindex_tags_1') ORDER BY 1, 2, 3, 4, 5, 6";
-    assert_eq!(all_rows(&src, others), all_rows(&out, others));
+    // A14.2's indexes, each checked on the source first: a name that
+    // matches no row would delete nothing and still pass the clone's check
+    // (`tags` is the WITHOUT ROWID table's own name, not an autoindex).
+    let mut before = 0;
+    for idx in ["idx_decks_name", "ix_notes_csum", "tags"] {
+        let count = format!("SELECT count(*) FROM sqlite_stat4 WHERE idx = '{idx}'");
+        let RawValue::Integer(n) = all_rows(&src, &count)[0][0] else {
+            panic!("{idx}")
+        };
+        assert!(n > 0, "ANALYZE sampled {idx} in the source");
+        assert_eq!(all_rows(&out, &count)[0][0], RawValue::Integer(0), "{idx}");
+        before += n;
+    }
+    let others = "SELECT * FROM sqlite_stat4 WHERE idx NOT IN ('idx_decks_name', 'ix_notes_csum', 'tags') ORDER BY 1, 2, 3, 4, 5, 6";
+    let kept = all_rows(&src, others);
+    assert!(!kept.is_empty(), "the source has other samples");
+    assert_eq!(kept, all_rows(&out, others));
     assert_eq!(clone.report.json["stat4_rows_deleted"], before);
     assert_eq!(clone.report.json["checks"]["rows"], "pass");
     assert_eq!(clone.report.json["checks"]["structure"], "pass");
@@ -935,6 +954,43 @@ fn a_config_value_naming_a_deck_is_a_review_item() {
     );
 }
 
+fn leak_locations(report: &Report) -> Vec<serde_json::Value> {
+    report.json["checks"]["leak"]["locations"].as_array().unwrap().clone()
+}
+
+#[test]
+fn a_preset_search_naming_a_deck_is_a_review_item() {
+    // deck_config is unchanged (A4) but scanned: the default preset's
+    // param_search names the deck Japanese.
+    let (_dir, clone) = standard_clone(true);
+    assert_eq!(clone.report.leak, Status::Warn);
+    let locations = leak_locations(&clone.report);
+    assert!(
+        locations
+            .iter()
+            .any(|l| l["table"] == "deck_config" && l["column"] == "config" && l["key"] == 1 && l["hits"] == 1),
+        "{locations:?}"
+    );
+    let preset = clone
+        .db()
+        .rows("SELECT config FROM deck_config WHERE id = 1", &[])
+        .unwrap()
+        .remove(0)
+        .remove(0);
+    let RawValue::Blob(preset) = preset else {
+        panic!("config is a blob")
+    };
+    assert_eq!(
+        ProtoBlob::<DeckConfigMessage>::decode(&preset).unwrap().param_search,
+        "deck:Japanese"
+    );
+
+    // Without it the preset is no location.
+    let (_dir, plain) = standard_clone(false);
+    let locations = leak_locations(&plain.report);
+    assert!(!locations.iter().any(|l| l["table"] == "deck_config"), "{locations:?}");
+}
+
 #[test]
 fn a_deck_name_left_in_place_fails_the_leak_scan() {
     let dir = tempfile::tempdir().unwrap();
@@ -942,17 +998,53 @@ fn a_deck_name_left_in_place_fails_the_leak_scan() {
     standard(&source, false);
     let hooks = Hooks {
         keep_deck_name: Some(D_JAPANESE),
+        ..Hooks::default()
     };
     let report = anonymize::anonymize_with(&source, &dir.path().join("clone"), &salt(), &hooks).unwrap();
     assert_eq!(report.leak, Status::Fail);
     assert_eq!(report.status(), Status::Fail);
-    let locations = report.json["checks"]["leak"]["locations"].as_array().unwrap();
+    let locations = leak_locations(&report);
     assert!(
         locations
             .iter()
             .any(|l| l["table"] == "decks" && l["column"] == "name" && l["key"] == D_JAPANESE),
         "{locations:?}"
     );
+}
+
+#[test]
+fn a_tag_name_left_in_a_stat4_sample_fails_the_leak_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    standard(&source, false);
+    let in_samples = |report: &Report| {
+        leak_locations(report)
+            .iter()
+            .any(|l| l["table"] == "sqlite_stat4" && l["column"] == "sample")
+    };
+
+    // A14.2 removes the tag samples: no sample holds a token. (Table and
+    // index names such as `notes`, a run of the media name notes.tar.gz,
+    // stay review items.)
+    let clean = run(&source, &dir.path().join("clean"));
+    assert_ne!(clean.report.leak, Status::Fail);
+    assert!(!in_samples(&clean.report), "{:?}", leak_locations(&clean.report));
+
+    // Left in place, the samples hold the source's tag names (Straße,
+    // german::verb, ...).
+    let hooks = Hooks {
+        keep_tag_samples: true,
+        ..Hooks::default()
+    };
+    let out = dir.path().join("clone");
+    let report = anonymize::anonymize_with(&source, &out, &salt(), &hooks).unwrap();
+    assert_eq!(report.leak, Status::Fail);
+    assert_eq!(report.status(), Status::Fail);
+    assert!(in_samples(&report), "{:?}", leak_locations(&report));
+    let text = fs::read_to_string(out.join("anonymize.json")).unwrap();
+    for token in ["Straße", "german", "spanish"] {
+        assert!(!text.contains(token), "the report holds {token}");
+    }
 }
 
 // ------------------------------------------------------------------ errors
