@@ -56,7 +56,7 @@ Sixteen keys, each value stored as a BLOB in the compact form of `storage/config
 | `sortType` | `"noteFld"` | 0 | 0 |
 | `timeLim` | `0` | 0 | 0 |
 
-- No other key. In particular there is no `rollover`, `localOffset` or `lastUnburied`: the first day query, which runs when the collection is opened (`sched/day-clock` D5, D8), writes `rollover` = `4`, and `localOffset` unless the device is at UTC, each with `usn` -1 and `mtime_secs` `now_s`, without moving `col.mod` (oracle: Europe/Paris gives `localOffset` `-60`).
+- No other key. In particular there is no `rollover`, `localOffset` or `lastUnburied`: the first day query, which runs when the collection is opened (`sched/day-clock` D5, D8), writes `rollover` = `4`, and `localOffset` unless the device is at UTC, each with `usn` -1 and `mtime_secs` `now_s`, without moving `col.mod` (oracle: Europe/Paris gives `localOffset` `-60`). On the creation day it writes no `lastUnburied`: today is day 0 and a missing `lastUnburied` reads as 0, so the unbury check does nothing (`sched/day-clock` D2, D7). The key first appears at a day query on a later day.
 - `curModel` is the only key written as a local change; it still leaves `col.mod` at 0.
 
 ## B5. The default preset

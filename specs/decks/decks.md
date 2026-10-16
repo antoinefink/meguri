@@ -136,7 +136,7 @@ Input: a list of decks, in order, and a target: a deck, or the top level (a drop
 Input: a list of decks.
 
 1. Each listed deck that still exists, in order, is processed together with its descendants (D3, found when it is reached), the deck first and then its descendants in `unicase` order of their names. For each processed deck:
-   - **Normal deck.** Every card whose `did` is the deck, and every card whose `odid` is the deck (a card of this deck sitting in a filtered deck), is removed with the card removal of the notes area (U27): a type 0 grave per card, and every note left without cards removed with its type 1 grave (`storage/graves` G3).
+   - **Normal deck.** Every card whose `did` is the deck, and every card whose `odid` is the deck (a card of this deck sitting in a filtered deck), is removed with the card removal of the notes area that also removes the notes it leaves empty (`notes/note-records` D2, U27): a type 0 grave per card, and every note left without cards removed with its type 1 grave (`storage/graves` G3). Deleting a deck writes no line to the deleted-notes log (`notes/deleted-notes-log`; only a note deletion does).
    - **Filtered deck.** Its cards return to their home decks (D9); none is removed.
    - Every config key whose name starts with `_deck_<id>_` (the deck's id in decimal) and has at least one more character is removed, with no grave (`storage/config-table` C10). A key named exactly `_deck_<id>_` stays (oracle).
    - **The default deck** (id 1) is never removed (R68): it gets the name `Default` (with the unique-name rule, so `Default+` when another deck has the name `Default`), becomes top-level if it was nested, and is stamped, even when its name was already `Default`. Its cards and its key family go as for any normal deck.
@@ -155,9 +155,9 @@ Example: `Default` with the subdeck `Default::Kid` and no cards: deleting `Defau
 - Meguri never creates or rebuilds a filtered deck; it keeps every filtered deck, its search terms and its cards' `odid` and `odue` as they are.
 - A filtered deck can be renamed (D6), moved (D7), deleted (D8) and collapsed (D10). Nothing can be created, renamed or moved under it (D3, D7).
 - **Returning a card home** (deleting a filtered deck): for each card whose `did` is the deck (or, for a damaged collection, whose `odid` is the deck):
-  - when `odid` is 0 the card is left as it is (it then names a missing deck, which Check Database repairs, U128);
-  - otherwise `did` takes `odid`, `odid` becomes 0, `due` takes `odue` when `odue` is not 0, `odue` becomes 0, and when `queue` is 0 or more it is set from `type`: 0 (new) gives 0, 2 (review) gives 2, 1 or 3 (learning, relearning) give 1 when `due` is above 1,000,000,000 (a timestamp) and 3 otherwise. A negative `queue` (suspended, buried) stays;
-  - the card is stamped (`usn` -1, `mod` `now_s`).
+  - when `odid` is 0 its `did`, `due`, `odue` and `queue` stay as they are (it then names a missing deck, which Check Database repairs, U128);
+  - otherwise `did` takes `odid`, `odid` becomes 0, `due` takes `odue` when `odue` is not 0, `odue` becomes 0, and when `queue` is 0 or more it is set from `type`: 0 (new) gives 0, 2 (review) gives 2, 1 or 3 (learning, relearning) give 1 when the new `due` is above 1,000,000,000 (a timestamp) and 3 otherwise. A negative `queue` (suspended, buried) stays;
+  - in both cases the card is stamped (`usn` -1, `mod` `now_s`), even when nothing else in its row changed.
 
 ## D10. Collapse and expand (R36, R37, R38, R69)
 

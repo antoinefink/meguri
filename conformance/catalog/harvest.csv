@@ -72,7 +72,7 @@ h26a096646ed7,rust,tag,decks,in-scope,deck pickers leave out the default deck wh
 h2c1eea8afaea,rust,tag,decks,in-scope,"deleting the default deck keeps it under its default name, with a suffix when the name is taken",decks/delete/default,done
 h34d675666d1c,rust,tag,decks,in-scope,deck pickers leave out the default deck while it holds no cards; specified with the pickers,,deferred
 h3bb5ab9d9cbc,rust,tag,decks,in-scope,"deck name components normalized (NFC, control characters, trimming, blank)",model/schema11/deck-names,done
-h3c7a515847bc,rust,tag,decks,not-applicable,conversion between the backend message and the internal deck; Meguri has no such service layer,,done
+h3c7a515847bc,rust,tag,decks,not-applicable,mapping between the backend message and the internal deck record; Meguri has no such service layer,,done
 h5159c422dac6,rust,tag,decks,out-of-scope,labels of filtered deck search orders,,done
 h59d86b0d0618,rust,tag,decks,in-scope,renaming a deck renames its descendants,decks/rename/subtree,done
 h5e505e6b3fb6,rust,tag,decks,in-scope,deck pickers can leave out filtered decks; specified with the pickers,,deferred
