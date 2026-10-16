@@ -3,6 +3,8 @@
 //! (a media `err` as `server_message`; an upload refusal as
 //! `server_message`) with the method set, and never panics, aborts,
 //! overflows the stack or allocates beyond the input's proportion (R1562).
+//! The download zip's files go to the temporary directory and are removed
+//! with their handles at the end of each input.
 
 #![no_main]
 
@@ -34,5 +36,8 @@ fuzz_target!(|data: &[u8]| {
     checked(Method::MediaChanges, wire::decode_media_changes(data));
     checked(Method::UploadChanges, wire::decode_upload_changes(data));
     checked(Method::MediaSanity, wire::decode_media_sanity(data));
-    checked(Method::DownloadFiles, wire::decode_download_zip(data));
+    checked(
+        Method::DownloadFiles,
+        wire::decode_download_zip(data, &std::env::temp_dir()),
+    );
 });

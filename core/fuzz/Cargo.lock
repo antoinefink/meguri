@@ -957,6 +957,7 @@ dependencies = [
  "libc",
  "meguri-model",
  "meguri-sched",
+ "meguri-search",
  "meguri-storage",
  "meguri-text",
  "regex",
@@ -999,6 +1000,7 @@ name = "meguri-search"
 version = "0.0.0"
 dependencies = [
  "meguri-model",
+ "meguri-storage",
  "regex",
 ]
 
@@ -1029,6 +1031,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "url",
  "zip",

@@ -3,9 +3,11 @@
 //! sync does with them is U111's.
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Write};
+use std::io::{self, Cursor, Read, Write};
+use std::path::Path;
 
 use serde_json::value::RawValue;
+use tempfile::TempPath;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -155,16 +157,51 @@ pub fn decode_media_sanity(body: &[u8]) -> Result<MediaSanity, JobError> {
     })
 }
 
-/// One file of a `downloadFiles` zip, under its real name.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One file of a `downloadFiles` zip: its real name and its bytes, expanded
+/// into the staging directory.
+#[derive(Debug)]
 pub struct MediaFile {
+    /// The name `_meta` maps the entry to.
     pub name: String,
-    pub data: Vec<u8>,
+    pub file: StagedFile,
+}
+
+/// A file the decoder wrote into the caller's staging directory, under a
+/// name of its own (never the entry's or the real name). Dropping the
+/// handle removes the file; [`StagedFile::persist`] keeps it.
+#[derive(Debug)]
+pub struct StagedFile {
+    path: TempPath,
+    size: u64,
+}
+
+impl StagedFile {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The file's size in bytes.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Moves the file to `to`, replacing a file there, and keeps it. When
+    /// the move fails the file is removed.
+    pub fn persist(self, to: &Path) -> io::Result<()> {
+        self.path.persist(to).map_err(|err| err.error)
+    }
 }
 
 /// The most bytes one entry of a `downloadFiles` zip may expand to: the
 /// largest file a server keeps (W17.2) and Meguri sends (R1565).
 pub const MAX_DOWNLOAD_ENTRY_BYTES: u64 = 100 * 1024 * 1024;
+
+/// The most bytes the files of one `downloadFiles` zip may expand to
+/// together, whatever the body's size: the 25 names a request asks for at
+/// most (R1577), each at most [`MAX_DOWNLOAD_ENTRY_BYTES`]. The files go to
+/// the staging directory, not to memory (R1852); this bounds what one
+/// answer writes there.
+pub const MAX_DOWNLOAD_BYTES: u64 = 25 * MAX_DOWNLOAD_ENTRY_BYTES;
 
 /// How many times its own size a `downloadFiles` zip may expand to, all its
 /// entries together (errors.md E6: a decoder allocates only in proportion to
@@ -172,68 +209,122 @@ pub const MAX_DOWNLOAD_ENTRY_BYTES: u64 = 100 * 1024 * 1024;
 /// deflate alone reaches about 1032.
 pub const MAX_DOWNLOAD_EXPANSION: u64 = 100;
 
+/// The bytes one read from an entry moves to its staged file.
+const COPY_CHUNK: usize = 64 * 1024;
+
 /// The `downloadFiles` answer (W17.1): a zip whose `_meta` maps each entry
 /// name to a real name. Entries may be stored or deflated. A file entry that
 /// `_meta` does not map makes the whole zip a decode failure; a `_meta`
-/// member with no entry is ignored. Files come in entry order.
+/// member with no entry is ignored. Files come in entry order, each
+/// expanded into a new file in `staging`, an existing directory: only
+/// `_meta` is read into memory.
 ///
-/// Reading stops at the first byte past [`MAX_DOWNLOAD_ENTRY_BYTES`] in one
-/// entry, or past [`MAX_DOWNLOAD_EXPANSION`] times the body's size in all of
-/// them (`_meta` counting), and the zip is a decode failure: a small body
-/// never expands into a large allocation.
-pub fn decode_download_zip(body: &[u8]) -> Result<Vec<MediaFile>, JobError> {
+/// The zip is a decode failure when one entry expands past
+/// [`MAX_DOWNLOAD_ENTRY_BYTES`], its files together past
+/// [`MAX_DOWNLOAD_BYTES`], or all its entries (`_meta` counting) past
+/// [`MAX_DOWNLOAD_EXPANSION`] times the body's size. The sizes the zip
+/// declares are checked before anything is staged; the bytes it expands to
+/// are checked again as they are read, and reading stops one byte past a
+/// limit. A failure leaves nothing in `staging`. A file that cannot be
+/// written there is `disk_full` or `local_storage` (errors.md E7).
+pub fn decode_download_zip(body: &[u8], staging: &Path) -> Result<Vec<MediaFile>, JobError> {
     let fail = |detail: String| JobError::bad_response(Method::DownloadFiles, detail);
     let mut archive =
         ZipArchive::new(Cursor::new(body)).map_err(|err| fail(format!("the body is not a zip: {err}")))?;
-    let mut budget = u64::try_from(body.len())
-        .unwrap_or(u64::MAX)
-        .saturating_mul(MAX_DOWNLOAD_EXPANSION);
+    let mut limits = Limits {
+        all: u64::try_from(body.len())
+            .unwrap_or(u64::MAX)
+            .saturating_mul(MAX_DOWNLOAD_EXPANSION),
+        files: MAX_DOWNLOAD_BYTES,
+    };
+    let entries = declared_entries(&archive, limits).map_err(fail)?;
     let meta = match archive.index_for_name(META_ENTRY) {
-        Some(index) => read_entry(&mut archive, index, &mut budget).map_err(fail)?,
+        Some(index) => read_meta(&mut archive, index, &mut limits).map_err(fail)?,
         None => return Err(fail(format!("the zip has no {META_ENTRY} entry"))),
     };
     let names: HashMap<String, String> = entry_names(&meta)
         .map_err(|err| fail(format!("{META_ENTRY}: {err}")))?
         .into_iter()
         .collect();
-    let mut files = Vec::new();
-    for index in 0..archive.len() {
-        let entry = match archive.name_for_index(index) {
-            Some(Ok(name)) => name.into_owned(),
-            Some(Err(err)) => return Err(fail(format!("zip entry {index}: {err}"))),
-            None => return Err(fail(format!("zip entry {index} is missing"))),
-        };
-        if entry == META_ENTRY {
-            continue;
-        }
+    let mut mapped = Vec::with_capacity(entries.len());
+    for (index, entry) in entries {
         let Some(name) = names.get(&entry) else {
             return Err(fail(format!("zip entry {entry:?} is not in {META_ENTRY}")));
         };
-        let data = read_entry(&mut archive, index, &mut budget).map_err(fail)?;
-        files.push(MediaFile {
-            name: name.clone(),
-            data,
-        });
+        mapped.push((index, name.clone()));
+    }
+    let mut buffer = vec![0u8; COPY_CHUNK];
+    let mut files = Vec::with_capacity(mapped.len());
+    for (index, name) in mapped {
+        let file = stage_entry(&mut archive, index, &mut limits, staging, &mut buffer)?;
+        files.push(MediaFile { name, file });
     }
     Ok(files)
 }
 
-/// The bytes of the entry at `index`, stored or deflated, taken from
-/// `budget`: at most [`MAX_DOWNLOAD_ENTRY_BYTES`] and at most what `budget`
-/// has left. One byte past either limit fails, and nothing past it is read.
-fn read_entry(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, budget: &mut u64) -> Result<Vec<u8>, String> {
+/// What a download zip may still expand to.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    /// All entries, `_meta` counting ([`MAX_DOWNLOAD_EXPANSION`]).
+    all: u64,
+    /// The files ([`MAX_DOWNLOAD_BYTES`]).
+    files: u64,
+}
+
+/// The index and name of each file entry (every entry but `_meta`), after
+/// checking what every entry declares against the limits: an entry that is
+/// neither stored nor deflated, or sizes past a limit, fail before anything
+/// expands.
+fn declared_entries(archive: &ZipArchive<Cursor<&[u8]>>, limits: Limits) -> Result<Vec<(usize, String)>, String> {
+    let mut all = 0u64;
+    let mut files = 0u64;
+    let mut entries = Vec::new();
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index_data(index)
+            .map_err(|err| format!("zip entry {index}: {err}"))?;
+        let name = entry
+            .name()
+            .map_err(|err| format!("zip entry {index}: {err}"))?
+            .into_owned();
+        if !matches!(
+            entry.compression(),
+            CompressionMethod::Stored | CompressionMethod::Deflated
+        ) {
+            return Err(format!("zip entry {index} is neither stored nor deflated"));
+        }
+        let size = entry.size();
+        if size > MAX_DOWNLOAD_ENTRY_BYTES {
+            return Err(format!(
+                "zip entry {index} declares more than {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
+            ));
+        }
+        all = all.saturating_add(size);
+        if name != META_ENTRY {
+            files = files.saturating_add(size);
+            entries.push((index, name));
+        }
+    }
+    if files > limits.files {
+        return Err(format!("the zip's files declare more than {MAX_DOWNLOAD_BYTES} bytes"));
+    }
+    if all > limits.all {
+        return Err(format!(
+            "the zip declares more than {MAX_DOWNLOAD_EXPANSION} times its size"
+        ));
+    }
+    Ok(entries)
+}
+
+/// The bytes of `_meta`, taken from `limits.all`: at most
+/// [`MAX_DOWNLOAD_ENTRY_BYTES`] and at most what is left. One byte past
+/// either limit fails, and nothing past it is read.
+fn read_meta(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, limits: &mut Limits) -> Result<Vec<u8>, String> {
     let entry = archive
         .by_index(index)
         .map_err(|err| format!("zip entry {index}: {err}"))?;
-    if !matches!(
-        entry.compression(),
-        CompressionMethod::Stored | CompressionMethod::Deflated
-    ) {
-        return Err(format!("zip entry {index} is neither stored nor deflated"));
-    }
-    let limit = MAX_DOWNLOAD_ENTRY_BYTES.min(*budget);
-    // The buffer grows with the bytes read, never from the declared size: an
-    // entry may declare far more than it holds.
+    let limit = MAX_DOWNLOAD_ENTRY_BYTES.min(limits.all);
+    // The buffer grows with the bytes read, never from the declared size.
     let mut data = Vec::new();
     entry
         .take(limit.saturating_add(1))
@@ -245,11 +336,82 @@ fn read_entry(archive: &mut ZipArchive<Cursor<&[u8]>>, index: usize, budget: &mu
             "zip entry {index} expands past {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
         ));
     }
-    if read > *budget {
+    if read > limits.all {
         return Err(format!("the zip expands past {MAX_DOWNLOAD_EXPANSION} times its size"));
     }
-    *budget -= read;
+    limits.all -= read;
     Ok(data)
+}
+
+/// Expands the file entry at `index` into a new file in `staging`, taken
+/// from both limits: at most [`MAX_DOWNLOAD_ENTRY_BYTES`] and at most what
+/// either limit has left. One byte past a limit fails, and nothing past it is
+/// read or written. On any failure the file is removed.
+fn stage_entry(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    index: usize,
+    limits: &mut Limits,
+    staging: &Path,
+    buffer: &mut [u8],
+) -> Result<StagedFile, JobError> {
+    let fail = |detail: String| JobError::bad_response(Method::DownloadFiles, detail);
+    let entry = archive
+        .by_index(index)
+        .map_err(|err| fail(format!("zip entry {index}: {err}")))?;
+    let mut file = tempfile::Builder::new()
+        .prefix("download-")
+        .tempfile_in(staging)
+        .map_err(|err| staging_error(&err))?;
+    let limit = MAX_DOWNLOAD_ENTRY_BYTES.min(limits.all).min(limits.files);
+    let mut reader = entry.take(limit.saturating_add(1));
+    let mut size = 0u64;
+    loop {
+        let read = match reader.read(buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(fail(format!("zip entry {index}: {err}"))),
+        };
+        size = size.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+        if size > MAX_DOWNLOAD_ENTRY_BYTES {
+            return Err(fail(format!(
+                "zip entry {index} expands past {MAX_DOWNLOAD_ENTRY_BYTES} bytes"
+            )));
+        }
+        if size > limits.files {
+            return Err(fail(format!("the zip's files expand past {MAX_DOWNLOAD_BYTES} bytes")));
+        }
+        if size > limits.all {
+            return Err(fail(format!(
+                "the zip expands past {MAX_DOWNLOAD_EXPANSION} times its size"
+            )));
+        }
+        file.write_all(&buffer[..read]).map_err(|err| staging_error(&err))?;
+    }
+    file.flush().map_err(|err| staging_error(&err))?;
+    limits.all -= size;
+    limits.files -= size;
+    Ok(StagedFile {
+        path: file.into_temp_path(),
+        size,
+    })
+}
+
+/// E7: a staged file that cannot be created or written. Lack of space is
+/// `disk_full`; anything else is `local_storage`.
+fn staging_error(err: &io::Error) -> JobError {
+    let kind = match err.kind() {
+        io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded => ErrorKind::DiskFull {
+            needed_bytes: None,
+            available_bytes: None,
+        },
+        _ => ErrorKind::LocalStorage,
+    };
+    JobError::new(
+        kind,
+        Some(Method::DownloadFiles),
+        format!("staging a downloaded file failed: {err}"),
+    )
 }
 
 /// `_meta` of a downloaded zip: an object mapping entry names to real names

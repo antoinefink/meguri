@@ -12,6 +12,7 @@
 mod common;
 
 use std::io::{Cursor, Read, Write};
+use std::path::Path;
 
 use common::{bytes, conformance_json, exchanges, json, served};
 use meguri_model::config::ConfigEntry;
@@ -953,6 +954,38 @@ fn zip_of(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+/// A new, empty staging directory for decoded files.
+fn staging() -> tempfile::TempDir {
+    tempfile::tempdir().unwrap()
+}
+
+/// How many entries `dir` holds.
+fn staged_count(dir: &Path) -> usize {
+    std::fs::read_dir(dir).unwrap().count()
+}
+
+/// A decoded file's real name and the bytes of its staged file.
+fn name_and_bytes(file: &MediaFile) -> (String, Vec<u8>) {
+    (file.name.clone(), std::fs::read(file.file.path()).unwrap())
+}
+
+/// Whether the staged file holds `len` zero bytes, read a MiB at a time.
+fn holds_zeros(file: &MediaFile, len: usize) -> bool {
+    let mut reader = std::fs::File::open(file.file.path()).unwrap();
+    let mut piece = vec![0u8; MIB];
+    let mut total = 0;
+    loop {
+        let read = reader.read(&mut piece).unwrap();
+        if read == 0 {
+            return total == len;
+        }
+        if piece[..read].iter().any(|&byte| byte != 0) {
+            return false;
+        }
+        total += read;
+    }
+}
+
 #[test]
 fn a_download_zip_maps_its_entries_through_meta() {
     // W17.1: stored and deflated entries, `_meta` naming each.
@@ -966,20 +999,26 @@ fn a_download_zip_maps_its_entries_through_meta() {
             false,
         ),
     ]);
-    let files = wire::decode_download_zip(&served(Method::DownloadFiles, &zip)).unwrap();
+    let dir = staging();
+    let files = wire::decode_download_zip(&served(Method::DownloadFiles, &zip), dir.path()).unwrap();
     assert_eq!(
-        files,
+        files.iter().map(name_and_bytes).collect::<Vec<_>>(),
         [
-            MediaFile {
-                name: "sun.mp3".to_owned(),
-                data: b"sun bytes".to_vec()
-            },
-            MediaFile {
-                name: "moon.jpg".to_owned(),
-                data: vec![7u8; 5000]
-            },
+            ("sun.mp3".to_owned(), b"sun bytes".to_vec()),
+            ("moon.jpg".to_owned(), vec![7u8; 5000]),
         ]
     );
+    assert_eq!(files.iter().map(|file| file.file.size()).collect::<Vec<_>>(), [9, 5000]);
+    // Each file is staged in the given directory, under a name that is
+    // neither its entry's nor its real one.
+    for file in &files {
+        let path = file.file.path();
+        assert_eq!(path.parent(), Some(dir.path()), "{}", path.display());
+        let staged = path.file_name().unwrap().to_str().unwrap();
+        assert!(!["0", "1", "sun.mp3", "moon.jpg"].contains(&staged), "{staged}");
+    }
+    assert_eq!(staged_count(dir.path()), 2);
+
     // A file entry `_meta` does not map, no `_meta`, a `_meta` that is not
     // an object of strings, or no zip at all refuse the whole body.
     let a = b"a".as_slice();
@@ -995,8 +1034,58 @@ fn a_download_zip_maps_its_entries_through_meta() {
         b"PK not a zip".to_vec(),
         Vec::new(),
     ] {
-        bad_response(wire::decode_download_zip(&zip), Method::DownloadFiles);
+        bad_response(file_count(&zip), Method::DownloadFiles);
     }
+}
+
+#[test]
+fn a_zip_refused_after_some_files_expanded_leaves_nothing_staged() {
+    // E6: a failed decode applies nothing. Entry `1`'s bytes no longer match
+    // their checksum, which shows only once entry `0` is staged.
+    let mut zip = zip_of(&[
+        ("0", b"sun bytes".as_slice(), false),
+        ("1", b"moon bytes".as_slice(), false),
+        ("_meta", br#"{"0":"sun.mp3","1":"moon.jpg"}"#.as_slice(), false),
+    ]);
+    let at = zip.windows(10).position(|window| window == b"moon bytes").unwrap();
+    zip[at] = b'M';
+    bad_response(file_count(&zip), Method::DownloadFiles);
+}
+
+#[test]
+fn a_staged_file_goes_with_its_handle_unless_persisted() {
+    let zip = zip_of(&[
+        ("0", b"sun".as_slice(), false),
+        ("1", b"moon".as_slice(), false),
+        ("_meta", br#"{"0":"sun.mp3","1":"moon.jpg"}"#.as_slice(), false),
+    ]);
+    let dir = staging();
+    let mut files = wire::decode_download_zip(&zip, dir.path()).unwrap();
+    let moon = files.pop().unwrap();
+    let sun = files.pop().unwrap();
+    let sun_path = sun.file.path().to_owned();
+    let media = staging();
+    let kept = media.path().join("moon.jpg");
+    moon.file.persist(&kept).unwrap();
+    assert_eq!(std::fs::read(&kept).unwrap(), b"moon");
+    assert!(sun_path.exists());
+    drop(sun);
+    assert!(!sun_path.exists());
+    assert_eq!(staged_count(dir.path()), 0);
+    assert_eq!(std::fs::read(&kept).unwrap(), b"moon");
+}
+
+#[test]
+fn a_file_that_cannot_be_staged_is_a_local_failure() {
+    // errors.md E7: the answer decodes; the device cannot store it.
+    let zip = zip_of(&[
+        ("0", b"sun".as_slice(), false),
+        ("_meta", br#"{"0":"sun.mp3"}"#.as_slice(), false),
+    ]);
+    let dir = staging();
+    let err = wire::decode_download_zip(&zip, &dir.path().join("missing")).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::LocalStorage, "{err}");
+    assert_eq!(err.method, Some(Method::DownloadFiles), "{err}");
 }
 
 const MIB: usize = 1024 * 1024;
@@ -1023,10 +1112,16 @@ fn padded_zero_zip(stored: &[u8], zeros: usize) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
-/// How many files a download zip decodes to: a failing test prints no file
-/// bytes.
+/// How many files a download zip decodes to, into a new staging directory: a
+/// failing test prints no file bytes. A zip that does not decode leaves the
+/// directory empty.
 fn file_count(zip: &[u8]) -> Result<usize, JobError> {
-    wire::decode_download_zip(zip).map(|files| files.len())
+    let dir = staging();
+    let result = wire::decode_download_zip(zip, dir.path()).map(|files| files.len());
+    if result.is_err() {
+        assert_eq!(staged_count(dir.path()), 0, "a refused zip left files staged");
+    }
+    result
 }
 
 /// Bytes deflate cannot shrink (xorshift).
@@ -1074,16 +1169,11 @@ fn entries_that_expand_too_far_together_are_refused() {
     // One such entry beside 64 KiB of stored bytes expands about 60 times:
     // a deflated file a server may well send.
     let noise = incompressible(64 * 1024);
-    let files = wire::decode_download_zip(&padded_zero_zip(&noise, 4 * MIB)).unwrap();
-    assert_eq!(
-        files[0],
-        MediaFile {
-            name: "noise.bin".to_owned(),
-            data: noise
-        }
-    );
+    let dir = staging();
+    let files = wire::decode_download_zip(&padded_zero_zip(&noise, 4 * MIB), dir.path()).unwrap();
+    assert_eq!(name_and_bytes(&files[0]), ("noise.bin".to_owned(), noise));
     assert_eq!(files[1].name, "silence.wav");
-    assert!(files[1].data == zeros, "{} bytes", files[1].data.len());
+    assert!(holds_zeros(&files[1], 4 * MIB), "{} bytes", files[1].file.size());
 }
 
 #[test]
@@ -1092,15 +1182,62 @@ fn a_downloaded_file_over_100_mib_is_refused_and_one_of_100_mib_is_not() {
     // one). 2 MiB of stored bytes keep the zip's expansion in proportion
     // (E6), so only the file's own size can refuse it.
     let noise = incompressible(2 * MIB);
-    let files = wire::decode_download_zip(&padded_zero_zip(&noise, 100 * MIB)).unwrap();
+    let dir = staging();
+    let files = wire::decode_download_zip(&padded_zero_zip(&noise, 100 * MIB), dir.path()).unwrap();
     assert_eq!(files.len(), 2);
-    assert_eq!(files[1].data.len(), 100 * MIB);
-    assert!(files[1].data.iter().all(|&byte| byte == 0));
+    assert_eq!(files[1].file.size(), 100 * MIB as u64);
+    assert!(holds_zeros(&files[1], 100 * MIB));
     drop(files);
     bad_response(
         file_count(&padded_zero_zip(&noise, 100 * MIB + 1)),
         Method::DownloadFiles,
     );
+}
+
+#[test]
+fn a_padded_zip_under_the_expansion_ratio_is_refused_past_25_files_of_100_mib() {
+    // R1852: whatever the ratio allows, one answer's files together stay
+    // within 25 names (R1577) of at most 100 MiB each (W17.2). 25 deflated
+    // entries of 100 MiB of zeros, beside 24 MiB of stored bytes that keep
+    // the zip under 100 times its size: no entry over 100 MiB, the files
+    // 24 MiB past the limit. It fails before any file is staged.
+    let mut template = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    template
+        .start_file(
+            "zeros",
+            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+        )
+        .unwrap();
+    let piece = vec![0u8; MIB];
+    for _ in 0..100 {
+        template.write_all(&piece).unwrap();
+    }
+    let template = template.finish().unwrap().into_inner();
+    let mut template = zip::ZipArchive::new(Cursor::new(template)).unwrap();
+
+    let padding = incompressible(24 * MIB);
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    zip.start_file(
+        "0",
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored),
+    )
+    .unwrap();
+    zip.write_all(&padding).unwrap();
+    let mut meta = serde_json::Map::new();
+    meta.insert("0".to_owned(), json!("padding.bin"));
+    for index in 1..=25 {
+        zip.raw_copy_file_rename(template.by_index(0).unwrap(), index.to_string())
+            .unwrap();
+        meta.insert(index.to_string(), json!(format!("{index}.wav")));
+    }
+    zip.start_file("_meta", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(&bytes(&Value::Object(meta))).unwrap();
+    let zip = zip.finish().unwrap().into_inner();
+    let expanded = 24 * MIB + 25 * 100 * MIB;
+    assert!(expanded < 100 * zip.len(), "{}", zip.len());
+
+    bad_response(file_count(&zip), Method::DownloadFiles);
 }
 
 #[test]

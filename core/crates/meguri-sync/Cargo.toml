@@ -31,6 +31,10 @@ reqwest.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
+# The files of a media download, expanded into the caller's staging
+# directory rather than memory (R1852, wire-format.md W17.1); also the status
+# tests' collection files.
+tempfile.workspace = true
 tokio.workspace = true
 url.workspace = true
 # The media sync zips (wire-format.md W17).
@@ -41,8 +45,6 @@ zstd.workspace = true
 # The scripted stub server (`sync_stub`). Through it every test build has this
 # crate's `test-hooks` and `ankiweb` features.
 meguri-testkit.workspace = true
-# Collection files for the status tests.
-tempfile.workspace = true
 
 [[test]]
 name = "endpoint_guard"

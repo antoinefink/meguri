@@ -382,6 +382,7 @@ fn every_answer_that_does_not_decode_is_bad_response_with_its_method() {
     // names the place and never quotes the body.
     let served = common::served;
     let secret = "SECRET-VALUE";
+    let staging = tempfile::tempdir().unwrap();
     let cases: Vec<(Method, Result<(), JobError>)> = vec![
         (
             Method::HostKey,
@@ -451,7 +452,7 @@ fn every_answer_that_does_not_decode_is_bad_response_with_its_method() {
         ),
         (
             Method::DownloadFiles,
-            wire::decode_download_zip(&served(Method::DownloadFiles, secret.as_bytes())).map(|_| ()),
+            wire::decode_download_zip(&served(Method::DownloadFiles, secret.as_bytes()), staging.path()).map(|_| ()),
         ),
     ];
     for (method, result) in cases {
