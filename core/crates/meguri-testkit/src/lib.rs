@@ -16,4 +16,5 @@ pub mod private;
 pub mod report;
 pub mod scenario;
 pub mod suite;
+pub mod sync_stub;
 pub mod wallclock;
