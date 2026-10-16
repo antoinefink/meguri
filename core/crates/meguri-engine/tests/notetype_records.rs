@@ -22,7 +22,7 @@ use meguri_model::ids::NotetypeId;
 use meguri_model::notetype::Notetype;
 use meguri_model::proto::ProtoBlob;
 use meguri_model::schema11::notetype_to_json;
-use meguri_model::time::EpochSecs;
+use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ReadRows, ReaderRole, RowImage, RowKey, StampMode, Table};
@@ -198,22 +198,26 @@ fn a_styling_change_stamps_the_notetype_row_and_rewrites_no_field_or_template() 
     );
 }
 
-/// The state right after a sync: every note type marked as sent (`usn` 5)
-/// and `ls` = `scm`; then a minute later, so a schema change made now would
-/// move `scm`.
+/// Stands in for the end of a normal sync with server usn 5, which U107 owns:
+/// every note type marked as sent (`usn` 5), then the `col` row finalised as
+/// R1531 gives (`mod` and `ls` the server's time, here now; `usn` 6). Then a
+/// minute later, so a schema change made now would move `scm` past `ls`.
 fn all_synced(h: &Harness) {
     let ids = notetypes::read::ids(&*h.collection.reader(ReaderRole::Query).unwrap()).unwrap();
     for id in ids {
         synced(h, id);
     }
+    let now = h.clock.now_ms();
     h.collection
         .run(
             OpSpec::named("test_sync_finish", OpSource::UserNonUndoable)
                 .skip_undo()
                 .stamp(StampMode::CallerSupplied),
-            |ctx| {
+            move |ctx| {
                 let mut col = ctx.scope().col()?;
-                col.last_sync = col.schema_modified;
+                col.modified = EpochMillis(now);
+                col.last_sync = EpochMillis(now);
+                col.usn = Usn(6);
                 ctx.scope().put_col(&col)?;
                 Ok(())
             },
@@ -222,10 +226,18 @@ fn all_synced(h: &Harness) {
     h.clock.step_ms(60_000);
 }
 
-/// What the next normal sync sends of the note types: the pending ones
-/// (`usn` -1, `storage/ids-usn-mtime` S2), each whole in its schema-11
-/// form (`model/schema11-json`, the wire form U107 sends), by id.
-fn outgoing_notetypes(h: &Harness) -> Vec<serde_json::Value> {
+/// The `col` row's `mod`, `scm` and `ls`, which the offline sync status
+/// reads (`sync/meta-status` M5).
+fn sync_stamps(h: &Harness) -> (i64, i64, i64) {
+    let col = h.collection.reader(ReaderRole::Query).unwrap().col().unwrap();
+    (col.modified.0, col.schema_modified.0, col.last_sync.0)
+}
+
+/// The pending note types (`usn` -1, `storage/ids-usn-mtime` S2), each whole
+/// in its schema-11 form (`model/schema11-json`, the form `applyChanges`
+/// carries, `sync/wire-format` W6.1), by id. Which rows a normal sync sends
+/// and the upload itself are U107's.
+fn pending_notetypes(h: &Harness) -> Vec<serde_json::Value> {
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     let pending = reader
         .execute_raw("SELECT id FROM notetypes WHERE usn = -1 ORDER BY id", &[])
@@ -243,36 +255,60 @@ fn outgoing_notetypes(h: &Harness) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// `sync/meta-status` M5 right after a sync: `mod` = `ls` and `scm` not
+/// past `ls`, so nothing is pending locally.
+#[track_caller]
+fn assert_nothing_pending(h: &Harness) {
+    let (modified, schema, last_sync) = sync_stamps(h);
+    assert_ne!(last_sync, 0);
+    assert!(schema <= last_sync, "scm {schema} ls {last_sync}");
+    assert_eq!(modified, last_sync);
+    assert!(pending_notetypes(h).is_empty());
+}
+
+/// M5 after a local change that is not a schema change: `scm` as it was and
+/// not past `ls`, `mod` past `ls`: local changes pending, which a normal
+/// sync sends (M5's one-way row does not match).
+#[track_caller]
+fn assert_changes_pending_without_one_way(h: &Harness, schema_before: i64) {
+    let (modified, schema, last_sync) = sync_stamps(h);
+    assert_eq!(schema, schema_before);
+    assert!(schema <= last_sync, "scm {schema} ls {last_sync}");
+    assert!(modified > last_sync, "mod {modified} ls {last_sync}");
+}
+
 #[test]
-fn the_next_normal_sync_sends_a_note_type_edited_by_field_options_or_a_field_rename() {
+fn a_field_option_save_or_a_field_rename_leaves_the_whole_note_type_pending_for_a_normal_sync() {
     // N3.2, N8, R950: after a sync, a field option save and a field rename
-    // each make the note type pending as a whole; what the next normal sync
-    // sends of it carries every edit, and `scm` stays (no full sync).
+    // each make the note type pending as a whole, its schema-11 form carries
+    // every edit, and `scm` stays, so the collection needs a normal sync and
+    // not a one-way one (meta-status M5). That the normal sync then uploads
+    // it is U107's (normal_sync.rs): U107 depends on this unit.
     let h = Harness::open();
     let id = add(&h, pair("Pair")).unwrap().id;
     all_synced(&h);
+    assert_nothing_pending(&h);
     let schema = scm(&h);
-    assert!(outgoing_notetypes(&h).is_empty());
 
     let mut draft = edit(&h, id);
     draft.fields[0].config.sticky = true;
     draft.fields[1].config.description = "the answer".to_owned();
     save(&h, draft).unwrap();
-    let sent = outgoing_notetypes(&h);
-    assert_eq!(sent.len(), 1, "{sent:?}");
-    assert_eq!(sent[0]["id"], id.0);
-    assert_eq!(sent[0]["usn"], -1);
-    assert_eq!(sent[0]["mod"], h.clock.now_ms() / 1000);
-    assert_eq!(sent[0]["flds"][0]["sticky"], true);
-    assert_eq!(sent[0]["flds"][1]["description"], "the answer");
-    assert_eq!(scm(&h), schema);
+    let pending = pending_notetypes(&h);
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0]["id"], id.0);
+    assert_eq!(pending[0]["usn"], -1);
+    assert_eq!(pending[0]["mod"], h.clock.now_ms() / 1000);
+    assert_eq!(pending[0]["flds"][0]["sticky"], true);
+    assert_eq!(pending[0]["flds"][1]["description"], "the answer");
+    assert_changes_pending_without_one_way(&h, schema);
 
-    // The sync sends it and marks it sent. A field rename is U34's op; the
+    // A sync sends it and marks it sent. A field rename is U34's op; the
     // aggregate rule is the record's, so a write of the renamed aggregate
     // through the scope stamps the notetypes row too.
     all_synced(&h);
+    assert_nothing_pending(&h);
     let schema = scm(&h);
-    assert!(outgoing_notetypes(&h).is_empty());
     let mut renamed = read(&h, id);
     renamed.fields[1].name = "Answer".to_owned();
     h.collection
@@ -281,11 +317,11 @@ fn the_next_normal_sync_sends_a_note_type_edited_by_field_options_or_a_field_ren
             Ok(())
         })
         .unwrap();
-    let sent = outgoing_notetypes(&h);
-    assert_eq!(sent.len(), 1, "{sent:?}");
-    assert_eq!(sent[0]["id"], id.0);
-    assert_eq!(sent[0]["usn"], -1);
-    let fields: Vec<(&str, bool, &str)> = sent[0]["flds"]
+    let pending = pending_notetypes(&h);
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(pending[0]["id"], id.0);
+    assert_eq!(pending[0]["usn"], -1);
+    let fields: Vec<(&str, bool, &str)> = pending[0]["flds"]
         .as_array()
         .unwrap()
         .iter()
@@ -298,7 +334,7 @@ fn the_next_normal_sync_sends_a_note_type_edited_by_field_options_or_a_field_ren
         })
         .collect();
     assert_eq!(fields, [("Front", true, ""), ("Answer", false, "the answer")]);
-    assert_eq!(scm(&h), schema);
+    assert_changes_pending_without_one_way(&h, schema);
 }
 
 #[test]
