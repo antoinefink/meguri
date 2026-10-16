@@ -16,6 +16,12 @@ struct SidebarRootView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $navigation.columnVisibility) {
             SidebarView(navigation: navigation, features: features)
+                #if os(macOS)
+                // The iPad's system width (320 points) already fits a deck tree.
+                .navigationSplitViewColumnWidth(
+                    min: WindowMetrics.sidebarMinimumWidth, ideal: WindowMetrics.sidebarIdealWidth, max: WindowMetrics.sidebarMaximumWidth
+                )
+                #endif
         } detail: {
             Group {
                 if let review = navigation.review {
