@@ -1,0 +1,38 @@
+# furigana, kana and kanji (specs/render/filters.md F4, R966): ruby groups,
+# the consumed space, &nbsp;, the base run stopping at a space or >, sound
+# readings left alone, shortest base and reading, line breaks.
+id: render/filters/furigana
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Ruby Probe, fields: [Key, Text]}
+          cases:
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, " 日本[にほん]語[ご]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "&nbsp;私[わたし]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "&nbsp;&nbsp;x[y]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a>b[c]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "abc日本[にほん]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a  b[c]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "日本 語[ご]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "日本　語[ご]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "私は 学生[がくせい]です。"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "<b>漢字[かんじ]</b>"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "[sound:x.mp3]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "語[sound:x.mp3]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, " 語[sound:x.mp3]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "日本[にほん][sound:a.mp3]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a&nbsp;b"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "&NBSP;x[y]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "x[]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "x[]]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a[b[c]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a[\n]b[c]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a\nb[c\nd]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "a\nb[c]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "x[y]z[w]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "word [reading]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "[x]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "<ruby>既[すで]</ruby>"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "\U0001f600[smile]"]}
+            - {front: "{{Key}}[{{furigana:Text}}][{{kana:Text}}][{{kanji:Text}}]", fields: [k, "plain text, no brackets"]}

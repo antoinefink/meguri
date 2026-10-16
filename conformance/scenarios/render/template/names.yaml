@@ -1,0 +1,24 @@
+# Field names in tags (specs/render/template-syntax.md T1, T5, R956): exact,
+# case-sensitive matching, inner spaces, non-Latin scripts and emoji, special
+# characters inside names, no Unicode normalization.
+id: render/template/names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype:
+            name: Name Probe
+            fields: [Front, My Field, "日本語", "Ünï", "\U0001f600", "C#", "a/b", "x^y", "Mot clé"]
+          cases:
+            - front: "{{Front}}|{{My Field}}|{{ My Field }}|{{text:My Field}}"
+              fields: [f, "<b>m</b>"]
+            - front: "{{日本語}}|{{Ünï}}|{{\U0001f600}}|{{C#}}|{{a/b}}|{{x^y}}|{{Mot clé}}"
+              fields: [f, m, j, u, e, c, s, x, w]
+            - front: "{{#C#}}hash{{/C#}}{{#a/b}}slash{{/a/b}}{{^x^y}}caret{{/x^y}}{{Front}}"
+              fields: [f, m, j, u, e, c, s]
+            - {front: "{{Front}}{{front}}", fields: [f]}
+            - {front: "{{Front}}{{FRONT}}", fields: [f]}
+            - {front: "{{Front}}{{My  Field}}", fields: [f]}
+            - {front: "{{Front}}{{Ünï}}", fields: [f]}
+            - {front: "{{Front}}{{Mot clé}}", fields: [f]}
+            - {front: "{{Front}}{{#my field}}x{{/my field}}", fields: [f]}

@@ -26,6 +26,8 @@ meguri-storage = { workspace = true, features = ["test-hooks"] }
 # The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
 meguri-sync = { workspace = true, features = ["test-hooks"] }
+# The render area's `template` observation (exec/render.rs).
+meguri-template.workspace = true
 meguri-text.workspace = true
 rand.workspace = true
 ryu.workspace = true

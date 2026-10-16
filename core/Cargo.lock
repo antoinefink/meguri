@@ -1139,6 +1139,10 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "difflib",
+ "meguri-testkit",
+ "meguri-text",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]
@@ -1158,6 +1162,7 @@ dependencies = [
  "meguri-sched",
  "meguri-storage",
  "meguri-sync",
+ "meguri-template",
  "meguri-text",
  "rand 0.9.4",
  "ryu",

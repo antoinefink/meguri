@@ -1372,28 +1372,28 @@ flowchart TB
 
 **Template language: syntax**
 
-- R953. Templates use `{{…}}` tags whose content is trimmed and whose leading extra `{` are ignored (so `{{{Field}}}` equals `{{Field}}`).
+- R953. Templates use `{{…}}` tags whose content is trimmed and whose leading extra `{` are ignored, so `{{{Field}}}` names the same field as `{{Field}}`. A tag ends at its first `}}`, so the third `}` of `{{{Field}}}` is plain text after the field's text, as in Anki. (Amended 2026-10-16 to match the oracle, as R1907 requires: this first said that `{{{Field}}}` equals `{{Field}}`; `docs/process/review-log/U60.md`, A1.)
 - R954. `{{#Key}}…{{/Key}}` renders its content when Key is non-empty and `{{^Key}}…{{/Key}}` when empty, nestable to any depth, with emptiness per R779.
 - R955. `{{#cN}}` is true only on the card whose cloze number (or template ordinal + 1) is N, even for normal note types.
 - R956. A replacement `{{f2:f1:Field}}` names the field after the last colon and applies filters right to left (f1 first), field names are case-sensitive and may contain spaces, and an empty filter name (from `::`) is ignored.
 - R957. Text inside HTML comments `<!-- … -->` is never evaluated and is output verbatim.
 - R958. A template that starts with `{{=<% %>=}}` uses `<%` and `%>` as tag delimiters for the rest of that template.
-- R959. Unclosed tags, unclosed or mismatched conditionals, unknown fields and unknown conditional keys render a clear error message in place of the card side instead of failing (deviation: message wording is Meguri's).
+- R959. Unclosed, unopened or mismatched conditionals, unknown fields and unknown conditional keys render a clear error message in place of the card side instead of failing (deviation: message wording is Meguri's). An opening `{{` with no `}}` after it is plain text, not an error, as in Anki. (Amended 2026-10-16 to match the oracle: this first listed unclosed tags among the errors; `docs/process/review-log/U60.md`, A1.)
 
 **Template language: special fields**
 
-- R960. The special fields are FrontSide (the rendered question without its style block, on the back only), Tags (space-separated), Type (note type name), Deck (full path, the original deck for cards in filtered decks), Subdeck (last path component), Card (template name), CardFlag (`flag0`–`flag7`) and CardID, and a real field with the same name takes precedence.
+- R960. The special fields are FrontSide (the rendered question without its style block, on the back only), Tags (space-separated), Type (note type name), Deck (full path, the original deck for cards in filtered decks), Subdeck (last path component), Card (template name), CardFlag (`flag` followed by the card's flags value: `flag0`–`flag7` for the user flags, higher bits unmasked as in Anki) and CardID, and a real field with the same name takes precedence, except that `{{FrontSide}}` always shows the question: a note field named FrontSide is seen only by sections, the blank check and card generation, as in Anki. (Amended 2026-10-16 to match the oracle: this first let a field named FrontSide win everywhere and limited CardFlag to `flag0`–`flag7`; `docs/process/review-log/U60.md`, A1.)
 - R961. Audio in `{{FrontSide}}` is shown as replay buttons on the back but is not auto-played again there.
 
 **Template language: filters**
 
 - R962. `text:` strips HTML and decodes entities.
 - R963. `cloze:` renders the field's clozes for the current card, and `cloze-only:` outputs only the current card's cloze contents (hints on the front, answers on the back) joined by ", ".
-- R964. `type:` as the outermost filter becomes a type-in placeholder for that field and drops any other filters, with modifiers `cloze`, `nc` (ignore combining characters) and `ci` (ignore case) combinable in any order, and the legacy names `type-cloze` and `type-nc` accepted.
-- R965. `hint:` outputs, for non-empty text, a "FieldName" link that reveals a hidden div with the text, with Anki's exact markup and an id derived from the first 8 bytes of the BLAKE3 hash of text plus field name, so output matches Anki byte for byte.
+- R964. `type:` as the outermost filter becomes Anki's type-in placeholder for that field and drops any other filters: exactly `type:nc:` (or the legacy `type-nc:`) gives the `nc` placeholder, exactly `type:cloze:` (or `type-cloze:`) the `cloze` one, and every other chain the plain one, so card HTML matches Anki. The type-in comparison reads the modifiers `cloze`, `nc` (ignore combining characters) and `ci` (ignore case), combinable in any order, from the template; `ci` and combined modifiers are a Meguri addition with its deviation entry (U64). (Amended 2026-10-16 to match the oracle: this first put `ci` and combined modifiers in the placeholder, which Anki's lacks; `docs/process/review-log/U60.md`, A1.)
+- R965. `hint:` outputs, for text that is not empty or white space only, a "FieldName" link that reveals a hidden div with the text, with Anki's exact markup and an id derived from the first 8 bytes of the BLAKE3 hash of text plus field name, so output matches Anki byte for byte; empty or white-space-only text is output unchanged. (Amended 2026-10-16 to match the oracle: this first said "for non-empty text"; `docs/process/review-log/U60.md`, A1.)
 - R966. `furigana:` turns each `base[reading]` into `<ruby><rb>base</rb><rt>reading</rt></ruby>`, `kana:` keeps only the reading and `kanji:` only the base, where the base is the run of characters other than space and `>` just before the bracket, one preceding space is consumed, `&nbsp;` counts as a space, and `[sound:…]` is left untouched.
 - R967. `tts <lang> [options]:` produces Anki's `[anki:tts lang=…]text[/anki:tts]` markup so card HTML matches Anki, and review shows the text instead of speaking it (TTS out of scope).
-- R968. Unknown filters (for example `editable:`, `edit:`, `clickable:`) pass their text through unchanged and later filters still apply.
+- R968. Unknown filters (for example `editable:`, `edit:`, `clickable:`) pass their text through unchanged. As in Anki without add-ons, an unknown filter ends the chain: filters written to its left have no effect, so `{{edit:furigana:F}}` gives the furigana output and `{{furigana:edit:F}}` the field's text. (Amended 2026-10-16 to match the oracle: this first said that later filters still apply; `docs/process/review-log/U60.md`, A1.)
 
 **Cloze syntax**
 
@@ -3264,6 +3264,7 @@ Product Contract preservation: changed, reconciling internal contradictions foun
 - R801: local-server adds leave Add-screen defaults alone.
 - R1451: full case folding, as Anki's pinned `unicase` does.
 - R1877 and R1885: test counts and the lock-file pin, matching the 26.09.3 tag.
+- R953, R959, R960, R964, R965 and R968: the template language as the oracle shows it, which R1907's string-identical output requires (amended 2026-10-16 after U60's review, `docs/process/review-log/U60.md`, A1).
 
 Readings of Product Contract conflicts settled during review, with the Product Contract text unchanged:
 - R239 and R387: ⌘⌫ deletes the note at once with the Undo toast, as the ⋯ menu does (U181).
@@ -3930,7 +3931,7 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 | U51 | App-side scheduling coordination: day clock monitor, optimizer gate, FSRS sheet, diagnostics | `app/Packages/MeguriKit/Sources/AppModel/`<br>`app/Packages/MeguriKit/Sources/Features/Settings/SchedulerDiagnosticsView.swift`<br>`app/Packages/MeguriKit/Sources/Features/Home/FsrsEnabledSheet.swift` | U6, U7, U9, U10, U13, U40, U47, U50, U113, U114, U151, U154, U160, U163 |
 | U60 | Template engine: syntax, special fields, filters | `core/crates/meguri-template/Cargo.toml`<br>`core/crates/meguri-template/src/`<br>`core/fuzz/fuzz_targets/template_parse.rs` | U2, U3, U4, U5, U20 |
 | U61 | Cloze rendering and cloze utilities | `core/crates/meguri-template/src/cloze/`<br>`core/fuzz/fuzz_targets/cloze.rs`<br>`core/crates/meguri-template/tests/cloze_unit.rs` | U20, U60 |
-| U62 | Card render pipeline, AV tags and display transform | `core/crates/meguri-template/src/`<br>`core/crates/meguri-engine/src/rendering/`<br>`core/crates/meguri-ffi/src/render.rs` | U6, U21, U23, U24, U28, U29, U60, U61 |
+| U62 | Card render pipeline, AV tags and display transform | `core/crates/meguri-template/src/`<br>`core/crates/meguri-engine/src/rendering/`<br>`core/crates/meguri-ffi/src/render.rs` | U6, U21, U23, U24, U27, U28, U29, U60, U61 |
 | U63 | Image occlusion storage format, detection and ordinals | `core/crates/meguri-template/src/image_occlusion/`<br>`core/crates/meguri-engine/src/image_occlusion.rs`<br>`core/crates/meguri-ffi/src/image_occlusion.rs` | U20, U21, U29, U61 |
 | U64 | Type-in answer, media display encoding and IO render data | `core/crates/meguri-template/src/type_answer/`<br>`core/crates/meguri-template/src/image_occlusion/render.rs`<br>`core/crates/meguri-template/src/media_display.rs` | U20, U61, U62, U63 |
 | U65 | Rendering spikes S1 and S2 | `app/Packages/MeguriKit/Tests/CardRenderingTests/Spikes/`<br>`app/MeguriUITests/CardSwapTimingSpikeTests.swift`<br>`docs/design/decisions.md` | U7 |
@@ -5698,6 +5699,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Churn scenarios assert zero pending rows (`usn = -1`), unchanged `col.mod` and zero dirty media after repeated launches and idle periods.
 - Each leg is owned by the unit that implements the behavior: review (U43), render (U60), sync (U107), device-local settings (U160), optimizer (U47), and the Migaku startup leg (a stub until U137 lands). This unit owns the fixtures, the dump rules and the suite wiring, and lands in M1 so the preservation suite guards the M1 trial.
 - Model scenarios (moved from U21, amended 2026-10-14; `docs/process/review-log/U21.md`, A1): this unit builds Meguri's `legacy_json`, `legacy_update` and `blob_decode` adapters on U21's codecs (`specs/conformance/model-ops.md` L1, L2, L4), and Meguri's `db_exec` (`specs/conformance/dsl.md`) unless the storage area has registered it already. With the note type, deck and preset setup sections of U28 and U29, that runs `conformance/scenarios/model/proto/` and `model/schema11/` (all but `apkg-notetypes`) on Meguri's executor.
+- Render scenario (moved from U60, amended 2026-10-16; `docs/process/review-log/U60.md`, A2): `legacy_update` saves the note type as `specs/conformance/model-ops.md` L2 says, recomputing each template's card requirement with U60's `legacy_requirement` (`specs/render/template-syntax.md` T11.3), so `conformance/scenarios/render/template/legacy-req` runs on Meguri's executor; this unit adds it to `conformance/scenarios/render/area.yaml`.
 
 **Execution note:** Spec writer builds fixtures and dump rules first; legs land as their implementing units land.
 
@@ -5713,7 +5715,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Ten open/close cycles plus a 1,000-op run → `sqlite_master` unchanged (R2016).
 - An optimizer write (U47 leg) → only `fsrsParams6` changes in the preset blob (R1486, R696); with `fsrsParams5` present and `fsrsParams6` empty, the write fills `fsrsParams6` and `fsrsParams5` stays byte-identical.
 
-**Verification:** preservation suite green in T0 (goldens) on every core change and in T1 (live legs); the R2017 normalized-dump comparison reports zero differences; `conformance/scenarios/model/proto/` and `model/schema11/` except `apkg-notetypes` pass on Meguri's executor on the macOS and Linux lanes.
+**Verification:** preservation suite green in T0 (goldens) on every core change and in T1 (live legs); the R2017 normalized-dump comparison reports zero differences; `conformance/scenarios/model/proto/` and `model/schema11/` except `apkg-notetypes`, and `render/template/legacy-req` (moved from U60, A2), pass on Meguri's executor on the macOS and Linux lanes.
 
 ### U37. Collection FFI surface and CoreBridge engine services
 
@@ -6572,37 +6574,39 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 **Approach:**
 - The crate depends only on `meguri-text` (KTD2). It takes a template string, a field map (note fields plus special fields supplied by the caller) and the card ordinal, and returns rendered text plus structured errors. It knows nothing about storage.
 - Parse once, render many: the parsed form is cached by the engine per notetype id and mtime (U62). The parser keeps HTML comments as opaque nodes (R957) and switches delimiters only at template start (R958).
-- Errors are structured kinds (unclosed tag, unclosed or mismatched conditional, unknown field, unknown conditional key) rendered as Meguri-worded messages in place of the side (R959). R1887: tests compare kinds, not wording.
-- `type:` as the outermost filter emits the oracle's type-in marker and drops other filters; modifier parsing per R964. The marker is resolved later by U64.
+- Errors are structured kinds (unclosed, unopened or mismatched conditional, unknown field, unknown conditional key: `specs/render/template-syntax.md` T9) rendered as Meguri-worded messages in place of the side (R959). An unclosed `{{` is text, not an error. R1887: tests compare kinds, not wording.
+- `type:` as the outermost filter emits the oracle's type-in marker and drops other filters (R964, `specs/render/filters.md` F7). The parse result keeps every filter name, so U64 reads R964's modifiers from it and resolves the marker.
 - `hint:` ids use BLAKE3 (R965). `blake3` joins the `=`-pinned parity crates at the oracle lockfile's version (cross-area: KTD2 list).
 - `tts` filter output per R967; the reviewer's display of it is U62.
 - `analysis.rs` exposes, without rendering: the field names a template references, and whether a template would render non-empty for a given set of non-empty fields (R779). U27 (card generation) and U29 (note type validation, R942) consume this; U200 consumes the parse-error list for live errors (R930).
 - The parsed AST is public, and every replacement, conditional open, negated open and close tag carries its byte range in the source, also after a `{{=<% %>=}}` delimiter change. U34's reference rewriting consumes it (cross-area contract).
-- Unknown filters pass text through and later filters still apply (R968).
+- Unknown filters pass text through and end the chain: filters to their left have no effect (R968, `specs/render/filters.md` F1).
 
 **Execution note:** Spec writer first (KTD1): `specs/render/*.md` plus scenarios and oracle goldens. The implementer then works test-first against the goldens, in a worktree without `refs/` or `local-data/`.
 
 **Patterns to follow:** KTD1 provenance trailers; one error enum per crate; `=` pins for parity crates; scenario/golden layout from U4; insta only for Meguri-produced text, never as goldens.
 
 **Test scenarios:**
-- `{{{Front}}}`, `{{ Front }}` and `{{Front}}` render identically (R953).
+- `{{ Front }}` and `{{Front}}` render identically, and `{{{Front}}}` renders the same text followed by `}` (R953).
 - Nested `{{#A}}{{^B}}x{{/B}}{{/A}}` across all four empty/non-empty combinations; fields holding only `<br>`, ` <div></div> `, `&nbsp;` or `<span></span>` evaluate emptiness per R779.
 - `{{#c2}}…{{/c2}}` on a normal note type's second template renders; on the first it does not (R955).
 - `{{f2:f1:My Field}}` applies f1 then f2; `{{::Field}}` ignores the empty filter; a field named `front` does not match `{{Front}}` (R956).
 - `<!-- {{#Missing}} -->` is output verbatim with no error (R957).
 - For every corpus template, the text rebuilt from the AST spans and the unspanned text equals the source byte for byte, including templates with alternate delimiters and comments.
 - A template starting `{{=<% %>=}}` renders `<%Front%>` and leaves `{{Front}}` literal (R958).
-- Unclosed `{{Front`, `{{#A}}` without close, `{{#A}}…{{/B}}`, `{{Nope}}` and `{{#Nope}}` each produce the matching error kind, and the oracle's error kind matches (R959, R1908).
-- A real field named `Tags` wins over the special field (R960).
+- `{{#A}}` without close, `{{/A}}` without open, `{{#A}}…{{/B}}`, `{{Nope}}` and `{{#Nope}}` each produce the matching error kind, and the oracle's error kind matches (R959, R1908); an unclosed `{{Front` is plain text with no error.
+- A real field named `Tags` wins over the special field; a real field named `FrontSide` does not change `{{FrontSide}}` (R960).
 - `{{text:F}}` with `<b>a&amp;b</b>` gives `a&b` (R962).
-- `{{hint:F}}` output equals the oracle byte for byte for ASCII, CJK and emoji text; empty text gives nothing (R965).
+- `{{hint:F}}` output equals the oracle byte for byte for ASCII, CJK and emoji text; empty text gives nothing and white-space-only text comes back unchanged (R965).
 - `{{furigana:F}}`, `{{kana:F}}` and `{{kanji:F}}` on ` 日本[にほん]語[ご]`, `&nbsp;私[わたし]`, `a>b[c]` and `[sound:x.mp3]` match the oracle (R966).
 - `{{tts ja_JP voices=Apple_Kyoko speed=0.8:F}}` matches the oracle markup (R967).
-- `{{editable:furigana:F}}` equals `{{furigana:F}}`, and `{{type:nc:ci:F}}`, `{{type-nc:F}}` and `{{type-cloze:F}}` produce the oracle's markers (R964, R968).
+- `{{editable:furigana:F}}` equals `{{furigana:F}}` and `{{furigana:edit:F}}` gives the field's text (R968); `{{type:nc:ci:F}}`, `{{type-nc:F}}` and `{{type-cloze:F}}` produce the oracle's markers (R964).
 - Analysis: `{{#A}}{{B}}{{/A}}` requires both A and B non-empty; `{{^A}}x{{/A}}` makes no field required.
 - Fuzz: random bytes and generated templates never panic, and parse→render terminates within a fixed bound on a 5 MB template (R1805).
 
-**Verification:** Every scenario under `conformance/scenarios/render/{template,filters,special-fields}/` and the generated template corpus match their oracle goldens in T0 and T1; the fuzz target runs clean for its nightly budget.
+**Verification:** Every scenario under `conformance/scenarios/render/{template,filters,special-fields}/` and the generated template corpus match their oracle goldens in T0 and T1, except `special-fields/cards` and `template/legacy-req`: the golden-pair tests (`core/crates/meguri-template/tests/golden_pairs.rs`) check the engine against those two goldens, T0 reports them `pending` and fails none, and their Meguri runs move to U62 and U36. The fuzz target runs clean for its nightly budget.
+
+Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: the Approach and test scenarios follow the oracle-backed specs where R953, R959, R960, R964, R965 and R968 first said otherwise (`specs/render/template-syntax.md` T14, `filters.md` F9). A2: this line first asked every render scenario of U60's areas to pass on Meguri's executor. `special-fields/cards` needs notes, cards and decks in the collection and the cloze blank check, and `template/legacy-req` needs the `legacy_update` and `legacy_json` adapters and the note type save, all built by later units, so their Meguri runs move to U62 and U36, whose Verification lines name them.
 
 ### U61. Cloze rendering and cloze utilities
 
@@ -6649,7 +6653,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 
 **Requirements:** R470 (style wrapping), R472 (supplies `reviewExtra`), R525–R528, R531, R559 (index kept), R564, R583, R976, R960–R961 (special-field values supplied by the engine); R1907, R1908, R1910 (the private-collection run belongs to the U240+ suite).
 
-**Dependencies:** U60, U61, U6, U21, U23, U24, U28 (deck names for Deck/Subdeck), U29 (templates, CSS, browser formats).
+**Dependencies:** U60, U61, U6, U21, U23, U24, U27 (notes and cards to render, and their setup in Meguri's executor; added 2026-10-16, `docs/process/review-log/U60.md`, A2), U28 (deck names for Deck/Subdeck), U29 (templates, CSS, browser formats).
 
 **Files:**
 - `core/crates/meguri-template/src/card.rs` (question/answer composition, FrontSide, blank-front and missing-cloze results)
@@ -6673,6 +6677,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 4. Render modes: `review`, `preview` and `browser`. Browser mode uses the browser formats when non-empty (R935, consumed by U84) and suppresses the blank-front message (R976).
 5. FFI returns one `RenderedCard` record per call: per-side display HTML, AV tag lists (file name, or TTS with its text), type-in descriptor, error kind, card ordinal, flag/mark state, notetype CSS and `reviewExtra`. Calls go on the interactive lane (KTD9, R1857). Media IRI encoding and type-in substitution are added by U64. Rendering is read-only (R583).
 6. A parse cache keyed by notetype id and mtime avoids re-parsing on every card. Change-stream notetype events invalidate it.
+7. The testkit's `template` observation gets its card cases (`specs/conformance/render-ops.md` Q1.3; moved from U60, amended 2026-10-16, `docs/process/review-log/U60.md`, A2): the field map of a stored card as step 1 builds it, rendered by `core/crates/meguri-testkit/src/exec/render.rs` as Q1.4 says, with the cloze blank check. That runs `conformance/scenarios/render/special-fields/cards` on Meguri's executor; this unit adds it to `conformance/scenarios/render/area.yaml`.
 
 **Execution note:** Spec writer first (KTD1). The display-transform spec is written from R525–R527 and R564 directly, since no oracle covers it.
 
@@ -6691,7 +6696,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - A notetype edit event invalidates the parse cache, and the next render uses the new template.
 - Benchmark: render of a 30 KB-script template and a 5 MB template is tracked under the R1864 instruction-count gate.
 
-**Verification:** All `render/{pipeline,av-tags,errors}` scenarios match their goldens; display snapshots are reviewed and committed; `CoreBridge.render…` is callable from Swift tests in `app/Packages/MeguriCore/Tests/`.
+**Verification:** All `render/{pipeline,av-tags,errors}` scenarios, and `render/special-fields/cards` (moved from U60, A2), match their goldens; display snapshots are reviewed and committed; `CoreBridge.render…` is callable from Swift tests in `app/Packages/MeguriCore/Tests/`.
 
 ### U63. Image occlusion storage format, detection and ordinals
 

@@ -433,7 +433,8 @@
               "if": { "properties": { "fns": { "contains": { "const": "unicase_compare" } } } },
               "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "array" } } } },
               "else": { "properties": { "inputs": { "items": { "type": "string" } } } }
-            }
+            },
+            "template": { "$ref": "#/$defs/template_request" }
           },
           "additionalProperties": false
         }
@@ -460,6 +461,60 @@
     "draft_args": {
       "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
       "type": "object"
+    },
+    "template_request": {
+      "description": "render-ops.md Q1.1: the template engine on given template texts. notetype is required when a case has no card and not allowed otherwise. Field name rules (Q1.1), ord and field-mapping checks are made when the scenario loads.",
+      "type": "object",
+      "required": ["cases"],
+      "additionalProperties": false,
+      "properties": {
+        "notetype": {
+          "type": "object",
+          "required": ["name", "fields"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "enum": ["standard", "cloze"] },
+            "fields": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true }
+          }
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "description": "Q1.2 new-note case.",
+                "type": "object",
+                "required": ["front"],
+                "additionalProperties": false,
+                "properties": {
+                  "front": { "type": "string" },
+                  "back": { "type": "string" },
+                  "ord": { "type": "integer", "minimum": 0, "maximum": 499 },
+                  "name": { "type": "string", "minLength": 1 },
+                  "fields": { "$ref": "#/$defs/fields" },
+                  "tags": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              {
+                "description": "Q1.3 card case.",
+                "type": "object",
+                "required": ["card", "front"],
+                "additionalProperties": false,
+                "properties": {
+                  "card": { "$ref": "#/$defs/card_ref" },
+                  "front": { "type": "string" },
+                  "back": { "type": "string" }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "if": { "properties": { "cases": { "contains": { "not": { "required": ["card"] } } } } },
+      "then": { "required": ["notetype"] },
+      "else": { "not": { "required": ["notetype"] } }
     },
     "names": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
     "package_name": {

@@ -9,6 +9,7 @@ pub mod live;
 mod meguri;
 mod oracle;
 pub mod parties;
+mod render;
 pub mod sched;
 mod storage;
 pub mod sync_guard;

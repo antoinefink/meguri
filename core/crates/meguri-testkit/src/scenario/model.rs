@@ -1103,6 +1103,8 @@ pub enum ObservationKind {
     Queue,
     DeckTree,
     Render,
+    /// render-ops.md Q1.
+    Template,
     Search,
     DbDump,
     /// storage-ops.md P3.
@@ -1133,7 +1135,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 20] = [
+    pub const ALL: [ObservationKind; 21] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1144,6 +1146,7 @@ impl ObservationKind {
         ObservationKind::Queue,
         ObservationKind::DeckTree,
         ObservationKind::Render,
+        ObservationKind::Template,
         ObservationKind::Search,
         ObservationKind::DbDump,
         ObservationKind::SchemaObjects,
@@ -1168,6 +1171,7 @@ impl ObservationKind {
             ObservationKind::Queue => "queue",
             ObservationKind::DeckTree => "deck_tree",
             ObservationKind::Render => "render",
+            ObservationKind::Template => "template",
             ObservationKind::Search => "search",
             ObservationKind::DbDump => "db_dump",
             ObservationKind::SchemaObjects => "schema_objects",
@@ -1201,6 +1205,7 @@ impl ObservationKind {
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
+            | ObservationKind::Template
             | ObservationKind::Text
             | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
@@ -1590,6 +1595,241 @@ impl FsrsNextRequest {
             inputs.push(input);
         }
         Ok(FsrsNextRequest { param_sets, inputs })
+    }
+}
+
+/// A `template` observation request (render-ops.md Q1.1-Q1.3), read with
+/// the load-time checks of Q1.6.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateRequest {
+    /// Present exactly when some case is a new-note case.
+    pub notetype: Option<TemplateNotetype>,
+    pub cases: Vec<TemplateCase>,
+}
+
+/// The note type of a request's new-note cases (Q1.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateNotetype {
+    pub name: String,
+    pub kind: NotetypeKind,
+    pub fields: Vec<String>,
+}
+
+/// One case of a `template` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateCase {
+    /// Q1.2: a note and card not yet added.
+    NewNote(NewNoteCase),
+    /// Q1.3: a stored card with other template texts.
+    Card { card: CardRef, front: String, back: String },
+}
+
+/// Q1.2, with the field values resolved to the note type's field order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewNoteCase {
+    pub front: String,
+    pub back: String,
+    pub ord: u32,
+    /// The template name; `None` means `Card <ord + 1>`.
+    pub name: Option<String>,
+    /// One value per note type field, in field order; missing ones empty.
+    pub fields: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+/// Q1.2: the largest card ordinal a new-note case takes.
+pub const TEMPLATE_MAX_ORD: u64 = 499;
+
+impl TemplateRequest {
+    /// Reads the request with scenario.schema.json's rules and Q1.1's
+    /// name rules, ord range and field checks.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<TemplateRequest, FormatError> {
+        let bad = |why: String| FormatError::new(format!("observation template: {why}"));
+        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "notetype" | "cases")) {
+            return Err(bad(format!("takes {{notetype?, cases}}, not {key:?}")));
+        }
+        let cases = map
+            .get("cases")
+            .and_then(Value::as_array)
+            .filter(|cases| !cases.is_empty())
+            .ok_or_else(|| bad("cases is a non-empty list".to_owned()))?;
+        let notetype = map
+            .get("notetype")
+            .map(TemplateNotetype::from_value)
+            .transpose()
+            .map_err(|e| bad(format!("notetype: {e}")))?;
+        let has_new_note = cases.iter().any(|case| case.get("card").is_none());
+        match (&notetype, has_new_note) {
+            (None, true) => return Err(bad("a new-note case needs notetype".to_owned())),
+            (Some(_), false) => {
+                return Err(bad(
+                    "notetype is only for new-note cases; every case names a card".to_owned()
+                ));
+            }
+            _ => {}
+        }
+        let cases = cases
+            .iter()
+            .enumerate()
+            .map(|(i, case)| {
+                TemplateCase::from_value(case, notetype.as_ref()).map_err(|e| bad(format!("case {i}: {e}")))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(TemplateRequest { notetype, cases })
+    }
+}
+
+impl TemplateNotetype {
+    fn from_value(value: &Value) -> Result<TemplateNotetype, String> {
+        let map = value.as_object().ok_or("must be a mapping")?;
+        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "name" | "kind" | "fields")) {
+            return Err(format!("takes {{name, kind?, fields}}, not {key:?}"));
+        }
+        let name = map.get("name").and_then(Value::as_str).ok_or("name is a string")?;
+        if name.is_empty() || meguri_text::normalize::nfc(name) != name || name.contains('"') {
+            return Err(format!("name {name:?} must be non-empty, NFC and without \""));
+        }
+        let kind = match map.get("kind").map(|k| k.as_str()) {
+            None | Some(Some("standard")) => NotetypeKind::Standard,
+            Some(Some("cloze")) => NotetypeKind::Cloze,
+            Some(_) => return Err("kind is standard or cloze".to_owned()),
+        };
+        let fields = map
+            .get("fields")
+            .and_then(Value::as_array)
+            .filter(|fields| !fields.is_empty())
+            .ok_or("fields is a non-empty list of field names")?;
+        let mut names: Vec<String> = Vec::with_capacity(fields.len());
+        for field in fields {
+            let field = field.as_str().ok_or("fields are strings")?;
+            if let Some(problem) = field_name_problem(field) {
+                return Err(format!("field {field:?} {problem}"));
+            }
+            if let Some(twin) = names
+                .iter()
+                .find(|n| meguri_text::fold::compare_folded(n, field) == std::cmp::Ordering::Equal)
+            {
+                return Err(format!(
+                    "fields {twin:?} and {field:?} are the same name to Anki (unicase)"
+                ));
+            }
+            names.push(field.to_owned());
+        }
+        Ok(TemplateNotetype {
+            name: name.to_owned(),
+            kind,
+            fields: names,
+        })
+    }
+}
+
+/// Q1.1: why a note type save would change or refuse this field name.
+fn field_name_problem(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("is empty")
+    } else if meguri_text::normalize::nfc(name) != name {
+        Some("is not NFC")
+    } else if name.contains([':', '{', '}', '"']) {
+        Some("holds one of : { } \"")
+    } else if name.starts_with(['#', '/', '^']) || name.starts_with(char::is_whitespace) {
+        Some("starts with #, /, ^ or white space")
+    } else if name.ends_with(char::is_whitespace) {
+        Some("ends with white space")
+    } else {
+        None
+    }
+}
+
+impl TemplateCase {
+    fn from_value(value: &Value, notetype: Option<&TemplateNotetype>) -> Result<TemplateCase, String> {
+        let map = value.as_object().ok_or("must be a mapping")?;
+        let text = |key: &str, required: bool| match map.get(key) {
+            Some(Value::String(s)) => Ok(s.clone()),
+            None if !required => Ok(String::new()),
+            None => Err(format!("{key} is required")),
+            Some(_) => Err(format!("{key} is a string")),
+        };
+        if let Some(card) = map.get("card") {
+            if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "card" | "front" | "back")) {
+                return Err(format!("a card case takes {{card, front, back?}}, not {key:?}"));
+            }
+            let card: LogicalRef = card
+                .as_str()
+                .ok_or("card is a #cN reference")?
+                .parse()
+                .map_err(|e: FormatError| e.to_string())?;
+            if card.kind != RefKind::Card {
+                return Err(format!("{card} is not a card reference"));
+            }
+            return Ok(TemplateCase::Card {
+                card: CardRef(card),
+                front: text("front", true)?,
+                back: text("back", false)?,
+            });
+        }
+        let notetype = notetype.ok_or("a new-note case needs notetype")?;
+        if let Some(key) = map
+            .keys()
+            .find(|k| !matches!(k.as_str(), "front" | "back" | "ord" | "name" | "fields" | "tags"))
+        {
+            return Err(format!(
+                "a new-note case takes {{front, back?, ord?, name?, fields?, tags?}}, not {key:?}"
+            ));
+        }
+        let ord = match map.get("ord") {
+            None => 0,
+            Some(ord) => ord
+                .as_u64()
+                .filter(|&ord| ord <= TEMPLATE_MAX_ORD)
+                .and_then(|ord| u32::try_from(ord).ok())
+                .ok_or_else(|| format!("ord is an integer from 0 to {TEMPLATE_MAX_ORD}"))?,
+        };
+        let name = match map.get("name") {
+            None => None,
+            Some(Value::String(name)) if !name.is_empty() => Some(name.clone()),
+            Some(_) => return Err("name is a non-empty string".to_owned()),
+        };
+        let mut fields = vec![String::new(); notetype.fields.len()];
+        match map.get("fields") {
+            None => {}
+            Some(Value::Array(values)) => {
+                if values.len() > fields.len() {
+                    return Err(format!("{} field values for {} fields", values.len(), fields.len()));
+                }
+                for (slot, value) in fields.iter_mut().zip(values) {
+                    *slot = value.as_str().ok_or("field values are strings")?.to_owned();
+                }
+            }
+            Some(Value::Object(values)) => {
+                for (name, value) in values {
+                    let ord =
+                        notetype.fields.iter().position(|f| f == name).ok_or_else(|| {
+                            format!("fields names {name:?}, which is not a field of {:?}", notetype.name)
+                        })?;
+                    fields[ord] = value.as_str().ok_or("field values are strings")?.to_owned();
+                }
+            }
+            Some(_) => return Err("fields is a list of values or a mapping of field name to value".to_owned()),
+        }
+        let tags = match map.get("tags") {
+            None => Vec::new(),
+            Some(tags) => tags
+                .as_array()
+                .and_then(|tags| {
+                    tags.iter()
+                        .map(|t| t.as_str().map(str::to_owned))
+                        .collect::<Option<Vec<_>>>()
+                })
+                .ok_or("tags is a list of strings")?,
+        };
+        Ok(TemplateCase::NewNote(NewNoteCase {
+            front: text("front", true)?,
+            back: text("back", false)?,
+            ord,
+            name,
+            fields,
+            tags,
+        }))
     }
 }
 
