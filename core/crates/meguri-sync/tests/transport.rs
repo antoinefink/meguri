@@ -809,7 +809,8 @@ fn no_redirect_is_ever_followed_automatically() {
     }
     assert!(target.requests().is_empty());
 
-    // A 308 on the repeated meta is refused too.
+    // A 308 on the repeated meta is refused too, and the job then has no
+    // new endpoint: not the first target either (T7).
     let second = SyncStub::serve(|_| Reply::redirect(308, Some("http://127.0.0.1:9/")));
     let to_second = second.url();
     let first = SyncStub::serve(move |_| Reply::redirect(308, Some(to_second.as_str())));
@@ -820,6 +821,7 @@ fn no_redirect_is_ever_followed_automatically() {
         RedirectRefusal::Repeated,
     );
     assert_eq!(paths(&second.requests()), ["/sync/meta"]);
+    assert_eq!(job.new_endpoint(), None);
 }
 
 #[test]

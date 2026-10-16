@@ -166,6 +166,10 @@ pub struct Job {
     stall_timeout: Duration,
     cancel: Arc<CancelToken>,
     progress: Option<ProgressSink>,
+    /// A redirect moved `base` (T7 allows one per job).
+    followed: bool,
+    /// The redirect target once `meta` answered there: until then the move
+    /// is not the job's result, and a refused second redirect leaves none.
     new_endpoint: Option<Endpoint>,
 }
 
@@ -195,6 +199,7 @@ impl Job {
             stall_timeout: options.stall_timeout,
             cancel: Arc::clone(&options.cancel),
             progress: None,
+            followed: false,
             new_endpoint: None,
         })
     }
@@ -218,8 +223,10 @@ impl Job {
         &self.session_key
     }
 
-    /// The redirect target this job moved to, as normalised (T7): the job's
-    /// result carries it as `newEndpoint` and the app stores it (AE70).
+    /// The redirect target this job moved to, as normalised, once the
+    /// repeated `meta` was answered there (T7): the job's result carries it as
+    /// `newEndpoint` and the app stores it (AE70). `None` after a refused
+    /// redirect, a second one included.
     pub fn new_endpoint(&self) -> Option<&Endpoint> {
         self.new_endpoint.as_ref()
     }
@@ -262,7 +269,14 @@ impl Job {
             };
             let response = self.transport.post(request).await?;
             match response.status {
-                200..=299 => return ResponseBody::new(response, Arc::clone(&self.cancel), self.progress.clone()),
+                200..=299 => {
+                    let body = ResponseBody::new(response, Arc::clone(&self.cancel), self.progress.clone())?;
+                    if self.followed && self.new_endpoint.is_none() {
+                        // The repeated `meta` was answered at the target (T7).
+                        self.new_endpoint = Some(self.base.clone());
+                    }
+                    return Ok(body);
+                }
                 code @ 300..=399 => {
                     let location = response.header_values("location").first().map(|v| v.to_vec());
                     // The redirect's body is never read.
@@ -297,7 +311,7 @@ impl Job {
         if code != 308 {
             return Err(refuse(RedirectRefusal::NotPermanent));
         }
-        if self.new_endpoint.is_some() {
+        if self.followed {
             return Err(refuse(RedirectRefusal::Repeated));
         }
         let Some(raw) = location else {
@@ -309,9 +323,8 @@ impl Job {
         let Some(body) = resend else {
             return Err(refuse(RedirectRefusal::NotResendable));
         };
-        let target = endpoint::follow_redirect(&self.base, self.kind, raw).map_err(refuse)?;
-        self.base = target.clone();
-        self.new_endpoint = Some(target);
+        self.base = endpoint::follow_redirect(&self.base, self.kind, raw).map_err(refuse)?;
+        self.followed = true;
         Ok(body.clone())
     }
 }
