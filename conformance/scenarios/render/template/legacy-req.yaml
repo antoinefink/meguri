@@ -1,0 +1,43 @@
+# Legacy card requirements (specs/render/template-syntax.md T11.3): the req
+# Anki stores per template when it saves a note type. legacy_update sets the
+# test templates (template checks are skipped there, so a template that does
+# not parse is allowed) and pins field and template ids and the LaTeX texts so
+# that the observed object is stable. New templates have no previous ordinal.
+id: render/template/legacy-req
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Req Probe
+      fields: [A, B, C]
+      templates: [{name: T0, front: "{{A}}", back: ""}]
+steps:
+  - legacy_update:
+      notetype: Req Probe
+      patch:
+        latexPre: "% pre"
+        latexPost: "% post"
+        flds:
+          - {name: A, ord: 0, id: 101, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: B, ord: 1, id: 102, sticky: false, rtl: false, font: Arial, size: 20}
+          - {name: C, ord: 2, id: 103, sticky: false, rtl: false, font: Arial, size: 20}
+        tmpls:
+          - {name: T0, ord: 0, id: 200, qfmt: "{{A}}{{B}}", afmt: ""}
+          - {name: T1, ord: null, id: 201, qfmt: "{{#A}}{{B}}{{/A}}", afmt: ""}
+          - {name: T2, ord: null, id: 202, qfmt: "{{^A}}{{B}}{{/A}}", afmt: ""}
+          - {name: T3, ord: null, id: 203, qfmt: "{{^A}}{{#B}}{{C}}{{/B}}{{/A}}", afmt: ""}
+          - {name: T4, ord: null, id: 204, qfmt: "{{#A}}{{#B}}{{A}}{{/B}}{{/A}}", afmt: ""}
+          - {name: T5, ord: null, id: 205, qfmt: "{{Tags}}{{A}}", afmt: ""}
+          - {name: T6, ord: null, id: 206, qfmt: "{{Tags}}{{FrontSide}}", afmt: ""}
+          - {name: T7, ord: null, id: 207, qfmt: "{{#A}}text{{/A}}", afmt: ""}
+          - {name: T8, ord: null, id: 208, qfmt: "{{A}}{{^A}}{{B}}{{/A}}", afmt: ""}
+          - {name: T9, ord: null, id: 209, qfmt: "<!--{{A}}-->{{B}}", afmt: ""}
+          - {name: T10, ord: null, id: 210, qfmt: "{{#c1}}{{A}}{{/c1}}", afmt: ""}
+          - {name: T11, ord: null, id: 211, qfmt: "{{text:A}}{{hint:C}}", afmt: ""}
+          - {name: T12, ord: null, id: 212, qfmt: "{{#A}}{{B}}", afmt: ""}
+          - {name: T13, ord: null, id: 213, qfmt: "{{#A}}{{#B}}{{C}}{{/B}}{{/A}}", afmt: ""}
+          - {name: T14, ord: null, id: 214, qfmt: "{{^C}}{{#A}}{{B}}{{/A}}{{/C}}", afmt: ""}
+          - {name: T15, ord: null, id: 215, qfmt: "{{^A}}{{A}}{{/A}}", afmt: ""}
+          - {name: T16, ord: null, id: 216, qfmt: "{{Nope}}", afmt: ""}
+          - {name: T17, ord: null, id: 217, qfmt: "{{^A}}x{{/A}}", afmt: ""}
+  - observe:
+      - legacy_json: {notetypes: [Req Probe]}

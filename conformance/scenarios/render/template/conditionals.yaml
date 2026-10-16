@@ -1,0 +1,40 @@
+# Sections (specs/render/template-syntax.md T6-T7): nesting across the four
+# empty/non-empty combinations, emptiness of spacer-only and other values
+# (text/field-emptiness E1, given values unsaved), repeated and deep nesting,
+# card-number keys c<N> on ordinals 0, 1 and 499.
+id: render/template/conditionals
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Section Probe, fields: [Key, A, B]}
+          cases:
+            - {front: "{{Key}}[{{#A}}{{^B}}x{{/B}}{{/A}}]", fields: [k, "", ""]}
+            - {front: "{{Key}}[{{#A}}{{^B}}x{{/B}}{{/A}}]", fields: [k, "", "b"]}
+            - {front: "{{Key}}[{{#A}}{{^B}}x{{/B}}{{/A}}]", fields: [k, "a", ""]}
+            - {front: "{{Key}}[{{#A}}{{^B}}x{{/B}}{{/A}}]", fields: [k, "a", "b"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, ""]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, " "]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "\t\n\r\u000b\u000c"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<br>"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<BR/><br /></br />"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, " <div></div> "]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<DIV/>\n</div>"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "&nbsp;"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<span></span>"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, " "]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "　"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<br  >"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<div class=\"x\"></div>"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<!-- -->"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "<br>\u0001"]}
+            - {front: "{{Key}}{{#A}}Y{{/A}}{{^A}}N{{/A}}", fields: [k, "0"]}
+            - {front: "{{Key}}{{#A}}1{{#A}}2{{/A}}3{{/A}}", fields: [k, "a"]}
+            - {front: "{{Key}}{{#A}}{{#B}}{{#Key}}deep {{A}}{{B}}{{/Key}}{{/B}}{{/A}}", fields: [k, "a", "b"]}
+            - {front: "{{Key}}{{^A}}{{^B}}none{{/B}}{{/A}}", fields: [k, "", ""]}
+            - {front: "{{Key}}{{#A}}<b>{{A}}</b>{{/A}}{{^A}}<i>missing</i>{{/A}}", back: "{{FrontSide}}|{{#B}}{{B}}{{/B}}", fields: [k, "a", "b"]}
+            - {front: "{{Key}}|{{c1}}|{{#c1}}one{{/c1}}{{^c1}}not one{{/c1}}|{{#c2}}two{{/c2}}{{^c2}}not two{{/c2}}", fields: [k]}
+            - {front: "{{Key}}|{{c2}}|{{#c1}}one{{/c1}}{{^c1}}not one{{/c1}}|{{#c2}}two{{/c2}}{{^c2}}not two{{/c2}}", ord: 1, fields: [k]}
+            - {front: "{{Key}}|{{c500}}|{{#c500}}last{{/c500}}|{{#c499}}x{{/c499}}", ord: 499, fields: [k]}
+            - {front: "{{Key}}|{{#c0}}a{{/c0}}{{#c01}}b{{/c01}}{{#c+1}}c{{/c+1}}{{#c4294967295}}d{{/c4294967295}}{{^c+1}}e{{/c+1}}", fields: [k]}
+            - {front: "{{Key}}|{{#c+2}}a{{/c+2}}{{#c02}}b{{/c02}}{{#c2}}c{{/c2}}", ord: 1, fields: [k]}

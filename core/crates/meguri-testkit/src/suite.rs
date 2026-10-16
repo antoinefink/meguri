@@ -16,6 +16,7 @@ use crate::exec::live::Chain;
 use crate::exec::parties::Parties;
 use crate::exec::{Executor, MeguriExecutor, Needs, SegmentExecutor};
 use crate::observe;
+use crate::observe::overlay::{self, Overlay};
 use crate::report::{Report, Tier};
 use crate::scenario::{self, ActorName, LoadedScenario, Side};
 use crate::wallclock::Stopwatch;
@@ -42,6 +43,33 @@ pub struct OraclePin {
     pub lock_sha256: String,
 }
 
+/// `conformance/oracle.json`'s pin of the macOS native lane's lock
+/// (float-determinism.md F6.1); absent until that lock exists.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct MacosPin {
+    #[serde(default)]
+    macos_lock_sha256: Option<String>,
+}
+
+/// Where Meguri's executor runs: overlays apply only natively on macOS
+/// (float-determinism.md F9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    MacOs,
+    Linux,
+}
+
+impl Platform {
+    /// The platform this build runs on.
+    pub fn current() -> Platform {
+        if cfg!(target_os = "macos") {
+            Platform::MacOs
+        } else {
+            Platform::Linux
+        }
+    }
+}
+
 /// One `deviations.yaml` entry (D13).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +89,14 @@ pub struct Deviation {
 pub enum Transform {
     /// The expected value becomes this value.
     Replace(Value),
+    /// `apple_overlay: true`, only the entry `fp-libm-boundary` (D13,
+    /// float-determinism.md F8.6): on macOS the scenario's overlay entries
+    /// under a matching pointer put their Apple values.
+    AppleOverlay(bool),
 }
+
+/// The deviation that applies overlays (float-determinism.md F8.6).
+pub const FP_LIBM_BOUNDARY: &str = "fp-libm-boundary";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -189,6 +224,9 @@ pub struct Outcome {
     pub differences: Vec<Difference>,
     pub missing: Option<Needs>,
     pub deviations_applied: Vec<String>,
+    /// On macOS, for a scenario with an overlay: how many overlay entries
+    /// its expected values took (float-determinism.md F9).
+    pub overlay_applied: Option<usize>,
 }
 
 impl Outcome {
@@ -207,6 +245,7 @@ impl Outcome {
             differences: Vec::new(),
             missing: None,
             deviations_applied: Vec::new(),
+            overlay_applied: None,
         }
     }
 
@@ -299,6 +338,10 @@ pub struct GoldensCheck {
     pub base: Option<PathBuf>,
     /// sha256 of the oracle's lock file, where known.
     pub oracle_lock_sha256: Option<String>,
+    /// Where the oracle tree is known: `Some(Some(hash))` when its macOS lock
+    /// (`macos/requirements-macos.lock`) exists, `Some(None)` when it does
+    /// not; `None` when the tree is not known (float-determinism.md F7.4).
+    pub oracle_macos_lock_sha256: Option<Option<String>>,
 }
 
 /// One freshness problem.
@@ -329,10 +372,42 @@ pub struct ChangedGroup {
     pub values: Vec<ChangedValue>,
 }
 
+/// Why `Suite::oracle_sides` has no sides for a scenario.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidesError {
+    /// The scenario or its golden: missing, invalid or stale.
+    Golden(String),
+    /// The overlay does not parse or is stale.
+    Overlay(String),
+}
+
+/// A scenario's observations on the Linux and the Apple oracle
+/// (`Suite::oracle_sides`).
+#[derive(Debug, Clone)]
+pub struct OracleSides {
+    pub scenario: LoadedScenario,
+    pub linux: Value,
+    pub apple: Value,
+    /// The lock the Linux golden was recorded with.
+    pub linux_lock_sha256: String,
+    pub overlay: Option<Overlay>,
+}
+
+/// One overlay and its entries by kind (float-determinism.md F7.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverlaySummary {
+    pub scenario: String,
+    pub entries: usize,
+    pub day_entries: usize,
+    pub memory_entries: usize,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Freshness {
     pub scenarios: usize,
     pub problems: Vec<Problem>,
+    /// Every overlay that parses, in id order.
+    pub overlays: Vec<OverlaySummary>,
     /// Against the base: changed values by area and observation kind.
     pub changed: Vec<ChangedGroup>,
     pub changed_goldens: Vec<String>,
@@ -350,7 +425,13 @@ impl Freshness {
 pub struct Suite {
     root: PathBuf,
     pub pin: OraclePin,
+    /// `conformance/oracle.json`'s `macos_lock_sha256`, when it has one.
+    pub macos_lock_sha256: Option<String>,
     pub deviations: Vec<Deviation>,
+    /// Where T0 runs Meguri's executor; overlays apply on macOS only.
+    pub platform: Platform,
+    /// Ids of the overlays in `goldens-apple/`.
+    overlays: BTreeSet<String>,
     areas: BTreeMap<String, Area>,
     files: Vec<ScenarioFile>,
     /// Canonical scenarios directory and each file's index by its path
@@ -366,8 +447,9 @@ impl Suite {
     pub fn open(root: &Path) -> Result<Suite, SuiteError> {
         let read =
             |rel: &str| std::fs::read_to_string(root.join(rel)).map_err(|e| suite_error(format!("reading {rel}: {e}")));
-        let pin: OraclePin =
-            serde_json::from_str(&read("oracle.json")?).map_err(|e| suite_error(format!("oracle.json: {e}")))?;
+        let pin_text = read("oracle.json")?;
+        let pin: OraclePin = serde_json::from_str(&pin_text).map_err(|e| suite_error(format!("oracle.json: {e}")))?;
+        let macos: MacosPin = serde_json::from_str(&pin_text).map_err(|e| suite_error(format!("oracle.json: {e}")))?;
         let deviations = if root.join("deviations.yaml").exists() {
             let value = scenario::parse_yaml(&read("deviations.yaml")?)
                 .map_err(|e| suite_error(format!("deviations.yaml: {e}")))?;
@@ -430,11 +512,20 @@ impl Suite {
             .map(|p| relative(&goldens_dir, p))
             .filter_map(|rel| rel.strip_suffix(".json").map(str::to_owned))
             .collect();
+        let overlays_dir = root.join(overlay::DIR);
+        let overlays = walk(&overlays_dir)?
+            .iter()
+            .map(|p| relative(&overlays_dir, p))
+            .filter_map(|rel| rel.strip_suffix(".json").map(str::to_owned))
+            .collect();
 
         Ok(Suite {
             root: root.to_path_buf(),
             pin,
+            macos_lock_sha256: macos.macos_lock_sha256,
             deviations,
+            platform: Platform::current(),
+            overlays,
             areas: areas.into_values().map(|(_, a)| (a.area.clone(), a)).collect(),
             files,
             canonical_scenarios: scenarios_dir.canonicalize().ok(),
@@ -446,6 +537,120 @@ impl Suite {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The same tree as T0 sees it on `platform` (tests of both lanes).
+    pub fn on_platform(mut self, platform: Platform) -> Suite {
+        self.platform = platform;
+        self
+    }
+
+    fn overlay_path(&self, rel: &str) -> PathBuf {
+        self.root.join(overlay::DIR).join(format!("{rel}.json"))
+    }
+
+    /// Ids of the overlays in `goldens-apple/`.
+    pub fn overlay_ids(&self) -> impl Iterator<Item = &str> {
+        self.overlays.iter().map(String::as_str)
+    }
+
+    /// The scenario's overlay checked as the runner uses it on macOS
+    /// (float-determinism.md F9 step 1): `None` when it has none; a stale
+    /// one makes the scenario stale, one that fails its schema or the checks
+    /// of F7.4 and F8 invalid.
+    fn overlay_for(
+        &self,
+        rel: &str,
+        loaded: &LoadedScenario,
+        golden: &Golden,
+        outcome: &Outcome,
+    ) -> Result<Option<Overlay>, Box<Outcome>> {
+        if !self.overlays.contains(rel) {
+            return Ok(None);
+        }
+        let fail = |status: Status, message: String| {
+            let mut outcome = outcome.clone().with(status, message);
+            outcome.repro = format!("tools/mg oracle record --platform apple {rel}");
+            Box::new(outcome)
+        };
+        let checked = self
+            .fresh_overlay(rel, loaded, golden)
+            .map_err(|(status, message)| fail(status, message))?;
+        let problems = overlay::check_entries(&checked, &golden.observations, &loaded.scenario);
+        if let Some(first) = problems.first() {
+            return Err(fail(
+                Status::Invalid,
+                format!(
+                    "{}/{rel}.json: {} entr{} fail{} the checks of float-determinism.md F7.4 and F8; first {}: {}",
+                    overlay::DIR,
+                    problems.len(),
+                    if problems.len() == 1 { "y" } else { "ies" },
+                    if problems.len() == 1 { "s" } else { "" },
+                    first.pointer,
+                    first.message
+                ),
+            ));
+        }
+        Ok(Some(checked))
+    }
+
+    /// A scenario's observations on both oracles (float-determinism.md
+    /// F10.1): the Linux golden's, and the Apple oracle's, which are the
+    /// golden's with every overlay entry put at its pointer (F9 step 2), in
+    /// the class or not. Errors when the golden is missing or stale, or the
+    /// overlay does not parse or is stale.
+    pub fn oracle_sides(&self, rel: &str) -> Result<OracleSides, SidesError> {
+        let file = self
+            .files
+            .iter()
+            .find(|f| f.rel == rel)
+            .ok_or_else(|| SidesError::Golden(format!("no scenario {rel}")))?;
+        let (loaded, golden, _) = self
+            .prepare(file)
+            .map_err(|o| SidesError::Golden(format!("{rel}: {}: {}", o.status.as_str(), o.message)))?;
+        let mut apple = golden.observations.clone();
+        let overlay = if self.overlays.contains(rel) {
+            let checked = self
+                .fresh_overlay(rel, &loaded, &golden)
+                .map_err(|(_, message)| SidesError::Overlay(message))?;
+            overlay::apply(&checked.entries, &[], &mut apple);
+            Some(checked)
+        } else {
+            None
+        };
+        Ok(OracleSides {
+            linux: golden.observations,
+            apple,
+            linux_lock_sha256: golden.oracle.lock_sha256,
+            overlay,
+            scenario: loaded,
+        })
+    }
+
+    /// The scenario's overlay when it parses and is fresh (F7.3); otherwise
+    /// the status it gives the scenario (`invalid` or `stale`) and why.
+    fn fresh_overlay(&self, rel: &str, loaded: &LoadedScenario, golden: &Golden) -> Result<Overlay, (Status, String)> {
+        let checked = self.read_overlay(rel).map_err(|message| (Status::Invalid, message))?;
+        let observations_sha256 = overlay::observations_sha256(&golden.observations)
+            .map_err(|e| (Status::Invalid, format!("goldens/{rel}.json: {e}")))?;
+        match overlay::staleness(
+            &checked,
+            &loaded.sha256,
+            &observations_sha256,
+            &self.pin.anki_version,
+            self.macos_lock_sha256.as_deref(),
+        ) {
+            Some(why) => Err((Status::Stale, format!("{}/{rel}.json is stale: {why}", overlay::DIR))),
+            None => Ok(checked),
+        }
+    }
+
+    fn read_overlay(&self, rel: &str) -> Result<Overlay, String> {
+        let path = self.overlay_path(rel);
+        std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| Overlay::parse(&text))
+            .map_err(|e| format!("{}/{rel}.json is not an overlay: {e}", overlay::DIR))
     }
 
     /// Scenario files matching any filter (all without filters): an id, a
@@ -528,6 +733,7 @@ impl Suite {
     /// Compares observations with a golden's and turns the result into a
     /// pass or a fail; `deviations` only where Meguri's behavior is in
     /// `actual` (dsl.md D13).
+    #[allow(clippy::too_many_arguments)]
     fn judge(
         &self,
         mut outcome: Outcome,
@@ -535,15 +741,20 @@ impl Suite {
         golden: &Golden,
         actual: &Value,
         deviations: bool,
+        overlay: Option<&Overlay>,
         what: &str,
     ) -> Outcome {
         let none = [];
         let options = CompareOptions {
             set: &loaded.scenario.compare.set,
             deviations: if deviations { &self.deviations } else { &none },
+            overlay: overlay.map_or(&[][..], |o| &o.entries),
         };
         let comparison = diff::compare(&loaded.scenario.id, &golden.observations, actual, &options);
         outcome.deviations_applied = comparison.deviations_applied;
+        if overlay.is_some() {
+            outcome.overlay_applied = Some(comparison.overlay_applied);
+        }
         if comparison.differences.is_empty() {
             return outcome;
         }
@@ -606,8 +817,17 @@ impl Suite {
             outcome.repro = format!("tools/mg conformance --live {}", file.rel);
             return outcome;
         }
+        // F9: overlays apply only where Meguri runs natively on macOS.
+        let overlay = if self.platform == Platform::MacOs {
+            match self.overlay_for(&file.rel, &loaded, &golden, &outcome) {
+                Ok(overlay) => overlay,
+                Err(outcome) => return *outcome,
+            }
+        } else {
+            None
+        };
         match meguri.run(&loaded) {
-            Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, ""),
+            Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, overlay.as_ref(), ""),
             Err(e) => outcome.with(Status::Error, e.to_string()),
         }
     }
@@ -639,6 +859,7 @@ impl Suite {
                 &golden,
                 &actual,
                 false,
+                None,
                 "the oracle no longer reproduces its golden: ",
             ),
             Err(e) => return outcome.with(Status::Error, format!("oracle: {e}")),
@@ -664,7 +885,7 @@ impl Suite {
             root,
         };
         match chain.run(&loaded) {
-            Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, "the live chain: "),
+            Ok(actual) => self.judge(outcome, &loaded, &golden, &actual, true, None, "the live chain: "),
             Err(e) => outcome.with(Status::Error, format!("live chain: {e}")),
         }
     }
@@ -692,6 +913,7 @@ impl Suite {
                 golden,
                 &actual,
                 false,
+                None,
                 "the oracle no longer reproduces its golden: ",
             ),
             Err(e) => return outcome.with(Status::Error, format!("oracle replay: {e}")),
@@ -707,7 +929,7 @@ impl Suite {
             return outcome;
         }
         match parties.mixed(loaded) {
-            Ok(actual) => self.judge(outcome, loaded, golden, &actual, true, "the mixed run: "),
+            Ok(actual) => self.judge(outcome, loaded, golden, &actual, true, None, "the mixed run: "),
             Err(e) => outcome.with(Status::Error, format!("mixed run: {e}")),
         }
     }
@@ -795,6 +1017,8 @@ impl Suite {
             oracle_pin: self.pin.clone(),
             outcomes,
             wall_ms: watch.elapsed_ms(),
+            // F9: T0 on macOS counts the overlay entries it applied.
+            overlays: tier == Tier::T0 && self.platform == Platform::MacOs,
         }
     }
 
@@ -860,6 +1084,30 @@ impl Suite {
                 }
             }
         }
+        self.check_overlays(&mut fresh);
+        if let Some(macos_lock) = &options.oracle_macos_lock_sha256
+            && macos_lock.as_deref() != self.macos_lock_sha256.as_deref()
+        {
+            let message = match (macos_lock, &self.macos_lock_sha256) {
+                (Some(lock), Some(pin)) => format!(
+                    "the oracle's macOS lock (macos/requirements-macos.lock) hashes to {}, macos_lock_sha256 says {}: adopt the bump with its overlays",
+                    short(lock),
+                    short(pin)
+                ),
+                (Some(lock), None) => format!(
+                    "the oracle's macOS lock (macos/requirements-macos.lock) exists (sha256 {}), but conformance/oracle.json has no macos_lock_sha256",
+                    short(lock)
+                ),
+                (None, _) => "conformance/oracle.json has macos_lock_sha256, but the oracle has no macOS lock (macos/requirements-macos.lock)"
+                    .to_owned(),
+            };
+            fresh.problems.push(problem(
+                "pin_mismatch",
+                "conformance/oracle.json",
+                message,
+                format!("tools/mg oracle bump {}", self.pin.anki_version),
+            ));
+        }
         if let Some(lock) = &options.oracle_lock_sha256
             && lock != &self.pin.lock_sha256
         {
@@ -878,6 +1126,88 @@ impl Suite {
             self.changed_since(base, &mut fresh)?;
         }
         Ok(fresh)
+    }
+
+    /// F7.4 on every overlay, on every platform: it parses and matches its
+    /// schema, is fresh and not orphaned, and every entry resolves to its
+    /// `linux` value, differs, appears once in pointer order and is in the
+    /// class of F8.
+    fn check_overlays(&self, fresh: &mut Freshness) {
+        for rel in &self.overlays {
+            let repro = format!("tools/mg oracle record --platform apple {rel}");
+            let problem = |kind: &str, message: String| Problem {
+                kind: kind.to_owned(),
+                scenario: rel.clone(),
+                message,
+                repro: repro.clone(),
+            };
+            let checked = match self.read_overlay(rel) {
+                Ok(checked) => checked,
+                Err(message) => {
+                    fresh.problems.push(problem("invalid_overlay", message));
+                    continue;
+                }
+            };
+            let (day_entries, memory_entries, _) = checked.counts();
+            fresh.overlays.push(OverlaySummary {
+                scenario: rel.clone(),
+                entries: checked.entries.len(),
+                day_entries,
+                memory_entries,
+            });
+            let file = self.files.iter().find(|f| &f.rel == rel);
+            let Some(file) = file.filter(|_| self.goldens.contains(rel)) else {
+                fresh.problems.push(problem(
+                    "orphan_overlay",
+                    format!("{}/{rel}.json has no scenario or no Linux golden", overlay::DIR),
+                ));
+                continue;
+            };
+            // The scenario's own problems are reported with it; the overlay
+            // of a scenario that does not load or whose golden is stale is
+            // not checked further.
+            let Ok((loaded, golden, outcome)) = self.prepare(file) else {
+                continue;
+            };
+            match self.overlay_for(rel, &loaded, &golden, &outcome) {
+                Ok(_) => {}
+                Err(failed) if failed.status == Status::Stale => {
+                    fresh.problems.push(problem("stale_overlay", failed.message));
+                }
+                Err(_) => {
+                    let problems = overlay::check_entries(&checked, &golden.observations, &loaded.scenario);
+                    let (outside, other): (Vec<_>, Vec<_>) = problems.into_iter().partition(|p| p.outside_class);
+                    let list = |items: &[overlay::EntryProblem]| {
+                        items
+                            .iter()
+                            .map(|p| format!("{}: {}", p.pointer, p.message))
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    };
+                    if !other.is_empty() {
+                        fresh.problems.push(problem(
+                            "overlay_entry",
+                            format!("{} entries: {}", other.len(), list(&other)),
+                        ));
+                    }
+                    if !outside.is_empty() {
+                        let mut p = problem(
+                            "outside_class",
+                            format!(
+                                "{} entr{} outside the fp-libm-boundary class (float-determinism.md F8): {}",
+                                outside.len(),
+                                if outside.len() == 1 { "y" } else { "ies" },
+                                list(&outside)
+                            ),
+                        );
+                        p.repro =
+                            "escalate for a decision (float-determinism.md F7.2 step 7, F11); never edit an overlay"
+                                .to_owned();
+                        fresh.problems.push(p);
+                    }
+                }
+            }
+        }
     }
 
     fn changed_since(&self, base: &Path, fresh: &mut Freshness) -> Result<(), SuiteError> {
@@ -1001,6 +1331,13 @@ fn check_deviations(deviations: &[Deviation]) -> Result<(), SuiteError> {
             return Err(bad(
                 "it needs a test asserting Meguri's behavior and at least one scenario pattern",
             ));
+        }
+        if let Transform::AppleOverlay(on) = d.transform
+            && (!on || d.id != FP_LIBM_BOUNDARY)
+        {
+            return Err(bad(&format!(
+                "apple_overlay is true, and only in the entry {FP_LIBM_BOUNDARY} (dsl.md D13)"
+            )));
         }
     }
     Ok(())
