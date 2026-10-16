@@ -178,6 +178,7 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 
 - An executor runs a scenario and returns its observations or an error. The oracle executor is a pool of oracle workers (`conformance/schema/protocol.json`), keyed by time zone. Meguri's executor runs the core in-process, with a scenario clock (D5) and the seeded random source, through the time and randomness seams (R1875).
 - Each executor declares capabilities: the setup sections, ops and observation kinds it implements. Before running, the runner compares the scenario's needs with them. A scenario that needs anything missing is `pending` (D10) and is not run.
+- An op's spec may split the op into finer capabilities, needed by the steps that use the part they name (`update_notetype`: `notetype-ops.md` T10.1). They count as ops.
 - Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op. The ability to play an actor of an actor scenario, through the parties executor, counts as the `actor` op (`sync-ops.md` S10.2).
 
 ## D9. Area metadata and live scenarios

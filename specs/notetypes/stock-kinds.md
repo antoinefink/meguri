@@ -109,7 +109,7 @@ The runtime falls back to its own colors when a property is missing; Meguri defi
 
 | Scenario | Covers |
 |---|---|
-| `notetypes/records/stock-new-collection` | K2 (recorded) |
+| `notetypes/records/stock-new-collection` | K2 |
 | `notetypes/records/stock-structure` | K1, K3, K4 through `notetype_structure`; K8 |
 | `notetypes/records/stock-handoff` | live (T1): a collection Meguri creates, read by the oracle: the same structure, the cards notes of each kind generate, and no Check Database problem |
 | `notetypes/records/io-on-demand` | `notetypes/records` N9 |

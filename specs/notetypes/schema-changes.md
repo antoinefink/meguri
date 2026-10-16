@@ -83,4 +83,6 @@ Scenario ops that are schema changes run confirmed (`specs/conformance/notetype-
 | `notetypes/gate/structure` | G2, G3, G5: each structural change of U34 sets `scm`, again when already modified; a field rename and a template text change do not; a move to the same position does not |
 | `notetypes/records/stamps`, `notetypes/records/names`, `notetypes/records/clone` | the non-schema ops of G2 leave `scm` |
 
+Both gate scenarios have their goldens. On Meguri they need `setup.notes` (U27), the `card` observation and U34's `update_notetype` edits (`specs/conformance/notetype-ops.md` T10.1), so they are `pending` until U34, which makes them active.
+
 The gate itself (`NeedsSchemaConfirmation`, nothing written, the confirmed resubmission, no second request) and the guard (a non-schema op that would change a field count while `scm <= ls` is refused; undo and redo of a template add both commit) are Meguri's alone and tested in `core/crates/meguri-engine/tests/schema_gate.rs`, with test-only ops until U34's ops exist.

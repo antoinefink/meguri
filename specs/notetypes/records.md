@@ -206,15 +206,20 @@ A clone is a new note type copied from an existing one:
 
 ## N12. Scenarios
 
-| Scenario | Covers | Golden |
+Every scenario below has its golden. Each runs on Meguri with U29's adapters and fresh collection (`specs/conformance/notetype-ops.md` T10) plus what the last column names; it is `pending` until those exist, and the unit that adds the last of them makes it active in `conformance/scenarios/notetypes/area.yaml` (D9.1). U29 makes active those with nothing in the last column.
+
+| Scenario | Covers | Meguri also needs |
 |---|---|---|
-| `notetypes/records/stock-new-collection` | `notetypes/stock-kinds` K2 | recorded |
-| `notetypes/records/stamps` | N3.1, N3.2, N8; deviation `notetype-unchanged-save` | awaits the driver ops (`specs/conformance/notetype-ops.md` T10) |
-| `notetypes/records/names` | N4, N5, N8 rename | awaits the driver ops |
-| `notetypes/records/preserve-on-edit` | N1, N3.2; deviation `notetype-unknown-fields-kept` | awaits the driver ops |
-| `notetypes/records/clone` | N7 | awaits the driver ops |
-| `notetypes/records/io-on-demand` | N9 | awaits the driver ops |
-| `notetypes/records/stock-structure`, `notetypes/records/stock-handoff` | `notetypes/stock-kinds` | awaits the driver ops |
-| `notetypes/records/validation` | `notetypes/validation` | awaits the driver ops |
+| `notetypes/records/stock-new-collection` | `notetypes/stock-kinds` K2 | |
+| `notetypes/records/names` | N4, N5, N8 rename | |
+| `notetypes/records/validation` | `notetypes/validation` | |
+| `notetypes/records/io-on-demand` | N9 | |
+| `notetypes/records/stock-structure` | `notetypes/stock-kinds` K1, K3, K4, K8 | |
+| `notetypes/records/stamps` | N3.1, N3.2, N8; deviation `notetype-unchanged-save` | `setup.decks` (U28) |
+| `notetypes/records/clone` | N7 | `legacy_update` (U36) |
+| `notetypes/records/preserve-on-edit` | N1, N3.2; deviation `notetype-unknown-fields-kept` | `legacy_update`, `blob_decode`, `legacy_json` (U36) |
+| `notetypes/records/stock-handoff` (live, T1) | `notetypes/stock-kinds` K2, K4, K9 | `add_note` (U27) |
+
+The gate scenarios (`notetypes/schema-changes` G8) also need `setup.notes` (U27) and U34's edits.
 
 Behavior only Meguri's code shows (per-row writes, the unique-index order of N3.2, undo images) is covered by `core/crates/meguri-engine/tests/notetype_records.rs`.

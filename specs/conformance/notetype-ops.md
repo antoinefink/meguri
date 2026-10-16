@@ -67,7 +67,7 @@ Applies a list of edits to a note type and saves the result once, as one undoabl
 - **Effect.** The draft is saved through the note type save that Anki's note type editors use: `notetypes/records` N3 and N4, the checks unless `skip_checks`, and every effect on notes, cards and `col.scm` that the save has (`notetypes/schema-changes` G2; U34 for notes and cards). A field or template kept from the stored note type keeps its identity (its id, options and, for a template, its row's `mtime_secs` and `usn`) wherever the edits move it; the save matches them by identity, never by name.
 - **Output** `{update_notetype: {name: <stored name after the save>}}`.
 - **Rejections** T7.
-- **Meguri's executor** maps an update to Meguri's ops: an update whose edits are only `rename`, `css`, `field_options`, `rename_template` and `template` without `front` or `back` is a plain save (U29); any other is U34's draft apply. Schema changes run confirmed (T9). Until U34 lands, scenarios that need its edits are `pending`.
+- **Meguri's executor** maps an update to Meguri's ops: an update whose edits are only `rename`, `css`, `field_options`, `rename_template` and `template` without `front` or `back` is a plain save (U29); any other is U34's draft apply. Schema changes run confirmed (T9). Until U34 lands, scenarios that need its edits are `pending` (T10.1).
 
 ## T6. `ensure_io_notetype` (op)
 
@@ -127,4 +127,19 @@ The structure of note types, without template text, CSS, LaTeX values or ids, so
 ## T10. Status
 
 - These ops and the kind are stable (`dsl.md` D7.2, `observations.md` O4): the oracle driver implements T2 to T8 through Anki's own note type operations, with the meanings above, and the scenarios that use them have goldens. The protocol's step description lists the ops and the kind.
-- **Meguri** (U29's implementer, with the adapters): the testkit model reads these shapes (`core/crates/meguri-testkit/src/scenario/`), and the notetypes adapter implements `add_notetype`, `add_stock_notetype`, `clone_notetype`, `ensure_io_notetype`, the plain-save part of `update_notetype` and `notetype_structure`; U34 adds the rest of `update_notetype`. Until the testkit model reads them, T0 reports the scenarios that use them as `invalid`.
+- **Meguri** (U29's implementer, with the adapters): the testkit model reads these shapes (`core/crates/meguri-testkit/src/scenario/`), and the notetypes adapter implements `setup.notetypes` (`dsl.md` D6.4, each entry added as `add_notetype` adds it), `add_notetype`, `add_stock_notetype`, `clone_notetype`, `ensure_io_notetype`, the plain-save part of `update_notetype` (T10.1) and `notetype_structure`; U34 adds the rest of `update_notetype`. Until the testkit model reads them, T0 reports the scenarios that use them as `invalid`.
+
+### T10.1 Capabilities of `update_notetype`
+
+So that a scenario whose edits Meguri cannot apply yet is `pending` (`dsl.md` D8, D10) and not an `error`, an `update_notetype` step needs the op `update_notetype` and, for each kind of edit it holds, the capability `update_notetype.<edit key>` (`update_notetype.css`, `update_notetype.add_field`, …). A `template` edit that sets `front` or `back` needs `update_notetype.template_text` instead of `update_notetype.template`. `skip_checks` and an empty edit list add nothing. These names are ops in the scenario's needs and in the `pending` report.
+
+| Declared by | Capabilities |
+|---|---|
+| U29 | `update_notetype`, `update_notetype.rename`, `update_notetype.css`, `update_notetype.field_options`, `update_notetype.rename_template`, `update_notetype.template` |
+| U34 | `update_notetype.sort_field`, `update_notetype.add_field`, `update_notetype.remove_field`, `update_notetype.rename_field`, `update_notetype.move_field`, `update_notetype.add_template`, `update_notetype.remove_template`, `update_notetype.move_template`, `update_notetype.template_text` |
+
+The oracle implements every edit and declares nothing.
+
+### T10.2 Meguri's fresh collection
+
+Every note type scenario runs on the fresh collection of `dsl.md` D6 and relies on what a new collection holds: the stock kinds' names (`basic` gets `+`) and the Image Occlusion note type's id as the lower bound of the note types a scenario added. On Meguri that collection is a new collection as `notetypes/stock-kinds` K2 says, made at `clock.start`: U28's bootstrap once it exists. Until then, Meguri's executor makes it with the storage area's create path and adds the six stock kinds and `curModel` as K2 says, through U29's own stock-kind code. The default deck, the default preset and the other new-collection config keys come with U28; no scenario U29 makes active observes them.
