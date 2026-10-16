@@ -80,9 +80,9 @@ The core half of KTD17. A replacement op holding the slot enters it:
 Every swap of the collection file goes through this procedure; U124's verified-replace primitive is the swap itself:
 
 1. The phase becomes `Replacing`. Every reader is closed (waiting for readers in use), then the writer: checkpoint and close (`storage/open-and-connections` C10).
-2. The swap runs with the collection path and nothing open.
-3. The file is opened through the open gate. If that fails the state becomes `Failed{reason}`.
-4. The generation increases by one; readers open lazily on the new file; `CollectionReplaced{generation}` is published once; every `GenerationListener` is told (U25 clears undo, U26 invalidates derived data, R1489).
+2. The swap runs with the collection path and nothing open. The engine notes which file the path names, its size, its modification and change times and its WAL's size before the swap, and compares them after it.
+3. The file is opened through the open gate, whether the swap succeeded or not. If that fails the state becomes `Failed{reason}`.
+4. If the swap succeeded, or failed after it changed the file (any of the noted values differ): the generation increases by one; readers open lazily on the new file; `CollectionReplaced{generation}` is published once; every `GenerationListener` is told (U25 clears undo, U26 invalidates derived data, R1489). A failed swap still returns its error, and the exclusive phase's handle is the new generation's. A swap that failed before changing the file leaves the generation, and every handle, as they were.
 5. Handles of older generations now fail with `StaleGeneration` (L3).
 
 ## L9. Which job takes which tier
