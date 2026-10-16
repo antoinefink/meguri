@@ -36,10 +36,10 @@ A check that could not run is `{"error": true}`; its error text stays in `build/
 
 ## The output guard
 
-`tools/mg private copy` rebuilds the token set from each copy: deck names, tags, media names and field words of four or more characters, minus anything already in the repository's tracked files.
+`tools/mg private copy` rebuilds the token set from each copy: deck names, tags and media names whatever their length, and field words of four or more characters, minus anything already committed (the files at `HEAD`, never the working tree or the index, and never the results in `conformance/reports/private/`).
 
 - `tools/mg private suite` scans its summary and writes it here only when the scan is clean.
 - `tools/mg private scan-outputs <paths>` checks any file before it is committed, and `tools/mg private scan-outputs` with no path checks the staged lines.
-- The pre-commit hook (`tools/hooks/pre-commit`) blocks a commit that adds a line holding a token.
+- The pre-commit hook (`tools/hooks/pre-commit`) blocks a commit that adds a line holding a token, merge commits included (`tools/hooks/pre-merge-commit` runs it for the merges `git merge` commits itself).
 
 Each of them names files and line numbers, never the token.

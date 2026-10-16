@@ -1,10 +1,10 @@
 # Git hooks (U2, R1958; U15, R1940). Sourced by tools/mg.
 
 mg_job hooks host mg_hooks \
-  "Git hooks: tools/mg hooks install adds the commit-msg provenance-trailer check (tools/hooks/commit-msg) and the pre-commit private-token scan (tools/hooks/pre-commit)"
+  "Git hooks: tools/mg hooks install adds the commit-msg provenance-trailer check (tools/hooks/commit-msg) and the private-token scan of commits and merges (tools/hooks/pre-commit, pre-merge-commit)"
 
 # The hooks tools/mg installs, each as a shim that runs tools/hooks/<name>.
-MG_HOOK_NAMES="commit-msg pre-commit"
+MG_HOOK_NAMES="commit-msg pre-commit pre-merge-commit"
 
 # mg__hook_marker <name>: the line that marks an installed shim as Meguri's.
 mg__hook_marker() { printf 'meguri: %s shim installed by tools/mg hooks install\n' "$1"; }
@@ -66,7 +66,7 @@ mg_hooks_install() {
   hooks_path="$(git -C "$MG_ROOT" config --get core.hooksPath || true)"
   if [ -n "$hooks_path" ]; then
     MG_HOOKS_FAILURE=hooks-path
-    MG_HOOKS_MESSAGE="core.hooksPath is set ($hooks_path); call tools/hooks/commit-msg and tools/hooks/pre-commit from that directory's hooks instead"
+    MG_HOOKS_MESSAGE="core.hooksPath is set ($hooks_path); call tools/hooks/commit-msg, pre-commit and pre-merge-commit from that directory's hooks instead"
     return 1
   fi
   if ! common="$(git -C "$MG_ROOT" rev-parse --path-format=absolute --git-common-dir)"; then

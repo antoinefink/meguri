@@ -18,9 +18,10 @@
 #
 # The token set (build/private/tokens/tokens.txt) is rebuilt from each copy:
 # meguri-cli private tokens lists the candidate strings, and
-# tools/scripts/private-scan/private_scan.py keeps those not already in the
-# repository. scan-outputs and the pre-commit hook (tools/hooks/pre-commit)
-# check files against it and name files and lines, never a token.
+# tools/scripts/private-scan/private_scan.py keeps those not already
+# committed (HEAD, private results excepted). scan-outputs and the
+# pre-commit and pre-merge-commit hooks (tools/hooks/) check files against
+# it and name files and lines, never a token.
 #
 # suite runs the checks meguri-cli registers (U249 adds the R1942 checks),
 # scans the summary and only then, with --record, writes it to
@@ -44,6 +45,12 @@ mg_job anonymize host mg_anonymize \
 mg_job private host mg_private \
   "Private collection vault (local-data/anki/, read-only, never off this Mac): status | copy | suite [--record <name>] [--keep] | scan-outputs [paths...] (default: the staged lines); copies and the token set stay in build/private/"
 
+mg_job private-selftest host mg_private_selftest \
+  "The vault's copy through the real read-only mount, on a made-up profile folder (no private data; any checkout): meguri-cli private copy in the private service gives the collection, its log and media unchanged, the source keeps every hash, size and mtime, writes through /vault are refused, a read-write source is refused"
+
+mg_job anonymize-check host mg_anonymize_check \
+  "The anonymizer end to end on a generated collection (U15): [<size>] [--seed N] (default 10k, seed 1); tools/mg fixtures, then tools/mg anonymize --source on it: the real meguri-cli anonymize (V1, V2, V4, V5) and the oracle's next-state and queue digests of the source and the clone (V3)"
+
 # Environment variables that mark a CI or other remote machine. Keep in step
 # with CI_MARKERS in core/crates/meguri-testkit/src/private/vault.rs
 # (tools/tests/private.bats compares them).
@@ -56,6 +63,10 @@ MG_PRIVATE_SCAN=tools/scripts/private-scan/private_scan.py
 # meguri-cli as the dev service builds it (profile `fixtures`), seen from the
 # private service, which mounts the same target volume.
 MG_PRIVATE_CLI=/cargo-target/fixtures/meguri-cli
+# The vault copy, as mg__private_run_on runs it: $1 meguri-cli, $2 the source
+# (/vault), $3 the run directory under /work. private copy and
+# private-selftest run this one command.
+MG_PRIVATE_COPY_SCRIPT='"$1" private copy --source "$2" --out "$3/copy" --access-log "$3/vault-access.log" >"$3/copy.json"'
 
 mg__private_usage() {
   mg_failure usage "$1; usage: tools/mg private status | copy | suite [--record <name>] [--keep] | scan-outputs [paths...]"
@@ -165,7 +176,7 @@ mg__private_copy() {
     return 1
   }
   chmod 700 "$MG_ROOT/$MG_PRIVATE_DIR" "$MG_ROOT/$run" 2>/dev/null
-  mg__private_run '"$1" private copy --source "$2" --out "$3/copy" --access-log "$3/vault-access.log" >"$3/copy.json"' "/work/$run"
+  mg__private_run "$MG_PRIVATE_COPY_SCRIPT" "/work/$run"
   rc=$?
   if [ "$rc" -ne 0 ] || ! jq -e .collection.sha256 "$MG_ROOT/$run/copy.json" >/dev/null 2>&1; then
     mg_failure copy "the vault copy failed (exit $rc); see log.txt"
@@ -422,6 +433,145 @@ mg_private() {
   esac
 }
 
+# ------------------------------------------------------------ self-test
+#
+# tools/mg private-selftest: the vault's copy as tools/mg private copy runs
+# it (images, meguri-cli, the private service, the read-only mount at
+# /vault, MG_PRIVATE_COPY_SCRIPT), on a made-up profile folder in its run
+# directory. Docker Desktop's file sharing is what makes the mount read-only,
+# so only a real run shows that the vault accepts it and that writes through
+# it fail. It never reads local-data/, so it runs in any checkout.
+
+# mg__private_selftest_files <dir>: every file under <dir> as {relative
+# path: {sha256, bytes, mtime_ns}}, one JSON object.
+mg__private_selftest_files() {
+  python3 -I -B -c 'import hashlib, json, os, sys
+root = sys.argv[1]
+out = {}
+for top, dirs, names in os.walk(root):
+    dirs.sort()
+    for name in sorted(names):
+        path = os.path.join(top, name)
+        st = os.lstat(path)
+        with open(path, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        out[os.path.relpath(path, root)] = {"sha256": digest, "bytes": st.st_size, "mtime_ns": st.st_mtime_ns}
+print(json.dumps(out, sort_keys=True))' "$1"
+}
+
+# mg__private_selftest_check <id> <message> <command...>: one check, passed
+# when the command succeeds.
+mg__private_selftest_check() {
+  local id="$1" message="$2"
+  shift 2
+  if "$@"; then
+    MG__SELFTEST_PASSED=$((MG__SELFTEST_PASSED + 1))
+  else
+    MG__SELFTEST_FAILED=$((MG__SELFTEST_FAILED + 1))
+    mg_failure "$id" "$message"
+  fi
+}
+
+# Writes through /vault ($2), each in a subshell (a failed redirection of a
+# builtin may end sh); writes one "<probe> written" or "<probe> refused:
+# <error>" line each to $3/write-probes.txt. Only EROFS counts as refused by
+# the mount.
+MG_PRIVATE_WRITE_PROBES='v="$2"
+exec >"$3/write-probes.txt"
+[ -f "$v/collection.anki2" ] && [ -f "$v/prefs21.db" ] || { echo "/vault does not show the profile folder" >&2; exit 3; }
+probe() { name="$1"; shift; if err="$( ( "$@" ) 2>&1)"; then echo "$name written"; else echo "$name refused: $err" | tr "\n" " "; echo; fi; }
+append() { printf x >>"$1"; }
+create() { printf x >"$1"; }
+probe append-collection append "$v/collection.anki2"
+probe create-file create "$v/made-up-new-file"
+probe touch-log touch "$v/collection.anki2-wal"
+probe remove-preferences rm "$v/prefs21.db"
+probe rename-collection mv "$v/collection.anki2" "$v/moved"
+probe create-media create "$v/collection.media/new.jpg"'
+
+mg_private_selftest() {
+  if [ "$#" -ne 0 ]; then
+    mg_failure usage "private-selftest takes no arguments"
+    mg_status error
+    return 0
+  fi
+  local rel="${MG_RUN_DIR#"$MG_ROOT"/}" profile="$MG_RUN_DIR/profile" before after rc ok
+  # A made-up profile folder: the collection, its log and media, and two
+  # files the vault never opens.
+  if ! mkdir -p "$profile/collection.media" "$profile/addons21/1" ||
+    ! { printf 'SQLite format 3\0' && head -c 20000 /dev/urandom; } >"$profile/collection.anki2" ||
+    ! head -c 3000 /dev/urandom >"$profile/collection.anki2-wal" ||
+    ! head -c 500 /dev/urandom >"$profile/collection.media/a b.jpg" ||
+    ! printf 'made-up preferences\n' >"$profile/prefs21.db" ||
+    ! printf '{"config": {"api_key": "made-up"}}\n' >"$profile/addons21/1/meta.json" ||
+    ! before="$(mg__private_selftest_files "$profile")"; then
+    mg_failure profile "could not write the made-up profile folder under $rel"
+    mg_status error
+    return 0
+  fi
+  printf '%s\n' "$before" >"$MG_RUN_DIR/source-before.json"
+  mg__private_docker || return 0
+  MG__SELFTEST_PASSED=0 MG__SELFTEST_FAILED=0
+
+  # The copy, exactly as tools/mg private copy runs it.
+  mg__private_run_on "$profile" "$MG_PRIVATE_COPY_SCRIPT" "/work/$rel"
+  rc=$?
+  mg__private_selftest_check copy "meguri-cli private copy through the read-only mount exited $rc; see log.txt" [ "$rc" -eq 0 ]
+  if [ "$rc" -eq 0 ]; then
+    mg_artifact copy "$MG_RUN_DIR/copy" "copy of the made-up profile folder"
+    mg_detail copy "$(jq -c . "$MG_RUN_DIR/copy.json")"
+    mg__private_selftest_check copy-report "copy.json does not give the source's hashes and sizes" \
+      jq -e --argjson s "$before" '.collection.sha256 == $s["collection.anki2"].sha256
+        and .collection.bytes == $s["collection.anki2"].bytes
+        and .wal.sha256 == $s["collection.anki2-wal"].sha256
+        and .media.files == 1 and .media.bytes == $s["collection.media/a b.jpg"].bytes and .media.skipped == 0' \
+      "$MG_RUN_DIR/copy.json"
+    mg__private_selftest_check copy-files "the copy is not the collection, its log and the media file, byte for byte" \
+      jq -en --argjson s "$before" --argjson c "$(mg__private_selftest_files "$MG_RUN_DIR/copy")" \
+      '($c | map_values(.sha256)) == ($s | with_entries(select(.key == "collection.anki2" or .key == "collection.anki2-wal" or .key == "collection.media/a b.jpg")) | map_values(.sha256))'
+    mg__private_selftest_check access-log "the vault's access log names more than the collection, its log and the media" \
+      [ "$(cat "$MG_RUN_DIR/vault-access.log" 2>/dev/null)" = "$(printf 'collection.anki2\ncollection.anki2-wal\ncollection.media/\ncollection.media/a b.jpg')" ]
+  fi
+
+  # Writes through the same mount.
+  mg__private_run_on "$profile" "$MG_PRIVATE_WRITE_PROBES" "/work/$rel"
+  rc=$?
+  mg_artifact report "$MG_RUN_DIR/write-probes.txt" "writes tried through /vault"
+  ok=1
+  [ "$rc" -eq 0 ] && [ "$(grep -c ' refused: .*Read-only file system' "$MG_RUN_DIR/write-probes.txt" 2>/dev/null)" -eq 6 ] &&
+    [ "$(grep -c . "$MG_RUN_DIR/write-probes.txt")" -eq 6 ] && ok=0
+  mg__private_selftest_check write-refused "a write through the read-only /vault mount was not refused as a read-only file system (exit $rc): $(grep -v ' refused: .*Read-only file system' "$MG_RUN_DIR/write-probes.txt" 2>/dev/null | tr '\n' ';')" \
+    [ "$ok" -eq 0 ]
+
+  # The vault refuses the same folder when it is not mounted read-only (the
+  # checkout's own read-write mount at /work).
+  mg__private_run_on "$profile" \
+    '"$1" private copy --source "$3/profile" --out "$3/copy-rw" 2>"$3/read-write.stderr"; echo "$?" >"$3/read-write.rc"' "/work/$rel"
+  ok=1
+  [ "$(cat "$MG_RUN_DIR/read-write.rc" 2>/dev/null)" = 1 ] && grep -q 'not on a read-only mount' "$MG_RUN_DIR/read-write.stderr" &&
+    [ ! -e "$MG_RUN_DIR/copy-rw" ] && ok=0
+  mg__private_selftest_check read-write-refused "meguri-cli private copy did not refuse a source on a read-write mount; see read-write.stderr" \
+    [ "$ok" -eq 0 ]
+
+  # The source as it was: same files, hashes, sizes and modification times.
+  after="$(mg__private_selftest_files "$profile")"
+  printf '%s\n' "$after" >"$MG_RUN_DIR/source-after.json"
+  mg__private_selftest_check source-unchanged "the source folder changed: $(jq -rn --argjson b "$before" --argjson a "$after" \
+    '[($b + $a) | keys[] as $k | select($b[$k] != $a[$k]) | $k] | join(", ")')" \
+    [ "$before" = "$after" ]
+
+  mg_count total $((MG__SELFTEST_PASSED + MG__SELFTEST_FAILED))
+  mg_count passed "$MG__SELFTEST_PASSED"
+  mg_count failed "$MG__SELFTEST_FAILED"
+  if [ "$MG__SELFTEST_FAILED" -eq 0 ]; then
+    mg_message "private-selftest: $MG__SELFTEST_PASSED checks pass (copy through the read-only mount, writes refused, source unchanged)"
+    mg_status pass
+  else
+    mg_message "private-selftest: $MG__SELFTEST_FAILED of $((MG__SELFTEST_PASSED + MG__SELFTEST_FAILED)) checks fail"
+    mg_status fail
+  fi
+}
+
 # ------------------------------------------------------------- anonymize
 
 mg__anonymize_usage() {
@@ -494,8 +644,11 @@ print(datetime.datetime.now(z).replace(hour=12, minute=0, second=0, microsecond=
 
 # mg__anonymize_v3 <source> <clone>: A17 V3. Runs tools/mg oracle check
 # --schedule on both at MG__ANON_NOW in MG__ANON_TZ and compares counts,
-# timing, check_db, schedule and changed_tables. Sets MG__ANON_V3 to pass,
-# fail or error and writes v3.json (the members and deck ids that differ).
+# timing, check_db, schedule and changed_tables. On its own, the clone's
+# Check Database must find nothing (U15 Validation): equal reports do not
+# pass when both find the same problems. Sets MG__ANON_V3 to pass, fail or
+# error and writes v3.json (the members and deck ids that differ, and the
+# clone's problems as kind: count, or its check_db rejection).
 mg__anonymize_v3() {
   local source="$1" clone="$2" side dir result repro
   for side in source clone; do
@@ -526,14 +679,25 @@ mg__anonymize_v3() {
        changed_tables: [$c.changed_tables[] | select(. != "col" and . != "config")
          | select(. as $t | ($s.changed_tables | index($t)) == null)],
        sha256: {source: $s.schedule.sha256, clone: $c.schedule.sha256},
+       clone_check_db: (if ($c.check_db | type) != "object" then {error: ($c.check_db | tostring)}
+         elif ($c.check_db | has("error")) then {error: $c.check_db.error}
+         else $c.check_db | to_entries | map(select(.value != 0)) | sort_by(.key) | from_entries end),
        now: $s.now, tz: $s.tz}
     | . + {equal: ((.members | length) == 0 and (.changed_tables | length) == 0)}' >"$MG_RUN_DIR/v3.json"
+  if [ ! -s "$MG_RUN_DIR/v3.json" ]; then
+    mg_failure v3/compare "could not compare the oracle reports; see log.txt" "tools/mg anonymize"
+    MG__ANON_V3=error
+    return 0
+  fi
   mg_detail v3 "$(jq -c . "$MG_RUN_DIR/v3.json")"
-  if jq -e '.equal' "$MG_RUN_DIR/v3.json" >/dev/null; then
+  if jq -e '.equal and .clone_check_db == {}' "$MG_RUN_DIR/v3.json" >/dev/null; then
     MG__ANON_V3=pass
     return 0
   fi
   MG__ANON_V3=fail
+  if jq -e '.clone_check_db != {}' "$MG_RUN_DIR/v3.json" >/dev/null; then
+    mg_failure v3/clone_check_db "the oracle's Check Database finds problems in the clone: $(jq -r '.clone_check_db | to_entries | map("\(.key) \(.value)") | join(", ")' "$MG_RUN_DIR/v3.json") (a clone must have none; when the source has the same, repair the source first)" "tools/mg anonymize"
+  fi
   jq -r '.members[] | select(. != "schedule")' "$MG_RUN_DIR/v3.json" | while IFS= read -r member; do
     mg_failure "v3/$member" "the oracle reports a different $member for the clone than for the source" "tools/mg anonymize"
   done
@@ -677,4 +841,116 @@ mg_anonymize() {
     mg_message "anonymize: every check passes (clone at ${out#"$MG_ROOT"/})"
     mg_status pass
   fi
+}
+
+# ------------------------------------------------------- anonymize-check
+#
+# tools/mg anonymize-check [<size>] [--seed N]: U15's "clone of a generated
+# 10k collection", end to end with nothing faked: tools/mg fixtures <size>,
+# then tools/mg anonymize --source on that collection, both nested. It passes
+# (or warns, for V4 review items) only when anonymize does with V3 run: the
+# oracle's next-state and queue digests equal for every deck and card, and
+# the clone's Check Database clean. Where the oracle cannot run (a unit
+# branch carrying spec-side oracle changes) it is error, as anonymize is.
+
+mg__anonymize_check_usage() {
+  mg_failure usage "$1; usage: tools/mg anonymize-check [<size>] [--seed N]" "tools/mg anonymize-check 10k"
+  mg_message "anonymize-check: usage error"
+  mg_status error
+}
+
+mg_anonymize_check() {
+  local size="" seed=1 gen dir anon status repro
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --seed)
+        [ "$#" -ge 2 ] || {
+          mg__anonymize_check_usage "--seed needs a value"
+          return 0
+        }
+        seed="$2"
+        shift 2
+        ;;
+      -*)
+        mg__anonymize_check_usage "unknown option '$1'"
+        return 0
+        ;;
+      *)
+        [ -z "$size" ] || {
+          mg__anonymize_check_usage "one size only"
+          return 0
+        }
+        size="$1"
+        shift
+        ;;
+    esac
+  done
+  size="${size:-10k}"
+  case "$seed" in '' | *[!0-9]*)
+    mg__anonymize_check_usage "--seed takes a non-negative integer, not '$seed'"
+    return 0
+    ;;
+  esac
+  if ! printf '%s' "$size" | grep -Eqi '^[1-9][0-9]*[km]?$'; then
+    mg__anonymize_check_usage "<size> is a card count such as 10k, not '$size'"
+    return 0
+  fi
+
+  repro="tools/mg fixtures $size --seed $seed"
+  echo "anonymize-check: $repro" >&2
+  gen="$("$MG_TOOLS/mg" fixtures "$size" --seed "$seed" </dev/null)"
+  gen="${gen##*$'\n'}"
+  if [ -z "$gen" ] || [ ! -f "$gen" ]; then
+    mg_failure fixtures "tools/mg fixtures wrote no result; see log.txt" "$repro"
+    mg_status error
+    return 0
+  fi
+  mg_artifact fixtures "$gen" "tools/mg fixtures result"
+  dir="$(jq -r '.details.fixtures[0].dir // empty' "$gen")"
+  if [ "$(jq -r .status "$gen")" != pass ] || [ -z "$dir" ]; then
+    mg_failure fixtures "tools/mg fixtures: $(jq -r .message "$gen")" "$repro"
+    mg_message "anonymize-check: generating the $size collection failed"
+    mg_status error
+    return 0
+  fi
+
+  repro="tools/mg anonymize --source $dir"
+  echo "anonymize-check: $repro" >&2
+  anon="$("$MG_TOOLS/mg" anonymize --source "$dir" </dev/null)"
+  anon="${anon##*$'\n'}"
+  if [ -z "$anon" ] || [ ! -f "$anon" ]; then
+    mg_failure anonymize "tools/mg anonymize wrote no result; see log.txt" "$repro"
+    mg_status error
+    return 0
+  fi
+  mg_artifact anonymize "$anon" "tools/mg anonymize result"
+  mg_detail anonymize "$(jq -c '{status, message, summary, v3: .details.v3, report: .details.report, clone: .details.clone}' "$anon")"
+  jq -c '.failures[]' "$anon" | while IFS= read -r failure; do
+    mg_failure "$(jq -r .id <<<"$failure")" "$(jq -r .message <<<"$failure")" "$repro"
+  done
+  mg_count total "$(jq '.summary.total // 0' "$anon")"
+  mg_count passed "$(jq '.summary.passed // 0' "$anon")"
+  mg_count failed "$(jq '.summary.failed // 0' "$anon")"
+  status="$(jq -r .status "$anon")"
+  case "$status" in
+    pass | warn)
+      if jq -e '.details.v3.equal == true and .details.v3.clone_check_db == {}
+        and .details.v3.sha256.source == .details.v3.sha256.clone' "$anon" >/dev/null; then
+        mg_message "anonymize-check: the clone of the $size collection schedules as its source in the oracle (schedule $(jq -r '.details.v3.sha256.source[0:12]' "$anon")); $(jq -r .message "$anon")"
+        mg_status "$status"
+      else
+        mg_failure v3 "tools/mg anonymize reported $status without an equal V3 and a clean Check Database" "$repro"
+        mg_message "anonymize-check: no V3 evidence for the $size collection"
+        mg_status fail
+      fi
+      ;;
+    fail)
+      mg_message "anonymize-check: the clone of the $size collection fails: $(jq -r .message "$anon")"
+      mg_status fail
+      ;;
+    *)
+      mg_message "anonymize-check: $(jq -r .message "$anon")"
+      mg_status error
+      ;;
+  esac
 }

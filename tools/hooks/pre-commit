@@ -1,16 +1,19 @@
 #!/bin/bash
 # pre-commit hook: the private-token scan (U15, R1940). `tools/mg hooks
 # install` and `tools/mg worktree new` install a shim that runs this file
-# from the checkout being committed in.
+# from the checkout being committed in; tools/hooks/pre-merge-commit runs it
+# for the merges `git merge` commits itself.
 #
 # The token set is built from the user's collection by `tools/mg private
 # copy` and lives in the main checkout's build/private/tokens/ (a checkout's
 # own build/private/tokens/ counts too). Without one the hook does nothing.
 # With one, the lines this commit adds (binary files whole) must hold none of
 # its tokens; tools/scripts/private-scan/private_scan.py scans them. The hook
-# names files and line numbers, never a token. Merge commits are not scanned
-# (their lines were scanned where they were committed), as the commit-msg
-# hook skips them. Runs under macOS /bin/bash 3.2.
+# names files and line numbers, never a token. A merge commit is scanned
+# like any other, against its first parent: a conflict resolution can add
+# text neither parent had, and the other parent's lines may have been
+# committed without the hook (--no-verify, another clone). Runs under macOS
+# /bin/bash 3.2.
 
 set -u
 
@@ -20,8 +23,6 @@ reject() {
 }
 
 top="$(git rev-parse --show-toplevel)" || exit 1
-git_dir="$(git rev-parse --absolute-git-dir)" || exit 1
-[ -f "$git_dir/MERGE_HEAD" ] && exit 0
 common="$(git rev-parse --path-format=absolute --git-common-dir)" || exit 1
 main="$(dirname "$common")"
 

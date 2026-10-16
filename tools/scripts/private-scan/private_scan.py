@@ -6,11 +6,15 @@
 
 `build` turns the candidate strings `meguri-cli private tokens` read from a
 copy of the collection into tokens: each deck name, tag and media name is one
-token (its word sequence), each field word of four or more characters is one
-token, and a token must hold a letter. Tokens that already occur in a tracked
-file of the repository are dropped: they are not private, and keeping them
-would block ordinary commits. It writes one token per line (words joined by
-one space) and `meta.json` (counts only) beside it.
+token (its word sequence), whatever its length; each field word of four or
+more characters that holds a letter is one token. Tokens that already occur
+in a file committed at the repository's HEAD are dropped: they are not
+private, and keeping them would block ordinary commits. Only committed text
+counts, never the working tree or the index (a private word written into a
+tracked file must not exempt itself before that file is scanned and
+committed), and never `conformance/reports/private/`, which holds results
+from the collection. It writes one token per line (words joined by one
+space) and `meta.json` (counts only) beside it.
 
 `scan` reports the files that contain a token, as whole words: whole files
 for paths (folders are walked), or the lines a commit adds for `--staged`
@@ -52,17 +56,18 @@ def words(text):
     return WORD.findall(unicodedata.normalize("NFC", text).casefold())
 
 
-def keep(token):
-    """A token is kept when it has four or more characters and a letter."""
-    return sum(len(w) for w in token) >= MIN_CHARS and any(c.isalpha() for w in token for c in w)
+def keep_word(word):
+    """A field word is a token when it has four or more characters and a letter."""
+    return len(word) >= MIN_CHARS and any(c.isalpha() for c in word)
 
 
 def tokens_of(kind, text):
-    """The tokens one candidate gives."""
+    """The tokens one candidate gives. The length rule is for field words
+    only: a deck, tag or media name is private whatever its length."""
     if kind == "word":
-        return [(w,) for w in words(text) if keep((w,))]
+        return [(w,) for w in words(text) if keep_word(w)]
     token = tuple(words(text))
-    return [token] if token and keep(token) else []
+    return [token] if token else []
 
 
 class Matcher:
@@ -148,8 +153,51 @@ def git(repo, *args):
     return run.stdout
 
 
-def tracked_files(repo):
-    return [os.fsdecode(p) for p in git(repo, "ls-files", "-z").split(b"\0") if p]
+# Committed files that never make a token public: results from the
+# collection itself.
+PRIVATE_RESULTS = "conformance/reports/private/"
+
+
+def committed_texts(repo):
+    """Yields the text of each regular file committed at HEAD (binary files and
+    PRIVATE_RESULTS left out). Nothing when HEAD has no commit."""
+    head = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "HEAD^{commit}"],
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if head.returncode != 0:
+        return
+    commit = head.stdout.decode("ascii").strip()
+    blobs = []
+    for record in git(repo, "ls-tree", "-r", "-z", "--full-tree", commit).split(b"\0"):
+        if not record:
+            continue
+        meta, path = record.split(b"\t", 1)
+        mode, kind, sha = meta.split(b" ")
+        # Regular files only: not symlinks (120000) or submodules (commit).
+        if kind != b"blob" or mode not in (b"100644", b"100755"):
+            continue
+        if os.fsdecode(path).startswith(PRIVATE_RESULTS):
+            continue
+        blobs.append(sha)
+    if not blobs:
+        return
+    # One reader for every blob: "<sha> blob <size>", the bytes, a newline.
+    proc = subprocess.Popen(["git", "-C", repo, "cat-file", "--batch"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    try:
+        for sha in blobs:
+            proc.stdin.write(sha + b"\n")
+            proc.stdin.flush()
+            header = proc.stdout.readline().split()
+            if len(header) != 3 or header[1] != b"blob":
+                raise RuntimeError("reading a committed file from git failed")
+            data = proc.stdout.read(int(header[2]))
+            proc.stdout.read(1)
+            if not is_binary(data):
+                yield data.decode("utf-8", errors="replace")
+    finally:
+        proc.stdin.close()
+        proc.stdout.read()
+        proc.wait()
 
 
 # ------------------------------------------------------------------ build
@@ -171,15 +219,7 @@ def build(candidates, repo, out):
             tokens.update(found)
     matcher = Matcher(tokens)
     in_repo = set()
-    for rel in tracked_files(repo):
-        path = os.path.join(repo, rel)
-        if not os.path.isfile(path) or os.path.islink(path):
-            continue
-        with open(path, "rb") as f:
-            data = f.read()
-        if is_binary(data):
-            continue
-        text = data.decode("utf-8", errors="replace")
+    for text in committed_texts(repo):
         in_repo.update(matcher.find(words(text)))
     final = sorted(" ".join(t) for t in tokens - in_repo)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)

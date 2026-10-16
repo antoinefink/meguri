@@ -5,9 +5,9 @@
 # service's command here, with /vault, /work and meguri-cli mapped, and a
 # fake meguri-cli whose "collection" is a candidates file (meguri-cli itself
 # is tested in core/; the scanner's unit tests run from here, since they need
-# git). The real copy
-# through a read-only mount is a manual run (see the U15 review log). Every
-# collection here is made up.
+# git). The real copy through the read-only mount is tools/mg
+# private-selftest; the real anonymizer and oracle on a generated collection
+# are tools/mg anonymize-check. Every collection here is made up.
 
 bats_require_minimum_version 1.5.0
 
@@ -349,6 +349,68 @@ no_private_text() { # <file>...: none holds a string of the made-up collection
   [ "$status" -eq 0 ]
 }
 
+@test "pre-commit hook: a merge's conflict resolution and an automatic merge are scanned too" {
+  mg hooks install
+  grep -q 'tools/hooks/pre-merge-commit' "$SB/.git/hooks/pre-merge-commit"
+  [ -x "$SB/.git/hooks/pre-merge-commit" ]
+  mkdir -p "$SB/build/private/tokens"
+  printf 'quokkasprung\n' >"$SB/build/private/tokens/tokens.txt"
+  local main
+  main="$(git -C "$SB" symbolic-ref --short HEAD)"
+  printf 'base\n' >"$SB/m.txt"
+  git -C "$SB" add m.txt
+  git -C "$SB" commit -qm base
+  git -C "$SB" checkout -qb side
+  printf 'side\n' >"$SB/m.txt"
+  git -C "$SB" commit -qam side
+  git -C "$SB" checkout -q "$main"
+  printf 'main\n' >"$SB/m.txt"
+  git -C "$SB" commit -qam main
+
+  # A conflict resolved with a line neither parent had.
+  run git -C "$SB" merge --no-edit side
+  [ "$status" -ne 0 ]
+  printf 'Quokkasprung resolved\n' >"$SB/m.txt"
+  git -C "$SB" add m.txt
+  run --separate-stderr git -C "$SB" commit --no-edit
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"m.txt (line 1)"* ]]
+  ! grep -qi quokka <<<"$stderr"
+  [ -f "$SB/.git/MERGE_HEAD" ]
+  printf 'resolved\n' >"$SB/m.txt"
+  git -C "$SB" add m.txt
+  run --separate-stderr git -C "$SB" commit --no-edit
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$SB" rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]
+
+  # An automatic merge (git merge runs pre-merge-commit, not pre-commit)
+  # bringing a line that was committed without the hook.
+  git -C "$SB" checkout -qb side2
+  printf 'Quokkasprung\n' >"$SB/n.txt"
+  git -C "$SB" add n.txt
+  git -C "$SB" commit -q --no-verify -m side2
+  git -C "$SB" checkout -q "$main"
+  printf 'other\n' >"$SB/o.txt"
+  git -C "$SB" add o.txt
+  git -C "$SB" commit -qm other
+  local before
+  before="$(git -C "$SB" rev-parse HEAD)"
+  run --separate-stderr git -C "$SB" merge --no-edit side2
+  [ "$status" -ne 0 ]
+  [[ "$stderr" == *"n.txt (line 1)"* ]]
+  ! grep -qi quokka <<<"$stderr"
+  [ "$(git -C "$SB" rev-parse HEAD)" = "$before" ]
+  git -C "$SB" merge --abort
+  # Without the token, the same kind of merge goes through.
+  git -C "$SB" checkout -q side2
+  printf 'harmless\n' >"$SB/n.txt"
+  git -C "$SB" commit -qam fixed
+  git -C "$SB" checkout -q "$main"
+  run --separate-stderr git -C "$SB" merge --no-edit side2
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$SB" rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ]
+}
+
 @test "hooks install refuses a foreign pre-commit hook" {
   printf '#!/bin/sh\nexit 0\n' >"$SB/.git/hooks/pre-commit"
   chmod +x "$SB/.git/hooks/pre-commit"
@@ -372,7 +434,12 @@ mg_oracle() {
   local report="$STUB_DIR/$(basename "$2").json"
   [ -f "$report" ] || { mg_failure oracle-tree-differs "made up: no oracle here"; mg_status error; return 0; }
   mg_detail check "$(jq -c . "$report")"
-  mg_status pass
+  # K9: a Check Database problem fails the job; the report is still there.
+  if jq -e '.check_db | has("error") or any(.[]; . != 0)' "$report" >/dev/null; then
+    mg_status fail
+  else
+    mg_status pass
+  fi
 }
 STUB
   FIX="$SB/build/fixtures/s-1-10k"
@@ -407,6 +474,28 @@ STUB
   grep -q "^oracle check $clone " "$STUB_LOG"
   [ "$(field .summary.total)" -eq 5 ]
   [ "$(field .summary.failed)" -eq 0 ]
+}
+
+@test "anonymize: Check Database problems in the clone fail, even when the source has the same ones" {
+  anonymize_sandbox
+  jq -c '.check_db.future_ids = 2 | .check_db.card_properties = 1' <<<"$REPORT" >"$STUB_DIR/s-1-10k.json"
+  cp "$STUB_DIR/s-1-10k.json" "$STUB_DIR/clone.json"
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(",")')" = v3/clone_check_db ]
+  [[ "$(field '.failures[0].message')" == *"card_properties 1, future_ids 2"* ]]
+  # The reports agree; the clone alone is judged.
+  [ "$(field .details.v3.equal)" = true ]
+  [ "$(field -c .details.v3.clone_check_db)" = '{"card_properties":1,"future_ids":2}' ]
+  [ "$(field .summary.failed)" -eq 1 ]
+
+  jq -c '.check_db = {"error": "corrupt"} | .changed_tables = []' <<<"$REPORT" >"$STUB_DIR/s-1-10k.json"
+  cp "$STUB_DIR/s-1-10k.json" "$STUB_DIR/clone.json"
+  mg anonymize --source build/fixtures/s-1-10k
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(",")')" = v3/clone_check_db ]
+  [[ "$(field '.failures[0].message')" == *"error corrupt"* ]]
 }
 
 @test "anonymize: a schedule or Check Database difference fails V3, naming the members and deck ids" {
@@ -489,6 +578,43 @@ STUB
   [ ! -e "$SB/build/private/$run/copy" ]
   [ -f "$SB/build/private/$run/clone/collection.anki2" ]
   no_private_text "$result" "$SB/build/mg/anonymize/$run/log.txt"
+}
+
+@test "anonymize-check: generates the collection, anonymizes it and passes only on V3 evidence" {
+  anonymize_sandbox
+  cat >>"$SB/tools/mg.d/zz-stub.sh" <<'STUB'
+mg_fixtures() {
+  echo "fixtures $*" >>"$STUB_LOG"
+  mg_detail fixtures '[{"target": "10k", "kind": "size", "dir": "build/fixtures/s-1-10k"}]'
+  mg_status pass
+}
+STUB
+  mg anonymize-check
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  grep -q '^fixtures 10k --seed 1$' "$STUB_LOG"
+  grep -q "meguri-cli anonymize --copy $FIX " "$STUB_LOG"
+  [ "$(grep -c '^oracle check .* --schedule --now 2030-01-15T10:00:00Z --tz Etc/GMT-1$' "$STUB_LOG")" -eq 2 ]
+  [ "$(field .details.anonymize.v3.equal)" = true ]
+  [ "$(field .summary.passed)" -eq 5 ]
+
+  # A schedule that differs fails it, with anonymize's failures.
+  jq -c '.schedule.sha256 = "bbb"' <<<"$REPORT" >"$STUB_DIR/clone.json"
+  mg anonymize-check 10k --seed 1
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(",")')" = v3/schedule ]
+  [ "$(field '.failures[0].repro')" = "tools/mg anonymize --source build/fixtures/s-1-10k" ]
+
+  # Without the oracle there is no evidence: error, never pass.
+  rm "$STUB_DIR/clone.json"
+  mg anonymize-check
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = v3/clone ]
+
+  mg anonymize-check 10k --seed x
+  [ "$(field '.failures[0].id')" = usage ]
+  mg anonymize-check notasize
+  [ "$(field '.failures[0].id')" = usage ]
 }
 
 @test "the job's CI markers are the vault's" {

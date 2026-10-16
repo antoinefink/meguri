@@ -54,13 +54,22 @@ class Words(unittest.TestCase):
         self.assertEqual(private_scan.words("Hör"), ["hör"])
         self.assertEqual(private_scan.words("蝶々が飛ぶ。"), ["蝶々が飛ぶ"])
 
-    def test_a_token_needs_four_characters_and_a_letter(self):
+    def test_a_field_word_token_needs_four_characters_and_a_letter(self):
         self.assertEqual(private_scan.tokens_of("word", "l'Écureuil 2024 abc"), [("écureuil",)])
-        self.assertEqual(private_scan.tokens_of("deck", "N5"), [])
+
+    def test_deck_tag_and_media_names_are_tokens_whatever_their_length(self):
+        # The four-character rule is for field words only (U15): a short or
+        # numeric name is still a name from the collection.
+        self.assertEqual(private_scan.tokens_of("deck", "N5"), [("n5",)])
+        self.assertEqual(private_scan.tokens_of("deck", "2024"), [("2024",)])
+        self.assertEqual(private_scan.tokens_of("tag", "nn"), [("nn",)])
         self.assertEqual(private_scan.tokens_of("tag", "jp::n5"), [("jp", "n5")])
         self.assertEqual(private_scan.tokens_of("media", "falter flug.jpg"), [("falter", "flug", "jpg")])
         self.assertEqual(private_scan.tokens_of("media", "1234.mp3"), [("1234", "mp3")])
-        self.assertEqual(private_scan.tokens_of("media", "12.34"), [])
+        self.assertEqual(private_scan.tokens_of("media", "12.34"), [("12", "34")])
+        # A name with no letter or digit at all gives no token.
+        self.assertEqual(private_scan.tokens_of("deck", "::"), [])
+        self.assertEqual(private_scan.tokens_of("media", "_.-"), [])
 
 
 class Build(unittest.TestCase):
@@ -83,27 +92,94 @@ class Build(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_build_keeps_private_tokens_and_drops_what_the_repository_holds(self):
+    def build(self):
         r = run("build", "--candidates", self.candidates, "--repo", self.repo, "--out", self.out)
         self.assertEqual(r.returncode, 0, r.stderr)
         with open(self.out, encoding="utf-8") as f:
-            tokens = f.read().splitlines()
+            return r, f.read().splitlines()
+
+    def test_build_keeps_private_tokens_and_drops_what_the_repository_holds(self):
+        r, tokens = self.build()
         self.assertEqual(tokens, sorted([
             "falter flug jpg",
             "hörverstehen",
             "japanisch",
             "japanisch hörverstehen",
             "jp n5",
+            "n5",
             "schmetterling",
             "écureuil",
         ]))
         meta = json.loads(r.stdout)
-        self.assertEqual(meta["tokens"], 7)
+        self.assertEqual(meta["tokens"], 8)
         self.assertEqual(meta["in_repository"], 2)
         with open(os.path.join(os.path.dirname(self.out), "meta.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f), meta)
         # stdout and meta.json hold counts, never a token.
         self.assertNotIn("japanisch", r.stdout)
+
+    def test_only_committed_text_makes_a_token_public(self):
+        # A private word written into a tracked file, a staged file or a new
+        # file is not in the repository until it is committed: exempting it
+        # would let the commit that adds it through the scan.
+        write(os.path.join(self.repo, "notes.md"), "A card is shown.\nThe WIESE is green.\nSchmetterling\n")
+        write(os.path.join(self.repo, "staged.md"), "Japanisch\n")
+        git(self.repo, "add", "staged.md")
+        write(os.path.join(self.repo, "report.json"), '{"deck": "Hörverstehen"}\n')
+        git(self.repo, "add", "report.json")
+        _, tokens = self.build()
+        for token in ("schmetterling", "japanisch", "hörverstehen"):
+            self.assertIn(token, tokens)
+        # A committed tracked file still counts, as committed.
+        self.assertNotIn("wiese", tokens)
+
+    def test_committed_private_results_never_make_a_token_public(self):
+        # conformance/reports/private/ holds results from the collection: a
+        # word there is no evidence that the word is public.
+        write(os.path.join(self.repo, "conformance", "reports", "private", "M1.json"), '{"deck": "Japanisch"}\n')
+        write(os.path.join(self.repo, "conformance", "private", "README.md"), "Hörverstehen\n")
+        git(self.repo, "add", "-A", "conformance")
+        git(self.repo, "commit", "-qm", "results")
+        _, tokens = self.build()
+        self.assertIn("japanisch", tokens)
+        self.assertNotIn("hörverstehen", tokens)
+
+    def test_a_repository_without_commits_exempts_nothing(self):
+        empty = os.path.join(self.dir, "empty")
+        os.makedirs(empty)
+        git(empty, "init", "-q")
+        write(os.path.join(empty, "notes.md"), "card Wiese\n")
+        git(empty, "add", "notes.md")
+        r = run("build", "--candidates", self.candidates, "--repo", empty, "--out", self.out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["in_repository"], 0)
+
+    def test_short_and_numeric_names_are_tokens_and_fail_a_result_json(self):
+        write(self.candidates, "".join(json.dumps(c) + "\n" for c in [
+            {"kind": "deck", "text": "N5"},
+            {"kind": "deck", "text": "2024"},
+            {"kind": "tag", "text": "nn"},
+            {"kind": "media", "text": "7.mp3"},
+            {"kind": "word", "text": "2025"},
+            {"kind": "word", "text": "abc"},
+        ]))
+        _, tokens = self.build()
+        self.assertEqual(tokens, ["2024", "7 mp3", "n5", "nn"])
+        results = os.path.join(self.dir, "results")
+        cases = {
+            "deck.json": ('{"deck": "N5", "passed": 3}', True),
+            "number.json": ('{"deck": 2024}', True),
+            "tag.json": ('{"tags": ["NN"]}', True),
+            "media.json": ('{"media": "7.mp3"}', True),
+            "word.json": ('{"passed": 2025, "x": "abc"}', False),
+            "inside.json": ('{"deck": "N50", "y": "nnx"}', False),
+        }
+        for name, (text, _) in cases.items():
+            write(os.path.join(results, name), text + "\n")
+        r = run("scan", "--tokens", self.out, results)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        found = sorted(os.path.basename(f["path"]) for f in json.loads(r.stdout)["files"])
+        self.assertEqual(found, sorted(n for n, (_, hit) in cases.items() if hit))
 
 
 class Scan(unittest.TestCase):
