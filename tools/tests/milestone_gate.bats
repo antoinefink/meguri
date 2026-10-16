@@ -60,7 +60,7 @@ EOF
     printf '# Plan\n\n### Delivery Milestones\n\n| Milestone | Units | Closing gate | User steps |\n|---|---|---|---|\n'
     # Only M0 has closing-gate and user-steps text: its suite and user step
     # claim it with their plan excerpts.
-    printf '| **M0 Stage M0** | U1 | Gate of M0. | Steps of M0 |\n'
+    printf '| **M0 Stage M0** | U1 | Gate of M0. | Steps of M0 (R1969) |\n'
     i=2
     for m in M1 M2 M3 M4 M5; do
       printf '| **%s Stage %s** | U%d |  |  |\n' "$m" "$m" "$i"
@@ -75,9 +75,9 @@ EOF
     i=1
     for m in M0 M1 M2 M3 M4 M5; do
       if [ "$m" = M0 ]; then
-        printf '  - id: M0\n    name: Stage M0\n    plan: {gate: "Gate of M0.", user_steps: "Steps of M0"}\n    units: [U1]\n'
+        printf '  - id: M0\n    name: Stage M0\n    plan: {gate: "Gate of M0.", user_steps: "Steps of M0 (R1969)"}\n    units: [U1]\n'
         printf '    suites:\n      - {id: unit, run: unit, plan: [Gate of M0]}\n      - {id: milestones, run: milestones}\n'
-        printf '    user_steps:\n      - {id: xcode-license, description: Accept the license, evidence: build/mg/doctor/, validator: {type: setup, step: xcode-license}, plan: [Steps of M0]}\n'
+        printf '    user_steps:\n      - {id: xcode-license, description: Accept the license, evidence: build/mg/doctor/, validator: {type: setup, step: xcode-license}, plan: ["Steps of M0 (R1969)"]}\n'
       else
         printf '  - id: %s\n    name: Stage %s\n    plan: {gate: "", user_steps: ""}\n    units: [U%d]\n' "$m" "$m" "$i"
       fi
@@ -139,7 +139,7 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
     "$(sed -n '/^### Unit Index/,/^### /p' "$REPO_ROOT/$(jq -r .plan "$d/manifest.json")" | grep -c '^| U[0-9]')" ]
 }
 
-@test "the real manifest fails the check when an entry the plan requires is removed" {
+@test "the real manifest fails the check when an entry the plan requires is removed or weakened" {
   local d="$BATS_TEST_TMPDIR" line edit expected m1='.milestones[] | select(.id == "M1")'
   "$REPO_ROOT/tools/mg" --list >"$d/registry.tsv"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
@@ -162,6 +162,10 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 ($m1).suites |= map(select(.id != "u253-a11y"));;including U253's sweep of those screens
 ($m1).user_steps |= map(select(.id != "device-run-ipad"));;no device-run user step on ipad
 ($m1 | .user_steps[] | select(.id == "trial") | .validator.days) = 6;;do not say 6-day
+($m1).suites |= map(select(.id != "perf-gate"));;U241 and U242 groups for launch, review, open and sync
+($m1 | .suites[] | select(.id == "bench-mac")).plan = ["U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844)"];;must bind the same items
+($m1 | .user_steps[] | select(.id == "trial") | .validator) = {"type": "report"};;which asks for a trial step of 7 days
+($m1 | .user_steps[] | select(.id == "variant-picks") | .validator) = {"type": "report"};;which asks for a variant-pick step
 (.milestones[] | select(.id == "M3")).suites |= map(select(.id != "u253-a11y"));;M3: the closing gate text names U253
 (.milestones[] | select(.id == "M5")).user_steps |= map(select(.id != "device-run-mac"));;no device-run user step on mac
 (.global[] | select(.id == "native-oracle")) |= del(.plan);;the macOS-native oracle check (KTD24)

@@ -549,6 +549,32 @@ class ManifestTests(Sandbox):
             ("items on a step that takes none",
              set_in(lambda m: m1(m)["user_steps"][2], {"plan": [{"text": "A 7-day trial, logged", "items": ["x"]}]}),
              "a trial step binds no items"),
+            # Text a suite binds to scope items is claimed with those items or
+            # not at all: an itemless claim would keep the text covered once
+            # the suite that holds the items is removed.
+            ("a supporting suite quotes text another binds to items",
+             lambda m: m1(m)["suites"].append({"id": "bench", "run": "bench", "pending": "U246",
+                                               "plan": ["U246: areas storage and sync (R1926–R1933)"]}),
+             "must bind the same items"),
+            ("a co-claim that binds fewer items",
+             lambda m: [m1(m)["suites"][2].update({"scope": {"detail": "screens", "items": ["home"]}}),
+                        m1(m)["suites"][2].update({"plan": ["U253", {"text": "for Home and review", "items": ["home"]}]})],
+             "must bind the same items"),
+            ("a suite whose plan text another quotes alike",
+             lambda m: m1(m)["suites"].append(dict(copy.deepcopy(m1(m)["suites"][0]), id="u246b", run="u246b")),
+             "removing it would go unnoticed"),
+            ("an excerpt that overlaps another definition's",
+             set_in(lambda m: m1(m)["suites"][1], {"plan": ["U252", {"text": "for Home", "items": ["home"]}]}),
+             "overlaps"),
+            # The plan's wording names the validator a user step needs.
+            ("the trial swapped for a report", set_in(lambda m: m1(m)["user_steps"][2], {"validator": {"type": "report"}}),
+             "'7-day', which asks for a trial step of 7 days"),
+            ("a device run swapped for a report",
+             set_in(lambda m: m1(m)["user_steps"][1], {"validator": {"type": "report"}}),
+             "'Device run', which asks for a device-run step"),
+            ("a step whose excerpts do not name its kind",
+             set_in(lambda m: m1(m)["user_steps"][2], {"validator": {"type": "setup", "step": "xcode-license"}}),
+             "a setup step, but none of its plan excerpts says R1969"),
         ]
         for name, mutate, expected in cases:
             with self.subTest(name):
@@ -747,17 +773,27 @@ class DeferralTests(Sandbox):
 
     UNAVAILABLE = {"lane": {"kind": "foldable", "status": "unavailable", "reason": "toolchain"}}
 
-    def test_an_approved_deferral_covers_its_cells_runs_unavailable_lane(self):
+    def holding(self):
         self.result("core-test")
         self.result("sim-setup", details={"foldable": {"status": "unavailable", "reason": "toolchain"}})
-        self.result("snapshots", status="warn", details=self.UNAVAILABLE)
+
+    def with_snap(self, scope=None):
         man = self.man()
-        man["milestones"][1]["suites"] = [{"id": "snap", "run": "snap"}]
+        man["milestones"][1]["suites"] = [dict({"id": "snap", "run": "snap"}, **({"scope": scope} if scope else {}))]
+        return man
+
+    def snap(self, ev):
+        return [s for s in ev["suites"] if s["id"] == "snap"][0]
+
+    def test_an_approved_deferral_covers_its_cells_runs_unavailable_lane(self):
+        self.holding()
+        self.result("snapshots", status="warn", details=dict(self.UNAVAILABLE, devices={
+            "iphone": "pass", "ipad": {"status": "pass"}, "foldable": "unavailable"}))
+        man = self.with_snap()
         rc, ev = self.evaluate(man, "M5")
         self.assertEqual(rc, 0, ev["failures"])
-        snap = [s for s in ev["suites"] if s["id"] == "snap"][0]
-        self.assertEqual(snap["outcome"], "deferred")
-        self.assertIn("foldable", snap["message"])
+        self.assertEqual(self.snap(ev)["outcome"], "deferred")
+        self.assertIn("foldable", self.snap(ev)["message"])
         with open(self.record, encoding="utf-8") as f:
             self.assertEqual([(s["id"], s["status"], s["outcome"]) for s in json.load(f)["suites"]],
                              [("unit", "pass", "pass"), ("snap", "warn", "deferred")])
@@ -766,6 +802,76 @@ class DeferralTests(Sandbox):
         rc, ev = self.evaluate(man, "M1")
         self.assertEqual(rc, 1)
         self.assertIn("unavailable", self.failure(ev, "suite:snap"))
+
+    def test_a_deferral_waives_only_its_cells_of_a_scoped_suite(self):
+        # The suite needs the iPhone and foldable cells; Antoine deferred the
+        # foldable ones only. A warn of the foldable lane with no iPhone result
+        # is no pass.
+        self.holding()
+        man = self.with_snap({"detail": "devices", "items": ["iphone", "foldable"]})
+        cases = [
+            (dict(self.UNAVAILABLE, devices={"foldable": "unavailable"}), "iphone: not reported"),
+            (self.UNAVAILABLE, "details.devices is missing"),
+            (dict(self.UNAVAILABLE, devices={"iphone": "fail", "foldable": "unavailable"}), "iphone: fail"),
+        ]
+        for details, expected in cases:
+            with self.subTest(expected):
+                self.result("snapshots", status="warn", details=details)
+                rc, ev = self.evaluate(man, "M5")
+                self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+                self.assertEqual(self.snap(ev)["outcome"], "fail")
+                self.assertIn(expected, self.failure(ev, "suite:snap"))
+                self.assertFalse(os.path.exists(self.record))
+        self.result("snapshots", status="warn", details=dict(self.UNAVAILABLE, devices={
+            "iphone": "pass", "foldable": "unavailable"}))
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(self.snap(ev)["outcome"], "deferred")
+        self.assertIn("foldable", self.snap(ev)["message"])
+        # A pass that leaves the deferred cell out is deferred too.
+        os.remove(self.record)
+        self.result("snapshots", details={"devices": {"iphone": "pass"}})
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(self.snap(ev)["outcome"], "deferred")
+
+    def test_a_deferral_leaves_the_rest_of_an_unscoped_suites_run_to_pass(self):
+        # Without a scope the suite needs its whole run: the result must show
+        # every cell but the deferred ones passing.
+        self.holding()
+        man = self.with_snap()
+        cases = [
+            (self.UNAVAILABLE, "details.devices is missing"),
+            (dict(self.UNAVAILABLE, devices={"ipad": "unavailable", "foldable": "unavailable"}), "ipad: unavailable"),
+        ]
+        for details, expected in cases:
+            with self.subTest(expected):
+                self.result("snapshots", status="warn", details=details)
+                rc, ev = self.evaluate(man, "M5")
+                self.assertEqual(rc, 1)
+                self.assertIn(expected, self.failure(ev, "suite:snap"))
+
+    def test_a_deferral_keeps_the_pass_rules_and_failures(self):
+        self.holding()
+        self.config["runs"][0]["require"] = [{"id": "nothing-failed", "summary": "failed", "max": 0}]
+        man = self.with_snap({"detail": "devices", "items": ["iphone", "foldable"]})
+        devices = dict(self.UNAVAILABLE, devices={"iphone": "pass", "foldable": "unavailable"})
+        self.result("snapshots", status="warn", details=devices,
+                    summary={"total": 4, "passed": 2, "failed": 2, "skipped": 0})
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("nothing-failed", self.failure(ev, "suite:snap"))
+        self.result("snapshots", status="warn", details=devices,
+                    failures=[{"id": "Snap/iphone.home", "message": "differs", "repro": "x"}])
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("Snap/iphone.home", self.failure(ev, "suite:snap"))
+
+    def test_a_deferral_must_name_its_cells(self):
+        self.holding()
+        rc, ev = self.evaluate(self.man(cells={"run": "snap"}), "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("cells must be {run", self.failure(ev, "deferred:foldable"))
 
     def test_a_deferral_covers_only_its_dependencys_lane_while_it_holds(self):
         self.result("core-test")

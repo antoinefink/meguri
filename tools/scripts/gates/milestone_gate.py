@@ -89,6 +89,20 @@ CONNECTIVES = frozenset(("a", "an", "and", "as", "at", "by", "for", "in", "of", 
 UNIT_TOKEN = re.compile(r"(?<![A-Za-z0-9])U[0-9]+[a-z]?(?![A-Za-z0-9])")
 UNIT_RANGE = re.compile(r"(?<![A-Za-z0-9])U([0-9]+)[\u2013-]U([0-9]+)(?![A-Za-z0-9])")  # en dash or hyphen
 DEVICE_NAMES = {"iphone": "iPhone", "ipad": "iPad", "mac": "Mac"}
+# How the plan's table words each kind of user step: (pattern, the cells it
+# applies in, the words). Plan text that matches is claimed only by user steps
+# of that kind (a trial's "<N>-day" by a trial of N days), and a user step of
+# that kind claims text that matches. Text that names no kind is a report.
+STEP_WORDING = {
+    "trial": (re.compile(r"(?<![0-9])([0-9]+)-day\b|\btrial\b|\bdaily-driver\b", re.I), ("user_steps",),
+              '"<N>-day", "trial" or "daily-driver"'),
+    "device-run": (re.compile(r"\bdevice runs?\b", re.I), ("user_steps", "gate"), '"device run"'),
+    "device-session": (re.compile(r"\bdevice sessions?\b", re.I), ("user_steps",), '"device session"'),
+    "variant-pick": (re.compile(r"\bvariant picks?\b|\bsign-off\b", re.I), ("user_steps",),
+                     '"variant picks" or "sign-off"'),
+    "capture": (re.compile(r"capture\b", re.I), ("user_steps",), '"capture"'),
+    "setup": (re.compile(r"\bR1969\b"), ("user_steps",), "R1969 (the one-time setup steps)"),
+}
 
 
 class Invalid(Exception):
@@ -297,74 +311,206 @@ def unclaimed(text, covered):
             if any(w.lower() not in CONNECTIVES for w in re.findall(r"[^\W_]+", r))]
 
 
+def milestone_claims(model, m):
+    """A milestone's plan excerpts by cell: [{key, who, b, step, spans}], key
+    telling the definitions apart, step the user step (else None), spans
+    where the excerpt occurs in the cell's text."""
+    mid = m["id"]
+    claims = {cell: [] for cell in PLAN_CELLS}
+
+    def add(cell, key, who, b, step=None):
+        claims[cell].append({"key": key, "who": who, "b": b, "step": step,
+                             "spans": excerpt_spans(m["plan"][cell], b["text"])})
+
+    for s in m["suites"]:
+        for b in s["plan"]:
+            add("gate", ("suite", s["id"]), "%s %s" % (mid, s["id"]), b)
+    for g in model["global"]:
+        if g["from"] == mid:
+            for b in g["plan"]:
+                add("gate", ("global", g["id"]), "global %s" % g["id"], b)
+    for st in m["user_steps"]:
+        for b in st["plan"]:
+            add(b["cell"], ("step", st["id"]), "%s %s" % (mid, st["id"]), b, st)
+    return claims
+
+
+def device_runs(claims):
+    """{key: (user step, [excerpt texts])} of the device-run steps that claim plan text."""
+    runs = {}
+    for cell in PLAN_CELLS:
+        for c in claims[cell]:
+            if c["step"] is not None and c["step"]["validator"].get("type") == "device-run":
+                runs.setdefault(c["key"], (c["step"], []))[1].append(c["b"]["text"])
+    return runs
+
+
+def run_devices(runs):
+    """The devices device runs must cover: those their excerpts name, or all three."""
+    texts = [t for _, ts in runs.values() for t in ts]
+    return [d for d in DEVICES if any(re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % DEVICE_NAMES[d], t)
+                                      for t in texts)] or list(DEVICES)
+
+
+def gaps(m, claims):
+    """What of a milestone's texts the claims leave unclaimed: runs of text,
+    the units the text names, the devices its device runs need."""
+    out = []
+    for cell, label in PLAN_CELLS.items():
+        text = m["plan"][cell]
+        covered, units, claimed = [False] * len(text), plan_units(text), set()
+        for c in claims[cell]:
+            excerpt, spans = c["b"]["text"], c["spans"]
+            if UNIT_TOKEN.fullmatch(excerpt):
+                claimed.add(excerpt)
+            elif len(spans) == 1:
+                claimed.update(UNIT_TOKEN.findall(excerpt))
+            else:
+                continue  # not in the text, or not unique (check_coverage reports it)
+            for i, j in spans:
+                covered[i:j] = [True] * (j - i)
+        for run in unclaimed(text, covered):
+            out.append("%s: the %s text %r is claimed by no suite, global condition or user step; give the one that "
+                       "implements it a plan excerpt (or restore it if it was removed)" % (m["id"], label, run))
+        for u in sorted(units - claimed, key=lambda x: int(re.sub(r"[^0-9]", "", x))):
+            out.append("%s: the %s text names %s, but no plan excerpt claims it (a unit inside a range needs its "
+                       "own: plan: [%s])" % (m["id"], label, u, u))
+    runs = device_runs(claims)
+    if runs:
+        required = run_devices(runs)
+        have = [st["validator"].get("device") for st, _ in runs.values()]
+        for d in required:
+            if d not in have:
+                out.append("%s: the plan asks for device runs on %s; there is no device-run user step on %s that "
+                           "claims it" % (m["id"], ", ".join(DEVICE_NAMES[x] for x in required), d))
+    return out
+
+
+def overlaps(a, b):
+    return any(i < z and x < j for i, j in a for x, z in b)
+
+
+def check_excerpts(m, claims, errors):
+    """Each excerpt is a unit the text names, or occurs once in its text."""
+    for cell, label in PLAN_CELLS.items():
+        units = plan_units(m["plan"][cell])
+        for c in claims[cell]:
+            excerpt, n = c["b"]["text"], len(c["spans"])
+            if UNIT_TOKEN.fullmatch(excerpt):
+                if excerpt not in units:
+                    errors.append("%s: plan excerpt %r is not a unit the %s text of %s names"
+                                  % (c["who"], excerpt, label, m["id"]))
+            elif n == 0:
+                errors.append("%s: plan excerpt %r is not in the %s text of %s" % (c["who"], excerpt, label, m["id"]))
+            elif n > 1:
+                errors.append("%s: plan excerpt %r occurs %d times in the %s text of %s; quote enough of it to make it "
+                              "unique" % (c["who"], excerpt, n, label, m["id"]))
+
+
+def check_shared(claims, errors):
+    """Definitions share plan text only by quoting the same excerpt with the
+    same items (bare unit ids bind none), so text bound to scope items is
+    never also claimed without them."""
+    for cell in PLAN_CELLS:
+        quoted = [c for c in claims[cell] if not UNIT_TOKEN.fullmatch(c["b"]["text"]) and len(c["spans"]) == 1]
+        for x, c in enumerate(quoted):
+            for o in quoted[x + 1:]:
+                if o["key"] == c["key"] or not overlaps(c["spans"], o["spans"]):
+                    continue
+                if o["spans"] != c["spans"]:
+                    errors.append("%s: plan excerpt %r overlaps %r of %s; definitions share plan text only by quoting "
+                                  "the same excerpt" % (o["who"], o["b"]["text"], c["b"]["text"], c["who"]))
+                elif sorted(o["b"]["items"]) != sorted(c["b"]["items"]):
+                    errors.append("%s: plan excerpt %r binds %s, and %s quotes it binding %s; definitions that claim "
+                                  "the same plan text must bind the same items (a suite that only supports another "
+                                  "quotes no plan text)" % (o["who"], o["b"]["text"], ", ".join(o["b"]["items"]) or
+                                                            "no items", c["who"], ", ".join(c["b"]["items"]) or "no items"))
+
+
+def check_wording(m, claims, errors):
+    """The plan's wording names the kind of user step (STEP_WORDING): text
+    that names a kind is claimed only by user steps of that kind (an "<N>-day"
+    by a trial of N days), and a step claims text that names its kind."""
+    seen = set()
+    for cell, label in PLAN_CELLS.items():
+        for kind, (pattern, cells, _) in STEP_WORDING.items():
+            if cell not in cells:
+                continue
+            for hit in pattern.finditer(m["plan"][cell]):
+                days = int(hit.group(1)) if kind == "trial" and hit.group(1) else None
+                for c in claims[cell]:
+                    if not overlaps([hit.span()], c["spans"]):
+                        continue
+                    v = c["step"]["validator"] if c["step"] else None
+                    if v is None:
+                        got = "a suite" if c["key"][0] == "suite" else "a global condition"
+                    elif v.get("type") != kind:
+                        got = "a %s step" % v.get("type")
+                    elif days is not None and v.get("days") != days:
+                        got = "a trial of %s days" % v.get("days")
+                    else:
+                        continue
+                    msg = "%s: the %s text of %s says %r, which asks for a %s step%s; this is %s" % (
+                        c["who"], label, m["id"], hit.group(0), kind, " of %d days" % days if days else "", got)
+                    if msg not in seen:
+                        seen.add(msg)
+                        errors.append(msg)
+    for st in m["user_steps"]:
+        v = st["validator"]
+        wording = STEP_WORDING.get(v.get("type"))
+        if st["plan"] and wording and not any(b["cell"] in wording[1] and wording[0].search(b["text"])
+                                              for b in st["plan"]):
+            errors.append("%s %s: a %s step, but none of its plan excerpts says %s"
+                          % (m["id"], st["id"], v.get("type"), wording[2]))
+        if v.get("type") == "trial" and st["plan"] and not any(
+                re.search(r"(?<![0-9])%s-day" % v.get("days"), b["text"]) for b in st["plan"]):
+            errors.append("%s %s: a trial of %s days, but its plan excerpts do not say %s-day"
+                          % (m["id"], st["id"], v.get("days"), v.get("days")))
+    runs = device_runs(claims)
+    if runs:
+        required = run_devices(runs)
+        for st, _ in runs.values():
+            if st["validator"].get("device") not in required:
+                errors.append("%s %s: a device run on %s, but its plan excerpts name only %s"
+                              % (m["id"], st["id"], st["validator"].get("device"),
+                                 ", ".join(DEVICE_NAMES[x] for x in required)))
+
+
+def check_needed(m, claims, errors):
+    """Every definition that quotes plan text is needed: without its claims
+    some text, unit or device goes unclaimed (gaps), so removing it fails the
+    check. Call it only when the claims leave no gap."""
+    keys = {}
+    for cell in PLAN_CELLS:
+        for c in claims[cell]:
+            keys.setdefault(c["key"], c["who"])
+    for key, who in keys.items():
+        if gaps(m, {cell: [c for c in cs if c["key"] != key] for cell, cs in claims.items()}):
+            continue
+        alike = sorted({o["who"] for cs in claims.values() for c in cs if c["key"] == key for o in cs
+                        if o["key"] != key and (overlaps(c["spans"], o["spans"]) or c["b"]["text"] == o["b"]["text"])})
+        errors.append("%s: removing it would go unnoticed: %s claim%s all the plan text it quotes; quote what only it "
+                      "implements, or nothing if it supports another definition"
+                      % (who, ", ".join(alike) or "other definitions", "s" if len(alike) == 1 else ""))
+
+
 def check_coverage(model, errors):
-    """The plan's table text against the definitions that run: every part of a
-    milestone's closing gate and user steps texts is claimed by the plan
+    """The plan's table text against the definitions that run: every part of
+    a milestone's closing gate and user steps texts is claimed by the plan
     excerpt of a suite, global condition (in its `from` milestone) or user
     step; each unit the text names, inside a range too, by its own excerpt;
     device runs cover the devices their excerpts name (all three when they
-    name none); a trial's excerpt states its days."""
+    name none). Then check_needed, check_shared and check_wording keep a
+    single edit from weakening a milestone unnoticed."""
     for m in model["milestones"]:
-        mid = m["id"]
-        claims = {cell: [] for cell in PLAN_CELLS}
-        for s in m["suites"]:
-            claims["gate"] += [("%s %s" % (mid, s["id"]), b) for b in s["plan"]]
-        for g in model["global"]:
-            if g["from"] == mid:
-                claims["gate"] += [("global %s" % g["id"], b) for b in g["plan"]]
-        for st in m["user_steps"]:
-            for b in st["plan"]:
-                claims[b["cell"]].append(("%s %s" % (mid, st["id"]), b))
-        for cell, label in PLAN_CELLS.items():
-            text = m["plan"][cell]
-            covered, units, claimed = [False] * len(text), plan_units(text), set()
-            for who, b in claims[cell]:
-                excerpt, spans = b["text"], excerpt_spans(text, b["text"])
-                if UNIT_TOKEN.fullmatch(excerpt):
-                    if excerpt not in units:
-                        errors.append("%s: plan excerpt %r is not a unit the %s text of %s names"
-                                      % (who, excerpt, label, mid))
-                    claimed.add(excerpt)
-                elif not spans:
-                    errors.append("%s: plan excerpt %r is not in the %s text of %s" % (who, excerpt, label, mid))
-                    continue
-                elif len(spans) > 1:
-                    errors.append("%s: plan excerpt %r occurs %d times in the %s text of %s; quote enough of it to "
-                                  "make it unique" % (who, excerpt, len(spans), label, mid))
-                    continue
-                else:
-                    claimed.update(UNIT_TOKEN.findall(excerpt))
-                for i, j in spans:
-                    covered[i:j] = [True] * (j - i)
-            for run in unclaimed(text, covered):
-                errors.append("%s: the %s text %r is claimed by no suite, global condition or user step; give the "
-                              "one that implements it a plan excerpt (or restore it if it was removed)"
-                              % (mid, label, run))
-            for u in sorted(units - claimed, key=lambda x: int(re.sub(r"[^0-9]", "", x))):
-                errors.append("%s: the %s text names %s, but no plan excerpt claims it (a unit inside a range "
-                              "needs its own: plan: [%s])" % (mid, label, u, u))
-        runs = [st for st in m["user_steps"] if st["validator"].get("type") == "device-run" and st["plan"]]
-        if runs:
-            texts = [b["text"] for st in runs for b in st["plan"]]
-            named = [d for d in DEVICES if any(re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % DEVICE_NAMES[d], t)
-                                               for t in texts)]
-            required = named or list(DEVICES)
-            have = [st["validator"].get("device") for st in runs]
-            for d in required:
-                if d not in have:
-                    errors.append("%s: the plan asks for device runs on %s; there is no device-run user step on %s "
-                                  "that claims it" % (mid, ", ".join(DEVICE_NAMES[x] for x in required), d))
-            for st in runs:
-                if st["validator"].get("device") not in required:
-                    errors.append("%s %s: a device run on %s, but its plan excerpts name only %s"
-                                  % (mid, st["id"], st["validator"].get("device"),
-                                     ", ".join(DEVICE_NAMES[x] for x in required)))
-        for st in m["user_steps"]:
-            days = st["validator"].get("days")
-            if st["validator"].get("type") == "trial" and st["plan"] and not any(
-                    re.search(r"(?<![0-9])%s-day" % days, b["text"]) for b in st["plan"]):
-                errors.append("%s %s: a trial of %s days, but its plan excerpts do not say %s-day"
-                              % (mid, st["id"], days, days))
+        claims = milestone_claims(model, m)
+        check_excerpts(m, claims, errors)
+        check_shared(claims, errors)
+        check_wording(m, claims, errors)
+        missing = gaps(m, claims)
+        errors += missing
+        if not missing:
+            check_needed(m, claims, errors)
 
 
 def runnable(run):
@@ -504,12 +650,13 @@ def check_deferral(where, d, runs):
     entry = {"id": d["id"], "dependency": d.get("dependency"), "condition": d.get("condition"),
              "approved_by": d.get("approved_by"), "why": d.get("why") if isinstance(d.get("why"), str) else "",
              "cells": None}
-    if not isinstance(cells, dict) or set(cells) - {"run", "scope"} or not isinstance(cells.get("run"), str):
-        problems.append("%s: cells must be {run: <tiers run>, scope: {...}}: the deferred cells" % where)
+    # The cells are named: a deferral waives them and nothing else of its run.
+    if not isinstance(cells, dict) or set(cells) != {"run", "scope"} or not isinstance(cells.get("run"), str):
+        problems.append("%s: cells must be {run: <tiers run>, scope: {detail, items}}: the deferred cells" % where)
     else:
         errs = []
         scope = check_scope(where, cells.get("scope"), errs)
-        problems += errs
+        problems += errs or ([] if scope else ["%s: cells.scope must name the deferred cells" % where])
         run = runs.get(cells["run"])
         if run is None:
             problems.append("%s: cells run %s is not in tools/gate/tiers.yaml" % (where, cells["run"]))
@@ -916,10 +1063,23 @@ class Results:
         return True
 
 
-def judge(r, rules, scope, deferred_by=None):
+def cell_status(value):
+    """A scope table entry's status: the string, or a mapping's status."""
+    return value if isinstance(value, str) else (value.get("status") if isinstance(value, dict) else None)
+
+
+def judge(r, rules, scope, waiver=None):
     """(outcome, message) of one result under the pass rules: pass,
-    awaiting_user, deferred (a warn an approved deferral covers: deferred_by
-    says which), or a failing queued, unavailable, warn, dirty or fail."""
+    awaiting_user, deferred, or a failing queued, unavailable, warn, dirty or
+    fail.
+
+    waiver: the deferrals that hold for the result's run (Waiver), or None.
+    They waive their cells and nothing else. A warn of the unavailable lane
+    they cover is deferred when the result records no failure, the pass rules
+    hold and every other cell the suite needs passes: its scope items but the
+    waived ones, or without a scope every cell the result reports beside them
+    (the deferral's detail table must be there). A pass whose scope lacks only
+    waived cells is deferred too."""
     commit = r.get("commit") if isinstance(r.get("commit"), dict) else {}
     if not isinstance(commit.get("sha"), str) or not SHA.match(commit["sha"]):
         return "fail", "the result names no commit"
@@ -928,26 +1088,42 @@ def judge(r, rules, scope, deferred_by=None):
     status = r.get("status")
     details = r.get("details") if isinstance(r.get("details"), dict) else {}
     message = r.get("message") or ""
+    covered = status == "warn" and waiver is not None and waiver.covers
     if status == "warn" and details.get("queued") is True:
         return "queued", "queued, it did not run: %s" % message
     if status == "warn" and details.get("outcome") == "awaiting_user":
         return "awaiting_user", message or "awaiting Antoine"
-    if status == "warn":
+    if status == "warn" and not covered:
         # Any other warn: the job did not run, or ran with something to look
         # at. Neither closes a milestone.
-        if deferred_by:
-            return "deferred", deferred_by
         lane = details.get("lane") if isinstance(details.get("lane"), dict) else {}
         if lane.get("status") == "unavailable":
             return "unavailable", "unavailable: %s (lane %s); it did not run, and no approved deferral covers it%s" % (
                 lane.get("reason"), lane.get("kind"), (": " + message) if message else "")
         return "warn", "warn%s; a milestone suite must pass (only a queued run or one awaiting Antoine is told apart)" % (
             (": " + message) if message else "")
-    if status != "pass":
+    if status not in ("pass", "warn"):
         fails = [f.get("id", "?") for f in r.get("failures") or [] if isinstance(f, dict)]
         return "fail", "%s%s" % (status, (": " + message) if message else "") + (
             " (%s)" % ", ".join(fails[:5]) if fails else "")
+    waived = waiver.cells if waiver else {}
+    used = covered  # whether a waived cell stands in for a pass
     bad = []
+    if covered:
+        fails = [f.get("id", "?") for f in r.get("failures") or [] if isinstance(f, dict)]
+        if fails:
+            bad.append("the result records failures (%s)" % ", ".join(fails[:5]))
+        if not scope:
+            # The suite needs its whole run: every cell beside the waived ones.
+            for detail, items in sorted(waived.items()):
+                table = get_path(details, detail)
+                if not isinstance(table, dict):
+                    bad.append("details.%s is missing, so the cells beside the deferred %s cannot be checked"
+                               % (detail, ", ".join(items)))
+                    continue
+                for item, v in sorted(table.items()):
+                    if item not in items and cell_status(v) != "pass":
+                        bad.append("%s: %s" % (item, cell_status(v) or "not reported"))
     for rule in rules:
         if "summary" in rule:
             value = (r.get("summary") or {}).get(rule["summary"])
@@ -964,19 +1140,44 @@ def judge(r, rules, scope, deferred_by=None):
             if off:
                 bad.append("%s: %s: %s; only %s allowed" % (rule["id"], rule["detail"], off, ", ".join(rule["only_keys"])))
     if scope:
+        skip = waived.get(scope["detail"], [])
+        need = [i for i in scope["items"] if i not in skip]
         table = get_path(details, scope["detail"])
         if not isinstance(table, dict):
-            bad.append("details.%s is missing, so its scope (%s) cannot be checked"
-                       % (scope["detail"], ", ".join(scope["items"])))
+            if need:
+                bad.append("details.%s is missing, so its scope (%s) cannot be checked"
+                           % (scope["detail"], ", ".join(need)))
+            used = used or bool(skip and set(skip) & set(scope["items"]))
         else:
             for item in scope["items"]:
-                v = table.get(item)
-                st = v if isinstance(v, str) else (v.get("status") if isinstance(v, dict) else None)
-                if st != "pass":
+                st = cell_status(table.get(item))
+                if item in skip:
+                    used = used or st != "pass"
+                elif st != "pass":
                     bad.append("%s: %s" % (item, st or "not reported"))
     if bad:
+        if covered or used:
+            return "fail", "%s; the deferred cells (%s) are waived, not the rest" % ("; ".join(bad), waiver.summary())
         return "fail", "; ".join(bad)
+    if used:
+        return "deferred", "%s waived by %s%s" % (waiver.summary(), waiver.by, (": " + message) if message else "")
     return "pass", message
+
+
+class Waiver:
+    """The cells the deferrals that hold for one run waive ({detail: [items]}),
+    whether its result's warn is the unavailable lane they cover, and which
+    deferrals they are."""
+
+    def __init__(self):
+        self.cells, self.covers, self.names = {}, False, []
+
+    @property
+    def by(self):
+        return "; ".join(self.names)
+
+    def summary(self):
+        return "; ".join("%s %s" % (d, ", ".join(items)) for d, items in sorted(self.cells.items()))
 
 
 # ---------------------------------------------------------------------------
@@ -1265,17 +1466,25 @@ def evaluate(model, config, a):
     results = Results(a.results, runs, a.milestone)
     in_effect = []  # deferrals that hold: (model entry, record)
 
-    def deferred_by(run_id, r):
-        """Which deferral in effect covers this warn result of run_id, or None."""
+    def waiver_for(run_id, r):
+        """The cells the deferrals in effect waive for this result of run_id
+        (a Waiver), or None when none is for its run."""
         details = r.get("details") if isinstance(r.get("details"), dict) else {}
+        waiver = None
         for d, rec in in_effect:
+            if d["cells"]["run"] != run_id:
+                continue
+            waiver = waiver or Waiver()
+            scope = d["cells"]["scope"]
+            have = waiver.cells.setdefault(scope["detail"], [])
+            have += [i for i in scope["items"] if i not in have]
             cover = DEPENDENCIES[d["dependency"]]["covers"]
             got = get_path(details, cover["detail"])
-            if (d["cells"]["run"] == run_id and isinstance(got, dict)
-                    and all(got.get(k) == v for k, v in cover["equals"].items())):
-                return "deferred by %s (%s, approved by %s; %s): %s" % (
-                    d["id"], d["dependency"], d["approved_by"], rec["message"], json.dumps(got))
-        return None
+            if isinstance(got, dict) and all(got.get(k) == v for k, v in cover["equals"].items()):
+                waiver.covers = True
+            waiver.names.append("%s (%s, approved by %s; %s)" % (d["id"], d["dependency"], d["approved_by"],
+                                                                 rec["message"]))
+        return waiver
 
     def assess(s):
         """One suite record: its run's result judged under its pass rules."""
@@ -1312,8 +1521,7 @@ def evaluate(model, config, a):
         rec["summary"] = r.get("summary")
         rec["args"] = r.get("args")
         rules = [x for x in run.get("require") or [] if not x.get("release")] + s["require"]
-        rec["outcome"], rec["message"] = judge(r, rules, s["scope"],
-                                               deferred_by(s["run"], r) if r.get("status") == "warn" else None)
+        rec["outcome"], rec["message"] = judge(r, rules, s["scope"], waiver_for(s["run"], r))
         if rec["commit"]:
             seen.append((s["id"], rec["commit"]))
         return rec

@@ -55,7 +55,7 @@
 # A suite may not run a job that requires its own milestone's gate (or a
 # later one's). A result counts only when its status is pass (or warn awaiting
 # Antoine); a queued, unavailable or other warn result fails, unless a
-# deferral that holds covers it.
+# deferral that holds covers it and every cell it does not defer passes.
 #
 # Plan excerpts (`plan` on suites, user steps and global conditions; checked
 # by --check and before every evaluation): each excerpt occurs exactly once in
@@ -68,7 +68,18 @@
 # text, or the closing gate text with {text, cell: gate}. Device-run steps
 # must cover the devices their excerpts name (all three when they name none),
 # and a trial's excerpt states its days ("7-day"). A suite or user step the
-# table does not ask for needs no excerpt.
+# table does not ask for needs no excerpt, and one that only supports another
+# (bench-mac for perf-gate) quotes none:
+#   - every definition that quotes plan text must be needed: without it some
+#     text, unit or device goes unclaimed;
+#   - definitions share text only by quoting the same excerpt, binding the
+#     same items, so scope items never leave with their suite unnoticed;
+#   - the table's wording names the kind of user step: text with "<N>-day",
+#     "trial" or "daily-driver" is a trial (of N days), "device run" (in
+#     either text) a device-run, "device session" a device-session, "variant
+#     picks" or "sign-off" a variant-pick, "capture" a capture, R1969 a setup
+#     step; only steps of that kind claim it, each step claims its kind's
+#     wording, and text that names no kind is a report.
 #
 # User steps (performed by Antoine; agents only record his reports):
 #   id, description, evidence (the path read at HEAD), validator:
@@ -112,15 +123,21 @@
 #
 # Deferred: items gated on an external dependency. Each names a dependency
 # from the evaluator's fixed list, that dependency's condition, the deferred
-# cells as a suite (`cells: {run, scope}`) and `approved_by: antoine`, written
-# only from Antoine's chat approval, as for quarantine (U19). The gate fails
-# on any other entry, and once the condition no longer holds while the cells
-# do not pass. The only dependency today:
+# cells as a suite (`cells: {run, scope: {detail, items}}`, both required)
+# and `approved_by: antoine`, written only from Antoine's chat approval, as
+# for quarantine (U19). The gate fails on any other entry, and once the
+# condition no longer holds while the cells do not pass. While it holds it
+# waives its cells and nothing else: a suite of the cells' run whose result
+# is a warn of the lane the dependency covers, or a pass lacking only those
+# cells, is `deferred` when the result records no failure, the pass rules
+# hold and every other cell passes (its scope items but the deferred ones;
+# for a suite without a scope, every entry of the result's details.<detail>
+# table beside them, so the table must be there). The only dependency today:
 #   - dependency: xcode-27.1-foldable-simulator
 #     condition: {job: sim-setup, args: [], detail: foldable, equals: {status: unavailable, reason: toolchain}}
 #     (a sim-setup result on the gate commit; run `tools/mg sim-setup` there);
-#     while it holds, a warn result of the cells' run whose details.lane is
-#     {kind: foldable, status: unavailable, reason: toolchain} is deferred
+#     it covers a warn whose details.lane is {kind: foldable, status:
+#     unavailable, reason: toolchain}
 # The foldable cells (R1962, R1971) are not deferred yet: Antoine has not
 # approved it (perfqa coverage note, question 5).
 #
@@ -195,7 +212,7 @@ milestones:
       - {id: swift-test-core, run: swift-test-core, plan: [The XCFramework builds, U6], why: "the XCFramework builds and CoreBridge tests pass (U6)"}
       - {id: swift-test-kit, run: swift-test-kit, why: "MeguriKit tests (U7, U9)"}
       - {id: build-app-ios, run: build-app-ios, plan: [U7], why: "the app builds for the simulator (U7)"}
-      - {id: build-app-mac, run: build-app-mac, plan: [U7], why: "the app builds for the Mac (U7)"}
+      - {id: build-app-mac, run: build-app-mac, why: "the app builds for the Mac (U7, whose plan text build-app-ios claims)"}
       - id: xcode-check
         run: xcode-check
         plan: ["the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy", U8]
@@ -271,8 +288,7 @@ milestones:
         why: U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842-R1844)
       - id: bench-mac
         run: bench-mac
-        plan: ["U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844)"]
-        why: the core benchmarks on Apple silicon that perf-gate reads (U242, R1864)
+        why: the core benchmarks on Apple silicon that perf-gate reads (U242, R1864); perf-gate claims their plan text
       - id: u244-ui-perf
         run: u244-ui-perf
         pending: U244
