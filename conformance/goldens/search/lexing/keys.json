@@ -1,0 +1,121 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "deck:x"
+          },
+          {
+            "text": "tag:y"
+          },
+          {
+            "text": "re:x"
+          },
+          {
+            "text": "w:x"
+          },
+          {
+            "text": "nc:x"
+          },
+          {
+            "text": "sc:x"
+          },
+          {
+            "text": "has-cd:x"
+          },
+          {
+            "text": "preset:x"
+          },
+          {
+            "text": "prop:ivl>1"
+          },
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "flag:1"
+          },
+          {
+            "text": "card:2"
+          },
+          {
+            "text": "note:x"
+          },
+          {
+            "text": "mid:5"
+          },
+          {
+            "text": "did:1"
+          },
+          {
+            "text": "nid:1"
+          },
+          {
+            "text": "cid:1"
+          },
+          {
+            "text": "added:1"
+          },
+          {
+            "text": "edited:2"
+          },
+          {
+            "text": "introduced:4"
+          },
+          {
+            "text": "rated:1"
+          },
+          {
+            "text": "resched:1"
+          },
+          {
+            "text": "dupe:1,x"
+          },
+          {
+            "text": "deck:"
+          },
+          {
+            "text": "tag:"
+          },
+          {
+            "text": "card:"
+          },
+          {
+            "text": "note:"
+          },
+          {
+            "text": "re:"
+          },
+          {
+            "text": "w:"
+          },
+          {
+            "text": "nc:"
+          },
+          {
+            "text": "sc:"
+          },
+          {
+            "text": "has-cd:"
+          },
+          {
+            "text": "preset:"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/lexing/keys",
+  "scenario_sha256": "f99087360f548f4a5db9ab8a9faf9ad05d1440fd228cde01d4ded7aab19e1358",
+  "tz": "UTC"
+}

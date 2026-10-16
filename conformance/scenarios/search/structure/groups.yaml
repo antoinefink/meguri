@@ -1,0 +1,25 @@
+# specs/search/grammar.md G5 and canonical-form.md F2: groups are kept, except
+# that one group making up the whole search loses its own brackets.
+id: search/structure/groups
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          - '(a b)'
+          - '((a b))'
+          - '(a)'
+          - '((a))'
+          - '(a) (b)'
+          - '(x or y) z'
+          - 'x (y or z)'
+          - '(x)(y)'
+          - '-(x y) or -z'
+          - '( u1    v  )'
+          - 'sky   -(sea and "hill:low road") OR stone'
+          - '-(a b)'
+          - '(a or b)'
+          - '((a) or (b))'
+          - '(-a)'
+          - '(deck:*)'
+          - '((((((((((a))))))))))'
+          - '(a (b (c (d))) e)'

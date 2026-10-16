@@ -318,14 +318,24 @@
             },
             "deck_tree": { "type": "null" },
             "search": {
-              "description": "Draft.",
-              "type": "object",
-              "required": ["query"],
-              "properties": {
-                "query": { "type": "string" },
-                "kind": { "enum": ["cards", "notes"] },
-                "order": {}
+              "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["query"],
+                "additionalProperties": false,
+                "properties": {
+                  "query": { "type": "string" },
+                  "kind": { "enum": ["cards", "notes"] }
+                }
               }
+            },
+            "canonical_search": {
+              "description": "search-ops.md S2: canonical texts of search texts; never reads the collection.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
             },
             "db_dump": {
               "description": "observations.md O8: all twelve tables, or the listed ones.",

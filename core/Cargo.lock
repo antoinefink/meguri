@@ -1107,6 +1107,12 @@ dependencies = [
 [[package]]
 name = "meguri-search"
 version = "0.0.0"
+dependencies = [
+ "meguri-model",
+ "meguri-testkit",
+ "regex",
+ "rusqlite",
+]
 
 [[package]]
 name = "meguri-servers"
@@ -1164,6 +1170,7 @@ dependencies = [
  "meguri-engine",
  "meguri-model",
  "meguri-sched",
+ "meguri-search",
  "meguri-storage",
  "meguri-sync",
  "meguri-template",

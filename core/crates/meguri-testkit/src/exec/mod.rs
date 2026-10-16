@@ -11,6 +11,7 @@ mod oracle;
 pub mod parties;
 mod render;
 pub mod sched;
+mod search;
 mod storage;
 pub mod sync_guard;
 mod text;
