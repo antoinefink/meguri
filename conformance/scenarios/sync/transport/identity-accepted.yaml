@@ -1,0 +1,25 @@
+# The server accepts Meguri's own client identity (specs/sync/transport.md
+# T3, R1509, R2030): after client_a uploads a collection, the Meguri actor
+# logs in and its status check runs to the end. The outcome is a one-way
+# download, the only direction left for a collection without cards (R1518).
+# The golden is the oracle playing `meguri` with Anki's identity; in the
+# mixed run Meguri must reach the same outcome with its own.
+id: sync/transport/identity-accepted
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - advance: 1m
+  - actor: meguri
+  - sync: {kind: login}
+  - sync: {kind: normal}

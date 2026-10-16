@@ -1,0 +1,23 @@
+# Registry rows through a rename (specs/tags/tags.md T7 steps 3 to 6, T14,
+# R1467). Renaming onto a registered tag merges into it: that row keeps its
+# collapsed state and config. The renamed rows go, a registered descendant
+# that no note uses included. The new descendant row `bar::a` takes the
+# columns of `foo::a` (expanded, config NULL) with usn -1; Anki's is a new
+# row, collapsed (deviation tags-rename-carries-columns).
+id: tags/rename/rows
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [foo, "foo::a"]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: [bar]}
+  - set_tag_collapsed: {tags: [foo, bar, "foo::a"], collapsed: false}
+  - set_tag_collapsed: {tags: ["foo::orphan"], collapsed: false}
+  - db_exec: {sql: "UPDATE tags SET config = X'01' WHERE tag IN ('foo', 'bar')"}
+  - advance: 1h
+  - rename_tag: {from: foo, to: bar}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}

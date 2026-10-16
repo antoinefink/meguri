@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use meguri_testkit::exec::{
     ExecError, Executor, MeguriExecutor, Needs, SegmentExecutor, SegmentOutput, SegmentRequest,
 };
-use meguri_testkit::scenario::LoadedScenario;
+use meguri_testkit::scenario::{LoadedScenario, SyncSpec};
 use meguri_testkit::suite::{GoldensCheck, LiveRun, Status, Suite};
 use meguri_testkit::wallclock::Stopwatch;
 use serde_json::{Value, json};
@@ -325,10 +325,64 @@ fn a_scenario_with_an_op_meguri_lacks_is_pending_and_t0_still_passes() {
 }
 
 #[test]
+fn a_run_from_the_new_collection_is_pending_until_an_area_makes_it_before_the_setup() {
+    use meguri_testkit::exec::Session;
+    use meguri_testkit::scenario::{ObservationRequest, Setup};
+
+    // Each adapter leaves a mark in the session, in the order they ran.
+    fn make(session: &mut Session<'_>) -> Result<(), ExecError> {
+        session.notes.push(1);
+        Ok(())
+    }
+    fn decks(session: &mut Session<'_>, _: &Setup) -> Result<(), ExecError> {
+        session.notes.push(2);
+        Ok(())
+    }
+    fn marks(session: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, ExecError> {
+        Ok(json!(session.notes))
+    }
+    let dir = tree();
+    let root = dir.path();
+    let text = "id: smoke/fresh\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsetup: {decks: [A]}\nsteps: [{observe: [ids]}]\n";
+    write(root, "scenarios/smoke/fresh.yaml", text);
+    golden_for(root, "smoke/fresh", json!({"steps": [{"ids": [1, 2]}]}));
+    let suite = Suite::open(root).unwrap();
+    let registry = || {
+        let mut registry = MeguriExecutor::area_registry(&["clock", "text"]);
+        registry.setup("decks", decks);
+        registry.observation("ids", marks);
+        registry
+    };
+
+    // dsl.md D8: the scenario starts from a new collection, a setup
+    // capability of its own.
+    let report = suite.run(&[], &MeguriExecutor::with(registry()), "test");
+    assert_eq!(report.outcomes[0].status, Status::Pending, "{}", report.render_text());
+    let missing = report.outcomes[0].missing.clone().unwrap();
+    assert_eq!(missing.setup.into_iter().collect::<Vec<_>>(), ["new_collection"]);
+    assert!(missing.ops.is_empty() && missing.observations.is_empty());
+    assert!(
+        report
+            .render_text()
+            .contains("smoke/fresh: pending (needs setup: new_collection)"),
+        "{}",
+        report.render_text()
+    );
+
+    // Once an area makes it, it is made before the setup runs.
+    let mut with_new = registry();
+    with_new.new_collection(make);
+    let meguri = MeguriExecutor::with(with_new);
+    assert!(meguri.capabilities().setup.contains("new_collection"));
+    let report = suite.run(&[], &meguri, "test");
+    assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
+}
+
+#[test]
 fn search_differences_pass_only_under_a_deviation_entry() {
     let dir = tree();
     let root = dir.path();
-    let scenario = "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: {query: \"über\"}}]\n";
+    let scenario = "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: [{query: \"über\"}]}]\n";
     write(root, "scenarios/search/folding/umlaut.yaml", scenario);
     write(
         root,
@@ -338,9 +392,9 @@ fn search_differences_pass_only_under_a_deviation_entry() {
     golden_for(
         root,
         "search/folding/umlaut",
-        json!({"steps": [{"search": {"ids": ["#n1"]}}]}),
+        json!({"steps": [{"search": [{"ids": ["#n1"]}]}]}),
     );
-    let meguri = Canned(json!({"steps": [{"search": {"ids": ["#n1", "#n2"]}}]}));
+    let meguri = Canned(json!({"steps": [{"search": [{"ids": ["#n1", "#n2"]}]}]}));
 
     let report = Suite::open(root).unwrap().run(&[], &meguri, "test");
     assert_eq!(report.outcomes[0].status, Status::Fail);
@@ -348,7 +402,7 @@ fn search_differences_pass_only_under_a_deviation_entry() {
     write(
         root,
         "deviations.yaml",
-        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
+        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/*/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
     );
     let report = Suite::open(root).unwrap().run(&[], &meguri, "test");
     assert_eq!(report.outcomes[0].status, Status::Pass);
@@ -729,23 +783,23 @@ fn deviations_apply_to_meguri_comparisons_and_not_to_oracle_replays() {
     write(
         root,
         "scenarios/search/folding/umlaut.yaml",
-        "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: {query: \"über\"}}]\n",
+        "id: search/folding/umlaut\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - observe: [{search: [{query: \"über\"}]}]\n",
     );
     write(
         root,
         "scenarios/search/area.yaml",
         "area: search\nactive: [folding/*]\n",
     );
-    let oracle_says = json!({"steps": [{"search": {"ids": ["#n1"]}}]});
+    let oracle_says = json!({"steps": [{"search": [{"ids": ["#n1"]}]}]});
     golden_for(root, "search/folding/umlaut", oracle_says.clone());
     write(
         root,
         "deviations.yaml",
-        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
+        "deviations:\n  - id: search-unicode-case-folding\n    requirement: R1036\n    summary: Unicode case folding in plain searches.\n    test: search/folding/unicode-mode\n    scenarios: [search/folding/*]\n    pointer: /steps/*/search/*/ids\n    transform: {replace: [\"#n1\", \"#n2\"]}\n",
     );
     let suite = Suite::open(root).unwrap();
     // T0: Meguri's deliberate difference passes under the entry.
-    let meguri_says = Canned(json!({"steps": [{"search": {"ids": ["#n1", "#n2"]}}]}));
+    let meguri_says = Canned(json!({"steps": [{"search": [{"ids": ["#n1", "#n2"]}]}]}));
     let t0 = suite.run(&[], &meguri_says, "test");
     assert_eq!(t0.outcomes[0].status, Status::Pass, "{}", t0.render_text());
     // T1: the oracle still reproduces its golden, untransformed.
@@ -933,12 +987,30 @@ fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
             .contains("timing")
     );
 
+    // Its first segment starts from the new collection (dsl.md D8, D9.2):
+    // pending while no adapter makes it.
     let mut registry = without_storage();
     registry.handoff(|_, _| Ok(()), |_, _| Ok(()));
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    assert_eq!(report.outcomes[0].status, Status::Pending, "{}", report.render_text());
+    let missing = report.outcomes[0].missing.clone().unwrap();
+    assert_eq!(
+        (
+            missing.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+            missing.ops.len()
+        ),
+        (vec!["new_collection"], 0)
+    );
+
+    let mut registry = without_storage();
+    registry.handoff(|_, _| Ok(()), |_, _| Ok(()));
+    registry.new_collection(|_| Ok(()));
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
     // With the storage area's own handoff adapters too.
-    let report = suite.run(&[], &MeguriExecutor::new(), "test");
+    let mut registry = MeguriExecutor::core_registry();
+    registry.new_collection(|_| Ok(()));
+    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
     assert_eq!(report.outcomes[0].repro, "tools/mg conformance --live smoke/chain");
     assert!(report.failures().is_empty());
@@ -968,13 +1040,17 @@ fn an_op_anki_refuses_is_recorded_and_the_run_goes_on() {
     golden_for(root, "notes/delete-twice", json!({"steps": [refused, {}, refused]}));
     let suite = Suite::open(root).unwrap();
 
+    // delete_notes touches the collection: the run starts from the new
+    // collection (dsl.md D8), a stand-in here.
     let mut registry = MeguriExecutor::core_registry();
+    registry.new_collection(|_| Ok(()));
     registry.op_rejecting("delete_notes", &["no_such_note"], refuse);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
 
     // A kind outside the op's list is the adapter's error, not a rejection.
     let mut registry = MeguriExecutor::core_registry();
+    registry.new_collection(|_| Ok(()));
     registry.op_rejecting("delete_notes", &["no_such_note"], refuse_oddly);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Error);
@@ -1047,13 +1123,18 @@ fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
         missing.observations.iter().map(String::as_str).collect::<Vec<_>>(),
         ["card"]
     );
+    assert_eq!(
+        missing.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["new_collection"]
+    );
     assert!(report.failures().is_empty(), "{}", report.render_text());
 
     // Once Meguri has what its actor needs, the scenario is live: T0 still
     // runs none of it (every adapter here would fail the run).
     let mut registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.actor(never_dump);
-    registry.op_rejecting("sync", &["clock_incorrect", "network"], never_op);
+    registry.new_collection(|_| Err(ExecError::new("internal_error", "T0 ran an actor scenario")));
+    registry.op_rejecting("sync", &SyncSpec::REJECTIONS, never_op);
     registry.observation("card", never_observe);
     registry.observation("db_dump", never_observe);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");

@@ -1,0 +1,38 @@
+# An edit that registers a new tag and generates a card is a step of its own,
+# and a plain edit 10 s later does not merge into it. Undoing it deletes the
+# generated card without adding a grave, deletes the new tag's row and puts
+# the note back with its server usn; redo puts the card and the tag row back
+# with their ids and stamps (specs/engine/undo.md A3, A4, A7). Needs db_exec,
+# edit_note, undo, redo and undo_status (specs/conformance/undo-ops.md). The
+# generated card has no logical id on the oracle (undo-ops.md V5): the dumps
+# show it.
+id: undo/edit-note-new-card
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Two, front: "{{#Back}}{{Back}}{{/Back}}", back: "{{Front}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Duo, deck: Inbox, fields: [sun], tags: [sky]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - observe: [{db_dump: {tables: [col, notes, cards, tags, graves]}}]
+  - advance: 1h
+  # Back fills the second template; star is a new tag.
+  - edit_note: {note: "#n1", fields: {Back: sol}, tags: [sky, star]}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, tags, graves]}}]
+  - advance: 10s
+  - edit_note: {note: "#n1", fields: {Back: luz}}
+  - undo: {}
+  - db_exec: {sql: "SELECT flds, mod, usn, tags FROM notes"}
+  - observe: [undo_status]
+  - advance: 10s
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, tags, graves]}}]
+  - advance: 1h
+  - redo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, tags, graves]}}]

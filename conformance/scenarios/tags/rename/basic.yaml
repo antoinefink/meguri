@@ -1,0 +1,30 @@
+# Renaming a tag and its descendants (specs/tags/tags.md T5, T6, T7, T14).
+# Matching ignores case and stops at `::`, so `foobar` is not renamed; a
+# note that already had the new name keeps both tags in place (` bar bar `);
+# tags keep their positions (` zzz2 zzz `). Only matching notes get usn -1
+# and the new mod; col.mod moves. The old name may be given in another case.
+# #n2 holds a descendant spelled differently from its row, as another client
+# could store it.
+id: tags/rename/basic
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [foo, other]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["foo::child", "foo::kid"]}
+  - db_exec: {sql: "UPDATE notes SET tags = ' foo::child FOO::kid ' WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: [foobar]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: [bar, foo]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: [a, zzz]}
+  - advance: 1h
+  - rename_tag: {from: foo, to: bar}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - rename_tag: {from: A, to: zzz2}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

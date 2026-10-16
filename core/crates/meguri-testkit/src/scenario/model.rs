@@ -145,10 +145,51 @@ impl<'de> Deserialize<'de> for NoArgs {
     }
 }
 
-/// `sync: {kind}` (sync-ops.md S4).
+/// `sync: {kind, credentials?}` (sync-ops.md S4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncSpec {
     pub kind: SyncKind,
+    /// What a `login` sends (S4.5); `Account` for every other kind.
+    pub credentials: Credentials,
+}
+
+impl SyncSpec {
+    /// The rejections a sync step records (S4.4, dsl.md D7.2): the list a
+    /// Meguri sync adapter registers with `Registry::op_rejecting`.
+    pub const REJECTIONS: [&'static str; 3] = ["auth_failed", "clock_incorrect", "network"];
+}
+
+/// How a `login` derives its credentials from the scenario's account
+/// (sync-ops.md S4.5). A scenario never names a credential.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Credentials {
+    /// The account's user name and password.
+    #[default]
+    Account,
+    /// The account's user name with its password followed by `-wrong`: the
+    /// server refuses it (`auth_failed`).
+    WrongPassword,
+}
+
+impl Credentials {
+    /// What `wrong_password` appends to the account's password (S4.5).
+    pub const WRONG_PASSWORD_SUFFIX: &'static str = "-wrong";
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Credentials::Account => "account",
+            Credentials::WrongPassword => "wrong_password",
+        }
+    }
+
+    /// The password a login with these credentials sends for an account
+    /// whose password is `password`.
+    pub fn password(self, password: &str) -> String {
+        match self {
+            Credentials::Account => password.to_owned(),
+            Credentials::WrongPassword => format!("{password}{}", Credentials::WRONG_PASSWORD_SUFFIX),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -178,9 +219,31 @@ impl<'de> Deserialize<'de> for SyncSpec {
         struct Raw {
             kind: SyncKind,
         }
-        let map = mapping(deserializer, "sync")?;
+        let mut map = mapping(deserializer, "sync")?;
+        // Read by hand, so its errors name the argument and a present
+        // `credentials: null` is not taken for a missing one.
+        let credentials = map.remove("credentials");
         let raw: Raw = serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)?;
-        Ok(SyncSpec { kind: raw.kind })
+        let credentials = match credentials {
+            None => Credentials::Account,
+            Some(_) if raw.kind != SyncKind::Login => {
+                return Err(de::Error::custom(format!(
+                    "sync {}: credentials are allowed only with kind login (sync-ops.md S4.5)",
+                    raw.kind.as_str()
+                )));
+            }
+            Some(Value::String(text)) if text == "account" => Credentials::Account,
+            Some(Value::String(text)) if text == "wrong_password" => Credentials::WrongPassword,
+            Some(other) => {
+                return Err(de::Error::custom(format!(
+                    "sync credentials {other} is not account or wrong_password (sync-ops.md S4.5)"
+                )));
+            }
+        };
+        Ok(SyncSpec {
+            kind: raw.kind,
+            credentials,
+        })
     }
 }
 
@@ -604,8 +667,30 @@ pub enum Step {
     EditNote(EditNoteArgs),
     /// record-ops.md W3.
     DeleteNotes(DeleteNotesArgs),
-    /// record-ops.md W4.
+    /// record-ops.md W4; `undoable`: undo-ops.md V3.1.
     SetConfig(SetConfigArgs),
+    /// undo-ops.md V3.2.
+    RemoveConfig(RemoveConfigArgs),
+    /// undo-ops.md V1: the top step of the undo history.
+    Undo(NoArgs),
+    /// undo-ops.md V1: the top step of the redo history.
+    Redo(NoArgs),
+    /// tag-ops.md G1.
+    AddNoteTags(NoteTagsArgs),
+    /// tag-ops.md G2.
+    RemoveNoteTags(NoteTagsArgs),
+    /// tag-ops.md G3.
+    DeleteTags(DeleteTagsArgs),
+    /// tag-ops.md G4.
+    RenameTag(RenameTagArgs),
+    /// tag-ops.md G5.
+    ReparentTags(ReparentTagsArgs),
+    /// tag-ops.md G6.
+    ClearUnusedTags(NoArgs),
+    /// tag-ops.md G7.
+    SetTagCollapsed(SetTagCollapsedArgs),
+    /// tag-ops.md G8.
+    SetFlag(SetFlagArgs),
     Bury(DraftArgs),
     Suspend(DraftArgs),
     Forget(DraftArgs),
@@ -640,7 +725,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 27] = [
+    pub const NAMES: [&'static str; 38] = [
         "advance",
         "set_clock",
         "add_note",
@@ -649,6 +734,17 @@ impl Step {
         "edit_note",
         "delete_notes",
         "set_config",
+        "remove_config",
+        "undo",
+        "redo",
+        "add_note_tags",
+        "remove_note_tags",
+        "delete_tags",
+        "rename_tag",
+        "reparent_tags",
+        "clear_unused_tags",
+        "set_tag_collapsed",
+        "set_flag",
         "bury",
         "suspend",
         "forget",
@@ -684,6 +780,17 @@ impl Step {
             Step::EditNote(_) => "edit_note",
             Step::DeleteNotes(_) => "delete_notes",
             Step::SetConfig(_) => "set_config",
+            Step::RemoveConfig(_) => "remove_config",
+            Step::Undo(_) => "undo",
+            Step::Redo(_) => "redo",
+            Step::AddNoteTags(_) => "add_note_tags",
+            Step::RemoveNoteTags(_) => "remove_note_tags",
+            Step::DeleteTags(_) => "delete_tags",
+            Step::RenameTag(_) => "rename_tag",
+            Step::ReparentTags(_) => "reparent_tags",
+            Step::ClearUnusedTags(_) => "clear_unused_tags",
+            Step::SetTagCollapsed(_) => "set_tag_collapsed",
+            Step::SetFlag(_) => "set_flag",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
             Step::Forget(_) => "forget",
@@ -860,13 +967,81 @@ pub struct DeleteNotesArgs {
     pub notes: Vec<NoteRef>,
 }
 
-/// `set_config: {key, value}` (record-ops.md W4): `key` not empty (checked
-/// on load), `value` any JSON value, null included.
+/// `set_config: {key, value, undoable?}` (record-ops.md W4): `key` not
+/// empty (checked on load), `value` any JSON value, null included.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetConfigArgs {
     pub key: String,
     pub value: Value,
+    /// undo-ops.md V3.1: true makes the write an "Update Config" undo step;
+    /// false when missing (an explicit null is invalid).
+    #[serde(default)]
+    pub undoable: bool,
+}
+
+/// `remove_config: {key}` (undo-ops.md V3.2): `key` not empty (checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveConfigArgs {
+    pub key: String,
+}
+
+/// `add_note_tags` and `remove_note_tags: {notes, tags}` (tag-ops.md G1,
+/// G2): at least one note (checked on load); `tags` the tag text as a caller
+/// gives it, which the executor splits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoteTagsArgs {
+    pub notes: Vec<NoteRef>,
+    pub tags: String,
+}
+
+/// `delete_tags: {tags}` (tag-ops.md G3): the tag text of the names to
+/// delete.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteTagsArgs {
+    pub tags: String,
+}
+
+/// `rename_tag: {from, to}` (tag-ops.md G4): `from` one non-empty name
+/// without U+0020 or U+3000 (checked on load); `to` the new name as typed.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameTagArgs {
+    pub from: String,
+    pub to: String,
+}
+
+/// `reparent_tags: {tags, parent}` (tag-ops.md G5): at least one source,
+/// each non-empty (checked on load); `parent` the target, empty for the top
+/// level.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReparentTagsArgs {
+    pub tags: Vec<String>,
+    pub parent: String,
+}
+
+/// `set_tag_collapsed: {tags, collapsed}` (tag-ops.md G7): at least one
+/// name, each non-empty (checked on load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetTagCollapsedArgs {
+    pub tags: Vec<String>,
+    pub collapsed: bool,
+}
+
+/// `set_flag: {cards, flag}` (tag-ops.md G8): at least one card (checked on
+/// load); `flag` an integer from 0, a value above 7 being the executor's
+/// `invalid_flag` rejection.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetFlagArgs {
+    pub cards: Vec<CardRef>,
+    pub flag: u64,
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes
@@ -1105,7 +1280,10 @@ pub enum ObservationKind {
     Render,
     /// render-ops.md Q1.
     Template,
+    /// search-ops.md S1.
     Search,
+    /// search-ops.md S2.
+    CanonicalSearch,
     DbDump,
     /// storage-ops.md P3.
     SchemaObjects,
@@ -1115,8 +1293,14 @@ pub enum ObservationKind {
     BlobDecode,
     PackageCol,
     Text,
+    /// undo-ops.md V2.
+    UndoStatus,
+    /// cloze-ops.md Z1.
+    Cloze,
     /// float-determinism.md F5.
     FsrsNext,
+    /// tag-ops.md G9.
+    TagTree,
 }
 
 /// How a kind takes arguments.
@@ -1132,10 +1316,12 @@ pub(super) enum ArgShape {
     Mapping,
     /// No arguments or a mapping.
     OptionalMapping,
+    /// A required non-empty list of values that are not references.
+    List,
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 21] = [
+    pub const ALL: [ObservationKind; 25] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1148,6 +1334,7 @@ impl ObservationKind {
         ObservationKind::Render,
         ObservationKind::Template,
         ObservationKind::Search,
+        ObservationKind::CanonicalSearch,
         ObservationKind::DbDump,
         ObservationKind::SchemaObjects,
         ObservationKind::Stats,
@@ -1156,7 +1343,10 @@ impl ObservationKind {
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
         ObservationKind::Text,
+        ObservationKind::UndoStatus,
+        ObservationKind::Cloze,
         ObservationKind::FsrsNext,
+        ObservationKind::TagTree,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1173,6 +1363,7 @@ impl ObservationKind {
             ObservationKind::Render => "render",
             ObservationKind::Template => "template",
             ObservationKind::Search => "search",
+            ObservationKind::CanonicalSearch => "canonical_search",
             ObservationKind::DbDump => "db_dump",
             ObservationKind::SchemaObjects => "schema_objects",
             ObservationKind::Stats => "stats",
@@ -1181,7 +1372,10 @@ impl ObservationKind {
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
+            ObservationKind::UndoStatus => "undo_status",
+            ObservationKind::Cloze => "cloze",
             ObservationKind::FsrsNext => "fsrs_next",
+            ObservationKind::TagTree => "tag_tree",
         }
     }
 
@@ -1195,20 +1389,23 @@ impl ObservationKind {
             ObservationKind::Timing
             | ObservationKind::DeckTree
             | ObservationKind::Digest
-            | ObservationKind::SchemaObjects => ArgShape::None,
+            | ObservationKind::SchemaObjects
+            | ObservationKind::UndoStatus
+            | ObservationKind::TagTree => ArgShape::None,
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }
             ObservationKind::FuzzTable
             | ObservationKind::NetProbe
-            | ObservationKind::Search
             | ObservationKind::LegacyJson
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
             | ObservationKind::Template
             | ObservationKind::Text
+            | ObservationKind::Cloze
             | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
+            ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }
 }
@@ -1220,6 +1417,8 @@ pub enum ObservationArgs {
     None,
     Refs(Vec<LogicalRef>),
     Mapping(Map<String, Value>),
+    /// The items of a kind that takes a list (`search`, `canonical_search`).
+    List(Vec<Value>),
 }
 
 /// One entry of an `observe` list (observations.md O2).
@@ -1230,6 +1429,24 @@ pub struct ObservationRequest {
 }
 
 impl ObservationRequest {
+    /// D8: the kinds that never read a collection, `text`, `cloze`,
+    /// `fsrs_next` and `canonical_search`, and `template` when every case is
+    /// a new-note case.
+    pub fn reads_no_collection(&self) -> bool {
+        match self.kind {
+            ObservationKind::Text
+            | ObservationKind::Cloze
+            | ObservationKind::FsrsNext
+            | ObservationKind::CanonicalSearch => true,
+            ObservationKind::Template => match &self.args {
+                ObservationArgs::Mapping(map) => TemplateRequest::from_mapping(map)
+                    .is_ok_and(|request| request.cases.iter().all(|c| matches!(c, TemplateCase::NewNote(_)))),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     fn parse_text(text: &str) -> Result<ObservationRequest, FormatError> {
         let bad = || FormatError::new(format!("observation {text:?} must look like name or name(#c1, ...)"));
         let trimmed = text.trim();
@@ -1272,6 +1489,7 @@ impl ObservationRequest {
             Value::Object(map) => ObservationArgs::Mapping(map),
             // `{ids: []}` is every id, like `ids`; a card list is never empty.
             Value::Array(items) if items.is_empty() && kind.shape() == ArgShape::AnyRefs => ObservationArgs::None,
+            Value::Array(items) if kind.shape() == ArgShape::List => ObservationArgs::List(items),
             Value::Array(items) if items.is_empty() => {
                 return Err(FormatError::new(format!(
                     "observation {name} needs at least one reference"
@@ -1294,10 +1512,11 @@ impl ObservationRequest {
     fn checked(kind: ObservationKind, args: ObservationArgs) -> Result<ObservationRequest, FormatError> {
         let name = kind.name();
         let ok = match (kind.shape(), &args) {
-            (_, ObservationArgs::None) => !matches!(kind.shape(), ArgShape::Mapping),
+            (_, ObservationArgs::None) => !matches!(kind.shape(), ArgShape::Mapping | ArgShape::List),
             (ArgShape::AnyRefs, ObservationArgs::Refs(_)) => true,
             (ArgShape::CardRefs, ObservationArgs::Refs(refs)) => refs.iter().all(|r| r.kind == RefKind::Card),
             (ArgShape::Mapping | ArgShape::OptionalMapping, ObservationArgs::Mapping(_)) => true,
+            (ArgShape::List, ObservationArgs::List(_)) => true,
             _ => false,
         };
         if !ok {
@@ -1305,8 +1524,10 @@ impl ObservationRequest {
                 "observation {name} does not take these arguments"
             )));
         }
-        if let ObservationArgs::Mapping(map) = &args {
-            super::validate::observation_mapping(kind, map)?;
+        match &args {
+            ObservationArgs::Mapping(map) => super::validate::observation_mapping(kind, map)?,
+            ObservationArgs::List(items) => super::validate::observation_list(kind, items)?,
+            ObservationArgs::None | ObservationArgs::Refs(_) => {}
         }
         Ok(ObservationRequest { kind, args })
     }
@@ -1314,6 +1535,77 @@ impl ObservationRequest {
 
 fn unknown_kind(name: &str) -> FormatError {
     FormatError::new(format!("unknown observation kind {name:?}"))
+}
+
+/// The mode of one `search` request (search-ops.md S1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SearchKind {
+    Cards,
+    Notes,
+}
+
+/// One request of a `search` observation: `{query, kind?}`, `kind` cards when
+/// missing (search-ops.md S1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchRequest {
+    pub query: String,
+    pub kind: SearchKind,
+}
+
+impl SearchRequest {
+    /// Reads a `search` list with scenario.schema.json's rules: at least one
+    /// request, each exactly `query` (a string) and an optional `kind`.
+    pub fn from_list(items: &[Value]) -> Result<Vec<SearchRequest>, FormatError> {
+        let bad = |why: String| FormatError::new(format!("observation search: {why}"));
+        if items.is_empty() {
+            return Err(bad("needs at least one request".to_owned()));
+        }
+        items
+            .iter()
+            .enumerate()
+            .map(|(k, item)| {
+                let map = item
+                    .as_object()
+                    .ok_or_else(|| bad(format!("request {k} is a {{query, kind?}} mapping")))?;
+                if let Some(key) = map.keys().find(|key| !matches!(key.as_str(), "query" | "kind")) {
+                    return Err(bad(format!("request {k} takes {{query, kind?}}, not {key:?}")));
+                }
+                let query = map
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| bad(format!("request {k} needs a query string")))?;
+                let kind = match map.get("kind") {
+                    None => SearchKind::Cards,
+                    Some(kind) => match kind.as_str() {
+                        Some("cards") => SearchKind::Cards,
+                        Some("notes") => SearchKind::Notes,
+                        _ => return Err(bad(format!("request {k}: kind is cards or notes"))),
+                    },
+                };
+                Ok(SearchRequest {
+                    query: query.to_owned(),
+                    kind,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Reads a `canonical_search` list (search-ops.md S2): at least one search
+/// text, every item a string.
+pub fn canonical_search_texts(items: &[Value]) -> Result<Vec<String>, FormatError> {
+    let bad = |why: &str| FormatError::new(format!("observation canonical_search: {why}"));
+    if items.is_empty() {
+        return Err(bad("needs at least one search text"));
+    }
+    items
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| bad("every item is a string"))
+        })
+        .collect()
 }
 
 /// The functions of the `text` kind (observations.md O9).
@@ -1431,6 +1723,115 @@ impl TextRequest {
             TextInputs::Strings(strings.ok_or_else(|| bad("inputs are strings"))?)
         };
         Ok(TextRequest { fns, inputs })
+    }
+}
+
+/// The functions of the `cloze` kind (cloze-ops.md Z2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ClozeFunction {
+    Numbers,
+    Front,
+    Back,
+    OnlyFront,
+    OnlyBack,
+    Typing,
+}
+
+impl ClozeFunction {
+    pub const ALL: [ClozeFunction; 6] = [
+        ClozeFunction::Numbers,
+        ClozeFunction::Front,
+        ClozeFunction::Back,
+        ClozeFunction::OnlyFront,
+        ClozeFunction::OnlyBack,
+        ClozeFunction::Typing,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ClozeFunction::Numbers => "numbers",
+            ClozeFunction::Front => "front",
+            ClozeFunction::Back => "back",
+            ClozeFunction::OnlyFront => "only_front",
+            ClozeFunction::OnlyBack => "only_back",
+            ClozeFunction::Typing => "typing",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<ClozeFunction> {
+        ClozeFunction::ALL.into_iter().find(|f| f.name() == name)
+    }
+}
+
+/// The highest card number a `cloze` input names (`render/cloze#C1`).
+pub const CLOZE_MAX_CARD: u16 = u16::MAX;
+
+/// The inputs of a `cloze` request: strings for `numbers`, `[text, card]`
+/// pairs for every other function (cloze-ops.md Z1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClozeInputs {
+    Texts(Vec<String>),
+    /// Card numbers are 1 to [`CLOZE_MAX_CARD`].
+    Cards(Vec<(String, u16)>),
+}
+
+/// A `cloze` observation request: `{fns, inputs}` (cloze-ops.md Z1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClozeRequest {
+    pub fns: Vec<ClozeFunction>,
+    pub inputs: ClozeInputs,
+}
+
+impl ClozeRequest {
+    /// Reads the request with Z1's rules: exactly `fns` and `inputs`;
+    /// distinct known functions, at least one; `numbers` alone, on strings;
+    /// every other function on `[string, integer 1-65535]` pairs. A card
+    /// written as a float, a string or a boolean is refused.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<ClozeRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation cloze: {why}"));
+        if map.len() != 2 || !map.contains_key("fns") || !map.contains_key("inputs") {
+            return Err(bad("takes exactly {fns, inputs}"));
+        }
+        let names = map["fns"]
+            .as_array()
+            .ok_or_else(|| bad("fns is a list of function names"))?;
+        if names.is_empty() {
+            return Err(bad("fns names at least one function"));
+        }
+        let mut fns = Vec::with_capacity(names.len());
+        for name in names {
+            let f = name
+                .as_str()
+                .and_then(ClozeFunction::from_name)
+                .ok_or_else(|| bad(&format!("{name} is not a cloze function")))?;
+            if fns.contains(&f) {
+                return Err(bad(&format!("{} appears twice in fns", f.name())));
+            }
+            fns.push(f);
+        }
+        let items = map["inputs"].as_array().ok_or_else(|| bad("inputs is a list"))?;
+        let inputs = if fns.contains(&ClozeFunction::Numbers) {
+            if fns.len() > 1 {
+                return Err(bad("numbers shares a request with no other function"));
+            }
+            let texts = items
+                .iter()
+                .map(|v| v.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>();
+            ClozeInputs::Texts(texts.ok_or_else(|| bad("numbers inputs are strings"))?)
+        } else {
+            let pair = |item: &Value| match item.as_array().map(Vec::as_slice) {
+                Some([Value::String(text), card]) => card
+                    .as_u64()
+                    .and_then(|card| u16::try_from(card).ok())
+                    .filter(|&card| card >= 1)
+                    .map(|card| (text.clone(), card)),
+                _ => None,
+            };
+            let pairs = items.iter().map(pair).collect::<Option<Vec<_>>>();
+            ClozeInputs::Cards(pairs.ok_or_else(|| bad("inputs are [text, card] pairs with a card from 1 to 65535"))?)
+        };
+        Ok(ClozeRequest { fns, inputs })
     }
 }
 
@@ -1844,6 +2245,10 @@ impl<'de> Deserialize<'de> for ObservationRequest {
     }
 }
 
+/// The new collection a scenario starts from as a capability (D8), listed
+/// with the setup sections.
+pub const NEW_COLLECTION: &str = "new_collection";
+
 /// What a scenario uses: the capabilities an executor needs to run it (D8).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Needs {
@@ -1881,12 +2286,33 @@ impl Scenario {
         Ok(scenario)
     }
 
-    /// The setup sections, ops and observation kinds the scenario uses.
+    /// The setup sections, ops and observation kinds the scenario uses, and
+    /// the new collection it starts from (D8).
     pub fn needs(&self) -> Needs {
         let mut needs = Needs::default();
+        if self.starts_from_new_collection() {
+            needs.setup.insert(NEW_COLLECTION.to_owned());
+        }
         needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
         add_step_needs(&mut needs, &self.steps);
         needs
+    }
+
+    /// Whether a run starts from a new collection made at `clock.start`
+    /// (D8): unless its first step is `open`, or it has no setup and no step
+    /// touches a collection (only `advance`, `set_clock` and observations of
+    /// kinds that never read one).
+    pub fn starts_from_new_collection(&self) -> bool {
+        if self.starts_with_open() {
+            return false;
+        }
+        !self.setup.sections().is_empty() || self.steps.iter().any(touches_collection)
+    }
+
+    /// storage-ops.md P1: the scenario replaces its collection with a fixture
+    /// before anything else.
+    pub fn starts_with_open(&self) -> bool {
+        matches!(self.steps.first(), Some(Step::Open(_)))
     }
 
     /// A live scenario has handoff steps (D9.2) or actors (D9.3): only T1
@@ -1922,16 +2348,18 @@ impl Scenario {
     }
 
     /// What Meguri needs to play the Meguri actors of an actor scenario
-    /// (sync-ops.md S10.2): the op `actor`; the setup sections when the first
-    /// actor is a Meguri actor; the ops and observation kinds of the steps
-    /// Meguri actors run; `advance` and `set_clock` when the scenario uses
-    /// them; `db_dump` for `converge`. Nothing without a Meguri actor.
+    /// (sync-ops.md S10.2): the op `actor`; the new collection each of them
+    /// starts from (S2.2, D8); the setup sections when the first actor is a
+    /// Meguri actor; the ops and observation kinds of the steps Meguri actors
+    /// run; `advance` and `set_clock` when the scenario uses them; `db_dump`
+    /// for `converge`. Nothing without a Meguri actor.
     pub fn needs_of_meguri_actors(&self) -> Needs {
         let mut needs = Needs::default();
         if !self.actors().iter().any(ActorName::is_meguri) {
             return needs;
         }
         needs.ops.insert("actor".to_owned());
+        needs.setup.insert(NEW_COLLECTION.to_owned());
         if self.actors()[0].is_meguri() {
             needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
         }
@@ -1983,13 +2411,17 @@ impl Scenario {
         segments
     }
 
-    /// What one side needs to run its segments of a live scenario: the setup
-    /// sections when it runs the first segment, the ops and observations of
-    /// its segments, and `handoff`.
+    /// What one side needs to run its segments of a live scenario: the new
+    /// collection (unless the first step is `open`) and the setup sections
+    /// when it runs the first segment (D9.2), the ops and observations of its
+    /// segments, and `handoff`.
     pub fn needs_on(&self, side: Side) -> Needs {
         let mut needs = Needs::default();
         for (i, segment) in self.segments().iter().enumerate().filter(|(_, s)| s.side == side) {
             if i == 0 {
+                if !self.starts_with_open() {
+                    needs.setup.insert(NEW_COLLECTION.to_owned());
+                }
                 needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
             }
             add_step_needs(&mut needs, &self.steps[segment.steps.clone()]);
@@ -2009,6 +2441,17 @@ impl Scenario {
     /// A live chain: handoff steps split it into segments (D9.2).
     pub fn has_handoffs(&self) -> bool {
         self.steps.iter().any(|s| matches!(s, Step::Handoff(_)))
+    }
+}
+
+/// D8: a step that reads or writes the scenario's collection. Only `advance`,
+/// `set_clock` and observations of kinds that never read a collection leave
+/// it alone.
+fn touches_collection(step: &Step) -> bool {
+    match step {
+        Step::Advance(_) | Step::SetClock(_) => false,
+        Step::Observe(requests) => requests.iter().any(|r| !r.reads_no_collection()),
+        _ => true,
     }
 }
 

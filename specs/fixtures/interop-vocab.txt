@@ -105,3 +105,26 @@ cap_answer_time_to_secs
 FrontSide
 cloze
 sound
+# anonymizer.md: config keys holding names or searches, deck kind blob
+# fields, SQLite statistics tables and the indexes whose samples hold names,
+# search keywords and markup the anonymizer must recognize
+savedFilters
+defaultSearchText
+flagLabels
+cardStateCustomizer
+lastNotetype
+lastDeck
+KindContainer
+markdown_description
+search_terms
+sqlite_stat1
+sqlite_stat4
+idx_decks_name
+ix_notes_csum
+sqlite_autoindex_tags_1
+resched
+dupe
+has-cd
+image-occlusion
+latex
+param_search

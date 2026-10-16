@@ -12,8 +12,8 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario,
-    Side, Step, SyncKind, TemplateRequest, TextRequest,
+    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind,
+    RefKind, Scenario, SearchRequest, Side, Step, SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -103,6 +103,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
             legacy_update(update).map_err(at)?;
         }
         record_op(step).map_err(at)?;
+        tag_op(step).map_err(at)?;
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
@@ -254,7 +255,8 @@ fn check(shape: Arg, value: &Value) -> Result<(), String> {
     }
 }
 
-/// record-ops.md W1, W3, W4: what the schema requires beyond the types.
+/// record-ops.md W1, W3, W4 and undo-ops.md V3.2: what the schema requires
+/// beyond the types.
 fn record_op(step: &Step) -> Result<(), FormatError> {
     match step {
         Step::DbExec(args) if args.sql.is_empty() => Err(FormatError::new("db_exec needs a non-empty sql")),
@@ -262,6 +264,32 @@ fn record_op(step: &Step) -> Result<(), FormatError> {
             Err(FormatError::new("delete_notes needs at least one note"))
         }
         Step::SetConfig(args) if args.key.is_empty() => Err(FormatError::new("set_config needs a non-empty key")),
+        Step::RemoveConfig(args) if args.key.is_empty() => Err(FormatError::new("remove_config needs a non-empty key")),
+        _ => Ok(()),
+    }
+}
+
+/// tag-ops.md G1 to G8: what the schema requires beyond the types.
+fn tag_op(step: &Step) -> Result<(), FormatError> {
+    let names = |op: &str, names: &[String]| {
+        if names.is_empty() {
+            Err(FormatError::new(format!("{op} needs at least one tag")))
+        } else if names.iter().any(String::is_empty) {
+            Err(FormatError::new(format!("{op} needs non-empty tag names")))
+        } else {
+            Ok(())
+        }
+    };
+    match step {
+        Step::AddNoteTags(args) | Step::RemoveNoteTags(args) if args.notes.is_empty() => {
+            Err(FormatError::new(format!("{} needs at least one note", step.name())))
+        }
+        Step::RenameTag(args) if args.from.is_empty() || args.from.contains([' ', '\u{3000}']) => Err(
+            FormatError::new("rename_tag needs a non-empty from without U+0020 or U+3000"),
+        ),
+        Step::ReparentTags(args) => names("reparent_tags", &args.tags),
+        Step::SetTagCollapsed(args) => names("set_tag_collapsed", &args.tags),
+        Step::SetFlag(args) if args.cards.is_empty() => Err(FormatError::new("set_flag needs at least one card")),
         _ => Ok(()),
     }
 }
@@ -321,19 +349,39 @@ fn package_name(value: &Value) -> Result<(), FormatError> {
 /// The `col` columns `package_col` reads (model-ops.md L7).
 const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "tags"];
 
-/// The schema's rules for the mapping form of an observation request.
-/// observations.md O2: a kind whose value is a list (`template`) is
-/// requested at most once per step; two lists do not merge.
+/// The schema's rules for the list form of an observation request
+/// (search-ops.md S1, S2).
+pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result<(), FormatError> {
+    match kind {
+        ObservationKind::Search => SearchRequest::from_list(items).map(drop),
+        ObservationKind::CanonicalSearch => canonical_search_texts(items).map(drop),
+        other => Err(FormatError::new(format!(
+            "observation {} does not take a list",
+            other.name()
+        ))),
+    }
+}
+
+/// observations.md O2: a kind whose value is a list (`template`, `search`,
+/// `canonical_search`) is requested at most once per step; two lists do not
+/// merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
-    let templates = requests.iter().filter(|r| r.kind == ObservationKind::Template).count();
-    if templates > 1 {
-        return Err(FormatError::new(
-            "observation template is requested more than once in one step",
-        ));
+    for kind in [
+        ObservationKind::Template,
+        ObservationKind::Search,
+        ObservationKind::CanonicalSearch,
+    ] {
+        if requests.iter().filter(|r| r.kind == kind).count() > 1 {
+            return Err(FormatError::new(format!(
+                "observation {} is requested more than once in one step",
+                kind.name()
+            )));
+        }
     }
     Ok(())
 }
 
+/// The schema's rules for the mapping form of an observation request.
 pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value>) -> Result<(), FormatError> {
     let name = kind.name();
     let bad = |why: &str| Err(FormatError::new(format!("observation {name}: {why}")));
@@ -370,17 +418,6 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                 || map.get("timeout_ms").is_some_and(|t| !uint(t))
             {
                 return bad("takes {host, port, timeout_ms?}");
-            }
-        }
-        ObservationKind::Search => {
-            if !map.get("query").is_some_and(Value::is_string) {
-                return bad("needs a query string");
-            }
-            if map
-                .get("kind")
-                .is_some_and(|k| !matches!(k.as_str(), Some("cards" | "notes")))
-            {
-                return bad("kind is cards or notes");
             }
         }
         ObservationKind::Queue => {
@@ -422,6 +459,10 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         }
         ObservationKind::Text => {
             TextRequest::from_mapping(map)?;
+        }
+        // cloze-ops.md Z1.
+        ObservationKind::Cloze => {
+            ClozeRequest::from_mapping(map)?;
         }
         ObservationKind::FsrsNext => {
             FsrsNextRequest::from_mapping(map)?;

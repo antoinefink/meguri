@@ -17,4 +17,6 @@ from . import (  # noqa: F401
     storage_open,
     sync_client,
     sync_server,
+    tags,
+    undo,
 )
