@@ -9,7 +9,7 @@ mod common;
 use std::time::Duration;
 
 use common::{Harness, drain};
-use meguri_engine::notetypes::{self, NewNotetype, NewTemplate};
+use meguri_engine::notetypes::{self, Draft, NewNotetype, NewTemplate, SaveOptions};
 use meguri_engine::schema_gate::{SchemaReason, would_ask};
 use meguri_engine::undo::names::UPDATE_NOTE_TYPE;
 use meguri_engine::{EngineError, EventKind, OpContext, OpSpec, StepKind, UndoScope, UndoStatus, mark_schema_change};
@@ -186,6 +186,81 @@ fn ae39_after_a_sync_only_the_first_schema_change_asks() {
     structure_op(&h, id, TEMPLATES, false, swap_templates).unwrap();
     assert_eq!(notetype(&h, id).templates[0].name, "Reverse");
     assert_eq!(col(&h).schema_modified.0, later);
+}
+
+#[test]
+fn a_plain_save_cannot_move_templates_that_have_no_id() {
+    // R949, notetype-ops.md T5: a template keeps its identity wherever a
+    // draft moves it, also without the optional ids of legacy note types.
+    // After a sync, two such templates with the same texts swapped in a
+    // draft look like two renames; the plain save must refuse the move,
+    // which asks first and rewrites card ordinals (U34), and write nothing.
+    let h = Harness::open();
+    let new = NewNotetype {
+        name: "Twins".to_owned(),
+        fields: vec!["Front".to_owned(), "Back".to_owned()],
+        templates: ["One", "Two"]
+            .into_iter()
+            .map(|name| NewTemplate {
+                name: name.to_owned(),
+                front: "{{Front}}{{Card}}".to_owned(),
+                back: "{{Back}}".to_owned(),
+            })
+            .collect(),
+        ..NewNotetype::default()
+    };
+    let id = notetypes::add(&h.collection, new).unwrap().value.id;
+    let mut legacy = notetype(&h, id);
+    for template in &mut legacy.templates {
+        template.config.id = None;
+    }
+    for field in &mut legacy.fields {
+        field.config.id = None;
+    }
+    h.collection
+        .run(
+            OpSpec::named("test_strip_ids", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::CallerSupplied),
+            move |ctx| {
+                ctx.scope().put_notetype(&legacy)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    just_synced(&h);
+    let before = (col(&h), notetype(&h, id));
+
+    let mut moved = Draft::of(notetype(&h, id));
+    moved.templates.swap(0, 1);
+    let refused = notetypes::save(&h.collection, moved, SaveOptions::default());
+    assert!(
+        matches!(refused, Err(EngineError::InvalidArgument { .. })),
+        "{refused:?}"
+    );
+    let mut fields_moved = Draft::of(notetype(&h, id));
+    fields_moved.fields.swap(0, 1);
+    let refused = notetypes::save(&h.collection, fields_moved, SaveOptions::default());
+    assert!(
+        matches!(refused, Err(EngineError::InvalidArgument { .. })),
+        "{refused:?}"
+    );
+
+    let after = (col(&h), notetype(&h, id));
+    assert_eq!(after.0, before.0);
+    assert_eq!(
+        after.1.templates.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+        ["One", "Two"]
+    );
+    assert_eq!(after.1.mtime, before.1.mtime);
+
+    // Renaming the same templates in place is a plain save, and no schema
+    // change.
+    let mut renamed = Draft::of(notetype(&h, id));
+    renamed.templates[0].name = "Two".to_owned();
+    renamed.templates[1].name = "One".to_owned();
+    notetypes::save(&h.collection, renamed, SaveOptions::default()).unwrap();
+    assert_eq!(col(&h).schema_modified, before.0.schema_modified);
 }
 
 #[test]

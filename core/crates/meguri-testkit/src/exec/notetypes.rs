@@ -8,7 +8,9 @@
 //! session's writer, until the session runs the engine (U38).
 
 use meguri_engine::EngineError;
-use meguri_engine::notetypes::{self, NewNotetype, NewTemplate, NotetypeKind, SaveOptions, StockKind};
+use meguri_engine::notetypes::{
+    self, AggregateDigest, Draft, NewNotetype, NewTemplate, NotetypeKind, SaveOptions, StockKind,
+};
 use meguri_model::clock::Clock;
 use meguri_model::col::Col;
 use meguri_model::config::ConfigEntry;
@@ -271,7 +273,10 @@ fn update_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, E
     let mut failed = None;
     let saved = in_scope(session, |scope, _| {
         let draft = match find(scope, &args.notetype)? {
-            Ok(stored) => apply_edits(scope, stored, &args.edits),
+            Ok(stored) => {
+                let base = AggregateDigest::of(&stored);
+                apply_edits(scope, stored, &args.edits).map(|notetype| Draft { notetype, base })
+            }
             Err(detail) => Err(unknown_ref(detail)),
         };
         match draft {

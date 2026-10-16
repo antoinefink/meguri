@@ -6,6 +6,12 @@
 //! (N5, N7, `stock-kinds` K8), and the on-demand Image Occlusion note type
 //! (N9).
 //!
+//! A plain save takes a [`Draft`]: the note type as read, edited, with the
+//! digest of what it was read as. The save checks that digest against the
+//! live rows inside its transaction (`engine/op-model` O7), so a draft made
+//! before another save of the same note type fails with `Stale` instead of
+//! writing back what that save changed.
+//!
 //! Each operation has two forms: an engine op on a [`Collection`], one
 //! undoable step named as `specs/conformance/undo-ops.md` V4 names it, and an
 //! `_in` form that does the same inside a write scope the caller holds (the
@@ -22,6 +28,7 @@ pub mod validate;
 pub mod write;
 
 use std::fmt;
+use std::ops::{Deref, DerefMut};
 
 use meguri_model::changes::OpSource;
 use meguri_model::ids::NotetypeId;
@@ -31,7 +38,7 @@ use meguri_model::proto::notetype::{FieldConfig, NotetypeConfig, TemplateConfig}
 use meguri_model::rng::RandomSource;
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
-use meguri_storage::{ConfigValue, ReadRows, WriteScope};
+use meguri_storage::{ConfigValue, ReadRows, Table, WriteScope};
 
 use crate::collection::Collection;
 use crate::error::EngineError;
@@ -42,6 +49,7 @@ use crate::undo::names as step_names;
 pub use names::{FieldNameCheck, FieldNameRefusal, InvalidNotetype, check_typed_field_name};
 pub use stock::StockKind;
 pub use validate::{CheckKind, TemplateFailure, TemplateSide, template_failures};
+pub use write::AggregateDigest;
 
 /// The config key of the current note type (`storage/config-table`).
 pub const CURRENT_NOTETYPE_KEY: &str = "curModel";
@@ -169,6 +177,39 @@ pub struct Saved {
     pub name: String,
     /// False for a save that changed nothing (N3.1): nothing was written.
     pub written: bool,
+}
+
+/// A note type being edited: the note type as read, with the editor's
+/// changes, and the digest of the aggregate it was read as. It reads and
+/// edits as the note type it holds.
+#[derive(Clone, Debug)]
+pub struct Draft {
+    pub notetype: Notetype,
+    pub base: AggregateDigest,
+}
+
+impl Draft {
+    /// A draft of a note type as read: its base is the note type's digest.
+    pub fn of(notetype: Notetype) -> Draft {
+        Draft {
+            base: AggregateDigest::of(&notetype),
+            notetype,
+        }
+    }
+}
+
+impl Deref for Draft {
+    type Target = Notetype;
+
+    fn deref(&self) -> &Notetype {
+        &self.notetype
+    }
+}
+
+impl DerefMut for Draft {
+    fn deref_mut(&mut self) -> &mut Notetype {
+        &mut self.notetype
+    }
 }
 
 /// How a save checks the note type (`notetypes/validation` V1).
@@ -333,17 +374,27 @@ pub fn ensure_image_occlusion_in(scope: &mut WriteScope<'_>, random: &dyn Random
 /// note type as read with its name, styling, field options, template names,
 /// browser appearance or deck overrides changed, is normalized (N4),
 /// checked unless `skip_checks` (V1, V3) and written row by row; a draft
-/// equal to the stored note type writes nothing (N3.1). Changes of the field
-/// or template lists, field names, template text, the sort field or the kind
-/// are U34's structure changes and are refused with `InvalidArgument`.
-pub fn save_in(scope: &mut WriteScope<'_>, draft: &Notetype, options: SaveOptions) -> Result<Saved, EngineError> {
-    let stored = scope.notetype(draft.id)?.ok_or_else(|| unknown(draft.id))?;
-    if let Some(change) = write::structure_change(&stored, draft) {
+/// equal to the stored note type writes nothing (N3.1). When the stored
+/// aggregate is no longer the one the draft was made from (its base), the
+/// save writes nothing and fails with `Stale` (`engine/op-model` O7): the
+/// editor reads the note type again. Changes of the field or template lists,
+/// field names, template text, the sort field or the kind are U34's
+/// structure changes and are refused with `InvalidArgument`.
+pub fn save_in(scope: &mut WriteScope<'_>, draft: &Draft, options: SaveOptions) -> Result<Saved, EngineError> {
+    let id = draft.notetype.id;
+    let stored = scope.notetype(id)?.ok_or_else(|| unknown(id))?;
+    if AggregateDigest::of(&stored) != draft.base {
+        return Err(EngineError::Stale {
+            table: Table::Notetypes,
+            key: id.0.to_string(),
+        });
+    }
+    if let Some(change) = write::structure_change(&stored, &draft.notetype) {
         return Err(EngineError::InvalidArgument {
             message: format!("{change} is a note type structure change (U34), not a plain save"),
         });
     }
-    let mut notetype = draft.clone();
+    let mut notetype = draft.notetype.clone();
     let others: Vec<(NotetypeId, String)> = read::names(scope)?
         .into_iter()
         .filter(|(id, _)| *id != notetype.id)
@@ -416,7 +467,8 @@ pub fn ensure_image_occlusion(collection: &Collection) -> Result<OpResult<Added>
 }
 
 /// A plain save as an op: "Update Note Type", recorded only when it wrote.
-pub fn save(collection: &Collection, draft: Notetype, options: SaveOptions) -> Result<OpResult<Saved>, EngineError> {
+/// A stale draft is not planned again: its edits are the caller's.
+pub fn save(collection: &Collection, draft: Draft, options: SaveOptions) -> Result<OpResult<Saved>, EngineError> {
     collection.run(op_spec("update_notetype", step_names::UPDATE_NOTE_TYPE), move |ctx| {
         save_in(ctx.scope(), &draft, options)
     })

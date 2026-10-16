@@ -11,7 +11,7 @@ use std::time::Duration;
 use common::{Harness, drain};
 use meguri_engine::executor::catalog;
 use meguri_engine::notetypes::{
-    self, CheckKind, FieldNameCheck, FieldNameRefusal, InvalidNotetype, NewNotetype, NewTemplate, NotetypeKind,
+    self, CheckKind, Draft, FieldNameCheck, FieldNameRefusal, InvalidNotetype, NewNotetype, NewTemplate, NotetypeKind,
     NotetypeRefusal, SaveOptions, StockKind, TemplateFailure, TemplateSide, check_typed_field_name, template_failures,
 };
 use meguri_engine::undo::names::{ADD_NOTE_TYPE, UPDATE_NOTE_TYPE};
@@ -21,6 +21,7 @@ use meguri_model::clock::Clock;
 use meguri_model::ids::NotetypeId;
 use meguri_model::notetype::Notetype;
 use meguri_model::proto::ProtoBlob;
+use meguri_model::schema11::notetype_to_json;
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 use meguri_storage::raw::SqlValue;
@@ -69,7 +70,12 @@ fn read(h: &Harness, id: NotetypeId) -> Notetype {
         .expect("the note type exists")
 }
 
-fn save(h: &Harness, draft: Notetype) -> Result<notetypes::Saved, EngineError> {
+/// A draft of the stored note type (records N3, engine/op-model O7).
+fn edit(h: &Harness, id: NotetypeId) -> Draft {
+    Draft::of(read(h, id))
+}
+
+fn save(h: &Harness, draft: Draft) -> Result<notetypes::Saved, EngineError> {
     notetypes::save(&h.collection, draft, SaveOptions::default()).map(|r| r.value)
 }
 
@@ -153,7 +159,7 @@ fn a_save_that_changes_nothing_writes_nothing() {
     let (before, modified) = (rows(&h, id), col_mod(&h));
     let top = h.collection.peek_undo(UndoScope::Global).unwrap();
     let events = h.engine.stream().subscribe();
-    let saved = save(&h, read(&h, id)).unwrap();
+    let saved = save(&h, edit(&h, id)).unwrap();
     assert!(!saved.written);
     assert_eq!(rows(&h, id), before);
     assert_eq!(col_mod(&h), modified);
@@ -175,7 +181,7 @@ fn a_styling_change_stamps_the_notetype_row_and_rewrites_no_field_or_template() 
     h.clock.step_ms(60_000);
     let before = rows(&h, id);
     let schema = scm(&h);
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     draft.config.css = ".card { color: teal; }".to_owned();
     let saved = save(&h, draft).unwrap();
     assert!(saved.written);
@@ -192,23 +198,81 @@ fn a_styling_change_stamps_the_notetype_row_and_rewrites_no_field_or_template() 
     );
 }
 
+/// The state right after a sync: every note type marked as sent (`usn` 5)
+/// and `ls` = `scm`; then a minute later, so a schema change made now would
+/// move `scm`.
+fn all_synced(h: &Harness) {
+    let ids = notetypes::read::ids(&*h.collection.reader(ReaderRole::Query).unwrap()).unwrap();
+    for id in ids {
+        synced(h, id);
+    }
+    h.collection
+        .run(
+            OpSpec::named("test_sync_finish", OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(StampMode::CallerSupplied),
+            |ctx| {
+                let mut col = ctx.scope().col()?;
+                col.last_sync = col.schema_modified;
+                ctx.scope().put_col(&col)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    h.clock.step_ms(60_000);
+}
+
+/// What the next normal sync sends of the note types: the pending ones
+/// (`usn` -1, `storage/ids-usn-mtime` S2), each whole in its schema-11
+/// form (`model/schema11-json`, the wire form U107 sends), by id.
+fn outgoing_notetypes(h: &Harness) -> Vec<serde_json::Value> {
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let pending = reader
+        .execute_raw("SELECT id FROM notetypes WHERE usn = -1 ORDER BY id", &[])
+        .unwrap();
+    pending
+        .rows
+        .iter()
+        .map(|row| {
+            let SqlValue::Integer(id) = row[0] else {
+                panic!("{row:?}")
+            };
+            let notetype = reader.notetype(NotetypeId(id)).unwrap().unwrap();
+            serde_json::from_str(&notetype_to_json(&notetype)).unwrap()
+        })
+        .collect()
+}
+
 #[test]
-fn a_field_option_or_a_field_rename_marks_the_notetype_for_upload() {
-    // N3.2: a change in any fields row stamps the notetypes row, so the next
-    // normal sync uploads the note type.
+fn the_next_normal_sync_sends_a_note_type_edited_by_field_options_or_a_field_rename() {
+    // N3.2, N8, R950: after a sync, a field option save and a field rename
+    // each make the note type pending as a whole; what the next normal sync
+    // sends of it carries every edit, and `scm` stays (no full sync).
     let h = Harness::open();
     let id = add(&h, pair("Pair")).unwrap().id;
-    synced(&h, id);
-    let mut draft = read(&h, id);
-    draft.fields[0].config.sticky = true;
-    save(&h, draft).unwrap();
-    let stored = read(&h, id);
-    assert!(stored.fields[0].config.sticky);
-    assert_eq!(stored.usn, Usn(-1));
+    all_synced(&h);
+    let schema = scm(&h);
+    assert!(outgoing_notetypes(&h).is_empty());
 
-    // A field rename is U34's op; the aggregate rule is the record's. A
-    // write of the renamed aggregate through the scope stamps the head too.
-    synced(&h, id);
+    let mut draft = edit(&h, id);
+    draft.fields[0].config.sticky = true;
+    draft.fields[1].config.description = "the answer".to_owned();
+    save(&h, draft).unwrap();
+    let sent = outgoing_notetypes(&h);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["id"], id.0);
+    assert_eq!(sent[0]["usn"], -1);
+    assert_eq!(sent[0]["mod"], h.clock.now_ms() / 1000);
+    assert_eq!(sent[0]["flds"][0]["sticky"], true);
+    assert_eq!(sent[0]["flds"][1]["description"], "the answer");
+    assert_eq!(scm(&h), schema);
+
+    // The sync sends it and marks it sent. A field rename is U34's op; the
+    // aggregate rule is the record's, so a write of the renamed aggregate
+    // through the scope stamps the notetypes row too.
+    all_synced(&h);
+    let schema = scm(&h);
+    assert!(outgoing_notetypes(&h).is_empty());
     let mut renamed = read(&h, id);
     renamed.fields[1].name = "Answer".to_owned();
     h.collection
@@ -217,7 +281,59 @@ fn a_field_option_or_a_field_rename_marks_the_notetype_for_upload() {
             Ok(())
         })
         .unwrap();
-    assert_eq!(read(&h, id).usn, Usn(-1));
+    let sent = outgoing_notetypes(&h);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0]["id"], id.0);
+    assert_eq!(sent[0]["usn"], -1);
+    let fields: Vec<(&str, bool, &str)> = sent[0]["flds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| {
+            (
+                f["name"].as_str().unwrap(),
+                f["sticky"].as_bool().unwrap(),
+                f["description"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(fields, [("Front", true, ""), ("Answer", false, "the answer")]);
+    assert_eq!(scm(&h), schema);
+}
+
+#[test]
+fn a_draft_made_before_another_save_is_stale_and_writes_nothing() {
+    // engine/op-model O7: two drafts of one note type are open; the first
+    // saves a field option, then the older second one saves the styling. It
+    // must not write back the field option the first one changed, even in
+    // the same second, where the notetypes row's stamps are equal.
+    let h = Harness::open();
+    let id = add(&h, pair("Pair")).unwrap().id;
+    let mut first = edit(&h, id);
+    let mut second = edit(&h, id);
+    first.fields[0].config.sticky = true;
+    save(&h, first).unwrap();
+    let saved = rows(&h, id);
+    let top = h.collection.peek_undo(UndoScope::Global).unwrap();
+    second.config.css = ".card { color: teal; }".to_owned();
+    let stale = save(&h, second);
+    assert!(
+        matches!(&stale, Err(EngineError::Stale { table: Table::Notetypes, key }) if *key == id.0.to_string()),
+        "{stale:?}"
+    );
+    assert_eq!(rows(&h, id), saved);
+    assert!(read(&h, id).fields[0].config.sticky);
+    assert_eq!(h.collection.peek_undo(UndoScope::Global).unwrap(), top);
+
+    // A draft of the note type as it is now saves. A sync that only marks
+    // the row as sent (its stamps) leaves such a draft current.
+    let mut third = edit(&h, id);
+    synced(&h, id);
+    third.config.css = ".card { color: teal; }".to_owned();
+    save(&h, third).unwrap();
+    let stored = read(&h, id);
+    assert!(stored.fields[0].config.sticky);
+    assert_eq!(stored.config.css, ".card { color: teal; }");
 }
 
 #[test]
@@ -229,7 +345,7 @@ fn template_rows_keep_their_stamps_wherever_they_move() {
     stamped.templates[1].mtime = EpochSecs(123);
     stamped.templates[1].usn = Usn(7);
     put_as_given(&h, stamped);
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     draft.templates[1].name = "Backwards".to_owned();
     save(&h, draft).unwrap();
     let stored = read(&h, id);
@@ -250,7 +366,7 @@ fn template_names_swapped_in_one_save_pass_the_unique_index() {
     // of one name halfway through the save.
     let h = Harness::open();
     let id = add(&h, pair("Pair")).unwrap().id;
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     draft.templates[0].name = "Reverse".to_owned();
     draft.templates[1].name = "FORWARD".to_owned();
     save(&h, draft).unwrap();
@@ -269,7 +385,7 @@ fn undo_restores_every_row_of_the_aggregate_and_redo_the_saved_ones() {
     synced(&h, id);
     h.clock.step_ms(60_000);
     let before = rows(&h, id);
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     draft.config.css = "x".to_owned();
     draft.templates[0].name = "Ahead".to_owned();
     draft.fields[1].config.description = "the answer".to_owned();
@@ -317,7 +433,7 @@ fn a_note_type_with_gaps_in_its_ords_is_saved_without_them() {
         (ords("fields"), ords("templates")),
         ("0,4".to_owned(), "0,3".to_owned())
     );
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     assert_eq!(draft.fields[1].name, "Back");
     draft.config.css = "y".to_owned();
     save(&h, draft).unwrap();
@@ -479,14 +595,14 @@ fn names_are_normalized_as_n4_says() {
     );
     // A case-only rename keeps its spelling: a note type never collides with
     // itself.
-    let mut draft = read(&h, first.id);
+    let mut draft = edit(&h, first.id);
     draft.name = "PAIR".to_owned();
     assert_eq!(save(&h, draft).unwrap().name, "PAIR");
-    let mut draft = read(&h, first.id);
+    let mut draft = edit(&h, first.id);
     draft.name = "Caf\u{e9}".to_owned();
     assert_eq!(save(&h, draft).unwrap().name, "Caf\u{e9}+");
     let alpha = add(&h, pair("Alpha")).unwrap();
-    let mut draft = read(&h, alpha.id);
+    let mut draft = edit(&h, alpha.id);
     draft.name = "ALPHA".to_owned();
     assert_eq!(save(&h, draft).unwrap().name, "ALPHA");
 }
@@ -644,7 +760,7 @@ fn an_unchecked_save_skips_the_template_checks() {
     // succeeds; a rename of it, a checked save, fails.
     let h = Harness::open();
     let id = broken(&h);
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     draft.fields[0].config.rtl = true;
     assert_eq!(
         kind_of(notetypes::save(&h.collection, draft.clone(), SaveOptions::default())),
@@ -652,7 +768,7 @@ fn an_unchecked_save_skips_the_template_checks() {
     );
     notetypes::save(&h.collection, draft, SaveOptions { skip_checks: true }).unwrap();
     assert!(read(&h, id).fields[0].config.rtl);
-    let mut renamed = read(&h, id);
+    let mut renamed = edit(&h, id);
     renamed.name = "Renamed".to_owned();
     assert_eq!(kind_of(save(&h, renamed)), "unknown_field");
     assert_eq!(read(&h, id).name, "Broken");
@@ -664,9 +780,9 @@ fn a_plain_save_refuses_structure_changes() {
     // text and the sort field (notetype-ops.md T5).
     let h = Harness::open();
     let id = add(&h, pair("Pair")).unwrap().id;
-    let stored = read(&h, id);
+    let stored = edit(&h, id);
     let before = rows(&h, id);
-    let invalid = |draft: Notetype| matches!(save(&h, draft), Err(EngineError::InvalidArgument { .. }));
+    let invalid = |draft: Draft| matches!(save(&h, draft), Err(EngineError::InvalidArgument { .. }));
     let mut draft = stored.clone();
     draft.fields.pop();
     assert!(invalid(draft));
@@ -743,7 +859,7 @@ fn unknown_fields_and_latex_values_survive_a_styling_change() {
     notetype.fields[0].config = with_unknown(&notetype.fields[0].config);
     notetype.templates[0].config = with_unknown(&notetype.templates[0].config);
     put_as_given(&h, notetype);
-    let mut draft = read(&h, id);
+    let mut draft = edit(&h, id);
     draft.config.css = "z".to_owned();
     save(&h, draft).unwrap();
     let stored = read(&h, id);
