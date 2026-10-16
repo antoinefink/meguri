@@ -1,0 +1,56 @@
+# The example inputs of specs/search/grammar.md, errors.md and
+# canonical-form.md that no other search scenario holds, so that every
+# example the specs give is pinned by a golden. Grouped by the spec section
+# that cites them.
+id: search/canonical/spec-examples
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # grammar G1: white space inside quotes and raw values
+          - "\"a b\""
+          - "re:a\tb"
+          # grammar G2: items without spaces, words that are not operators
+          - 'a"b"(c)'
+          - '(x)(y)'
+          - 'not'
+          - 'a not b'
+          - 'andy'
+          # grammar G3: term forms
+          - '"abc\'
+          - 'key:""'
+          - 'key:"abc'
+          - 'a\)'
+          - 'a"b"'
+          - '"-term"'
+          # grammar G4, G5
+          - '-a b'
+          - '(a (b)'
+          - 'a ) b'
+          - '(a or)'
+          # grammar G6
+          - ':'
+          - '::'
+          - '":foo"'
+          - 'Has-CD:x'
+          # grammar G7
+          - '\\x'
+          - '\\\x'
+          - 're:a\ b'
+          - 're:a\'
+          # grammar G8.1, G9
+          - 'prop:stability>1'
+          - 'prop:IVL>1'
+          - 'flag:1.0'
+          - 'prop:ease>1.5'
+          - 'prop:ease>1_0'
+          - 'prop:ease>1..2'
+          # errors E3
+          - 're:('
+          - 're:['
+          - 'prop:s>inf'
+          - 'prop:cdn:k<nan'
+          # canonical-form F7, F8
+          - '\-foo'
+          - '"prop:cds:abc=foo bar"'
+          - '-OR'

@@ -3,7 +3,7 @@
 Spec: search/errors
 Requirements: R1075, R1778, R1085
 Anki: 26.09.3
-Scenarios: conformance/scenarios/search/errors/
+Scenarios: conformance/scenarios/search/errors/, conformance/scenarios/search/canonical/spec-examples.yaml
 
 The closed list of search error kinds, the details each carries, the order in which errors are found, the range each covers and the message Meguri shows. The grammar that raises them is `grammar.md`. The browser (U85) and the AnkiConnect server (U141, R1778) return the same message text.
 

@@ -1,0 +1,25 @@
+# Filter chains (specs/render/filters.md F1-F2, R529, R956, R968): order nearest
+# the key first, empty names, unknown names ending the chain at every position,
+# add-on filter names, case-sensitive built-in names.
+id: render/filters/chains
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Chain Probe, fields: [Front, Reading]}
+          cases:
+            - {front: "{{text:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{text:unknown:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{unknown:text:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{editable:furigana:Reading}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{furigana:editable:Reading}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{edit:Reading}}|{{clickable:Reading}}|{{tts-voices:Reading}}|{{editable:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{Text:Front}}|{{TEXT:Front}}|{{ text:Front}}|{{text :Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{::text:Front}}|{{text::Front}}|{{:::::Front}}|{{text:::Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{kana:furigana:Reading}}|{{furigana:kana:Reading}}|{{kanji:kana:Reading}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{text:hint:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{hint:text:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{text:tts en_US:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{nc:Front}}|{{ci:Front}}|{{tts:Front}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{furigana:edit:kana:Reading}}|{{edit:kana:furigana:Reading}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}
+            - {front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{text:Reading}}|{{kanji:text:Reading}}", fields: ["<b>a&amp;b</b>", "日本[にほん]"]}

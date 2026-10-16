@@ -1,0 +1,97 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "template": [
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint6b215452407cf553').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint6b215452407cf553\" class=hint style=\"display: none\">hello</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint00d4c424ba9965a0').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint00d4c424ba9965a0\" class=hint style=\"display: none\">日本語のヒント</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint679eae7dfae0398a').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint679eae7dfae0398a\" class=hint style=\"display: none\">😀 emoji 👩‍👩‍👧</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hinte74f4270f0bd5130').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hinte74f4270f0bd5130\" class=hint style=\"display: none\"><b>bold</b> &amp; <i>more</i></div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint4dca6249d20fab82').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint4dca6249d20fab82\" class=hint style=\"display: none\">line one\nline two</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k[]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k[ ]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k[　\t\n]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k[\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint45f911799c6f328b').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint45f911799c6f328b\" class=hint style=\"display: none\">&nbsp;</div>\n]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k[\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint84bbe1bf1d2d3b15').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint84bbe1bf1d2d3b15\" class=hint style=\"display: none\"><br></div>\n]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintd65e8067531e1042').style.display='block';\nreturn false;\" draggable=false>\nMy Hint</a>\n<div id=\"hintd65e8067531e1042\" class=hint style=\"display: none\">hello</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint5ed865566c7b8863').style.display='block';\nreturn false;\" draggable=false>\nヒント</a>\n<div id=\"hint5ed865566c7b8863\" class=hint style=\"display: none\">hello</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint6b215452407cf553').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint6b215452407cf553\" class=hint style=\"display: none\">hello</div>\n"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "k\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintc60baf0a9447ddae').style.display='block';\nreturn false;\" draggable=false>\nType</a>\n<div id=\"hintc60baf0a9447ddae\" class=hint style=\"display: none\">Hint Probe</div>\n"
+          },
+          {
+            "answer": "k<hr>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint6b215452407cf553').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint6b215452407cf553\" class=hint style=\"display: none\">hello</div>\n\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint719c738a1b2e753a').style.display='block';\nreturn false;\" draggable=false>\nKey</a>\n<div id=\"hint719c738a1b2e753a\" class=hint style=\"display: none\">k</div>\n",
+            "empty": false,
+            "question": "k"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "aeac0ec295e2e34082a4d084d08e6a5f40ef7e0ebb45ac49e5e1139b1a16affc",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/filters/hint",
+  "scenario_sha256": "5fa7c113a284877d2bbd3a44a4e030b8d8e9b81eaf58335af1bba844a572326a",
+  "tz": "UTC"
+}

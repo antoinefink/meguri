@@ -383,6 +383,35 @@
                 }
               }
             },
+            "fsrs_next": {
+              "description": "float-determinism.md F5.1: FSRS next states of a stored review card per input; never touches the scenario's collection. At most one per observe step, params must name a member of param_sets, and f32 members are read per model/json-numbers N2 (checked when the scenario loads).",
+              "type": "object",
+              "required": ["param_sets", "inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "param_sets": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$" },
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": { "type": "number" },
+                    "anyOf": [
+                      { "maxItems": 0 },
+                      { "minItems": 17, "maxItems": 17 },
+                      { "minItems": 19, "maxItems": 19 },
+                      { "minItems": 21, "maxItems": 21 }
+                    ]
+                  }
+                },
+                "inputs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 1000,
+                  "items": { "$ref": "#/$defs/fsrs_next_input" }
+                }
+              }
+            },
             "text": {
               "description": "observations.md O4 text: pure text functions over a list of inputs; pairs for unicase_compare, which shares a request with no other function.",
               "type": "object",
@@ -414,15 +443,88 @@
               "if": { "properties": { "fns": { "contains": { "const": "unicase_compare" } } } },
               "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "array" } } } },
               "else": { "properties": { "inputs": { "items": { "type": "string" } } } }
-            }
+            },
+            "template": { "$ref": "#/$defs/template_request" }
           },
           "additionalProperties": false
         }
       ]
     },
+    "fsrs_next_input": {
+      "description": "float-determinism.md F2.1: one probe input, the members of a line of conformance/corpora/fp-probe/inputs.jsonl.",
+      "type": "object",
+      "required": ["id", "card_id", "reps", "s", "d", "elapsed_days", "scheduled_days", "dr", "params", "max_ivl"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/uint" },
+        "card_id": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "reps": { "type": "integer", "minimum": 0, "maximum": 4294967294 },
+        "s": { "type": "number", "minimum": 0.001, "maximum": 36500 },
+        "d": { "type": "number", "minimum": 1, "maximum": 10 },
+        "elapsed_days": { "type": "integer", "minimum": 0, "maximum": 20000 },
+        "scheduled_days": { "type": "integer", "minimum": 1, "maximum": 36500 },
+        "dr": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+        "params": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "max_ivl": { "type": "integer", "minimum": 1, "maximum": 36500 }
+      }
+    },
     "draft_args": {
       "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
       "type": "object"
+    },
+    "template_request": {
+      "description": "render-ops.md Q1.1: the template engine on given template texts. notetype is required when a case has no card and not allowed otherwise. Field name rules (Q1.1), ord and field-mapping checks are made when the scenario loads.",
+      "type": "object",
+      "required": ["cases"],
+      "additionalProperties": false,
+      "properties": {
+        "notetype": {
+          "type": "object",
+          "required": ["name", "fields"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "kind": { "enum": ["standard", "cloze"] },
+            "fields": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true }
+          }
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "description": "Q1.2 new-note case.",
+                "type": "object",
+                "required": ["front"],
+                "additionalProperties": false,
+                "properties": {
+                  "front": { "type": "string" },
+                  "back": { "type": "string" },
+                  "ord": { "type": "integer", "minimum": 0, "maximum": 499 },
+                  "name": { "type": "string", "minLength": 1 },
+                  "fields": { "$ref": "#/$defs/fields" },
+                  "tags": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              {
+                "description": "Q1.3 card case.",
+                "type": "object",
+                "required": ["card", "front"],
+                "additionalProperties": false,
+                "properties": {
+                  "card": { "$ref": "#/$defs/card_ref" },
+                  "front": { "type": "string" },
+                  "back": { "type": "string" }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "if": { "properties": { "cases": { "contains": { "not": { "required": ["card"] } } } } },
+      "then": { "required": ["notetype"] },
+      "else": { "not": { "required": ["notetype"] } }
     },
     "names": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
     "package_name": {
