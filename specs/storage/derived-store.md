@@ -120,7 +120,8 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
 
 ## D10. Invalidation
 
-- `CollectionReplaced` (`engine/lifecycle` L8; one-way sync, `.colpkg` import, restore): before the replacement returns, the derived writer stops any refresh, empties every component's tables, stamps the new collection's mark with `clean` 0 and binds the new generation. Every component then rebuilds (R1489).
+- `CollectionReplaced` (`engine/lifecycle` L8; one-way sync, `.colpkg` import, restore, and a swap that failed after it changed the file): before the replacement returns, the derived writer stops any refresh, empties every component's tables, stamps the new collection's mark with `clean` 0 and binds the new generation. Every component then rebuilds (R1489).
+- A swap that failed before changing the file moves no generation: the store stays bound and keeps its content, and the readers reopened after the swap attach it again (D9).
 - Check Database (U128) and an external change (U32, R1453) invalidate the store: every component is marked `Stale` and rebuilt through staging, so readers keep the old content until each swap.
 - A crash between a collection commit and its derived update is found at the next bind by D5.2 and repaired by catch-up or rebuild.
 
@@ -146,6 +147,7 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
 | File deleted while closed → rebuilt with the same content | `tests/derived_lag.rs` |
 | Process killed between a collection commit and its derived update → catch-up; content equals a full rebuild | `tests/derived_lag.rs` |
 | `CollectionReplaced` → rebuilt for the new generation; no reader of the new generation sees old rows | `tests/derived_lag.rs` |
+| A swap that failed after changing the file → rebuilt for the new generation; one that failed before leaves the store bound, its content kept and readers attached again | `tests/derived_lag.rs` |
 | File truncated mid-page → recreated at bind and rebuilt | `tests/derived_lag.rs` |
 | Rebuild over 150,000 cards while answers commit: answer write phase p95 under 5 ms; `Building` progress and `Ready` on the change stream | `tests/derived_lag.rs` |
 | No derived activity changes the collection's `sqlite_master` | `tests/derived_lag.rs` |

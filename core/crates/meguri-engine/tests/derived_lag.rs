@@ -1137,6 +1137,105 @@ fn a_replaced_collection_is_rebuilt_and_no_reader_of_the_new_generation_sees_old
 }
 
 #[test]
+fn a_swap_that_fails_after_replacing_the_file_still_rebuilds_the_store_for_the_new_generation() {
+    let (dir, path) = copy_fixture("schema-18.anki2");
+    let replacement = replacement_with_cards(dir.path());
+    let opened = open(&path);
+    opened.settle();
+    add_cards(&opened.collection, &[1_000, 1_001]);
+    opened.host.flush().unwrap();
+    let old = opened.collection.generation();
+    let builds = opened.builds();
+
+    let slot = opened.engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(false).unwrap();
+    // The file is in place, then a later step of the swap fails
+    // (`engine/lifecycle` L8 step 4): the collection was still replaced.
+    let source = replacement.clone();
+    let error = exclusive
+        .replace(move |live| {
+            fs::rename(&source, live).unwrap();
+            Err(EngineError::Internal {
+                message: "syncing the directory failed".to_owned(),
+            })
+        })
+        .unwrap_err();
+    assert!(matches!(error, EngineError::Internal { .. }), "{error:?}");
+    let new = exclusive.collection().generation();
+    assert_eq!(new, Generation(old.0 + 1));
+    assert!(!opened.host.is_ready(MIRROR, new));
+    assert_eq!(
+        mirrored(exclusive.collection()),
+        Vec::new(),
+        "the old generation's rows are gone before the replace returns"
+    );
+    drop(exclusive);
+    drop(slot);
+    opened.settle();
+
+    let current = opened.engine.collection().unwrap();
+    assert_eq!(current.generation(), new);
+    assert!(opened.host.is_ready(MIRROR, new));
+    assert_eq!(opened.builds(), builds + 1);
+    let rows = mirrored(&current);
+    assert_eq!(rows, expected(&current));
+    let dues: Vec<i64> = rows.iter().map(|r| r.4).collect();
+    assert!(
+        [2_000, 2_001, 2_002].iter().all(|due| dues.contains(due))
+            && !dues.iter().any(|due| (1_000..2_000).contains(due)),
+        "{dues:?}"
+    );
+    let after: Vec<Readiness> = opened
+        .readiness_events()
+        .into_iter()
+        .filter(|e| e.generation == new)
+        .map(|e| e.readiness)
+        .collect();
+    assert_eq!(after.first(), Some(&Readiness::Stale), "{after:?}");
+    assert_eq!(after.last(), Some(&Readiness::Ready), "{after:?}");
+    drop(current);
+    opened.close();
+}
+
+#[test]
+fn a_swap_that_fails_before_touching_the_file_keeps_the_store_bound_and_its_content() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open(&path);
+    opened.settle();
+    add_cards(&opened.collection, &[1_000, 1_001]);
+    opened.host.flush().unwrap();
+    let before = mirrored(&opened.collection);
+    let generation = opened.collection.generation();
+    let builds = opened.builds();
+    let _ = opened.readiness_events();
+
+    let slot = opened.engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(false).unwrap();
+    let error = exclusive
+        .replace(|_| {
+            Err(EngineError::Internal {
+                message: "the staging copy failed its integrity check".to_owned(),
+            })
+        })
+        .unwrap_err();
+    assert!(matches!(error, EngineError::Internal { .. }), "{error:?}");
+    assert_eq!(exclusive.collection().generation(), generation);
+    drop(exclusive);
+    drop(slot);
+    opened.settle();
+
+    // The readers the swap closed attach the store again when they reopen.
+    assert!(opened.host.is_ready(MIRROR, generation));
+    assert_eq!(mirrored(&opened.collection), before);
+    assert_eq!(opened.builds(), builds, "an unchanged file needs no rebuild");
+    assert_eq!(opened.readiness_events(), Vec::new());
+    add_cards(&opened.collection, &[1_002]);
+    opened.host.flush().unwrap();
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    opened.close();
+}
+
+#[test]
 fn a_running_rebuild_yields_to_an_exclusive_phase_and_starts_again_after_it() {
     let (_dir, path) = copy_fixture("schema-18.anki2");
     // 50 batches of 30 ms: the rest of the first build takes well over the
