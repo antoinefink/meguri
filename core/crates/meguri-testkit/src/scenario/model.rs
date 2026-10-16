@@ -130,6 +130,18 @@ fn mapping<'de, D: Deserializer<'de>>(deserializer: D, what: &str) -> Result<Map
     }
 }
 
+/// An op argument read through its mapping, for a variant's or a member's
+/// `deserialize_with`: serde's derived struct alone would also read the list
+/// of its values, which the schema forbids.
+fn op_mapping<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: de::DeserializeOwned,
+{
+    let map = mapping(deserializer, "an op argument")?;
+    serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)
+}
+
 /// The argument `{}` of `reopen`, `converge` and `check_db`: a mapping with
 /// no keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -922,17 +934,6 @@ pub struct DeleteNotesArgs {
 pub struct SetConfigArgs {
     pub key: String,
     pub value: Value,
-}
-
-/// An op's mapping read into its argument struct: serde's derive alone would
-/// also take the list of the struct's values, which the schema forbids.
-fn op_mapping<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: de::DeserializeOwned,
-{
-    let map = mapping(deserializer, "the op")?;
-    serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)
 }
 
 /// `add_deck: {name}` (deck-ops.md K2) and `add_preset: {name}` (K8): the
