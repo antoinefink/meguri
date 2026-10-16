@@ -52,6 +52,21 @@ pub enum EventKind {
         id: JobId,
         outcome: JobOutcome,
     },
+    /// The scheduler day changed, either way (`sched/day-clock` D8):
+    /// published once the rollover op committed.
+    RolledOver {
+        old_day: u32,
+        new_day: u32,
+    },
+    /// The clock's IANA zone id differs from the one the day clock last saw,
+    /// whether or not the day or the offset changed (D8).
+    TimeZoneChanged {
+        zone_id: String,
+    },
+    /// The next day boundary the day clock reports moved (D8): epoch seconds.
+    NextDayAtChanged {
+        next_day_at: i64,
+    },
     Extension(Arc<dyn ExtensionEvent>),
 }
 

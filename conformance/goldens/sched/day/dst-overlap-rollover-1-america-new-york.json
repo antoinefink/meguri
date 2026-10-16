@@ -1,0 +1,99 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-10-28T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1919480400,
+          "now": 1919426400,
+          "utc_offset_secs": -14400
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 5,
+          "next_day_at": 1919912400,
+          "now": 1919865600,
+          "utc_offset_secs": -14400
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 5,
+          "next_day_at": 1919912400,
+          "now": 1919912399,
+          "utc_offset_secs": -14400
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1919998800,
+          "now": 1919912400,
+          "utc_offset_secs": -14400
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1919998800,
+          "now": 1919912401,
+          "utc_offset_secs": -14400
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1920002400,
+          "now": 1920002399,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 7,
+          "next_day_at": 1920088800,
+          "now": 1920002400,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 7,
+          "next_day_at": 1920088800,
+          "now": 1920002401,
+          "utc_offset_secs": -18000
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["creationOffset", 0, 0, "240"],
+            ["lastUnburied", -1, 1920002400, "7"],
+            ["localOffset", -1, 1920002399, "300"],
+            ["rollover", -1, 1919426400, "1"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "42673b66d36a95ebe3e7e6b7a586aa876d2478a1710b602d8bdaad7b4db37e8f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/day/dst-overlap-rollover-1-america-new-york",
+  "scenario_sha256": "a922a1b1d071ba3fd271256ee4b1a3116eacd3e25b70250d7cd028dd510d6951",
+  "tz": "America/New_York"
+}
