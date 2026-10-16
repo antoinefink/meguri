@@ -10,10 +10,13 @@ import notify
 ///
 /// - A subclass names the intervals it measures in `intervalNames`; each
 ///   must be in the registry (`IntervalNames`), or the test fails at setup.
-/// - It runs only in the Profile configuration (Release optimization plus
-///   the test hooks, app/AGENTS.md) and without a debugger, else it fails at
-///   setup; the Performance plan and `tools/mg perf-ui` fix the rest of
-///   R1866 (no coverage, sanitizers, screenshots or parallel testing).
+///   It names the collection it measures on in `fixture` (the sizes and
+///   named fixtures of tools/perf/budgets.yaml), so U241's gate applies
+///   R1803's size rules to its results.
+/// - It fails at setup unless `PerfPreconditions` hold (R1866): a Profile
+///   build (Release optimization plus the test hooks, app/AGENTS.md), no
+///   debugger, no coverage or sanitizers, no parallel testing; the
+///   Performance plan and `tools/mg perf-ui` fix the same options.
 /// - `measure(app:prepare:action:)` asks the app for a warmed web content
 ///   process and waits for it (R1866, `TestHooks.WebContentWarmup`), runs
 ///   the action once unmeasured (warm-up: the app's caches and the warmed
@@ -26,13 +29,18 @@ import notify
 ///   `declarationPrefix` + names: `tools/mg perf-ui` fails a test whose
 ///   declared interval has no measurements, and a performance suite with no
 ///   metrics (tools/scripts/perf-compare, which writes the perf result for
-///   U241's gate).
+///   U241's gate). Its fixture goes into an activity named
+///   `fixturePrefix` + fixture, which perf-compare puts on its rows.
 ///
 /// A new subclass joins the UI plan's skipped tests (app/TestPlans).
 @MainActor
 class PerfTestCase: XCTestCase {
     /// The registered intervals the test measures, by name.
     nonisolated class var intervalNames: [String] { [] }
+
+    /// The collection the test measures on (150k, 500k, review-corpus, ...),
+    /// as tools/perf/budgets.yaml names it; nil when it loads none.
+    nonisolated class var fixture: String? { nil }
 
     /// Measured iterations, after the warm-up run.
     nonisolated class var iterations: Int { 5 }
@@ -44,14 +52,17 @@ class PerfTestCase: XCTestCase {
     /// followed by their names separated by spaces (perf-compare reads it).
     nonisolated static let declarationPrefix = "meguri.perf.intervals:"
 
+    /// The title of the activity that declares a test's fixture, followed by
+    /// it (perf-compare reads it).
+    nonisolated static let fixturePrefix = "meguri.perf.fixture:"
+
     /// The intervals of `intervalNames` (setup has checked they resolve).
     var intervals: [IntervalName] { (try? Self.registered(Self.intervalNames)) ?? [] }
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         _ = try Self.registered(Self.intervalNames)
-        try Self.requireProfile(try BuildUnderTest.current().configuration)
-        try Self.requireNoDebugger()
+        try PerfPreconditions.check(try BuildUnderTest.current())
     }
 
     // MARK: Preconditions
@@ -69,24 +80,6 @@ class PerfTestCase: XCTestCase {
                     description: "\(name) is not a registered interval: performance tests measure only IntervalNames (R1861)")
             }
             return interval
-        }
-    }
-
-    nonisolated static func requireProfile(_ configuration: BuildUnderTest.Configuration) throws {
-        guard configuration == .profile else {
-            throw PreconditionFailure(
-                description: "performance tests require Profile (R1866); this bundle was built in \(configuration.rawValue)")
-        }
-    }
-
-    /// The test runner is not being debugged (R1866).
-    nonisolated static func requireNoDebugger() throws {
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0 else { return }
-        if info.kp_proc.p_flag & P_TRACED != 0 {
-            throw PreconditionFailure(description: "performance tests run without a debugger (R1866)")
         }
     }
 
@@ -121,6 +114,7 @@ class PerfTestCase: XCTestCase {
         action(app)
         try warmWebContent()
         XCTContext.runActivity(named: Self.declaration(intervals)) { _ in }
+        declareFixture()
         let options = XCTMeasureOptions()
         options.invocationOptions = [.manuallyStart, .manuallyStop]
         options.iterationCount = Self.iterations
@@ -137,24 +131,25 @@ class PerfTestCase: XCTestCase {
         ([declarationPrefix] + intervals.map(\.name)).joined(separator: " ")
     }
 
-    /// Asks the running app for a warmed web content process and waits until
-    /// it reports one ready (R1866): the notification
-    /// `<bundle id>.testhooks.warmWebContent`, answered by
-    /// `<bundle id>.testhooks.webContentReady`. Throws when no answer comes.
-    func warmWebContent() throws {
-        let id = try BuildUnderTest.current().expectedBundleIdentifier
-        let ready = "\(id).testhooks.webContentReady"
-        #if os(macOS)
-        let answer = XCTNSNotificationExpectation(
-            name: Notification.Name(ready), object: nil, notificationCenter: DistributedNotificationCenter.default())
-        #else
-        let answer = XCTDarwinNotificationExpectation(notificationName: ready)
-        #endif
-        post("\(id).testhooks.warmWebContent")
-        guard XCTWaiter().wait(for: [answer], timeout: Self.webContentTimeout) == .completed else {
-            throw PreconditionFailure(
-                description: "the app reported no warmed web content process within \(Self.webContentTimeout) s (R1866)")
+    /// The activity title declaring `fixture`.
+    nonisolated static func fixtureDeclaration(_ fixture: String) -> String {
+        "\(fixturePrefix) \(fixture)"
+    }
+
+    /// Records the fixture as an activity, for perf-compare.
+    func declareFixture() {
+        if let fixture = Self.fixture {
+            XCTContext.runActivity(named: Self.fixtureDeclaration(fixture)) { _ in }
         }
+    }
+
+    /// Asks the running app for a warmed web content process and waits until
+    /// it reports one ready (R1866, `PerfPreconditions`). Throws when no
+    /// answer comes.
+    func warmWebContent() throws {
+        try PerfPreconditions.requireWarmWebContent(
+            bundleIdentifier: try BuildUnderTest.current().expectedBundleIdentifier,
+            timeout: Self.webContentTimeout, post: post)
     }
 
     /// Measures launching the app with `options` (launch time, R1863), after
@@ -164,6 +159,8 @@ class PerfTestCase: XCTestCase {
         app.launchArguments = options.arguments
         app.launch()
         app.terminate()
+        // A launch measures no interval: only the fixture is declared.
+        declareFixture()
         let measure = XCTMeasureOptions()
         measure.iterationCount = Self.iterations
         self.measure(metrics: [XCTApplicationLaunchMetric(waitUntilResponsive: true)], options: measure) {
