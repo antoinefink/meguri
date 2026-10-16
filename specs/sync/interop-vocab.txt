@@ -24,3 +24,22 @@ cv
 newEndpoint
 # Build switch and default endpoint
 ankiweb
+# Message bodies (wire-format.md): meta record, start, applyChanges, chunks,
+# sanity check, media requests and the media zip index (U106)
+minUsn
+lnewer
+hostNum
+media_usn
+cont
+msg
+crt
+conf
+models
+revlog
+lastIvl
+sfld
+csum
+lastUsn
+sk
+_meta
+_pad

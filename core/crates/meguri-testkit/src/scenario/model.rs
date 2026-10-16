@@ -199,6 +199,9 @@ pub enum SyncKind {
     Normal,
     FullUpload,
     FullDownload,
+    /// The sync status (S4.1; `specs/sync/meta-status.md` M6): results
+    /// `no_changes`, `normal_sync` or `full_sync`; it syncs nothing.
+    Status,
 }
 
 impl SyncKind {
@@ -208,6 +211,7 @@ impl SyncKind {
             SyncKind::Normal => "normal",
             SyncKind::FullUpload => "full_upload",
             SyncKind::FullDownload => "full_download",
+            SyncKind::Status => "status",
         }
     }
 }

@@ -827,12 +827,12 @@
           "$ref": "#/$defs/actor_name"
         },
         "sync": {
-          "description": "sync-ops.md S4; credentials only with kind login (S4.5).",
+          "description": "sync-ops.md S4; credentials only with kind login (S4.5); status is the sync status of specs/sync/meta-status.md M6.",
           "type": "object",
           "required": ["kind"],
           "additionalProperties": false,
           "properties": {
-            "kind": { "enum": ["login", "normal", "full_upload", "full_download"] },
+            "kind": { "enum": ["login", "normal", "status", "full_upload", "full_download"] },
             "credentials": { "enum": ["account", "wrong_password"] }
           },
           "if": { "required": ["credentials"] },

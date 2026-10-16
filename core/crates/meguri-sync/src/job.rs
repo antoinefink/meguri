@@ -15,7 +15,7 @@ use meguri_engine::{CancelToken, ProgressSink};
 use meguri_model::rng::RandomSource;
 
 use crate::endpoint::{self, Endpoint, EndpointRule, ServerKind};
-use crate::error::{InvalidInput, NetworkCause, NetworkError, RedirectError, RedirectRefusal, SyncError};
+use crate::error::{InvalidInput, JobError, NetworkCause, NetworkError, RedirectError, RedirectRefusal, SyncError};
 use crate::identity::client_identity;
 use crate::transport::framing::{self, CompressedBody, Decompressor, Source};
 use crate::transport::http::HttpTransport;
@@ -217,6 +217,17 @@ impl Job {
 
     pub fn kind(&self) -> ServerKind {
         self.kind
+    }
+
+    /// The host key the job sends as `k` (`None` for a login).
+    pub(crate) fn host_key(&self) -> Option<&HostKey> {
+        self.host_key.as_ref()
+    }
+
+    /// A transport failure of this job's `method` as the kind the user sees
+    /// (errors.md E4, E5): `tls` carries whether the server is self-hosted.
+    pub fn error_for(&self, method: Method, error: SyncError) -> JobError {
+        JobError::from_transport(error, Some(method), self.kind)
     }
 
     /// The job's session key (T4): 8 characters of `0-9 A-Z a-z`.
