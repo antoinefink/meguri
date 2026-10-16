@@ -66,9 +66,24 @@ mg_session_new_id() {
 # record took it along), the record is stored. On failure sets
 # MG_SESSION_FAILURE (failure id) and MG_SESSION_MESSAGE and returns 1.
 mg_session_store() {
-  local dir="$1" record="$2" file="$1/$MG_SESSIONS_FILE" line lock waited=0 tries=0
+  local id role name
+  id="$(jq -r .session <<<"$2")"
+  role="$(jq -r .role <<<"$2")"
+  name="$(jq -r '.name // ""' <<<"$2")"
+  mg_ledger_store "$1" "$MG_SESSIONS_FILE" "$2" "Record session $id ($role${name:+, $name})
+
+Role: infra
+Session: $id"
+}
+
+# mg_ledger_store <checkout> <ledger path> <record JSON> <commit message>:
+# mg_session_store for any append-only ledger under docs/process/provenance/
+# (sessions, escalations). One lock for all of them: they commit in the same
+# checkouts. Same failure contract as mg_session_store.
+mg_ledger_store() {
+  local dir="$1" rel="$2" record="$3" message="$4" file="$1/$2" line lock waited=0 tries=0
   MG_SESSION_FAILURE=session-ledger
-  MG_SESSION_MESSAGE="could not append the record to $MG_SESSIONS_FILE; see log.txt"
+  MG_SESSION_MESSAGE="could not append the record to $rel; see log.txt"
   line="$(jq -c . <<<"$record")" && [ -n "$line" ] || return 1
   lock="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/meguri-session.lock" || return 1
   trap 'mg__session_unlock; exit 143' TERM
@@ -78,7 +93,7 @@ mg_session_store() {
     if [ "$waited" -ge $((${MG_SESSION_LOCK_SECONDS:-60} * 10)) ]; then
       trap - TERM HUP EXIT
       MG_SESSION_FAILURE=session-lock
-      MG_SESSION_MESSAGE="$lock has been held for ${MG_SESSION_LOCK_SECONDS:-60} s; if no tools/mg session record or worktree new is running, remove that directory and run again"
+      MG_SESSION_MESSAGE="$lock has been held for ${MG_SESSION_LOCK_SECONDS:-60} s; if no tools/mg session record, worktree new or escalation is running, remove that directory and run again"
       return 1
     fi
     sleep 0.1
@@ -89,12 +104,12 @@ mg_session_store() {
     mg__session_unlock
     return 1
   fi
-  until mg__session_commit "$dir" "$record" || mg__session_in_head "$dir" "$line"; do
+  until mg__ledger_commit "$dir" "$rel" "$message" || mg__ledger_in_head "$dir" "$rel" "$line"; do
     tries=$((tries + 1))
     if [ "$tries" -ge 3 ]; then
       mg__session_unlock
       MG_SESSION_FAILURE=session-commit
-      MG_SESSION_MESSAGE="appended the record to $MG_SESSIONS_FILE but could not commit it (see log.txt)"
+      MG_SESSION_MESSAGE="appended the record to $rel but could not commit it (see log.txt)"
       return 1
     fi
     sleep 1
@@ -108,22 +123,13 @@ mg__session_unlock() {
   trap - TERM HUP EXIT
 }
 
-mg__session_commit() {
-  local id role name
-  id="$(jq -r .session <<<"$2")"
-  role="$(jq -r .role <<<"$2")"
-  name="$(jq -r '.name // ""' <<<"$2")"
-  git -C "$1" add -- "$MG_SESSIONS_FILE" >&2 &&
-    git -C "$1" commit -q -F - -- "$MG_SESSIONS_FILE" >&2 <<EOF
-Record session $id ($role${name:+, $name})
-
-Role: infra
-Session: $id
-EOF
+mg__ledger_commit() {
+  git -C "$1" add -- "$2" >&2 &&
+    printf '%s\n' "$3" | git -C "$1" commit -q -F - -- "$2" >&2
 }
 
-mg__session_in_head() {
-  git -C "$1" show "HEAD:$MG_SESSIONS_FILE" 2>/dev/null | grep -Fxq -- "$2"
+mg__ledger_in_head() {
+  git -C "$1" show "HEAD:$2" 2>/dev/null | grep -Fxq -- "$3"
 }
 
 # mg_session_record_json <id> <role> <kind> <name> <base commit> [extra JSON object]

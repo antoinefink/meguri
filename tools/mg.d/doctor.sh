@@ -280,8 +280,8 @@ mg_doctor() {
     "Only if macOS motion capture is wanted: System Settings > Privacy & Security > Screen Recording."
   mg_user_step xcode-external-agents unverified false "Allow external agents to use Xcode tools" \
     "Optional: enable 'Allow external agents to use Xcode tools' in Xcode's settings."
-  mg_user_step nightly-scheduler unverified false "Approve the scheduler entry for nightly jobs" \
-    "When tools/mg nightly (U19) asks for its scheduler entry, approve it."
+  mg_user_step nightly-scheduler unverified false "Approve the scheduler entries for the nightly and weekly runs" \
+    "tools/mg nightly --print-schedule writes them; copy them to ~/Library/LaunchAgents and load them with launchctl."
 
   # Result
   local checks env npass nwarn nfail status

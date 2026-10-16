@@ -739,6 +739,39 @@ mod tests {
   validate "$result"
 }
 
+@test "core-test --canaries runs the canary binaries alone and passes when they pass (the gate's canary stage)" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn unit_breaks() { panic!("unit test ran"); } }'
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  write_file core/crates/fx/tests/other.rs '#[test] fn other_breaks() { panic!("other test ran"); }'
+  write_crate broken 'pub fn f() -> u32 { "not a number" }'
+  mg core-test --canaries
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field -c .summary)" = '{"total":1,"passed":1,"failed":0,"skipped":0}' ]
+  [[ "$(field .message)" == *canar* ]]
+  validate "$result"
+
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_drifted() { panic!("pin drifted"); }'
+  mg core-test --canaries
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = 'fx::canary_pins$pin_drifted' ]
+  validate "$result"
+}
+
+@test "core-test --canaries fails when the workspace has no canary" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn unit() {} }'
+  mg core-test --canaries
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = no-canaries ]
+  mg core-test --canaries -- -E 'all()'
+  [ "$status" -eq 2 ]
+  [ "$(failure_ids)" = usage ]
+}
+
 @test "core-test runs the other tests once the canaries pass, each test once" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   write_workspace
@@ -952,6 +985,28 @@ EOF
   [ "$(field .summary.total)" -eq 1 ]
   grep -q -- '-max_total_time=600 ' "$STUB_LOG"
   ! grep -q ' alpha ' "$STUB_LOG"
+}
+
+@test "core-fuzz --seed passes the seed to every target, logs it and puts it in the repro (R1937)" {
+  fuzz_sandbox
+  mg core-fuzz --seconds 5 --seed 4242
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  [ "$(grep -c '^+nightly-stub fuzz run .* -seed=4242 ' "$STUB_LOG")" -eq 2 ]
+  [ "$(field .details.seed)" = 4242 ]
+  [[ "$(field .message)" == *"seed 4242"* ]]
+  validate "$result"
+
+  export STUB_CRASH=alpha
+  mg core-fuzz --seconds 5 --seed 4242
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-fuzz --seconds 5 --seed 4242 alpha" ]
+
+  for args in "--seed" "--seed x1" "--seed -3" "--seed 99999999999"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg core-fuzz $args
+    [ "$status" -eq 2 ] || { echo "$args"; return 1; }
+    [ "$(field '.failures[0].id')" = usage ]
+  done
 }
 
 @test "core-fuzz fails a target that finds an input, keeping the input, and on a failed run or build" {

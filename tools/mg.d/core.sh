@@ -1,7 +1,7 @@
 # Rust core jobs. Sourced by tools/mg; they run inside the `dev` container.
 
 mg_job core-test docker:dev mg_core_test \
-  "Rust tests: cargo nextest on core/ (no retries), canary_* test binaries first; args after -- go to nextest"
+  "Rust tests: cargo nextest on core/ (no retries), canary_* test binaries first; --canaries runs only those; args after -- go to nextest"
 mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: cargo fmt --check, clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features"
 mg_job core-deny docker:dev mg_core_deny \
@@ -49,15 +49,30 @@ mg__nextest() {
   )
 }
 
-# tools/mg core-test [-- nextest args, e.g. -E 'package(meguri-text)']
+# tools/mg core-test [--canaries] [-- nextest args, e.g. -E 'package(meguri-text)']
+# --canaries runs the canary phase alone (the gate's canary stage, U19) and
+# fails when the workspace has no canary.
 mg_core_test() {
+  local only_canaries=false
+  if [ "${1:-}" = --canaries ]; then
+    only_canaries=true
+    shift
+    if [ "$#" -gt 0 ]; then
+      mg_failure usage "--canaries takes no nextest arguments" "tools/mg core-test --canaries"
+      mg_status error
+      return 0
+    fi
+  fi
   [ "${1:-}" = "--" ] && shift
   mg__core_environment
 
   # Only a bare run may match no tests (no or empty workspace). With nextest
   # arguments, an empty match must fail, or a stale repro command would pass.
   if [ ! -f core/Cargo.toml ]; then
-    if [ "$#" -eq 0 ]; then
+    if [ "$only_canaries" = true ]; then
+      mg_failure no-canaries "core/ has no Cargo workspace, so no canary (tests/canary_*.rs) runs"
+      mg_status fail
+    elif [ "$#" -eq 0 ]; then
       mg_message "core-test: no Cargo workspace in core/ yet; 0 tests"
       mg_status pass
     else
@@ -76,6 +91,12 @@ mg_core_test() {
       if [ -n "$pkg" ]; then canaries+=(-p "$pkg"); fi
     done < <(mg__core_canary_packages)
   fi
+  if [ "$only_canaries" = true ] && [ "${#canaries[@]}" -eq 0 ]; then
+    mg_failure no-canaries "no workspace package has a tests/canary_*.rs test, so the pin canary is missing (core/AGENTS.md)"
+    mg_message "core-test: no canary to run"
+    mg_status fail
+    return 0
+  fi
   if [ "${#canaries[@]}" -gt 0 ]; then
     mg__nextest "$canary" "${canaries[@]}" --no-tests=pass -E "$MG_CORE_CANARIES"
     rc=$?
@@ -83,6 +104,8 @@ mg_core_test() {
     files=("$canary")
     if [ "$rc" -ne 0 ]; then
       stopped=true
+    elif [ "$only_canaries" = true ]; then
+      :
     else
       mg__nextest "$main" --workspace --no-tests=pass -E "not ($MG_CORE_CANARIES)"
       rc=$?
@@ -124,7 +147,10 @@ mg_core_test() {
   elif [ "$rc" -ne 0 ] && [ "$failed" -eq 0 ]; then
     mg_failure "nextest-exit-$rc" "cargo nextest exited with code $rc before reporting a test failure (build or setup error); see log.txt"
   fi
-  if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
+  if [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$only_canaries" = true ]; then
+    mg_message "core-test: canaries only: $passed passed, $skipped skipped"
+    mg_status pass
+  elif [ "$rc" -eq 0 ] && [ "$failed" -eq 0 ]; then
     mg_message "core-test: $passed passed, $skipped skipped"
     mg_status pass
   elif [ "$stopped" = true ] && [ "$failed" -gt 0 ]; then
