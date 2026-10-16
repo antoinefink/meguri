@@ -1,0 +1,58 @@
+# How each kind of chosen state is written (specs/sched/answering.md A3.2,
+# A4, A5), FSRS on, load balancer off, at 11:00 UTC, 17 hours before the next
+# day starts. New cards of a preset with steps 1d and 3d and of one with steps
+# 90s and 20h get learning delays in days (queue 3) and intraday ones (queue 1,
+# with learning fuzz); a learning card graduates; one review card lapses into
+# relearning and another is answered Hard. The review-log rows show lastIvl and
+# type by the state before each answer. The chosen states are the next_states
+# observed before the answers. Needs answer and db_exec
+# (specs/conformance/record-ops.md W1).
+id: sched/answer/state-kinds
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Long, learn_steps: [1d, 3d]}
+    - {name: Hours, learn_steps: [90s, 20h]}
+  decks:
+    - {name: Long, preset: Long}
+    - {name: Hours, preset: Hours}
+    - Inbox
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Single, deck: Long, fields: [long-again, a]}
+    - {notetype: Single, deck: Long, fields: [long-hard, b]}
+    - {notetype: Single, deck: Long, fields: [long-good, c]}
+    - {notetype: Single, deck: Hours, fields: [hours-again, d]}
+    - {notetype: Single, deck: Hours, fields: [hours-hard, e]}
+    - {notetype: Single, deck: Hours, fields: [hours-good, f]}
+    - {notetype: Single, deck: Inbox, fields: [learner, g]}
+    - {notetype: Single, deck: Inbox, fields: [lapse, h]}
+    - {notetype: Single, deck: Inbox, fields: [tough, i]}
+steps:
+  # #c8 and #c9 become review cards: interval 4 days, due today (day 0), with
+  # a memory state and a last review 4 days ago.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 0, factor = 2500, reps = 3, data = '{\"s\":4.5,\"d\":5.0,\"lrt\":1894356000}' WHERE nid IN (SELECT id FROM notes WHERE sfld IN ('lapse', 'tough'))"
+  - advance: 1h
+  - observe: [timing, "next_states(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"]
+  - answer: {card: "#c1", rating: again, time_ms: 1000}
+  - answer: {card: "#c2", rating: hard, time_ms: 1000}
+  - answer: {card: "#c3", rating: good, time_ms: 1000}
+  - answer: {card: "#c4", rating: again, time_ms: 1000}
+  - answer: {card: "#c5", rating: hard, time_ms: 1000}
+  - answer: {card: "#c6", rating: good, time_ms: 1000}
+  - answer: {card: "#c7", rating: good, time_ms: 1000}
+  - answer: {card: "#c8", rating: again, time_ms: 1000}
+  - answer: {card: "#c9", rating: hard, time_ms: 1000}
+  - observe:
+      - "card(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"
+      - "revlog(#c1, #c2, #c3, #c4, #c5, #c6, #c7, #c8, #c9)"
+  # The learning card's last step (10m) is done: Good graduates it.
+  - advance: 10m
+  - observe: [timing, "next_states(#c7)"]
+  - answer: {card: "#c7", rating: good, time_ms: 1000}
+  - observe: ["card(#c7)", "revlog(#c7)"]

@@ -1,0 +1,22 @@
+# R595 (D4, D9): answering a card in a legacy collection (no creationOffset)
+# leaves its timing mode as it is: no creationOffset is written and the day
+# count stays legacy. Needs the answer path (U44) and note setup (U27).
+id: sched/day/legacy-timing-after-answer
+clock: {tz: Europe/Paris, start: "2030-06-01T10:00:00", mode: step}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Front, Back]
+      templates: [{name: Card 1, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Plain, fields: [river, rio]}]
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = 'creationOffset'"}
+  - db_exec: {sql: "UPDATE col SET crt = 1894660200"}
+  - set_clock: "2030-06-02T10:00:00"
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - advance: 1d
+  - observe: [timing]

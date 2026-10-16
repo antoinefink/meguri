@@ -1,0 +1,127 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "update_note"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fmichi", 1894705260, -1, 1894705265000],
+            [1894701600001, "dog\u001fperra", 1894705265, -1, 1894705265000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fmichi", 1894705260, -1, 1894705260000],
+            [1894701600001, "dog\u001fperro", 1894701600, 7, 1894705260000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fgatito", 1894705259, -1, 1894705259000],
+            [1894701600001, "dog\u001fperro", 1894701600, 7, 1894705259000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fgato", 1894701600, 7, 1894701600000],
+            [1894701600001, "dog\u001fperro", 1894701600, 7, 1894701600000]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": "update_note",
+          "undo": null
+        }
+      },
+      {
+        "undo": {
+          "error": "nothing_to_undo"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fgatito", 1894705259, -1, 1894705259000],
+            [1894701600001, "dog\u001fperro", 1894701600, 7, 1894705259000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fmichi", 1894705260, -1, 1894705260000],
+            [1894701600001, "dog\u001fperro", 1894701600, 7, 1894705260000]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": "update_note",
+          "undo": "update_note"
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000, "cat\u001fgato", 1894701600, 7, 1894701600000],
+            [1894701600001, "dog\u001fperro", 1894701600, 7, 1894701600000]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": "update_note",
+          "undo": null
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "e4c1e525d20b4b6615ce28dcba167e14dc7c9f333d0e811ba3adc9c81b7918d6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "undo/edit-note-merge",
+  "scenario_sha256": "81bb1b9b24e8f1bfed223daf7ae8bf143faf3f95a2702afd0f8df83dcfcd1487",
+  "tz": "UTC"
+}

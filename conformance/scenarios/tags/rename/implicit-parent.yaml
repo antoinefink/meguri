@@ -1,0 +1,20 @@
+# Renaming onto a name that only an implicit parent spells (specs/tags/
+# tags.md T3, T7; R892): `foo` → `bar` while the only row near it is
+# `Bar::x`. Meguri gives the new tags the tree's spelling `Bar` and stores
+# and registers `Bar` and `Bar::c`; Anki stores and registers `bar` and
+# `bar::c` (deviation tags-implicit-parent-rename, two entries: the notes,
+# then the registry).
+id: tags/rename/implicit-parent
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [foo, "foo::c"]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["Bar::x"]}
+  - advance: 1h
+  - rename_tag: {from: foo, to: bar}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T03:30:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894676400,
+          "now": 1894674600,
+          "utc_offset_secs": 3600
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894590000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["creationOffset", 0, 0, "-60"],
+            ["localOffset", -1, 1894674600, "-60"],
+            ["rollover", -1, 1894674600, "4"]
+          ]
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894676400,
+          "now": 1894676399,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894762800,
+          "now": 1894676400,
+          "utc_offset_secs": 3600
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894503600,
+          "now": 1894438800,
+          "utc_offset_secs": 3600
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "42673b66d36a95ebe3e7e6b7a586aa876d2478a1710b602d8bdaad7b4db37e8f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/day/creation-before-rollover",
+  "scenario_sha256": "36f3d454b7eecc42139deadb5c341f9ca758748d04cfd5832f97f0b049ae4d59",
+  "tz": "Europe/Paris"
+}

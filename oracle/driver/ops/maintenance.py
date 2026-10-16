@@ -93,16 +93,21 @@ def problem_counts(tr: Any, problems: list[str]) -> dict[str, int]:
     return counts
 
 
-def check_database(col) -> dict[str, int] | None:
+def database_problems(col) -> list[str] | None:
     """Run Check Database as the desktop command runs it (integrity check,
-    optimize, repairs); its K5 counts, or None when the file is corrupt."""
+    optimize, repairs); its messages, or None when the file is corrupt."""
     try:
-        problems = list(col._backend.check_database())
+        return list(col._backend.check_database())
     except anki.errors.DBError as exc:
         if str(exc) == col.tr.database_check_corrupt():
             return None
         raise
-    return problem_counts(col.tr, problems)
+
+
+def check_database(col) -> dict[str, int] | None:
+    """Check Database's K5 counts, or None when the file is corrupt."""
+    problems = database_problems(col)
+    return None if problems is None else problem_counts(col.tr, problems)
 
 
 @op("check_db", rejects=("corrupt",))

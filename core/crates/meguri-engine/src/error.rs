@@ -6,6 +6,7 @@ use std::fmt;
 use meguri_storage::{OpenError, StorageError, Table};
 
 use crate::lifecycle::Generation;
+use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
@@ -28,6 +29,11 @@ pub enum EngineError {
     /// Another long operation holds the slot this one needs (R171).
     Busy {
         running_op: String,
+    },
+    /// No step to undo or redo, or the core refuses the top one
+    /// (`engine/undo` M4, M5): nothing was written.
+    UndoUnavailable {
+        reason: DisabledReason,
     },
     /// The op's or job's cancel token was cancelled before it committed.
     Cancelled,
@@ -104,6 +110,7 @@ impl fmt::Display for EngineError {
             ),
             EngineError::CollectionUnavailable { reason } => write!(f, "collection unavailable: {reason}"),
             EngineError::Busy { running_op } => write!(f, "busy: {running_op} is running"),
+            EngineError::UndoUnavailable { reason } => write!(f, "undo unavailable: {reason}"),
             EngineError::Cancelled => f.write_str("cancelled"),
             EngineError::Open(error) => write!(f, "open: {error}"),
             EngineError::Storage(error) => write!(f, "storage: {error}"),

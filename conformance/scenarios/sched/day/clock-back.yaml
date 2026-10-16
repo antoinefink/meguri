@@ -1,0 +1,17 @@
+# D6: a computed day is kept while its boundary has not passed, also when the
+# clock moves back; a reopen computes it afresh.
+id: sched/day/clock-back
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-20T10:00:00"
+  - observe: [timing]
+  - set_clock: "2030-01-18T10:00:00"
+  - observe: [timing]
+  - set_clock: "2030-01-21T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - set_clock: "2030-01-18T10:00:00"
+  - reopen: {}
+  - observe: [timing]

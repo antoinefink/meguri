@@ -13,7 +13,21 @@ public struct CoreEvent: Sendable, Hashable {
     public let kind: Kind
 
     public enum Kind: Sendable, Hashable {
+        /// An op committed these changes; the event's `seq` is the op's.
+        case changes(ChangeSet)
+        /// The collection file was replaced and `generation` is open now.
+        /// Exactly once per replacement.
+        case collectionReplaced(generation: UInt64)
         case jobFinished(JobID, JobOutcome)
+        /// The scheduler day changed, either way, after the core's rollover
+        /// op committed: queues and counts of the old day are stale.
+        case rolledOver(oldDay: UInt32, newDay: UInt32)
+        /// The device's time zone differs from the one the day clock last
+        /// saw, even when the day did not change.
+        case timeZoneChanged(zoneID: String)
+        /// The next day boundary moved, in epoch seconds: re-arm the day
+        /// clock's timer.
+        case nextDayAtChanged(nextDayAt: Int64)
     }
 
     init(_ event: MeguriCoreBindings.CoreEvent) {
@@ -21,8 +35,18 @@ public struct CoreEvent: Sendable, Hashable {
         generation = event.generation
         causeSeq = event.causeSeq
         switch event.kind {
+        case .changes(let changes):
+            kind = .changes(ChangeSet(changes))
+        case .collectionReplaced(let generation):
+            kind = .collectionReplaced(generation: generation)
         case .jobFinished(let id, let outcome):
             kind = .jobFinished(JobID(rawValue: id), JobOutcome(outcome))
+        case .rolledOver(let oldDay, let newDay):
+            kind = .rolledOver(oldDay: oldDay, newDay: newDay)
+        case .timeZoneChanged(let zoneId):
+            kind = .timeZoneChanged(zoneID: zoneId)
+        case .nextDayAtChanged(let nextDayAt):
+            kind = .nextDayAtChanged(nextDayAt: nextDayAt)
         }
     }
 }
