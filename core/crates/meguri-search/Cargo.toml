@@ -8,8 +8,8 @@ publish.workspace = true
 
 [features]
 # Test-only (KTD18): the AsciiCompat fold mode (search/query-model Q8), for
-# the differential runs against the oracle (U91). Never on by default or in
-# Release.
+# the differential runs against the oracle (U91), and Plan::build_with, which
+# runs plans with stand-in term compilers. Never on by default or in Release.
 test-hooks = []
 
 [dependencies]
@@ -19,6 +19,10 @@ meguri-model.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
-# The plan's own tests (src/plan) run its statements on in-memory card and
-# note tables; collections are only ever read through meguri-storage.
+# Turns test-hooks on for the tests (testkit depends on this crate with it):
+# tests/canonical_roundtrip.rs runs plans through Plan::build_with.
+meguri-testkit.workspace = true
+# The plan's tests (src/plan, tests/canonical_roundtrip.rs) run statements on
+# in-memory card and note tables; collections are only ever read through
+# meguri-storage.
 rusqlite.workspace = true

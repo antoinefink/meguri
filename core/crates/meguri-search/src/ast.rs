@@ -276,35 +276,6 @@ pub enum Term {
     Template(TemplateRef),
 }
 
-/// The term families of Q3, by the unit that owns their matching.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TermFamily {
-    WholeCollection,
-    Text,
-    Field,
-    Regex,
-    NoCombining,
-    StripCloze,
-    Word,
-    Tag,
-    Notetype,
-    NotetypeId,
-    Edited,
-    Duplicates,
-    Deck,
-    Preset,
-    Ids,
-    State,
-    Flag,
-    Added,
-    Introduced,
-    Rated,
-    Rescheduled,
-    Property,
-    HasCustomData,
-    Template,
-}
-
 /// Which rows a term reads (Q5).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Scope {
@@ -331,35 +302,6 @@ impl Scope {
 }
 
 impl Term {
-    pub fn family(&self) -> TermFamily {
-        match self {
-            Term::WholeCollection => TermFamily::WholeCollection,
-            Term::Text(_) => TermFamily::Text,
-            Term::Field { .. } => TermFamily::Field,
-            Term::Regex(_) => TermFamily::Regex,
-            Term::NoCombining(_) => TermFamily::NoCombining,
-            Term::StripCloze(_) => TermFamily::StripCloze,
-            Term::Word(_) => TermFamily::Word,
-            Term::Tag { .. } => TermFamily::Tag,
-            Term::Notetype(_) => TermFamily::Notetype,
-            Term::NotetypeId(_) => TermFamily::NotetypeId,
-            Term::Edited(_) => TermFamily::Edited,
-            Term::Duplicates { .. } => TermFamily::Duplicates,
-            Term::Deck(_) => TermFamily::Deck,
-            Term::Preset(_) => TermFamily::Preset,
-            Term::Ids { .. } => TermFamily::Ids,
-            Term::State(_) => TermFamily::State,
-            Term::Flag(_) => TermFamily::Flag,
-            Term::Added(_) => TermFamily::Added,
-            Term::Introduced(_) => TermFamily::Introduced,
-            Term::Rated { .. } => TermFamily::Rated,
-            Term::Rescheduled(_) => TermFamily::Rescheduled,
-            Term::Property { .. } => TermFamily::Property,
-            Term::HasCustomData(_) => TermFamily::HasCustomData,
-            Term::Template(_) => TermFamily::Template,
-        }
-    }
-
     /// Q3's scope column.
     pub fn scope(&self) -> Scope {
         match self {

@@ -172,7 +172,7 @@ fn a_partly_quoted_value_needs_the_quote_right_after_the_colon() {
 #[test]
 fn spaces_need_not_separate_terms_from_quotes_and_brackets() {
     assert_eq!(shape(&parsed("a\"b\"(c)")), "(a AND b AND [c])");
-    assert_eq!(shape(&parsed("\"f o o\"bar")), "(f o o AND bar)");
+    assert_eq!(shape(&parsed("\"red fox\"den")), "(red fox AND den)");
     assert_eq!(shape(&parsed("(x)(y)")), "([x] AND [y])");
     assert_eq!(term("a\\\"b"), Term::Text("a\"b".into()));
     assert_eq!(term("a-b"), Term::Text("a-b".into()));

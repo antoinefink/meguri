@@ -133,11 +133,11 @@ fn search(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Val
                 outputs.push(error_value(&error));
                 continue;
             }
-            Err(BuildError::NotYetSupported { family, .. }) => {
+            Err(BuildError::NotYetSupported { term, .. }) => {
                 return Err(ExecError::new(
                     "unsupported_observation",
                     format!(
-                        "search {:?}: Meguri does not match {family:?} terms yet (U81, U82)",
+                        "search {:?}: Meguri cannot match the term {term:?} yet (U81, U82)",
                         request.query
                     ),
                 ));

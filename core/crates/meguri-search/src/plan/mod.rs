@@ -7,7 +7,7 @@ pub mod sql;
 
 use std::ops::Range;
 
-use crate::ast::{NodeId, NodeKind, Query, Scope, Term, TermFamily};
+use crate::ast::{NodeId, NodeKind, Query, Scope, Term};
 use crate::context::{ContextReads, SearchContext};
 use crate::error::{ErrorKind, SearchError, SearchFailure};
 
@@ -61,8 +61,9 @@ pub enum BuildError {
     /// A run error of E3 found before anything runs.
     Search(SearchError),
     /// The query holds a term whose matching unit (U81, U82) has not landed:
-    /// the first such term's family and range. Removed with the last stub.
-    NotYetSupported { family: TermFamily, range: Range<usize> },
+    /// the first such term, as parsed, and its range. Removed with the last
+    /// stub.
+    NotYetSupported { term: Term, range: Range<usize> },
 }
 
 impl From<SearchError> for BuildError {
@@ -77,6 +78,19 @@ impl Plan {
     /// (E3), whatever else the query holds.
     pub fn build(query: &Query, mode: SearchMode, ctx: &SearchContext) -> Result<Plan, BuildError> {
         build_with(query, mode, ctx, &mut sql::compile_term)
+    }
+
+    /// Test-only (KTD18): [`Plan::build`] with `compile` in place of
+    /// [`sql::compile_term`], so that tests can run plans of terms whose
+    /// matching (U81, U82) is still a stub.
+    #[cfg(feature = "test-hooks")]
+    pub fn build_with(
+        query: &Query,
+        mode: SearchMode,
+        ctx: &SearchContext,
+        compile: &mut dyn FnMut(&Term, &TermEnv<'_>, &mut Params) -> Result<TermOutcome, ErrorKind>,
+    ) -> Result<Plan, BuildError> {
+        build_with(query, mode, ctx, compile)
     }
 
     pub fn mode(&self) -> SearchMode {
@@ -203,15 +217,15 @@ fn build_with(
                         reads = reads.union(term_sql.reads);
                     }
                     TermOutcome::NotYetSupported => {
-                        not_yet.get_or_insert_with(|| (term.family(), node.span.clone()));
+                        not_yet.get_or_insert_with(|| (term.clone(), node.span.clone()));
                         predicate.push_str("(0)");
                     }
                 }
             }
         }
     }
-    if let Some((family, range)) = not_yet {
-        return Err(BuildError::NotYetSupported { family, range });
+    if let Some((term, range)) = not_yet {
+        return Err(BuildError::NotYetSupported { term, range });
     }
     Ok(Plan {
         mode,

@@ -7,7 +7,7 @@
 use rusqlite::{Connection, params_from_iter};
 
 use super::*;
-use crate::ast::{CardState, TermFamily};
+use crate::ast::CardState;
 use crate::context::FoldMode;
 use crate::parser::parse;
 
@@ -197,7 +197,7 @@ fn search_failures_win_over_terms_not_yet_supported() {
     assert_eq!(
         error,
         BuildError::NotYetSupported {
-            family: TermFamily::Text,
+            term: Term::Text("x".into()),
             range: 0..1
         }
     );

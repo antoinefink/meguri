@@ -16,7 +16,7 @@ mod lexer;
 mod parser;
 pub mod plan;
 
-pub use ast::{Node, NodeId, NodeKind, Query, Scope, Term, TermFamily};
+pub use ast::{Node, NodeId, NodeKind, Query, Scope, Term};
 pub use canonical::canonical_text;
 pub use context::{ContextReads, ContextValue, FoldMode, SearchContext};
 pub use error::{ErrorKind, SearchError, SearchFailure};

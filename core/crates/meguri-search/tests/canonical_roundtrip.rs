@@ -1,12 +1,18 @@
 //! Canonical search text (`specs/search/canonical-form.md`): F8's examples,
-//! and the R1077 round trip over 10,000 generated searches. The committed
+//! and the R1077 round trip over 10,000 generated searches, whose plans run
+//! on a fixture collection with stand-in term compilers. The committed
 //! oracle goldens (`conformance/goldens/search/`) are checked through the
 //! testkit's `canonical_search` adapter in T0.
 
+use std::collections::BTreeSet;
+
 use meguri_model::ids::DeckId;
 use meguri_search::ast::{NodeId, NodeKind, Property, Query};
-use meguri_search::plan::{BuildError, Plan, SearchMode};
-use meguri_search::{FoldMode, SearchContext, Term, canonical_text, parse};
+use meguri_search::error::ErrorKind;
+use meguri_search::plan::sql::compile_term;
+use meguri_search::plan::{BuildError, Param, Params, Plan, Rows, SearchMode, TermEnv, TermOutcome, TermSql};
+use meguri_search::{ContextReads, FoldMode, Scope, SearchContext, Term, canonical_text, parse};
+use rusqlite::{Connection, params_from_iter};
 
 fn canonical(text: &str) -> String {
     canonical_text(text).unwrap_or_else(|e| panic!("{text:?}: {e:?}"))
@@ -23,7 +29,6 @@ fn the_spec_examples_write_anki_bytes() {
         ("a\tb", "a b"),
         ("a\u{A0}b", "a b"),
         ("a\u{3000}b", "a b"),
-        ("\"foo\" \"b a r\"", "foo \"b a r\""),
         ("field:\"foo\"", "field:foo"),
         ("key:\"value with spaces\"", "\"key:value with spaces\""),
         ("key: \"value\"", "key: value"),
@@ -35,8 +40,6 @@ fn the_spec_examples_write_anki_bytes() {
         ("deck:\\:", "deck::"),
         ("deck:a\\-b", "deck:a-b"),
         ("deck:a\\(b", "\"deck:a(b\""),
-        ("\"aNd\" \"oR\"", "\"aNd\" \"oR\""),
-        ("\"f o o\"bar", "\"f o o\" bar"),
         ("tag:re\\:x", "tag:re\\:x"),
         ("f:re\\:x", "f:re\\:x"),
         ("re:\\(", "\"re:\\(\""),
@@ -49,7 +52,6 @@ fn the_spec_examples_write_anki_bytes() {
         ("prop:ease>1.0", "prop:ease>1"),
         ("prop:s>1.0", "prop:s>1"),
         ("prop:pos=+3", "prop:pos=3"),
-        ("\"prop:cds:abc=foo bar\"", "\"prop:cds:abc=foo bar\""),
         ("dupe:1,a\\\\b", "dupe:1,a\\\\b"),
         ("-(a or b)", "-(a OR b)"),
         ("(a b)", "a b"),
@@ -57,7 +59,6 @@ fn the_spec_examples_write_anki_bytes() {
         ("(a)", "a"),
         ("-(a b)", "-(a b)"),
         // F3.
-        ("1 and 2 or 3", "1 2 OR 3"),
         ("a(b)", "a (b)"),
         ("\"x\"\"y\"", "x y"),
         ("a -and b", "a -  b"),
@@ -66,7 +67,6 @@ fn the_spec_examples_write_anki_bytes() {
         ("\"-\"", "-"),
         ("\"a-b\"", "a-b"),
         ("\\(", "\"(\""),
-        ("\"aNd\"", "\"aNd\""),
         // F5.
         ("DECK:x", "deck:x"),
         ("flag:007", "flag:7"),
@@ -103,6 +103,27 @@ fn the_spec_examples_write_anki_bytes() {
     }
 }
 
+// F3's joiners, F4's quoting and F5's `prop:cds:` row, on Meguri's own
+// inputs: expected texts follow the rules' wording.
+#[test]
+fn joiners_and_quotes_follow_the_rules() {
+    let cases = [
+        // F3: explicit `and` is one space, `or` is ` OR `.
+        ("pear and fig or lime", "pear fig OR lime"),
+        // F4: a quoted text keeps its quotes only when it needs them.
+        ("\"kiwi\" \"green tea\"", "kiwi \"green tea\""),
+        // F4: operator words in any letter case are quoted.
+        ("\"anD\" plum \"OR\"", "\"anD\" plum \"OR\""),
+        // G3, F3: a quote ends a term, and the writer puts a space after it.
+        ("\"red fox\"den", "\"red fox\" den"),
+        // F5: a `prop:cds:` value holding a space is quoted whole.
+        ("\"prop:cds:hint=two words\"", "\"prop:cds:hint=two words\""),
+    ];
+    for (text, expected) in cases {
+        assert_eq!(canonical(text), expected, "{text:?}");
+    }
+}
+
 // F7's three shapes whose canonical text does not read back the same.
 #[test]
 fn the_spec_exceptions_keep_anki_bytes() {
@@ -114,10 +135,23 @@ fn the_spec_exceptions_keep_anki_bytes() {
     assert_eq!(canonical_text("preset:a\\\\\"b").unwrap_err().code(), "unclosed_quote");
     assert_eq!(canonical("has\\-cd:x"), "has-cd:x");
     assert!(matches!(term_of("has-cd:x"), Term::HasCustomData(_)));
-    // F2.2 removes one level of brackets per writing, so a search that is a
-    // group holding a group shrinks again (not listed in F7).
+}
+
+// R1077's fourth exception, which F7 does not list yet: F2.2 drops one level
+// of brackets per writing, so the canonical text of a search that is a group
+// holding a group is not canonical again; it still means the same. The
+// oracle golden search/canonical/top-level pins `((a))` -> `(a)` -> `a`.
+#[test]
+fn a_group_holding_a_group_loses_one_level_per_writing() {
     assert_eq!(canonical("((a))"), "(a)");
     assert_eq!(canonical("(a)"), "a");
+    assert_eq!(canonical("(((a b)))"), "((a b))");
+    assert_eq!(canonical("((a b))"), "(a b)");
+    assert_eq!(canonical("(a b)"), "a b");
+    // Only the whole search loses a level: a negated group, or a group among
+    // other items, is written as it is.
+    assert_eq!(canonical("-((a))"), "-((a))");
+    assert_eq!(canonical("((a)) b"), "((a)) b");
 }
 
 fn term_of(text: &str) -> Term {
@@ -328,6 +362,16 @@ fn is_exception(query: &Query) -> bool {
     })
 }
 
+/// The shape of `a_group_holding_a_group_loses_one_level_per_writing`: the
+/// whole search is a group whose only item is a group. Its canonical text
+/// means the same, but is not canonical again.
+fn is_group_of_group(query: &Query) -> bool {
+    match query.node(query.root()).kind {
+        NodeKind::Group(inside) => matches!(query.node(inside).kind, NodeKind::Group(_)),
+        _ => false,
+    }
+}
+
 /// The node a meaning comparison starts from: one root group less (F2.2
 /// drops it, and a group is transparent, Q1).
 fn meaning_root(query: &Query) -> NodeId {
@@ -367,34 +411,92 @@ fn context() -> SearchContext {
     }
 }
 
-/// What a plan does, or why there is none; ranges and node ids are left
-/// out, being positions in the source.
-fn plan(query: &Query, mode: SearchMode) -> Result<String, String> {
-    match Plan::build(query, mode, &context()) {
-        Ok(plan) => Ok(format!(
-            "{:?} {} {:?} {:?} {}",
-            plan.rows(),
-            plan.sql(),
-            plan.params(),
-            plan.reads(),
-            plan.slow_terms().len()
-        )),
-        Err(BuildError::Search(e)) => Err(e.code().to_owned()),
-        Err(BuildError::NotYetSupported { family, .. }) => Err(format!("{family:?}")),
+/// Stands in for U81's and U82's matchers, which are stubs in U80. A term is
+/// true on a fixed set of rows that depends on the term alone: it reads only
+/// the ids its scope allows (Q3, Q5) and binds its text as a parameter, so
+/// the ids a search finds depend on the plan's rows, joins, operators and
+/// parameter numbers. The whole collection is the product's own SQL.
+fn stand_in(term: &Term, env: &TermEnv<'_>, params: &mut Params) -> Result<TermOutcome, ErrorKind> {
+    if *term == Term::WholeCollection {
+        return compile_term(term, env, params);
     }
+    let id = match (term.scope(), env.rows) {
+        (Scope::Card, _) => "c.id",
+        (Scope::Note, _) => "n.id",
+        (Scope::CardAndNote, _) => "c.id + n.id",
+        (Scope::Either, Rows::Notes) => "n.id",
+        (Scope::Either, _) => "c.nid",
+    };
+    let text = params.bind(Param::Text(format!("{term:?}")));
+    Ok(TermOutcome::Sql(TermSql {
+        sql: format!("({id} + length({text})) % 3 = 0"),
+        slow: false,
+        reads: ContextReads::NONE,
+    }))
+}
+
+/// The fixture collection: notes 1-8 with none to three cards each (note 8
+/// has none), and card 120, whose note 9 is gone (Q6). Only the columns the
+/// plan's statement and the stand-in read.
+fn collection() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE notes (id INTEGER PRIMARY KEY);
+         CREATE TABLE cards (id INTEGER PRIMARY KEY, nid INTEGER NOT NULL);
+         INSERT INTO notes VALUES (1), (2), (3), (4), (5), (6), (7), (8);
+         INSERT INTO cards VALUES (101, 1), (102, 1), (103, 2), (104, 3), (105, 3), (106, 3),
+             (107, 4), (108, 5), (109, 5), (110, 6), (111, 7), (120, 9);",
+    )
+    .unwrap();
+    conn
+}
+
+/// What a plan does; node ids are left out, being positions in the source.
+fn summary(plan: &Plan) -> String {
+    format!(
+        "{:?} {} {:?} {:?} {}",
+        plan.rows(),
+        plan.sql(),
+        plan.params(),
+        plan.reads(),
+        plan.slow_terms().len()
+    )
+}
+
+/// The ids a plan finds in the fixture collection, ascending.
+fn ids(conn: &Connection, plan: &Plan) -> Vec<i64> {
+    let mut statement = conn
+        .prepare_cached(plan.sql())
+        .unwrap_or_else(|e| panic!("{}: {e}", plan.sql()));
+    let values = plan.params().iter().map(|p| match p {
+        Param::Integer(v) => rusqlite::types::Value::Integer(*v),
+        Param::Real(v) => rusqlite::types::Value::Real(*v),
+        Param::Text(v) => rusqlite::types::Value::Text(v.clone()),
+    });
+    let mut found: Vec<i64> = statement
+        .query_map(params_from_iter(values), |row| row.get(0))
+        .unwrap_or_else(|e| panic!("{}: {e}", plan.sql()))
+        .collect::<Result<_, _>>()
+        .unwrap();
+    found.sort_unstable();
+    found
 }
 
 // R1077, F7: canonical(canonical(t)) = canonical(t), and canonical(t) means
-// what t means: the same query, so the same plan and the same ids on any
-// collection, in both modes.
+// what t means: the same query, the same plan, and on the fixture collection
+// the same ids in both modes. A case counts only when both searches ran in
+// both modes.
 #[test]
 fn canonical_texts_round_trip() {
+    let conn = collection();
     let mut seq = Seq(0x00C0_FFEE);
     let mut checked = 0;
     let mut attempts = 0;
+    // The distinct result sizes per mode, cards then notes.
+    let mut sizes = [BTreeSet::new(), BTreeSet::new()];
     while checked < 10_000 {
         attempts += 1;
-        assert!(attempts < 200_000, "the generator yields too few searches that parse");
+        assert!(attempts < 200_000, "the generator yields too few searches that run");
         let text = sequence(&mut seq, 3);
         let Ok(query) = parse(&text) else {
             continue;
@@ -408,17 +510,31 @@ fn canonical_texts_round_trip() {
             same_meaning(&query, meaning_root(&query), &again, again.root()),
             "{text:?} -> {once:?} reads differently"
         );
-        // F2.2: only a search that is a group holding a group shrinks again.
-        let twice = again.canonical_text();
-        match query.node(meaning_root(&query)).kind {
-            NodeKind::Group(_) if matches!(query.node(query.root()).kind, NodeKind::Group(_)) => {
-                assert_eq!(format!("({twice})"), once, "{text:?}");
+        if !is_group_of_group(&query) {
+            assert_eq!(again.canonical_text(), once, "{text:?}");
+        }
+        let mut ran = 0;
+        for (k, mode) in [SearchMode::Cards, SearchMode::Notes].into_iter().enumerate() {
+            let first = Plan::build_with(&query, mode, &context(), &mut stand_in);
+            let second = Plan::build_with(&again, mode, &context(), &mut stand_in);
+            match (first, second) {
+                (Ok(first), Ok(second)) => {
+                    assert_eq!(summary(&first), summary(&second), "{text:?} -> {once:?}");
+                    let found = ids(&conn, &first);
+                    assert_eq!(found, ids(&conn, &second), "{text:?} -> {once:?} in {mode:?}");
+                    sizes[k].insert(found.len());
+                    ran += 1;
+                }
+                (Err(BuildError::Search(first)), Err(BuildError::Search(second))) => {
+                    assert_eq!(first.code(), second.code(), "{text:?} -> {once:?}");
+                }
+                (first, second) => panic!("{text:?} -> {once:?} in {mode:?}: {first:?} / {second:?}"),
             }
-            _ => assert_eq!(twice, once, "{text:?}"),
         }
-        for mode in [SearchMode::Cards, SearchMode::Notes] {
-            assert_eq!(plan(&query, mode), plan(&again, mode), "{text:?} -> {once:?}");
+        if ran == 2 {
+            checked += 1;
         }
-        checked += 1;
     }
+    // The stand-in must not make every search find nothing or everything.
+    assert!(sizes.iter().all(|seen| seen.len() > 3), "result sizes {sizes:?}");
 }
