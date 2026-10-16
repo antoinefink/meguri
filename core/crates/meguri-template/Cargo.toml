@@ -7,17 +7,21 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Hint ids (specs/render/filters.md F5): a parity pin.
 blake3.workspace = true
 difflib.workspace = true
 # data-cloze attribute encoding (specs/render/cloze.md C7): a parity pin.
 htmlescape.workspace = true
-# Markup removal inside MathJax in cloze output (cloze.md C8, strip-html H2).
+# The text filter (strip-html H4), section emptiness (field-emptiness E1) and
+# markup removal inside MathJax in cloze output (cloze.md C8, strip-html H2).
 meguri-text.workspace = true
-# The C8 MathJax match: leftmost-first, lazy.
+# Ruby groups of the furigana filters (filters.md F4) and the cloze MathJax
+# match (cloze.md C8): leftmost-first.
 regex.workspace = true
 
 [dev-dependencies]
-# Reads the render/cloze scenarios (YAML 1.2 core schema) and their hashes for
-# tests/cloze_goldens.rs, until T0 runs them.
+# Reads scenarios (YAML 1.2 core schema) and their hashes for the golden-pair
+# tests of scenarios Meguri's executor cannot run yet (tests/golden_pairs.rs).
 meguri-testkit.workspace = true
+# Reads the template corpus scenarios for the source-span round trip (T12).
 serde_json.workspace = true

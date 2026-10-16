@@ -1,7 +1,7 @@
 # Opening a collection and its connections
 
 Spec: storage/open-and-connections
-Requirements: R1449, R1451, R1452, R1454, R1479, R1482, R2013, R2016; supports R1823
+Requirements: R1449, R1451, R1452, R1454, R1479, R1482, R2013, R2016; supports R1823, R1491 and R2006 (C9, with U32)
 Anki: 26.09.3
 Scenarios: conformance/scenarios/storage/open/
 
@@ -98,8 +98,8 @@ Exactly one per open collection, owned by the engine's writer thread (U24); ever
 | `cache_size` | -40960 (40 MiB) | Anki's value |
 | `temp_store` | `MEMORY` | |
 | `journal_mode` | `WAL` | persistent in the file; Anki writes and uploads WAL-mode files. A no-op when the file is already in WAL mode |
-| `synchronous` | C9 | |
-| `fullfsync`, `checkpoint_fullfsync` | `ON` on Apple platforms when `synchronous=FULL` (C9) | a plain `fsync` on Apple does not flush the drive's cache |
+| `synchronous` | `NORMAL` (C9) | a commit returns without a sync; U32's flush makes it durable within 1 s |
+| `fullfsync`, `checkpoint_fullfsync` | `ON` on Apple platforms, whatever `synchronous` is (C9) | every sync SQLite still issues (checkpoints, the WAL header on restart) then flushes the drive's cache; a plain `fsync` on Apple does not |
 | prepared-statement cache | 128 statements | |
 | `wal_autocheckpoint` | SQLite's default (1000 pages) | passive checkpoints after commits |
 
@@ -156,16 +156,63 @@ A new collection is not opened through this gate; U28's bootstrap creates it.
 
 ## C9. Durability of the writer
 
-- Default, in force until the measurement below says otherwise: `synchronous=FULL`, and on Apple platforms `fullfsync=ON` and `checkpoint_fullfsync=ON`. Each commit is then durable on return. Anki leaves SQLite's default (`FULL` in WAL mode) and never sets `fullfsync`.
-- Switch: if U12's answer-commit benchmark shows the answer write phase, commit sync included, above U24's p95 budget of 5 ms on the target devices, the writer uses `synchronous=NORMAL` instead, and U32's flush, at most 1 s after any commit and before suspension, issues a full sync of the `-wal` file itself. That flush must not depend on checkpoint progress, because a checkpoint blocked by a reader syncs nothing.
-- Measured so far (preliminary, not the deciding run): on the development Mac (Apple silicon, internal SSD, macOS system SQLite 3.54.0), committing one card update plus one review-log insert in WAL mode took p50 0.22 ms and p95 0.40 ms with `FULL` and full fsync, p95 0.12 ms with `FULL` alone, p95 0.03 ms with `NORMAL`. The deciding numbers come from U12's benchmark of the bundled SQLite on iPhone and iPad; they are recorded in this section by a spec-writer change, and the choice follows them.
+Decided on 2026-10-15 by the switch rule (C9.4): the writer runs `synchronous=NORMAL`, and on Apple platforms it keeps `fullfsync=ON` and `checkpoint_fullfsync=ON`. A commit returns without a sync, and U32's flush (C9.2) makes it durable within 1 s. The setting is the same on every platform.
+
+### C9.1 What the writer does
+
+- In WAL mode, `NORMAL` writes a commit's frames to the `-wal` file and returns without a sync. SQLite still syncs in three places: the `-wal` before a checkpoint copies its frames, the main file after the checkpoint, and the `-wal` header when a commit starts the log again after a complete checkpoint. With the two Apple pragmas, each of these syncs is a full one (`F_FULLFSYNC`, which also flushes the drive's cache).
+- A commit that runs the passive autocheckpoint (C4) or starts the log again therefore still pays full syncs inside its write phase. Such commits are rare (the autocheckpoint runs once per 1000 pages of log), so they show in p99 and the maximum rather than at p95.
+- None of these three pragmas is stored in the file. Anki sets none of them and keeps SQLite's defaults; it opens a file Meguri wrote with no difference, and no golden can observe the setting.
+
+### C9.2 The flush (U32)
+
+Without the flush, a returned commit becomes durable only at the next checkpoint or at close. No release ships before U32 delivers it.
+
+- After every commit on the writer that appended frames to the `-wal`, a full sync of the `-wal` file completes at most 1 s after that commit returned. `flush_for_background()` and `suspend()` return only when every commit that returned before them is covered.
+- The flush syncs the `-wal` file itself. It never relies on a checkpoint: a checkpoint held back by a reader's snapshot (C7; for example U107's sync snapshot) syncs nothing.
+- A full sync is `F_FULLFSYNC` (an `fcntl` command) on Apple platforms, and the platform's file sync elsewhere.
+- One sync covers every commit that returned before the sync started. A commit that returns during a sync is covered by the next one. Commits close together share one sync.
+- The first flush after the `-wal` file was created also syncs the directory that holds it, so that the file's directory entry survives a power loss.
+- The flush runs outside every op's write phase, so op timings (`engine/op-model` O10) do not include it. Its cost is one full sync, about 4 ms at p50 on the M3 Max (C9.4), at most once per second while commits arrive.
+- A failed sync is never silent. The commits it covered have already returned, so U32 reports the failure as an I/O error; its design doc decides what the user sees.
+- One route that meets all of this with the bundled SQLite: on the writer's thread, between ops, the file control `SQLITE_FCNTL_JOURNAL_POINTER` returns the connection's `-wal` file. A sync of that file with the full-sync flag issues `F_FULLFSYNC` on Apple, and SQLite adds the one-time directory sync when this connection created the file.
+- U32's counting-VFS test proves the flush: a reader holds a snapshot, and each of 20 answer commits is followed by a full sync of the `-wal` within 1 s. U32 records the measured cost in C9.4.
+
+### C9.3 What a failure can lose
+
+- A killed process (SIGKILL, a jetsam kill, a crash of Meguri) loses no returned commit, because its frames are already in the operating system's cache.
+- An OS crash or a power loss can lose the commits whose flush had not completed: at most those of the last second. Recovery keeps the commits up to the first one that did not fully reach the disk (the `-wal` frames carry checksums), so the reopened collection is an earlier consistent state and never corrupt (R1491).
+- R1491 and R2006 allow this window (durable within 1 s). R2002's bound of one in-flight operation still holds for a killed process. For an OS crash or a power loss, the bound is this window, which the switch rule accepts.
+
+### C9.4 Why: the rule and the measurements
+
+The rule (U22): `synchronous=FULL` with full syncs on Apple, unless U12's answer-commit benchmark shows the answer write phase, commit sync included, above U24's p95 budget of 5 ms on the target devices. Then `NORMAL`, with U32's flush.
+
+The answer write is one op that reads a card, updates it and inserts one review-log row, timed from submit to result, commit included (`engine/op-model` O10; suite `core/crates/meguri-engine/benches/executor.rs`), on generated collections of 10k and 150k cards.
+
+| Where | SQLite | Writer setting | Answer write p50 | p95 |
+|---|---|---|---|---|
+| M3 Max, macOS 27.0.1, internal SSD; `tools/mg bench-mac --bench executor`, two runs (2026-10-15) | bundled 3.53.2 | `FULL`, `fullfsync`, `checkpoint_fullfsync` | 4.02–4.04 ms | 4.97–5.09 ms (5 ms or more in three of four) |
+| Docker, Linux arm64, collection on tmpfs; `tools/mg bench --bench executor`, one run | bundled 3.53.2 | `FULL` (a sync costs nothing on tmpfs) | 0.043–0.054 ms | 0.11–0.16 ms |
+| Development Mac, earlier preliminary run | macOS system 3.54.0 | `FULL` with full fsync | 0.22 ms | 0.40 ms |
+| same | same | `FULL` alone | | 0.12 ms |
+| same | same | `NORMAL` | | 0.03 ms |
+| M3 Max, after the switch: awaiting the rerun of `tools/mg bench-mac --bench executor` | bundled 3.53.2 | `NORMAL`, `fullfsync`, `checkpoint_fullfsync` | | |
+| iPhone and iPad: not measured (no device runs until signing allows device builds) | bundled 3.53.2 | | | |
+
+On the M3 Max the answer's p99 was 8.2–9.4 ms and its maximum 16–56 ms.
+
+- About 4 ms of each Mac answer is the commit's full sync: the same op costs 0.11–0.16 ms at p95 when the sync costs nothing.
+- The earlier preliminary p95 of 0.40 ms "with `FULL` and full fsync" does not describe Meguri. It was taken with the macOS system SQLite, not the bundled build that Meguri ships (KTD3), and its full-sync commits cost a small fraction of the bundled build's (p50 0.22 ms against 4.02 ms). It is superseded.
+- The rule fires without the iPhone and iPad numbers. The Mac is one of Meguri's target platforms, and on the M3 Max that U24's verification names, the answer write is at the 5 ms budget and over it in three of four measurements. The cost is the drive-cache flush that a full sync must make, so code changes cannot remove it.
+- Device numbers, when U12 has them, are recorded in this table. They cannot reverse the choice, because the setting is the same on every platform and the Mac is already over the budget.
 
 ## C10. Close
 
 The storage side of closing (U32 orchestrates it):
 
 1. Finish every reader's statements and close every reader.
-2. Run the checkpoint primitive on the writer. With every reader closed it cannot be busy.
+2. Run the checkpoint primitive on the writer. With every reader closed it cannot be busy. Its syncs (full ones on Apple, C9.1) also make the last commits durable, whatever U32's flush has done.
 3. Close the writer. SQLite removes the `-wal` and `-shm` files when the last connection closes after a complete checkpoint.
 
 After a clean close, `collection.anki2` alone holds the whole collection, no `-wal` or `-shm` file is left, and Anki opens it without any conversion (R1449, scenario `storage/open/oracle-made-reopen`).
@@ -182,6 +229,9 @@ After a clean close, `collection.anki2` alone holds the whole collection, no `-w
 | Refused file unchanged: SHA-256 and directory listing | `tests/open_refuse.rs` (Meguri only) |
 | Hot journal, file refused: the refusal is the one for the rolled-back version (a file at 10 whose crashed transaction had written 18 is `TooOld` 10); the file's SHA-256, the journal's SHA-256 and the directory listing are unchanged | `tests/open_refuse.rs` (Meguri only) |
 | Hot journal, file accepted: the file is rolled back in place and opens at its last committed version (a file at 18 whose crashed transaction had written 10 opens at 18 with no upgrade); the crashed transaction's objects are gone, `integrity_check` is `ok`, and the journal is gone | `tests/open_refuse.rs` (Meguri only) |
+| Writer settings per C4: `synchronous` reads 1 (`NORMAL`); `fullfsync` and `checkpoint_fullfsync` read 1 on Apple platforms and 0 elsewhere | `tests/connections.rs` |
+| With a reader holding a snapshot, each of 20 answer commits is followed by a full sync of the `-wal` within 1 s (C9.2) | U32's counting-VFS test |
+| Answer write p95 under 5 ms on the M3 Max with C9's setting | `tools/mg bench-mac --bench executor` (`engine/op-model` O10) |
 | Reader keeps its snapshot during a writer commit; no `SQLITE_BUSY` on readers | `tests/connections.rs` |
 | `VACUUM INTO` succeeds on the sync and maintenance readers; a write fails on every reader role | `tests/connections.rs` |
 | Collation registration failure fails the open | `tests/connections.rs` |

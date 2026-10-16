@@ -50,3 +50,10 @@ path = "fuzz_targets/cloze.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "template_parse"
+path = "fuzz_targets/template_parse.rs"
+test = false
+doc = false
+bench = false

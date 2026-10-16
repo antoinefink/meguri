@@ -14,6 +14,7 @@ pub mod error;
 pub mod events;
 pub mod jobs;
 pub mod progress;
+mod runtime;
 #[cfg(feature = "test-hooks")]
 mod test_hooks;
 

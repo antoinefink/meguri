@@ -22,7 +22,10 @@ const USAGE: &str = "usage: meguri-cli conformance <command> [options]
   exec [--oracle] <scenario file>       print a run's observations (golden layout)
   diff [--live] <scenario file>         Meguri's run against the golden (or the live oracle)
   capabilities                          what Meguri's executor supports, and the language
-  goldens-check [--base DIR] [--oracle-lock-sha256 HEX] [--report FILE]
+  goldens-check [--base DIR] [--oracle-lock-sha256 HEX]
+                [--oracle-macos-lock-sha256 HEX | --oracle-macos-lock-absent] [--report FILE]
+        the oracle's lock files where known (the macOS one: present with its
+        hash, or absent), checked against conformance/oracle.json
   harvest-report [--catalog FILE] [--live-report FILE] [--report FILE] [--markdown FILE]
         --live-report: a run --live report at the current oracle pin; its
         statuses replace `live` and `pending` for the scenario texts it ran
@@ -56,6 +59,7 @@ struct Options {
     live_report: Option<PathBuf>,
     handoff_dir: Option<PathBuf>,
     lock: Option<String>,
+    macos_lock: Option<Option<String>>,
     rest: Vec<String>,
 }
 
@@ -73,6 +77,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         live_report: None,
         handoff_dir: None,
         lock: None,
+        macos_lock: None,
         rest: Vec::new(),
     };
     let mut it = args.iter();
@@ -91,6 +96,8 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             "--live-report" => o.live_report = Some(value(arg)?.into()),
             "--handoff-dir" => o.handoff_dir = Some(value(arg)?.into()),
             "--oracle-lock-sha256" => o.lock = Some(value(arg)?),
+            "--oracle-macos-lock-sha256" => o.macos_lock = Some(Some(value(arg)?)),
+            "--oracle-macos-lock-absent" => o.macos_lock = Some(None),
             "--" => o.rest.extend(it.by_ref().cloned()),
             flag if flag.starts_with("--") => return Err(format!("unknown option {flag}")),
             other => o.rest.push(other.to_owned()),
@@ -289,6 +296,7 @@ fn diff(options: &Options) -> Result<i32, String> {
     let compare = meguri_testkit::diff::CompareOptions {
         set: &loaded.scenario.compare.set,
         deviations: &suite.deviations,
+        overlay: &[],
     };
     let comparison = meguri_testkit::diff::compare(&loaded.scenario.id, &expected, &actual, &compare);
     if comparison.differences.is_empty() {
@@ -333,6 +341,7 @@ fn goldens_check(options: &Options) -> Result<i32, String> {
     let check = GoldensCheck {
         base: options.base.clone(),
         oracle_lock_sha256: options.lock.clone(),
+        oracle_macos_lock_sha256: options.macos_lock.clone(),
     };
     let fresh = suite.goldens_check(&check).map_err(|e| e.to_string())?;
     for p in &fresh.problems {
@@ -358,6 +367,16 @@ fn goldens_check(options: &Options) -> Result<i32, String> {
                 );
             }
         }
+    }
+    if !fresh.overlays.is_empty() {
+        let sum = |f: fn(&meguri_testkit::suite::OverlaySummary) -> usize| fresh.overlays.iter().map(f).sum::<usize>();
+        eprintln!(
+            "{} overlays: {} entries ({} day, {} memory)",
+            fresh.overlays.len(),
+            sum(|o| o.entries),
+            sum(|o| o.day_entries),
+            sum(|o| o.memory_entries)
+        );
     }
     eprintln!(
         "{} scenarios: {} problem{}; {} goldens changed, {} added, {} removed since the base",
@@ -385,6 +404,12 @@ fn goldens_check(options: &Options) -> Result<i32, String> {
                     "before": meguri_testkit::diff::shown(&v.before),
                     "after": meguri_testkit::diff::shown(&v.after),
                 })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "overlays": fresh.overlays.iter().map(|o| json!({
+                "scenario": o.scenario,
+                "entries": o.entries,
+                "day_entries": o.day_entries,
+                "memory_entries": o.memory_entries,
             })).collect::<Vec<_>>(),
             "changed_goldens": fresh.changed_goldens,
             "added_goldens": fresh.added_goldens,
