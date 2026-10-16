@@ -1,25 +1,24 @@
-//! Every `browser/config` scenario (`conformance/scenarios/browser/config/`;
-//! `specs/browser/config-keys.md`, `specs/conformance/browser-config-ops.md`)
-//! run through Meguri's executor and its browser adapters, and compared with
-//! the oracle's golden as T0 compares it (dsl.md D10, observations.md O7).
+//! The two `browser/config` scenarios T0 does not run
+//! (`conformance/scenarios/browser/config/`; `specs/browser/config-keys.md`
+//! K13, `specs/conformance/browser-config-ops.md`), played through Meguri's
+//! executor and its browser adapters and compared with the oracle's golden
+//! as T0 compares it (dsl.md D10, observations.md O7). T0 runs the other
+//! four, which open the schema-18 storage fixture and are active.
 //!
-//! T0 runs them once Meguri's executor has the new collection (U28) and the
-//! config setup section; until then this file stands in for both, in front
-//! of the scenario's own steps:
-//!
-//! - **The new collection** (dsl.md D6): `open` of the oracle-made schema-18
-//!   storage fixture, a new collection of the pinned Anki.
-//! - **`setup.config`** (D6.1): one `set_config` per key, in sorted key
-//!   order, at `clock.start`.
-//!
-//! `browser/config/live-roundtrip` is a live chain (D9.2): here Meguri runs
-//! every segment, handing the collection over to itself through the storage
-//! area's handoff adapters, as the oracle ran every segment to record the
-//! golden. The comparison shows that Meguri stores the bytes Anki stored at
-//! the end of each segment and reads every key as Anki read them; a cargo
-//! test has no oracle worker, so only T1 (`tools/mg conformance --live`),
-//! running the oracle's segments on the oracle, shows each side opening the
-//! collection file the other wrote.
+//! - `browser/config/new-collection` starts from the new collection
+//!   (dsl.md D8), which Meguri's executor gets with U28
+//!   (docs/process/review-log/U83.md, A1). Until then `open` of the
+//!   oracle-made schema-18 storage fixture, a new collection of the pinned
+//!   Anki, stands in for it in front of the scenario's steps.
+//! - `browser/config/live-roundtrip` is a live chain (D9.2), which only T1
+//!   runs. Here Meguri runs every segment from the same stand-in, handing
+//!   the collection over to itself through the storage area's handoff
+//!   adapters, as the oracle ran every segment to record the golden. That
+//!   shows Meguri stores the bytes Anki stored at the end of each segment and
+//!   reads every key as Anki read them. A cargo test has no oracle worker:
+//!   only T1 (`tools/mg conformance --live browser/config/live-roundtrip`)
+//!   runs the oracle's segments on the oracle, so each side opens the
+//!   collection file the other wrote.
 
 use std::path::{Path, PathBuf};
 
@@ -27,7 +26,7 @@ use meguri_testkit::diff::{self, CompareOptions};
 use meguri_testkit::exec::live::Chain;
 use meguri_testkit::exec::{Executor, MeguriExecutor};
 use meguri_testkit::observe::parse_json;
-use meguri_testkit::scenario::{self, LoadedScenario, OpenSpec, SetConfigArgs, Step};
+use meguri_testkit::scenario::{self, LoadedScenario, OpenSpec, Side, Step};
 use meguri_testkit::suite::Suite;
 use serde_json::{Value, json};
 
@@ -35,31 +34,24 @@ fn conformance() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance")
 }
 
-/// The committed scenario with the stand-ins in front of its steps, and how
-/// many steps they are.
-fn with_stand_ins(loaded: &LoadedScenario) -> (LoadedScenario, usize) {
+/// The committed scenario with the fixture's `open` in front of its steps.
+fn with_stand_in(loaded: &LoadedScenario) -> LoadedScenario {
     let mut played = loaded.clone();
-    let mut front = vec![Step::Open(OpenSpec {
-        fixture: "storage/schema-18.anki2".parse().unwrap(),
-    })];
-    if let Some(config) = played.scenario.setup.config.take() {
-        let mut keys: Vec<(&String, &Value)> = config.iter().collect();
-        keys.sort_by(|a, b| a.0.cmp(b.0));
-        for (key, value) in keys {
-            front.push(Step::SetConfig(SetConfigArgs {
-                key: key.clone(),
-                value: value.clone(),
-                undoable: false,
-            }));
-        }
-    }
+    assert!(
+        !played.scenario.starts_with_open(),
+        "T0 runs the scenarios that open a fixture"
+    );
     assert!(
         played.scenario.setup.sections().is_empty(),
-        "the browser/config scenarios set up config only"
+        "the browser/config scenarios have no setup"
     );
-    let prefix = front.len();
-    played.scenario.steps.splice(0..0, front);
-    (played, prefix)
+    played.scenario.steps.insert(
+        0,
+        Step::Open(OpenSpec {
+            fixture: "storage/schema-18.anki2".parse().unwrap(),
+        }),
+    );
+    played
 }
 
 /// Runs `browser/config/<name>` on Meguri and compares it with its golden.
@@ -75,7 +67,7 @@ fn play(name: &str) {
     );
     assert_eq!(golden["clock"]["mode"], json!("frozen"));
 
-    let (played, prefix) = with_stand_ins(&loaded);
+    let played = with_stand_in(&loaded);
     let executor = MeguriExecutor::new();
     let observed = if played.scenario.is_live() {
         let root = tempfile::tempdir().unwrap();
@@ -90,11 +82,8 @@ fn play(name: &str) {
     }
     .unwrap_or_else(|e| panic!("{id}: {e}"));
     let steps = observed["steps"].as_array().unwrap();
-    assert!(
-        steps[..prefix].iter().all(|s| s == &json!({})),
-        "{id}: the stand-ins record nothing"
-    );
-    let observed = json!({ "steps": steps[prefix..] });
+    assert_eq!(steps[0], json!({}), "{id}: the stand-in records nothing");
+    let observed = json!({ "steps": steps[1..] });
 
     let suite = Suite::open(&conformance()).unwrap();
     let comparison = diff::compare(
@@ -124,11 +113,6 @@ fn play(name: &str) {
 }
 
 #[test]
-fn absent_defaults() {
-    play("absent-defaults");
-}
-
-#[test]
 fn live_roundtrip() {
     play("live-roundtrip");
 }
@@ -138,33 +122,19 @@ fn new_collection() {
     play("new-collection");
 }
 
+/// Meguri's executor lacks only the new collection, and only
+/// `browser/config/new-collection` needs it; the live chain's Meguri
+/// segment needs nothing it lacks. Once U28 registers the new collection,
+/// this fails: activate new-collection in `browser/area.yaml` and drop its
+/// stand-in here.
 #[test]
-fn other_keys_untouched() {
-    play("other-keys-untouched");
-}
-
-#[test]
-fn write_shapes() {
-    play("write-shapes");
-}
-
-#[test]
-fn wrong_shapes() {
-    play("wrong-shapes");
-}
-
-/// T0 lists every browser/config scenario but the live chain as pending
-/// until the new collection exists (U28), the only capability they lack
-/// since the storage area runs `setup.config`; T1 can run the live chain:
-/// Meguri's segments need only the browser, clock and storage adapters.
-#[test]
-fn meguri_needs_only_the_new_collection() {
+fn meguri_lacks_only_the_new_collection() {
     let executor = MeguriExecutor::new();
     for entry in std::fs::read_dir(conformance().join("scenarios/browser/config")).unwrap() {
         let path = entry.unwrap().path();
         let loaded = scenario::load(&path).unwrap();
         let missing = if loaded.scenario.is_live() {
-            executor.missing(&loaded.scenario.needs_on(scenario::Side::Meguri))
+            executor.missing(&loaded.scenario.needs_on(Side::Meguri))
         } else {
             executor.missing(&loaded.scenario.needs())
         };
@@ -176,10 +146,10 @@ fn meguri_needs_only_the_new_collection() {
             missing.observations
         );
         let setup: Vec<&str> = missing.setup.iter().map(String::as_str).collect();
-        if loaded.scenario.is_live() {
-            assert!(setup.is_empty(), "{}: {setup:?}", path.display());
-        } else {
+        if loaded.scenario.id == "browser/config/new-collection" {
             assert_eq!(setup, ["new_collection"], "{}", path.display());
+        } else {
+            assert!(setup.is_empty(), "{}: {setup:?}", path.display());
         }
     }
 }
