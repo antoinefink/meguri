@@ -367,8 +367,16 @@ mg_perf_ratio() {
     fi
   fi
   if [ -s "$rows" ]; then
-    [ -f "$csv" ] || printf '%s\n' "$MG_PERF_RATIO_HEADER" >"$csv"
-    cat "$rows" >>"$csv"
+    if [ ! -f "$csv" ] && ! printf '%s\n' "$MG_PERF_RATIO_HEADER" >"$csv"; then
+      mg_failure history-write "creating the header in $MG_PERF_RATIO_CSV failed"
+      mg_status error
+      return 0
+    fi
+    if ! cat "$rows" >>"$csv"; then
+      mg_failure history-write "appending rows to $MG_PERF_RATIO_CSV failed"
+      mg_status error
+      return 0
+    fi
     appended="$(wc -l <"$rows" | tr -d ' ')"
   fi
 

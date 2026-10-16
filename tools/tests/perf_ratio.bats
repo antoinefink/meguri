@@ -184,6 +184,34 @@ $today,$COMMIT,linux-arm64,10k,9953,decks.counts,6.000,5.000,0.833,ok" ]
   [ "$(field '.details.host_lease.job')" = perf-ratio ]
 }
 
+@test "perf-ratio: an unwritable history path reports an error instead of success" {
+  pair apple 10k 9953 collection.open=ok:2.0 -- collection.open=ok:1.0
+  # A directory refuses writes even when the dev container runs as root.
+  rm "$SB/docs/process/perf-ratio.csv"
+  mkdir "$SB/docs/process/perf-ratio.csv"
+  mg perf-ratio --sizes 10k --platform apple
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = history-write ]
+  [ "$(field '.summary.total')" -eq 0 ]
+}
+
+@test "perf-ratio: a failed row append reports an error instead of counting rows" {
+  pair apple 10k 9953 collection.open=ok:2.0 -- collection.open=ok:1.0
+  cat >>"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
+cat() {
+  if [ "$1" = "$MG_RUN_DIR/rows.csv" ]; then return 1; fi
+  command cat "$@"
+}
+EOF
+  mg perf-ratio --sizes 10k --platform apple
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = history-write ]
+  [ "$(field '.summary.total')" -eq 0 ]
+  [ -z "$(rows)" ]
+}
+
 @test "perf-ratio: an operation Meguri lacks is pending, with Anki's time only, and fails nothing" {
   pair apple 10k 9953 collection.open=ok:2.0 search.deck=ok:3.5 -- collection.open=unsupported search.deck=unsupported
   mg perf-ratio --sizes 10k --platform apple

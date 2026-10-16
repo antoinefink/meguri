@@ -203,6 +203,37 @@ fn error_report(out: &Path) -> Value {
 }
 
 #[test]
+fn a_failed_run_replaces_the_previous_success_report() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = generated(root.path());
+    let out = root.path().join("out");
+    let args = ["timing", "run", path(&dir), "--out", path(&out)];
+    assert_eq!(cli(&args).status.code(), Some(0));
+    assert!(out.join("timing.json").exists());
+
+    let mut invalid = args.to_vec();
+    invalid.extend_from_slice(&["--repeat", "0"]);
+    assert_eq!(cli(&invalid).status.code(), Some(2));
+    assert_eq!(error_report(&out)["kind"], json!("usage"));
+}
+
+#[test]
+fn a_successful_run_replaces_the_previous_error_report() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = generated(root.path());
+    let out = root.path().join("out");
+    let args = ["timing", "run", path(&dir), "--out", path(&out)];
+    let mut invalid = args.to_vec();
+    invalid.extend_from_slice(&["--bogus", "1"]);
+    assert_eq!(cli(&invalid).status.code(), Some(2));
+    assert_eq!(error_report(&out)["kind"], json!("usage"));
+
+    assert_eq!(cli(&args).status.code(), Some(0));
+    assert_eq!(read_json(&out.join("timing.json"))["side"], json!("meguri"));
+    assert!(!out.join("timing-error.json").exists());
+}
+
+#[test]
 fn usage_errors_exit_2_and_say_so_in_the_error_report() {
     let root = tempfile::tempdir().unwrap();
     let dir = generated(root.path());

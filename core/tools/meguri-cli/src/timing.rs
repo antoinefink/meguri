@@ -10,11 +10,13 @@
 //!
 //! `--out` (made when missing) gets `timing.json`, or `timing-error.json`
 //! (`{kind, detail}`; kinds `usage`, `no_collection`, `open_failed`,
-//! `failed`) when the run cannot report. Copies go to a directory made in
-//! `--scratch` (default: the system's temporary directory) and deleted at
-//! the end: a tmpfs in Docker, the Mac's local disk natively, under
-//! `build/private/` for a vault copy (T2.1, T3.4). Exit 0 with a report, 1
-//! with an error report, 2 on a usage error.
+//! `failed`) when the run cannot report. A run first removes both files, so
+//! `--out` never holds an earlier run's report beside its own. Copies go to
+//! a directory made in `--scratch` (default: the system's temporary
+//! directory) and deleted at the end: a tmpfs in Docker, the Mac's local
+//! disk natively, under `build/private/` for a vault copy (T2.1, T3.4).
+//! Exit 0 with a report, 1 with an error report (or when an earlier report
+//! cannot be removed), 2 on a usage error.
 //!
 //! The report's `meguri.commit` is `MEGURI_BUILD_COMMIT` as the build saw
 //! it (40 hex digits; `null` otherwise) and `meguri.profile` the Cargo
@@ -121,6 +123,14 @@ fn run(args: &[String]) -> i32 {
     let Some(out) = out else {
         return usage(None, "--out is required");
     };
+    for name in ["timing.json", "timing-error.json"] {
+        if let Err(e) = fs::remove_file(out.join(name))
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("meguri-cli timing: removing {name} failed: {e}");
+            return 1;
+        }
+    }
     if let Some(problem) = problem {
         return usage(Some(&out), &problem);
     }
