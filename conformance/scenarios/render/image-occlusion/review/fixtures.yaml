@@ -1,0 +1,73 @@
+# specs/render/image-occlusion-review.md M15: the shape divs that the review
+# runtime's test fixtures draw from. Each case renders a synthetic cloze note
+# type's question and answer with `cloze:` over an occlusion field, so the
+# golden holds the exact `div` markup of every fixture side (classes by side
+# and activity, data attributes, the encoded label text). The runtime cases
+# (M14) wrap these outputs in their own page; nothing here runs a script.
+# Pending in Meguri until U64 fills the image-occlusion hook of `cloze:`.
+id: render/image-occlusion/review/fixtures
+description: "cloze: output of the image-occlusion fixtures used by the review runtime tests"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Mask Probe, kind: cloze, fields: [Shapes]}
+          cases:
+            # IO1 hide-all, card 2: c2 active, c1 and c3 inactive, label c0
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 1
+              fields: ["{{c1::image-occlusion:rect:left=.05:top=.1:width=.2:height=.15:oi=1}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.15:oi=1}}<br>{{c3::image-occlusion:rect:left=.7:top=.1:width=.2:height=.15:oi=1}}<br>{{c0::image-occlusion:text:left=.05:top=.6:text=Note:scale=1.:fs=.08:oi=1}}<br>"]
+            # IO2 hide-one, card 2: the same shapes without oi
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 1
+              fields: ["{{c1::image-occlusion:rect:left=.05:top=.1:width=.2:height=.15}}<br>{{c2::image-occlusion:rect:left=.4:top=.1:width=.2:height=.15}}<br>{{c3::image-occlusion:rect:left=.7:top=.1:width=.2:height=.15}}<br>{{c0::image-occlusion:text:left=.05:top=.6:text=Note:scale=1.:fs=.08}}<br>"]
+            # IO3 fills, card 1: own fills of active and inactive masks
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 0
+              fields: ["{{c1::image-occlusion:rect:left=.05:top=.05:width=.15:height=.15:fill=#123456:oi=1}}<br>{{c2::image-occlusion:rect:left=.3:top=.05:width=.15:height=.15:fill=#00ff00:oi=1}}<br>{{c3::image-occlusion:rect:left=.55:top=.05:width=.15:height=.15:fill=#ffeba2:oi=1}}<br>{{c4::image-occlusion:rect:left=.8:top=.05:width=.15:height=.15:fill=#FFEBA2:oi=1}}<br>{{c5::image-occlusion:ellipse:left=.05:top=.5:rx=.1:ry=.1:oi=1}}<br>{{c6::image-occlusion:polygon:left=.4:top=.5:points=.4,.5 .6,.5 .5,.7:fill=#ff00ff:oi=1}}<br>"]
+            # IO4 labels, card 1: font size given and not, rotated two-line
+            # label with an escaped colon, label without scale, one mask
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 0
+              fields: ["{{c0::image-occlusion:text:left=.1:top=.1:text=Label:scale=1.:fs=.1}}<br>{{c0::image-occlusion:text:left=.1:top=.4:text=Plain:scale=1.}}<br>{{c0::image-occlusion:text:left=.5:top=.1:angle=2500:text=a\\:b\nc:scale=2.:fs=.05:fill=#0000ff}}<br>{{c0::image-occlusion:text:left=.5:top=.7:text=Unscaled}}<br>{{c1::image-occlusion:rect:left=.7:top=.4:width=.2:height=.2}}<br>"]
+            # IO5 rotation, card 1: 90 degrees as 2500 and 12500 steps
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 0
+              fields: ["{{c1::image-occlusion:rect:left=.25:top=.25:angle=2500:width=.25:height=.125}}<br>{{c1::image-occlusion:ellipse:left=.6:top=.2:angle=2500:rx=.1:ry=.05}}<br>{{c1::image-occlusion:rect:left=.1:top=.6:angle=12500:width=.1:height=.05}}<br>{{c2::image-occlusion:rect:left=.6:top=.6:width=.1:height=.1}}<br>"]
+            # IO6 polygons, card 1: offset by left/top minus the smallest
+            # point, angle ignored
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 0
+              fields: ["{{c1::image-occlusion:polygon:left=.5:top=.5:points=.1,.1 .3,.1 .2,.3}}<br>{{c1::image-occlusion:polygon:left=.1:top=.6:angle=2500:points=.1,.6 .3,.6 .3,.8 .1,.8}}<br>"]
+            # IO7 several numbers on one mask, card 2
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 1
+              fields: ["{{c1,2::image-occlusion:rect:left=.1:top=.1:width=.2:height=.2:oi=1}}<br>{{c3::image-occlusion:rect:left=.5:top=.5:width=.2:height=.2:oi=1}}<br>"]
+            # IO8 a polygon without points, card 2
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 1
+              fields: ["{{c1::image-occlusion:polygon:left=.1:top=.1}}<br>{{c2::image-occlusion:rect:left=.5:top=.5:width=.2:height=.2}}<br>"]
+            # IO9 shapes that draw nothing, card 1: unknown kind, zero width,
+            # missing radius; only the last rect draws
+            - front: "{{cloze:Shapes}}"
+              back: "{{cloze:Shapes}}"
+              ord: 0
+              fields: ["{{c1::image-occlusion:star:left=.1:top=.1:width=.2:height=.2}}<br>{{c1::image-occlusion:rect:left=.4:top=.1:width=0:height=.2}}<br>{{c1::image-occlusion:ellipse:left=.1:top=.5:rx=.1}}<br>{{c1::image-occlusion:rect:left=.6:top=.6:width=.2:height=.2}}<br>"]
+  - observe:
+      - template:
+          notetype: {name: Mask Audio Probe, kind: cloze, fields: [Shapes, S1, S2]}
+          cases:
+            # IO10 hidden per-mask audio fields next to the masks, card 1:
+            # their cloze spans share the class names of the masks
+            - front: "{{cloze:Shapes}}<div style=\"display:none\">{{cloze:S1}}{{cloze:S2}}</div>"
+              back: "{{cloze:Shapes}}<div style=\"display:none\">{{cloze:S1}}{{cloze:S2}}</div>"
+              ord: 0
+              fields: ["{{c1::image-occlusion:rect:left=.1:top=.1:width=.3:height=.3:oi=1}}<br>{{c2::image-occlusion:rect:left=.5:top=.5:width=.3:height=.3:oi=1}}<br>", "{{c1::[sound:_s1.mp3]}}", "{{c2::[sound:_s2.mp3]}}"]
