@@ -31,6 +31,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         serde_json::json!([
             "add_note_tags",
             "advance",
+            "browser_config_set",
             "clear_unused_tags",
             "db_exec",
             "delete_tags",
@@ -38,6 +39,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "open",
             "remove_note_tags",
             "rename_tag",
+            "reopen",
             "reparent_tags",
             "set_clock",
             "set_config",
@@ -48,6 +50,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!([
+            "browser_config",
             "canonical_search",
             "cloze",
             "db_dump",
@@ -56,14 +59,16 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "search",
             "tag_tree",
             "template",
-            "text"
+            "text",
+            "timing"
         ])
     );
-    // dsl.md D7.2: 37 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 38 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
-    // set_config, undo-ops.md's undo, redo and remove_config and the eight
-    // ops of tag-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 37);
+    // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
+    // of tag-ops.md and browser-config-ops.md's browser_config_set among
+    // them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 38);
     for op in [
         "actor",
         "sync",
@@ -77,6 +82,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "remove_config",
         "rename_tag",
         "set_flag",
+        "browser_config_set",
     ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),

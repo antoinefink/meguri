@@ -89,6 +89,9 @@ impl OpenConfig {
     }
 }
 
+/// The name of the day clock's open step (L2), as a failed open reports it.
+pub const DAY_CLOCK_STEP: &str = "day_clock";
+
 /// The engine. Clones share it.
 #[derive(Clone)]
 pub struct Engine {
@@ -331,14 +334,25 @@ impl Engine {
             generation,
             privilege: Some(privilege),
         };
-        for step in &config.ports.open_steps {
-            if let Err(error) = step.run(&privileged) {
+        // The registered open steps, then the day clock's first check, which
+        // writes and unburies before anything reads counts (L2,
+        // `sched/day-clock` D8).
+        type Step<'a> = (&'a str, Box<dyn Fn() -> Result<(), EngineError> + 'a>);
+        let mut steps: Vec<Step<'_>> = config
+            .ports
+            .open_steps
+            .iter()
+            .map(|step| (step.name(), Box::new(|| step.run(&privileged)) as Box<dyn Fn() -> _>))
+            .collect();
+        steps.push((DAY_CLOCK_STEP, Box::new(|| privileged.restart_day_clock().map(drop))));
+        for (name, run) in steps {
+            if let Err(error) = run() {
                 if let Err(close_error) = shut_down(&core, Some(writer)) {
                     tracing::warn!(error = %close_error, "closing the collection after a failed open step");
                 }
                 self.set_state(LifecycleState::Failed {
                     reason: FailedReason::OpenStep {
-                        step: step.name().to_owned(),
+                        step: name.to_owned(),
                         detail: error.to_string(),
                     },
                 });

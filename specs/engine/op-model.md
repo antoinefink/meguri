@@ -15,7 +15,7 @@ An op is a closure that writes through one write scope (`storage/ids-usn-mtime`,
 |---|---|
 | name | a static name; the catalog (O9) names every op that may declare a long write |
 | source | one of the seven below |
-| stamping mode | default from the source (table below); an op may set another (`KeepMtime` for `.apkg` updates, `CallerSupplied` for undo restores, `Raw` for U40's rollover queue write) |
+| stamping mode | default from the source (table below); an op may set another (`KeepMtime` for `.apkg` updates, `CallerSupplied` for undo restores, `Raw` for the day clock's ops, U40, `sched/day-clock` D10) |
 | preconditions | O7 |
 | cancel token, progress sink | O5, `engine/jobs` |
 | planned generation | the generation of the handle the op is submitted through (`engine/lifecycle` L3); none when the op read nothing before it was submitted and says so (`run_on_any_generation`) |

@@ -1621,6 +1621,8 @@ dependencies = [
  "criterion",
  "libc",
  "meguri-model",
+ "meguri-sched",
+ "meguri-search",
  "meguri-storage",
  "meguri-testkit",
  "meguri-text",
@@ -1663,6 +1665,7 @@ name = "meguri-sched"
 version = "0.0.0"
 dependencies = [
  "fsrs",
+ "meguri-model",
  "rand 0.9.4",
 ]
 
@@ -1671,9 +1674,11 @@ name = "meguri-search"
 version = "0.0.0"
 dependencies = [
  "meguri-model",
+ "meguri-storage",
  "meguri-testkit",
  "regex",
  "rusqlite",
+ "tempfile",
 ]
 
 [[package]]

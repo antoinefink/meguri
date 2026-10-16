@@ -17,6 +17,7 @@ use meguri_model::tag::Tag;
 use rusqlite::{Connection, params_from_iter};
 
 use crate::connections::{Reader, Writer};
+use crate::day_writes::CardQueueRow;
 use crate::error::StorageError;
 use crate::journal;
 use crate::rows::config::{ConfigValue, stored_value};
@@ -202,6 +203,13 @@ pub trait ReadRows: sealed::Connected {
             rows::select_image(self.connection(), Table::Config, &RowKey::text(key))?
                 .and_then(|cells| stored_value(&cells[3])),
         )
+    }
+
+    /// The cards whose stored `queue` is one of `queues`, by id: their id,
+    /// `type`, `queue` and `due` (the day clock's unbury, `sched/day-clock`
+    /// D7).
+    fn cards_in_queues(&self, queues: &[i64]) -> Result<Vec<CardQueueRow>, StorageError> {
+        crate::day_writes::cards_in_queues(self.connection(), queues)
     }
 
     /// Every config key, in byte order.

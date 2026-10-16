@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+pub mod day;
 pub mod steps;
 pub mod tagging;
 

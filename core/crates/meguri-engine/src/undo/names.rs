@@ -57,6 +57,13 @@ pub const EXPAND_COLLAPSE: &str = "Expand/Collapse";
 /// Meguri's own step for renaming a flag or restoring its default name
 /// (`specs/tags/flags-and-marked.md` F4): Anki records none. Not in V4.
 pub const RENAME_FLAG: &str = "Rename Flag";
+/// Meguri's own steps for the saved-search writes
+/// (`specs/browser/config-keys.md` K7.2, K10.2; R2020): Anki records none.
+/// Not in V4.
+pub const SAVE_SEARCH: &str = "Save Search";
+pub const UPDATE_SAVED_SEARCH: &str = "Update Saved Search";
+pub const RENAME_SAVED_SEARCH: &str = "Rename Saved Search";
+pub const DELETE_SAVED_SEARCH: &str = "Delete Saved Search";
 
 /// Every name, in V4's order.
 pub const ALL: [&str; 38] = [

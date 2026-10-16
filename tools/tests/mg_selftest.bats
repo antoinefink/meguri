@@ -799,24 +799,27 @@ mod tests {
   validate "$result"
 }
 
-@test "core-lint fails naming the forbidden edges: tokio in sched, engine in sched, stats in package" {
+@test "core-lint fails naming the forbidden edges: tokio in sched, sched in search, stats in package" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   copy_core
   vendor_crate tokio MIT
   add_dep crates/meguri-sched 'tokio = { path = "../../../vendor/tokio" }'
-  add_dep crates/meguri-sched 'meguri-engine.workspace = true'
+  # An upward edge to a crate that does not depend on the source: since U40
+  # meguri-engine depends on meguri-sched, so sched -> engine is a cycle that
+  # cargo refuses before layering-check runs.
+  add_dep crates/meguri-search 'meguri-sched.workspace = true'
   add_dep crates/meguri-package 'meguri-stats.workspace = true'
   mg core-lint
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(failure_ids)" = "layering/edge/meguri-package -> meguri-stats
-layering/edge/meguri-sched -> meguri-engine
+layering/edge/meguri-search -> meguri-sched
 layering/restricted/meguri-sched -> tokio" ]
   local m
   m="$(jq -r '.failures[] | select(.id == "layering/restricted/meguri-sched -> tokio") | .message' "$result")"
   [[ "$m" == *"meguri-sched depends on tokio"* ]]
-  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-sched -> meguri-engine") | .message' "$result")"
-  [[ "$m" == *"edges.toml row 6"*"(row 7)"* ]]
+  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-search -> meguri-sched") | .message' "$result")"
+  [[ "$m" == *"edges.toml row 5"*"(row 6)"* ]]
   m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-package -> meguri-stats") | .message' "$result")"
   [[ "$m" == *"edges.toml row 8"*"(row 8)"*siblings* ]]
   [ "$(field '.failures[0].repro')" = "tools/mg core-lint" ]

@@ -691,6 +691,8 @@ pub enum Step {
     SetTagCollapsed(SetTagCollapsedArgs),
     /// tag-ops.md G8.
     SetFlag(SetFlagArgs),
+    /// browser-config-ops.md B1.
+    BrowserConfigSet(BrowserConfigSetArgs),
     Bury(DraftArgs),
     Suspend(DraftArgs),
     Forget(DraftArgs),
@@ -725,7 +727,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 38] = [
+    pub const NAMES: [&'static str; 39] = [
         "advance",
         "set_clock",
         "add_note",
@@ -745,6 +747,7 @@ impl Step {
         "clear_unused_tags",
         "set_tag_collapsed",
         "set_flag",
+        "browser_config_set",
         "bury",
         "suspend",
         "forget",
@@ -791,6 +794,7 @@ impl Step {
             Step::ClearUnusedTags(_) => "clear_unused_tags",
             Step::SetTagCollapsed(_) => "set_tag_collapsed",
             Step::SetFlag(_) => "set_flag",
+            Step::BrowserConfigSet(_) => "browser_config_set",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
             Step::Forget(_) => "forget",
@@ -1042,6 +1046,16 @@ pub struct SetTagCollapsedArgs {
 pub struct SetFlagArgs {
     pub cards: Vec<CardRef>,
     pub flag: u64,
+}
+
+/// `browser_config_set: {key, value}` (browser-config-ops.md B1): `key` one
+/// of the 22 browser config keys, `value` of its shape (both checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserConfigSetArgs {
+    pub key: String,
+    pub value: Value,
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes
@@ -1301,6 +1315,8 @@ pub enum ObservationKind {
     FsrsNext,
     /// tag-ops.md G9.
     TagTree,
+    /// browser-config-ops.md B2.
+    BrowserConfig,
 }
 
 /// How a kind takes arguments.
@@ -1321,7 +1337,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 25] = [
+    pub const ALL: [ObservationKind; 26] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1347,6 +1363,7 @@ impl ObservationKind {
         ObservationKind::Cloze,
         ObservationKind::FsrsNext,
         ObservationKind::TagTree,
+        ObservationKind::BrowserConfig,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1376,6 +1393,7 @@ impl ObservationKind {
             ObservationKind::Cloze => "cloze",
             ObservationKind::FsrsNext => "fsrs_next",
             ObservationKind::TagTree => "tag_tree",
+            ObservationKind::BrowserConfig => "browser_config",
         }
     }
 
@@ -1391,7 +1409,8 @@ impl ObservationKind {
             | ObservationKind::Digest
             | ObservationKind::SchemaObjects
             | ObservationKind::UndoStatus
-            | ObservationKind::TagTree => ArgShape::None,
+            | ObservationKind::TagTree
+            | ObservationKind::BrowserConfig => ArgShape::None,
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }

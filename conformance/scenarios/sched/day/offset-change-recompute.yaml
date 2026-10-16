@@ -1,0 +1,20 @@
+# R464, R597 (D6, D12.1): the UTC offset changes (Paris moves its clocks
+# forward on 31 March 2030) while a day computed with the old offset is
+# cached. Meguri computes the day afresh at the first query after the change,
+# so the day rolls at 04:00 CEST. Anki keeps the cached day until its
+# boundary, 04:00 +01:00 (05:00 CEST), passes. Deviation
+# day-clock-offset-change-* in conformance/deviations.yaml.
+id: sched/day/offset-change-recompute
+clock: {tz: Europe/Paris, start: "2030-03-29T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-03-30T12:00:00"
+  - observe: [timing]
+  - set_clock: "2030-03-31T03:59:59+02:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - set_clock: "2030-03-31T05:00:00+02:00"
+  - observe: [timing]
