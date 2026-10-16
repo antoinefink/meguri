@@ -76,6 +76,31 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/engine/undo.md A8: a redo whose rows changed outside the undo
+  # history (here a trigger took the answer's review-log id) is refused by
+  # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row
+  # and answers the card again.
+  - id: undo-revlog-taken-id-redo
+    requirement: R1796
+    summary: Meguri refuses the redo of an answer whose review-log id another writer took after the undo, with changed_externally; Anki redoes it.
+    test: undo/revlog-taken-id
+    scenarios: [undo/revlog-taken-id]
+    pointer: /steps/9
+    transform: {replace: {redo: {error: changed_externally}}}
+  - id: undo-revlog-taken-id-status
+    requirement: R1796
+    summary: After the refused redo Meguri has nothing to undo or redo; Anki can undo the redone answer.
+    test: undo/revlog-taken-id
+    scenarios: [undo/revlog-taken-id]
+    pointer: /steps/10/undo_status
+    transform: {replace: {undo: null, redo: null}}
+  - id: undo-revlog-taken-id-card
+    requirement: R1796
+    summary: After the refused redo the card is still new on Meguri; Anki answered it again.
+    test: undo/revlog-taken-id
+    scenarios: [undo/revlog-taken-id]
+    pointer: /steps/11/db_exec/rows
+    transform: {replace: [[0, 0, 0]]}
   # specs/tags/tags.md T7, T8: after a rename or a reparent, Meguri writes into
   # the notes the spelling it gives every new tag (T3, after removing the old
   # rows); Anki writes the text it built, spelled from the old rows or as

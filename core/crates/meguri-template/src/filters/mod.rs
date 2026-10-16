@@ -12,6 +12,17 @@ pub mod tts;
 
 use std::borrow::Cow;
 
+use crate::cloze;
+
+/// What the `cloze` and `cloze-only` filters need of the card being rendered
+/// (F8): its card number, the template ordinal plus one
+/// (`render/cloze#C1`), and the side its template is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CardContext {
+    pub card: u32,
+    pub side: cloze::Side,
+}
+
 /// F7: the three type-in markers; each discards the text it is given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeMarker {
@@ -45,10 +56,10 @@ enum Builtin<'a> {
     /// `tts ` followed by its options, kept exactly.
     Tts(&'a str),
     Type(TypeMarker),
-    /// `cloze` and `cloze-only` (F8): built in, so they never end a chain.
-    /// Their output is U61's (`specs/render/cloze.md`); until it lands they
-    /// leave the text unchanged.
+    /// `cloze` (F8, `render/cloze#C6`): built in, so it never ends a chain.
     Cloze,
+    /// `cloze-only` (F8, `render/cloze#C9`).
+    ClozeOnly,
 }
 
 impl<'a> Builtin<'a> {
@@ -62,12 +73,13 @@ impl<'a> Builtin<'a> {
             "type" => Builtin::Type(TypeMarker::Plain),
             "type-nc" => Builtin::Type(TypeMarker::NoCombining),
             "type-cloze" => Builtin::Type(TypeMarker::Cloze),
-            "cloze" | "cloze-only" => Builtin::Cloze,
+            "cloze" => Builtin::Cloze,
+            "cloze-only" => Builtin::ClozeOnly,
             _ => Builtin::Tts(name.strip_prefix("tts ")?),
         })
     }
 
-    fn apply(self, text: &str, key: &str) -> String {
+    fn apply(self, text: &str, key: &str, context: CardContext) -> String {
         match self {
             Builtin::Text => text::text(text),
             Builtin::Furigana => furigana::furigana(text),
@@ -76,7 +88,8 @@ impl<'a> Builtin<'a> {
             Builtin::Hint => hint::hint(text, key),
             Builtin::Tts(options) => tts::tts(text, options),
             Builtin::Type(marker) => marker.marker(key),
-            Builtin::Cloze => text.to_owned(),
+            Builtin::Cloze => cloze::render(text, context.card, context.side),
+            Builtin::ClozeOnly => cloze::render_only(text, context.card, context.side),
         }
     }
 }
@@ -96,8 +109,9 @@ fn type_rewrite(filters: &[String]) -> Option<TypeMarker> {
 }
 
 /// F1: the field's text through a replacement's filters, given in source
-/// order, for the replacement's key as written.
-pub fn apply<'t>(value: &'t str, key: &str, filters: &[String]) -> Cow<'t, str> {
+/// order, for the replacement's key as written, on the card and side
+/// `context` names.
+pub fn apply<'t>(value: &'t str, key: &str, filters: &[String], context: CardContext) -> Cow<'t, str> {
     if let Some(marker) = type_rewrite(filters) {
         return Cow::Owned(marker.marker(key));
     }
@@ -109,7 +123,7 @@ pub fn apply<'t>(value: &'t str, key: &str, filters: &[String]) -> Cow<'t, str> 
         let Some(filter) = Builtin::named(name) else {
             break;
         };
-        text = Cow::Owned(filter.apply(&text, key));
+        text = Cow::Owned(filter.apply(&text, key, context));
     }
     text
 }

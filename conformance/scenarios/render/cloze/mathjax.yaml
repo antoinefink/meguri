@@ -1,0 +1,26 @@
+# specs/render/cloze.md C8: markup inside \(...\) and \[...\] is removed from
+# cloze: output only, across span boundaries, and cloze parsing ignores MathJax
+# (R973, R563; see C13 for the plan's MathJax-aware parsing).
+id: render/cloze/mathjax
+description: "MathJax in cloze output"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back, only_back, typing]
+          inputs:
+            - ["{{c1::\\(a}}b\\)}}", 1]
+            - ["{{c2::\\(\\frac{1}{x^{2}}\\)}}", 2]
+            - ["{{c1::\\(x\\)}}", 1]
+            - ["{{c1::\\(<b>x</b>\\)}} \\[<i>y</i>\\]", 1]
+            - ["\\(a {{c1::b}} c\\)", 1]
+            - ["{{c1::x}} \\(<b>open only", 1]
+            - ["{{c1::x}} \\(<b>y</b>\\] \\[<i>z</i>\\)", 1]
+            - ["{{c1::x}} \\\\(<b>y</b>\\)", 1]
+            - ["{{c1::x}} \\(<!-- c -->y<style>s</style>\\)", 1]
+            - ["{{c1::x}} \\(a < b\\)", 1]
+            - ["{{c1::x}} \\(a &amp; b &lt;\\)", 1]
+            - ["{{c1::x}} \\(<b>one</b>\\) and \\(<i>two</i>\\)", 1]
+            - ["{{c1::x}} \\(\\)", 1]
+            - ["{{c1::x}} \\(<b>multi\nline</b>\\)", 1]
+            - ["text {{c1::a}} \\(<b>x</b>\\)", 2]

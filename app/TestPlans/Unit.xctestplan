@@ -39,6 +39,14 @@
         "identifier" : "DesignSystemTests",
         "name" : "DesignSystemTests"
       }
+    },
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:Packages/MeguriKit",
+        "identifier" : "CardRenderingTests",
+        "name" : "CardRenderingTests"
+      }
     }
   ],
   "version" : 1

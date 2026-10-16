@@ -40,15 +40,15 @@ impl fmt::Display for CoreError {
 impl std::error::Error for CoreError {}
 
 /// The engine's errors as Swift sees them. U37 adds variants for the op
-/// results Swift reacts to (`Stale`, `StaleGeneration`); until then they
-/// cross as `Unavailable` or `Internal`.
+/// results Swift reacts to (`Stale`, `StaleGeneration`, `UndoUnavailable`);
+/// until then they cross as `Unavailable` or `Internal`.
 impl From<EngineError> for CoreError {
     fn from(error: EngineError) -> CoreError {
         match error {
             EngineError::Cancelled => CoreError::Cancelled,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
             EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
-            EngineError::StaleGeneration { .. } => CoreError::Unavailable {
+            EngineError::StaleGeneration { .. } | EngineError::UndoUnavailable { .. } => CoreError::Unavailable {
                 reason: error.to_string(),
             },
             EngineError::Unsupported { feature } => CoreError::Unsupported { feature },

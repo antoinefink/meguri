@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "cloze": {
+          "back": ["<span class=\"cloze\" data-ordinal=\"1\">H</span><span class=\"cloze\" data-ordinal=\"1\">2</span><span class=\"cloze\" data-ordinal=\"1\">O</span>", "<span class=\"cloze\" data-ordinal=\"1\">red</span>, <span class=\"cloze\" data-ordinal=\"1\">green</span> and <span class=\"cloze\" data-ordinal=\"1\">blue</span>", "<span class=\"cloze\" data-ordinal=\"1\">red</span>, <span class=\"cloze\" data-ordinal=\"1\">red</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">blue</span>", "<span class=\"cloze-inactive\" data-ordinal=\"1\">red</span>, <span class=\"cloze-inactive\" data-ordinal=\"1\">red</span> and <span class=\"cloze\" data-ordinal=\"2\">blue</span>", "<span class=\"cloze\" data-ordinal=\"1\">same</span> <span class=\"cloze\" data-ordinal=\"1\">same</span> <span class=\"cloze\" data-ordinal=\"1\">same</span>", "<span class=\"cloze\" data-ordinal=\"1\">sun</span> <span class=\"cloze\" data-ordinal=\"1\">sun</span> <span class=\"cloze\" data-ordinal=\"1\">star</span>", "<span class=\"cloze\" data-ordinal=\"1\">sun</span> <span class=\"cloze\" data-ordinal=\"1\">sun</span>", "x<span class=\"cloze\" data-ordinal=\"3\">a</span>y<span class=\"cloze\" data-ordinal=\"3\">a</span>z"],
+          "front": ["<span class=\"cloze\" data-cloze=\"H\" data-ordinal=\"1\">[...]</span><span class=\"cloze\" data-cloze=\"2\" data-ordinal=\"1\">[...]</span><span class=\"cloze\" data-cloze=\"O\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"red\" data-ordinal=\"1\">[...]</span>, <span class=\"cloze\" data-cloze=\"green\" data-ordinal=\"1\">[...]</span> and <span class=\"cloze\" data-cloze=\"blue\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"red\" data-ordinal=\"1\">[...]</span>, <span class=\"cloze\" data-cloze=\"red\" data-ordinal=\"1\">[...]</span> and <span class=\"cloze-inactive\" data-ordinal=\"2\">blue</span>", "<span class=\"cloze-inactive\" data-ordinal=\"1\">red</span>, <span class=\"cloze-inactive\" data-ordinal=\"1\">red</span> and <span class=\"cloze\" data-cloze=\"blue\" data-ordinal=\"2\">[...]</span>", "<span class=\"cloze\" data-cloze=\"same\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"same\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"same\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"star\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[hint]</span> <span class=\"cloze\" data-cloze=\"sun\" data-ordinal=\"1\">[...]</span>", "x<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"3\">[...]</span>y<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"3\">[...]</span>z"],
+          "only_back": ["H, 2, O", "red, green, blue", "red, red", "blue", "same, same, same", "sun, sun, star", "sun, sun", "a, a"],
+          "only_front": ["..., ..., ...", "..., ..., ...", "..., ...", "...", "..., ..., ...", "..., ..., ...", "hint, ...", "..., ..."],
+          "typing": ["H, 2, O", "red, green, blue", "red", "blue", "same", "sun, sun, star", "sun", "a"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "09cd906bf8cf0daa13a1dcb841fcc42e97f2d7f3c5c2e43585d32f2d457aa10f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/repeated",
+  "scenario_sha256": "5b36ea4f5116559a95b1e6636dd9aae8089c2cd85cb7e7d270c80cb3fa0eedbc",
+  "tz": "UTC"
+}

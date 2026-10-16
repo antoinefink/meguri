@@ -144,7 +144,7 @@ impl Collection {
         Ok(ReaderLease::new(guard, &self.core.exec, self.generation))
     }
 
-    fn check_current(&self) -> Result<(), EngineError> {
+    pub(crate) fn check_current(&self) -> Result<(), EngineError> {
         let current = self.current_generation();
         if current == self.generation {
             Ok(())

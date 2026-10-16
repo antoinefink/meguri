@@ -29,12 +29,20 @@ criterion.workspace = true
 # reads, the steppable clock, WAL-flush observations) and gives them fixture
 # collections.
 meguri-testkit.workspace = true
+# undo_conformance.rs: scenario values and the golden's observations.
+serde_json.workspace = true
 tempfile.workspace = true
 
 # Criterion wall-clock suite (U12 harness, R1864): empty-op overhead and the
 # answer-sized write phase (`specs/engine/op-model.md` O10).
 [[bench]]
 name = "executor"
+harness = false
+
+# Criterion wall-clock suite: undo of an answer (`specs/engine/undo.md` M12,
+# R1811).
+[[bench]]
+name = "undo"
 harness = false
 
 [[test]]
