@@ -137,12 +137,15 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `advance` | duration | none | stable |
 | `set_clock` | date-time | none | stable |
 | `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
-| `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing | none | stable |
+| `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing; the card gets the state `next_states` reports for the rating at the current instant, written as `specs/sched/answering.md` says | none | stable (`sched/answering`) |
 | `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
 | `observe` | list of observation requests (`observations.md` O2); the pure kinds `text` and `fsrs_next` (`float-determinism.md` F5) never touch the collection | `{<kind>: <value>, ...}` | stable |
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |
 | `delete_notes` | `{notes: [#nN, ...]}`: notes that no longer exist are skipped | none | stable (`record-ops.md` W3) |
-| `set_config` | `{key, value}`: one collection config key and its JSON value | none | stable (`record-ops.md` W4) |
+| `set_config` | `{key, value, undoable?}`: one collection config key and its JSON value; `undoable: true` makes the write an undoable step (`undo-ops.md` V3.1) | none | stable (`record-ops.md` W4) |
+| `remove_config` | `{key}`: remove one collection config key, as an undoable step | none | stable (`undo-ops.md` V3.2) |
+| `undo` | `{}`: apply the top step of the undo history | none; rejections `nothing_to_undo`, `changed_externally` (Meguri's only) | stable (`undo-ops.md` V1) |
+| `redo` | `{}`: apply the top step of the redo history | none; rejections `nothing_to_redo`, `changed_externally` (Meguri's only) | stable (`undo-ops.md` V1) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
@@ -156,7 +159,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |
-| `sync` | `{kind: login \| normal \| full_upload \| full_download}` | `{result: <result>}`: `ok`, or for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`; rejections `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
+| `sync` | `{kind: login \| normal \| full_upload \| full_download, credentials?: account \| wrong_password}`; `credentials` only with `login` | `{result: <result>}`: `ok`, or for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`; rejections `auth_failed`, `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
 | `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |
 | `converge` | `{}` | `{differences, dump}` (`sync-ops.md` S7.5) | stable (actor scenarios, `sync-ops.md` S7) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
@@ -174,6 +177,7 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 - An executor runs a scenario and returns its observations or an error. The oracle executor is a pool of oracle workers (`conformance/schema/protocol.json`), keyed by time zone. Meguri's executor runs the core in-process, with a scenario clock (D5) and the seeded random source, through the time and randomness seams (R1875).
 - Each executor declares capabilities: the setup sections, ops and observation kinds it implements. Before running, the runner compares the scenario's needs with them. A scenario that needs anything missing is `pending` (D10) and is not run.
 - Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op. The ability to play an actor of an actor scenario, through the parties executor, counts as the `actor` op (`sync-ops.md` S10.2).
+- **The new collection** (D6) is a capability of its own, `new_collection`, listed with the setup sections. Meguri declares it once its executor starts every scenario that needs it from a new collection made at `clock.start`: U28's bootstrap (`storage/new-collection`), or before it a stand-in that an area's spec defines (the note type area's, U29). A scenario needs it unless its first step is `open` (`storage-ops.md` P1) or it has no `setup` and touches no collection: every step is `advance`, `set_clock` or an `observe` of kinds that never read a collection (`text`, `cloze`, `fsrs_next`, `canonical_search` (`search-ops.md` S2), and `template` when every case is a new-note case). So `smoke/runner-empty` (no steps) needs nothing, while a scenario with no setup that runs `set_config` or `db_exec`, or observes `timing`, needs it: without it the scenario is `pending`, not an `error` for want of an open collection. A live scenario needs it when Meguri runs its first segment (D9.2); an actor scenario needs it for each Meguri actor, which starts from a new collection (`sync-ops.md` S2.2, S10.2).
 
 ## D9. Area metadata and live scenarios
 
@@ -198,7 +202,7 @@ A scenario with `handoff` steps is live: Meguri's output is the oracle's input (
 - **What crosses.** At a handoff the side closes its collection and copies its session directory (the collection file `collection.anki2`, its media and every file an op wrote, such as an `export`'s package) to `<handoff dir>/<scenario id>@<handoff step index>/` (`@` is outside the id alphabet, so one scenario's handoff directories never lie inside another's, such as `smoke/rt` and `smoke/rt/1`, which T1 runs at the same time), together with the clock (epoch seconds) and the real ids behind `#nN` and `#cN` (protocol.json `handoff_state`). The next side copies that directory, opens the collection at the same clock and keeps numbering logical ids after the handed ones. It runs no setup. The handoff directory is one directory both see: the runner's on the host, mounted into oracle workers (`ORACLE_HANDOFF`). Areas add files to the session directory with the driver. Clients that sync with each other are actors (D9.3), not handoffs.
 - **Golden.** A live scenario has a golden like any other, recorded by `tools/mg oracle record`: the oracle runs every segment itself, and each handoff only closes and reopens its collection. So the golden is what the oracle observes of its own output.
 - **Pass.** T1 runs the segments on their sides (the chain) and compares the chain's observations, the oracle's observations of Meguri's output included, with the golden by the usual rules and deviations (`observations.md` O7). A handoff step records `{}`.
-- **Capabilities.** Meguri needs `handoff`, the setup sections when it runs the first segment, and the ops and observation kinds of its own segments. Without them the scenario is `pending`.
+- **Capabilities.** Meguri needs `handoff`, the setup sections and the new collection (D8) when it runs the first segment, and the ops and observation kinds of its own segments. Without them the scenario is `pending`.
 - Meguri's executor alone, and T0, never run a live scenario.
 
 ### D9.3 Actor scenarios
@@ -219,7 +223,7 @@ The runner gives each scenario exactly one status, checking in this order:
 | `invalid` | the file does not parse, violates the schema (the runner checks what `scenario.schema.json` requires, not only `goldens-check`), or its id does not match its path; on macOS also when the scenario's overlay fails its schema or the `fp-libm-boundary` class (`float-determinism.md` F7.4, F8) | always | always |
 | `missing` | no golden | if active | always |
 | `stale` | the golden's `scenario_sha256` differs from the scenario's hash, or its `oracle.lock_sha256` differs from the current pin (`conformance/oracle.json`); on macOS also when the scenario's overlay is stale or orphaned (`float-determinism.md` F7.3) | if active | always |
-| `pending` | Meguri lacks a setup section, op or observation kind the scenario uses (for a live scenario: what its own segments use, D9.2, or what its Meguri actors use, D9.3) | if active | if active |
+| `pending` | Meguri lacks a setup section, op or observation kind the scenario uses, or the new collection it starts from (D8) (for a live scenario: what its own segments use, D9.2, or what its Meguri actors use, D9.3) | if active | if active |
 | `live` | T0 only: a live scenario Meguri could join; T0 does not run it | never | (not in T1) |
 | `error` | an executor failed while running it (a panic in an adapter included) | if active | always |
 | `fail` | observations differ from the golden after comparison rules and deviations | if active | always |
@@ -275,7 +279,7 @@ deviations:
     summary: Plain and field searches fold non-ASCII letters, so Meguri can match more notes.
     test: search/folding/unicode-mode        # scenario id or test id asserting Meguri's behavior
     scenarios: [search/folding/umlaut]       # patterns over scenario ids (D9 syntax)
-    pointer: /steps/*/search/ids              # pointer pattern (observations.md O3)
+    pointer: /steps/*/search/*/ids            # pointer pattern (observations.md O3)
     transform: {replace: ["#n1", "#n2"]}
 ```
 

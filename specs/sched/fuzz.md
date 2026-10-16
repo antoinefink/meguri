@@ -1,13 +1,13 @@
 # Interval fuzz
 
 Spec: sched/fuzz
-Requirements: R652, R659, R660, R661, R662, R664, R1892
+Requirements: R652, R659, R660, R661, R662, R663, R664, R1892
 Anki: 26.09.3
-Scenarios: conformance/scenarios/fp-probe/
+Scenarios: conformance/scenarios/fp-probe/, conformance/scenarios/sched/answer/
 
 How Anki spreads a review interval over a range of nearby days, so that cards answered together do not stay together. Fuzz cannot be turned off (R664): Anki has no setting for it, and every interval below goes through it.
 
-This file was written for the floating-point probe (U14, `conformance/float-determinism`). It covers review-interval fuzz, the no-regression minimum and the fuzz-delta observation. U45 adds learning-step fuzz (R663) as a further section; U44 adds the load balancer, which replaces the pick of Z4 when it is on (R666).
+This file was written for the floating-point probe (U14, `conformance/float-determinism`). It covers review-interval fuzz, the no-regression minimum and the fuzz-delta observation. Z7, learning-step fuzz (R663), was added for `sched/answering`, which applies it; U44 adds the load balancer, which replaces the pick of Z4 when it is on (R666).
 
 ## Z1. Seed
 
@@ -89,3 +89,24 @@ Examples (oracle, `conformance/goldens/smoke/fuzz-table-small.json`, maximum int
 | 1 | 0 | 0 | 0 | 1 | 2 | 2 | 5 | 34 |
 | 1 | 1 | 0 | 0 | −1 | −2 | −3 | −6 | −44 |
 | 1894680000001 | 2 | 0 | 0 | 0 | 1 | 1 | 2 | 13 |
+
+## Z7. Learning-step fuzz (R663)
+
+When an answer puts a card into an intraday learning or relearning step (`sched/answering` A3.2), its `due` is the answer second plus the step's delay with a small random extra, so that cards answered together are not shown again together. The extra is never shown on the answer buttons and never recorded in the review log.
+
+Given the delay `s` in whole seconds (an unsigned 32-bit integer) and the seed of Z1 (card id plus `reps` before the answer):
+
+1. `w` = `floor(min(f(s) × 0.25, 300.0))` in 32-bit float arithmetic, where `f(s)` is `s` converted to `f32`, then converted to an unsigned integer. So `w` is a quarter of the delay, at most 300 seconds (5 minutes).
+2. When `w` is 0 (delays under 4 seconds), the fuzzed delay is `s`.
+3. Otherwise the fuzzed delay is the first value that the `rand` crate, version 0.9.4 exactly (as Z2), returns for `Rng::random_range(s..s + w)`, a half-open range of `u32`, on a generator made by `StdRng::seed_from_u64(seed)`. It lies in `[s, s + w − 1]`.
+
+The draw is integer-only, so it is the same on every platform. U45's current state of a learning card reconstructs the instant of its last answer from its `due` with the fuzzed delay that the seed of the previous answer gives (Z1's review count minus one).
+
+Examples (oracle):
+
+| Card id | `reps` before | `s` | `w` | Fuzzed delay | Golden |
+|---|---|---|---|---|---|
+| 1894701600000 | 0 | 600 | 150 | 739 | `storage/stamps/answer`, step 4 |
+| 1894698000000 | 0 | 600 | 150 | 696 | `smoke/fsrs-new-card`, step 3 |
+| 1894698000000 | 2 | 600 | 150 | 715 | `smoke/fsrs-new-card`, step 8 |
+| 1894719600000 | 3 | 600 | 150 | 705 | `smoke/sm2-new-card`, step 9 |

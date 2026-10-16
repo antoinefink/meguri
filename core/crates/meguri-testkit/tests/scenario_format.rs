@@ -222,7 +222,7 @@ fn the_typed_model_reads_every_v0_op_and_rejects_unknown_ones() {
     let text = r##"
 id: area/all-ops
 clock: {tz: UTC, start: "2030-01-15T10:00:00Z", mode: frozen}
-compare: {set: ["/steps/*/search/ids"]}
+compare: {set: ["/steps/*/search/*/ids"]}
 setup:
   config: {rollover: 4}
   presets: [{name: Default, learn_steps: [30s, 1d], leech_action: tag_only}]
@@ -257,7 +257,8 @@ steps:
       - timing
       - {next_states: ["#c1"]}
       - {fuzz_table: {card: "#c1", pairs: [[1, 0]], intervals: [3]}}
-      - {search: {query: "deck:A"}}
+      - {search: [{query: "deck:A"}]}
+      - {canonical_search: ["deck:A"]}
       - queue
       - deck_tree
       - render(#c1)
@@ -273,7 +274,16 @@ steps:
     let needs = parsed.needs();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["cards", "config", "decks", "notes", "notetypes", "presets", "revlog"]
+        [
+            "cards",
+            "config",
+            "decks",
+            "new_collection",
+            "notes",
+            "notetypes",
+            "presets",
+            "revlog"
+        ]
     );
     assert!(needs.ops.contains("build_filtered") && needs.ops.contains("reopen"));
     assert!(!needs.ops.contains("observe"));
@@ -433,8 +443,33 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ),
         ("steps: [{observe: [{net_probe: {host: h}}]}]", "net_probe"),
         (
-            "steps: [{observe: [{search: {query: q, kind: decks}}]}]",
+            "steps: [{observe: [{search: [{query: q, kind: decks}]}]}]",
             "cards or notes",
+        ),
+        // search-ops.md S1, S2: non-empty lists of requests and of texts.
+        ("steps: [{observe: [{search: []}]}]", "at least one request"),
+        ("steps: [{observe: [{search: {query: q}}]}]", "does not take"),
+        ("steps: [{observe: [search]}]", "does not take"),
+        ("steps: [{observe: [{search: [{query: 1}]}]}]", "query string"),
+        ("steps: [{observe: [{search: [{query: q, order: id}]}]}]", "\"order\""),
+        ("steps: [{observe: [{search: [q]}]}]", "{query, kind?}"),
+        (
+            "steps: [{observe: [{canonical_search: []}]}]",
+            "at least one search text",
+        ),
+        (
+            "steps: [{observe: [{canonical_search: [q, 1]}]}]",
+            "every item is a string",
+        ),
+        ("steps: [{observe: [canonical_search]}]", "does not take"),
+        // observations.md O2: a kind whose value is a list, once per step.
+        (
+            "steps: [{observe: [{search: [{query: a}]}, {search: [{query: b}]}]}]",
+            "search is requested more than once",
+        ),
+        (
+            "steps: [{observe: [{canonical_search: [a]}, {canonical_search: [b]}]}]",
+            "canonical_search is requested more than once",
         ),
         ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
         ("steps: [{handoff: elsewhere}]", "unknown variant"),
@@ -547,6 +582,54 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
     let needs = parsed.needs();
     assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
+}
+
+/// undo-ops.md V1-V3: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn undo_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: undo/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{undo: {}}, {redo: {}}, {remove_config: {key: k}}, {set_config: {key: k, value: 1, undoable: true}}, \
+         {set_config: {key: k, value: 1, undoable: false}}, {set_config: {key: k, value: 1}}, \
+         {observe: [undo_status, {undo_status: null}]}]",
+    )
+    .unwrap();
+    let undoable: Vec<bool> = parsed
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::SetConfig(args) => Some(args.undoable),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(undoable, [true, false, false]);
+    assert!(matches!(&parsed.steps[2], Step::RemoveConfig(args) if args.key == "k"));
+    let needs = parsed.needs();
+    for op in ["undo", "redo", "remove_config", "set_config"] {
+        assert!(needs.ops.contains(op), "{op}");
+    }
+    assert!(needs.observations.contains("undo_status"));
+    for (bad, why) in [
+        ("[{undo: {steps: 1}}]", "unknown key"),
+        ("[{undo: null}]", "takes a mapping"),
+        ("[{redo: []}]", "takes a mapping"),
+        ("[{remove_config: {}}]", "key"),
+        ("[{remove_config: {key: \"\"}}]", "non-empty key"),
+        ("[{remove_config: {key: k, undoable: true}}]", "unknown field"),
+        ("[{remove_config: k}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: null}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: 1}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: \"true\"}}]", "invalid type"),
+        ("[{observe: [\"undo_status(#c1)\"]}]", "does not take"),
+        ("[{observe: [{undo_status: {}}]}]", "undo_status"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
 }
 
 #[test]
@@ -842,10 +925,78 @@ fn actor_scenarios_are_checked_when_they_load() {
 }
 
 #[test]
+fn a_login_says_how_it_derives_its_credentials() {
+    use meguri_testkit::scenario::{Credentials, SyncKind};
+
+    // sync-ops.md S4.5: after a login, a second sync step with these
+    // arguments; `account` is the default.
+    let second = |args: &str| {
+        actor_scenario(&format!(
+            "id: sync/creds\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nactors: [meguri]\n\
+             steps: [{{sync: {{kind: login}}}}, {{sync: {args}}}]\n"
+        ))
+    };
+    for (args, kind, credentials) in [
+        ("{kind: login}", SyncKind::Login, Credentials::Account),
+        (
+            "{kind: login, credentials: account}",
+            SyncKind::Login,
+            Credentials::Account,
+        ),
+        (
+            "{kind: login, credentials: wrong_password}",
+            SyncKind::Login,
+            Credentials::WrongPassword,
+        ),
+        ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+    ] {
+        let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
+        let Step::Sync(spec) = &parsed.steps[1] else {
+            panic!("{args}: not a sync step")
+        };
+        assert_eq!((spec.kind, spec.credentials), (kind, credentials), "{args}");
+    }
+    for (args, why) in [
+        ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: full_upload, credentials: wrong_password}", "credentials"),
+        ("{kind: login, credentials: other}", "other"),
+        ("{kind: login, credentials: null}", "credentials"),
+        ("{kind: login, credentials: 1}", "credentials"),
+        ("{kind: login, credentials: [account]}", "credentials"),
+        ("{kind: login, password: secret}", "password"),
+    ] {
+        let err = second(args).expect_err(args);
+        assert!(err.contains(why), "{args}: {err}");
+    }
+
+    // The committed scenario parses with the wrong password on its first login.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/transport/login-wrong-password.yaml")).unwrap();
+    assert!(matches!(
+        &loaded.scenario.steps[1],
+        Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
+    ));
+}
+
+#[test]
+fn the_wrong_password_is_the_accounts_password_followed_by_wrong() {
+    use meguri_testkit::scenario::{Credentials, SyncSpec};
+
+    // sync-ops.md S4.5: every executor derives it the same way.
+    assert_eq!(Credentials::Account.password("meguri-test-a"), "meguri-test-a");
+    assert_eq!(
+        Credentials::WrongPassword.password("meguri-test-a"),
+        "meguri-test-a-wrong"
+    );
+    // S4.4: the closed list of rejections, auth_failed among them.
+    assert_eq!(SyncSpec::REJECTIONS, ["auth_failed", "clock_incorrect", "network"]);
+}
+
+#[test]
 fn meguri_actors_need_what_they_run_and_nothing_else() {
     let path = conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml");
     let loaded = scenario::load(&path).unwrap();
-    // sync-ops.md S10.2: `actor`; no setup (client_a runs it); the ops and
+    // sync-ops.md S10.2: `actor`; the new collection it starts from (S2.2,
+    // dsl.md D8) but no setup section (client_a runs the setup); the ops and
     // observations of meguri's steps; advance (the scenario uses it); db_dump
     // for converge. client_a's full_upload is the oracle's business.
     let needs = loaded.scenario.needs_of_meguri_actors();
@@ -857,7 +1008,10 @@ fn meguri_actors_need_what_they_run_and_nothing_else() {
         needs.observations.iter().map(String::as_str).collect::<Vec<_>>(),
         ["card", "db_dump"]
     );
-    assert!(needs.setup.is_empty());
+    assert_eq!(
+        needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["new_collection"]
+    );
 
     // Without a Meguri actor, nothing.
     let two = scenario::load(&conformance_dir().join("scenarios/smoke/sync/two-party.yaml")).unwrap();
@@ -883,13 +1037,89 @@ steps:
     let needs = actor_scenario(text).unwrap().needs_of_meguri_actors();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["decks", "notetypes"]
+        ["decks", "new_collection", "notetypes"]
     );
     assert_eq!(
         needs.ops.iter().map(String::as_str).collect::<Vec<_>>(),
         ["actor", "reopen", "set_clock", "sync"]
     );
     assert!(needs.observations.is_empty());
+}
+
+#[test]
+fn a_scenario_starts_from_the_new_collection_unless_it_opens_a_fixture_or_reads_none() {
+    // dsl.md D8: the new collection is the setup capability `new_collection`.
+    let load = |setup: &str, steps: &str| {
+        let text = format!("id: smoke/d8\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{setup}steps:\n{steps}");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap()
+    };
+    let needs_it = |setup: &str, steps: &str| {
+        let parsed = load(setup, steps);
+        let needs = parsed.needs().setup.contains(scenario::NEW_COLLECTION);
+        assert_eq!(needs, parsed.starts_from_new_collection(), "{steps}");
+        needs
+    };
+    let template = |case: &str| {
+        format!(
+            "  - observe:\n      - template:\n          notetype: {{name: P, fields: [Front, Back]}}\n          cases: [{case}]\n"
+        )
+    };
+    let new_note = r#"{front: "{{Front}}", back: "{{Back}}", fields: [a, b]}"#;
+    // No setup and only steps that touch no collection: nothing.
+    for steps in [
+        " []\n".to_owned(),
+        "  - advance: 1d\n  - set_clock: \"2030-03-31T03:00:00\"\n".to_owned(),
+        "  - observe: [{text: {fns: [strip_markup], inputs: [\"<b>a</b>\"]}}]\n".to_owned(),
+        "  - observe: [{cloze: {fns: [numbers], inputs: [\"{{c1::a}}\"]}}]\n".to_owned(),
+        "  - observe: [{fsrs_next: {param_sets: {default: []}, inputs: [{id: 0, card_id: 1, reps: 1, s: 1.0, d: 5.0, elapsed_days: 1, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}]}}]\n".to_owned(),
+        "  - observe: [{canonical_search: [\"deck:a\", \"a or\"]}]\n".to_owned(),
+        template(new_note),
+    ] {
+        assert!(!needs_it("", &steps), "{steps}");
+    }
+    // A step that reads or writes a collection, or any setup section.
+    for steps in [
+        "  - observe: [timing]\n".to_owned(),
+        "  - db_exec: {sql: \"SELECT 1\"}\n".to_owned(),
+        "  - set_config: {key: k, value: 1}\n".to_owned(),
+        "  - advance: 1d\n  - observe: [undo_status]\n".to_owned(),
+        template(&format!(
+            r##"{new_note}, {{card: "#c1", front: "{{{{Front}}}}", back: "x"}}"##
+        )),
+    ] {
+        assert!(needs_it("", &steps), "{steps}");
+    }
+    assert!(needs_it("setup: {decks: [A]}\n", " []\n"));
+    // A scenario that opens a fixture first starts from that fixture.
+    assert!(!needs_it(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - db_exec: {sql: \"SELECT 1\"}\n"
+    ));
+
+    // A live scenario: the side that runs the first segment (D9.2).
+    let chain = load("", "  - advance: 1d\n  - handoff: oracle\n  - observe: [timing]\n");
+    assert!(
+        chain
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    assert!(
+        !chain
+            .needs_on(scenario::Side::Oracle)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    let opened = load(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - handoff: oracle\n  - observe: [timing]\n",
+    );
+    assert!(
+        !opened
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
 }
 
 #[test]

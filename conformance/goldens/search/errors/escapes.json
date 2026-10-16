@@ -1,0 +1,172 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "error": "unknown_escape",
+            "provided": "\\"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ b"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ bar baz"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ b) c"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ b"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ b  c"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ "
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\ "
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\%"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\f"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\y"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\e"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\%"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\'"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\'"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "a'b"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "a'b"
+          },
+          {
+            "context": "ivl>'",
+            "error": "invalid_positive_whole_number",
+            "provided": "'"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "'"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/errors/escapes",
+  "scenario_sha256": "1a5f59df692555cdde061a5f5791d2f1db10d1818ab76a2a30c3f85cdd5d9f39",
+  "tz": "UTC"
+}

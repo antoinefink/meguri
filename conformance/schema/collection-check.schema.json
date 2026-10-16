@@ -107,11 +107,61 @@
       "type": "array",
       "uniqueItems": true,
       "items": { "enum": ["col", "notes", "cards", "revlog", "graves", "decks", "deck_config", "notetypes", "fields", "templates", "tags", "config"] }
+    },
+    "schedule": {
+      "description": "K11: present only with --schedule. Digests of every deck's queue and every card's next states at now, plus counts.",
+      "type": "object",
+      "required": ["cards", "decks", "root", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "cards": { "$ref": "#/$defs/count" },
+        "decks": {
+          "description": "K11.3: one member per deck, keyed by deck id in decimal.",
+          "type": "object",
+          "propertyNames": { "pattern": "^-?[0-9]+$" },
+          "additionalProperties": { "$ref": "#/$defs/schedule_deck" }
+        },
+        "root": { "$ref": "#/$defs/deck_counts" },
+        "sha256": { "$ref": "#/$defs/sha256", "description": "K11.3: over the compact JSON of {cards, decks, root}." }
+      }
     }
   },
   "$defs": {
     "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "count": { "type": "integer", "minimum": 0 },
+    "deck_counts": {
+      "type": "object",
+      "required": ["new", "learning", "review"],
+      "additionalProperties": false,
+      "properties": {
+        "new": { "$ref": "#/$defs/count" },
+        "learning": { "$ref": "#/$defs/count" },
+        "review": { "$ref": "#/$defs/count" }
+      }
+    },
+    "schedule_deck": {
+      "description": "K11.3: cards whose did is the deck, their next-states digest, the deck's queue and its deck-list numbers.",
+      "type": "object",
+      "required": ["cards", "next_states_sha256", "queue", "tree"],
+      "additionalProperties": false,
+      "properties": {
+        "cards": { "$ref": "#/$defs/count" },
+        "next_states_sha256": { "$ref": "#/$defs/sha256" },
+        "queue": {
+          "type": "object",
+          "required": ["entries", "new", "learning", "review", "order_sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "entries": { "$ref": "#/$defs/count" },
+            "new": { "$ref": "#/$defs/count" },
+            "learning": { "$ref": "#/$defs/count" },
+            "review": { "$ref": "#/$defs/count" },
+            "order_sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "tree": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/deck_counts" }] }
+      }
+    },
     "check_db_counts": {
       "description": "collection-check.md K5: every kind present, 0 when Anki reported none of it.",
       "type": "object",

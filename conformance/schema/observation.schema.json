@@ -168,6 +168,23 @@
             "tags": { "type": "object", "additionalProperties": { "type": "integer" } }
           }
         },
+        "cloze": {
+          "description": "specs/conformance/cloze-ops.md Z1: one array per requested function, one output per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "numbers": {
+              "type": "array",
+              "items": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+            },
+            "front": { "$ref": "#/$defs/text_strings" },
+            "back": { "$ref": "#/$defs/text_strings" },
+            "only_front": { "$ref": "#/$defs/text_strings" },
+            "only_back": { "$ref": "#/$defs/text_strings" },
+            "typing": { "$ref": "#/$defs/text_strings" }
+          }
+        },
         "fsrs_next": {
           "description": "float-determinism.md F3.3, F5.2: one row per input, in input order: days, stability and difficulty for again, hard, good and easy.",
           "type": "object",
@@ -255,6 +272,65 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "undo": {
+          "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]
+        },
+        "redo": {
+          "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_redo", "changed_externally"] } } }]
+        },
+        "undo_status": {
+          "description": "undo-ops.md V2: the step an undo and a redo would apply now, or null.",
+          "type": "object",
+          "required": ["undo", "redo"],
+          "additionalProperties": false,
+          "properties": {
+            "undo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] },
+            "redo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] }
+          }
+        },
+        "search": {
+          "description": "specs/conformance/search-ops.md S1: one output per request, in request order.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["ids"],
+                "additionalProperties": false,
+                "properties": {
+                  "ids": {
+                    "description": "#cN (cards mode) or #nN (notes mode) in logical-id order, then real ids of unnamed rows in ascending order.",
+                    "type": "array",
+                    "items": { "anyOf": [{ "type": "string", "pattern": "^#[nc][1-9][0-9]*$" }, { "type": "integer" }] }
+                  }
+                }
+              },
+              { "$ref": "#/$defs/search_error" }
+            ]
+          }
+        },
+        "canonical_search": {
+          "description": "specs/conformance/search-ops.md S2: one output per query text, in order; parse errors only.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["text"],
+                "additionalProperties": false,
+                "properties": { "text": { "type": "string" } }
+              },
+              {
+                "allOf": [
+                  { "$ref": "#/$defs/search_error" },
+                  { "properties": { "error": { "not": { "enum": ["invalid_regex", "search_failed"] } } } }
+                ]
+              }
+            ]
+          }
+        },
         "sync": {
           "description": "specs/conformance/sync-ops.md S4: a result, or a rejection of the op's closed list.",
           "anyOf": [
@@ -267,7 +343,7 @@
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["clock_incorrect", "network"] } } }
+                { "properties": { "error": { "enum": ["auth_failed", "clock_incorrect", "network"] } } }
               ]
             }
           ]
@@ -293,6 +369,66 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "undo_step": {
+      "description": "undo-ops.md V4: the id of an undo step's name.",
+      "enum": [
+        "add_deck", "add_note", "add_note_type", "answer_card", "build_deck", "bury", "change_deck", "change_note_type",
+        "clear_unused_tags", "custom_study", "deck_options", "delete_deck", "delete_note", "empty", "empty_cards",
+        "find_and_replace", "grade_now", "image_occlusion", "import", "preferences", "remove_note_type", "remove_tag",
+        "rename_deck", "rename_tag", "reposition", "reset_card", "select_deck", "set_due_date", "set_flag", "suspend",
+        "toggle_load_balancer", "unbury_unsuspend", "update_card", "update_config", "update_deck", "update_note",
+        "update_note_type", "update_tag"
+      ]
+    },
+    "search_error": {
+      "description": "specs/search/errors.md E1 kinds; provided and context per E2, backticks replaced by apostrophes (search-ops.md S3).",
+      "type": "object",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "enum": [
+            "misplaced_and", "misplaced_or", "empty_group", "unopened_group", "unclosed_group", "empty_quote",
+            "unclosed_quote", "missing_key", "unknown_escape", "invalid_state", "invalid_flag", "invalid_property",
+            "invalid_operator", "invalid_number", "invalid_whole_number", "invalid_positive_whole_number",
+            "invalid_negative_whole_number", "invalid_answer_button", "invalid_id_list", "invalid_dupe", "malformed",
+            "invalid_regex", "search_failed"
+          ]
+        },
+        "provided": { "type": "string" },
+        "context": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "error": { "enum": ["unknown_escape", "invalid_state", "invalid_property", "invalid_operator"] } } },
+          "then": { "required": ["provided"], "not": { "required": ["context"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "error": {
+                "enum": ["invalid_number", "invalid_whole_number", "invalid_positive_whole_number", "invalid_negative_whole_number", "invalid_answer_button"]
+              }
+            }
+          },
+          "then": { "required": ["provided", "context"] }
+        },
+        {
+          "if": { "properties": { "error": { "const": "invalid_id_list" } } },
+          "then": { "required": ["context"], "not": { "required": ["provided"] } }
+        },
+        {
+          "if": {
+            "properties": {
+              "error": {
+                "enum": ["misplaced_and", "misplaced_or", "empty_group", "unopened_group", "unclosed_group", "empty_quote", "unclosed_quote", "missing_key", "invalid_flag", "invalid_dupe", "malformed", "invalid_regex", "search_failed"]
+              }
+            }
+          },
+          "then": { "properties": { "provided": false, "context": false } }
+        }
+      ]
+    },
     "decode_status": { "enum": ["ok", "invalid_blob"] },
     "objects_by_id": {
       "description": "schema11-json S12: decimal id -> schema-11 object.",

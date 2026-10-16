@@ -5,13 +5,16 @@
 //! The scenario language, observations and statuses are specified in
 //! `specs/conformance/dsl.md` and `specs/conformance/observations.md`.
 
+pub mod anonymize;
 pub mod bench;
 pub mod catalog;
 pub mod diff;
 pub mod exec;
 pub mod generate;
 pub mod observe;
+pub mod private;
 pub mod report;
 pub mod scenario;
 pub mod suite;
+pub mod sync_stub;
 pub mod wallclock;

@@ -1,0 +1,42 @@
+# specs/search/grammar.md G6: reserved keys compare ASCII case-insensitively
+# (R1031) and are written in lower case; empty values parse.
+id: search/lexing/keys
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # letter case of keys
+          - 'DECK:x'
+          - 'Tag:y'
+          - 'RE:x'
+          - 'W:x'
+          - 'NC:x'
+          - 'SC:x'
+          - 'Has-CD:x'
+          - 'PRESET:x'
+          - 'Prop:ivl>1'
+          - 'Is:new'
+          - 'FLAG:1'
+          - 'CARD:2'
+          - 'Note:x'
+          - 'MID:5'
+          - 'DID:1'
+          - 'NID:1'
+          - 'CID:1'
+          - 'ADDED:1'
+          - 'Edited:2'
+          - 'INTRODUCED:4'
+          - 'Rated:1'
+          - 'RESCHED:1'
+          - 'DUPE:1,x'
+          # empty values
+          - 'deck:'
+          - 'tag:'
+          - 'card:'
+          - 'note:'
+          - 're:'
+          - 'w:'
+          - 'nc:'
+          - 'sc:'
+          - 'has-cd:'
+          - 'preset:'
