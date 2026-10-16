@@ -2,6 +2,7 @@
 strings and pruned by the repository, and the scan of files and of a
 commit's staged lines. Every collection here is made up."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -236,6 +237,45 @@ class Scan(unittest.TestCase):
         self.assertEqual(out["files"], [{"path": os.path.join(self.dir, "out", "db", "copy.anki2"), "binary": True}])
         self.assertEqual(out["files_scanned"], 3)
 
+    def test_short_tokens_in_binary_files_are_found(self):
+        # A database keeps a short value as a short run between control
+        # bytes: a four-letter field word, a tag, a field between the 0x1f
+        # separators of a note's fields.
+        tokens = os.path.join(self.dir, "short-tokens.txt")
+        write(tokens, "hund\njp n5\nkatze\n")
+        cases = {
+            "word.bin": (b"\0\x01Hund\0\x07", True),
+            "tag.bin": (b"\0\x15jp::n5\x1f\0", True),
+            "field.bin": (b"\0" * 64 + b"\x02\x1fKATZE\x1fcat\0" + b"\0" * 64, True),
+            "inside.bin": (b"\0Hunde\0katzen\0", False),
+        }
+        for name, (data, expected) in cases.items():
+            path = os.path.join(self.dir, "bin", name)
+            write(path, data, "wb")
+            r = run("scan", "--tokens", tokens, path)
+            self.assertEqual(r.returncode, 1 if expected else 0, (name, r.stderr))
+            out = json.loads(r.stdout)
+            self.assertEqual(out["files"], [{"path": path, "binary": True}] if expected else [], name)
+
+    def test_a_short_run_in_compressed_looking_data_is_chance(self):
+        # Compressed data (PNG, JPEG, zip) holds about ten short printable
+        # runs per megabyte that equal some four-letter word by chance; there
+        # a short run is no evidence. The same run among a database's text
+        # and integers is.
+        tokens = os.path.join(self.dir, "short-tokens.txt")
+        write(tokens, "hund\n")
+        noise = b"".join(hashlib.sha256(i.to_bytes(4, "big")).digest() for i in range(2048))
+        self.assertNotIn(b"Hund", noise)
+        compressed = os.path.join(self.dir, "bin", "image.png")
+        write(compressed, b"\x89PNG\r\n\x1a\n" + noise[:30000] + b"\0Hund\0" + noise[30000:], "wb")
+        r = run("scan", "--tokens", tokens, compressed)
+        self.assertEqual((r.returncode, json.loads(r.stdout)["files"]), (0, []), r.stderr)
+        # A long run is text wherever it is.
+        long_run = os.path.join(self.dir, "bin", "long.png")
+        write(long_run, b"\x89PNG\r\n\x1a\n" + noise[:30000] + b"\0der Hund bellt\0" + noise[30000:], "wb")
+        r = run("scan", "--tokens", tokens, long_run)
+        self.assertEqual(r.returncode, 1, r.stderr)
+
     def test_errors_exit_2_without_the_tokens(self):
         r = run("scan", "--tokens", os.path.join(self.dir, "missing.txt"), self.tokens)
         self.assertEqual(r.returncode, 2)
@@ -283,6 +323,15 @@ class Staged(unittest.TestCase):
         r, out = self.scan()
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertEqual(out["files"], [{"path": "blob.bin", "binary": True}])
+
+    def test_a_short_token_in_a_staged_binary_file_is_found(self):
+        tokens = os.path.join(self.tmp.name, "short-tokens.txt")
+        write(tokens, "hund\n")
+        write(os.path.join(self.repo, "fixture.anki2"), b"SQLite format 3\0" + b"\0" * 32 + b"\x1fHund\x1fdog\0", "wb")
+        git(self.repo, "add", "-A")
+        r = run("scan", "--tokens", tokens, "--staged", "--repo", self.repo)
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["files"], [{"path": "fixture.anki2", "binary": True}])
 
     def test_nothing_staged_or_nothing_found_passes(self):
         r, out = self.scan()

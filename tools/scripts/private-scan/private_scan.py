@@ -18,9 +18,10 @@ space) and `meta.json` (counts only) beside it.
 
 `scan` reports the files that contain a token, as whole words: whole files
 for paths (folders are walked), or the lines a commit adds for `--staged`
-(binary files whole). A line also counts when its HTML entities, JSON or
-Python escapes, or URL percent-escapes hide a token. It prints the files and
-line numbers, never a token.
+(binary files whole, as runs of printable text: see PRINTABLE_RUN). A line
+also counts when its HTML entities, JSON or Python escapes, or URL
+percent-escapes hide a token. It prints the files and line numbers, never a
+token.
 
 Words are maximal runs of letters and digits (`str.isalnum`) after NFC
 normalization and case folding, so `Hörverstehen` in a deck name matches
@@ -32,8 +33,10 @@ the containers.
 """
 
 import argparse
+import collections
 import html
 import json
+import math
 import os
 import re
 import subprocess
@@ -43,9 +46,31 @@ import urllib.parse
 
 WORD = re.compile(r"[^\W_]+")
 MIN_CHARS = 4
-# Printable runs this long are scanned in binary files (SQLite pages keep
-# text as is); shorter runs in compressed data match words by chance.
-BINARY_RUN = re.compile(r"[^\x00-\x1f\x7f�]{8,}")
+# Binary files are scanned as runs of printable characters: valid UTF-8 other
+# than C0 controls, DEL and U+FFFD (SQLite pages keep text as is, between
+# record headers, integers and the 0x1f field separator). A run of LONG_RUN
+# characters or more is scanned wherever it is. A shorter run (MIN_CHARS or
+# more) is scanned only where the bytes around it do not look compressed:
+# PNG, JPEG or zip data holds about ten such runs per megabyte that equal a
+# four-letter word by chance. Runs under MIN_CHARS are never scanned.
+PRINTABLE_RUN = re.compile(
+    rb"(?:[\x20-\x7e]"
+    rb"|[\xc2-\xdf][\x80-\xbf]"
+    rb"|\xe0[\xa0-\xbf][\x80-\xbf]"
+    rb"|[\xe1-\xec\xee][\x80-\xbf]{2}"
+    rb"|\xef(?:[\x80-\xbe][\x80-\xbf]|\xbf[\x80-\xbc\xbe\xbf])"
+    rb"|\xed[\x80-\x9f][\x80-\xbf]"
+    rb"|\xf0[\x90-\xbf][\x80-\xbf]{2}"
+    rb"|[\xf1-\xf3][\x80-\xbf]{3}"
+    rb"|\xf4[\x80-\x8f][\x80-\xbf]{2})"
+    rb"{%d,}" % MIN_CHARS
+)
+LONG_RUN = 8
+# Compressed-looking: the byte entropy of the NOISE_WINDOW bytes around a
+# short run is NOISE_BITS per byte or more. Compressed data measures about
+# 7.9 over 4 KiB; database pages of text and integers stay under 7.
+NOISE_WINDOW = 4096
+NOISE_BITS = 7.0
 SURROGATE_PAIR = re.compile(r"\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re.IGNORECASE)
 ESCAPE = re.compile(r"\\(?:u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2}))")
 SNIFF = 8192
@@ -137,9 +162,28 @@ def line_hits(matcher, text, first=1):
     return hits
 
 
+def byte_entropy(data):
+    """Shannon entropy of `data`, in bits per byte."""
+    total = len(data)
+    return -sum(n / total * math.log2(n / total) for n in collections.Counter(data).values())
+
+
+def looks_compressed(data, at):
+    """Whether the NOISE_WINDOW bytes around `at` (the whole of a smaller
+    file) look like compressed data."""
+    start = max(0, min(at - NOISE_WINDOW // 2, len(data) - NOISE_WINDOW))
+    return byte_entropy(data[start:start + NOISE_WINDOW]) >= NOISE_BITS
+
+
 def binary_hit(matcher, data):
-    text = data.decode("utf-8", errors="replace")
-    return any(matcher.hit(v) for run in BINARY_RUN.findall(text) for v in variants(run))
+    """Whether a binary file's printable runs hold a token (see PRINTABLE_RUN)."""
+    for m in PRINTABLE_RUN.finditer(data):
+        run = m.group(0).decode("utf-8")
+        if not any(matcher.hit(v) for v in variants(run)):
+            continue
+        if len(run) >= LONG_RUN or not looks_compressed(data, m.start()):
+            return True
+    return False
 
 
 def is_binary(data):
