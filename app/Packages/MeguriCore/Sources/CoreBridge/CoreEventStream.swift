@@ -13,6 +13,11 @@ public struct CoreEvent: Sendable, Hashable {
     public let kind: Kind
 
     public enum Kind: Sendable, Hashable {
+        /// An op committed these changes; the event's `seq` is the op's.
+        case changes(ChangeSet)
+        /// The collection file was replaced and `generation` is open now.
+        /// Exactly once per replacement.
+        case collectionReplaced(generation: UInt64)
         case jobFinished(JobID, JobOutcome)
     }
 
@@ -21,6 +26,10 @@ public struct CoreEvent: Sendable, Hashable {
         generation = event.generation
         causeSeq = event.causeSeq
         switch event.kind {
+        case .changes(let changes):
+            kind = .changes(ChangeSet(changes))
+        case .collectionReplaced(let generation):
+            kind = .collectionReplaced(generation: generation)
         case .jobFinished(let id, let outcome):
             kind = .jobFinished(JobID(rawValue: id), JobOutcome(outcome))
         }

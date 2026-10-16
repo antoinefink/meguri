@@ -1,0 +1,31 @@
+# specs/render/cloze.md C5: cloze numbers of a text (AE33's c0 rule), nested
+# clozes included, dropped markers and unclosed clozes excluded.
+id: render/cloze/numbers
+description: "cloze numbers"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [numbers]
+          inputs:
+            - "{{c1::a}}{{c3::b}}{{c0::l}}{{c700::z}}"
+            - "{{c2::ab{{c1::cd}}}}e{{"
+            - "{{c0,3,4::x}}"
+            - "{{c1::open"
+            - "ÄÖÜ öäü"
+            - ""
+            - "no clozes"
+            - "{{c5::x}} {{c5::y}} {{c2::z}}"
+            - "{{c3,1,2::shared}}"
+            - "{{c4,,6::x}}"
+            - "{{c::a}} {{c,1::b}} {{c99999::d}} {{c65535::e}} {{c007::f}}"
+            - "{{c0::only zero}}"
+            - "{{c1::{{c2::{{c3::{{c4::{{c5::{{c6::{{c7::{{c8::{{c9::{{c10::{{c11::core}}}}}}}}}}}}}}}}}}}}}}"
+            - "{{c1::kept}} {{c2::lost"
+            - "{{c1::outer {{c2::inner}} never closed"
+            - "{{C1::upper}}"
+            - "{{c1::\\(a}}b\\)}}"
+            - "<b>{{c12::bold}}</b>"
+            - "{{c2::x}}}}{{c4::y}}"
+            - "{{c1,2::wide {{c3::narrow}}}}"
+            - "{{c3::image-occlusion:rect:left=.1:top=.2:width=.3:height=.4}}"

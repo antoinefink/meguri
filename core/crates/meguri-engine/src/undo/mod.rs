@@ -9,6 +9,7 @@
 
 pub mod entry;
 pub mod holdback;
+pub mod names;
 pub mod reasons;
 pub mod restorers;
 pub(crate) mod stack;
@@ -16,7 +17,7 @@ pub(crate) mod stack;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use meguri_model::changes::{ChangeSet, OpSource};
-use meguri_storage::{Journal, StampMode};
+use meguri_storage::{Journal, ReadRows, StampMode};
 
 use crate::changes::stream::Seq;
 use crate::collection::Collection;
@@ -90,6 +91,36 @@ impl UndoAction {
             UndoAction::Redo(_) => Direction::Redo,
         }
     }
+
+    /// The catalog op it runs as: the long-write variant for a step whose
+    /// op declared a long write (M4).
+    fn def(self, long_write: bool) -> catalog::OpDef {
+        match (self, long_write) {
+            (UndoAction::Undo(_), false) => catalog::UNDO,
+            (UndoAction::Redo(_), false) => catalog::REDO,
+            (UndoAction::Undo(_), true) => catalog::UNDO_LONG_WRITE,
+            (UndoAction::Redo(_), true) => catalog::REDO_LONG_WRITE,
+        }
+    }
+}
+
+/// An undo or redo op on the writer's queue (M4.1). The writer resolves its
+/// step when it takes the op, before the op's write phase starts, so the op
+/// declares the write of the step it restores even when that step was
+/// recorded after the op was submitted.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Restore {
+    pub action: UndoAction,
+    /// The step on top of the action's scope when the writer took the op,
+    /// or why there was none; `None` until then.
+    pub target: Option<Result<EntryId, DisabledReason>>,
+}
+
+/// What the writer resolved for an undo or redo op it takes.
+pub(crate) struct Resolved {
+    pub target: Result<EntryId, DisabledReason>,
+    pub def: catalog::OpDef,
+    pub declared: Option<std::time::Duration>,
 }
 
 /// What the op spec says about undo: the step it records and how.
@@ -108,11 +139,32 @@ pub(crate) struct UndoNotes {
     pub merge: Option<SyncMerge>,
     /// The step an undo or redo op restored.
     pub restored: Option<EntryId>,
+    /// `col.mod` when that undo or redo ran (A7).
+    pub col_mod: Option<i64>,
+}
+
+impl UndoNotes {
+    /// Takes in the notes of a substep that committed (`OpContext::step`):
+    /// what it set replaces what the op had set before it.
+    pub(crate) fn absorb(&mut self, step: UndoNotes) {
+        let UndoNotes {
+            state,
+            merge,
+            restored,
+            col_mod,
+        } = step;
+        self.state = state.or(self.state.take());
+        self.merge = merge.or(self.merge.take());
+        self.restored = restored.or(self.restored);
+        self.col_mod = col_mod.or(self.col_mod);
+    }
 }
 
 /// A committed op, as the undo manager sees it.
 pub(crate) struct CommitInfo<'a> {
     pub seq: Seq,
+    /// The epoch second at which the op began (A3).
+    pub began: i64,
     pub name: &'static str,
     pub source: OpSource,
     pub spec: &'a UndoSpec,
@@ -160,6 +212,20 @@ impl UndoManager {
         self.lock().peek(side, scope)
     }
 
+    /// M4.1, on the writer as it takes an undo or redo op: the step the op
+    /// acts on and the catalog op and write it runs with.
+    pub(crate) fn resolve(&self, action: UndoAction) -> Resolved {
+        let (target, declared) = match self.lock().target(action.side(), action.scope()) {
+            Ok(entry) => (Ok(entry.info.id), entry.info.long_write),
+            Err(reason) => (Err(reason), None),
+        };
+        Resolved {
+            target,
+            def: action.def(declared.is_some()),
+            declared,
+        }
+    }
+
     /// M6: replacement and close.
     pub(crate) fn reset(&self, reason: DisabledReason) {
         self.lock().reset(reason);
@@ -180,16 +246,25 @@ impl UndoManager {
                     step: entry.info.clone(),
                     state: entry.state.clone(),
                 };
-                entry.inverse(commit.seq.into(), journal, commit.changes)
+                entry.inverse(
+                    commit.seq.into(),
+                    journal,
+                    commit.changes,
+                    commit.notes.col_mod,
+                    commit.began,
+                )
             });
             return applied;
         }
         if commit.spec.skip {
+            // Keeps the steps; every op but undo and redo empties redo (A2).
+            stack.clear_redo();
             return Applied::Nothing;
         }
         match source_effect(commit.source) {
             SourceEffect::Recorded => {
                 let Some(journal) = commit.journal.filter(|_| changed) else {
+                    stack.clear_redo();
                     return Applied::Nothing;
                 };
                 let (name, kind) = commit.spec.step.unwrap_or((commit.name, StepKind::Other));
@@ -200,13 +275,14 @@ impl UndoManager {
                     session: commit.spec.session,
                     long_write: commit.declared,
                 };
-                stack.record(Entry::recorded(
-                    info.clone(),
+                let holder = stack.record(Entry::recorded(
+                    info,
                     journal,
                     commit.changes,
                     commit.notes.state,
+                    commit.began,
                 ));
-                Applied::Recorded(info)
+                Applied::Recorded(holder)
             }
             SourceEffect::ClearAll(reason) => {
                 if changed {
@@ -282,27 +358,40 @@ impl<'c> OpContext<'_, 'c> {
         let run = self.undo.lock().begin_sync(session, snapshot);
         Ok(SyncHold {
             snapshot,
-            run: holdback::run_value(&run)?,
+            run: holdback::run_value(&run),
         })
     }
 
-    /// The undo or redo itself (M4, M5), inside the op's transaction.
-    fn restore_top(&mut self, action: UndoAction) -> Result<StepInfo, EngineError> {
+    /// The undo or redo itself (M4, M5), inside the op's transaction, on the
+    /// step the writer resolved as it took the op (M4.1).
+    fn restore_top(&mut self) -> Result<StepInfo, EngineError> {
+        let Some(Restore {
+            action,
+            target: Some(target),
+        }) = self.restore
+        else {
+            return Err(EngineError::internal("an undo or redo op ran without a resolved step"));
+        };
+        let unavailable = |reason| EngineError::UndoUnavailable { reason };
         let side = action.side();
+        let id = target.map_err(unavailable)?;
+        // A clear from another thread may have dropped the step since.
         let entry = self
             .undo
             .lock()
-            .target(side, action.scope())
+            .resolved_target(side, action.scope(), id)
             .cloned()
-            .map_err(|reason| EngineError::UndoUnavailable { reason })?;
+            .map_err(unavailable)?;
         if !entry.still_applied(self.scope)? {
             self.undo.lock().drop_changed(side, entry.info.id);
             return Err(EngineError::UndoUnavailable {
                 reason: DisabledReason::ChangedExternally,
             });
         }
-        entry.restore(self.scope)?;
+        let col_mod = self.scope.col()?.modified.0;
+        entry.restore(self.scope, action.direction())?;
         self.undo_notes.restored = Some(entry.info.id);
+        self.undo_notes.col_mod = Some(col_mod);
         Ok(entry.info)
     }
 }
@@ -323,9 +412,10 @@ impl Collection {
         Ok(self.undo_manager()?.peek(Side::Redo, scope))
     }
 
-    /// Undoes the top step of `scope` as an op (M4). Refused with
-    /// `UndoUnavailable` when there is none, it was uploaded or is pending
-    /// upload, or its rows changed.
+    /// Undoes the top step of `scope` as an op (M4): the step on top when
+    /// the writer takes the op (M4.1). Refused with `UndoUnavailable` when
+    /// there is none, it was uploaded or is pending upload, or its rows
+    /// changed.
     pub fn submit_undo(&self, scope: UndoScope) -> Pending<OpResult<StepInfo>> {
         self.submit_restore(UndoAction::Undo(scope))
     }
@@ -344,24 +434,13 @@ impl Collection {
     }
 
     fn submit_restore(&self, action: UndoAction) -> Pending<OpResult<StepInfo>> {
-        // A step of a job-run op is undone with its declared write (M4);
-        // only then is the op a catalog long write.
-        let declared = match self.core.exec.undo.peek(action.side(), action.scope()) {
-            UndoStatus::Available(step) => step.long_write,
-            UndoStatus::Unavailable(_) => None,
-        };
-        let def = match (action, declared.is_some()) {
-            (UndoAction::Undo(_), false) => catalog::UNDO,
-            (UndoAction::Redo(_), false) => catalog::REDO,
-            (UndoAction::Undo(_), true) => catalog::UNDO_LONG_WRITE,
-            (UndoAction::Redo(_), true) => catalog::REDO_LONG_WRITE,
-        };
-        let mut spec = OpSpec::new(def, OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
-        if let Some(declared) = declared {
-            spec = spec.declare_long_write(declared);
-        }
+        // Which step it restores, and so whether it runs as the long-write
+        // variant with that step's declared write, is settled on the writer
+        // as it takes the op (M4.1): a step recorded meanwhile, such as a
+        // bulk op's that was running at submit, is the one it restores.
+        let mut spec = OpSpec::new(action.def(false), OpSource::UserUndoable).stamp(StampMode::CallerSupplied);
         spec.undo.action = Some(action);
-        self.submit(spec, move |ctx| ctx.restore_top(action))
+        self.submit(spec, |ctx| ctx.restore_top())
     }
 
     /// Clears the whole history (M6): rollover, Check Database, an outside
@@ -374,7 +453,7 @@ impl Collection {
     /// The held-back run of `session` now (M8).
     pub fn held_back_run(&self, session: Option<SessionId>) -> Result<HeldBackRun, EngineError> {
         let run = self.undo_manager()?.lock().run(session);
-        holdback::run_value(&run)
+        Ok(holdback::run_value(&run))
     }
 
     /// M9.2: the sync sent its `finish` request; pending steps are uploaded

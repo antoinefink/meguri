@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use meguri_storage::{RowKey, Table};
 
 use crate::changes::stream::Seq;
-use crate::undo::entry::{Entry, EntryId, SessionId, StepKind, UploadState};
+use crate::undo::entry::{Entry, EntryId, SessionId, StepInfo, StepKind, UploadState};
 use crate::undo::reasons::DisabledReason;
 use crate::undo::{UndoScope, UndoStatus};
 
@@ -78,6 +78,19 @@ impl UndoStack {
         }
     }
 
+    /// M4.1: step `id`, which the writer resolved for an undo or redo op,
+    /// while it is still the step `scope` acts on; otherwise why not.
+    /// Only the writer adds steps, so between the resolve and the op another
+    /// thread can only drop the step (a clear) or change its upload state.
+    pub(crate) fn resolved_target(&self, side: Side, scope: UndoScope, id: EntryId) -> Result<&Entry, DisabledReason> {
+        let entry = self.target(side, scope)?;
+        if entry.info.id == id {
+            Ok(entry)
+        } else {
+            Err(DisabledReason::None)
+        }
+    }
+
     pub(crate) fn peek(&self, side: Side, scope: UndoScope) -> UndoStatus {
         match self.target(side, scope) {
             Ok(entry) => UndoStatus::Available(entry.info.clone()),
@@ -85,14 +98,34 @@ impl UndoStack {
         }
     }
 
-    /// M1: a new step on top; the oldest beyond 30 goes, and redo is cleared.
-    pub(crate) fn record(&mut self, entry: Entry) {
+    /// M1, A2: a new step on top, or merged into the top step (A3); redo
+    /// is cleared. Returns the step that now holds the op.
+    pub(crate) fn record(&mut self, entry: Entry) -> StepInfo {
+        let info = self.push(entry);
+        self.redo.clear();
+        info
+    }
+
+    /// A2: an op that records nothing still empties redo (A11.1).
+    pub(crate) fn clear_redo(&mut self) {
+        self.redo.clear();
+    }
+
+    /// Puts a step on top of the history, unless the top step takes it in
+    /// (A3); the oldest beyond 30 goes. Returns the step that holds it.
+    fn push(&mut self, entry: Entry) -> StepInfo {
+        if let Some(top) = self.undo.last_mut()
+            && top.absorb(&entry)
+        {
+            return top.info.clone();
+        }
+        let info = entry.info.clone();
         self.undo.push(entry);
         if self.undo.len() > CAPACITY {
             self.undo.remove(0);
             self.floor = DisabledReason::None;
         }
-        self.redo.clear();
+        info
     }
 
     /// M2, M6: drops every step and redo step.
@@ -109,8 +142,9 @@ impl UndoStack {
     }
 
     /// M4.5, M5: the step `id` was undone (or redone) by an op whose journal
-    /// made `inverse`, which goes on the other stack. Nothing when a clear
-    /// dropped the step meanwhile.
+    /// made `inverse`, which goes on the other stack; on the history it may
+    /// merge into the top step as a new step would (A3). Nothing when a
+    /// clear dropped the step meanwhile.
     pub(crate) fn restored(&mut self, side: Side, id: EntryId, inverse: impl FnOnce(&Entry) -> Entry) {
         let stack = match side {
             Side::Undo => &mut self.undo,
@@ -124,11 +158,7 @@ impl UndoStack {
         match side {
             Side::Undo => self.redo.push(made),
             Side::Redo => {
-                self.undo.push(made);
-                if self.undo.len() > CAPACITY {
-                    self.undo.remove(0);
-                    self.floor = DisabledReason::None;
-                }
+                self.push(made);
             }
         }
     }

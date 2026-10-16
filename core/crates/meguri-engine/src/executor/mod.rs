@@ -6,6 +6,7 @@ pub mod catalog;
 #[cfg(feature = "test-hooks")]
 pub mod durability_events;
 pub(crate) mod exclusive;
+mod live_file;
 pub mod op;
 pub mod plan_commit;
 pub mod preconditions;
@@ -288,6 +289,7 @@ impl ExecShared {
             park: false,
             cancel: None,
             declared: None,
+            restore: None,
             submitted: crate::monotonic::now(),
             control: false,
         }
@@ -331,6 +333,10 @@ impl ExecShared {
         meta.park = spec.park;
         meta.cancel = spec.cancel.clone();
         meta.declared = spec.declared;
+        meta.restore = spec
+            .undo
+            .action
+            .map(|action| crate::undo::Restore { action, target: None });
         self.submit(Task {
             meta,
             body: Box::new(OpTask { spec, op, reply }),
@@ -381,7 +387,8 @@ impl ExecShared {
             body: Box::new(ReplaceTask { swap, reply }),
         });
         rx.recv().unwrap_or(Replaced {
-            result: Err(EngineError::internal("the writer stopped during a replace")),
+            error: Some(EngineError::internal("the writer stopped during a replace")),
+            generation: None,
             factory: None,
         })
     }

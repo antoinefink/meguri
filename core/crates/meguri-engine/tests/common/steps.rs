@@ -11,10 +11,7 @@ use meguri_model::ids::{CardId, NoteId, RevlogId};
 use meguri_storage::raw::SqlValue;
 use meguri_storage::{ReadRows, ReaderRole};
 
-pub const ANSWER_CARD: &str = "Answer Card";
-pub const BURY: &str = "Bury";
-pub const SUSPEND: &str = "Suspend";
-pub const UPDATE_NOTE: &str = "Update Note";
+pub use meguri_engine::undo::names::{ANSWER_CARD, BURY, SUSPEND, UPDATE_NOTE};
 
 fn spec(op: &'static str, step: &'static str, kind: StepKind, session: Option<SessionId>) -> OpSpec {
     let spec = OpSpec::named(op, OpSource::UserUndoable).undo_step(step, kind);

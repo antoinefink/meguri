@@ -1401,11 +1401,11 @@ flowchart TB
 - R970. `{{c1,2,3::text}}` belongs to cards 1, 2 and 3 (numbers deduplicated and sorted), and hints work with it.
 - R971. The same number used several times hides every occurrence on that card.
 - R972. Clozes nest up to 10 levels deep, and a `}}` outside any open cloze is literal text.
-- R973. Cloze parsing ignores `}}` inside MathJax `\(…\)` and `\[…\]` so a cloze around math does not close early, and HTML inside MathJax in cloze output is stripped, even though MathJax rendering is out of scope.
+- R973. Cloze parsing does not look at MathJax: a `}}` inside `\(…\)` or `\[…\]` closes a cloze like any other, as in Anki. HTML inside MathJax in `cloze:` output is stripped, even though MathJax rendering is out of scope, and where that removes one tag of a cloze span and not the other, the output stays unbalanced, as in Anki. (Amended 2026-10-16 to match the oracle, as R1907 requires: this first said that parsing ignores `}}` inside MathJax so a cloze around math does not close early, which Anki's main branch does and the pinned 26.09.3 does not; `docs/process/review-log/U61.md`, A1.)
 - R974. Front output for the active cloze is `<span class="cloze" data-cloze="<entity-encoded content>" data-ordinal="N">[...]</span>` (or `[hint]`), back output is `<span class="cloze" data-ordinal="N">content</span>`, and other clozes are `<span class="cloze-inactive" data-ordinal="M">content</span>` on both sides.
 - R975. A `{{cloze:Field}}` whose field contains no cloze for the current card renders as the empty string.
 - R976. A card whose cloze number appears in no field renders a "missing cloze" message, and a normal card whose front renders empty renders a "front of card is blank" message (both outside Browse).
-- R977. `{{type:cloze:Field}}` compares against the current card's cloze contents, collapsing identical answers to one and otherwise joining them with ", ".
+- R977. `{{type:cloze:Field}}` compares against the current card's cloze contents: the one answer when all of them are identical, and otherwise all of them in order, duplicates included, joined with ", ", as in Anki. (Amended 2026-10-16 to match the oracle: this first said "collapsing identical answers to one and otherwise joining them", which U61 read as dropping every duplicate; `docs/process/review-log/U61.md`, A2.)
 
 **Media in notes: naming and adding**
 
@@ -3265,6 +3265,7 @@ Product Contract preservation: changed, reconciling internal contradictions foun
 - R1451: full case folding, as Anki's pinned `unicase` does.
 - R1877 and R1885: test counts and the lock-file pin, matching the 26.09.3 tag.
 - R953, R959, R960, R964, R965 and R968: the template language as the oracle shows it, which R1907's string-identical output requires (amended 2026-10-16 after U60's review, `docs/process/review-log/U60.md`, A1).
+- R973 and R977: cloze parsing around MathJax and cloze type-in answers as the oracle shows them, for the same reason (amended 2026-10-16 after U61's review, `docs/process/review-log/U61.md`, A1 and A2).
 
 Readings of Product Contract conflicts settled during review, with the Product Contract text unchanged:
 - R239 and R387: ⌘⌫ deletes the note at once with the Undo toast, as the ⋯ menu does (U181).
@@ -4491,6 +4492,32 @@ Units are grouped by area. Each area lists its units in dependency order. U-IDs 
 
 **Verification:** From a worktree, with the host locked or unlocked, the iPhone drive example, the iPhone and iPad accessibility audits and (if they match) the snapshot matrix pass through the VM; `ps` on the host shows no booted simulator during the runs; `tools/mg selftest` passes.
 
+### U8d. The Mac app stays out of sight on the host
+
+**Goal:** When a test or a `tools/mg` job starts the Mac app on Antoine's Mac, it gets no Dock icon and never comes to the front. Mac snapshot tests (the app is their test host) and hidden launches (`open -g -j`, for window captures) still run on the host, but they no longer show up while he works. Antoine saw the app appear in his Dock on 2026-10-16 and chose this fix.
+
+**Requirements:** R1961, R1963, and root AGENTS.md "Running tests and apps on this Mac".
+
+**Dependencies:** U8c, U10.
+
+**Files:**
+- Modify: `app/Meguri/App/MeguriApp.swift` (or the Mac app delegate it uses), `tools/mg.d/app.sh` and `tools/mg.d/drive.sh` (their hidden launches pass the launch argument), `app/AGENTS.md`, root `AGENTS.md`, `docs/process/mac-ui-vm.md`; tests in the app's test targets and `tools/tests/`.
+
+**Approach:**
+- The app decides once, before it finishes launching: it runs without a Dock icon and never activates when it is a test host (`XCTestConfigurationFilePath` is set) or when the launch argument `-MeguriBackgroundLaunch YES` is passed. `tools/mg` adds that argument to every Mac launch it makes on the host. Choose the activation policy for each case from evidence: off-screen snapshot rendering and `screencapture -l <windowid>` must keep working.
+- The switch exists only in Debug builds of the dev bundle id. Release and App Store builds ignore it.
+- Mac UI suites in the VM launch the app through XCUIApplication without the argument, so it keeps the normal policy there.
+- Snapshot reference images must not change. If any Mac snapshot differs, the policy is wrong: fix it, do not re-record.
+
+**Test scenarios:**
+- A hosted test asserts that the app, as test host, has no regular activation policy.
+- `tools/mg run --platform mac` (hidden launch): `lsappinfo info -only ApplicationType <pid>` does not report `Foreground` while it runs, and the window capture still works.
+- The app launched by hand (no argument, not a test host) gets the regular policy and a Dock icon.
+- `tools/mg snapshots --platform mac` passes with unchanged references.
+- `tools/mg mac-ui` in the VM still passes.
+
+**Verification:** During `tools/mg snapshots --platform mac` and `tools/mg run --platform mac` on the host, the Meguri process never reports `Foreground` and gets no Dock tile; the Mac snapshot matrix matches its references; `tools/mg mac-ui` passes in the VM; `tools/mg selftest` passes.
+
 ### U9. DesignSystem package, design documents, UI lint gate and component gallery
 
 **Goal:** Provide the token-based design vocabulary, the written design brief and rubric, a deterministic lint gate that rejects off-token UI code and misplaced glass, a contrast test over every token pair, and a debug component gallery agents build from.
@@ -5216,7 +5243,9 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Catalog test: every registered op has an undoability class; destructive non-undoable ops declare confirmation and backup.
 - Undo of an answer at 150k cards: core time p95 well under the R1811 50 ms budget (U12 bench).
 
-**Verification:** `conformance/scenarios/undo/` match goldens; property test 10k cases clean; catalog test green.
+**Verification:** `undo/config-writes`, played on the engine's undo by `core/crates/meguri-engine/tests/undo_conformance.rs`, matches its golden; property test 10k cases clean; catalog test green.
+
+Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). This line first asked for `conformance/scenarios/undo/` to match its goldens on Meguri's executor. Every undo scenario starts from the fresh collection of `specs/conformance/dsl.md` D6, which U28's bootstrap creates, and uses `undo`, `redo` and `undo_status`, whose adapter `specs/conformance/undo-ops.md` V6 places once the conformance session runs ops through the engine (U38's `CoreHost::open`; only meguri-engine and meguri-host may open the engine). Nine of the ten also use the `notetypes`, `decks` and `notes` setup sections (U27, U28, U29); eight of them use `edit_note` or `delete_notes` (U27), and `undo/revlog-taken-id` uses `answer` and the `card` and `revlog` observations (U44). U27, U28 and U38 depend on U25, so U25 cannot run them without building their collection, deck, note type and note logic ahead of the core. U38 now builds the undo adapter, and each undo scenario becomes active in the unit that lands the last op, setup section or observation it uses: U27, U28, U38 or U44, whose Verification lines say so. Until then `undo_conformance.rs` plays `undo/config-writes`, the one scenario with no setup section and no note or answer op, on the engine against its golden, with a copy of the schema-18 fixture standing in for the fresh collection.
 
 ### U26. Derived store
 
@@ -5321,12 +5350,14 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - `core/crates/meguri-host/src/lib.rs`, `src/open.rs` (`CoreHost::open`, `close`), `src/config.rs` (`HostConfig`), `src/wiring/mod.rs`, `src/wiring/pending.rs`
 - `core/crates/meguri-host/tests/ports.rs`, `tests/headless_parity.rs`
 - `specs/engine/host.md` (Meguri design doc)
+- `core/crates/meguri-testkit/src/exec/undo.rs` (Meguri's undo adapter, moved from U25)
 
 **Approach:**
 - `CoreHost::open(HostConfig)` takes the collection directory, the backups directory, the App Group snapshot path, the clock and the `DiskSpaceProvider`. It opens the engine through its raw open entry point, which only this crate may call (U5 layering-check rule), and registers every port implementation.
 - Wiring is per area under `src/wiring/`: U127 adds `backup.rs` (package BackupService), U95 and U100 add `stats.rs` (stats observers, widget builder), U113 adds `sync.rs` (session and lifecycle events fed into the sync policy). Until a provider unit lands, its port uses the engine's explicit `Unavailable` provider listed in `wiring/pending.rs`; that list must be empty when M1 closes.
 - Callers: meguri-ffi (U37), meguri-servers (U135) for headless contract runs, and every testkit or cli path that executes engine ops from this unit on (U117, U250). None of them registers ports itself.
 - `core/crates/meguri-host/AGENTS.md` records the traps: no business logic here, only construction and wiring; a new port needs a wiring entry and a `ports.rs` case.
+- Undo adapter (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1): once the conformance session runs ops through `CoreHost::open`, this unit builds Meguri's undo adapter (`specs/conformance/undo-ops.md` V1–V3, V6): `undo`, `redo` and `undo_status` in `exec/undo.rs`, `set_config`'s `undoable` and `remove_config` beside `set_config`, and `db_exec` emptying both histories after a statement that is not a select (`specs/conformance/record-ops.md` W1). The engine side exists (U25; `core/crates/meguri-engine/tests/undo_conformance.rs` plays `undo/config-writes` on it).
 
 **Execution note:** Meguri-designed contract; no spec-writer pass. Land the crate with an empty wiring table right after U32 so U37 and the area units can add to it.
 
@@ -5338,7 +5369,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - A crate other than meguri-host that calls the engine's raw open → `core-lint` fails (U5 rule).
 - `close` after open → every registered thread idle, writer and readers closed, no `-wal` content left after the final checkpoint.
 
-**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`.
+**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`. Meguri's undo adapter is registered, and every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U33. Schema-11 legacy writer
 
@@ -5503,7 +5534,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Regenerating after a template add across 20k notes → progress ≤ ~10 Hz, cancel before commit leaves no cards, completion equals the oracle's card set.
 - LocalApi add → `curModel` and last-deck keys unchanged; Add-screen add → all three written.
 
-**Verification:** notes and cardgen scenarios (including harvested ones) match goldens; add-note p95 < 5 ms at 150k cards (U12).
+**Verification:** notes and cardgen scenarios (including harvested ones) match goldens; add-note p95 < 5 ms at 150k cards (U12). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; nine of the ten use the `notes` setup section, eight `edit_note` or `delete_notes`) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U28. Decks, deck presets and new-collection defaults
 
@@ -5547,7 +5578,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Emoji and mixed-script deck names round-trip unchanged.
 - New collection → normalized dump (ids and times masked, stock template text excluded) equals the oracle's new collection plus the IO notetype; the oracle opens it and adds a note (T1).
 
-**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes.
+**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes. Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; all ten start from the fresh collection) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U31. Media service: names, store, change journal, staging, trash (C9)
 
@@ -6159,7 +6190,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Fault injection (U24 test hook) fails the revlog insert: no card, deck, sibling or tag change persists.
 - Perf: the answer op commit ≤ 5 ms release at 14.4k cards; the 1 s durability bound (R2006) is asserted in U43.
 
-**Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys).
+**Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; `undo/revlog-taken-id` uses `answer`, `card` and `revlog`) passes on Meguri's executor on the macOS and Linux lanes, `undo/revlog-taken-id` with its three `undo-revlog-taken-id-*` deviations, and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U43. Review session (contract C5)
 
@@ -6612,7 +6643,7 @@ Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: th
 
 **Goal:** Cloze parsing and rendering (`cloze:`, `cloze-only:`), cloze-number extraction and type-in cloze extraction, identical to the oracle.
 
-**Requirements:** R963, R969–R975, R977 (extraction side), R973 (MathJax-aware parsing; R563 depends on it); supports AE33 (c0 rule, with U27).
+**Requirements:** R963, R969–R975, R977 (extraction side), R973 (parsing that ignores MathJax, and HTML stripped inside math in the output; R563 depends on it); supports AE33 (c0 rule, with U27).
 
 **Dependencies:** U60, U20.
 
@@ -6624,9 +6655,9 @@ Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: th
 - `conformance/scenarios/render/cloze/**.yaml`, `conformance/goldens/render/cloze/**.json`
 
 **Approach:**
-- The tokenizer handles multi-ordinal markers, hints, nesting up to the R972 limit, and MathJax spans (R973). It hands cloze bodies that start with the image-occlusion prefix to U64's IO renderer, behind a hook that returns empty until U64 lands.
+- The tokenizer handles multi-ordinal markers, hints and nesting up to the R972 limit. It does not look at MathJax: the `cloze:` output strips HTML inside MathJax spans afterwards (R973). It hands cloze bodies that start with the image-occlusion prefix to U64's IO renderer, behind a hook that returns empty until U64 lands.
 - `numbers.rs` returns the set of cloze numbers in a string, with c0 excluded. U27 consumes it for card generation (AE33) and U190/U200 for the card picker (R931).
-- `typing.rs` extracts the current card's cloze answers for `{{type:cloze:}}`, collapsing duplicates or joining them per R977. U64 consumes it.
+- `typing.rs` extracts the current card's cloze answers for `{{type:cloze:}}`: one answer when all are identical, otherwise all of them joined, per R977. U64 consumes it.
 - The `data-cloze` attribute is entity-encoded (R974). This is what keeps hidden `[sound:]` out of front-side AV extraction (R1020, R545; verified in U64).
 
 **Execution note:** Spec writer first (KTD1), then implementer test-first against oracle goldens.
@@ -6638,14 +6669,16 @@ Amended 2026-10-16 after U60's review (`docs/process/review-log/U60.md`). A1: th
 - `{{c1,3,3,2::x}}` is active on cards 1, 2 and 3 with ordinal attribute `1,2,3` (R970).
 - c1 used three times hides all three on card 1 (R971).
 - Ten nested levels render as the oracle does, an eleventh level matches the oracle, and a stray `}}` stays literal (R972).
-- `{{c1::\(a}}b\)}}` does not close inside math, and HTML inside math in the output is stripped (R973).
+- `{{c1::\(a}}b\)}}` closes at the `}}` inside the math, as the oracle does, so cloze 1 holds `\(a`. HTML inside math in the `cloze:` output is stripped, which leaves the back's span unclosed, `<span class="cloze" data-ordinal="1">\(ab\)}}`, as in the oracle (R973).
 - `{{cloze:Extra}}`, where Extra has no c2, renders an empty string on card 2 (R975).
 - `cloze-only:` on the front gives hints or `...`, and on the back the answers joined by ", " (R963).
-- Type-in extraction of `{{c1::a}} {{c1::a}} {{c1::b}}` gives `a, b`; of `{{c1::a}} {{c1::a}}` gives `a` (R977).
+- Type-in extraction of `{{c1::a}} {{c1::a}} {{c1::b}}` gives `a, a, b`; of `{{c1::a}} {{c1::a}}` gives `a` (R977).
 - Numbers of `{{c1::a}}{{c3::b}}{{c0::l}}{{c700::z}}` are {1, 3, 700}; the ordinal cap is applied by U27 (AE33).
-- Fuzz: arbitrary field text never panics, and the output never contains an unbalanced span.
+- Fuzz: arbitrary field text never panics, and the `cloze:` output has balanced spans whenever the MathJax strip finds nothing to match (`specs/render/cloze.md` C12); only that strip may unbalance it (R973).
 
 **Verification:** All `conformance/scenarios/render/cloze/` scenarios and the harvested Anki cloze scenarios match their goldens.
+
+Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: the Requirements, Approach and test scenarios follow R973 as amended (parsing ignores MathJax, `specs/render/cloze.md` C8 and C13), and the fuzz property holds where C12 says. A2: the type-in scenario follows R977 as amended (C10, C13): it first expected `a, b`.
 
 ### U62. Card render pipeline, AV tags and display transform
 

@@ -130,7 +130,7 @@ While rendering (after T6 found no structural error), the first problem in templ
 After a question renders without error, the card is **blank** when:
 
 - standard note type: the question template's analysis (T11.2, strict form) says it renders nothing for the set of names whose field-map values are non-empty (E1). `FrontSide` is in that set only when the note has a non-empty field of that name (P4), so a question made only of text, comments, `{{FrontSide}}` and conditionals around such things is usually blank, whatever it outputs;
-- cloze note type: no field value of the note holds a cloze with number ordinal + 1 (`specs/render/cloze.md`, U61).
+- cloze note type: no value of the field map, special values included, has ordinal + 1 among its cloze numbers; the templates play no part (`specs/render/cloze.md` C15, U61).
 
 A blank card keeps its question output; its answer is not rendered. Anki then shows a "card is blank" notice with a help link on both sides; Meguri shows its own notice (U62), and observations report `empty` instead of any notice text.
 

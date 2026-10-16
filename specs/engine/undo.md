@@ -3,15 +3,16 @@
 Spec: engine/undo
 Requirements: R719, R720, R721, R725 (as KTD7 reconciles it), R1795, R1796, R2020; supports R365, R366, R370, R371, R723, R726, R1811
 Anki: none for sections M1 to M12 (Meguri design from KTD5, KTD6, KTD7 and spec-flow C3, Q1, Q4, Q11; written by the implementer, U25). Sections A1 to A11 are Anki's observable results at 26.09.3, written by the spec writer; A11 lists what they change in M1 to M12.
-Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `op_catalog.rs`
+Scenarios: `conformance/scenarios/undo/` (A10); mechanism tests in `core/crates/meguri-engine/tests/undo_basic.rs`, `undo_merge.rs`, `undo_truncation.rs`, `undo_holdback_props.rs`, `undo_holdback_memory.rs`, `op_catalog.rs`; `undo_conformance.rs` plays `undo/config-writes` on the engine against its golden until the runner's undo adapter runs the area (`undo-ops.md` V6)
 
 The undo manager of one open collection (C3): the steps it records from committed ops, what every other op does to them, undo and redo as ops, the reasons a step is unavailable, the held-back run a normal sync keeps local, and the rule that no uploaded step is ever undone. Ops, sources and journals are `engine/op-model`; the change set is `engine/change-stream`.
 
 ## M1. Steps
 
-- A step is recorded from every committed op whose source is `UserUndoable` and whose journal (U23) holds at least one change, unless the op is an undo or a redo (M4, M5). An op that changed nothing records nothing and leaves redo alone.
-- A step holds: its id, which is the seq of the op that made it (`engine/op-model` O4); its name; its kind; its session; the op's journal (every changed row's before-image, and its after-image, a digest for notes); the notes it touched (the notes it changed and the notes of the cards it changed, from its change set); `col.mod` before and after the op; the write phase the op declared, if any (O8); its upload state (M9); and an optional restorer state the op attached (M10).
-- The name is the step name the op gives (Anki's op names: "Answer Card", "Bury", "Suspend", R719, R370); without one it is the op's name. The kind is `Answer` for an answer and `Other` for every other step; only the held-back run (M8) reads it. The session is the review session the op names, if any.
+- A step is recorded from every committed op whose source is `UserUndoable` and whose journal (U23) holds at least one change, unless the op is an undo or a redo (M4, M5), or the top step takes the op in (merging, below). An op that changed nothing records nothing, and still empties redo (M2, A2).
+- A step holds: its id, which is the seq of the op that made it (`engine/op-model` O4); its name; its kind; its session; the op's journal (every changed row's before-image, and its after-image, a digest for notes); the notes it touched (the notes it changed and the notes of the cards it changed, from its change set); the `col.mod` its undo restores, which is the value `col.mod` held just before the op (A7); its time, the epoch second at which the op began (the writer reads the clock before the op's closure runs); the write phase the op declared, if any (O8); its upload state (M9); and an optional restorer state the op attached (M10).
+- The name is the step name the op gives, one of `undo-ops.md` V4's names exactly (`src/undo/names.rs`: "Answer Card", "Update Note", "Delete Note", R719, R370, A1); without one it is the op's name. The kind is `Answer` for an answer and `Other` for every other step; only the held-back run (M8) reads it. The session is the review session the op names, if any.
+- **Merging (A3).** The top step takes in a step about to be recorded when both are "Update Note" steps whose journals changed one and the same note row (there before and after) and nothing else but `col`, both have the same session, the top step is still local (never uploaded or pending, M9), and the new step's time minus the top step's is below 60 seconds (a negative difference counts as 0). The top step keeps its id, kind, session, touched notes, before-images, `col.mod` and time, and takes the new op's after-images (the journals composed, meguri-storage `Journal::then`), so its undo puts the note back as before its first edit and the check of M4.2 accepts it. The step a redo records merges the same way (M5, A3: a redo of an "Update Note" step is a note update). The step an undo leaves on redo never merges. The two conditions Anki has no counterpart for, local and same session, keep a step a sync uploaded or holds pending unchanged and keep a session-scoped undo (M3) from reverting an edit made outside its session.
 - The touched set of a step is the keys of its journal, the notes it touched, and the graves of the cards, notes and decks it removed (M4.3).
 - At most 30 steps are kept (R719). A 31st drops the oldest. Steps live in memory only: before-images past the journal's spill threshold live in its unnamed temporary file, which the system deletes when the journal drops, so nothing survives a quit and nothing needs a sweep at launch. Closing the collection drops every step.
 
@@ -21,16 +22,16 @@ Each op source has one undo effect, applied on the writer right after the op com
 
 | Source | Effect when the op changed something |
 |---|---|
-| `UserUndoable` | recorded as a new step (M1); redo is cleared |
-| `UserNonUndoable` | clear all, reason `ClearedByNonUndoableOp` (R366, R725); an op marked skip-undo instead changes nothing in the history (below) |
+| `UserUndoable` | recorded as a new step, or merged into the top step (M1); redo is cleared, also when the op changed nothing (A2) |
+| `UserNonUndoable` | clear all, reason `ClearedByNonUndoableOp` (R366, R725); an op marked skip-undo instead keeps the steps and clears redo (below) |
 | `LocalApi` | never recorded; truncates at the deepest intersecting step (M7, R1795, R1796) |
 | `SyncIncoming` | the merge rule of M9.4 (KTD7) |
 | `Optimizer`, `Maintenance` | clear all, reason `ClearedByNonUndoableOp` |
 | `Rollover` | clear all, reason `ClearedByRollover` (R462) |
 
 - Clear all drops every step and every redo step, and sets the reason peek reports once the history is empty (M3).
-- Skip-undo: an op of source `UserNonUndoable` may be marked skip-undo. It is neither recorded nor clears anything: selecting a deck (`curDeck`, `activeDecks`; U28's op and U43's session start) keeps the answer before it undoable (R42). Any other source marked skip-undo is refused with `InvalidArgument` at submit.
-- An op that changed nothing has no effect, whatever its source.
+- Skip-undo: an op of source `UserNonUndoable` may be marked skip-undo. It is never recorded and keeps every step, and it clears redo, changed or not, as every op but undo and redo does (A2, A11.1): selecting a deck (`curDeck`, `activeDecks`; U28's op and U43's session start) keeps the answer before it undoable (R42), and so does a config write without an undo entry (`record-ops.md` W4). Any other source marked skip-undo is refused with `InvalidArgument` at submit.
+- An op that changed nothing has no other effect: a `UserUndoable` or skip-undo op clears redo and nothing else, and an op of any other source leaves both histories (A11.6). A refused undo or redo, and an op that fails and rolls back, leave both.
 
 ## M3. Peek and scopes
 
@@ -55,19 +56,19 @@ Each op source has one undo effect, applied on the writer right after the op com
 
 Undo is an op (catalog `undo`, or `undo_long_write` for a step whose op declared a long write; `engine/op-model` O9) of source `UserUndoable`, written in the `CallerSupplied` stamping mode, so every restored row keeps its own `usn` and modification time (`storage/ids-usn-mtime` S3). Inside its transaction, on the writer:
 
-1. **Target.** The top step for the scope (M3). None: refused with `UndoUnavailable` and the reason peek reports (`None`, or why the history was emptied). Upload state `Uploaded` or `Pending`: refused with `AlreadyUploaded` or `UploadPending` (M9); the core refuses whatever the caller. A refusal writes nothing.
+1. **Target.** The top step for the scope (M3) when the writer takes the op, not when it was submitted: an undo submitted while a bulk op holds the writer undoes the bulk op's step once that commits. The writer resolves the step before the op's write phase starts, and the op then runs as `undo_long_write` with the step's declared write when the step has one, so the WAL flush before a long write and its `WriteDelay` (O2, O8) follow the step it restores. None: refused with `UndoUnavailable` and the reason peek reports (`None`, or why the history was emptied). Upload state `Uploaded` or `Pending`: refused with `AlreadyUploaded` or `UploadPending` (M9); the core refuses whatever the caller. Only the writer adds steps, so between the resolve and the restore another thread can only drop the step (M6, M9.2) or flag it: the op then refuses with the reason peek reports, or `None` when another step took its place. A refusal writes nothing.
 2. **Check.** Every row of the step's journal must still equal the step's after-image: the same digest (`storage` journal digest), or absent where the step removed it. For the `col` row only the columns the step changed other than `mod` are compared. If any row differs, the step and every older step are dropped, the reason becomes `ChangedExternally`, and the undo is refused with that reason, writing nothing.
-3. **Restore.** Every journal row gets its before-image back: rows the step inserted are deleted, rows it deleted are inserted again (with the graves it added removed, since those are journal rows too), changed rows are written back whole. Rows of `decks`, `notetypes`, `fields` and `templates` the step changed are deleted first and inserted after, so names moving between rows never meet in their unique indexes. Graves: when the step removed a card, note or deck without adding its grave (the grave existed already, `storage/graves` G2), the undo also removes that grave if it is there, as Anki does (`storage/graves` G6); its redo puts it back.
-4. **`col`.** The columns other than `mod` that the step changed get their before values; `mod` gets the value it had before the step (`storage/ids-usn-mtime` S5), never now.
-5. **Commit.** The undo op's own journal becomes a redo step with the undone step's name, kind, session, declared write and restorer state; its id is the undo op's seq. Its `col.mod` values are the step's, swapped, so redo sets `mod` back to the value the step set.
+3. **Restore.** Every journal row gets its before-image back: rows the step inserted are deleted, rows it deleted are inserted again (with the graves it added removed, since those are journal rows too), changed rows are written back whole. Rows of `decks`, `notetypes`, `fields` and `templates` the step changed are deleted first and inserted after, so names moving between rows never meet in their unique indexes. Graves: when the step removed a card, note or deck without adding its grave (the grave existed already, `storage/graves` G2), the undo also removes that grave if it is there, as Anki does (`storage/graves` G6); its redo puts it back pending (M5).
+4. **`col`.** The columns other than `mod` that the step changed get their before values; `mod` gets the step's `col.mod` (M1: the value it held just before the step's op, or, for a redo step, when the undo ran; A7, `storage/ids-usn-mtime` S5), never now.
+5. **Commit.** The undo op's own journal becomes a redo step with the undone step's name, kind, session, declared write and restorer state; its id is the undo op's seq and its time the second the undo began. Its `col.mod` is the value `col.mod` held when the undo ran, read before the restore, so the redo puts back that value (A7: the one the step set, unless something that keeps the history moved it since, such as a skip-undo write).
 
 The result's value names the undone step; its change set has source `UserUndoable`; `undo` (the recorded-step metadata of O4) is empty.
 
-A step whose op declared a long write (a job-run op, KTD9: bulk ops, large structure changes, an `.apkg` apply) reports that write in peek; its undo and redo declare the same write (O8), so callers start them on the maintenance lane and never block the interactive lane.
+A step whose op declared a long write (a job-run op, KTD9: bulk ops, large structure changes, an `.apkg` apply) reports that write in peek; its undo and redo declare the same write (O8, resolved on the writer as M4.1 says), so callers start them on the maintenance lane and never block the interactive lane.
 
 ## M5. Redo
 
-Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo step: refused with `None` when there is none; the same check (M4.2: here a failure drops that redo step and every redo step below it) and restore (M4.3, M4.4). Its journal becomes a new step at the top of the history, with the redo step's name, kind, session, declared write and restorer state, and `col.mod` values swapped back; the other redo steps stay. Any newly recorded step clears redo (R720).
+Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo step: refused with `None` when there is none; the same check (M4.2: here a failure drops that redo step and every redo step below it) and restore (M4.3, M4.4), except that every grave it writes back, the graves its undo removed, gets `usn` -1, also one that held a server `usn` before the deletion (A5). Its journal becomes a new step at the top of the history, with the redo step's name, kind, session, declared write and restorer state; its `col.mod` is the value `col.mod` held when the redo ran, and its time the second the redo began. It merges into the top step as a new step would (M1). The other redo steps stay. Every `UserUndoable` op but undo and redo, and every skip-undo op, clears redo (M2, A2, R720).
 
 ## M6. Clearing without an op
 
@@ -84,7 +85,7 @@ Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo 
 ## M8. The held-back run (KTD6, spec-flow Q11)
 
 - `held_back_run(session)` is the contiguous run of steps at the top of the history that belong to that session and are neither uploaded nor upload-pending, down to and including the newest answer among them. It is empty when there is no session, when the top step is not that session's, is uploaded or pending, or when no such answer is reached before the run ends.
-- Its value: the steps (ids, names, kinds) and the rows they touched, each with its before-image from the oldest step of the run that touched it (absent when the run created it). The `col` row is not in it.
+- Its value: the steps (ids, names, kinds) and the rows they touched, each with its before-image from the oldest step of the run that touched it (absent when the run created it). The `col` row is not in it. The value keeps the steps' journals and reads an image only when asked, for one row by its key or one row at a time as an iteration over the rows reaches it, from memory or from the journal's spill file (M1). Taking the run, at a sync's barrier on the writer or through `held_back_run`, reads no image, so a run with a large step (a session-scoped bulk edit) costs no memory beyond its journals and holds the writer no longer than a small one (R1851). The journals live as long as the value, also after their steps leave the history.
 - The session for hold-back ends when U43 says so (the summary or congrats screen is dismissed, KTD6); U43 then stops passing it.
 
 ## M9. Sync
@@ -115,6 +116,7 @@ State outside the collection that an undo or redo must put back (U44's load-bala
 Undo of an answer (one card row, one review-log row and `col`) returns within R1811's 50 ms with a wide margin: the `undo` criterion suite (`core/crates/meguri-engine/benches/undo.rs`) times the undo op's round trip at 10k and 150k cards and fails on Apple hosts when its p95 reaches 5 ms.
 
 - Measured 2026-10-16, undo and redo of an answer alternating: `tools/mg bench-mac --bench undo` (M3 Max) p50 77 µs (10k) and 92 µs (150k), p95 0.20 ms and 0.25 ms; `tools/mg bench --bench undo` (Docker, tmpfs) p50 29 µs and 32 µs, p95 63 µs and 91 µs.
+- After A11's changes (the `col.mod` read before the restore, the merge check): `tools/mg bench --bench undo` (Docker) p50 33 µs (10k) and 32 µs (150k), p95 86 µs and 105 µs.
 - A first Mac run, with undo and redo as ops that may declare a long write, measured p50 4.0 ms and p95 4.96 ms: the writer syncs a pending WAL flush before such an op (C9.2's full sync, about 4 ms). Plain `undo` and `redo` are therefore short catalog ops, and only a step of a long write uses `undo_long_write` and `redo_long_write`.
 
 ## Observable results of undoing each op
@@ -242,7 +244,7 @@ Every row a step changed, in any table, comes back as A4 to A6 describe for note
 
 ### A11. What this changes in M1 to M12
 
-Anki's results above that the mechanism does not produce yet; the implementer updates the M sections with the code.
+Anki's results above that the mechanism did not produce at first. M1, M2, M4 and M5 now follow items 1 to 5 (U25's implementer, with the code); item 6 stays as written.
 
 1. **Redo emptied by every op (A2).** M1's "an op that changed nothing records nothing and leaves redo alone" and M2's skip-undo op that "is neither recorded nor clears anything" become: every op of source `UserUndoable` empties the redo history when it runs, whether or not it changed something; a skip-undo op (W4's config write, and R42's deck selection, where Anki records a "Select Deck" step and so empties redo too) keeps the undo steps and empties redo. Undo and redo keep it.
 2. **Merging (A3).** A step needs the second at which its first op began (the clock seam's time, rounded down to whole seconds; a redone step takes the time of the redo). When an "Update Note" op merges into the top step, the step keeps its before-images and takes the op's after-images, so that M4.2's check accepts the next undo; its id, kind, session and touched set stay. The step a redo of an "Update Note" step records merges the same way; the redo step an undo leaves never merges.

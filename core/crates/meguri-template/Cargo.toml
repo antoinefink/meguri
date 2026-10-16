@@ -10,9 +10,13 @@ publish.workspace = true
 # Hint ids (specs/render/filters.md F5): a parity pin.
 blake3.workspace = true
 difflib.workspace = true
-# The text filter (strip-html H4) and section emptiness (field-emptiness E1).
+# data-cloze attribute encoding (specs/render/cloze.md C7): a parity pin.
+htmlescape.workspace = true
+# The text filter (strip-html H4), section emptiness (field-emptiness E1) and
+# markup removal inside MathJax in cloze output (cloze.md C8, strip-html H2).
 meguri-text.workspace = true
-# Ruby groups of the furigana filters (filters.md F4): leftmost-first.
+# Ruby groups of the furigana filters (filters.md F4) and the cloze MathJax
+# match (cloze.md C8): leftmost-first.
 regex.workspace = true
 
 [dev-dependencies]

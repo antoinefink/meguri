@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The worker side of `tools/mg oracle check` (specs/conformance/collection-check.md).
 
-check: {dir, now, decks?, render_notes?} -> the report's {now, tz, timing,
-counts, decks, render, check_db, changed_tables} (K3-K8), or the run errors
-no_collection and open_failed (K7).
+check: {dir, now, decks?, render_notes?, schedule?} -> the report's {now, tz,
+timing, counts, decks, render, schedule?, check_db, changed_tables} (K3-K8,
+K11), or the run errors no_collection and open_failed (K7).
 
 The worker copies <dir>/collection.anki2 (and its -wal) into its scratch, sets
 its clock to `now` and opens the copy with the Python layer, in English, as the
@@ -13,11 +13,16 @@ closed: after steps 1-5 the collection closes, is digested, opens again (which
 writes nothing to a file Anki already opened) and runs Check Database, then
 closes and is digested again. A digest covers each O8 table's rows in key
 order, every column as its storage class and raw bytes (text never decoded).
+
+K11 (schedule) selects each deck in turn and builds its queue through the
+backend, as the deck list and the reviewer do; the next states it reads last
+see the load balancer of the last queue built.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sqlite3
@@ -26,32 +31,41 @@ import tempfile
 from typing import Any
 
 import anki.errors
+from anki import scheduler_pb2
 from anki._backend import RustBackend
 from anki.collection import Collection
 from anki.template import TemplateRenderContext
 
+from . import convert
 from .clock import Clock
 from .errors import DriverError, log_exception
 from .observe import timing
 from .observe.db_dump import KEYS, TABLES
+from .observe.sched import BUTTONS
 from .ops.maintenance import check_database
 
 COUNTED_TABLES = (
     ("notes", "notes"), ("cards", "cards"), ("revlog", "revlog"), ("notetypes", "notetypes"),
     ("decks", "decks"), ("presets", "deck_config"), ("tags", "tags"), ("graves", "graves"),
 )
-REQUEST_KEYS = {"cmd", "id", "dir", "now", "decks", "render_notes"}
+REQUEST_KEYS = {"cmd", "id", "dir", "now", "decks", "render_notes", "schedule"}
 I64 = (-(2**63), 2**63 - 1)
+QUEUE_KINDS = {
+    scheduler_pb2.QueuedCards.NEW: "new",
+    scheduler_pb2.QueuedCards.LEARNING: "learning",
+    scheduler_pb2.QueuedCards.REVIEW: "review",
+}
 
 
 def _is_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def check_request(req: dict) -> tuple[str, int, list[str], list[int]]:
+def check_request(req: dict) -> tuple[str, int, list[str], list[int], bool]:
     unknown = sorted(set(req) - REQUEST_KEYS)
     decks = req.get("decks", [])
     notes = req.get("render_notes", [])
+    schedule = req.get("schedule", False)
     if (
         unknown
         or not isinstance(req.get("dir"), str)
@@ -62,13 +76,17 @@ def check_request(req: dict) -> tuple[str, int, list[str], list[int]]:
         or not all(isinstance(d, str) for d in decks)
         or not isinstance(notes, list)
         or not all(_is_int(n) and I64[0] <= n <= I64[1] for n in notes)
+        or not isinstance(schedule, bool)
     ):
-        raise DriverError("protocol_error", detail="check is {dir, now, decks?: [names], render_notes?: [note ids]}")
-    return req["dir"], req["now"], decks, notes
+        raise DriverError(
+            "protocol_error",
+            detail="check is {dir, now, decks?: [names], render_notes?: [note ids], schedule?: boolean}",
+        )
+    return req["dir"], req["now"], decks, notes, schedule
 
 
 def run(req: dict, tz: str, scratch: str, clock: Clock) -> dict:
-    directory, now, deck_names, note_ids = check_request(req)
+    directory, now, deck_names, note_ids, schedule = check_request(req)
     source = os.path.join(directory, "collection.anki2")
     if not os.path.isfile(source):
         raise DriverError("no_collection", detail="the directory holds no collection.anki2")
@@ -88,6 +106,8 @@ def run(req: dict, tz: str, scratch: str, clock: Clock) -> dict:
             report["timing"] = _stage("timing", lambda: timing.value(col))
             report["decks"] = _stage("decks", lambda: deck_counts(col, deck_names))
             report["render"] = _stage("render", lambda: render_notes(col, note_ids))
+            if schedule:
+                report["schedule"] = _stage("schedule", lambda: schedule_report(col))
         finally:
             _close(col)
         # A corrupt file may fail to digest; Check Database then says so.
@@ -189,6 +209,74 @@ def render_card(card) -> dict:
         "question_bytes": len(output.question_text.encode("utf-8")),
         "answer_bytes": len(output.answer_text.encode("utf-8")),
     }
+
+
+# --- schedule (K11) -----------------------------------------------------------------
+
+
+def _compact(value: Any) -> str:
+    """K11.2/K11.3: no whitespace, members sorted by code point, floats as the
+    f32 decimals convert.message already chose (O6)."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _lines_sha256(lines: list[str]) -> str:
+    """K11.2: SHA-256 of the lines, each ending in LF."""
+    h = hashlib.sha256()
+    for line in lines:
+        h.update(line.encode("utf-8"))
+        h.update(b"\n")
+    return h.hexdigest()
+
+
+def _numbers(node) -> dict[str, int]:
+    return {"new": node.new_count, "learning": node.learn_count, "review": node.review_count}
+
+
+def schedule_report(col: Collection) -> dict[str, Any]:
+    """K11.1-K11.3 on the open collection at the frozen instant."""
+    # K11.1 step 1: the deck list's numbers (K6), every node and the root.
+    root = col.sched.deck_due_tree()
+    tree: dict[int, dict[str, int]] = {}
+    pending = list(root.children)
+    while pending:
+        node = pending.pop()
+        tree[node.deck_id] = _numbers(node)
+        pending.extend(node.children)
+    card_count = col.db.scalar("select count() from cards")
+    # K11.1 step 2: select each deck as the deck list does, then read its
+    # whole queue in presentation order (the backend's fetch reads the
+    # learning cards due now, the main queue, then the learn-ahead cards).
+    queues: dict[int, dict[str, Any]] = {}
+    for did in col.db.list("select id from decks order by id"):
+        col.decks.set_current(did)
+        queued = col.sched.get_queued_cards(fetch_limit=max(card_count, 1))
+        lines = [f"{entry.card.id}\t{QUEUE_KINDS[entry.queue]}" for entry in queued.cards]
+        queues[did] = {
+            "entries": len(lines),
+            "new": queued.new_count,
+            "learning": queued.learning_count,
+            "review": queued.review_count,
+            "order_sha256": _lines_sha256(lines),
+        }
+    # K11.1 step 3: next states in card id order, after the last queue was
+    # built (its load balancer, when on, covers every deck).
+    by_deck: dict[int, list[str]] = {}
+    for cid, did in col.db.all("select id, did from cards order by id"):
+        states = col._backend.get_scheduling_states(cid)
+        value = {button: convert.message(getattr(states, button)) for button in BUTTONS}
+        by_deck.setdefault(did, []).append(f"{cid}\t{_compact(value)}")
+    decks = {
+        str(did): {
+            "cards": len(by_deck.get(did, [])),
+            "next_states_sha256": _lines_sha256(by_deck.get(did, [])),
+            "queue": queue,
+            "tree": tree.get(did),
+        }
+        for did, queue in queues.items()
+    }
+    body = {"cards": card_count, "decks": decks, "root": _numbers(root)}
+    return {**body, "sha256": hashlib.sha256(_compact(body).encode("utf-8")).hexdigest()}
 
 
 # --- digests ---------------------------------------------------------------------

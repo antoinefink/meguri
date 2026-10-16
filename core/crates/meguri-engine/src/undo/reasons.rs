@@ -1,48 +1,50 @@
 //! Why a step cannot be undone, why the history was cleared, and what each
 //! op source does to the history (`specs/engine/undo.md` M2, M3, M6).
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use meguri_model::changes::OpSource;
 
-/// Why `peek` reports no available step, or why an undo or redo was refused
-/// (M3). The UI words each one (R365, R366, R462, R1796).
+/// The answer `peek` gives when no step is available, and the reason an undo
+/// or redo is refused (M3, the table of reasons). The UI has its own words
+/// for each (R365, R366, R462, R1796); logs and errors show the variant's
+/// name in snake case (`cleared_by_rollover`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DisabledReason {
-    /// Nothing to undo: session start, everything undone, or a session scope
-    /// whose top step is not its own.
+    /// There is nothing to undo: a new session, a history undone to its
+    /// bottom, or a session scope that finds another session's step (or a
+    /// step of no session) on top.
     None,
+    /// Day rollover emptied the history.
     ClearedByRollover,
+    /// The incoming changes of a normal sync dropped the steps below (M9.4).
     ClearedBySync,
-    /// The collection was replaced: one-way sync, restore, `.colpkg` import.
+    /// A one-way sync, a restore or a `.colpkg` import replaced the
+    /// collection.
     ClearedByOneWay,
+    /// An op that records no step changed rows (a non-undoable user op, the
+    /// optimizer, maintenance), or Check Database ran.
     ClearedByNonUndoableOp,
-    /// A local-server write or an outside change truncated the history, or
-    /// an undo found its rows changed.
+    /// A local-server write or a change from outside cut the history, or an
+    /// undo's check found a row of its step changed (M4.2, M7).
     ChangedExternally,
+    /// A sync uploaded the step on top (M9.2).
     AlreadyUploaded,
-    /// The step is in the snapshot of a running sync.
+    /// The step on top is in the snapshot of a sync still running (M9.1).
     UploadPending,
-}
-
-impl DisabledReason {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DisabledReason::None => "none",
-            DisabledReason::ClearedByRollover => "cleared_by_rollover",
-            DisabledReason::ClearedBySync => "cleared_by_sync",
-            DisabledReason::ClearedByOneWay => "cleared_by_one_way",
-            DisabledReason::ClearedByNonUndoableOp => "cleared_by_non_undoable_op",
-            DisabledReason::ChangedExternally => "changed_externally",
-            DisabledReason::AlreadyUploaded => "already_uploaded",
-            DisabledReason::UploadPending => "upload_pending",
-        }
-    }
 }
 
 impl fmt::Display for DisabledReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        // Each capital of the variant's name starts a lower-case word.
+        let variant = format!("{self:?}");
+        for (at, letter) in variant.char_indices() {
+            if letter.is_ascii_uppercase() && at > 0 {
+                f.write_char('_')?;
+            }
+            f.write_char(letter.to_ascii_lowercase())?;
+        }
+        Ok(())
     }
 }
 
@@ -91,5 +93,20 @@ pub fn source_effect(source: OpSource) -> SourceEffect {
         OpSource::LocalApi => SourceEffect::TruncateIntersecting,
         OpSource::SyncIncoming => SourceEffect::SyncMerge,
         OpSource::Rollover => SourceEffect::ClearAll(DisabledReason::ClearedByRollover),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DisabledReason;
+
+    #[test]
+    fn a_reason_shows_as_its_name_in_snake_case() {
+        assert_eq!(DisabledReason::None.to_string(), "none");
+        assert_eq!(
+            DisabledReason::ClearedByNonUndoableOp.to_string(),
+            "cleared_by_non_undoable_op"
+        );
+        assert_eq!(DisabledReason::UploadPending.to_string(), "upload_pending");
     }
 }

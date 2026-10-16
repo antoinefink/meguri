@@ -32,7 +32,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     );
     assert_eq!(
         json["supports"]["observations"],
-        serde_json::json!(["db_dump", "fsrs_next", "schema_objects", "template", "text"])
+        serde_json::json!(["cloze", "db_dump", "fsrs_next", "schema_objects", "template", "text"])
     );
     // dsl.md D7.2: 29 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's

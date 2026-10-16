@@ -2,24 +2,27 @@
 //! M9; KTD6, KTD7): what a normal sync keeps local, which steps it flags
 //! upload-pending, and what its merge reports.
 
-use std::collections::BTreeSet;
+use std::fmt;
+use std::sync::Arc;
 
+use meguri_storage::journal::{Entry as JournalEntry, Journal};
 use meguri_storage::{RowImage, RowKey, Table};
 
 use crate::changes::stream::Seq;
 use crate::error::EngineError;
-use crate::executor::preconditions::TouchKey;
 use crate::undo::entry::{Entry, StepInfo};
 
-/// The held-back run (M8) as a value: its steps and the rows they touched,
-/// each with the image it had before the run.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// The held-back run (M8): its steps and the rows they touched. It keeps the
+/// steps' journals and reads a row's image from before the run only when
+/// asked ([`HeldBackRun::before`], [`HeldBackRun::rows`]), from memory or
+/// from the journal's spill file, so a sync's barrier reads no image and a
+/// large spilled step costs no more memory than its journal does (R1851).
+#[derive(Clone, Default)]
 pub struct HeldBackRun {
     /// Newest first.
     pub steps: Vec<StepInfo>,
-    /// One per key, in no set order: the image from the oldest step of the
-    /// run that touched it; `None` when the run created the row.
-    pub rows: Vec<HeldRow>,
+    /// The steps' journals, oldest first.
+    journals: Vec<Arc<Journal>>,
 }
 
 impl HeldBackRun {
@@ -28,12 +31,62 @@ impl HeldBackRun {
     }
 
     /// Whether the run touched the row (`tags` keys compare with `unicase`).
+    /// The `col` row is never in the run.
     pub fn touches(&self, table: Table, key: &RowKey) -> bool {
-        let probe = TouchKey::new(table, key.clone());
-        self.rows
-            .iter()
-            .any(|row| TouchKey::new(row.table, row.key.clone()) == probe)
+        self.first_change(table, key).is_some()
     }
+
+    /// The row with its image from before the run, read now: the image the
+    /// oldest step of the run that touched it found, `None` inside when the
+    /// run created the row. `None` when the run did not touch the row.
+    pub fn before(&self, table: Table, key: &RowKey) -> Result<Option<HeldRow>, EngineError> {
+        self.first_change(table, key)
+            .map(|(journal, change)| held_row(journal, change))
+            .transpose()
+    }
+
+    /// Every row the run touched, once each, oldest step first; each image is
+    /// read only when the iteration reaches its row.
+    pub fn rows(&self) -> impl Iterator<Item = Result<HeldRow, EngineError>> + '_ {
+        self.journals.iter().enumerate().flat_map(move |(at, journal)| {
+            let older = &self.journals[..at];
+            journal
+                .entries()
+                .filter(move |change| {
+                    change.table() != Table::Col
+                        && older
+                            .iter()
+                            .all(|earlier| earlier.entry(change.table(), change.key()).is_none())
+                })
+                .map(move |change| held_row(journal, change))
+        })
+    }
+
+    /// The oldest step's change of the row, with that step's journal.
+    fn first_change(&self, table: Table, key: &RowKey) -> Option<(&Journal, &JournalEntry)> {
+        if table == Table::Col {
+            return None;
+        }
+        self.journals
+            .iter()
+            .find_map(|journal| journal.entry(table, key).map(|change| (&**journal, change)))
+    }
+}
+
+impl fmt::Debug for HeldBackRun {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeldBackRun")
+            .field("steps", &self.steps)
+            .finish_non_exhaustive()
+    }
+}
+
+fn held_row(journal: &Journal, change: &JournalEntry) -> Result<HeldRow, EngineError> {
+    Ok(HeldRow {
+        table: change.table(),
+        key: change.key().clone(),
+        before: journal.before(change)?,
+    })
 }
 
 /// A row of the held-back run and its image before the run.
@@ -45,7 +98,7 @@ pub struct HeldRow {
 }
 
 /// What a normal sync's barrier gets (M9.1).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SyncHold {
     /// The seq of the last op the snapshot sees.
     pub snapshot: Seq,
@@ -61,26 +114,10 @@ pub struct SyncMerge {
     pub staged: Vec<(Table, RowKey)>,
 }
 
-/// The run's value from its steps, newest first (M8).
-pub(crate) fn run_value(run: &[Entry]) -> Result<HeldBackRun, EngineError> {
-    let mut seen = BTreeSet::new();
-    let mut rows = Vec::new();
-    for entry in run.iter().rev() {
-        for row in entry.journal.entries() {
-            if row.table() == Table::Col {
-                continue;
-            }
-            if seen.insert(TouchKey::new(row.table(), row.key().clone())) {
-                rows.push(HeldRow {
-                    table: row.table(),
-                    key: row.key().clone(),
-                    before: entry.before(row)?,
-                });
-            }
-        }
-    }
-    Ok(HeldBackRun {
+/// The run of these steps, newest first (M8): their journals, no image read.
+pub(crate) fn run_value(run: &[Entry]) -> HeldBackRun {
+    HeldBackRun {
         steps: run.iter().map(|entry| entry.info.clone()).collect(),
-        rows,
-    })
+        journals: run.iter().rev().map(|entry| Arc::clone(&entry.journal)).collect(),
+    }
 }

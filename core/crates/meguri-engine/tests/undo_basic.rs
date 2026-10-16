@@ -5,7 +5,7 @@
 mod common;
 
 use std::any::Any;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use common::steps::{self, ANSWER_CARD, BURY, SUSPEND, UPDATE_NOTE};
@@ -21,7 +21,7 @@ use meguri_model::deck::Deck;
 use meguri_model::grave::GraveKind;
 use meguri_model::ids::{CardId, DeckId, NoteId};
 use meguri_model::usn::Usn;
-use meguri_storage::{ConfigValue, ReadRows, ReaderRole};
+use meguri_storage::{ConfigValue, ReadRows, ReaderRole, StampMode};
 
 const S1: SessionId = SessionId(1);
 const S2: SessionId = SessionId(2);
@@ -49,6 +49,27 @@ fn note_with_card(h: &Harness, front: &str) -> (NoteId, CardId) {
 fn card_queue(h: &Harness, card: CardId) -> CardQueue {
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     reader.card(card).unwrap().unwrap().queue
+}
+
+#[test]
+fn step_names_are_the_names_undo_ops_v4_lists() {
+    // R370, A1, A11.5: undo_status maps names to V4's ids, so the engine's
+    // names are V4's, in its order.
+    let spec = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../specs/conformance/undo-ops.md"),
+    )
+    .unwrap();
+    let section = spec
+        .split("\n## V4.")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("undo-ops.md has a V4 section");
+    let listed: Vec<&str> = section
+        .lines()
+        .filter(|line| line.starts_with("| `"))
+        .map(|line| line.split('|').nth(2).unwrap_or_default().trim())
+        .collect();
+    assert_eq!(listed, meguri_engine::undo::names::ALL);
 }
 
 #[test]
@@ -96,29 +117,56 @@ fn undo_restores_the_dump_before_the_op_and_redo_the_dump_after_it() {
     );
 }
 
+fn peek_redo(h: &Harness) -> UndoStatus {
+    h.collection.peek_redo(UndoScope::Global).unwrap()
+}
+
 #[test]
-fn undo_then_a_new_step_empties_redo_but_an_op_changing_nothing_does_not() {
+fn undo_then_a_new_step_empties_redo() {
     let h = Harness::open();
     let (_, cid) = note_with_card(&h, "a");
     steps::answer(&h.collection, None, cid).unwrap();
     steps::bury(&h.collection, None, cid).unwrap();
     h.collection.undo(UndoScope::Global).unwrap();
-    assert_eq!(h.collection.peek_redo(UndoScope::Global).unwrap().name(), Some(BURY));
+    assert_eq!(peek_redo(&h).name(), Some(BURY));
+
+    steps::suspend(&h.collection, None, cid).unwrap();
+    assert_eq!(peek_redo(&h), UndoStatus::Unavailable(DisabledReason::None));
+    assert_eq!(refused(h.collection.redo(UndoScope::Global)), DisabledReason::None);
+    assert_eq!(peek_name(&h), Some(SUSPEND));
+}
+
+#[test]
+fn an_undoable_op_that_changes_nothing_records_nothing_but_empties_redo() {
+    // A2, A11.1: every operation empties the redo history, whether or not
+    // it changed a row.
+    let h = Harness::open();
+    let (_, cid) = note_with_card(&h, "a");
+    steps::answer(&h.collection, None, cid).unwrap();
+    steps::bury(&h.collection, None, cid).unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(peek_redo(&h).name(), Some(BURY));
 
     let nothing = h
         .collection
         .run(OpSpec::named("touch_nothing", OpSource::UserUndoable), |_| Ok(()))
         .unwrap();
-    assert_eq!(nothing.undo, None);
-    assert_eq!(h.collection.peek_redo(UndoScope::Global).unwrap().name(), Some(BURY));
+    assert_eq!(nothing.undo, None, "nothing recorded");
+    assert_eq!(peek_redo(&h), UndoStatus::Unavailable(DisabledReason::None));
+    assert_eq!(peek_name(&h), Some(ANSWER_CARD), "the steps below stay");
+}
 
-    steps::suspend(&h.collection, None, cid).unwrap();
-    assert_eq!(
-        h.collection.peek_redo(UndoScope::Global).unwrap(),
-        UndoStatus::Unavailable(DisabledReason::None)
-    );
+#[test]
+fn an_undo_or_redo_that_is_refused_leaves_both_histories() {
+    let h = Harness::open();
+    let (_, cid) = note_with_card(&h, "a");
+    steps::answer(&h.collection, None, cid).unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(refused(h.collection.undo(UndoScope::Global)), DisabledReason::None);
+    assert_eq!(peek_redo(&h).name(), Some(ANSWER_CARD), "a refused undo keeps redo");
+    h.collection.redo(UndoScope::Global).unwrap();
     assert_eq!(refused(h.collection.redo(UndoScope::Global)), DisabledReason::None);
-    assert_eq!(peek_name(&h), Some(SUSPEND));
+    assert_eq!(peek_name(&h), Some(ANSWER_CARD), "a refused redo keeps the steps");
 }
 
 #[test]
@@ -226,28 +274,48 @@ fn check_database_and_an_outside_change_clear_with_their_reasons() {
     assert_eq!(peek(&h), UndoStatus::Unavailable(DisabledReason::ChangedExternally));
 }
 
-#[test]
-fn selecting_a_deck_keeps_the_answer_undoable_and_a_settings_write_clears_it() {
-    let h = Harness::open();
-    let (_, cid) = note_with_card(&h, "a");
-    steps::answer(&h.collection, Some(S1), cid).unwrap();
-    let select = h
-        .collection
+/// The current-deck selection (R42): a skip-undo op.
+fn select_deck(h: &Harness, deck: i128) -> meguri_engine::OpResult<()> {
+    h.collection
         .run(
             OpSpec::named("set_current_deck", OpSource::UserNonUndoable).skip_undo(),
-            |ctx| {
-                ctx.scope().set_config("curDeck", &ConfigValue::Integer(1))?;
+            move |ctx| {
+                ctx.scope().set_config("curDeck", &ConfigValue::Integer(deck))?;
                 ctx.scope()
                     .set_config("activeDecks", &ConfigValue::parse(b"[1]").unwrap())?;
                 Ok(())
             },
         )
-        .unwrap();
+        .unwrap()
+}
+
+#[test]
+fn selecting_a_deck_keeps_the_answer_undoable_and_a_settings_write_clears_it() {
+    let h = Harness::open();
+    let (_, cid) = note_with_card(&h, "a");
+    steps::answer(&h.collection, Some(S1), cid).unwrap();
+    steps::bury(&h.collection, Some(S1), cid).unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(peek_redo(&h).name(), Some(BURY));
+    let select = select_deck(&h, 1);
     assert!(!select.changes.config_keys.is_empty(), "the selection wrote");
     assert_eq!(select.undo, None, "not recorded");
-    assert_eq!(peek_name(&h), Some(ANSWER_CARD));
+    assert_eq!(peek_name(&h), Some(ANSWER_CARD), "the steps stay (R42)");
+    assert_eq!(
+        peek_redo(&h),
+        UndoStatus::Unavailable(DisabledReason::None),
+        "A11.1: a skip-undo op empties redo"
+    );
     h.collection.undo(UndoScope::Global).unwrap();
-    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(peek_redo(&h).name(), Some(ANSWER_CARD));
+    let again = select_deck(&h, 1);
+    assert!(again.changes.is_empty(), "the same selection writes nothing");
+    assert_eq!(
+        peek_redo(&h),
+        UndoStatus::Unavailable(DisabledReason::None),
+        "and still empties redo"
+    );
+    steps::answer(&h.collection, Some(S1), cid).unwrap();
 
     let settings = h
         .collection
@@ -325,15 +393,6 @@ fn undo_sets_col_mod_back_and_redo_sets_the_value_the_op_set() {
     steps::answer(&h.collection, None, cid).unwrap();
     let set = col_mod(&h.collection);
     assert!(set > before);
-    // A deck selection moves col.mod without touching the step.
-    h.clock.step_ms(10_000);
-    h.collection
-        .run(OpSpec::named("select", OpSource::UserNonUndoable).skip_undo(), |ctx| {
-            ctx.scope().set_config("curDeck", &ConfigValue::Integer(2))?;
-            Ok(())
-        })
-        .unwrap();
-    assert!(col_mod(&h.collection) > set);
 
     h.clock.step_ms(10_000);
     h.collection.undo(UndoScope::Global).unwrap();
@@ -341,6 +400,48 @@ fn undo_sets_col_mod_back_and_redo_sets_the_value_the_op_set() {
     h.clock.step_ms(10_000);
     h.collection.redo(UndoScope::Global).unwrap();
     assert_eq!(col_mod(&h.collection), set);
+    h.clock.step_ms(10_000);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(col_mod(&h.collection), before);
+}
+
+#[test]
+fn redo_sets_col_mod_to_its_value_when_the_undo_ran_and_the_next_undo_to_its_value_when_the_redo_ran() {
+    // A7, A11.4: something that moves col.mod and keeps the history (a deck
+    // selection, R42; a local-server write that reaches no step, M7) shows
+    // which value each restore takes.
+    let h = Harness::open();
+    let (_, cid) = note_with_card(&h, "a");
+    let (other, _) = note_with_card(&h, "b");
+    h.clock.step_ms(10_000);
+    let before = col_mod(&h.collection);
+    h.clock.step_ms(10_000);
+    steps::answer(&h.collection, None, cid).unwrap();
+    let set = col_mod(&h.collection);
+    h.clock.step_ms(10_000);
+    select_deck(&h, 2);
+    let selected = col_mod(&h.collection);
+    assert!(before < set && set < selected);
+
+    h.clock.step_ms(10_000);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(col_mod(&h.collection), before, "the value before the answer");
+    h.clock.step_ms(10_000);
+    common::set_first_field(&h.collection, OpSource::LocalApi, other, "script").unwrap();
+    let scripted = col_mod(&h.collection);
+    assert!(scripted > selected);
+    assert_eq!(peek_redo(&h).name(), Some(ANSWER_CARD), "the write reached no step");
+
+    h.clock.step_ms(10_000);
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(
+        col_mod(&h.collection),
+        selected,
+        "the value when the undo ran, not the one the answer set"
+    );
+    h.clock.step_ms(10_000);
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(col_mod(&h.collection), scripted, "the value when the redo ran");
 }
 
 #[test]
@@ -416,6 +517,53 @@ fn undo_removes_an_earlier_grave_of_an_object_the_step_deleted_and_redo_puts_it_
 }
 
 #[test]
+fn a_redo_of_a_deletion_writes_every_grave_its_undo_removed_back_pending() {
+    // A5, A11.3: the note's grave was synced (usn 5) before the deletion
+    // kept it; after the undo and the redo every grave of the deletion is
+    // pending, and the undo of the redone deletion removes them all again.
+    let h = Harness::open();
+    let (nid, cid) = note_with_card(&h, "again");
+    h.collection
+        .run(
+            OpSpec::named("old_grave", OpSource::UserNonUndoable).stamp(StampMode::CallerSupplied),
+            move |ctx| {
+                ctx.scope().add_grave(nid.0, GraveKind::Note, Usn(5))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let graves = |h: &Harness| {
+        let reader = h.collection.reader(ReaderRole::Query).unwrap();
+        (
+            reader.grave(nid.0, GraveKind::Note).unwrap().map(|g| g.usn),
+            reader.grave(cid.0, GraveKind::Card).unwrap().map(|g| g.usn),
+        )
+    };
+    h.collection
+        .run(
+            OpSpec::named("remove_notes", OpSource::UserUndoable).undo_step("Delete Note", StepKind::Other),
+            move |ctx| {
+                ctx.scope().remove_note_and_cards(nid)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        graves(&h),
+        (Some(Usn(5)), Some(Usn(-1))),
+        "graves G2: the old grave kept"
+    );
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(graves(&h), (None, None));
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(graves(&h), (Some(Usn(-1)), Some(Usn(-1))), "every grave pending");
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(graves(&h), (None, None));
+    h.collection.redo(UndoScope::Global).unwrap();
+    assert_eq!(graves(&h), (Some(Usn(-1)), Some(Usn(-1))));
+}
+
+#[test]
 fn a_row_changed_outside_the_history_disables_the_step_with_changed_externally() {
     let h = Harness::open();
     let (_, cid) = note_with_card(&h, "a");
@@ -453,32 +601,37 @@ fn a_row_changed_outside_the_history_disables_the_step_with_changed_externally()
 
 #[test]
 fn a_redo_whose_rows_changed_is_refused_and_dropped() {
+    // A8: every op empties redo, so only a writer outside the history can
+    // change a redo step's rows. Here an SQL trigger takes the review-log
+    // id of the answer as the undo deletes its row; the redo's check (M5)
+    // finds the row and refuses (deviation undo-revlog-taken-id-redo).
     let h = Harness::open();
     steps::answer(&h.collection, None, note_with_card(&h, "a").1).unwrap();
+    let (_, card) = note_with_card(&h, "b");
+    steps::answer(&h.collection, None, card).unwrap();
+    // The maintenance lane is the only raw writer; it stands in for
+    // another process here.
     h.collection
-        .run(
-            OpSpec::named("set_option", OpSource::UserUndoable).undo_step("Set Option", StepKind::Other),
-            |ctx| {
-                ctx.scope().set_config("curDeck", &ConfigValue::Integer(5))?;
-                Ok(())
-            },
-        )
-        .unwrap();
-    h.collection.undo(UndoScope::Global).unwrap();
-    h.collection
-        .run(OpSpec::named("select", OpSource::UserNonUndoable).skip_undo(), |ctx| {
-            ctx.scope().set_config("curDeck", &ConfigValue::Integer(9))?;
+        .submit_maintenance(catalog::ANALYZE, Duration::from_millis(10), |writer| {
+            writer.execute_raw(
+                "CREATE TRIGGER occupy AFTER DELETE ON revlog WHEN old.usn = -1 BEGIN \
+                 INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) \
+                 VALUES (old.id, old.cid, 9, 4, 4, 0, 2500, 1500, 0); END",
+                &[],
+            )?;
             Ok(())
         })
+        .wait()
         .unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(peek_redo(&h).name(), Some(ANSWER_CARD));
+    let dump = steps::dump(&h.collection);
     assert_eq!(
         refused(h.collection.redo(UndoScope::Global)),
         DisabledReason::ChangedExternally
     );
-    assert_eq!(
-        h.collection.peek_redo(UndoScope::Global).unwrap(),
-        UndoStatus::Unavailable(DisabledReason::None)
-    );
+    assert_eq!(steps::dump(&h.collection), dump, "nothing written");
+    assert_eq!(peek_redo(&h), UndoStatus::Unavailable(DisabledReason::None));
     assert_eq!(peek_name(&h), Some(ANSWER_CARD), "the history below stays");
 }
 
@@ -605,6 +758,62 @@ fn a_step_of_a_long_write_reports_it_and_its_undo_and_redo_declare_it() {
     assert_eq!(delays, ["undo_long_write", "redo_long_write"]);
 }
 
+/// The writer's `WriteDelay` events among `events`, as (op, declared).
+fn write_delays(events: &[Arc<meguri_engine::Event>]) -> Vec<(&'static str, Duration)> {
+    events
+        .iter()
+        .filter_map(|event| match event.kind {
+            EventKind::WriteDelay { op, declared } => Some((op, declared)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_undo_queued_behind_a_long_write_declares_that_write_when_it_undoes_its_step() {
+    let h = Harness::open();
+    let notes = common::add_notes(&h.collection, 20, "bulk");
+    let (_, cid) = note_with_card(&h, "a");
+    steps::suspend(&h.collection, None, cid).unwrap();
+    let declared = Duration::from_millis(400);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let bulk = h.collection.submit(
+        OpSpec::new(catalog::BULK_OP, OpSource::UserUndoable)
+            .declare_long_write(declared)
+            .undo_step("Find and Replace", StepKind::Other),
+        move |ctx| {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            for nid in &notes {
+                steps::set_first_field(ctx, *nid, "replaced".to_owned())?;
+            }
+            Ok(())
+        },
+    );
+    started_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    // The bulk op holds the writer and has recorded nothing yet: the caller
+    // sees the short step on top and submits a plain undo.
+    assert_eq!(peek_name(&h), Some(SUSPEND));
+    let events = h.engine.stream().subscribe();
+    let undo = h.collection.submit_undo(UndoScope::Global);
+    release_tx.send(()).unwrap();
+    bulk.wait().unwrap();
+    let undone = undo.wait().unwrap();
+
+    assert_eq!(
+        undone.value.name, "Find and Replace",
+        "the undo takes the top step when it runs"
+    );
+    assert_eq!(undone.value.long_write, Some(declared));
+    assert_eq!(
+        write_delays(&drain(&events, Duration::from_millis(100))),
+        [("undo_long_write", declared)],
+        "the undo of the bulk step declares the bulk op's write"
+    );
+    assert_eq!(peek_name(&h), Some(SUSPEND));
+}
+
 /// One call a restorer got: direction, step name, state, cards changed.
 type Seen = (Direction, &'static str, Option<String>, usize);
 
@@ -670,6 +879,41 @@ fn restorers_get_each_undo_and_redo_with_the_state_the_op_attached() {
             (Direction::Redo, ANSWER_CARD, state.clone(), 1),
             (Direction::Undo, ANSWER_CARD, state, 1),
         ]
+    );
+}
+
+#[test]
+fn a_substep_that_fails_takes_its_restorer_state_back_with_its_rows() {
+    let h = Harness::open();
+    let recorder = Arc::new(Recorder::default());
+    h.collection.add_undo_restorer(recorder.clone());
+    let (_, cid) = note_with_card(&h, "a");
+    h.collection
+        .run(
+            OpSpec::named("answer_card", OpSource::UserUndoable).undo_step(ANSWER_CARD, StepKind::Answer),
+            move |ctx| {
+                ctx.step(|ctx| {
+                    ctx.set_undo_state(Arc::new("kept".to_owned()));
+                    Ok(())
+                })?;
+                let failed = ctx.step(|ctx| {
+                    ctx.set_undo_state(Arc::new("rolled back".to_owned()));
+                    Err::<(), _>(EngineError::InvalidArgument {
+                        message: "the step fails".to_owned(),
+                    })
+                });
+                assert!(failed.is_err(), "the op handles the failed step");
+                let mut card = ctx.scope().card(cid)?.unwrap();
+                card.reps += 1;
+                ctx.scope().put(&card)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    h.collection.undo(UndoScope::Global).unwrap();
+    assert_eq!(
+        *recorder.seen.lock().unwrap(),
+        [(Direction::Undo, ANSWER_CARD, Some("kept".to_owned()), 1)]
     );
 }
 

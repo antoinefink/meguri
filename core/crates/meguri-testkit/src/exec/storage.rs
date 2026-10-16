@@ -226,8 +226,8 @@ fn db_exec(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
         .map_err(core)?;
     let baseline = object_set(collection(session)?)?;
     session.storage.baseline = baseline;
-    // Meguri keeps no cached view of the collection or undo history yet
-    // (W1's reset after a write has nothing to clear until U24 and U25).
+    // W1's reset after a write has nothing to clear: the session runs no
+    // engine yet, so it keeps no cached view and no undo history (U38).
     Ok(OpResult::Output(json!({ "rows": rows_value(&rows) })))
 }
 
@@ -258,7 +258,10 @@ fn config_value(value: &Value) -> Result<ConfigValue, ExecError> {
 
 /// W4: one config key through the config API (`storage/config-table` C4),
 /// as an operation of its own that keeps no undo entry: a local change,
-/// written only when the value differs.
+/// written only when the value differs. With `undoable` (undo-ops.md V3.1)
+/// the write is an "Update Config" undo step, which needs the engine's
+/// history: refused until the session runs ops through the engine (U38's
+/// `CoreHost::open`), so no scenario passes with the step left out.
 fn set_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     let Step::SetConfig(args) = step else {
         return Err(ExecError::new(
@@ -266,6 +269,12 @@ fn set_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecEr
             "set_config adapter called for another op",
         ));
     };
+    if args.undoable {
+        return Err(ExecError::new(
+            "unsupported_op",
+            "set_config with undoable: true records an undo step; the session has no engine yet (U38)",
+        ));
+    }
     let value = config_value(&args.value)?;
     let clock = session.clock.clone();
     let collection = collection(session)?;

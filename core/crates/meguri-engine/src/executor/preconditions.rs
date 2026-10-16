@@ -142,17 +142,11 @@ impl TouchIndex {
 }
 
 /// A key as its table compares keys: `tags` by `unicase`, others byte for
-/// byte. Also the held-back run's row key (U25).
+/// byte.
 #[derive(Clone, Debug)]
-pub(crate) struct TouchKey {
+struct TouchKey {
     table: Table,
     key: RowKey,
-}
-
-impl TouchKey {
-    pub(crate) fn new(table: Table, key: RowKey) -> TouchKey {
-        TouchKey { table, key }
-    }
 }
 
 impl Ord for TouchKey {
