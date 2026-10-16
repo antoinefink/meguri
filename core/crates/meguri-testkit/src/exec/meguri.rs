@@ -230,7 +230,7 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 6] = ["clock", "render", "sched", "search", "storage", "text"];
+    pub const AREAS: [&'static str; 7] = ["clock", "render", "sched", "search", "storage", "tags", "text"];
 
     /// Every area adapter that exists.
     pub fn core_registry() -> Registry {
@@ -252,6 +252,7 @@ impl MeguriExecutor {
                 "sched" => super::sched::register(&mut registry),
                 "search" => super::search::register(&mut registry),
                 "storage" => super::storage::register(&mut registry),
+                "tags" => super::tags::register(&mut registry),
                 "text" => super::text::register(&mut registry),
                 other => panic!("no area {other} has Meguri adapters"),
             }

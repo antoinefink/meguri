@@ -1,0 +1,11 @@
+# specs/conformance/dsl.md D9.1. None active yet. Every tags scenario starts
+# from the new collection (dsl.md D8: U28's bootstrap) and needs the notetypes
+# setup section (U29) and add_note (U27); canon/spelling also edit_note (U27).
+# The testkit's tags adapters (exec/tags.rs, U30) run the eight tag and flag
+# ops and the tag_tree observation. The unit that lands the last thing a
+# scenario uses activates it here. Meanwhile
+# core/crates/meguri-engine/tests/tags_conformance.rs plays every tags
+# scenario on the engine's tag and flag ops against its golden, with
+# stand-ins for the new collection, the setup, add_note and edit_note.
+area: tags
+active: []
