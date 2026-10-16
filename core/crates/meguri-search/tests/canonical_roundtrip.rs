@@ -18,10 +18,11 @@ fn canonical(text: &str) -> String {
     canonical_text(text).unwrap_or_else(|e| panic!("{text:?}: {e:?}"))
 }
 
-// F8 and F6, from the spec's tables.
+// The examples of F2 to F6 and F8, from the spec's text and tables.
 #[test]
 fn the_spec_examples_write_anki_bytes() {
     let cases = [
+        // F8.
         ("dog cat or  fish", "dog cat OR fish"),
         ("", "deck:*"),
         ("   ", "deck:*"),
@@ -29,17 +30,20 @@ fn the_spec_examples_write_anki_bytes() {
         ("a\tb", "a b"),
         ("a\u{A0}b", "a b"),
         ("a\u{3000}b", "a b"),
-        ("field:\"foo\"", "field:foo"),
+        ("\"cedar\" \"p q r\"", "cedar \"p q r\""),
+        ("stem:\"oak\"", "stem:oak"),
         ("key:\"value with spaces\"", "\"key:value with spaces\""),
         ("key: \"value\"", "key: value"),
-        ("\\( \\)", "\"(\" \")\""),
-        ("\\-foo", "\"-foo\""),
-        ("\"-foo\"", "\"-foo\""),
+        ("a\\( \\)b", "\"a(\" \")b\""),
+        ("\\-bloom", "\"-bloom\""),
+        ("\"-bloom\"", "\"-bloom\""),
         ("--a", "-\"-a\""),
-        ("\\*\\:\\_", "\\*\\:\\_"),
-        ("deck:\\:", "deck::"),
+        ("q\\_\\:\\*", "q\\_\\:\\*"),
+        ("deck:a\\:b", "deck:a:b"),
         ("deck:a\\-b", "deck:a-b"),
         ("deck:a\\(b", "\"deck:a(b\""),
+        ("\"Or\"  \"aND\"", "\"Or\" \"aND\""),
+        ("\"k l m\"no", "\"k l m\" no"),
         ("tag:re\\:x", "tag:re\\:x"),
         ("f:re\\:x", "f:re\\:x"),
         ("re:\\(", "\"re:\\(\""),
@@ -49,57 +53,70 @@ fn the_spec_examples_write_anki_bytes() {
         ("rated:0", "rated:1"),
         ("rated:2:+3", "rated:2:3"),
         ("resched:0", "resched:0"),
-        ("prop:ease>1.0", "prop:ease>1"),
+        ("prop:ease>3.0", "prop:ease>3"),
         ("prop:s>1.0", "prop:s>1"),
         ("prop:pos=+3", "prop:pos=3"),
+        ("\"prop:cds:tip=one two\"", "\"prop:cds:tip=one two\""),
         ("dupe:1,a\\\\b", "dupe:1,a\\\\b"),
         ("-(a or b)", "-(a OR b)"),
         ("(a b)", "a b"),
         ("((a b))", "(a b)"),
+        // F2.
         ("(a)", "a"),
         ("-(a b)", "-(a b)"),
         // F3.
+        ("7 and 8  or 9", "7 8 OR 9"),
         ("a(b)", "a (b)"),
         ("\"x\"\"y\"", "x y"),
         ("a -and b", "a -  b"),
         ("-or", "- OR "),
         // F4.
         ("\"-\"", "-"),
+        ("\"-a\"", "\"-a\""),
         ("\"a-b\"", "a-b"),
-        ("\\(", "\"(\""),
+        ("\"(\"", "\"(\""),
+        ("\"AnD\"", "\"AnD\""),
         // F5.
         ("DECK:x", "deck:x"),
+        ("card:01", "card:1"),
         ("flag:007", "flag:7"),
         ("added:0", "added:1"),
         ("nid:007", "nid:007"),
+        // F6.
         ("mid:+5", "mid:5"),
         ("prop:due=-0", "prop:due=0"),
-        ("prop:ivl>=+5", "prop:ivl>=5"),
+        ("prop:ivl>=+6", "prop:ivl>=6"),
         ("dupe:+1,a", "dupe:1,a"),
-        ("has\\-cd:x", "has-cd:x"),
-        ("preset:a\\\"b", "preset:a\\\\\"b"),
-        // F6.
-        ("prop:ease>1.", "prop:ease>1"),
-        ("prop:ease>1E0", "prop:ease>1"),
-        ("prop:ease>2.50", "prop:ease>2.5"),
-        ("prop:ease>1e3", "prop:ease>1000"),
-        ("prop:ease>+.5", "prop:ease>0.5"),
-        ("prop:ease>0.1", "prop:ease>0.1"),
-        ("prop:ease>0.3333333333", "prop:ease>0.33333334"),
-        ("prop:ease>1e-10", "prop:ease>0.0000000001"),
-        ("prop:ease>16777217", "prop:ease>16777216"),
-        ("prop:ease>123456789", "prop:ease>123456790"),
-        ("prop:ease>1e39", "prop:ease>inf"),
-        ("prop:ease>1e400", "prop:ease>inf"),
-        ("prop:ease>infinity", "prop:ease>inf"),
-        ("prop:ease>-inf", "prop:ease>-inf"),
-        ("prop:ease>nan", "prop:ease>NaN"),
-        ("prop:ease>1e-50", "prop:ease>0"),
-        ("prop:ease>-1e-50", "prop:ease>-0"),
-        ("prop:ease>-0", "prop:ease>-0"),
     ];
     for (text, expected) in cases {
         assert_eq!(canonical(text), expected, "{text:?}");
+    }
+}
+
+// F6's table: each operand as typed and as written. F6 is the same for every
+// float property (F5), so the rows go through `prop:d<`.
+#[test]
+fn float_operands_are_written_as_f6_says() {
+    let rows: [(&[&str], &str); 14] = [
+        (&["1.0", "1.", "1E0"], "1"),
+        (&["2.50"], "2.5"),
+        (&["1e3", "1E3"], "1000"),
+        (&[".5", "+.5"], "0.5"),
+        (&["0.1"], "0.1"),
+        (&["0.3333333333"], "0.33333334"),
+        (&["1e-10"], "0.0000000001"),
+        (&["16777217"], "16777216"),
+        (&["123456789"], "123456790"),
+        (&["1e39", "1e400", "infinity", "inf"], "inf"),
+        (&["-inf"], "-inf"),
+        (&["nan", "NaN"], "NaN"),
+        (&["1e-50"], "0"),
+        (&["-1e-50", "-0"], "-0"),
+    ];
+    for (typed, written) in rows {
+        for operand in typed {
+            assert_eq!(canonical(&format!("prop:d<{operand}")), format!("prop:d<{written}"), "{operand:?}");
+        }
     }
 }
 
@@ -124,7 +141,7 @@ fn joiners_and_quotes_follow_the_rules() {
     }
 }
 
-// F7's three shapes whose canonical text does not read back the same.
+// F7's first three shapes: their canonical text does not read back the same.
 #[test]
 fn the_spec_exceptions_keep_anki_bytes() {
     assert_eq!(canonical("-and"), "- ");
@@ -137,17 +154,16 @@ fn the_spec_exceptions_keep_anki_bytes() {
     assert!(matches!(term_of("has-cd:x"), Term::HasCustomData(_)));
 }
 
-// R1077's fourth exception, which F7 does not list yet: F2.2 drops one level
-// of brackets per writing, so the canonical text of a search that is a group
-// holding a group is not canonical again; it still means the same. The
-// oracle golden search/canonical/top-level pins `((a))` -> `(a)` -> `a`.
+// F7's fourth shape: F2.2 drops one level of brackets per writing, so the
+// canonical text of a search that is one group holding only a group is not
+// canonical again. It still means the same; the round trip checks that.
 #[test]
 fn a_group_holding_a_group_loses_one_level_per_writing() {
-    assert_eq!(canonical("((a))"), "(a)");
-    assert_eq!(canonical("(a)"), "a");
-    assert_eq!(canonical("(((a b)))"), "((a b))");
     assert_eq!(canonical("((a b))"), "(a b)");
     assert_eq!(canonical("(a b)"), "a b");
+    assert_eq!(canonical("(((x)))"), "((x))");
+    assert_eq!(canonical("((x))"), "(x)");
+    assert_eq!(canonical("(x)"), "x");
     // Only the whole search loses a level: a negated group, or a group among
     // other items, is written as it is.
     assert_eq!(canonical("-((a))"), "-((a))");
@@ -284,7 +300,7 @@ fn term(seq: &mut Seq) -> String {
         20 => format!(
             "{}:{}",
             seq.key("preset"),
-            seq.pick(&["Default", "a\\x", "a\\-b", "a\\:b"])
+            seq.pick(&["Evening", "a\\x", "a\\-b", "a\\:b"])
         ),
         21 => {
             let property = seq.pick(&["ivl", "reps", "lapses", "pos"]);
@@ -348,7 +364,7 @@ fn sequence(seq: &mut Seq, depth: u32) -> String {
     out
 }
 
-/// F7's shapes, excluded from the round trip.
+/// F7's first three shapes, excluded from the round trip.
 fn is_exception(query: &Query) -> bool {
     query.nodes().iter().any(|node| match &node.kind {
         NodeKind::NegatedOperator(_) => true,
@@ -362,8 +378,8 @@ fn is_exception(query: &Query) -> bool {
     })
 }
 
-/// The shape of `a_group_holding_a_group_loses_one_level_per_writing`: the
-/// whole search is a group whose only item is a group. Its canonical text
+/// F7's fourth shape (`a_group_holding_a_group_loses_one_level_per_writing`):
+/// the whole search is a group whose only item is a group. Its canonical text
 /// means the same, but is not canonical again.
 fn is_group_of_group(query: &Query) -> bool {
     match query.node(query.root()).kind {
@@ -484,8 +500,8 @@ fn ids(conn: &Connection, plan: &Plan) -> Vec<i64> {
 
 // R1077, F7: canonical(canonical(t)) = canonical(t), and canonical(t) means
 // what t means: the same query, the same plan, and on the fixture collection
-// the same ids in both modes. A case counts only when both searches ran in
-// both modes.
+// the same ids in both modes. F7's fourth shape is checked for its meaning
+// only. A case counts only when both searches ran in both modes.
 #[test]
 fn canonical_texts_round_trip() {
     let conn = collection();

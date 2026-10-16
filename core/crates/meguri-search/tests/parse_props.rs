@@ -171,8 +171,8 @@ fn a_partly_quoted_value_needs_the_quote_right_after_the_colon() {
 // R1027, G3 form 3, G2: terms end at a space, `"`, `(` or `)`.
 #[test]
 fn spaces_need_not_separate_terms_from_quotes_and_brackets() {
-    assert_eq!(shape(&parsed("a\"b\"(c)")), "(a AND b AND [c])");
-    assert_eq!(shape(&parsed("\"red fox\"den")), "(red fox AND den)");
+    assert_eq!(shape(&parsed("p\"q\"(r)")), "(p AND q AND [r])");
+    assert_eq!(shape(&parsed("\"k l m\"no")), "(k l m AND no)");
     assert_eq!(shape(&parsed("(x)(y)")), "([x] AND [y])");
     assert_eq!(term("a\\\"b"), Term::Text("a\"b".into()));
     assert_eq!(term("a-b"), Term::Text("a-b".into()));
@@ -230,8 +230,9 @@ fn escapes_colons_and_hyphens() {
 // R1028, E2, E5: the escape's own characters.
 #[test]
 fn unknown_escapes_report_the_escape_and_its_range() {
-    let cases: [(&str, &str, std::ops::Range<usize>); 9] = [
+    let cases: [(&str, &str, std::ops::Range<usize>); 10] = [
         ("\\x", "\\x", 0..2),
+        ("\\fern", "\\f", 0..2),
         ("abc\\", "\\", 3..4),
         ("foo\\ bar baz", "\\ bar baz", 3..12),
         ("  a\\\u{3000}b  c ", "\\ b  c", 3..9),
@@ -321,9 +322,9 @@ fn reserved_key_values() {
         }
     );
     assert_eq!(
-        term("prop:ivl>=+5"),
+        term("prop:ivl>=+6"),
         Term::Property {
-            property: Property::Interval(5),
+            property: Property::Interval(6),
             comparison: Comparison::GreaterOrEqual
         }
     );
@@ -362,6 +363,10 @@ fn reserved_key_values() {
         error("prop:stability>1").kind(),
         &ErrorKind::InvalidOperator { provided: "s".into() }
     );
+    assert_eq!(
+        error("prop:pos").kind(),
+        &ErrorKind::InvalidOperator { provided: "pos".into() }
+    );
     match term("prop:ease>nan") {
         Term::Property {
             property: Property::Ease(Float(x)),
@@ -394,7 +399,7 @@ fn every_parse_error_category_is_reachable() {
         ("\"abc", "unclosed_quote", None, None),
         (":x", "missing_key", None, None),
         ("\\x", "unknown_escape", Some("\\x"), None),
-        ("is:foo", "invalid_state", Some("foo"), None),
+        ("is:asleep", "invalid_state", Some("asleep"), None),
         ("flag:9", "invalid_flag", None, None),
         ("prop:foo>1", "invalid_property", Some("foo>1"), None),
         ("prop:ivl~1", "invalid_operator", Some("ivl"), None),
@@ -488,8 +493,8 @@ fn error_ranges_follow_e5() {
         ("a k:\"\"", "empty_quote", 4..6),
         ("a \"bc  ", "unclosed_quote", 2..5),
         (":x", "missing_key", 0..2),
-        ("\t-is:foo", "invalid_state", 2..8),
-        ("a \"is:foo\"", "invalid_state", 2..10),
+        ("\t-is:asleep", "invalid_state", 2..11),
+        ("a \"is:asleep\"", "invalid_state", 2..13),
         ("é k:\"v\" prop:ivl>x", "invalid_positive_whole_number", 8..18),
         ("NID:\"1 2\"", "invalid_id_list", 0..9),
     ];
