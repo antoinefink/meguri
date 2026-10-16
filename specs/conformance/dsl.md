@@ -275,7 +275,7 @@ deviations:
     summary: Plain and field searches fold non-ASCII letters, so Meguri can match more notes.
     test: search/folding/unicode-mode        # scenario id or test id asserting Meguri's behavior
     scenarios: [search/folding/umlaut]       # patterns over scenario ids (D9 syntax)
-    pointer: /steps/*/search/ids              # pointer pattern (observations.md O3)
+    pointer: /steps/*/search/*/ids            # pointer pattern (observations.md O3)
     transform: {replace: ["#n1", "#n2"]}
 ```
 

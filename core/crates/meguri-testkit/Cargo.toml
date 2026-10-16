@@ -25,6 +25,10 @@ meguri-engine = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }
 # The scheduler area's adapters (exec/sched.rs): fsrs_next and the fuzz table.
 meguri-sched.workspace = true
+# The search area's `search` and `canonical_search` observations (exec/search.rs).
+# test-hooks: Plan::build_with for meguri-search's own tests, which get it
+# through this crate in a plain workspace run.
+meguri-search = { workspace = true, features = ["test-hooks"] }
 # test-hooks: the raw SQL of db_exec and db_dump, and the storage fault points.
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 # The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
