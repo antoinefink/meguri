@@ -56,7 +56,7 @@ There is no git remote, so nights run on this Mac. `tools/mg nightly --print-sch
 - needs every unit merged at or before the gate commit (a `Unit:` trailer from an implementing role) with no open escalation;
 - fails while a conformance, sync or data-safety test is quarantined or any quarantine entry is invalid or expired.
 
-The outcome is `pass`, `fail`, or `awaiting_user` (status warn) when only Antoine's evidence is missing. A pass writes `docs/process/milestone-records/<M>.json` (commit, per-suite counts, user-step results, open quarantine entries with owners, deferrals); commit it. `tools/mg milestone-gate --check`, a T0 run, keeps the manifest equal to the plan's Delivery Milestones table and Unit Index and its suites on runs that `tools/mg milestone` executes.
+The outcome is `pass`, `fail`, or `awaiting_user` (status warn) when only Antoine's evidence is missing. Outside the main checkout the gate evaluates but always fails: a unit branch carries its own `Unit:` trailers, so its units look merged there. A pass writes `docs/process/milestone-records/<M>.json` (commit, per-suite counts, user-step results, open quarantine entries with owners, deferrals); commit it. `tools/mg milestone-gate --check`, a T0 run, keeps the manifest equal to the plan's Delivery Milestones table and Unit Index and its suites on runs that `tools/mg milestone` executes.
 
 ## Changing tiers.yaml
 

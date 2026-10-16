@@ -1225,6 +1225,11 @@ def evaluate(model, config, a):
         elif outcome != "pass":
             fail("user-step:" + st["id"], "%s: %s" % (st["id"], message))
 
+    if a.outside_main:
+        # A unit branch carries its own `Unit:` trailers: its units look
+        # merged there. Only the integration branch closes a milestone.
+        fail("checkout", "a milestone closes only in the main checkout, on the integration branch (where "
+                         "tools/mg milestone runs); in this checkout the branch's own commits count as merged")
     outcome = "fail" if failures else ("awaiting_user" if awaiting else "pass")
     evaluation = {
         "milestone": a.milestone, "name": milestone["name"], "outcome": outcome, "evaluated_at": now,
@@ -1303,6 +1308,8 @@ def main(argv):
     s.add_argument("--now", required=True, help="YYYY-MM-DDTHH:MM:SSZ")
     s.add_argument("--doctor", help="a tools/mg doctor result.json, for setup steps")
     s.add_argument("--record", help="where a pass writes the milestone record (unless one exists)")
+    s.add_argument("--outside-main", action="store_true",
+                   help="the checkout is not the main checkout: evaluate, but the gate fails")
     s.add_argument("--out", required=True)
     a = p.parse_args(argv)
     return {"load": cmd_load, "check": cmd_check, "evaluate": cmd_evaluate}[a.command](a)

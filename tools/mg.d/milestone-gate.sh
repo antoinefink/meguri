@@ -7,7 +7,8 @@
 # escalations; the user-step evidence committed at HEAD (setup steps read a
 # fresh `tools/mg doctor`); deferrals; the global conditions. Pass, fail, or
 # warn with details.outcome awaiting_user when only Antoine's evidence is
-# missing. A pass writes docs/process/milestone-records/<M>.json: commit it.
+# missing. It fails outside the main checkout. A pass writes
+# docs/process/milestone-records/<M>.json: commit it.
 # `--check` validates the manifest against tools/gate/tiers.yaml and the
 # plan's Delivery Milestones table and Unit Index (a T0 run).
 
@@ -105,11 +106,14 @@ mg_milestone_gate() {
     fi
   fi
 
-  local out="$MG_RUN_DIR/evaluation.json" errors="$MG_RUN_DIR/evaluate-errors.json"
+  # Only the integration branch closes a milestone: elsewhere a unit
+  # branch's own commits count as merged, so the evaluation fails there.
+  local out="$MG_RUN_DIR/evaluation.json" errors="$MG_RUN_DIR/evaluate-errors.json" where=""
   local record="$MG_ROOT/docs/process/milestone-records/$which.json"
+  mg_gate__in_main || where=--outside-main
   mg_milestone_gate__python evaluate --manifest "$manifest" --config "$config" --milestone "$which" \
     --root "$MG_ROOT" --results "$MG_ROOT/build/mg" --now "$(mg_gate__now)" ${doctor:+--doctor "$doctor"} \
-    --record "$record" --out "$out" >"$errors"
+    --record "$record" --out "$out" $where >"$errors"
   rc=$?
   if [ "$rc" -eq 2 ] || [ ! -s "$out" ]; then
     if jq -e '.errors | length > 0' "$errors" >/dev/null 2>&1; then

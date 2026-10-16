@@ -186,6 +186,21 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
   [ "$(field '.details.record.written')" = false ]
 }
 
+@test "milestone-gate fails outside the main checkout and writes no record" {
+  local wt="$BATS_TEST_TMPDIR/wt"
+  git -C "$SB" worktree add -q -b unit/U1 "$wt"
+  run --separate-stderr "$wt/tools/mg" t-job unit
+  [ "$status" -eq 0 ]
+  run --separate-stderr "$wt/tools/mg" milestone-gate --check
+  [ "$status" -eq 0 ]
+  run --separate-stderr "$wt/tools/mg" milestone-gate M0
+  result="${lines[${#lines[@]} - 1]:-}"
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = checkout ]
+  [[ "$(field '.failures[0].message')" == *"main checkout"* ]]
+  [ ! -e "$wt/docs/process/milestone-records/M0.json" ]
+}
+
 @test "a result from a dirty tree fails the gate" {
   printf 'scratch\n' >"$SB/untracked.txt"
   mg t-job unit

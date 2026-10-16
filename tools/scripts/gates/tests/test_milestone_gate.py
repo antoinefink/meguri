@@ -108,7 +108,7 @@ class Sandbox(unittest.TestCase):
                        "failures": failures or [], "artifacts": [], "user_steps": [], "details": details or {}}, f)
         return path
 
-    def evaluate(self, man, milestone, doctor=None):
+    def evaluate(self, man, milestone, doctor=None, extra=()):
         paths = {}
         for name, value in (("manifest", man), ("config", self.config)):
             paths[name] = os.path.join(self.tmp, name + ".json")
@@ -120,7 +120,7 @@ class Sandbox(unittest.TestCase):
         self.record = os.path.join(self.root, "docs/process/milestone-records/%s.json" % milestone)
         cmd = [sys.executable, "-B", GATE, "evaluate", "--manifest", paths["manifest"], "--config", paths["config"],
                "--milestone", milestone, "--root", self.root, "--results", self.results, "--now", NOW,
-               "--record", self.record, "--out", out]
+               "--record", self.record, "--out", out] + list(extra)
         if doctor is not None:
             dpath = os.path.join(self.tmp, "doctor.json")
             with open(dpath, "w", encoding="utf-8") as f:
@@ -190,6 +190,20 @@ class SuiteTests(Sandbox):
         self.assertEqual(record["closed_at"], NOW)
         self.assertEqual([s["id"] for s in record["suites"]], ["unit", "static"])
         self.assertEqual(record["suites"][0]["summary"]["passed"], 3)
+
+    def test_outside_the_main_checkout_a_milestone_never_closes(self):
+        # A unit branch carries its own `Unit:` trailers, so its units look merged there.
+        self.run_("unit", job="core-test")
+        self.merge_units("U240")
+        self.result("core-test")
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}], "units": ["U240"]})
+        rc, ev = self.evaluate(man, "M0", extra=["--outside-main"])
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+        self.assertEqual(self.failure_ids(ev), ["checkout"])
+        self.assertIn("main checkout", self.failure(ev, "checkout"))
+        self.assertFalse(os.path.exists(self.record))
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 0, ev["failures"])
 
     def test_placeholders_match_the_results_own_commit(self):
         self.run_("static", job="static-checks", args=["--base", "{base}"], cls="static")

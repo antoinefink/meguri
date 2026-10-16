@@ -21,7 +21,8 @@
 #     or its cells pass;
 #   - every `global` condition holds.
 # The outcome is pass, fail, or awaiting_user when only user-step evidence is
-# missing (or a suite's own result is awaiting_user). A pass writes
+# missing (or a suite's own result is awaiting_user). It fails outside the
+# main checkout, where a unit branch's own commits look merged. A pass writes
 # docs/process/milestone-records/<M>.json; commit it.
 #
 # The gate commit is the commit every suite result was made on (clean tree).
