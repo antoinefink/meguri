@@ -1,0 +1,20 @@
+# Marking and unmarking notes through the tag operations (specs/tags/
+# flags-and-marked.md M2). Unmarking removes `Marked` and its descendant and
+# keeps `markedly`; marking adds the registered spelling `Marked`.
+id: tags/marked/mark
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [Marked, "marked::x", markedly, q]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: [other]}
+  - advance: 1h
+  - remove_note_tags: {notes: ["#n1", "#n2"], tags: marked}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - advance: 1h
+  - add_note_tags: {notes: ["#n1", "#n2"], tags: marked}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

@@ -675,6 +675,22 @@ pub enum Step {
     Undo(NoArgs),
     /// undo-ops.md V1: the top step of the redo history.
     Redo(NoArgs),
+    /// tag-ops.md G1.
+    AddNoteTags(NoteTagsArgs),
+    /// tag-ops.md G2.
+    RemoveNoteTags(NoteTagsArgs),
+    /// tag-ops.md G3.
+    DeleteTags(DeleteTagsArgs),
+    /// tag-ops.md G4.
+    RenameTag(RenameTagArgs),
+    /// tag-ops.md G5.
+    ReparentTags(ReparentTagsArgs),
+    /// tag-ops.md G6.
+    ClearUnusedTags(NoArgs),
+    /// tag-ops.md G7.
+    SetTagCollapsed(SetTagCollapsedArgs),
+    /// tag-ops.md G8.
+    SetFlag(SetFlagArgs),
     Bury(DraftArgs),
     Suspend(DraftArgs),
     Forget(DraftArgs),
@@ -709,7 +725,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 30] = [
+    pub const NAMES: [&'static str; 38] = [
         "advance",
         "set_clock",
         "add_note",
@@ -721,6 +737,14 @@ impl Step {
         "remove_config",
         "undo",
         "redo",
+        "add_note_tags",
+        "remove_note_tags",
+        "delete_tags",
+        "rename_tag",
+        "reparent_tags",
+        "clear_unused_tags",
+        "set_tag_collapsed",
+        "set_flag",
         "bury",
         "suspend",
         "forget",
@@ -759,6 +783,14 @@ impl Step {
             Step::RemoveConfig(_) => "remove_config",
             Step::Undo(_) => "undo",
             Step::Redo(_) => "redo",
+            Step::AddNoteTags(_) => "add_note_tags",
+            Step::RemoveNoteTags(_) => "remove_note_tags",
+            Step::DeleteTags(_) => "delete_tags",
+            Step::RenameTag(_) => "rename_tag",
+            Step::ReparentTags(_) => "reparent_tags",
+            Step::ClearUnusedTags(_) => "clear_unused_tags",
+            Step::SetTagCollapsed(_) => "set_tag_collapsed",
+            Step::SetFlag(_) => "set_flag",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
             Step::Forget(_) => "forget",
@@ -954,6 +986,62 @@ pub struct SetConfigArgs {
 #[serde(deny_unknown_fields)]
 pub struct RemoveConfigArgs {
     pub key: String,
+}
+
+/// `add_note_tags` and `remove_note_tags: {notes, tags}` (tag-ops.md G1,
+/// G2): at least one note (checked on load); `tags` the tag text as a caller
+/// gives it, which the executor splits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoteTagsArgs {
+    pub notes: Vec<NoteRef>,
+    pub tags: String,
+}
+
+/// `delete_tags: {tags}` (tag-ops.md G3): the tag text of the names to
+/// delete.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteTagsArgs {
+    pub tags: String,
+}
+
+/// `rename_tag: {from, to}` (tag-ops.md G4): `from` one non-empty name
+/// without U+0020 or U+3000 (checked on load); `to` the new name as typed.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameTagArgs {
+    pub from: String,
+    pub to: String,
+}
+
+/// `reparent_tags: {tags, parent}` (tag-ops.md G5): at least one source,
+/// each non-empty (checked on load); `parent` the target, empty for the top
+/// level.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReparentTagsArgs {
+    pub tags: Vec<String>,
+    pub parent: String,
+}
+
+/// `set_tag_collapsed: {tags, collapsed}` (tag-ops.md G7): at least one
+/// name, each non-empty (checked on load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetTagCollapsedArgs {
+    pub tags: Vec<String>,
+    pub collapsed: bool,
+}
+
+/// `set_flag: {cards, flag}` (tag-ops.md G8): at least one card (checked on
+/// load); `flag` an integer from 0, a value above 7 being the executor's
+/// `invalid_flag` rejection.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetFlagArgs {
+    pub cards: Vec<CardRef>,
+    pub flag: u64,
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes
@@ -1211,6 +1299,8 @@ pub enum ObservationKind {
     Cloze,
     /// float-determinism.md F5.
     FsrsNext,
+    /// tag-ops.md G9.
+    TagTree,
 }
 
 /// How a kind takes arguments.
@@ -1231,7 +1321,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 24] = [
+    pub const ALL: [ObservationKind; 25] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1256,6 +1346,7 @@ impl ObservationKind {
         ObservationKind::UndoStatus,
         ObservationKind::Cloze,
         ObservationKind::FsrsNext,
+        ObservationKind::TagTree,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1284,6 +1375,7 @@ impl ObservationKind {
             ObservationKind::UndoStatus => "undo_status",
             ObservationKind::Cloze => "cloze",
             ObservationKind::FsrsNext => "fsrs_next",
+            ObservationKind::TagTree => "tag_tree",
         }
     }
 
@@ -1298,7 +1390,8 @@ impl ObservationKind {
             | ObservationKind::DeckTree
             | ObservationKind::Digest
             | ObservationKind::SchemaObjects
-            | ObservationKind::UndoStatus => ArgShape::None,
+            | ObservationKind::UndoStatus
+            | ObservationKind::TagTree => ArgShape::None,
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }

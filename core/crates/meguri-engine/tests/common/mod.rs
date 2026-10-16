@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 pub mod steps;
+pub mod tagging;
 
 use std::fs;
 use std::path::{Path, PathBuf};
