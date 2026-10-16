@@ -79,10 +79,12 @@ fn unknown_ref(detail: impl Into<String>) -> ExecError {
 /// T10.2: the new collection at the clock's instant, made with the storage
 /// area's create path: a schema-18 `col` row with `crt` and the
 /// `creationOffset` key of `sched/day-clock` D11 (`col.mod` 0, `scm` now),
-/// `schedVer` 2, and the six stock kinds and `curModel` as
-/// `notetypes/stock-kinds` K2 says, written by meguri-engine's stock-kind
-/// code. The default deck, the default preset and the other new-collection
-/// config keys come with U28.
+/// `schedVer` 2, the two browser keys a new collection holds
+/// (`browser/config-keys` K1: `sortType` `"noteFld"`, `sortBackwards`
+/// false), and the six stock kinds and `curModel` as `notetypes/stock-kinds`
+/// K2 says, written by meguri-engine's stock-kind code. The default deck,
+/// the default preset and the other new-collection config keys come with
+/// U28.
 fn new_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
     let now_ms = session.clock.now_ms();
     let timing = new_collection_timing(now_ms.div_euclid(1000), session.clock.as_ref());
@@ -105,6 +107,8 @@ fn new_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
     let config = [
         entry("creationOffset", timing.creation_offset.to_string()),
         entry("schedVer", "2".to_owned()),
+        entry("sortBackwards", "false".to_owned()),
+        entry("sortType", "\"noteFld\"".to_owned()),
     ];
     let random = session.random.clone();
     super::storage::create_collection(session, &col, &config, |scope| {
