@@ -61,7 +61,7 @@ Install Xcode 27.1 when it ships. It adds the foldable iPhone simulator (R1962);
 
 ### `nightly-scheduler`
 
-Approve the scheduler entry for nightly jobs when `tools/mg nightly` (U19) asks for it. There is no git remote, so nightly runs happen on this Mac only. Doctor cannot verify this.
+Approve the scheduler entries for the nightly and weekly runs. `tools/mg nightly --print-schedule` (U19) writes them, `com.meguri.nightly.plist` and `com.meguri.nightly.weekly.plist`, under its run directory; copy them to `~/Library/LaunchAgents/` and load them with `launchctl load`. There is no git remote, so nightly runs happen on this Mac only. `tools/mg nightly` lists the step as missing while the nightly entry is not in `~/Library/LaunchAgents/`; doctor lists it as unverified.
 
 ## While agents run
 
