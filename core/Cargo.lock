@@ -1623,6 +1623,7 @@ dependencies = [
  "meguri-model",
  "meguri-sched",
  "meguri-storage",
+ "meguri-template",
  "meguri-testkit",
  "meguri-text",
  "serde_json",

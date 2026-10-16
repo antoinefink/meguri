@@ -8,6 +8,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 
 use meguri_model::changes::{ChangeSet, OpSource};
+use meguri_model::rng::RandomSource;
 use meguri_model::time::EpochMillis;
 use meguri_storage::{StampMode, WriteScope};
 
@@ -165,6 +166,8 @@ pub struct OpContext<'s, 'c> {
     /// Work for the writer once the op committed and published its change
     /// set (`OpContext::on_commit`); dropped when the op rolls back.
     pub(crate) on_commit: Vec<CommitHook>,
+    /// The collection's random source (R1875): new field and template ids.
+    pub(crate) random: Arc<dyn RandomSource>,
 }
 
 /// What an op's commit hook learns: the op's seq and generation, and
@@ -206,6 +209,17 @@ impl<'c> OpContext<'_, 'c> {
     /// The clock's current instant.
     pub fn now(&self) -> EpochMillis {
         self.scope.now()
+    }
+
+    /// The collection's random source (R1875), which the open config gave.
+    pub fn random(&self) -> &dyn RandomSource {
+        self.random.as_ref()
+    }
+
+    /// The write scope and the random source together, for writes that draw
+    /// ids (new note type fields and templates).
+    pub fn scope_and_random(&mut self) -> (&mut WriteScope<'c>, &dyn RandomSource) {
+        (self.scope, self.random.as_ref())
     }
 
     pub fn progress(&self) -> Option<&ProgressSink> {

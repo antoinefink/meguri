@@ -5,9 +5,10 @@
 //! ordered change stream and in-core observers (C2), the collection
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
 //! registry, the ports, cancellation and progress; U25 adds undo and redo
-//! (C3), and U40 the day clock (C6, `sched`). Specs:
+//! (C3), U40 the day clock (C6, `sched`), and U29 note types and the
+//! schema-change gate (`notetypes`, `schema_gate`). Specs:
 //! `specs/engine/op-model.md`, `change-stream.md`, `lifecycle.md`, `jobs.md`,
-//! `undo.md`, `specs/sched/day-clock.md`.
+//! `undo.md`, `specs/sched/day-clock.md`, `specs/notetypes/`.
 
 pub mod cancel;
 pub mod changes;
@@ -17,10 +18,12 @@ pub mod executor;
 pub mod jobs;
 pub mod lifecycle;
 pub mod monotonic;
+pub mod notetypes;
 pub mod ports;
 pub mod progress;
 pub mod readers;
 pub mod sched;
+pub mod schema_gate;
 pub mod threads;
 pub mod undo;
 
@@ -45,6 +48,7 @@ pub use ports::{ChangeObserver, GenerationListener, OpenStep, PortKind, Ports, S
 pub use progress::{Progress, ProgressListener, ProgressPhase, ProgressSink};
 pub use readers::{ReaderLease, Snapshot};
 pub use sched::{DayCache, DayClock, DayQuery, DayReport, day_query};
+pub use schema_gate::{SchemaReason, mark_schema_change};
 pub use threads::{Qos, RegisteredThread, ThreadInfo, ThreadRegistry};
 pub use undo::entry::{EntryId, RestorerState, SessionId, StepInfo, StepKind};
 pub use undo::holdback::{HeldBackRun, HeldRow, SyncHold, SyncMerge};
