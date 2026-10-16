@@ -1,0 +1,20 @@
+# The grammar of sound tags and directives (specs/render/av-tags.md A2-A4, A6,
+# A7): empty and bracketed names, entity decoding all or nothing, line breaks
+# and non-Latin names, other directives written in normal form, broken and
+# unclosed directives left as text, and literal play markers in field text.
+id: render/av-tags/grammar
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Tag Soup
+      fields: [Sounds, Directives]
+      templates:
+        - {name: Sounds First, front: "{{Sounds}}", back: "{{Directives}}"}
+        - {name: Directives First, front: "<div>{{Directives}}</div>", back: "<div>{{Sounds}}</div>"}
+  notes:
+    - notetype: Tag Soup
+      fields:
+        - "[sound:]] [sound:a]b] [[sound:x y.mp3]] [sound:a&amp;b.mp3] [sound:a&b&c.mp3] [sound:&nbsp;n.mp3] [sound:日本語.ogg] [sound:line\nbreak.mp3] [sound:dir/clip.mp3] [Sound:upper.mp3]"
+        - "[anki:foo  a=1\n]x[/anki:foo] [anki:foo a=\"x y\" ]y[/anki:foo] [anki:foo a=x]]z[/anki:foo] [anki:foo a]w[/anki:foo] [anki:open]v [anki:x=y]u[/anki:x=y] [anki:play:q:0] [anki:play:a:7] [anki:tts lang=en]t[/anki:TTS]"
+steps:
+  - observe: [render]

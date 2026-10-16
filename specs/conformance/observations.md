@@ -46,7 +46,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `schema_objects` | none | `[{type, name, tbl_name, sql}]`, every object of the collection file's `sqlite_master` with its SQL text normalized (`storage-ops.md` P3) |
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
-| `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
+| `render` | card references or none | draft until the driver has it (render, U62): `{"#cN": {review, browser} \| null}`, the card render pipeline's outputs for the stored templates: question and answer text with play markers, AV entries, blank kind or template error, in review and in browser mode (`render-ops.md` Q4) |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |

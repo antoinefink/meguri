@@ -59,3 +59,22 @@ data-cloze
 data-ordinal
 image-occlusion
 span
+# render/av-tags, render/display-transform, render/card-render-pipeline
+play
+cloze_blank
+replay-button
+soundLink
+playImage
+viewBox
+pycmd
+webkit
+messageHandlers
+postMessage
+hideAudioPlayButtons
+reviewExtra
+q_format_browser
+a_format_browser
+bqfmt
+bafmt
+mtime_secs
+marked

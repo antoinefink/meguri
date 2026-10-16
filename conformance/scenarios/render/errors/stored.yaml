@@ -1,0 +1,29 @@
+# Template errors of stored cards (specs/render/card-render-pipeline.md K4,
+# K5, K6, template-syntax.md T9, special-fields.md P4): a note type save
+# accepts FrontSide as a section key, which then renders as an
+# unknown_conditional error on the question or the answer side. A blank
+# question hides the answer's error in review but not in browser mode, where
+# standard cards are never blank; a missing cloze hides it in both modes.
+id: render/errors/stored
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Faulty
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Bad Question, front: "{{Front}}{{^FrontSide}}!{{/FrontSide}}", back: "{{Back}}"}
+        - {name: Bad Answer, front: "{{Back}}", back: "{{FrontSide}}{{#FrontSide}}?{{/FrontSide}}"}
+        - {name: Hidden Bad Answer, front: "{{#Extra}}{{Extra}}{{/Extra}}", back: "{{Front}}{{#FrontSide}}{{/FrontSide}}"}
+    - name: Faulty Gap
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap Card, front: "{{cloze:Text}}", back: "{{cloze:Text}}{{^FrontSide}}!{{/FrontSide}}"}
+  notes:
+    - {notetype: Faulty, fields: [Kopf, head, der Kopf]}
+    - {notetype: Faulty Gap, fields: ["{{c1::Rhein}} and {{c2::Elbe}}"]}
+steps:
+  - observe: [render]
+  - edit_note: {note: "#n1", fields: [Kopf, head, ""]}
+  - edit_note: {note: "#n2", fields: ["{{c1::Rhein}} and Elbe"]}
+  - observe: [render]

@@ -1,0 +1,26 @@
+# Special fields through stored templates (specs/render/card-render-pipeline.md
+# K3, special-fields.md P3, R960): nested deck names and Subdeck, a card moved
+# to another deck with odid set shows its original deck, flags 3 and 9
+# (CardFlag shows the whole value), stored tags and the template name. CardID
+# is left out: special-fields/cards covers it.
+id: render/pipeline/specials
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: ["Lang::German::Verbs", Holding]
+  notetypes:
+    - name: Deck Probe
+      fields: [Word]
+      templates:
+        - name: Show Deck
+          front: "{{Word}}|{{Deck}}|{{Subdeck}}|{{CardFlag}}|{{Card}}|{{Type}}|{{Tags}}"
+          back: "{{FrontSide}}|{{#Tags}}tagged{{/Tags}}{{^Tags}}untagged{{/Tags}}"
+  notes:
+    - {notetype: Deck Probe, deck: "Lang::German::Verbs", fields: [gehen], tags: [verb, a1]}
+    - {notetype: Deck Probe, deck: "Lang::German::Verbs", fields: [laufen]}
+steps:
+  - observe: [render]
+  - db_exec:
+      sql: "UPDATE cards SET flags = 3 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)"
+  - db_exec:
+      sql: "UPDATE cards SET flags = 9, odid = did, did = (SELECT id FROM decks WHERE name = 'Holding') WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+  - observe: [render]

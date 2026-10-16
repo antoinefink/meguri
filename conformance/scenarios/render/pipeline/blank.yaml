@@ -1,0 +1,32 @@
+# Blank cards (specs/render/card-render-pipeline.md K4 step 2, K5 step 3,
+# template-syntax.md T10, cloze.md C15, R976): a standard card whose question
+# renders nothing is blank in review but not in browser mode; a blank question
+# keeps its text and its audio; a cloze card whose number left the note is
+# blank in both modes.
+id: render/pipeline/blank
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional Extra
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Main, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+        - name: Extra Card
+          front: "{{#Extra}}{{Extra}}{{/Extra}}"
+          back: "{{FrontSide}}|{{Back}}"
+        - name: Listen
+          front: "Listen [sound:prompt.mp3]{{#Extra}}{{Extra}}{{/Extra}}"
+          back: "{{FrontSide}}|{{Back}}[sound:back.mp3]"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap Card, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  notes:
+    - {notetype: Optional Extra, fields: [Haus, house, "das Haus"]}
+    - {notetype: Gap, fields: ["{{c1::Berlin}} is in {{c2::Germany}}", capital]}
+steps:
+  - observe: [render]
+  - edit_note: {note: "#n1", fields: [Haus, house, ""]}
+  - edit_note: {note: "#n2", fields: ["{{c1::Berlin}} is in Germany", capital]}
+  - observe: [render]

@@ -1,0 +1,22 @@
+# The render pipeline on stored cards (specs/render/card-render-pipeline.md
+# K2-K4, R469, R528): a Basic-like note type with a reverse template, its own
+# CSS (never part of the observed text), FrontSide holding the question text
+# with its play markers, and HTML and audio in fields.
+id: render/pipeline/basic
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Word Pair
+      fields: [Front, Back]
+      css: ".card { font-family: serif; font-size: 24px; }"
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}
+        - name: Reverse
+          front: "<div class=prompt>{{Back}}</div>"
+          back: "{{FrontSide}}\n\n<hr id=answer>\n\n{{Front}}"
+  notes:
+    - {notetype: Word Pair, deck: Words, fields: [sun, Sonne]}
+    - {notetype: Word Pair, deck: Words, fields: ["<b>猫</b>[sound:neko.mp3]", "cat &amp; kitten [sound:cat.mp3]"]}
+steps:
+  - observe: [render]

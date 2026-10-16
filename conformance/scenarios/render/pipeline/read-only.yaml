@@ -1,0 +1,20 @@
+# Rendering changes nothing (specs/render/card-render-pipeline.md K7, R583):
+# the notes and cards tables are the same before and after rendering a note
+# whose templates hold MathJax, a TTS filter, the hint filter and an unknown
+# (add-on) filter.
+id: render/pipeline/read-only
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Busy Template
+      fields: [Front, Back]
+      templates:
+        - name: Busy
+          front: "{{Front}} \\(x^2\\) {{tts en_US:Front}} {{myaddon:Front}} {{hint:Back}}"
+          back: "{{FrontSide}}<hr id=answer>{{Back}} \\[\\sum_i i\\]"
+  notes:
+    - {notetype: Busy Template, fields: ["energy [sound:e.mp3]", "E = mc²"], tags: [physics]}
+steps:
+  - observe: [{db_dump: {tables: [notes, cards]}}]
+  - observe: [render]
+  - observe: [{db_dump: {tables: [notes, cards]}}]

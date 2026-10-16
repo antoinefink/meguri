@@ -1,0 +1,23 @@
+# Audio in clozes (specs/render/av-tags.md A9, cloze.md C7, R1020): the active
+# cloze hides its sounds on the front (its data-cloze attribute is encoded) and
+# plays them on the back; inactive clozes show theirs on both sides; a TTS
+# filter over the cloze output speaks the front with its gap.
+id: render/av-tags/cloze
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Sound Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap Card, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+    - name: Spoken Gap
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Spoken Card, front: "{{cloze:Text}}{{tts en_US:cloze:Text}}", back: "{{FrontSide}}<hr id=answer>{{cloze:Text}}"}
+  notes:
+    - {notetype: Sound Gap, fields: ["{{c1::犬[sound:inu.mp3]}} and {{c2::猫[sound:neko.mp3]}} [sound:always.mp3]", "[sound:extra.mp3]"]}
+    - {notetype: Spoken Gap, fields: ["The {{c1::sun}} is a {{c2::star::kind}}."]}
+steps:
+  - observe: [render]
