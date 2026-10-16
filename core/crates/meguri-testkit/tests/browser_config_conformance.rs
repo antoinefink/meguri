@@ -15,8 +15,11 @@
 //! `browser/config/live-roundtrip` is a live chain (D9.2): here Meguri runs
 //! every segment, handing the collection over to itself through the storage
 //! area's handoff adapters, as the oracle ran every segment to record the
-//! golden. T1 runs the chain with the oracle on its own segments
-//! (`tools/mg conformance --live`).
+//! golden. The comparison shows that Meguri stores the bytes Anki stored at
+//! the end of each segment and reads every key as Anki read them; a cargo
+//! test has no oracle worker, so only T1 (`tools/mg conformance --live`),
+//! running the oracle's segments on the oracle, shows each side opening the
+//! collection file the other wrote.
 
 use std::path::{Path, PathBuf};
 

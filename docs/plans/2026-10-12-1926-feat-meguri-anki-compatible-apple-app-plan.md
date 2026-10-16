@@ -5578,7 +5578,7 @@ Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). Th
 - Emoji and mixed-script deck names round-trip unchanged.
 - New collection → normalized dump (ids and times masked, stock template text excluded) equals the oracle's new collection plus the IO notetype; the oracle opens it and adds a note (T1).
 
-**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes. Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; all ten start from the fresh collection) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
+**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes. Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; all ten start from the fresh collection) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1). `browser/config/new-collection` passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/browser/area.yaml` (moved from U83, amended 2026-10-16; `docs/process/review-log/U83.md`, A1).
 
 ### U31. Media service: names, store, change journal, staging, trash (C9)
 
@@ -7395,7 +7395,9 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - `browserTableShowNotesMode` toggled → one config write, no undo entry.
 - An undoable `test-hooks` op, then a saved-search write → `peek` names "Save Search"; two undos restore the saved-search map and then the earlier op's rows.
 
-**Verification:** `conformance/scenarios/browser/config/` matches the goldens. The T1 live round-trip of config keys through the oracle shows no diff.
+**Verification:** `conformance/scenarios/browser/config/` matches the goldens, except `browser/config/new-collection`, whose Meguri run is U28's. The T1 live round-trip of config keys through the oracle shows no diff.
+
+Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). This line first asked for every browser/config scenario to match its golden on Meguri's executor. `browser/config/new-collection` reads which browser keys a new collection holds (`specs/browser/config-keys.md` K1, K13). Its only step is a `db_exec` read of the collection that the `new_collection` capability (`specs/conformance/dsl.md` D8) makes. On Meguri that collection is U28's bootstrap, and D8 lets the executor declare the capability only for U28's bootstrap or for a stand-in that an area's spec defines. U83 builds no new collection, so this scenario's Meguri run moves to U28, whose Verification names it. Until then, `core/crates/meguri-testkit/tests/browser_config_conformance.rs` plays it on Meguri against its golden, with the schema-18 storage fixture (a new collection of the pinned Anki) in place of the new collection.
 
 ### U84. Browser rows, columns and sorting
 
