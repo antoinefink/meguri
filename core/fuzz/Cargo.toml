@@ -17,6 +17,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 meguri-model = { path = "../crates/meguri-model" }
+meguri-template = { path = "../crates/meguri-template" }
 meguri-text = { path = "../crates/meguri-text" }
 
 [workspace]
@@ -39,6 +40,13 @@ bench = false
 [[bin]]
 name = "proto_blobs"
 path = "fuzz_targets/proto_blobs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "template_parse"
+path = "fuzz_targets/template_parse.rs"
 test = false
 doc = false
 bench = false
