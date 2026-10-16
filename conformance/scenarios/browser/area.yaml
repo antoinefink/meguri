@@ -1,0 +1,12 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them (T1 for the
+# live chain). config/live-roundtrip's Meguri segment needs only the browser
+# adapters (meguri-testkit exec/browser.rs, U83), the clock and the storage
+# area. The other browser/config scenarios start from the new collection
+# (U28), other-keys-untouched also with setup.config; the unit that lands the
+# last of those activates them here. Meanwhile
+# core/crates/meguri-testkit/tests/browser_config_conformance.rs plays every
+# browser/config scenario on Meguri's executor against its golden, with
+# stand-ins for the new collection and the config setup.
+area: browser
+active:
+  - "config/live-roundtrip"
