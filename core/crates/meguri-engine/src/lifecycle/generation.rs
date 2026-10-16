@@ -22,15 +22,19 @@ impl fmt::Display for Generation {
     }
 }
 
+/// What a replace left: the privileged handle of the new generation whenever
+/// the generation moved, and the error when the swap or the reopen failed.
+/// A swap that failed after changing the file leaves both.
+pub(crate) struct Replacement {
+    pub(crate) moved: Option<Collection>,
+    pub(crate) error: Option<EngineError>,
+}
+
 /// L8: closes the readers and the writer, runs `swap` with nothing open,
-/// reopens through the open gate, moves to the next generation, publishes
-/// `CollectionReplaced` once and tells every `GenerationListener`.
-pub(crate) fn replace(
-    engine: &Engine,
-    core: &Arc<CollectionCore>,
-    privilege: Privilege,
-    swap: Swap,
-) -> Result<Collection, EngineError> {
+/// reopens through the open gate, and, when the file changed, moves to the
+/// next generation, publishes `CollectionReplaced` once and tells every
+/// `GenerationListener`.
+pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Privilege, swap: Swap) -> Replacement {
     engine.set_exclusive_phase(core, ExclusivePhase::Replacing);
     core.exec.wait_idle();
     core.readers.close_all();
@@ -40,40 +44,38 @@ pub(crate) fn replace(
     if let Some(factory) = replaced.factory {
         core.readers.set_factory(factory);
     }
-    match replaced.result {
-        Ok(new) => {
-            for listener in engine.ports().generation_listeners {
-                listener.collection_replaced(old, new);
-            }
-            engine.set_exclusive_phase(core, ExclusivePhase::Working);
-            Ok(Collection {
-                core: Arc::clone(core),
-                generation: new,
-                privilege: Some(privilege),
-            })
+    let moved = replaced.generation.map(|new| {
+        for listener in engine.ports().generation_listeners {
+            listener.collection_replaced(old, new);
         }
-        Err(error) => {
-            if !reopened {
-                // Nothing reopened: the collection is gone.
-                core.exec.set_admission(Admission::Closed {
-                    reason: "the collection could not be reopened after a swap".to_owned(),
-                });
-                let mut state = engine.lock_state();
-                // Unless it was closed meanwhile (the writer refused the swap).
-                if is_open(&state, core) {
-                    engine.set_state_locked(
-                        &mut state,
-                        LifecycleState::Failed {
-                            reason: FailedReason::Replace {
-                                detail: error.to_string(),
-                            },
-                        },
-                    );
-                }
-            } else {
-                engine.set_exclusive_phase(core, ExclusivePhase::Working);
-            }
-            Err(error)
+        Collection {
+            core: Arc::clone(core),
+            generation: new,
+            privilege: Some(privilege),
         }
+    });
+    if reopened {
+        engine.set_exclusive_phase(core, ExclusivePhase::Working);
+    } else if let Some(error) = &replaced.error {
+        // Nothing reopened: the collection is gone.
+        core.exec.set_admission(Admission::Closed {
+            reason: "the collection could not be reopened after a swap".to_owned(),
+        });
+        let mut state = engine.lock_state();
+        // Unless it was closed meanwhile (the writer refused the swap).
+        if is_open(&state, core) {
+            engine.set_state_locked(
+                &mut state,
+                LifecycleState::Failed {
+                    reason: FailedReason::Replace {
+                        detail: error.to_string(),
+                    },
+                },
+            );
+        }
+    }
+    Replacement {
+        moved,
+        error: replaced.error,
     }
 }

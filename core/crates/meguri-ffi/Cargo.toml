@@ -16,6 +16,8 @@ crate-type = ["staticlib", "lib"]
 # its job registry runs jobs, its cancel token and progress sink back the
 # exported objects.
 meguri-engine.workspace = true
+# The change value types and ids the `Changes` event carries (KTD2).
+meguri-model.workspace = true
 uniffi.workspace = true
 
 [features]
