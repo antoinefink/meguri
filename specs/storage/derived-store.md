@@ -95,6 +95,7 @@ The stamp then takes the collection's mark with `clean` 0 and the bind's seq, an
   - waiting for a refresh: the delta is dropped, because the refresh's snapshot will hold it.
   - a "rebuild" capture queues a rebuild of a ready component, and makes a waiting or running catch-up a rebuild: a catch-up may not see what such a commit changed (a sync brings rows whose modification times are before its `since`).
 - A transaction that fails as a whole (the D12 fault point, an I/O error) marks every ready component `ready` 0 and queues its rebuild; the stamp keeps its mark.
+- When `ready` 0 cannot be written (here or at an invalidation, D10), the file may still say `ready` 1 for a component that misses commits, and any later stamp would pass its rows as current (D8) or, marked clean, as fresh at the next open. The store then unbinds, as a crash would leave it: nothing more is written to the file (its stamp neither advances nor is marked clean), any refresh stops, readers no longer attach it (D9) and every component is `Stale` (its `cause_seq` the failed transaction's last commit, none for an invalidation). The next open assesses the file (D5.2); a replacement first opens it again, then empties it (D10).
 - The stamp's mark becomes the last `col` row in the transaction, and its `seq` the last commit of the batch, the dropped ones included.
 - Normal syncs need nothing else: a `SyncIncoming` commit reaches components like any other (R1489).
 
@@ -126,6 +127,7 @@ The stamp then takes the collection's mark with `clean` 0 and the bind's seq, an
 - `CollectionReplaced` (`engine/lifecycle` L8; one-way sync, `.colpkg` import, restore, and a swap that failed after it changed the file): before the replacement returns, the derived writer stops any refresh, empties every component's tables, stamps the new collection's mark with `clean` 0 and binds the new generation. Every component then rebuilds (R1489).
 - A swap that failed before changing the file moves no generation: the store stays bound and keeps its content, and the readers reopened after the swap attach it again (D9).
 - Check Database (U128) and an external change (U32, R1453) invalidate the store: every component is marked `Stale` and rebuilt through staging, so readers keep the old content until each swap.
+- A replacement while the store is not open (it could not be opened, or it unbound, D6) opens it for the new collection and empties it all the same: whatever the file's verdicts, every component rebuilds.
 - A crash between a collection commit and its derived update is found at the next bind by D5.2 and repaired by catch-up or rebuild.
 
 ## D11. Suspend and close
@@ -163,3 +165,5 @@ The stamp then takes the collection's mark with `clean` 0 and the bind's seq, an
 | A commit applied after a snapshot began: a snapshot that read the store before is still current and its derived rows match its collection; one whose first read of `derived` comes after is not current | `tests/derived_lag.rs` |
 | A snapshot reads the stamp's `seq` of a ready component from its own view of the store; writing the mark keeps the `seq` | `tests/derived_store.rs` |
 | A "rebuild" capture while a catch-up waits or runs makes it a rebuild that holds the commit | `tests/derived_lag.rs` |
+| A failed commit or an invalidation whose `ready` 0 cannot be written (another connection holds the file's write lock): the store unbinds; once the file can be written, a later commit leaves the component not current, readers without `derived`, the stamp not clean after close, and the next open repairs it | `tests/derived_lag.rs` |
+| A replacement of an unbound store binds it again and rebuilds every component | `tests/derived_lag.rs` |

@@ -978,38 +978,15 @@ impl Worker {
 
     /// D5.
     fn bind(&mut self, collection: Collection, mark: CollectionMark, seq: Seq) {
-        let path = derived::derived_path(collection.path());
+        let Some(verdicts) = self.open_file(&collection, mark, seq) else {
+            return;
+        };
         let generation = collection.generation();
-        let (mut file, found) = match DerivedFile::open(&path) {
-            Ok(opened) => opened,
-            Err(error) => {
-                tracing::warn!(%error, path = %path.display(), "the derived store cannot be opened");
-                return;
-            }
-        };
-        if let Found::Recreated { reason } = &found {
-            tracing::warn!(%reason, path = %path.display(), "the derived store was replaced");
-        }
-        let through = self.through.max(seq);
-        let verdicts = match bind_file(&mut file, &self.shared.registry, &mark, through) {
-            Ok(verdicts) => verdicts,
-            Err(error) => {
-                tracing::warn!(%error, "binding the derived store");
-                return;
-            }
-        };
-        self.epoch += 1;
-        self.file = Some(file);
-        self.collection = Some(collection.clone());
-        self.generation = Some(generation);
-        self.bind_seq = seq;
-        self.through = through;
-        self.mark = Some(mark);
         self.queue.clear();
         let mut state = self.shared.lock();
         state.bound = Some(Bound {
             generation,
-            path,
+            path: derived::derived_path(collection.path()),
             epoch: self.epoch,
         });
         state.collection = Some(collection);
@@ -1041,6 +1018,39 @@ impl Worker {
             };
             self.shared.set_readiness(&mut state, slot, generation, readiness, None);
         }
+    }
+
+    /// Opens the store's file for `collection` and stamps it (D5.1, D5.2);
+    /// the caller publishes the binding. The verdicts, or `None` when the
+    /// file cannot be opened or stamped.
+    fn open_file(&mut self, collection: &Collection, mark: CollectionMark, seq: Seq) -> Option<Vec<Verdict>> {
+        let path = derived::derived_path(collection.path());
+        let (mut file, found) = match DerivedFile::open(&path) {
+            Ok(opened) => opened,
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "the derived store cannot be opened");
+                return None;
+            }
+        };
+        if let Found::Recreated { reason } = &found {
+            tracing::warn!(%reason, path = %path.display(), "the derived store was replaced");
+        }
+        let through = self.through.max(seq);
+        let verdicts = match bind_file(&mut file, &self.shared.registry, &mark, through) {
+            Ok(verdicts) => verdicts,
+            Err(error) => {
+                tracing::warn!(%error, "binding the derived store");
+                return None;
+            }
+        };
+        self.epoch += 1;
+        self.file = Some(file);
+        self.collection = Some(collection.clone());
+        self.generation = Some(collection.generation());
+        self.bind_seq = seq;
+        self.through = through;
+        self.mark = Some(mark);
+        Some(verdicts)
     }
 
     /// D6.
@@ -1147,21 +1157,58 @@ impl Worker {
     }
 
     /// Marks every ready component stale and queues its rebuild, because the
-    /// commits up to `cause` did not reach it.
+    /// commits up to `cause` did not reach it. When that cannot be written
+    /// either, the store unbinds.
     fn all_ready_stale(&mut self, cause: Seq) {
         let ready: Vec<usize> = (0..self.slots.len())
             .filter(|slot| self.slots[*slot] == SlotState::Ready)
             .collect();
-        if let Some(file) = self.file.as_mut()
-            && let Ok(tx) = file.begin()
-        {
-            for slot in &ready {
-                let _ = tx.set_ready(&self.shared.registry.schemas()[*slot].name, false);
-            }
-            let _ = tx.commit();
+        if ready.is_empty() {
+            return;
+        }
+        if let Err(error) = self.clear_ready(&ready) {
+            tracing::warn!(%error, "the derived store cannot record that its components are stale");
+            self.unbind(Some(cause));
+            return;
         }
         for slot in ready {
             self.queue_refresh(slot, Kind::Rebuild, Some(cause));
+        }
+    }
+
+    /// Writes `ready` 0 for `slots`, in one transaction.
+    fn clear_ready(&mut self, slots: &[usize]) -> Result<(), EngineError> {
+        let schemas = self.shared.registry.schemas();
+        let file = self.file.as_mut().ok_or(EngineError::Cancelled)?;
+        let tx = file.begin()?;
+        for slot in slots {
+            tx.set_ready(&schemas[*slot].name, false)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// `ready` 0 could not be written: the file may still say `ready` 1 for
+    /// a component that misses commits, and any later stamp would make its
+    /// rows pass as current (D8) or, marked clean, fresh at the next open.
+    /// So nothing more is written to it, as after a crash: readers stop
+    /// attaching it and every component is `Stale` until the next bind
+    /// assesses it (D5.2) or a replacement empties it (D10).
+    fn unbind(&mut self, cause: Option<Seq>) {
+        // Its staging tables go at the next bind (D5.1).
+        self.abort_running();
+        self.queue.clear();
+        // Without a checkpoint: nothing more for a file that fails.
+        drop(self.file.take());
+        let mut state = self.shared.lock();
+        state.bound = None;
+        for slot in 0..self.slots.len() {
+            self.slots[slot] = SlotState::Failed;
+            state.slots[slot].refresh = None;
+            if let Some(generation) = self.generation {
+                self.shared
+                    .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
+            }
         }
     }
 
@@ -1488,9 +1535,9 @@ impl Worker {
         if self.file.is_none()
             && let Some((mark, seq)) = mark
         {
-            // The store could not be opened before: try again for this one.
-            self.bind(collection, mark, seq);
-            return;
+            // The store is not open (it could not be, or it unbound): open it
+            // for this collection, then empty it below whatever its verdicts.
+            let _ = self.open_file(&collection, mark, seq);
         }
         self.abort_running();
         self.queue.clear();
@@ -1522,10 +1569,11 @@ impl Worker {
         self.mark = mark.map(|(mark, _)| mark);
         let mut state = self.shared.lock();
         state.collection = Some(collection);
-        state.bound = match (&state.bound, usable) {
-            (Some(bound), true) => Some(Bound {
+        state.bound = match (&self.file, usable) {
+            (Some(file), true) => Some(Bound {
                 generation,
-                ..bound.clone()
+                path: file.path().to_path_buf(),
+                epoch: self.epoch,
             }),
             _ => None,
         };
@@ -1565,13 +1613,11 @@ impl Worker {
             self.discard_staging(&schema, running.kind);
         }
         self.queue.clear();
-        if let Some(file) = self.file.as_mut()
-            && let Ok(tx) = file.begin()
-        {
-            for schema in self.shared.registry.schemas() {
-                let _ = tx.set_ready(&schema.name, false);
-            }
-            let _ = tx.commit();
+        let all: Vec<usize> = (0..self.slots.len()).collect();
+        if let Err(error) = self.clear_ready(&all) {
+            tracing::warn!(%error, "the derived store cannot record its invalidation");
+            self.unbind(None);
+            return;
         }
         let mut state = self.shared.lock();
         for slot in 0..self.slots.len() {

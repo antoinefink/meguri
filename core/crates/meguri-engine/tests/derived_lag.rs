@@ -1353,6 +1353,166 @@ fn a_commit_batch_that_fails_while_a_rebuild_runs_still_reaches_the_rebuilt_tabl
     opened.close();
 }
 
+/// Another connection holding the derived file's write lock: every derived
+/// transaction fails at its start, after the busy timeout, as on a disk that
+/// refuses writes. Dropping it is the recovery.
+struct WriteLock {
+    _held: rusqlite::Connection,
+}
+
+impl WriteLock {
+    fn take(path: &Path) -> WriteLock {
+        let conn = rusqlite::Connection::open(derived_file(path)).unwrap();
+        conn.busy_timeout(WAIT).unwrap();
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        WriteLock { _held: conn }
+    }
+}
+
+/// The stamp's `clean` in the closed store's file.
+fn file_clean(path: &Path) -> i64 {
+    let conn = rusqlite::Connection::open(derived_file(path)).unwrap();
+    conn.query_row("SELECT clean FROM meguri_stamp", [], |row| row.get(0))
+        .unwrap()
+}
+
+/// Opens the collection with the mirror ready and one card, then runs
+/// `fail` while the derived file cannot be written: it makes the store mark
+/// the mirror stale, which cannot be written either, and neither could the
+/// staging tables of its rebuild. Returns the store and the card once the
+/// file can be written again; `fail` returns the `cause_seq` of the mirror's
+/// `Stale`.
+fn unwritable_while(path: &Path, fail: impl FnOnce(&Opened, CardId) -> Option<Seq>) -> (Opened, CardId) {
+    let opened = open(path);
+    opened.settle();
+    let id = add_cards(&opened.collection, &[1])[0];
+    opened.host.flush().unwrap();
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    let _ = opened.readiness_envelopes();
+
+    let lock = WriteLock::take(path);
+    let cause = fail(&opened, id);
+    // Past the commits' transaction, the readiness write and the next
+    // refresh's start.
+    opened.host.flush().unwrap();
+    let events = opened.readiness_envelopes();
+    assert!(
+        events
+            .iter()
+            .any(|(c, e)| *c == cause && e.readiness == Readiness::Stale),
+        "{events:?}"
+    );
+    drop(lock);
+    (opened, id)
+}
+
+/// After [`unwritable_while`]: a later commit, once the file can be written
+/// again, must not make the mirror's old rows pass as current, in this
+/// session (D8) or, through a close, in the next (D5.2, D11).
+fn later_commit_finds_the_store_unbound_and_the_next_open_repairs_it(path: &Path, opened: Opened, id: CardId) {
+    let later = set_due(&opened.collection, id, 3);
+    opened.settle();
+    {
+        let lease = opened.collection.reader(ReaderRole::Query).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        assert_eq!(snapshot.seq(), later);
+        assert!(
+            !opened.host.is_current(MIRROR, &snapshot),
+            "the mirror's rows miss the commits made while its file could not be written"
+        );
+    }
+    assert_eq!(opened.readiness(), Readiness::Stale);
+    assert_eq!(opened.host.path(), None, "the store is unbound");
+    let reader = opened.collection.reader(ReaderRole::Query).unwrap();
+    assert!(
+        reader
+            .execute_raw("SELECT count(*) FROM derived.card_mirror__rows", &[])
+            .is_err(),
+        "readers no longer attach it"
+    );
+    drop(reader);
+    opened.close();
+    assert_eq!(file_clean(path), 0, "an unbound store is never marked clean");
+
+    let reopened = open(path);
+    reopened.settle();
+    assert_ne!(
+        (reopened.builds(), reopened.catch_ups()),
+        (0, 0),
+        "the store is not fresh"
+    );
+    assert_eq!(reopened.readiness(), Readiness::Ready);
+    let rows = mirrored(&reopened.collection);
+    assert!(rows.iter().any(|r| r.0 == id.0 && r.4 == 3), "{rows:?}");
+    assert_eq!(rows, expected(&reopened.collection));
+    reopened.close();
+}
+
+#[test]
+fn a_failed_commit_whose_staleness_cannot_be_written_unbinds_the_store_until_the_next_open() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let (opened, id) = unwritable_while(&path, |opened, id| Some(set_due(&opened.collection, id, 2)));
+    later_commit_finds_the_store_unbound_and_the_next_open_repairs_it(&path, opened, id);
+}
+
+#[test]
+fn an_invalidation_that_cannot_be_written_unbinds_the_store_until_the_next_open() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let (opened, id) = unwritable_while(&path, |opened, _| {
+        opened.host.invalidate(Invalidation::ExternalChange);
+        None
+    });
+    later_commit_finds_the_store_unbound_and_the_next_open_repairs_it(&path, opened, id);
+}
+
+#[test]
+fn a_replacement_binds_an_unbound_store_again_and_rebuilds_every_component() {
+    let (dir, path) = copy_fixture("schema-18.anki2");
+    // Made a minute later: its `col.mod` is after the store's mark, so the
+    // store's unclean stamp alone would only be caught up from (D5.2).
+    let replacement = dir.path().join("replacement.anki2");
+    fs::copy(common::fixture("schema-18.anki2"), &replacement).unwrap();
+    without_store_at(&replacement, NOW_MS + 60_000, |collection| {
+        add_cards(collection, &[2_000, 2_001])
+    });
+    let (opened, _) = unwritable_while(&path, |opened, id| Some(set_due(&opened.collection, id, 2)));
+    assert_eq!(opened.host.path(), None, "the store is unbound");
+    let old = opened.collection.generation();
+    let builds = opened.builds();
+
+    let slot = opened.engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(false).unwrap();
+    let new = exclusive
+        .replace(move |live| {
+            fs::rename(&replacement, live).map_err(|e| EngineError::Internal { message: e.to_string() })
+        })
+        .unwrap()
+        .generation();
+    assert_eq!(new, Generation(old.0 + 1));
+    drop(exclusive);
+    drop(slot);
+    opened.settle();
+
+    let current = opened.engine.collection().unwrap();
+    assert!(opened.host.is_ready(MIRROR, new));
+    assert_eq!(opened.host.path(), Some(derived_file(&path)));
+    assert_eq!(
+        (opened.builds(), opened.catch_ups()),
+        (builds + 1, 0),
+        "a replacement rebuilds every component (D10)"
+    );
+    let rows = mirrored(&current);
+    assert_eq!(rows, expected(&current));
+    assert!(rows.iter().any(|r| r.4 == 2_000), "{rows:?}");
+    {
+        let lease = current.reader(ReaderRole::Query).unwrap();
+        let snapshot = lease.snapshot().unwrap();
+        assert!(opened.host.is_current(MIRROR, &snapshot));
+    }
+    drop(current);
+    opened.close();
+}
+
 #[test]
 fn suspend_returns_only_once_a_running_build_let_go_of_its_snapshot() {
     let (_dir, path) = copy_fixture("schema-18.anki2");
