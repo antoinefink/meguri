@@ -17,7 +17,9 @@
 mg_job gallery host mg_gallery \
   "Review gallery (R1988, R1989): [--base <rev>] [--pending <worktree>]... [--picks <file>] [--components] builds the page (old | new | diff of every screen's key variants, open critic issues, picks); serve [<gallery run>] [--port N] [--seconds N] serves it on 127.0.0.1 and records Antoine's decisions"
 
-MG_GALLERY_KEY_VARIANT='/(light|dark)-(standard|ax5)-(iphoneLarge|ipadRegular|macDefault)\.png$'
+# The key variants, with Reduce Transparency on too: a screen whose system
+# glass is not the same twice renders them so (MatrixSet.opaqueKeyVariants).
+MG_GALLERY_KEY_VARIANT='/(light|dark)-(standard|ax5)-(iphoneLarge|ipadRegular|macDefault)(\+rt)?\.png$'
 
 mg_gallery__usage() {
   mg_failure usage "gallery: $1" "tools/mg --list"

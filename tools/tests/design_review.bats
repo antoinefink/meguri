@@ -567,6 +567,24 @@ EOF
   [ -z "$(git -C "$wt" status --porcelain -- docs/design)" ]
 }
 
+@test "the gallery shows the key variants, also as a screen renders them with Reduce Transparency" {
+  cat >"$SB/tools/mg.d/zz-gallery-keys.sh" <<'EOF'
+mg_job fx-keys host fx_keys "fixture: key variant names"
+fx_keys() {
+  local p kept=""
+  for p in light-standard-iphoneLarge dark-ax5-ipadRegular+rt light-standard-macDefault dark-ax5-iphoneLarge+hc \
+    light-xxxLarge-ipadRegular+rt light-standard-ipadRegular+rt+rm dark-standard-ipadCompact+rt; do
+    printf 'app/Snapshots/K/s/typical/%s.png\n' "$p" | grep -qE "$MG_GALLERY_KEY_VARIANT" && kept="$kept $p"
+  done
+  mg_detail kept "$(jq -n --arg k "${kept# }" '$k')"
+  mg_status pass
+}
+EOF
+  mg fx-keys
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.kept)" = "light-standard-iphoneLarge dark-ax5-ipadRegular+rt light-standard-macDefault" ]
+}
+
 @test "the gallery takes a baseline's blob only when HEAD holds the file as it is" {
   local committed="app/Snapshots/$KEY/home.deckList/typical/light-standard-macDefault.png"
   local untracked="app/Snapshots/$KEY/settings.general/typical/light-standard-macDefault.png"

@@ -226,6 +226,13 @@ enum MatrixSet: String, Codable, Sendable {
     /// one text size) on the platform's reference device class: the T0
     /// subset (U252).
     case keyVariants
+    /// The light key variants with Reduce Transparency on (`+rt`), for a
+    /// screen whose system Liquid Glass renders differently from run to run
+    /// (the iPad sidebar's grain). Reduce Transparency makes the glass
+    /// opaque; what noise it keeps (the sidebar toggle's, one level) fails
+    /// the perceptual comparison on near-black pixels, so in dark cells
+    /// only. The Mac cannot set it: there these cells are deferred.
+    case opaqueLightKeyVariants
     /// A pairwise covering set (R1972, non-signature screens).
     case pairwise
     /// Every combination (signature screens use U252's counted covering set
@@ -291,6 +298,12 @@ enum SnapshotMatrix {
                 (platform == .mac ? [TextSize.standard] : [.standard, .ax5]).map {
                     MatrixCell(appearance: appearance, textSize: $0, device: referenceDevice(platform))
                 }
+            }
+        case .opaqueLightKeyVariants:
+            cells(.keyVariants, on: platform).filter { $0.appearance == .light }.map {
+                var cell = $0
+                cell.reduceTransparency = true
+                return cell
             }
         case .pairwise:
             pairwiseCells(on: platform)

@@ -61,19 +61,24 @@ enum MatrixRegistry {
         ScreenRegistration(type: TestHooks.SampleDeckOverview.self) { platform, state in
             platform == .iphone && state == .overflow ? .pairwise : .keyVariants
         },
-        // The shell's tab layout on the iPhone, in key variants. The sidebar
-        // layout has no snapshot yet (U252): on the iPad the system
-        // sidebar's Liquid Glass renders with a grain that differs between
-        // runs beyond the tolerance (3 of 4 cells failed in one of three
-        // runs, 2026-10-16), and the Mac's off-screen render (cacheDisplay)
-        // cannot draw the AppKit split view's materials (a black selection,
-        // a white detail column in dark mode). The pairwise set's dark cells
-        // with Increase Contrast, Reduce Motion or a glass opacity extreme
-        // show the same grain in the tab bar. The sidebar layout is checked
-        // by NavigationLayoutTests, ShellAccessibilityTests and
-        // `tools/mg screenshot`.
+        // The shell in key variants: the tab layout on the iPhone, the
+        // sidebar layout on the iPad and the Mac. The iPad's are the light
+        // ones with Reduce Transparency on: with Liquid Glass the system
+        // sidebar renders with a grain that differs between runs beyond the
+        // tolerance (3 of 4 cells failed in one of three runs, 2026-10-16),
+        // and with Reduce Transparency the sidebar toggle's glass still
+        // differs by one level, which failed a dark cell in 2 of 7 runs
+        // (near-black pixels). The Mac's draw the split view's columns flat
+        // (`ChromeGlass.flat`, the Mac matrix's own): the off-screen render
+        // (cacheDisplay) cannot draw their materials. The pairwise set's
+        // dark iPhone cells with Increase Contrast, Reduce Motion or a glass
+        // opacity extreme show the same grain in the tab bar, so the iPhone
+        // keeps the key variants too.
         ScreenRegistration(type: ShellRootPreview.self) { platform, _ in
-            platform == .iphone ? .keyVariants : nil
+            switch platform {
+            case .iphone, .mac: .keyVariants
+            case .ipad: .opaqueLightKeyVariants
+            }
         },
     ]
 

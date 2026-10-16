@@ -1,4 +1,5 @@
 import AppModel
+import DesignSystem
 import SwiftUI
 
 /// The sidebar layout (R4, R17, R20–R22), at regular width and always on the
@@ -16,19 +17,23 @@ struct SidebarRootView: View {
         NavigationSplitView(columnVisibility: $navigation.columnVisibility) {
             SidebarView(navigation: navigation, features: features)
         } detail: {
-            if let review = navigation.review {
-                features.review(review, navigation)
-            } else {
-                NavigationStack(path: $navigation.detailPath) {
-                    SectionDestinationView(screen: root, navigation: navigation, features: features)
-                        .navigationDestination(for: Destination.self) { destination in
-                            SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
-                        }
+            Group {
+                if let review = navigation.review {
+                    features.review(review, navigation)
+                } else {
+                    NavigationStack(path: $navigation.detailPath) {
+                        SectionDestinationView(screen: root, navigation: navigation, features: features)
+                            .navigationDestination(for: Destination.self) { destination in
+                                SectionDestinationView(screen: .init(destination), navigation: navigation, features: features)
+                            }
+                    }
+                    // Each sidebar row has its own stack: a new selection
+                    // starts from its root rather than animating from the
+                    // last one's.
+                    .id(navigation.sidebarSelection)
                 }
-                // Each sidebar row has its own stack: a new selection starts
-                // from its root rather than animating from the last one's.
-                .id(navigation.sidebarSelection)
             }
+            .detailColumnChrome()
         }
     }
 

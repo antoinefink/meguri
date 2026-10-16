@@ -37,6 +37,7 @@ struct SidebarView: View {
                     .accessibilityIdentifier("shell.root.sidebarDecks")
             }
         }
+        .sidebarColumnChrome()
         .navigationTitle(Text(verbatim: "Meguri"))
     }
 }

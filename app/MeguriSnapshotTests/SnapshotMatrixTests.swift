@@ -125,4 +125,15 @@ import Testing
         // SwiftUI on the Mac ignores Dynamic Type: one text size there.
         #expect(SnapshotMatrix.cells(.keyVariants, on: .mac).map(\.name) == ["light-standard-macDefault", "dark-standard-macDefault"])
     }
+
+    /// The light key variants with Reduce Transparency on, rendered by the
+    /// simulator run that has it (system glass turns opaque); the Mac cannot
+    /// set it, so its cells wait for the device session.
+    @Test func opaqueLightKeyVariantsAreTheLightKeyVariantsWithReduceTransparency() {
+        let ipad = SnapshotMatrix.cells(.opaqueLightKeyVariants, on: .ipad)
+        #expect(ipad.map(\.name) == ["light-standard-ipadRegular+rt", "light-ax5-ipadRegular+rt"])
+        #expect(ipad.allSatisfy { $0.systemGroup == "rt1-rm0-t50" && $0.deferredReason == nil })
+        let mac = SnapshotMatrix.cells(.opaqueLightKeyVariants, on: .mac)
+        #expect(!mac.isEmpty && mac.allSatisfy { $0.deferredReason != nil })
+    }
 }

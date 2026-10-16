@@ -21,14 +21,24 @@ import AppKit
         MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" && $0.cell.deferredReason == nil }
     }
 
-    /// The tab layout on the iPhone in every state. The sidebar layout's
-    /// renders are not deterministic yet (MatrixRegistry, U252).
-    @Test func theShellsTabLayoutIsSnapshottedInEveryState() {
+    /// Both layouts in every state: the tab layout on the iPhone, the
+    /// sidebar layout on the iPad (light, Reduce Transparency on: its
+    /// system glass is not the same twice, MatrixRegistry) and on the Mac
+    /// (its split view drawn flat), all rendered rather than deferred.
+    @Test func bothLayoutsAreSnapshottedInEveryState() {
         #expect(ShellRootPreview.previewStates == [.typical, .error, .loading])
+        let states: Set<String> = ["typical", "loading", "error"]
         let iphone = shellCells(on: .iphone)
-        #expect(!iphone.isEmpty && iphone.allSatisfy { !$0.cell.device.horizontalSizeClassIsRegular })
-        #expect(Set(iphone.map(\.state)) == ["typical", "loading", "error"])
-        #expect(shellCells(on: .ipad).isEmpty && shellCells(on: .mac).isEmpty)
+        #expect(iphone.allSatisfy { !$0.cell.device.horizontalSizeClassIsRegular })
+        #expect(Set(iphone.map(\.state)) == states)
+        let ipad = shellCells(on: .ipad)
+        #expect(ipad.allSatisfy { $0.cell.device.horizontalSizeClassIsRegular && $0.cell.reduceTransparency })
+        #expect(Set(ipad.map(\.state)) == states)
+        #expect(Set(shellCells(on: .mac).map(\.state)) == states)
+        for platform in SnapshotPlatform.allCases {
+            let all = MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" }
+            #expect(all.allSatisfy { $0.cell.deferredReason == nil }, "\(platform): \(all.compactMap(\.cell.deferredReason))")
+        }
     }
 
     #if os(macOS)
