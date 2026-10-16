@@ -7,33 +7,46 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::derived::registry::{ComponentSchema, STAGING_PREFIX, Target};
 use crate::error::StorageError;
 
-/// Drops every table whose name starts with `prefix`, virtual tables first
-/// (dropping one drops its shadow tables). Their indexes go with them.
-fn drop_prefixed(conn: &Connection, prefix: &str) -> Result<(), StorageError> {
+/// Drops every table `owned` accepts, virtual tables first (dropping one
+/// drops its shadow tables). Their indexes go with them.
+fn drop_tables(conn: &Connection, owned: impl Fn(&str) -> bool) -> Result<(), StorageError> {
     let tables: Vec<String> = {
         let mut statement = conn.prepare(
             "SELECT name FROM sqlite_master
-             WHERE type = 'table' AND substr(name, 1, length(?1)) = ?1
+             WHERE type = 'table'
              ORDER BY coalesce(substr(upper(sql), 1, 14) = 'CREATE VIRTUAL', 0) DESC, name",
         )?;
         statement
-            .query_map([prefix], |row| row.get(0))?
+            .query_map([], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?
     };
-    for table in tables {
+    for table in tables.iter().filter(|table| owned(table)) {
         conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{table}\""))?;
     }
     Ok(())
 }
 
-/// Drops the live tables of the component `name`.
+/// Whether the stored table `stored` belongs to the component `name` among
+/// the tables named `<namespace><component>__<table>` (D2). A table name
+/// starts with a letter, so `foo___rows` is `foo_`'s table `rows`, not
+/// `foo`'s: a prefix match on `foo__` would take it too.
+fn owned_by(stored: &str, namespace: &str, name: &str) -> bool {
+    stored
+        .strip_prefix(namespace)
+        .and_then(|rest| rest.strip_prefix(name))
+        .and_then(|rest| rest.strip_prefix("__"))
+        .is_some_and(|table| table.starts_with(|c: char| c.is_ascii_lowercase()))
+}
+
+/// Drops the live tables of the component `name`, also those its schema no
+/// longer lists.
 pub(crate) fn drop_component(conn: &Connection, name: &str) -> Result<(), StorageError> {
-    drop_prefixed(conn, &format!("{name}__"))
+    drop_tables(conn, |table| owned_by(table, "", name))
 }
 
 /// Drops every staging table of every component.
 pub(crate) fn drop_staging_leftovers(conn: &Connection) -> Result<(), StorageError> {
-    drop_prefixed(conn, STAGING_PREFIX)
+    drop_tables(conn, |table| table.starts_with(STAGING_PREFIX))
 }
 
 /// Whether every live table of `schema` exists.
@@ -89,7 +102,7 @@ pub(crate) fn begin_staging(conn: &Connection, schema: &ComponentSchema) -> Resu
 }
 
 pub(crate) fn discard_staging(conn: &Connection, schema: &ComponentSchema) -> Result<(), StorageError> {
-    drop_prefixed(conn, &format!("{STAGING_PREFIX}{}__", schema.name))
+    drop_tables(conn, |table| owned_by(table, STAGING_PREFIX, &schema.name))
 }
 
 pub(crate) fn finish_staging(conn: &Connection, schema: &ComponentSchema) -> Result<(), StorageError> {

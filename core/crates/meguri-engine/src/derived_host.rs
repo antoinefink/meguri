@@ -21,6 +21,7 @@
 use std::any::Any;
 use std::collections::VecDeque;
 use std::fmt;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
@@ -274,8 +275,16 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Records and publishes a readiness change.
-    fn set_readiness(&self, state: &mut SharedState, slot: usize, generation: Generation, readiness: Readiness) {
+    /// Records and publishes a readiness change; `cause` is the seq of the
+    /// commit that started it (D8).
+    fn set_readiness(
+        &self,
+        state: &mut SharedState,
+        slot: usize,
+        generation: Generation,
+        readiness: Readiness,
+        cause: Option<Seq>,
+    ) {
         let view = &mut state.slots[slot];
         if view.generation == generation && view.readiness == readiness {
             return;
@@ -288,7 +297,7 @@ impl Shared {
             readiness,
         };
         self.stream
-            .publish(generation, None, EventKind::Extension(Arc::new(event)));
+            .publish(generation, cause, EventKind::Extension(Arc::new(event)));
         self.changed.notify_all();
     }
 
@@ -525,7 +534,7 @@ impl ChangeObserver for HostObserver {
     fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
         let mut deltas = Vec::new();
         for (slot, component) in self.components.iter().enumerate() {
-            let captured = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| component.capture(commit)));
+            let captured = panic::catch_unwind(AssertUnwindSafe(|| component.capture(commit)));
             match captured {
                 Ok(Capture::Nothing) => {}
                 Ok(capture) => deltas.push((slot, capture)),
@@ -676,14 +685,63 @@ enum Kind {
     CatchUp { since: i64 },
 }
 
+/// A refresh waiting to run.
+#[derive(Clone, Copy, Debug)]
+struct Queued {
+    slot: usize,
+    kind: Kind,
+    /// The seq of the commit that made the component stale; every readiness
+    /// event of the refresh carries it (D8).
+    cause: Option<Seq>,
+}
+
 struct Running {
     id: u64,
     slot: usize,
     kind: Kind,
+    cause: Option<Seq>,
     abort: Arc<AtomicBool>,
     kept: Vec<(Seq, AnyDelta)>,
     /// Too much was kept, or a commit asked for a rebuild: start again.
     restart: bool,
+    /// A batch failed: the refresh fails, whatever its build made of it.
+    failed_batch: Option<EngineError>,
+}
+
+impl Running {
+    fn queued(&self) -> Queued {
+        Queued {
+            slot: self.slot,
+            kind: self.kind,
+            cause: self.cause,
+        }
+    }
+
+    /// Keeps a commit's capture for the refresh's last transaction (D6, D7).
+    fn keep(&mut self, seq: Seq, capture: Capture<AnyDelta>) {
+        if self.restart {
+            return;
+        }
+        match capture {
+            Capture::Nothing => {}
+            Capture::Rebuild => {
+                self.restart = true;
+                self.cause = Some(seq);
+                self.kept.clear();
+            }
+            Capture::Delta(delta) if self.kept.len() < MAX_KEPT => self.kept.push((seq, delta)),
+            Capture::Delta(_) => {
+                self.restart = true;
+                self.kept.clear();
+            }
+        }
+    }
+}
+
+/// Runs a component's code on the derived writer: a panic is its error, so
+/// it fails that component's part and never stops the writer (D6, D7).
+fn guarded<T>(work: impl FnOnce() -> Result<T, EngineError>) -> Result<T, EngineError> {
+    panic::catch_unwind(AssertUnwindSafe(work)).unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())))
 }
 
 /// The derived writer's own state.
@@ -700,9 +758,14 @@ struct Worker {
     epoch: u64,
     mark: Option<CollectionMark>,
     slots: Vec<SlotState>,
-    queue: VecDeque<(usize, Kind)>,
+    queue: VecDeque<Queued>,
     running: Option<Running>,
     next_refresh: u64,
+    /// The refreshes whose builder has not ended yet, stopped ones too: each
+    /// may still hold a collection snapshot.
+    builders: Vec<u64>,
+    /// Suspends waiting for those builders to end (D11).
+    suspend_acks: Vec<SyncSender<()>>,
     /// Failed refreshes in a row, per component.
     failures: Vec<u32>,
     suspended: bool,
@@ -727,6 +790,8 @@ impl Worker {
             queue: VecDeque::new(),
             running: None,
             next_refresh: 1,
+            builders: Vec::new(),
+            suspend_acks: Vec::new(),
             failures: vec![0; count],
             suspended: false,
             stop: false,
@@ -787,16 +852,23 @@ impl Worker {
                 refresh,
                 snapshot,
                 outcome,
-            } => self.done(refresh, snapshot, outcome),
+            } => {
+                self.builders.retain(|id| *id != refresh);
+                self.done(refresh, snapshot, outcome);
+                self.ack_suspend();
+            }
             Msg::Invalidate(why) => self.invalidate(why),
             Msg::Flush(ack) => {
                 let _ = ack.send(());
             }
             Msg::Suspend(ack) => {
+                // The running refresh stops at its next batch; the writer
+                // goes on serving messages (refusing that refresh's batches)
+                // and answers once its builder let go of its snapshot.
                 self.requeue_running();
                 self.suspended = true;
-                self.mark_clean(true);
-                let _ = ack.send(());
+                self.suspend_acks.push(ack);
+                self.ack_suspend();
             }
             Msg::Resume(ack) => {
                 self.suspended = false;
@@ -807,6 +879,21 @@ impl Worker {
                 self.close();
                 let _ = ack.send(());
             }
+        }
+    }
+
+    /// Answers the waiting suspends once no builder may hold a collection
+    /// snapshot, after marking the store clean when it is still suspended
+    /// (D11).
+    fn ack_suspend(&mut self) {
+        if self.suspend_acks.is_empty() || !self.builders.is_empty() {
+            return;
+        }
+        if self.suspended {
+            self.mark_clean(true);
+        }
+        for ack in self.suspend_acks.drain(..) {
+            let _ = ack.send(());
         }
     }
 
@@ -853,88 +940,98 @@ impl Worker {
                 }
                 Verdict::CatchUp { since } => {
                     self.slots[slot] = SlotState::Queued;
-                    self.queue.push_back((slot, Kind::CatchUp { since }));
+                    self.queue.push_back(Queued {
+                        slot,
+                        kind: Kind::CatchUp { since },
+                        cause: None,
+                    });
                     Readiness::Stale
                 }
                 Verdict::Rebuild(reason) => {
                     tracing::info!(component = %self.schema(slot).name, ?reason, "the derived component rebuilds");
                     self.slots[slot] = SlotState::Queued;
-                    self.queue.push_back((slot, Kind::Rebuild));
+                    self.queue.push_back(Queued {
+                        slot,
+                        kind: Kind::Rebuild,
+                        cause: None,
+                    });
                     Readiness::Stale
                 }
             };
-            self.shared.set_readiness(&mut state, slot, generation, readiness);
+            self.shared.set_readiness(&mut state, slot, generation, readiness, None);
         }
     }
 
     /// D6.
     fn apply_commits(&mut self, batch: Vec<CommitMsg>) {
         let Some(generation) = self.generation else { return };
-        let commits: Vec<CommitMsg> = batch
+        let mut commits: Vec<CommitMsg> = batch
             .into_iter()
             .filter(|c| c.generation == generation && c.seq > self.bind_seq)
             .collect();
-        if commits.is_empty() {
+        let Some(last) = commits.last().map(|c| c.seq) else {
             return;
+        };
+        // The running refresh keeps its deltas first: they wait in memory
+        // for its last transaction, whatever becomes of this batch's.
+        if let Some(running) = self.running.as_mut() {
+            for commit in &mut commits {
+                let deltas = std::mem::take(&mut commit.deltas);
+                for (slot, capture) in deltas {
+                    if slot == running.slot {
+                        running.keep(commit.seq, capture);
+                    } else {
+                        commit.deltas.push((slot, capture));
+                    }
+                }
+            }
         }
         if let Err(error) = meguri_model::faultpoint!("engine.derived.before_apply") {
             tracing::warn!(%error, "applying derived commits");
-            self.all_ready_stale();
+            self.all_ready_stale(last);
             return;
         }
         let shared = Arc::clone(&self.shared);
         let Some(file) = self.file.as_mut() else { return };
-        let mut failed = Vec::new();
+        let mut failed: Vec<(usize, Seq)> = Vec::new();
         let mut mark = self.mark;
         let result = (|| -> Result<(), EngineError> {
             let tx = file.begin()?;
             for commit in commits {
                 for (slot, capture) in commit.deltas {
-                    match self.slots[slot] {
-                        SlotState::Ready => match capture {
-                            Capture::Nothing => {}
-                            Capture::Rebuild => {
-                                self.slots[slot] = SlotState::Queued;
-                                failed.push(slot);
-                            }
-                            Capture::Delta(delta) => {
-                                let schema = &shared.registry.schemas()[slot];
-                                let savepoint = tx.savepoint()?;
-                                match shared.components[slot].apply(&tx.tables(schema, Target::Live), delta) {
-                                    Ok(()) => savepoint.release()?,
-                                    Err(error) => {
-                                        savepoint.rollback()?;
-                                        tracing::warn!(component = %schema.name, %error, "a derived apply failed");
-                                        self.slots[slot] = SlotState::Queued;
-                                        failed.push(slot);
-                                    }
-                                }
-                            }
-                        },
-                        SlotState::Refreshing => {
-                            if let Some(running) = self.running.as_mut().filter(|r| r.slot == slot) {
-                                match capture {
-                                    Capture::Nothing => {}
-                                    Capture::Rebuild => running.restart = true,
-                                    Capture::Delta(delta) => {
-                                        if running.kept.len() < MAX_KEPT {
-                                            running.kept.push((commit.seq, delta));
-                                        } else {
-                                            running.restart = true;
-                                            running.kept.clear();
-                                        }
-                                    }
+                    // Only a ready component applies: a queued one's refresh
+                    // reads a later snapshot, a failed one waits for the next
+                    // bind or invalidation, the refreshing one kept its delta.
+                    if self.slots[slot] != SlotState::Ready {
+                        continue;
+                    }
+                    match capture {
+                        Capture::Nothing => {}
+                        Capture::Rebuild => {
+                            self.slots[slot] = SlotState::Queued;
+                            failed.push((slot, commit.seq));
+                        }
+                        Capture::Delta(delta) => {
+                            let schema = &shared.registry.schemas()[slot];
+                            let component = &shared.components[slot];
+                            let savepoint = tx.savepoint()?;
+                            match guarded(|| component.apply(&tx.tables(schema, Target::Live), delta)) {
+                                Ok(()) => savepoint.release()?,
+                                Err(error) => {
+                                    savepoint.rollback()?;
+                                    tracing::warn!(component = %schema.name, %error, "a derived apply failed");
+                                    self.slots[slot] = SlotState::Queued;
+                                    failed.push((slot, commit.seq));
                                 }
                             }
                         }
-                        SlotState::Queued | SlotState::Failed => {}
                     }
                 }
                 if let Some(next) = commit.mark {
                     mark = Some(next);
                 }
             }
-            for slot in &failed {
+            for (slot, _) in &failed {
                 tx.set_ready(&shared.registry.schemas()[*slot].name, false)?;
             }
             if let Some(mark) = mark
@@ -948,22 +1045,23 @@ impl Worker {
         match result {
             Ok(()) => {
                 self.mark = mark;
-                for slot in failed {
-                    self.queue_refresh(slot, Kind::Rebuild);
+                for (slot, cause) in failed {
+                    self.queue_refresh(slot, Kind::Rebuild, Some(cause));
                 }
             }
             Err(error) => {
                 tracing::warn!(%error, "a derived transaction failed");
-                for slot in failed {
+                for (slot, _) in failed {
                     self.slots[slot] = SlotState::Ready;
                 }
-                self.all_ready_stale();
+                self.all_ready_stale(last);
             }
         }
     }
 
-    /// Marks every ready component stale and queues its rebuild.
-    fn all_ready_stale(&mut self) {
+    /// Marks every ready component stale and queues its rebuild, because the
+    /// commits up to `cause` did not reach it.
+    fn all_ready_stale(&mut self, cause: Seq) {
         let ready: Vec<usize> = (0..self.slots.len())
             .filter(|slot| self.slots[*slot] == SlotState::Ready)
             .collect();
@@ -976,20 +1074,20 @@ impl Worker {
             let _ = tx.commit();
         }
         for slot in ready {
-            self.queue_refresh(slot, Kind::Rebuild);
+            self.queue_refresh(slot, Kind::Rebuild, Some(cause));
         }
     }
 
     /// Queues a refresh of `slot` once and publishes `Stale`.
-    fn queue_refresh(&mut self, slot: usize, kind: Kind) {
+    fn queue_refresh(&mut self, slot: usize, kind: Kind, cause: Option<Seq>) {
         self.slots[slot] = SlotState::Queued;
-        if !self.queue.iter().any(|(queued, _)| *queued == slot) {
-            self.queue.push_back((slot, kind));
+        if !self.queue.iter().any(|queued| queued.slot == slot) {
+            self.queue.push_back(Queued { slot, kind, cause });
         }
         if let Some(generation) = self.generation {
             let mut state = self.shared.lock();
             self.shared
-                .set_readiness(&mut state, slot, generation, Readiness::Stale);
+                .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
         }
     }
 
@@ -1001,7 +1099,7 @@ impl Worker {
         let (Some(collection), Some(generation)) = (self.collection.clone(), self.generation) else {
             return;
         };
-        let Some((slot, kind)) = self.queue.pop_front() else {
+        let Some(Queued { slot, kind, cause }) = self.queue.pop_front() else {
             return;
         };
         let schema = self.schema(slot).clone();
@@ -1026,9 +1124,11 @@ impl Worker {
             id,
             slot,
             kind,
+            cause,
             abort: Arc::clone(&abort),
             kept: Vec::new(),
             restart: false,
+            failed_batch: None,
         });
         {
             let mut state = self.shared.lock();
@@ -1042,6 +1142,7 @@ impl Worker {
                     completed: 0,
                     total: None,
                 },
+                cause,
             );
         }
         let builder = Builder {
@@ -1050,6 +1151,7 @@ impl Worker {
             collection,
             slot,
             kind,
+            cause,
             refresh: id,
             abort,
         };
@@ -1059,11 +1161,14 @@ impl Worker {
             .spawn("meguri-derived-builder", Qos::Utility, move |activity| {
                 builder.run(activity)
             });
-        if let Err(error) = spawned {
-            tracing::warn!(%error, "cannot start a derived builder");
-            self.running = None;
-            self.slots[slot] = SlotState::Failed;
-            self.forget_refresh(slot);
+        match spawned {
+            Ok(_) => self.builders.push(id),
+            Err(error) => {
+                tracing::warn!(%error, "cannot start a derived builder");
+                self.running = None;
+                self.forget_refresh(slot);
+                self.fail(slot, cause);
+            }
         }
     }
 
@@ -1071,9 +1176,10 @@ impl Worker {
         self.shared.lock().slots[slot].refresh = None;
     }
 
-    /// Runs one batch of the running refresh (D7).
+    /// Runs one batch of the running refresh (D7). A failed batch fails the
+    /// refresh.
     fn write_batch(&mut self, refresh: u64, batch: Batch) -> Result<(), EngineError> {
-        let Some(running) = self.running.as_ref().filter(|r| r.id == refresh) else {
+        let Some(running) = self.running.as_mut().filter(|r| r.id == refresh) else {
             return Err(EngineError::Cancelled);
         };
         let target = match running.kind {
@@ -1081,11 +1187,20 @@ impl Worker {
             Kind::CatchUp { .. } => Target::Live,
         };
         let schema = &self.shared.registry.schemas()[running.slot];
-        let file = self.file.as_mut().ok_or(EngineError::Cancelled)?;
-        let tx = file.begin()?;
-        batch(&tx.tables(schema, target))?;
-        tx.commit()?;
-        Ok(())
+        let result = match self.file.as_mut() {
+            None => Err(EngineError::Cancelled),
+            Some(file) => (|| -> Result<(), EngineError> {
+                let tx = file.begin()?;
+                guarded(|| batch(&tx.tables(schema, target)))?;
+                tx.commit()?;
+                Ok(())
+            })(),
+        };
+        if let Err(error) = &result {
+            tracing::warn!(component = %schema.name, %error, "a derived refresh batch failed");
+            running.failed_batch.get_or_insert_with(|| error.clone());
+        }
+        result
     }
 
     /// A refresh ended (D7).
@@ -1095,14 +1210,18 @@ impl Worker {
         }
         let Some(running) = self.running.take() else { return };
         self.forget_refresh(running.slot);
-        let slot = running.slot;
+        let (slot, kind, cause) = (running.slot, running.kind, running.cause);
         let schema = self.schema(slot).clone();
         if running.restart {
-            self.discard_staging(&schema, running.kind);
+            self.discard_staging(&schema, kind);
             self.slots[slot] = SlotState::Queued;
-            self.queue.push_front((slot, running.kind));
+            self.queue.push_front(running.queued());
             return;
         }
+        let outcome = match (outcome, &running.failed_batch) {
+            (Outcome::Built | Outcome::CaughtUp, Some(error)) => Outcome::Failed(error.clone()),
+            (outcome, _) => outcome,
+        };
         match outcome {
             Outcome::Built | Outcome::CaughtUp => {
                 let snapshot = snapshot.unwrap_or_default();
@@ -1113,38 +1232,42 @@ impl Worker {
                         if let Some(generation) = self.generation {
                             let mut state = self.shared.lock();
                             self.shared
-                                .set_readiness(&mut state, slot, generation, Readiness::Ready);
+                                .set_readiness(&mut state, slot, generation, Readiness::Ready, cause);
                         }
                     }
                     Err(error) => {
                         tracing::warn!(component = %schema.name, %error, "finishing a derived refresh");
                         self.discard_staging(&schema, Kind::Rebuild);
-                        self.retry_or_fail(slot);
+                        self.retry_or_fail(slot, cause);
                     }
                 }
             }
             Outcome::NeedsRebuild => {
                 self.slots[slot] = SlotState::Queued;
-                self.queue.push_front((slot, Kind::Rebuild));
+                self.queue.push_front(Queued {
+                    slot,
+                    kind: Kind::Rebuild,
+                    cause,
+                });
             }
             Outcome::Deferred => {
-                self.discard_staging(&schema, running.kind);
+                self.discard_staging(&schema, kind);
                 self.slots[slot] = SlotState::Queued;
-                self.queue.push_front((slot, running.kind));
+                self.queue.push_front(running.queued());
                 if let Some(generation) = self.generation {
                     let mut state = self.shared.lock();
                     self.shared
-                        .set_readiness(&mut state, slot, generation, Readiness::Stale);
+                        .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
                 }
             }
             Outcome::Cancelled => {
-                self.discard_staging(&schema, running.kind);
-                self.fail(slot);
+                self.discard_staging(&schema, kind);
+                self.fail(slot, cause);
             }
             Outcome::Failed(error) => {
                 tracing::warn!(component = %schema.name, %error, "a derived refresh failed");
-                self.discard_staging(&schema, running.kind);
-                self.retry_or_fail(slot);
+                self.discard_staging(&schema, kind);
+                self.retry_or_fail(slot, cause);
             }
         }
     }
@@ -1166,7 +1289,7 @@ impl Worker {
         }
         for (seq, delta) in running.kept {
             if seq > snapshot {
-                component.apply(&tx.tables(schema, Target::Live), delta)?;
+                guarded(|| component.apply(&tx.tables(schema, Target::Live), delta))?;
             }
         }
         tx.set_ready(&schema.name, true)?;
@@ -1188,21 +1311,21 @@ impl Worker {
 
     /// A failed refresh is rebuilt once more; a second failure in a row
     /// leaves the component `Stale` until the next bind or invalidation.
-    fn retry_or_fail(&mut self, slot: usize) {
+    fn retry_or_fail(&mut self, slot: usize, cause: Option<Seq>) {
         self.failures[slot] += 1;
         if self.failures[slot] < 2 {
-            self.queue_refresh(slot, Kind::Rebuild);
+            self.queue_refresh(slot, Kind::Rebuild, cause);
         } else {
-            self.fail(slot);
+            self.fail(slot, cause);
         }
     }
 
-    fn fail(&mut self, slot: usize) {
+    fn fail(&mut self, slot: usize, cause: Option<Seq>) {
         self.slots[slot] = SlotState::Failed;
         if let Some(generation) = self.generation {
             let mut state = self.shared.lock();
             self.shared
-                .set_readiness(&mut state, slot, generation, Readiness::Stale);
+                .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
         }
     }
 
@@ -1231,7 +1354,7 @@ impl Worker {
             let schema = self.schema(running.slot).clone();
             self.discard_staging(&schema, running.kind);
             self.slots[running.slot] = SlotState::Queued;
-            self.queue.push_front((running.slot, running.kind));
+            self.queue.push_front(running.queued());
         }
     }
 
@@ -1279,13 +1402,17 @@ impl Worker {
         for slot in 0..self.slots.len() {
             if usable {
                 self.slots[slot] = SlotState::Queued;
-                self.queue.push_back((slot, Kind::Rebuild));
+                self.queue.push_back(Queued {
+                    slot,
+                    kind: Kind::Rebuild,
+                    cause: None,
+                });
             } else {
                 self.slots[slot] = SlotState::Failed;
             }
             state.slots[slot].refresh = None;
             self.shared
-                .set_readiness(&mut state, slot, generation, Readiness::Stale);
+                .set_readiness(&mut state, slot, generation, Readiness::Stale, None);
         }
         if !usable {
             // Nothing can be read through a store that does not describe the
@@ -1319,9 +1446,13 @@ impl Worker {
         let mut state = self.shared.lock();
         for slot in 0..self.slots.len() {
             self.slots[slot] = SlotState::Queued;
-            self.queue.push_back((slot, Kind::Rebuild));
+            self.queue.push_back(Queued {
+                slot,
+                kind: Kind::Rebuild,
+                cause: None,
+            });
             self.shared
-                .set_readiness(&mut state, slot, generation, Readiness::Stale);
+                .set_readiness(&mut state, slot, generation, Readiness::Stale, None);
         }
     }
 
@@ -1351,6 +1482,10 @@ impl Worker {
         self.collection = None;
         self.queue.clear();
         self.stop = true;
+        // A suspend still waiting gets its answer: nothing runs any more.
+        for ack in self.suspend_acks.drain(..) {
+            let _ = ack.send(());
+        }
         let mut state = self.shared.lock();
         state.bound = None;
         state.collection = None;
@@ -1359,8 +1494,9 @@ impl Worker {
     }
 
     fn publish_idle(&self) {
-        let idle =
-            self.running.is_none() && (self.queue.is_empty() || self.suspended || self.file.is_none() || self.stop);
+        let idle = self.running.is_none()
+            && self.builders.is_empty()
+            && (self.queue.is_empty() || self.suspended || self.file.is_none() || self.stop);
         let mut state = self.shared.lock();
         if state.idle != idle {
             state.idle = idle;
@@ -1422,13 +1558,17 @@ struct Builder {
     collection: Collection,
     slot: usize,
     kind: Kind,
+    cause: Option<Seq>,
     refresh: u64,
     abort: Arc<AtomicBool>,
 }
 
 impl Builder {
+    /// Always ends with `Done`, which the writer waits for before a suspend
+    /// returns: the snapshot is released by then.
     fn run(self, activity: &ThreadActivity) {
-        let (snapshot, outcome) = self.refresh(activity);
+        let (snapshot, outcome) = panic::catch_unwind(AssertUnwindSafe(|| self.refresh(activity)))
+            .unwrap_or_else(|payload| (None, Outcome::Failed(EngineError::from_panic(payload.as_ref()))));
         let _ = self.sender.send(Msg::Done {
             refresh: self.refresh,
             snapshot,
@@ -1482,11 +1622,12 @@ impl Builder {
             generation: self.collection.generation(),
             slot: self.slot,
             refresh: self.refresh,
+            cause: self.cause,
             abort: Arc::clone(&self.abort),
             deferred: false,
         };
         let component = Arc::clone(&self.shared.components[self.slot]);
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match self.kind {
+        let result = panic::catch_unwind(AssertUnwindSafe(|| match self.kind {
             Kind::Rebuild => component.build(&snapshot, &mut sink).map(|()| Outcome::Built),
             Kind::CatchUp { since } => component
                 .catch_up(&snapshot, EpochMillis(since), &mut sink)
@@ -1523,6 +1664,8 @@ pub struct BuildSink {
     generation: Generation,
     slot: usize,
     refresh: u64,
+    /// The refresh's cause, for its progress events (D8).
+    cause: Option<Seq>,
     abort: Arc<AtomicBool>,
     /// Stopped because the collection entered an exclusive phase.
     deferred: bool,
@@ -1596,6 +1739,7 @@ impl BuildSink {
             self.slot,
             self.generation,
             Readiness::Building { completed, total },
+            self.cause,
         );
     }
 }

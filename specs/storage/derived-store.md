@@ -25,7 +25,7 @@ Meguri's own indexes (count caches, folded text and full-text search, browser ca
   | `meguri_stamp` | `id` (always 1), `crt`, `scm`, `col_mod`, `clean` |
   | `meguri_components` | `name` (key), `version`, `ready`, `build` |
 
-- Every other table belongs to one component (D4). Its stored name is `<component>__<table>`; an index's is `<component>__<index>__<build>`. Tables named `meguri_build__<component>__<table>` exist only while a rebuild runs (D7).
+- Every other table belongs to one component (D4). Its stored name is `<component>__<table>`; an index's is `<component>__<index>__<build>`. Tables named `meguri_build__<component>__<table>` exist only while a rebuild runs (D7). A table name starts with a letter, so each stored name has one owner: `foo___rows` is table `rows` of `foo_`, never of `foo`. Emptying, swapping or dropping a component's tables takes exactly the names it owns, never a prefix match.
 
 ## D3. The stamp
 
@@ -89,26 +89,27 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
 - The engine's in-core observer (`engine/change-stream` S2) runs each component's capture on the collection writer thread and sends the commit (seq, generation, the `col` row after the op when the op changed it, the captured deltas) to the derived writer. Sending never blocks: the collection writer never waits for derived work.
 - The derived writer is one thread with the only writable connection to the file. It applies commits in seq order, several queued commits per transaction. Commits of another generation, and commits at or before the bind's seq (already in the bind's mark), are dropped.
 - Per component, by its state:
-  - ready: the delta is applied in a savepoint. A failing apply rolls back that component's part, marks it `ready` 0 and queues its rebuild; the other components and the stamp go on.
-  - refreshing (D7): the delta is kept with its seq.
+  - ready: the delta is applied in a savepoint. A failing or panicking apply rolls back that component's part, marks it `ready` 0 and queues its rebuild; the other components and the stamp go on.
+  - refreshing (D7): the delta is kept with its seq, before the transaction begins, so a transaction that then fails loses nothing the refresh needs.
   - waiting for a refresh: the delta is dropped, because the refresh's snapshot will hold it.
   - a "rebuild" capture queues a rebuild of that component.
+- A transaction that fails as a whole (the D12 fault point, an I/O error) marks every ready component `ready` 0 and queues its rebuild; the stamp keeps its mark.
 - The stamp's mark becomes the last `col` row in the transaction.
 - Normal syncs need nothing else: a `SyncIncoming` commit reaches components like any other (R1489).
 
 ## D7. Rebuild and catch-up
 
-- At most one refresh runs at a time, on a builder thread. It waits while the collection is in an exclusive phase, takes the maintenance reader (KTD3) and one snapshot (`engine/op-model` O6) for the whole refresh, and runs the component's build or catch-up on it. Each batch it writes goes to the derived writer, which runs it in its own transaction and goes on with other components' commits between batches: a rebuild never holds back the count caches or anyone else's updates.
+- At most one refresh runs at a time, on a builder thread. It waits while the collection is in an exclusive phase, takes the maintenance reader (KTD3) and one snapshot (`engine/op-model` O6) for the whole refresh, and runs the component's build or catch-up on it. Each batch it writes goes to the derived writer, which runs it in its own transaction and goes on with other components' commits between batches: a rebuild never holds back the count caches or anyone else's updates. A batch that fails or panics is rolled back and fails the refresh, even when the build goes on.
 - A rebuild writes into staging tables. When it ends, one transaction creates the indexes on the staging tables, drops the live tables, renames the staging tables to the live names, applies the deltas kept since the refresh started whose seq is after the snapshot's (those at or before it are in the snapshot), and sets `ready` 1. Readers see the old content or the new content, never a partial one.
 - A catch-up writes into the live tables; its last transaction applies the kept deltas after the snapshot and sets `ready` 1.
 - Progress: completed and total rows as the component reports them, published at most every 100 ms (D8).
 - A refresh stops at its next batch when the collection enters an exclusive phase (it is retried from the start once the phase ends), when the collection closes or is replaced, when the store is invalidated, suspended or closed. Its staging tables are dropped. More than 100,000 kept deltas also restart it.
-- A refresh that fails (the component's build or catch-up returns an error, or the last transaction fails) is retried once from the start; a second failure in a row leaves the component `Stale` until the next bind or invalidation.
+- A refresh that fails (the component's build or catch-up returns an error or panics, one of its batches fails, or the last transaction fails, a kept delta's apply included) is retried once from the start; a second failure in a row leaves the component `Stale` until the next bind or invalidation.
 
 ## D8. Readiness
 
 - Each component is `Ready`, `Building{completed, total}` (a rebuild or catch-up runs) or `Stale` (its content is not current: waiting for a refresh, failed, or not yet bound), for one generation.
-- Every change, and progress at most every 100 ms, is published on the change stream as an `Extension` event (`engine/change-stream` S3) carrying the component name, the generation and the readiness.
+- Every change, and progress at most every 100 ms, is published on the change stream as an `Extension` event (`engine/change-stream` S3) carrying the component name, the generation and the readiness. The envelope's `cause_seq` is the seq of the commit that made the component stale (its "rebuild" capture, its failed apply, or the last commit of a failed transaction), on that `Stale` and on every event of the refresh it queued, retries included. Events of a bind, a replacement or an invalidation carry none.
 - Consumers read derived tables only while the component is `Ready` for their generation, and keep a correct path without it (deck counts and the review queue never wait for the search index).
 
 ## D9. Readers
@@ -125,7 +126,7 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
 
 ## D11. Suspend and close
 
-- The derived writer is a `SuspendParticipant` (U32): `flush` returns once every commit sent before it is applied or kept; `suspend` stops a running refresh (it restarts on resume), applies everything pending, writes `clean` 1 and checkpoints the file; `resume` writes `clean` 0.
+- The derived writer is a `SuspendParticipant` (U32): `flush` returns once every commit sent before it is applied or kept; `suspend` stops a running refresh (it restarts on resume) and returns only once that refresh's builder has ended, so no derived thread holds a collection snapshot; meanwhile the writer goes on applying commits and refuses the stopped refresh's batches. It then writes `clean` 1 and checkpoints the file; `resume` writes `clean` 0.
 - Close: the store is closed after the collection (U38: after `Engine::close`, so the ops the close drains reach the store). It stops any refresh, applies everything pending, writes `clean` 1, checkpoints and closes the file. A store closed while ops still commit leaves `clean` 1 with an older `col_mod`, which D5.2 turns into a rebuild.
 
 ## D12. Threads and budgets
@@ -148,3 +149,8 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
 | File truncated mid-page → recreated at bind and rebuilt | `tests/derived_lag.rs` |
 | Rebuild over 150,000 cards while answers commit: answer write phase p95 under 5 ms; `Building` progress and `Ready` on the change stream | `tests/derived_lag.rs` |
 | No derived activity changes the collection's `sqlite_master` | `tests/derived_lag.rs` |
+| Components `foo` and `foo_`: emptying, rebuilding or dropping one leaves the other's live and staging tables | `tests/derived_store.rs` |
+| A commit batch whose transaction fails while a rebuild runs still reaches the rebuilt tables | `tests/derived_lag.rs` |
+| `suspend` during a build returns once the builder let go of its snapshot | `tests/derived_lag.rs` |
+| A panicking apply, build batch or kept delta is rolled back, its refresh runs again and the writer goes on; a build that goes on after a failed batch is not made ready | `tests/derived_lag.rs` |
+| Readiness changed by a commit carries that commit's seq as `cause_seq` | `tests/derived_lag.rs` |

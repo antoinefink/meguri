@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -22,7 +22,7 @@ use meguri_engine::derived_host::{
 };
 use meguri_engine::{
     Collection, Engine, EngineConfig, EngineError, Event, EventKind, Generation, LongOp, ObservedCommit, OpSpec, Ports,
-    Qos, Snapshot, Subscription, monotonic,
+    Qos, Seq, Snapshot, Subscription, monotonic,
 };
 use meguri_model::card::{Card, CardQueue, CardType};
 use meguri_model::changes::OpSource;
@@ -61,13 +61,46 @@ struct Counters {
     catch_ups: AtomicUsize,
 }
 
+/// Holds a build after its first batch until a test opens it.
+#[derive(Default)]
+struct Gate {
+    open: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Gate {
+    fn open(&self) {
+        *self.open.lock().unwrap() = true;
+        self.changed.notify_all();
+    }
+
+    fn is_open(&self) -> bool {
+        *self.open.lock().unwrap()
+    }
+
+    /// Waits until the gate opens, at most [`WAIT`].
+    fn pass(&self) {
+        let open = self.open.lock().unwrap();
+        let _open = self.changed.wait_timeout_while(open, WAIT, |open| !*open).unwrap();
+    }
+}
+
 /// A test component: one row per card. It catches up from card
-/// modification times (D4) and can be made to fail an apply or to build
-/// slowly.
+/// modification times (D4) and can be made to fail or panic in an apply, to
+/// panic in its first build's first batch, to build slowly, or to stop after
+/// its first batch until a gate opens.
 struct CardMirror {
     counters: Arc<Counters>,
     /// An apply of a row with this due fails.
     fail_on_due: Option<i64>,
+    /// An apply of a row with this due panics.
+    panic_on_due: Option<i64>,
+    /// The first build's first batch panics on the derived writer.
+    panic_in_first_batch: bool,
+    /// The build goes on after a batch failed (against D4's contract).
+    ignore_batch_errors: bool,
+    /// Every build waits here after its first batch.
+    gate: Option<Arc<Gate>>,
     /// Cards per build batch, and a pause before each batch.
     batch: usize,
     pause: Duration,
@@ -78,6 +111,10 @@ impl CardMirror {
         CardMirror {
             counters: Arc::clone(counters),
             fail_on_due: None,
+            panic_on_due: None,
+            panic_in_first_batch: false,
+            ignore_batch_errors: false,
+            gate: None,
             batch: 5_000,
             pause: Duration::ZERO,
         }
@@ -163,7 +200,11 @@ impl DerivedComponent for CardMirror {
                             message: "this due is refused".into(),
                         });
                     }
+                    // Half written when it panics.
                     put_rows(tables, &[row])?;
+                    if Some(row.4) == self.panic_on_due {
+                        panic!("an apply panics on due {}", row.4);
+                    }
                 }
                 Change::Remove(cid) => {
                     tables
@@ -177,18 +218,34 @@ impl DerivedComponent for CardMirror {
     }
 
     fn build(&self, source: &Snapshot<'_>, sink: &mut BuildSink) -> Result<(), EngineError> {
-        self.counters.builds.fetch_add(1, Ordering::SeqCst);
+        let first_build = self.counters.builds.fetch_add(1, Ordering::SeqCst) == 0;
         let total = match &source.execute_raw("SELECT count(*) FROM cards", &[])?.rows[0][0] {
             SqlValue::Integer(n) => *n as u64,
             other => panic!("{other:?}"),
         };
         let mut done = 0;
+        let mut first_batch = true;
         each_page(source, self.batch, |cards| {
             thread::sleep(self.pause);
             let rows: Vec<Row> = cards.iter().map(row_of).collect();
             done += rows.len() as u64;
-            sink.write(move |tables| put_rows(tables, &rows))?;
+            let panics = self.panic_in_first_batch && first_build && first_batch;
+            let written = sink.write(move |tables| {
+                // Half written when it panics.
+                put_rows(tables, &rows[..rows.len() / 2])?;
+                if panics {
+                    panic!("a build batch panics");
+                }
+                put_rows(tables, &rows[rows.len() / 2..])
+            });
+            if !self.ignore_batch_errors {
+                written?;
+            }
             sink.progress(done, Some(total));
+            if first_batch && let Some(gate) = &self.gate {
+                gate.pass();
+            }
+            first_batch = false;
             Ok(())
         })
     }
@@ -301,9 +358,25 @@ impl Opened {
 
     /// The readiness events received so far.
     fn readiness_events(&self) -> Vec<DerivedReadiness> {
+        self.readiness_envelopes().into_iter().map(|(_, event)| event).collect()
+    }
+
+    /// The readiness events received so far, with their envelopes'
+    /// `cause_seq`.
+    fn readiness_envelopes(&self) -> Vec<(Option<Seq>, DerivedReadiness)> {
         std::iter::from_fn(|| self.events.try_recv())
-            .filter_map(|event| readiness_of(&event))
+            .filter_map(|event| readiness_of(&event).map(|readiness| (event.cause_seq, readiness)))
             .collect()
+    }
+
+    /// Waits until a build has written its first batch: its snapshot is
+    /// taken.
+    fn wait_for_first_batch(&self) {
+        let deadline = monotonic::now() + WAIT;
+        while !matches!(self.readiness(), Readiness::Building { completed, .. } if completed > 0) {
+            assert!(monotonic::now() < deadline, "the build never wrote a batch");
+            thread::sleep(Duration::from_millis(2));
+        }
     }
 }
 
@@ -336,6 +409,19 @@ fn rows_of(raw: &[Vec<SqlValue>]) -> Vec<Row> {
     raw.iter()
         .map(|r| (int(&r[0]), int(&r[1]), int(&r[2]), int(&r[3]), int(&r[4])))
         .collect()
+}
+
+/// The stamp's `clean` as a collection reader sees it.
+fn stamp_clean(collection: &Collection) -> i64 {
+    let reader = collection.reader(ReaderRole::Query).unwrap();
+    match &reader
+        .execute_raw("SELECT clean FROM derived.meguri_stamp", &[])
+        .unwrap()
+        .rows[0][0]
+    {
+        SqlValue::Integer(v) => *v,
+        other => panic!("{other:?}"),
+    }
 }
 
 /// What the mirror should hold: every card of the collection.
@@ -391,7 +477,8 @@ fn add_cards(collection: &Collection, dues: &[i64]) -> Vec<CardId> {
         .value
 }
 
-fn set_due(collection: &Collection, id: CardId, due: i64) {
+/// Sets a card's due in one op; returns the op's seq.
+fn set_due(collection: &Collection, id: CardId, due: i64) -> Seq {
     collection
         .run(OpSpec::named("set_due_date", OpSource::UserUndoable), move |ctx| {
             let mut card = ctx.scope().card(id)?.expect("the card exists");
@@ -399,7 +486,8 @@ fn set_due(collection: &Collection, id: CardId, due: i64) {
             ctx.scope().put(&card)?;
             Ok(())
         })
-        .unwrap();
+        .unwrap()
+        .seq
 }
 
 fn remove_card(collection: &Collection, id: CardId) {
@@ -728,6 +816,224 @@ fn a_failing_apply_makes_the_component_stale_and_rebuilds_it() {
     opened.close();
 }
 
+#[test]
+fn readiness_changed_by_a_commit_carries_that_commits_seq() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open_with(&path, |counters| CardMirror {
+        fail_on_due: Some(666),
+        ..CardMirror::new(counters)
+    });
+    opened.settle();
+    let at_open = opened.readiness_envelopes();
+    assert!(
+        at_open.last().is_some_and(|(_, e)| e.readiness == Readiness::Ready),
+        "{at_open:?}"
+    );
+    assert!(
+        at_open.iter().all(|(cause, _)| cause.is_none()),
+        "binding at open is no commit's doing: {at_open:?}"
+    );
+    let id = add_cards(&opened.collection, &[1])[0];
+    let failed = set_due(&opened.collection, id, 666);
+    opened.settle();
+    let events = opened.readiness_envelopes();
+    let states: Vec<&Readiness> = events.iter().map(|(_, e)| &e.readiness).collect();
+    assert_eq!(states.first(), Some(&&Readiness::Stale), "{events:?}");
+    assert!(
+        states.iter().any(|s| matches!(s, Readiness::Building { .. })),
+        "{events:?}"
+    );
+    assert_eq!(states.last(), Some(&&Readiness::Ready), "{events:?}");
+    assert!(
+        events.iter().all(|(cause, _)| *cause == Some(failed)),
+        "every state of the rebuild names the commit whose apply failed ({failed:?}): {events:?}"
+    );
+    opened.close();
+}
+
+#[test]
+fn a_commit_batch_that_fails_while_a_rebuild_runs_still_reaches_the_rebuilt_tables() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let ids = without_store(&path, |collection| add_cards(collection, &(0..10).collect::<Vec<_>>()));
+    let gate = Arc::new(Gate::default());
+    let opened = open_with(&path, |counters| CardMirror {
+        batch: 2,
+        gate: Some(Arc::clone(&gate)),
+        ..CardMirror::new(counters)
+    });
+    opened.wait_for_first_batch();
+    // Commits after the build's snapshot, whose derived transactions fail.
+    faultpoint::arm("engine.derived.before_apply", Fault::IoError(std::io::ErrorKind::Other));
+    set_due(&opened.collection, ids[0], 4_242);
+    let added = add_cards(&opened.collection, &[4_343])[0];
+    remove_card(&opened.collection, ids[1]);
+    opened.host.flush().unwrap();
+    faultpoint::disarm("engine.derived.before_apply");
+    assert!(
+        matches!(opened.readiness(), Readiness::Building { .. }),
+        "the build still runs: {:?}",
+        opened.readiness()
+    );
+    gate.open();
+    opened.settle();
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    let rows = mirrored(&opened.collection);
+    assert!(
+        rows.iter().any(|r| r.0 == ids[0].0 && r.4 == 4_242),
+        "the change is there"
+    );
+    assert!(rows.iter().any(|r| r.0 == added.0 && r.4 == 4_343), "the addition too");
+    assert!(!rows.iter().any(|r| r.0 == ids[1].0), "and the removal");
+    assert_eq!(rows, expected(&opened.collection));
+    opened.close();
+}
+
+#[test]
+fn suspend_returns_only_once_a_running_build_let_go_of_its_snapshot() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    without_store(&path, |collection| add_cards(collection, &(0..10).collect::<Vec<_>>()));
+    let gate = Arc::new(Gate::default());
+    let opened = open_with(&path, |counters| CardMirror {
+        batch: 2,
+        gate: Some(Arc::clone(&gate)),
+        ..CardMirror::new(counters)
+    });
+    // The builder holds its snapshot, stopped after its first batch.
+    opened.wait_for_first_batch();
+    let participant = opened.ports.suspend_participants[0].clone();
+    let suspended = {
+        let (engine, gate, participant) = (opened.engine.clone(), Arc::clone(&gate), participant.clone());
+        thread::spawn(move || {
+            participant.suspend().unwrap();
+            // What still runs the moment suspend returns.
+            let builders = engine
+                .threads()
+                .busy_threads()
+                .into_iter()
+                .filter(|t| t.name == "meguri-derived-builder")
+                .count();
+            (gate.is_open(), builders)
+        })
+    };
+    thread::sleep(Duration::from_millis(200));
+    // The builder reaches its next batch, where it stops.
+    gate.open();
+    let (gate_was_open, builders) = suspended.join().unwrap();
+    assert!(gate_was_open, "suspend returned while the builder held its snapshot");
+    assert_eq!(builders, 0, "a builder was still busy after suspend");
+    let started = monotonic::now();
+    drop(opened.collection.reader(ReaderRole::Maintenance).unwrap());
+    assert!(
+        monotonic::now() - started < Duration::from_millis(500),
+        "the maintenance reader was held for {:?} after suspend",
+        monotonic::now() - started
+    );
+    assert_eq!(stamp_clean(&opened.collection), 1, "suspended clean");
+
+    // The build starts again on resume.
+    participant.resume().unwrap();
+    opened.settle();
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    assert!(opened.builds() >= 2, "{} builds", opened.builds());
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    opened.close();
+}
+
+#[test]
+fn a_panicking_apply_is_rolled_back_and_rebuilt_and_the_writer_goes_on() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open_with(&path, |counters| CardMirror {
+        panic_on_due: Some(667),
+        ..CardMirror::new(counters)
+    });
+    opened.settle();
+    let id = add_cards(&opened.collection, &[1])[0];
+    set_due(&opened.collection, id, 667);
+    opened.settle();
+    assert_eq!(opened.builds(), 2, "rebuilt after the panic");
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    let states: Vec<Readiness> = opened.readiness_events().into_iter().map(|e| e.readiness).collect();
+    assert!(states.contains(&Readiness::Stale), "{states:?}");
+    // The derived writer still applies commits.
+    set_due(&opened.collection, id, 5);
+    opened.host.flush().unwrap();
+    assert!(mirrored(&opened.collection).iter().any(|r| r.0 == id.0 && r.4 == 5));
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    assert_eq!((opened.builds(), opened.readiness()), (2, Readiness::Ready));
+    opened.close();
+}
+
+#[test]
+fn a_panicking_build_batch_fails_that_refresh_which_runs_again_and_the_writer_goes_on() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    without_store(&path, |collection| add_cards(collection, &(0..10).collect::<Vec<_>>()));
+    let opened = open_with(&path, |counters| CardMirror {
+        batch: 4,
+        panic_in_first_batch: true,
+        ..CardMirror::new(counters)
+    });
+    assert!(
+        opened.host.wait_idle(Duration::from_secs(10)),
+        "the derived store did not settle: {:?}",
+        opened.readiness()
+    );
+    assert_eq!(opened.builds(), 2, "the failed refresh ran again");
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    let id = add_cards(&opened.collection, &[77])[0];
+    opened.host.flush().unwrap();
+    assert!(mirrored(&opened.collection).iter().any(|r| r.0 == id.0 && r.4 == 77));
+    opened.close();
+}
+
+#[test]
+fn a_build_that_goes_on_after_a_failed_batch_does_not_make_the_component_ready() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    without_store(&path, |collection| add_cards(collection, &(0..10).collect::<Vec<_>>()));
+    let opened = open_with(&path, |counters| CardMirror {
+        batch: 4,
+        panic_in_first_batch: true,
+        ignore_batch_errors: true,
+        ..CardMirror::new(counters)
+    });
+    opened.settle();
+    assert_eq!(opened.builds(), 2, "the refresh with a failed batch ran again");
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    opened.close();
+}
+
+#[test]
+fn a_kept_delta_whose_apply_panics_at_the_swap_fails_that_refresh_which_runs_again() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let ids = without_store(&path, |collection| add_cards(collection, &(0..10).collect::<Vec<_>>()));
+    let gate = Arc::new(Gate::default());
+    let opened = open_with(&path, |counters| CardMirror {
+        batch: 2,
+        gate: Some(Arc::clone(&gate)),
+        panic_on_due: Some(667),
+        ..CardMirror::new(counters)
+    });
+    opened.wait_for_first_batch();
+    // Kept by the running build; its apply panics in the swap transaction.
+    set_due(&opened.collection, ids[0], 667);
+    opened.host.flush().unwrap();
+    gate.open();
+    assert!(
+        opened.host.wait_idle(Duration::from_secs(10)),
+        "the derived store did not settle: {:?}",
+        opened.readiness()
+    );
+    assert_eq!(opened.builds(), 2, "the failed refresh ran again");
+    assert_eq!(opened.readiness(), Readiness::Ready);
+    assert_eq!(mirrored(&opened.collection), expected(&opened.collection));
+    set_due(&opened.collection, ids[0], 5);
+    opened.host.flush().unwrap();
+    assert!(mirrored(&opened.collection).iter().any(|r| r.0 == ids[0].0 && r.4 == 5));
+    opened.close();
+}
+
 /// Makes the replacement file: the fixture with cards due 2000 and up, made
 /// by an engine without the store.
 fn replacement_with_cards(dir: &Path) -> PathBuf {
@@ -872,23 +1178,12 @@ fn suspend_marks_the_store_clean_and_resume_marks_it_in_use() {
     let (_dir, path) = copy_fixture("schema-18.anki2");
     let opened = open(&path);
     opened.settle();
-    let clean = |collection: &Collection| {
-        let reader = collection.reader(ReaderRole::Query).unwrap();
-        match &reader
-            .execute_raw("SELECT clean FROM derived.meguri_stamp", &[])
-            .unwrap()
-            .rows[0][0]
-        {
-            SqlValue::Integer(v) => *v,
-            other => panic!("{other:?}"),
-        }
-    };
-    assert_eq!(clean(&opened.collection), 0, "in use");
+    assert_eq!(stamp_clean(&opened.collection), 0, "in use");
     let participant = opened.ports.suspend_participants[0].clone();
     participant.suspend().unwrap();
-    assert_eq!(clean(&opened.collection), 1);
+    assert_eq!(stamp_clean(&opened.collection), 1);
     participant.resume().unwrap();
-    assert_eq!(clean(&opened.collection), 0);
+    assert_eq!(stamp_clean(&opened.collection), 0);
     add_cards(&opened.collection, &[1]);
     participant.flush().unwrap();
     assert_eq!(mirrored(&opened.collection), expected(&opened.collection));

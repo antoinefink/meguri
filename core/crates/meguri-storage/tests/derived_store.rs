@@ -495,6 +495,83 @@ fn a_discarded_staging_build_leaves_the_live_tables() {
     assert!(!names(&conn, "table").iter().any(|t| t.starts_with("meguri_build__")));
 }
 
+/// One keyed table, for components whose names differ by a trailing `_`.
+fn keyed(name: &str) -> ComponentSchema {
+    ComponentSchema::new(name, 1).table(TableDef::columns("rows", "(k INTEGER PRIMARY KEY, v TEXT NOT NULL)"))
+}
+
+fn put(tx: &derived::DerivedTx<'_>, schema: &ComponentSchema, target: Target, k: i64, v: &str) {
+    let tables = tx.tables(schema, target);
+    let table = tables.table("rows").unwrap().to_owned();
+    tables
+        .conn()
+        .execute(
+            &format!("INSERT OR REPLACE INTO \"{table}\" (k, v) VALUES (?1, ?2)"),
+            (k, v),
+        )
+        .unwrap();
+}
+
+#[test]
+fn emptying_rebuilding_or_dropping_a_component_never_touches_one_named_like_it_with_a_trailing_underscore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(derived::FILE_NAME);
+    // `foo`'s live table is `foo__rows`, `foo_`'s is `foo___rows`.
+    let both = registry(vec![keyed("foo"), keyed("foo_")]);
+    let (foo, neighbour) = (both.get("foo").unwrap(), both.get("foo_").unwrap());
+    let (mut file, _) = DerivedFile::open(&path).unwrap();
+    {
+        let tx = file.begin().unwrap();
+        tx.sync_components(&both).unwrap();
+        put(&tx, neighbour, Target::Live, 1, "neighbour");
+        put(&tx, foo, Target::Live, 1, "old");
+        // foo rebuilds: its swap drops foo's live tables only.
+        tx.begin_staging(foo).unwrap();
+        put(&tx, foo, Target::Staging, 2, "new");
+        tx.finish_staging(foo).unwrap();
+        // A rebuild of foo_ runs while foo's staging is discarded.
+        tx.begin_staging(neighbour).unwrap();
+        put(&tx, neighbour, Target::Staging, 3, "staged");
+        tx.begin_staging(foo).unwrap();
+        tx.discard_staging(foo).unwrap();
+        tx.commit().unwrap();
+    }
+    {
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(rows(&conn, "foo__rows"), [(2, "new".to_owned())]);
+        assert_eq!(rows(&conn, "foo___rows"), [(1, "neighbour".to_owned())]);
+        assert_eq!(
+            rows(&conn, "meguri_build__foo___rows"),
+            [(3, "staged".to_owned())],
+            "foo's discard left foo_'s staging table"
+        );
+    }
+    {
+        // Emptying foo (a replaced collection) leaves foo_ alone.
+        let tx = file.begin().unwrap();
+        tx.reset_component(foo).unwrap();
+        tx.discard_staging(neighbour).unwrap();
+        tx.commit().unwrap();
+    }
+    {
+        let conn = Connection::open(&path).unwrap();
+        assert!(rows(&conn, "foo__rows").is_empty());
+        assert_eq!(rows(&conn, "foo___rows"), [(1, "neighbour".to_owned())]);
+    }
+    {
+        // foo is no longer registered: its tables go, foo_'s stay.
+        let tx = file.begin().unwrap();
+        let synced = tx.sync_components(&registry(vec![keyed("foo_")])).unwrap();
+        assert_eq!(synced[0].reset, None, "foo_ kept its tables");
+        tx.commit().unwrap();
+    }
+    file.close().unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let tables = names(&conn, "table");
+    assert!(!tables.contains(&"foo__rows".to_owned()), "{tables:?}");
+    assert_eq!(rows(&conn, "foo___rows"), [(1, "neighbour".to_owned())]);
+}
+
 #[test]
 fn a_full_text_table_survives_the_swap() {
     let dir = tempfile::tempdir().unwrap();
