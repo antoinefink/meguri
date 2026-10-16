@@ -3,7 +3,7 @@
 Spec: search/grammar
 Requirements: R1021, R1022, R1023, R1024, R1025, R1026, R1027, R1028, R1029, R1030, R1031, R1032
 Anki: 26.09.3
-Scenarios: conformance/scenarios/search/lexing/, conformance/scenarios/search/structure/
+Scenarios: conformance/scenarios/search/lexing/, conformance/scenarios/search/structure/, conformance/scenarios/search/canonical/spec-examples.yaml
 
 How search text becomes a query: whitespace, items, terms, keys and values. What each term means as data is `query-model.md`, the errors named here (in `code` font, such as `unclosed_quote`) are `errors.md`, and the text written back is `canonical-form.md`. Every rule here was checked against the oracle; the scenarios pin the examples.
 
