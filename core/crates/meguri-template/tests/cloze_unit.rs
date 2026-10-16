@@ -3,6 +3,7 @@
 //! and the oracle differ from the plan, the spec's expectation is used).
 
 use meguri_template::cloze::{self, Side};
+use meguri_template::{CardSpecials, FieldMap, ParsedTemplate};
 
 fn front(text: &str, card: u32) -> String {
     cloze::render(text, card, Side::Front)
@@ -218,6 +219,89 @@ fn top_level_presence_ignores_nested_clozes() {
     assert!(!cloze::has_cloze("{{c0::a}}"));
     assert!(!cloze::has_cloze("x {{c2::y"));
     assert!(!cloze::has_cloze("plain"));
+}
+
+// C15: the blank check of a cloze note type (template-syntax.md T10) looks
+// at every value of the card's field map, special values included.
+
+/// The specials of a card not yet added, with the parts C15 varies.
+struct Specials<'a> {
+    notetype: &'a str,
+    template: &'a str,
+    deck: Option<&'a str>,
+    tags: &'a [String],
+}
+
+const PLAIN: Specials<'static> = Specials {
+    notetype: "Gap",
+    template: "Cloze",
+    deck: None,
+    tags: &[],
+};
+
+fn blank(fields: &[(&str, &str)], card: u32, specials: &Specials<'_>) -> bool {
+    let specials = CardSpecials {
+        ord: card - 1,
+        notetype_name: specials.notetype,
+        template_name: specials.template,
+        deck_name: specials.deck,
+        flags: 0,
+        card_id: 0,
+        tags: specials.tags,
+    };
+    FieldMap::new(fields.iter().copied(), &specials).is_blank_cloze_card()
+}
+
+#[test]
+fn a_cloze_card_is_blank_without_its_number_in_any_field() {
+    let text = |value| [("Text", value), ("Extra", "")];
+    assert!(blank(&text("{{c1::a}} {{c2::b}}"), 3, &PLAIN));
+    assert!(!blank(&text("{{c1::a}} {{c2::b}}"), 2, &PLAIN));
+    // A field no template uses counts too: the templates play no part.
+    assert!(!blank(&[("Text", "plain"), ("Extra", "{{c2::x}}")], 2, &PLAIN));
+    assert!(blank(&text("no clozes"), 1, &PLAIN));
+    // C5's numbers: nested clozes count; 0, unclosed clozes and markers that
+    // are not markers count for nothing.
+    assert!(!blank(&text("{{c0::a {{c2::b}}}}"), 2, &PLAIN));
+    assert!(blank(&text("{{c1::open"), 1, &PLAIN));
+    assert!(blank(&text("{{c0::label}}"), 1, &PLAIN));
+    assert!(blank(&text("{{C1::x}} {{c1:x}} {c1::x}"), 1, &PLAIN));
+    assert!(!blank(&text("{{c1,3::x}}"), 3, &PLAIN));
+    assert!(!blank(&text("{{c500::x}}"), 500, &PLAIN));
+    assert!(!blank(&text("{{c65535::x}}"), 65535, &PLAIN));
+    assert!(blank(&[], 1, &PLAIN));
+}
+
+#[test]
+fn special_values_count_unless_a_field_replaces_them() {
+    let fields = [("Text", "{{c1::a}}")];
+    let tags = ["{{c3::t}}".to_owned()];
+    let tagged = Specials { tags: &tags, ..PLAIN };
+    assert!(!blank(&fields, 3, &tagged));
+    let named = Specials {
+        template: "{{c4::card}}",
+        ..PLAIN
+    };
+    assert!(!blank(&fields, 4, &named));
+    let typed = Specials {
+        notetype: "Gap {{c5::type}}",
+        ..PLAIN
+    };
+    assert!(!blank(&fields, 5, &typed));
+    assert!(blank(&fields, 6, &typed));
+    let decked = Specials {
+        deck: Some("Lang::{{c6::a}}"),
+        ..PLAIN
+    };
+    assert!(!blank(&fields, 6, &decked));
+    // A note field named like a special replaces it.
+    assert!(blank(&[("Text", "{{c1::a}}"), ("Tags", "")], 3, &tagged));
+    let tags = ["t".to_owned()];
+    let plain_tags = Specials { tags: &tags, ..PLAIN };
+    assert!(!blank(&[("Text", "{{c1::a}}"), ("Tags", "{{c3::f}}")], 3, &plain_tags));
+    assert!(blank(&[("Text", "{{c1::a}}"), ("Card", "")], 4, &named));
+    // `c<N>` is `1`, CardFlag `flag0`, CardID `0`: no cloze in any.
+    assert!(blank(&fields, 2, &PLAIN));
 }
 
 // C6: the `cloze:` filter.
@@ -442,6 +526,50 @@ fn cloze_only_keeps_an_empty_hint_entry_and_writes_html_as_is() {
     assert_eq!(only_back("{{c1::<b>a & b</b>}}", 1), "<b>a & b</b>");
     // A nested active cloze inside an inactive one still counts.
     assert_eq!(only_back("{{c2::a {{c1::b}}}}", 1), "b");
+}
+
+// filters.md F8 through the template engine: the card number is the
+// ordinal plus one (C1), the question template renders the front and the
+// answer template the back, and `cloze` never ends a chain (F1).
+
+/// A card not yet added at ordinal `ord`, with these note fields.
+fn card(fields: &[(&str, &str)], ord: u32) -> FieldMap {
+    let name = format!("Card {}", ord + 1);
+    let specials = CardSpecials {
+        ord,
+        notetype_name: "Probe",
+        template_name: &name,
+        deck_name: None,
+        flags: 0,
+        card_id: 0,
+        tags: &[],
+    };
+    FieldMap::new(fields.iter().copied(), &specials)
+}
+
+#[test]
+fn the_engine_renders_cloze_filters_for_the_card_and_side() {
+    let fields = card(&[("Text", "{{c1::a::h}} {{c2::b}}"), ("Extra", "{{c1::e}}")], 1);
+    let template = ParsedTemplate::parse("{{cloze:Text}}|{{cloze:Extra}}|{{cloze-only:Text}}");
+    // R975: Extra has no c2, so it renders nothing on card 2.
+    assert_eq!(
+        template.render(&fields, meguri_template::Side::Question).unwrap(),
+        format!("{} {}||...", inactive("1", "a"), hidden("2", "b", "...")),
+    );
+    let answer = meguri_template::Side::Answer { front_side: "" };
+    assert_eq!(
+        template.render(&fields, answer).unwrap(),
+        format!("{} {}||b", inactive("1", "a"), shown("2", "b")),
+    );
+    let chains = ParsedTemplate::parse("{{text:cloze:Text}}|{{edit:cloze:Text}}|{{cloze:edit:Text}}");
+    assert_eq!(
+        chains.render(&fields, answer).unwrap(),
+        format!(
+            "a b|{} {}|{{{{c1::a::h}}}} {{{{c2::b}}}}",
+            inactive("1", "a"),
+            shown("2", "b")
+        ),
+    );
 }
 
 // C10: type-in extraction.
