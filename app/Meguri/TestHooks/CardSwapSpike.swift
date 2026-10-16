@@ -97,10 +97,24 @@ extension TestHooks {
             var swaps = 0
             var footprintAt100KB = 0
             var footprintAt1000KB = 0
+            /// The pages' web content processes: after loading (warm), at
+            /// swaps 100 and 1,000, and after the session closed (both pages
+            /// dropped their card). -1 where the system does not tell (iOS).
+            var webContentWarmKB = -1
+            var webContentAt100KB = -1
+            var webContentAt1000KB = -1
+            var webContentClosedKB = -1
+            /// Why the web content processes' footprint is not readable.
+            var webContentNote = ""
             var nodesAt100 = 0
             var nodesAt1000 = 0
             var pages = 0
             var windowMoves: [Int] = []
+            /// Card elements the pages registered for finalization, and how
+            /// many were collected once the session closed: a page that kept
+            /// old cards alive would collect none.
+            var cardElementsRegistered = 0
+            var cardElementsFinalized = 0
         }
 
         private(set) var reportJSON = "{}"
@@ -405,10 +419,17 @@ extension TestHooks {
 
         /// S1(f): 1,000 page swaps with no input, each after the next card
         /// settled and the previous one confirmed; memory and DOM size at
-        /// swap 100 and 1,000.
+        /// swap 100 and 1,000, each after 3 s of rest; then the session
+        /// closes (both pages drop their card) and memory is read again
+        /// after 3 s; last, the pages collect their garbage and the
+        /// finalized card elements are counted.
         private func burst() async {
             var burst = Burst()
             let pages = [ObjectIdentifier(front), ObjectIdentifier(back)]
+            let views: [WKWebView] = [front.webView, back.webView]
+            for page in [front!, back!] { _ = await page.run("window.trackCards = true; return 'ok';") }
+            let warm = await restedWebContentKB(views, &burst)
+            burst.webContentWarmKB = warm
             for cycle in 1...1000 {
                 while !settled { try? await Task.sleep(for: .milliseconds(2)) }
                 guard let token = swapPages(input: CACurrentMediaTime()) else { continue }
@@ -424,12 +445,15 @@ extension TestHooks {
                 if cycle == 100 || cycle == 1000 {
                     while !settled { try? await Task.sleep(for: .milliseconds(2)) }
                     let nodes = Int(await back.run("return String(document.getElementsByTagName('*').length);")) ?? -1
+                    let webContent = await restedWebContentKB(views, &burst)
                     let footprint = Self.footprint() / 1024
                     if cycle == 100 {
                         burst.footprintAt100KB = footprint
+                        burst.webContentAt100KB = webContent
                         burst.nodesAt100 = nodes
                     } else {
                         burst.footprintAt1000KB = footprint
+                        burst.webContentAt1000KB = webContent
                         burst.nodesAt1000 = nodes
                     }
                 }
@@ -437,8 +461,88 @@ extension TestHooks {
             }
             burst.pages = Set([ObjectIdentifier(front), ObjectIdentifier(back)]).union(pages).count
             burst.windowMoves = [front.windowMoves, back.windowMoves]
+            // The session closes: each page drops its card (R1853's release,
+            // KTD11 call-out). Then the pages collect their garbage, and the
+            // finalized card elements are counted.
+            while !settled { try? await Task.sleep(for: .milliseconds(2)) }
+            for page in [front!, back!] { _ = await page.run("document.getElementById('qa').innerHTML = ''; return 'ok';") }
+            let closed = await restedWebContentKB(views, &burst)
+            burst.webContentClosedKB = closed
+            for page in [front!, back!] {
+                let counts = await page.run(Self.collectScript)
+                let parts = counts.split(separator: " ").compactMap { Int($0) }
+                if parts.count == 2 {
+                    burst.cardElementsRegistered += parts[0]
+                    burst.cardElementsFinalized += parts[1]
+                }
+            }
             report.burst = burst
             publish()
+        }
+
+        /// Allocates and drops about 256 MB of arrays so the page collects
+        /// its garbage (again, up to six times, while more than two cards'
+        /// elements are still waiting), then answers `<registered>
+        /// <finalized>`.
+        static let collectScript = """
+            // Up to six rounds, until no more than two cards' elements wait.
+            for (let pass = 0; pass < 6 && window.cardsFinalized < window.cardsRegistered - 10; pass += 1) {
+              for (let round = 0; round < 256; round += 1) {
+                let junk = [];
+                for (let i = 0; i < 64; i += 1) junk.push(new Array(2048).fill(round + i));
+                junk = null;
+                // Turn the event loop (a message, which hidden pages do not throttle
+                // as they do timers): collections and finalizers run between tasks.
+                if (round % 16 == 15) await new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
+              }
+              await new Promise((resolve) => setTimeout(resolve, 500));
+            }
+            return window.cardsRegistered + " " + window.cardsFinalized;
+            """
+
+        /// The pages' web content footprint in KB after 3 s of rest, or -1
+        /// (`webContentNote` says why).
+        private func restedWebContentKB(_ views: [WKWebView], _ burst: inout Burst) async -> Int {
+            try? await Task.sleep(for: .seconds(3))
+            do {
+                return try Self.webContentFootprint(views) / 1024
+            } catch {
+                burst.webContentNote = error.why
+                return -1
+            }
+        }
+
+        struct Unreadable: Error {
+            let why: String
+        }
+
+        /// The footprint of the web content processes that render `views`,
+        /// in bytes, or nil when the system does not tell. Each pid comes
+        /// from `_webProcessIdentifier` (WebKit SPI, read only in test hooks)
+        /// and its footprint from `proc_pid_rusage`, which iOS does not
+        /// offer; the Mac's app sandbox may refuse it too.
+        static func webContentFootprint(_ views: [WKWebView]) throws(Unreadable) -> Int {
+            #if os(macOS)
+            let selector = NSSelectorFromString("_webProcessIdentifier")
+            var pids: Set<pid_t> = []
+            for view in views {
+                guard view.responds(to: selector), let pid = (view.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0
+                else { throw Unreadable(why: "no web content process identifier") }
+                pids.insert(pid)
+            }
+            var bytes = 0
+            for pid in pids {
+                var usage = rusage_info_v4()
+                let result = withUnsafeMutablePointer(to: &usage) { pointer in
+                    pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+                }
+                guard result == 0 else { throw Unreadable(why: "proc_pid_rusage refused: errno \(errno)") }
+                bytes += Int(usage.ri_phys_footprint)
+            }
+            return bytes
+            #else
+            throw Unreadable(why: "iOS offers no way to read another process's footprint")
+            #endif
         }
 
         static func footprint() -> Int {
@@ -511,6 +615,9 @@ extension TestHooks {
             <style>html, body { margin: 0; height: 100%; font: -apple-system-body; } #qa { padding: 16px; }</style>
             <script>
             window.cards = 0;
+            window.cardsRegistered = 0;
+            window.cardsFinalized = 0;
+            const finalization = new FinalizationRegistry(() => { window.cardsFinalized += 1; });
             window.show = (id, html) => {
               const qa = document.getElementById("qa");
               qa.innerHTML = html;
@@ -519,6 +626,11 @@ extension TestHooks {
                 const script = document.createElement("script");
                 script.textContent = old.textContent;
                 old.replaceWith(script);
+              }
+              // S1(f): each card's elements, to see whether old cards are
+              // collected (a weak registration keeps nothing alive).
+              if (window.trackCards) {
+                for (const element of qa.children) { finalization.register(element, 0); window.cardsRegistered += 1; }
               }
             };
             </script></head><body><div id="qa"></div></body></html>

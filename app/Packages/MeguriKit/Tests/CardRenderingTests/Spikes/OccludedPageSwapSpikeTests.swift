@@ -171,12 +171,20 @@ extension RenderingSpikes {
 
         /// The runtime stand-in each page loads once: `show(id, html)`
         /// replaces the card and runs its scripts, as U66's prepare phase
-        /// will.
+        /// will. With `trackCards` set, it registers each card's elements for
+        /// finalization (a weak registration keeps nothing alive), so a test
+        /// can see whether old cards are collected: `collect()` allocates and
+        /// drops about 256 MB of arrays so the page collects its garbage, up
+        /// to six times while more than two cards' elements are still
+        /// waiting, and answers the counts.
         static let skeleton = card(
             #"<div id="qa"></div>"#,
             head: """
                 <script>
                 window.cards = 0;
+                window.cardsRegistered = 0;
+                window.cardsFinalized = 0;
+                const finalization = new FinalizationRegistry(() => { window.cardsFinalized += 1; });
                 window.show = (id, html) => {
                   const qa = document.getElementById("qa");
                   qa.innerHTML = html;
@@ -186,46 +194,197 @@ extension RenderingSpikes {
                     script.textContent = old.textContent;
                     old.replaceWith(script);
                   }
+                  if (window.trackCards) {
+                    for (const element of qa.children) { finalization.register(element, 0); window.cardsRegistered += 1; }
+                  }
                   return document.getElementsByTagName("*").length;
+                };
+                window.collect = async () => {
+                  for (let pass = 0; pass < 6 && window.cardsFinalized < window.cardsRegistered - 8; pass += 1) {
+                    for (let round = 0; round < 256; round += 1) {
+                      let junk = [];
+                      for (let i = 0; i < 64; i += 1) junk.push(new Array(2048).fill(round + i));
+                      junk = null;
+                      // Turn the event loop (a message, which hidden pages do not throttle
+                      // as they do timers): collections and finalizers run between tasks.
+                      if (round % 16 == 15) await new Promise((resolve) => { const channel = new MessageChannel(); channel.port1.onmessage = resolve; channel.port2.postMessage(0); });
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, 500));
+                  }
+                  return JSON.stringify({ registered: window.cardsRegistered, finalized: window.cardsFinalized });
                 };
                 </script>
                 """)
 
-        @Test func aThousandSwapsKeepTheSamePairInItsWindowWithFlatMemory() async throws {
+        /// Memory at a point of a burst, in bytes: this process, and the web
+        /// content processes that render the pair.
+        struct MemoryPoint {
+            let cycle: Int
+            let app: Int
+            let webContent: Int
+        }
+
+        struct Collected: Decodable {
+            let registered: Int
+            let finalized: Int
+        }
+
+        /// What a burst of swaps measured.
+        struct Burst {
+            var pages: [SpikeWebView] = []
+            /// The web content processes after the pages loaded, and after
+            /// the session closed; how many there were.
+            var warmWebContent = 0
+            var closedWebContent = 0
+            var processes = 0
+            var points: [MemoryPoint] = []
+            var nodes: [Int: Int] = [:]
+            /// Pages created while swapping, the pair's pages after the last
+            /// swap, and the container's subviews then.
+            var createdDuringSwaps = 0
+            var pagesAfter: Set<ObjectIdentifier> = []
+            var subviewsAfter = 0
+            /// Each page's window moves and card count.
+            var windowMoves: [Int] = []
+            var cardsSeen: [String] = []
+            /// Card elements registered for finalization, and collected once
+            /// the session closed, over both pages.
+            var registered = 0
+            var finalized = 0
+
+            func growth(_ part: KeyPath<MemoryPoint, Int>) -> Int? {
+                guard let first = points.first(where: { $0.cycle == 100 }), let last = points.first(where: { $0.cycle == 1000 }) else {
+                    return nil
+                }
+                return last[keyPath: part] - first[keyPath: part]
+            }
+
+            static let fiveMB = 5 * 1024 * 1024
+
+            /// R1853 for this process, as U245 reads it: within 5 MB from swap
+            /// 100 to 1,000.
+            var appProblems: [String] {
+                guard let app = growth(\.app) else { return ["no memory at swaps 100 and 1,000"] }
+                return app < Self.fiveMB ? [] : ["this process grew \(app / 1024) KB from swap 100 to 1,000"]
+            }
+
+            /// R1853 for the web content processes: within 5 MB from swap 100
+            /// to 1,000, and back within 10 MB of the warm level once the
+            /// session closed (KTD11's call-out, U245).
+            var webContentProblems: [String] {
+                guard let webContent = growth(\.webContent) else { return ["no memory at swaps 100 and 1,000"] }
+                var problems: [String] = []
+                if webContent >= Self.fiveMB { problems.append("the web content processes grew \(webContent / 1024) KB from swap 100 to 1,000") }
+                let aboveWarm = closedWebContent - warmWebContent
+                if aboveWarm >= 2 * Self.fiveMB {
+                    problems.append("after the session closed, the web content processes stayed \(aboveWarm / 1024) KB above their warm level")
+                }
+                return problems
+            }
+
+            var summary: String {
+                let points = points.filter { [100, 1000].contains($0.cycle) }
+                    .map { "\($0.cycle): app \($0.app / 1024) KB, web content \($0.webContent / 1024) KB" }
+                return "web content warm \(warmWebContent / 1024) KB; " + points.joined(separator: "; ")
+                    + "; closed: web content \(closedWebContent / 1024) KB (\(processes) process(es)); "
+                    + "card elements finalized \(finalized) of \(registered)"
+            }
+        }
+
+        /// The pages' web content footprint after `seconds` of rest.
+        static func restedWebContent(_ pages: [SpikeWebView], seconds: Int = 3) async throws -> (processes: Int, bytes: Int) {
+            try await Task.sleep(for: .seconds(seconds))
+            return try #require(spikeWebContentFootprint(pages), "the pages' web content footprint is not readable")
+        }
+
+        /// Puts cards 1 to 1,000 into the page beneath and swaps each to the
+        /// front, a frame apart, with `script` in every card; measures memory
+        /// after loading, at swaps 100 and 1,000 and after the session closed
+        /// (each after 3 s of rest); then counts the collected card elements.
+        static func burst(script: String = "window.cards += 1;") async throws -> Burst {
             let handler = SpikeMediaHandler()
             handler.add("/_anki/card.html", text: Self.skeleton, "text/html")
             handler.add("/_img.png", try SpikeAssets.solidPNG(side: 64), "image/png")
             let pair = SpikePagePair(configuration: Spike.configuration(handler: handler), size: Self.size)
             let window = SpikeWindow(pair.container)
             defer { window.close() }
-            let pages = [pair.front, pair.back]
-            for page in pages { try await page.open(Spike.origin.appending(path: "_anki/card.html")) }
+            var burst = Burst(pages: [pair.front, pair.back])
+            for page in burst.pages {
+                try await page.open(Spike.origin.appending(path: "_anki/card.html"))
+                try await page.run("window.trackCards = true;")
+            }
+            burst.warmWebContent = try await Self.restedWebContent(burst.pages).bytes
             let created = SpikeWebView.created.load(ordering: .relaxed)
-            var footprints: [(cycle: Int, bytes: Int)] = []
-            var nodes: [Int: Int] = [:]
             for cycle in 1...1000 {
-                let html = #"<h1>Card \#(cycle)</h1><img src="_img.png"><p>\#(String(repeating: "word ", count: 40))</p><script>window.cards += 1;</script>"#
+                let html = #"<h1>Card \#(cycle)</h1><img src="_img.png"><p>\#(String(repeating: "word ", count: 40))</p><script>\#(script)</script>"#
                 let count = try await pair.back.string("return String(show(id, html));", arguments: ["id": cycle, "html": html])
-                nodes[cycle] = Int(count)
+                burst.nodes[cycle] = Int(count)
                 pair.swap()
-                if cycle % 100 == 0 { footprints.append((cycle, spikeFootprint())) }
+                // At most one card a frame, as a reviewer sees them.
+                try await Task.sleep(for: .milliseconds(16))
+                if cycle == 100 || cycle == 1000 {
+                    let webContent = try await Self.restedWebContent(burst.pages)
+                    burst.points.append(MemoryPoint(cycle: cycle, app: spikeFootprint(), webContent: webContent.bytes))
+                }
             }
+            burst.createdDuringSwaps = SpikeWebView.created.load(ordering: .relaxed) - created
+            burst.pagesAfter = [ObjectIdentifier(pair.front), ObjectIdentifier(pair.back)]
+            burst.subviewsAfter = pair.container.subviews.count
+            burst.windowMoves = burst.pages.map(\.windowMoves)
+            for page in burst.pages { burst.cardsSeen.append(try await page.string("return String(window.cards);")) }
+            // The session closes: each page drops its card (R1853's release,
+            // KTD11's call-out). Then the pages collect their garbage, and the
+            // finalized card elements are counted.
+            for page in burst.pages { try await page.run("document.getElementById('qa').innerHTML = '';") }
+            let closed = try await Self.restedWebContent(burst.pages)
+            (burst.processes, burst.closedWebContent) = (closed.processes, closed.bytes)
+            for page in burst.pages {
+                let collected = try await page.json(Collected.self, "return await collect();")
+                burst.registered += collected.registered
+                burst.finalized += collected.finalized
+            }
+            return burst
+        }
+
+        @Test func aThousandSwapsKeepTheSamePairInItsWindowWithFlatMemory() async throws {
+            let burst = try await Self.burst()
+            print("S1(f) host: 1,000 swaps, 2 pages: \(burst.summary)")
             // The same two pages throughout, never out of their window.
-            #expect(SpikeWebView.created.load(ordering: .relaxed) == created)
-            #expect(Set([ObjectIdentifier(pair.front), ObjectIdentifier(pair.back)]) == Set(pages.map(ObjectIdentifier.init)))
-            #expect(pair.container.subviews.count == 2)
-            #expect(pages.map(\.windowMoves) == [1, 1])
+            #expect(burst.createdDuringSwaps == 0)
+            #expect(burst.pagesAfter == Set(burst.pages.map(ObjectIdentifier.init)))
+            #expect(burst.subviewsAfter == 2)
+            #expect(burst.windowMoves == [1, 1])
             // Each page saw every other card: globals persist per page (R465).
-            for page in pages {
-                let seen = try await page.string("return String(window.cards);")
-                #expect(seen == "500")
+            #expect(burst.cardsSeen == ["500", "500"])
+            // The DOM does not grow, and this process's memory stays within
+            // R1853's 5 MB from swap 100 to 1,000.
+            #expect(burst.nodes[1000] == burst.nodes[100])
+            #expect(burst.appProblems.isEmpty, "\(burst.appProblems): \(burst.summary)")
+            // No page keeps old cards alive: once the session closed, all but
+            // a few of the card elements registered were collected.
+            #expect(burst.registered == 4000)
+            #expect(burst.finalized * 100 >= burst.registered * 95, "\(burst.summary)")
+            // S1(f) is open for web content memory (decision record S1): on
+            // this harness the web content processes grow up to 20 MB over
+            // the burst and keep it after the session closes, though no card
+            // stays alive. The check stays, so a run that meets R1853 shows.
+            withKnownIssue("S1(f) open: web content memory over 1,000 swaps (decision record S1)", isIntermittent: true) {
+                #expect(burst.webContentProblems.isEmpty, "\(burst.webContentProblems): \(burst.summary)")
             }
-            // The DOM does not grow, and neither does this process's memory
-            // after the first hundred swaps (R1853's 5 MB over 1,000 cards).
-            #expect(nodes[1000] == nodes[100])
-            let growth = (footprints.last?.bytes ?? 0) - (footprints.first?.bytes ?? 0)
-            #expect(growth < 5 * 1024 * 1024, "footprint grew \(growth) bytes: \(footprints)")
-            print("S1(f) host: 1,000 swaps, 2 pages, footprint growth \(growth / 1024) KB from swap 100 to 1,000: \(footprints.map { "\($0.cycle): \($0.bytes / 1024) KB" })")
+        }
+
+        /// The memory check sees what the pages keep: cards that each retain
+        /// 64 KB in their page's script heap (57.6 MB from swap 100 to 1,000)
+        /// pass this process's check and keep the DOM the same size, but the
+        /// web content check sees most of what they keep.
+        @Test func theMemoryCheckCatchesCardsThatRetainMemoryInTheirPages() async throws {
+            let burst = try await Self.burst(
+                script: "window.kept = (window.kept || []); window.kept.push(new Uint8Array(65536).fill(window.kept.length % 251 + 1));")
+            print("S1(f) host, cards retaining 64 KB each: \(burst.webContentProblems): \(burst.summary)")
+            #expect(burst.nodes[1000] == burst.nodes[100])
+            #expect(burst.appProblems.isEmpty, "this process's memory alone would have missed it: \(burst.summary)")
+            #expect(burst.webContentProblems.contains { $0.hasPrefix("the web content processes grew") }, "\(burst.summary)")
+            #expect((burst.growth(\.webContent) ?? 0) >= 40 * 1024 * 1024, "\(burst.summary)")
         }
     }
 }

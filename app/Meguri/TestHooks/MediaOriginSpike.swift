@@ -10,9 +10,11 @@ extension TestHooks {
     /// or a simulator. `spike/storage/write` and `spike/storage/read` keep a
     /// value in localStorage and IndexedDB on the media origin across a
     /// relaunch (S2(d), R502); `spike/media-seek` seeks a muted video through
-    /// Range requests (S2(a)). Audio is not checked here: in the test VM no
+    /// Range requests (S2(a)), and `spike/media-seek/audio` an 8 MB silent
+    /// MP3, for a device or a Mac's own hardware: in the test VM no
     /// `<audio>` plays, from any source, and an audio element left loading
-    /// there stalled the app's main thread for over a minute. The macOS host checks, and the throwaway
+    /// there stalled the app's main thread for over a minute, so the test
+    /// skips the audio route there. The macOS host checks, and the throwaway
     /// handler they share with this one, are CustomSchemeMediaSpikeTests'.
     /// Throwaway: U67's media handler and configuration replace it.
     enum MediaOriginSpike {
@@ -30,6 +32,21 @@ extension TestHooks {
             configuration.allowsInlineMediaPlayback = true
             #endif
             return configuration
+        }
+
+        /// A constant-bitrate MP3 of silence at least `minimumBytes` long
+        /// (MPEG-1 Layer III, 128 kbit/s, 44.1 kHz, mono, no tag), made at run
+        /// time like CustomSchemeMediaSpikeTests' own: each 417-byte frame is
+        /// a header and zeros, which decode to silence, so playing it makes
+        /// no sound.
+        nonisolated static func silentMP3(minimumBytes: Int) -> Data {
+            let frameLength = 417
+            var frame = [UInt8](repeating: 0, count: frameLength)
+            frame.replaceSubrange(0..<4, with: [0xFF, 0xFB, 0x90, 0xC4])
+            let frames = (minimumBytes + frameLength - 1) / frameLength
+            var data = Data(capacity: frames * frameLength)
+            for _ in 0..<frames { data.append(contentsOf: frame) }
+            return data
         }
 
         /// An H.264 MP4 of 20 s at 10 frames a second, fast start, made at
@@ -73,6 +90,8 @@ extension TestHooks {
         final class Handler: NSObject, WKURLSchemeHandler {
             struct Answer {
                 let path: String
+                /// The request's `Range` header.
+                let requested: String?
                 let status: Int
                 let first: Int?
                 let contentRange: String?
@@ -85,29 +104,62 @@ extension TestHooks {
             func webView(_ webView: WKWebView, start task: any WKURLSchemeTask) {
                 guard let url = task.request.url else { return task.didFailWithError(URLError(.badURL)) }
                 let path = url.path(percentEncoded: false)
+                let requested = task.request.value(forHTTPHeaderField: "Range")
                 guard let file = files[path] else {
-                    return finish(task, url, path, status: 404, first: nil, headers: [:], body: Data())
+                    return finish(task, url, path, requested, status: 404, first: nil, headers: [:], body: Data())
                 }
                 var headers = ["Content-Type": file.type, "Accept-Ranges": "bytes", "Cache-Control": "no-store"]
                 let total = file.data.count
-                if let range = task.request.value(forHTTPHeaderField: "Range"),
-                    let match = range.wholeMatch(of: /bytes=(\d+)-(\d*)/), let first = Int(match.1), first < total
-                {
-                    let last = min(Int(match.2) ?? (total - 1), total - 1)
-                    headers["Content-Range"] = "bytes \(first)-\(last)/\(total)"
-                    return finish(task, url, path, status: 206, first: first, headers: headers, body: file.data.subdata(in: first..<(last + 1)))
+                if let range = requested, let bounds = Self.bounds(range, total: total) {
+                    headers["Content-Range"] = "bytes \(bounds.first)-\(bounds.last)/\(total)"
+                    return finish(
+                        task, url, path, requested, status: 206, first: bounds.first, headers: headers,
+                        body: file.data.subdata(in: bounds.first..<(bounds.last + 1)))
                 }
-                finish(task, url, path, status: 200, first: nil, headers: headers, body: file.data)
+                finish(task, url, path, requested, status: 200, first: nil, headers: headers, body: file.data)
             }
 
             func webView(_ webView: WKWebView, stop task: any WKURLSchemeTask) {}
 
+            /// The first and last byte a single-range `Range` header asks for
+            /// (`bytes=a-b`, `bytes=a-`, or the suffix `bytes=-n`), or nil.
+            static func bounds(_ header: String, total: Int) -> (first: Int, last: Int)? {
+                guard let match = header.wholeMatch(of: /bytes=(\d*)-(\d*)/), total > 0 else { return nil }
+                if match.1.isEmpty {
+                    guard let suffix = Int(match.2), suffix > 0 else { return nil }
+                    return (max(0, total - suffix), total - 1)
+                }
+                guard let first = Int(match.1), first < total else { return nil }
+                let last = min(Int(match.2) ?? (total - 1), total - 1)
+                return last >= first ? (first, last) : nil
+            }
+
+            /// What is wrong with the answers to ranged requests for `path`
+            /// (R495): each must be a 206 whose `Content-Range` names the
+            /// first byte asked for, the last one asked for (or the file's
+            /// last), and the file's length, with exactly those bytes.
+            func rangeProblems(_ path: String, total: Int) -> [String] {
+                answers.filter { $0.path == path && $0.requested != nil }.compactMap { answer in
+                    let requested = answer.requested ?? ""
+                    guard let bounds = Self.bounds(requested, total: total) else {
+                        return "\(requested): not a satisfiable single range"
+                    }
+                    let expected = "bytes \(bounds.first)-\(bounds.last)/\(total)"
+                    guard answer.status == 206, answer.contentRange == expected, answer.length == bounds.last - bounds.first + 1 else {
+                        return "\(requested): \(answer.status) \(answer.contentRange ?? "no Content-Range") with \(answer.length) bytes, not 206 \(expected)"
+                    }
+                    return nil
+                }
+            }
+
             private func finish(
-                _ task: any WKURLSchemeTask, _ url: URL, _ path: String, status: Int, first: Int?, headers: [String: String], body: Data
+                _ task: any WKURLSchemeTask, _ url: URL, _ path: String, _ requested: String?, status: Int, first: Int?,
+                headers: [String: String], body: Data
             ) {
                 var headers = headers
                 headers["Content-Length"] = String(body.count)
-                answers.append(Answer(path: path, status: status, first: first, contentRange: headers["Content-Range"], length: body.count))
+                answers.append(
+                    Answer(path: path, requested: requested, status: status, first: first, contentRange: headers["Content-Range"], length: body.count))
                 task.didReceive(HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!)
                 task.didReceive(body)
                 task.didFinish()
@@ -264,10 +316,12 @@ extension TestHooks {
         }
     }
 
-    /// S2(a) in the app: a muted H.264 video on the media origin seeks to
-    /// 90 % and plays on; the result names the ranged answers the handler
-    /// gave.
+    /// S2(a) in the app: a muted H.264 video (or, with `audio`, an 8 MB
+    /// silent MP3) on the media origin seeks to 90 % and plays on; the result
+    /// names the ranged answers the handler gave and what is wrong with any
+    /// of them.
     struct MediaSeekSpikeView: View {
+        var audio = false
         @State private var result = "running"
         @State private var page: MediaOriginSpike.Page?
 
@@ -316,6 +370,12 @@ extension TestHooks {
             var video = ""
             var videoRanged = 0
             var videoLate = 0
+            var audio = ""
+            var audioRanged = 0
+            var audioLate = 0
+            /// Ranged answers whose `Content-Range` or length is not the one
+            /// asked for.
+            var badRanges: [String] = []
         }
 
         var body: some View {
@@ -349,19 +409,38 @@ extension TestHooks {
                 let answers = handler.answers.filter { $0.path == path && $0.status == 206 }
                 return (answers.count, answers.filter { ($0.first ?? 0) >= total * 8 / 10 }.count)
             }
-            result = "running: encoding the video"
-            if let mp4 = try? await MediaOriginSpike.mp4() {
-                handler.files["/_clip.mp4"] = (mp4, "video/mp4")
-                result = "running: the video"
-                outcome.video = await page.run(Self.script, ["id": await page.run(Self.video)], within: 50)
-                (outcome.videoRanged, outcome.videoLate) = ranged("/_clip.mp4", mp4.count)
+            if audio {
+                let mp3 = MediaOriginSpike.silentMP3(minimumBytes: 8 * 1024 * 1024)
+                handler.files["/_long.mp3"] = (mp3, "audio/mpeg")
+                result = "running: the audio"
+                outcome.audio = await page.run(Self.script, ["id": await page.run(Self.audioElement)], within: 50)
+                (outcome.audioRanged, outcome.audioLate) = ranged("/_long.mp3", mp3.count)
+                outcome.badRanges = handler.rangeProblems("/_long.mp3", total: mp3.count)
             } else {
-                outcome.video = "no MP4 encoder"
+                result = "running: encoding the video"
+                if let mp4 = try? await MediaOriginSpike.mp4() {
+                    handler.files["/_clip.mp4"] = (mp4, "video/mp4")
+                    result = "running: the video"
+                    outcome.video = await page.run(Self.script, ["id": await page.run(Self.video)], within: 50)
+                    (outcome.videoRanged, outcome.videoLate) = ranged("/_clip.mp4", mp4.count)
+                    outcome.badRanges = handler.rangeProblems("/_clip.mp4", total: mp4.count)
+                } else {
+                    outcome.video = "no MP4 encoder"
+                }
             }
             let encoder = JSONEncoder()
             encoder.outputFormatting = .sortedKeys
             return (try? encoder.encode(outcome)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
         }
+
+        static let audioElement = """
+            const audio = document.createElement("audio");
+            audio.id = "audio";
+            audio.preload = "auto";
+            audio.src = "_long.mp3";
+            document.body.appendChild(audio);
+            return audio.id;
+            """
 
         static let video = """
             const video = document.createElement("video");

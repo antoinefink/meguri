@@ -14,7 +14,9 @@ extension TestHooks {
     ///   swap (S1(e)).
     /// - `spike/storage/write`, `spike/storage/read`: storage on the media
     ///   origin across a relaunch (S2(d)).
-    /// - `spike/media-seek`: a muted video seeks through Range requests (S2(a)).
+    /// - `spike/media-seek`: a muted video seeks through Range requests
+    ///   (S2(a)); `/audio`: an 8 MB silent MP3 does, on a device or a Mac's
+    ///   own hardware (no `<audio>` plays in the test VM).
     enum SpikeRoutes {
         static func register(in registry: inout RouteRegistry) {
             registry.register("spike/card-swap") { _ in .screen { CardSwapSpikeView(mode: .timing) } }
@@ -23,6 +25,7 @@ extension TestHooks {
             registry.register("spike/storage/write") { _ in .screen { StorageSpikeView(write: true) } }
             registry.register("spike/storage/read") { _ in .screen { StorageSpikeView(write: false) } }
             registry.register("spike/media-seek") { _ in .screen { MediaSeekSpikeView() } }
+            registry.register("spike/media-seek/audio") { _ in .screen { MediaSeekSpikeView(audio: true) } }
         }
     }
 

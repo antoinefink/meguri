@@ -23,54 +23,62 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
     static let inputsPerRun = 40
 
     struct Stats: Decodable {
-        let count: Int
-        let p50Frames: Int
-        let p95Frames: Int
-        let p99Frames: Int
-        let maxFrames: Int
-        let p50Ms: Double
-        let p95Ms: Double
-        let p99Ms: Double
-        let displayLinkP95Frames: Int
-        let fromHandlerP95Frames: Int
-        let fromHandlerP99Frames: Int
+        var count: Int
+        var p50Frames: Int
+        var p95Frames: Int
+        var p99Frames: Int
+        var maxFrames: Int
+        var p50Ms: Double
+        var p95Ms: Double
+        var p99Ms: Double
+        var displayLinkP95Frames: Int
+        var fromHandlerP95Frames: Int
+        var fromHandlerP99Frames: Int
     }
 
     struct Burst: Decodable {
-        let swaps: Int
-        let footprintAt100KB: Int
-        let footprintAt1000KB: Int
-        let nodesAt100: Int
-        let nodesAt1000: Int
-        let pages: Int
-        let windowMoves: [Int]
+        var swaps: Int
+        var footprintAt100KB: Int
+        var footprintAt1000KB: Int
+        /// -1 where the system does not tell (iOS).
+        var webContentWarmKB: Int
+        var webContentAt100KB: Int
+        var webContentAt1000KB: Int
+        var webContentClosedKB: Int
+        var webContentNote: String
+        var nodesAt100: Int
+        var nodesAt1000: Int
+        var pages: Int
+        var windowMoves: [Int]
+        var cardElementsRegistered: Int
+        var cardElementsFinalized: Int
     }
 
     struct Report: Decodable {
-        let ready: Bool
-        let probe: String
-        let periodMs: Double
-        let inputs: Int
-        let web: Stats
-        let baseline: Stats
-        let unsettled: Int
-        let unpresented: Int
-        let confirmed: Int
-        let wrongCard: Int
-        let unconfirmed: Int
-        let confirmP95Ms: Double
-        let inputToHandlerP95Ms: Double
-        let frontRAFPerSecond: Int
-        let beneathRAFPerSecond: Int
-        let captured: Int
-        let blank: Int
-        let stale: Int
-        let captureControl: String
-        let focused: String
-        let messages: Int
-        let lastConfirm: String
-        let terminations: Int
-        let burst: Burst?
+        var ready: Bool
+        var probe: String
+        var periodMs: Double
+        var inputs: Int
+        var web: Stats
+        var baseline: Stats
+        var unsettled: Int
+        var unpresented: Int
+        var confirmed: Int
+        var wrongCard: Int
+        var unconfirmed: Int
+        var confirmP95Ms: Double
+        var inputToHandlerP95Ms: Double
+        var frontRAFPerSecond: Int
+        var beneathRAFPerSecond: Int
+        var captured: Int
+        var blank: Int
+        var stale: Int
+        var captureControl: String
+        var focused: String
+        var messages: Int
+        var lastConfirm: String
+        var terminations: Int
+        var burst: Burst?
     }
 
     // MARK: S1(a), S1(b)
@@ -93,31 +101,28 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
             inputs += Self.inputsPerRun
             input(app, count: Self.inputsPerRun, expectingTotal: inputs)
         }
-        report = try waitForReport(app) {
-            $0.web.count + $0.unsettled >= inputs / 2 && $0.confirmed + $0.unconfirmed + $0.wrongCard + $0.unsettled >= inputs / 2 - 1
+        // Every input resolved: each swap has its frame (presented, or the
+        // display link's estimate), and the confirmations are in. A run that
+        // never gets there is read as it stands, and the gate names what is
+        // missing.
+        report = try waitForReport(app, orLatest: true) {
+            $0.web.count + $0.baseline.count + $0.unsettled >= $0.inputs
+                && $0.confirmed + $0.unconfirmed + $0.wrongCard + $0.unsettled >= inputs / 2 - 1
         }
-        record(report, "S1(b)")
+        let mode = CardSwapTimingGate.current
+        record(report, "S1(b), \(mode)")
         XCTAssertGreaterThanOrEqual(report.web.count, 200)
         XCTAssertGreaterThanOrEqual(report.baseline.count, 200)
         XCTAssertEqual(report.unsettled, 0, "inputs found the next card not yet settled beneath")
         XCTAssertEqual(report.wrongCard, 0)
         XCTAssertLessThanOrEqual(report.unconfirmed, 1, "only the last swap may still wait for its confirmation")
         XCTAssertGreaterThanOrEqual(report.confirmed, 199)
-        // Frames are exact only where the probe saw every swap presented (a
-        // device, this Mac's own screen): there the pages must land in the
-        // baseline's frame at p95 and at most one frame later at p99
-        // (R1807). Elsewhere they are display-link estimates, which count
-        // the main-thread work after a page swap (its confirmation and the
-        // next card) as lateness: the simulator and the test VM check
-        // function only (KTD19), with one frame of slack at p95.
-        let presented = report.probe == "metal" && report.unpresented == 0
-        let slack = presented ? 0 : 1
-        XCTAssertLessThanOrEqual(
-            report.web.p95Frames, report.baseline.p95Frames + slack,
-            "p95 frames: pages \(report.web.p95Frames), baseline \(report.baseline.p95Frames)")
-        if presented {
-            XCTAssertLessThanOrEqual(report.web.fromHandlerP95Frames, report.baseline.fromHandlerP95Frames)
-            XCTAssertLessThanOrEqual(report.web.p99Frames, report.baseline.p99Frames + 1)
+        // The frame gate's mode comes from where the run is, never from the
+        // samples (CardSwapTimingGate): strict on a device or this Mac's own
+        // screen, function only on the simulator and in the test VM, where
+        // frames are display-link estimates (KTD19).
+        for problem in CardSwapTimingGate.problems(report, mode: mode) {
+            XCTFail("S1(b), \(mode): \(problem)")
         }
         XCTAssertEqual(report.terminations, 0)
     }
@@ -129,7 +134,7 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
     /// capture of the first card before any swap.
     func testNoBlankOrStaleFrameAtThePageSwap() throws {
         #if os(macOS)
-        throw XCTSkip("the Mac has no in-process capture of web content; S1(c) on the Mac is the device session's (decision record)")
+        throw XCTSkip("the Mac has no in-process capture of web content: S1(c) on the Mac is open (decision record S1)")
         #else
         let app = launch(MeguriLaunch(animations: false, route: "spike/card-swap/capture"))
         var report = try waitForReport(app) { $0.ready }
@@ -180,7 +185,12 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
 
     /// S1(f) on screen: 1,000 page swaps with no input keep the same two
     /// pages in their window, the DOM the same size, and the app's memory
-    /// within R1853's 5 MB from swap 100 to 1,000.
+    /// within R1853's 5 MB from swap 100 to 1,000; once the session closes,
+    /// all but a few of the cards' elements have been collected. Web content
+    /// memory is checked where the app may read it (not on iOS; the Mac's
+    /// sandbox refused it in the test VM). S1(f) is open for it (decision
+    /// record S1), so that check is an expected failure, and a run that
+    /// meets it shows as passing.
     func testAThousandSwapsKeepTheSamePagesAndFlatMemory() throws {
         let app = launch(MeguriLaunch(animations: false, route: "spike/card-swap"))
         _ = try waitForReport(app) { $0.ready }
@@ -192,7 +202,21 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
         XCTAssertEqual(burst.windowMoves, [1, 1])
         XCTAssertEqual(burst.nodesAt1000, burst.nodesAt100)
         XCTAssertLessThan(burst.footprintAt1000KB - burst.footprintAt100KB, 5 * 1024)
+        // The 1,000 cards prepared during the burst, each with five
+        // elements (style, heading, image, paragraph, script).
+        XCTAssertEqual(burst.cardElementsRegistered, 5000)
+        XCTAssertGreaterThanOrEqual(burst.cardElementsFinalized * 100, burst.cardElementsRegistered * 95, "old cards stayed alive in their pages")
         XCTAssertEqual(report.terminations, 0)
+        guard burst.webContentAt100KB >= 0, burst.webContentWarmKB >= 0, burst.webContentClosedKB >= 0 else {
+            XCTContext.runActivity(named: "S1(f): web content memory not readable here: \(burst.webContentNote)") { _ in }
+            return
+        }
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = false
+        XCTExpectFailure("S1(f) open: web content memory over 1,000 swaps (decision record S1)", options: options) {
+            XCTAssertLessThan(burst.webContentAt1000KB - burst.webContentAt100KB, 5 * 1024, "web content growth from swap 100 to 1,000")
+            XCTAssertLessThan(burst.webContentClosedKB - burst.webContentWarmKB, 10 * 1024, "web content above warm after the session closed")
+        }
     }
 
     // MARK: S2(a), S2(d)
@@ -201,6 +225,10 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
         let video: String
         let videoRanged: Int
         let videoLate: Int
+        let audio: String
+        let audioRanged: Int
+        let audioLate: Int
+        let badRanges: [String]
     }
 
     struct Played: Decodable {
@@ -210,9 +238,8 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
     }
 
     /// S2(a) in the app: a muted H.264 video on the media origin seeks to
-    /// 90 % and plays on, through ranged requests answered 206. Audio is the
-    /// macOS host's check (CustomSchemeMediaSpikeTests) and the device
-    /// session's: no `<audio>` plays in the test VM.
+    /// 90 % and plays on, through ranged requests answered 206 with the
+    /// `Content-Range` asked for. Audio is the next test's.
     func testVideoSeeksToNinetyPercentThroughRangeRequests() throws {
         let app = launch(MeguriLaunch(animations: false, route: "spike/media-seek"))
         let text = text(app.staticTexts["spike.media.result"], notStartingWith: "running", timeout: 120)
@@ -224,6 +251,36 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
         XCTAssertGreaterThanOrEqual(seekedTo, 17.9, "seeked to \(seekedTo) of 20 s")
         XCTAssertGreaterThan(playedTo, seekedTo + 0.3)
         XCTAssertGreaterThan(outcome.videoLate, 0, "no ranged request in the last fifth")
+        XCTAssertEqual(outcome.badRanges, [])
+    }
+
+    /// S2(a), audio: an 8 MB silent MP3 in `<audio>` on the media origin
+    /// seeks to 90 % and plays on, through ranged requests each answered 206
+    /// with the `Content-Range` asked for. It needs real hardware: in a
+    /// virtual machine no `<audio>` plays (no audio route), and an audio
+    /// element left loading there stalled the app for a minute, so the test
+    /// skips the test VM's simulators and Mac. Its runs are the iOS device
+    /// check and Antoine's run on this Mac (decision record S2).
+    func testAudioSeeksToNinetyPercentThroughRangeRequests() throws {
+        #if os(macOS) || targetEnvironment(simulator)
+        // A simulator shares its Mac's kernel, so this reads the Mac's.
+        guard CardSwapTimingGate.hypervisorPresent() == false else {
+            throw XCTSkip("not known to run on real hardware (kern.hv_vmm_present): no <audio> plays in a virtual machine")
+        }
+        #endif
+        let app = launch(MeguriLaunch(animations: false, route: "spike/media-seek/audio"))
+        let text = text(app.staticTexts["spike.media.result"], notStartingWith: "running", timeout: 120)
+        XCTContext.runActivity(named: "S2(a) audio \(text)") { _ in }
+        let outcome = try JSONDecoder().decode(MediaOutcome.self, from: Data(text.utf8))
+        let audio = try JSONDecoder().decode(Played.self, from: Data(outcome.audio.utf8))
+        XCTAssertNil(audio.error, outcome.audio)
+        // 8 MB at 128 kbit/s is 524 s: 90 % is about 472 s.
+        let seekedTo = try XCTUnwrap(audio.seekedTo), playedTo = try XCTUnwrap(audio.playedTo)
+        XCTAssertGreaterThanOrEqual(seekedTo, 470, "seeked to \(seekedTo) s")
+        XCTAssertGreaterThan(playedTo, seekedTo + 0.3)
+        XCTAssertGreaterThan(outcome.audioRanged, 0, "no ranged request")
+        XCTAssertGreaterThan(outcome.audioLate, 0, "no ranged request in the last fifth")
+        XCTAssertEqual(outcome.badRanges, [])
     }
 
     /// S2(d): a value written to localStorage and IndexedDB on the media
@@ -260,18 +317,25 @@ final class CardSwapTimingSpikeTests: PerfTestCase {
         XCTAssert(waitForText(counter, "Swaps: \(total)", timeout: 60), "the swap count did not reach \(total)")
     }
 
-    private func waitForReport(_ app: XCUIApplication, timeout: TimeInterval = 30, until done: (Report) -> Bool) throws -> Report {
+    /// The app's report once `done` accepts it. After `timeout`, the latest
+    /// report if `orLatest`, else a failure.
+    private func waitForReport(
+        _ app: XCUIApplication, timeout: TimeInterval = 30, orLatest: Bool = false, until done: (Report) -> Bool
+    ) throws -> Report {
         let element = app.staticTexts["spike.cardSwap.report"]
         let deadline = Date().addingTimeInterval(timeout)
         var last = ""
+        var latest: Report?
         repeat {
             last = text(element, notEqualTo: "", timeout: 5)
-            if let report = try? JSONDecoder().decode(Report.self, from: Data(last.utf8)), done(report) {
+            if let report = try? JSONDecoder().decode(Report.self, from: Data(last.utf8)) {
                 lastReport = last
-                return report
+                latest = report
+                if done(report) { return report }
             }
             Thread.sleep(forTimeInterval: 0.5)
         } while Date() < deadline
+        if orLatest, let latest { return latest }
         throw PreconditionFailure(description: "the spike's report did not reach the expected state: \(last)")
     }
 

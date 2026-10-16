@@ -304,6 +304,41 @@ final class SpikeWindow {
     }
 }
 
+/// The memory footprint of the web content processes that render `pages`,
+/// in bytes: R1853 counts what the pages hold there (script heaps, DOM,
+/// decoded images) as well as this process. Nil when a page has no process
+/// or a process's footprint cannot be read.
+///
+/// WebKit has no public way to name a page's process: the pid comes from
+/// `WKWebView`'s `_webProcessIdentifier` (SPI, read in test code only), and
+/// its footprint from `proc_pid_rusage`.
+func spikeWebContentFootprint(_ pages: [WKWebView]) -> (processes: Int, bytes: Int)? {
+    let selector = NSSelectorFromString("_webProcessIdentifier")
+    var pids: Set<pid_t> = []
+    for page in pages {
+        guard page.responds(to: selector), let pid = (page.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0 else {
+            return nil
+        }
+        pids.insert(pid)
+    }
+    var bytes = 0
+    for pid in pids {
+        guard let footprint = spikeFootprint(pid: pid) else { return nil }
+        bytes += footprint
+    }
+    return (pids.count, bytes)
+}
+
+/// Another process's memory footprint, in bytes, or nil when the system
+/// does not tell.
+func spikeFootprint(pid: pid_t) -> Int? {
+    var usage = rusage_info_v4()
+    let result = withUnsafeMutablePointer(to: &usage) { pointer in
+        pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+    }
+    return result == 0 ? Int(usage.ri_phys_footprint) : nil
+}
+
 /// This process's memory footprint (what Xcode and jetsam count), in bytes.
 func spikeFootprint() -> Int {
     var info = task_vm_info_data_t()

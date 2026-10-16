@@ -95,6 +95,10 @@ extension RenderingSpikes {
             #expect(result.seekedTo >= mp3.duration * 0.89, "seeked to \(result.seekedTo) of \(mp3.duration)")
             #expect(result.playedTo > result.seekedTo + 0.3, "played from \(result.seekedTo) to \(result.playedTo)")
             let ranged = Self.rangedAnswers(handler, path: "/_long.mp3", total: mp3.data.count)
+            // Every ranged request was answered 206 with the bytes its
+            // Content-Range names.
+            let asked = handler.requests(for: "/_long.mp3").filter { $0.range != nil }
+            #expect(!asked.isEmpty && ranged.count == asked.count, "\(asked)")
             // At least one ranged request starts in the last fifth of the file:
             // the seek fetched from there instead of reading everything.
             let late = ranged.filter { request in
