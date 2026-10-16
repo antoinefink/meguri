@@ -12,8 +12,8 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, DUMP_TABLES, DraftArgs, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario, Side, Step,
-    SyncKind, TemplateRequest, TextRequest,
+    ActorName, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind, RefKind, Scenario,
+    Side, Step, SyncKind, TemplateRequest, TextRequest,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -108,6 +108,14 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
         if let Step::Export(args) = step {
             legacy_export(args).map_err(at)?;
+        }
+        // float-determinism.md F5.1: at most one fsrs_next per observe step.
+        if let Step::Observe(requests) = step
+            && requests.iter().filter(|r| r.kind == ObservationKind::FsrsNext).count() > 1
+        {
+            return Err(at(FormatError::new(
+                "fsrs_next appears at most once in an observe step",
+            )));
         }
         if let Step::Handoff(to) = step {
             if side == Some(*to) {
@@ -414,6 +422,9 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         }
         ObservationKind::Text => {
             TextRequest::from_mapping(map)?;
+        }
+        ObservationKind::FsrsNext => {
+            FsrsNextRequest::from_mapping(map)?;
         }
         // render-ops.md Q1.1-Q1.3, Q1.6.
         ObservationKind::Template => {

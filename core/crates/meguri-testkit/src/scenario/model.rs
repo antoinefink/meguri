@@ -1115,6 +1115,8 @@ pub enum ObservationKind {
     BlobDecode,
     PackageCol,
     Text,
+    /// float-determinism.md F5.
+    FsrsNext,
 }
 
 /// How a kind takes arguments.
@@ -1133,7 +1135,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 20] = [
+    pub const ALL: [ObservationKind; 21] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1154,6 +1156,7 @@ impl ObservationKind {
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
         ObservationKind::Text,
+        ObservationKind::FsrsNext,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1178,6 +1181,7 @@ impl ObservationKind {
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
+            ObservationKind::FsrsNext => "fsrs_next",
         }
     }
 
@@ -1202,7 +1206,8 @@ impl ObservationKind {
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
             | ObservationKind::Template
-            | ObservationKind::Text => ArgShape::Mapping,
+            | ObservationKind::Text
+            | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
         }
     }
@@ -1426,6 +1431,170 @@ impl TextRequest {
             TextInputs::Strings(strings.ok_or_else(|| bad("inputs are strings"))?)
         };
         Ok(TextRequest { fns, inputs })
+    }
+}
+
+/// One probe input of an `fsrs_next` request: a stored review card
+/// (float-determinism.md F2.1, F3.1), with its `f32` members read per
+/// `model/json-numbers` N2.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FsrsNextInput {
+    pub id: u64,
+    pub card_id: u64,
+    pub reps: u64,
+    pub s: f32,
+    pub d: f32,
+    pub elapsed_days: u32,
+    pub scheduled_days: u32,
+    pub dr: f32,
+    /// A member of the request's `param_sets`.
+    pub params: String,
+    pub max_ivl: u32,
+}
+
+/// An `fsrs_next` observation request (float-determinism.md F5.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FsrsNextRequest {
+    /// Parameter sets by name: 0, 17, 19 or 21 `f32` values.
+    pub param_sets: BTreeMap<String, Vec<f32>>,
+    /// 1 to 1,000 inputs.
+    pub inputs: Vec<FsrsNextInput>,
+}
+
+/// The most inputs one `fsrs_next` request holds (F5.1).
+pub const FSRS_NEXT_MAX_INPUTS: usize = 1000;
+
+/// The members of an `fsrs_next` input (F2.1).
+const FSRS_NEXT_MEMBERS: [&str; 10] = [
+    "card_id",
+    "d",
+    "dr",
+    "elapsed_days",
+    "id",
+    "max_ivl",
+    "params",
+    "reps",
+    "s",
+    "scheduled_days",
+];
+
+/// `^[a-z0-9][a-z0-9-]*$`: a parameter set's name (F5.1).
+fn param_set_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// A JSON number read as `f32` (`model/json-numbers` N2): an integer literal
+/// to the nearest `f32`, any other to the nearest 64-bit float, then to the
+/// nearest `f32`.
+pub fn json_f32(value: &Value) -> Option<f32> {
+    let n = value.as_number()?;
+    if let Some(i) = n.as_i64() {
+        return Some(i as f32);
+    }
+    if let Some(u) = n.as_u64() {
+        return Some(u as f32);
+    }
+    n.as_f64().map(|x| x as f32)
+}
+
+impl FsrsNextInput {
+    /// Reads one input with scenario.schema.json's `fsrs_next_input` rules.
+    pub fn from_value(value: &Value) -> Result<FsrsNextInput, String> {
+        let map = value.as_object().ok_or("an input is an object")?;
+        let keys: BTreeSet<&str> = map.keys().map(String::as_str).collect();
+        if keys != BTreeSet::from(FSRS_NEXT_MEMBERS) {
+            return Err(format!(
+                "an input has exactly the members {}",
+                FSRS_NEXT_MEMBERS.join(", ")
+            ));
+        }
+        let int = |key: &str, min: u64, max: u64| {
+            map[key]
+                .as_u64()
+                .filter(|v| (min..=max).contains(v))
+                .ok_or_else(|| format!("{key} is an integer from {min} to {max}"))
+        };
+        let small = |key: &str, min: u32, max: u32| int(key, min.into(), max.into()).map(|v| v as u32);
+        let number = |key: &str, ok: &dyn Fn(f64) -> bool, range: &str| {
+            map[key]
+                .as_f64()
+                .filter(|v| ok(*v))
+                .and_then(|_| json_f32(&map[key]))
+                .ok_or_else(|| format!("{key} is a number {range}"))
+        };
+        Ok(FsrsNextInput {
+            id: int("id", 0, u64::MAX)?,
+            card_id: int("card_id", 1, (1 << 53) - 1)?,
+            reps: int("reps", 0, 4_294_967_294)?,
+            s: number("s", &|v| (0.001..=36500.0).contains(&v), "from 0.001 to 36,500")?,
+            d: number("d", &|v| (1.0..=10.0).contains(&v), "from 1 to 10")?,
+            elapsed_days: small("elapsed_days", 0, 20_000)?,
+            scheduled_days: small("scheduled_days", 1, 36_500)?,
+            dr: number("dr", &|v| v > 0.0 && v < 1.0, "above 0 and below 1")?,
+            params: map["params"]
+                .as_str()
+                .filter(|p| param_set_name(p))
+                .ok_or("params names a parameter set")?
+                .to_owned(),
+            max_ivl: small("max_ivl", 1, 36_500)?,
+        })
+    }
+}
+
+impl FsrsNextRequest {
+    /// Reads parameter sets (`param_sets`, or the probe's `param-sets.json`):
+    /// at least one, each named `^[a-z0-9][a-z0-9-]*$` with 0, 17, 19 or 21
+    /// numbers read as `f32`.
+    pub fn param_sets(value: &Value) -> Result<BTreeMap<String, Vec<f32>>, String> {
+        let sets = value
+            .as_object()
+            .filter(|sets| !sets.is_empty())
+            .ok_or("param_sets is an object with at least one parameter set")?;
+        let mut param_sets = BTreeMap::new();
+        for (name, values) in sets {
+            if !param_set_name(name) {
+                return Err(format!("parameter set name {name:?} must match ^[a-z0-9][a-z0-9-]*$"));
+            }
+            let values = values
+                .as_array()
+                .filter(|v| matches!(v.len(), 0 | 17 | 19 | 21))
+                .and_then(|v| v.iter().map(json_f32).collect::<Option<Vec<f32>>>())
+                .ok_or_else(|| format!("parameter set {name} is a list of 0, 17, 19 or 21 numbers"))?;
+            param_sets.insert(name.clone(), values);
+        }
+        Ok(param_sets)
+    }
+
+    /// Reads the request with scenario.schema.json's rules and F5.1's: exactly
+    /// `param_sets` and `inputs`; at least one parameter set, each named
+    /// `^[a-z0-9][a-z0-9-]*$` with 0, 17, 19 or 21 numbers; 1 to 1,000 inputs,
+    /// each naming a set of `param_sets`.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<FsrsNextRequest, FormatError> {
+        let bad = |why: &str| FormatError::new(format!("observation fsrs_next: {why}"));
+        if map.len() != 2 || !map.contains_key("param_sets") || !map.contains_key("inputs") {
+            return Err(bad("takes exactly {param_sets, inputs}"));
+        }
+        let param_sets = FsrsNextRequest::param_sets(&map["param_sets"]).map_err(|e| bad(&e))?;
+        let items = map["inputs"]
+            .as_array()
+            .filter(|i| (1..=FSRS_NEXT_MAX_INPUTS).contains(&i.len()))
+            .ok_or_else(|| bad("inputs is a list of 1 to 1,000 inputs"))?;
+        let mut inputs = Vec::with_capacity(items.len());
+        for (k, item) in items.iter().enumerate() {
+            let input = FsrsNextInput::from_value(item).map_err(|e| bad(&format!("input {k}: {e}")))?;
+            if !param_sets.contains_key(&input.params) {
+                return Err(bad(&format!(
+                    "input {k}: params {:?} is not in param_sets",
+                    input.params
+                )));
+            }
+            inputs.push(input);
+        }
+        Ok(FsrsNextRequest { param_sets, inputs })
     }
 }
 

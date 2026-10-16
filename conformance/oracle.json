@@ -1,5 +1,6 @@
 {
-  "$comment": "The current oracle pin (specs/conformance/dsl.md D11): anki version and sha256 of oracle/requirements.lock. Goldens recorded with another lock_sha256 are stale. Change it only when adopting an oracle bump, together with the lock file and every golden.",
+  "$comment": "The current oracle pin (specs/conformance/dsl.md D11): anki version, sha256 of oracle/requirements.lock, and sha256 of oracle/macos/requirements-macos.lock for the macOS native lane (float-determinism.md F6.1). Goldens recorded with another lock_sha256 are stale; overlays recorded with another macos_lock_sha256 are stale. Change it only when adopting an oracle bump, together with both lock files, every golden and every overlay.",
   "anki_version": "26.9.3",
-  "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7",
+  "macos_lock_sha256": "869b29c42af493bd7b46960d5ee4e72e99ff92bfc8b2a10c190dc54a5513a244"
 }
