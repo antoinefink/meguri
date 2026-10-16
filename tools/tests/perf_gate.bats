@@ -108,6 +108,37 @@ PY
   validate "$result"
 }
 
+@test "perf-gate --check fails when a suite declares an interval no test measures" {
+  # The probe's test removed, testLaunch kept: SmokePerfTests still declares the probe.
+  python3 - "$SB/app/MeguriUITests/Performance/SmokePerfTests.swift" <<'PY'
+import sys
+p = sys.argv[1]
+text = open(p).read()
+start = text.index("    /// `perf/probe` emits")
+end = text.index("    /// Launch to the first screen")
+open(p, "w").write(text[:start] + text[end:])
+PY
+  run ! grep -q 'measure(app:' "$SB/app/MeguriUITests/Performance/SmokePerfTests.swift"
+  mg perf-gate --check
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].message | select(contains("no test of SmokePerfTests calls measure(app:)"))] | length')" -eq 1 ]
+  validate "$result"
+}
+
+@test "perf-gate fails when a suite's result lacks a case the catalog gates on it" {
+  perf_result perf-ui "$(jq -nc --argjson r "$SIM" '{schema_version: 1, suite: "SmokePerfTests", kind: "ui",
+    configuration: "Profile", attachments: 0, runner: $r, results: [
+      {name: "xctest.application-launch", test: "SmokePerfTests/testLaunch()", metric: "duration", unit: "ms",
+       percentile: "p95", value: 900, samples: 5}]}')"
+  mg perf-gate
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '.failures[0].id')" = missing/smoke-probe/synthetic-delay ]
+  [[ "$(field '.failures[0].message')" == *"measured no probe.syntheticDelay p50"*R1861* ]]
+  [ "$(field '.details.groups.smoke.status')" = missing ]
+  validate "$result"
+}
+
 @test "perf-gate judges this commit's results only: the latest per suite and runner" {
   perf_result perf-ui "$(smoke 30)" 0000000000000000000000000000000000000001
   perf_result perf-ui "$(smoke 31)" "" true

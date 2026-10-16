@@ -33,7 +33,14 @@ Rules (budgets.yaml `rules`):
     and fail only on an absolute breach.
   - R1803: a budget stated at 150k (or less) holds at every size up to
     150k, time budgets may be 2x at up to 500k, and above 500k a result only
-    has to exist (the feature completed).
+    has to exist (the feature completed). Every size is judged, but only a
+    measurement at a case's own fixture proves it: a 1M completion or a 500k
+    pass leaves a case stated at 150k missing (budget and group statuses,
+    device-run reports).
+  - R1861: every result of a suite must measure each case the catalog gates
+    on that suite (pending cases aside, at any fixture the case takes), or
+    the evaluation fails; `check` requires the suite to declare the
+    interval and to call measure(app:), which measures the declared ones.
   - R1866: a UI result not built in Profile, or whose tests kept attachments
     or screenshots, is refused before anything is judged.
 
@@ -383,7 +390,11 @@ INTERVAL_DECL = re.compile(
     r"(?:,\s*fieldReported:\s*(true|false)\s*)?\)")
 BRIDGE_DECL = re.compile(r"static\s+let\s+(\w+)\s*=\s*BridgeCall\(\s*\"([^\"]+)\"\s*\)")
 CLASS_DECL = re.compile(r"\bclass\s+(\w+)\s*:\s*(\w+)[^{]*\{")
+EXTENSION_DECL = re.compile(r"\bextension\s+(\w+)\b[^{]*\{")
 INTERVALS_VAR = re.compile(r"\bclass\s+var\s+intervalNames\s*:\s*\[String\]\s*\{")
+# PerfTestCase.measure(app:...): the only call that measures the declared
+# intervals (measureLaunch measures the launch alone).
+MEASURE_CALL = re.compile(r"\bmeasure\s*\(\s*app\s*:")
 
 
 def read_registry(path):
@@ -420,11 +431,23 @@ def braced(text, start):
     return text[start + 1:], n
 
 
+def calls_measure(text):
+    """Whether Swift `text` calls measure(app:...): not its definition, not a
+    line comment."""
+    for m in MEASURE_CALL.finditer(text):
+        line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+        if "//" not in line and not text[:m.start()].rstrip().endswith("func"):
+            return True
+    return False
+
+
 def read_perf_tests(directory, registry):
-    """{class: [interval names]} of the PerfTestCase subclasses under
-    `directory`: what each declares in `intervalNames` (IntervalNames.<x>.name
-    or a literal), inherited when a subclass does not override it."""
-    classes = {}
+    """{class: {declared, measures}} of the PerfTestCase subclasses under
+    `directory`: the interval names each declares in `intervalNames`
+    (IntervalNames.<x>.name or a literal), inherited when a subclass does
+    not override it, and whether it or a base class (their bodies or
+    extensions) calls measure(app:), which measures them."""
+    classes, extended = {}, {}
     for dirpath, _, files in os.walk(directory):
         for name in sorted(files):
             if not name.endswith(".swift"):
@@ -440,23 +463,29 @@ def read_perf_tests(directory, registry):
                     declared = [registry["idents"].get(i, "IntervalNames." + i)
                                 for i in re.findall(r"IntervalNames\.(\w+)\.name", inner)]
                     declared += re.findall(r"\"([^\"\\]+)\"", inner)
-                classes[m.group(1)] = {"base": m.group(2), "declared": declared}
+                classes[m.group(1)] = {"base": m.group(2), "declared": declared, "measures": calls_measure(body)}
+            for m in EXTENSION_DECL.finditer(text):
+                body, _ = braced(text, m.end() - 1)
+                extended[m.group(1)] = extended.get(m.group(1), False) or calls_measure(body)
 
     def resolve(cls, seen=()):
+        """(declared, measures) of `cls`, or None when it is no PerfTestCase."""
         info = classes.get(cls)
         if info is None or cls in seen:
             return None
-        if info["base"] != "PerfTestCase" and resolve(info["base"], seen + (cls,)) is None:
-            return None
-        if info["declared"] is not None:
-            return info["declared"]
-        return [] if info["base"] == "PerfTestCase" else resolve(info["base"], seen + (cls,))
+        base = None
+        if info["base"] != "PerfTestCase":
+            base = resolve(info["base"], seen + (cls,))
+            if base is None:
+                return None
+        declared = info["declared"] if info["declared"] is not None else (base[0] if base else [])
+        return declared, info["measures"] or extended.get(cls, False) or bool(base and base[1])
 
     out = {}
     for cls in classes:
-        names = resolve(cls)
-        if names is not None:
-            out[cls] = names
+        found = resolve(cls)
+        if found is not None:
+            out[cls] = {"declared": found[0], "measures": found[1]}
     return out
 
 
@@ -522,10 +551,14 @@ def check(catalog, root, milestones=None):
             errors.append("%s: no UI performance test emits %s: %s is not a PerfTestCase subclass under %s"
                           % (c["key"], c["name"], c["suite"], paths["perf_tests"]))
             continue
+        suite = tests[c["suite"]]
         for n in registered:
-            if n not in tests[c["suite"]]:
+            if n not in suite["declared"]:
                 errors.append("%s: %s does not declare %s in its intervalNames, so no UI performance test emits it"
                               % (c["key"], c["suite"], n))
+        if registered and not suite["measures"]:
+            errors.append("%s: no test of %s calls measure(app:), so none emits %s: a declaration alone measures "
+                          "nothing (R1861)" % (c["key"], c["suite"], ", ".join(registered)))
 
     # R1861: every user-facing interval has a catalog entry.
     named = {c["name"] for c in catalog["cases"]}
@@ -687,6 +720,15 @@ def fixture_rule(case, row_fixture, rules):
     return ("scale", 1)
 
 
+def covers(case, row_fixture):
+    """Whether a measurement at `row_fixture` (None: the case's) is at the
+    collection the case's limit is stated for. Other sizes are judged by
+    R1803's rules, but only this one proves the case."""
+    cf = case["fixture"]
+    rf = row_fixture if row_fixture is not None else cf
+    return rf == cf or (size_of(cf) is not None and size_of(cf) == size_of(rf))
+
+
 def regression_percent(value, base):
     if base == 0:
         return 0.0 if value <= 0 else math.inf
@@ -697,14 +739,22 @@ def over(pct, threshold):
     return round(pct, 6) > threshold
 
 
-def case_matches(case, doc, row, place, family):
-    """Whether `row` of `doc` measures `case` (its unit aside: a unit that
-    differs is a failure, not another case)."""
+def case_applies(case, doc, place, family):
+    """Whether `case` is measured by results of `doc`'s suite, placement and
+    device family."""
     if place not in case["where"] or case["suite"] != doc["suite"]:
         return False
     if family is not None and family not in case["devices"]:
         return False
     if family is None and place in UI_PLACEMENTS and len(case["devices"]) < len(DEVICES):
+        return False
+    return True
+
+
+def case_matches(case, doc, row, place, family):
+    """Whether `row` of `doc` measures `case` (its unit aside: a unit that
+    differs is a failure, not another case)."""
+    if not case_applies(case, doc, place, family):
         return False
     if case["test"] and not fnmatch.fnmatchcase(row.get("test", ""), case["test"]):
         return False
@@ -805,36 +855,38 @@ def judge_icount(row, doc, base, rules):
 STATUS_ORDER = ("fail", "missing", "pending", "unchecked", "pass")
 
 
-def case_status(statuses):
-    if "fail" in statuses:
+def case_status(case, evaluations):
+    """fail when any evaluation of `case` fails; otherwise pass (or
+    unchecked) from those at its own fixture; None when none is there."""
+    if any(e["status"] == "fail" for e in evaluations):
         return "fail"
-    if "pass" in statuses:
+    at = [e["status"] for e in evaluations if covers(case, e["fixture"])]
+    if "pass" in at:
         return "pass"
-    return "unchecked"
+    return "unchecked" if at else None
 
 
 def rollup(catalog, evaluations, entries):
     """{entry or group: {status, cases: {status: n}, pending: [units]}} over
     the cases the perf jobs measure (a case measured only on devices is left
-    to the device runs, unless a device result is evaluated here)."""
+    to the device runs, unless a device result is evaluated here). A case
+    judged only at other sizes than its fixture is missing (or pending)."""
     per_case = {}
     for e in evaluations:
         if e.get("case"):
-            per_case.setdefault(e["case"], []).append(e["status"])
+            per_case.setdefault(e["case"], []).append(e)
     out = {}
     for name, cases in entries:
         counts, pending = {}, []
         for c in cases:
-            if c["key"] in per_case:
-                s = case_status(per_case[c["key"]])
-            elif set(c["where"]) <= {"device"}:
-                continue
-            elif c["pending"]:
-                s = "pending"
-                if c["pending"] not in pending:
+            evs = per_case.get(c["key"], [])
+            s = case_status(c, evs)
+            if s is None:
+                if not evs and set(c["where"]) <= {"device"}:
+                    continue
+                s = "pending" if c["pending"] else "missing"
+                if c["pending"] and c["pending"] not in pending:
                     pending.append(c["pending"])
-            else:
-                s = "missing"
             counts[s] = counts.get(s, 0) + 1
         status = next((s for s in STATUS_ORDER if counts.get(s)), "device-only")
         out[name] = {"status": status, "cases": counts, "pending": sorted(pending)}
@@ -845,7 +897,7 @@ def evaluate(catalog, inputs, baselines, require=(), problems=()):
     """The evaluation of `inputs` ([{path, job, run_id, result}]) against the
     catalog and `baselines` ({(runner id, suite): baseline document})."""
     rules = catalog["rules"]
-    evaluations, tracked, failures, warnings, recorded = [], [], [], [], []
+    evaluations, tracked, failures, warnings, recorded, unmeasured = [], [], [], [], [], []
     untracked = 0
     for p in problems:
         failures.append({"id": "input", "message": p})
@@ -869,6 +921,7 @@ def evaluate(catalog, inputs, baselines, require=(), problems=()):
             continue
         base = baselines.get((doc["runner"]["id"], doc["suite"]))
         base = baseline_rows(base) if base is not None else None
+        measured, elsewhere = set(), {}
         for row in doc["results"]:
             if doc["kind"] == "instruction-count":
                 evaluations.append(dict(judge_icount(row, doc, base, rules), input=i))
@@ -882,10 +935,25 @@ def evaluate(catalog, inputs, baselines, require=(), problems=()):
                 if not case_matches(case, doc, row, place, family):
                     continue
                 if row["unit"] == case["unit"] and fixture_rule(case, row.get("fixture"), rules) is None:
+                    elsewhere.setdefault(case["key"], []).append(row.get("fixture"))
                     continue
                 matched = True
+                measured.add(case["key"])
                 evaluations.append(dict(judge(case, row, doc, place, family, base, rules), input=i))
             untracked += 0 if matched else 1
+        # R1861: the suite's result measures every case the catalog gates on
+        # it; a declared interval no test measures has no row.
+        if doc["kind"] != "instruction-count":
+            for case in catalog["cases"]:
+                if case["pending"] or case["key"] in measured or not case_applies(case, doc, place, family):
+                    continue
+                at = sorted({f or "no fixture" for f in elsewhere.get(case["key"], [])})
+                unmeasured.append({"id": "missing/%s" % case["key"], "message": (
+                    "%s on %s (%s) measured no %s %s for %s: a suite's results measure every case the catalog "
+                    "gates on it (R1861)%s" % (
+                        doc["suite"], doc["runner"]["id"], item.get("path"), case["name"], case["percentile"] or "",
+                        case["key"], ("; its rows are at %s, the case is at %s" % (", ".join(at), case["fixture"]))
+                        if at else ""))})
     for job in require:
         if not any(r["job"] == job for r in recorded):
             failures.append({"id": "require/%s" % job,
@@ -897,6 +965,7 @@ def evaluate(catalog, inputs, baselines, require=(), problems=()):
             failures.append({"id": "budget/%s" % target if e["case"] else target, "message": e["message"]})
         elif e["status"] == "unchecked":
             warnings.append(e["message"])
+    failures += unmeasured
     if not evaluations:
         warnings.append("nothing the catalog gates was measured: %d perf results, %d untracked rows"
                         % (len(recorded), untracked))
@@ -1113,11 +1182,12 @@ def device_report(catalog, evaluation, milestone, device, build_commit):
         rows = []
         for c in cases:
             mine = [e for e in evs if e["case"] == c["key"]]
-            if not mine:
-                rows.append({"case": c["key"], "status": "pending" if c["pending"] else "missing",
-                             "pending": c["pending"]})
             for e in mine:
                 rows.append(dict({"case": c["key"]}, **{k: e.get(k) for k in CASE_FIELDS}))
+            if not any(covers(c, e["fixture"]) for e in mine):
+                # Another size is judged, but proves nothing at the case's own (R1803).
+                rows.append({"case": c["key"], "status": "pending" if c["pending"] else "missing",
+                             "pending": c["pending"], "fixture": c["fixture"]})
         statuses = {r["status"] for r in rows}
         status = "fail" if "fail" in statuses else ("pass" if statuses == {"pass"} else "incomplete")
         budgets.append({"id": b["id"], "status": status, "cases": rows})
@@ -1210,14 +1280,16 @@ def verify_device_report(report, catalog, device, required):
         statuses, why = [], []
         for c in cases:
             measured = [r for r in recorded.get(c["key"], []) if r.get("status") not in ("missing", "pending")]
-            if not measured:
+            # Only a record at the case's own fixture proves it; one at
+            # another size (a 1M completion) is judged too (R1803).
+            if not any(covers(c, r.get("fixture")) for r in measured):
                 if c["pending"]:
                     pending.setdefault(c["pending"], []).append(c["key"])
                     statuses.append("pending")
                 else:
-                    problems.append("%s records no result for %s" % (rid, c["key"]))
+                    problems.append("%s records no result for %s%s" % (
+                        rid, c["key"], (" at " + c["fixture"]) if c["fixture"] else ""))
                     statuses.append("missing")
-                continue
             for r in measured:
                 status, problem = recheck(c, r, rules)
                 if status == "invalid":

@@ -32,13 +32,16 @@
 #     strict      true for "below": the limit itself fails
 #     fixture     the collection it is stated for (default 150k); a size
 #                 (10k, 150k, 500k, 1m) or a named fixture (exact match). A
-#                 UI row without a fixture is taken at the case's.
+#                 UI row without a fixture is taken at the case's. Rows at
+#                 other sizes are judged, but only one at this fixture proves
+#                 the case: a 1M completion leaves a 150k case missing.
 #     multiplier_500k, rule_1m  R1803: a time budget stated at 150k or less
 #                 may be 2x at up to 500k; above 500k a result only has to
 #                 exist (completes, no crash or hang)
 #     where       core-docker, core-mac, simulator (iOS simulators and the Mac
 #                 in the test VM) and device (real iPhone and iPad, the Mac
-#                 host); every budget has a device case (U256)
+#                 host); every limit a budget states has a device case (R1802,
+#                 U256), not only a core bench
 #     simulator   regression: only the +10% rule on simulators, whatever the
 #                 unit (KTD19: R1807, R1808, R1815)
 #     pending     the unit that lands the measurement. A pending case is
@@ -47,7 +50,8 @@
 #                 suite, test and fixture given here (or changes them here in
 #                 its own change), registers new intervals in IntervalNames and
 #                 removes `pending`; from then on --check requires its suite
-#                 to declare the interval (R1861).
+#                 to declare the interval and call measure(app:), and every
+#                 result of that suite must measure it (R1861).
 #     note        why a number or a choice is what it is
 #
 # Rules: budgets are absolute on devices and in the Mac core benchmarks. On
@@ -903,7 +907,16 @@ budgets:
         limit: 3000
         where: [core-mac]
         pending: U242
-      - id: device
+      - id: device-local-work
+        suite: SyncPerfTests
+        name: sync.normal.localWork
+        metric: duration
+        unit: ms
+        limit: 1000
+        where: [device]
+        pending: U256
+        note: The core bench's day of changes against a local server; local work only, transfer excluded.
+      - id: device-end-to-end
         suite: SyncPerfTests
         name: sync.startToEnd
         metric: duration
@@ -940,13 +953,39 @@ budgets:
         fixture: private-collection
         where: [core-mac]
         pending: U249
-      - id: device
+      - id: device-download
         suite: SyncPerfTests
         name: sync.fullDownload.localWork
         metric: duration
         unit: ms
         limit: 3000
         fixture: private-collection
+        where: [device]
+        pending: U256
+      - id: device-upload
+        suite: SyncPerfTests
+        name: sync.fullUpload.localWork
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: private-collection
+        where: [device]
+        pending: U256
+        note: To a local server only; the real-collection leg never syncs with the user's account (U256).
+      - id: device-download-150k
+        suite: SyncPerfTests
+        name: sync.fullDownload.localWork
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [device]
+        pending: U256
+      - id: device-upload-150k
+        suite: SyncPerfTests
+        name: sync.fullUpload.localWork
+        metric: duration
+        unit: ms
+        limit: 10000
         where: [device]
         pending: U256
   - id: R1844
@@ -1006,7 +1045,7 @@ budgets:
         limit: 10000
         where: [core-mac]
         pending: U242
-      - id: device
+      - id: device-apkg
         suite: MaintenancePerfTests
         name: import.apkg
         metric: duration
@@ -1015,6 +1054,15 @@ budgets:
         fixture: apkg-10k
         where: [device]
         pending: U256
+      - id: device-colpkg
+        suite: MaintenancePerfTests
+        name: import.colpkg
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [device]
+        pending: U256
+        note: At 150k like the core case, ten times the user's cards (R1803), so the real collection never needs a .colpkg on the device.
   - id: R1847
     title: Check Database on a healthy 150k collection takes at most 5 s in the background
     group: check-database
@@ -1205,9 +1253,18 @@ budgets:
         fixture: worst-media-30k
         where: [core-docker, core-mac]
         pending: U242
-      - id: device
+      - id: device-listings
         suite: MemoryPerfTests
         name: media.folderListings
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [device]
+        pending: U256
+      - id: device-hashes
+        suite: MemoryPerfTests
+        name: media.fileHashes
         metric: count
         unit: count
         percentile: max

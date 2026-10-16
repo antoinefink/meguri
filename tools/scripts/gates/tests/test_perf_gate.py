@@ -121,6 +121,19 @@ def inputs(*docs):
             for i, d in enumerate(docs)]
 
 
+def review_rows(start=120.0, tint=0, frames=(3, 4), swap=(3, 3), start_fixture=None, omit=()):
+    """A full ReviewLoopPerfTests run as raw_catalog() gates it: R1807's
+    frames against the native swap, R1813's start and R1816's tint."""
+    rows = [row("review.startToFirstCard", start, fixture=start_fixture),
+            row("review.answerToNextVisible", frames[0], metric="frames", unit="frames", fixture="review-corpus"),
+            row("review.answerToNextVisible", frames[1], metric="frames", unit="frames", percentile="p99",
+                fixture="review-corpus"),
+            row("probe.nativeSwap", swap[0], metric="frames", unit="frames"),
+            row("probe.nativeSwap", swap[1], metric="frames", unit="frames", percentile="p99"),
+            row("review.touchDownToTint", tint, metric="frames", unit="frames")]
+    return [r for r in rows if r["name"] not in omit]
+
+
 def baseline(runner, suite, rows, kind="ui", reason="first baseline"):
     return {"schema_version": 1, "runner": {"id": runner["id"], "kind": runner["kind"]}, "suite": suite,
             "kind": kind, "measured_commit": COMMIT, "reason": reason, "rows": rows}
@@ -148,8 +161,7 @@ class EvaluateScenarios(unittest.TestCase):
         self.assertEqual(ev["budgets"]["R1813"], "fail")
 
     def test_the_same_value_within_the_budget_passes(self):
-        res = ui("ReviewLoopPerfTests", [row("review.startToFirstCard", 149, test="ReviewLoopPerfTests/testStart()")],
-                 runner=IPHONE)
+        res = ui("ReviewLoopPerfTests", review_rows(start=149), runner=IPHONE)
         ev = perf_gate.evaluate(catalog(), inputs(res), {})
         self.assertEqual(ev["status"], "pass", failure_text(ev))
 
@@ -257,14 +269,10 @@ class EvaluateScenarios(unittest.TestCase):
 
 class EvaluateRules(unittest.TestCase):
     def test_frame_relative_budgets_compare_with_the_native_swap_on_the_same_device(self):
-        rows = [row("review.answerToNextVisible", 3, metric="frames", unit="frames", fixture="review-corpus"),
-                row("review.answerToNextVisible", 4, metric="frames", unit="frames", percentile="p99",
-                    fixture="review-corpus"),
-                row("probe.nativeSwap", 3, metric="frames", unit="frames"),
-                row("probe.nativeSwap", 3, metric="frames", unit="frames", percentile="p99")]
+        rows = review_rows(frames=(3, 4), swap=(3, 3))
         ev = perf_gate.evaluate(catalog(), inputs(ui("ReviewLoopPerfTests", rows, runner=IPHONE)), {})
         self.assertEqual(ev["status"], "pass", failure_text(ev))
-        rows[1]["value"] = 5  # p99 two frames after the baseline swap
+        rows = review_rows(frames=(3, 5), swap=(3, 3))  # p99 two frames after the baseline swap
         ev = perf_gate.evaluate(catalog(), inputs(ui("ReviewLoopPerfTests", rows, runner=IPHONE)), {})
         self.assertEqual(ev["status"], "fail")
         self.assertIn("R1807", failure_text(ev))
@@ -283,11 +291,15 @@ class EvaluateRules(unittest.TestCase):
         self.assertIn("R1816", failure_text(ev))
 
     def test_the_ktd19_exception_keeps_r1807_on_simulators_to_the_regression_rule(self):
-        rows = [row("review.answerToNextVisible", 6, metric="frames", unit="frames", fixture="review-corpus"),
-                row("probe.nativeSwap", 3, metric="frames", unit="frames")]
+        # Three and four frames after the swap: absolute, both would fail.
+        rows = review_rows(frames=(6, 7), swap=(3, 3))
         bl = baselines(baseline(SIM, "ReviewLoopPerfTests", [
             {"name": "review.answerToNextVisible", "metric": "frames", "unit": "frames", "percentile": "p95",
-             "fixture": "review-corpus", "value": 6}]))
+             "fixture": "review-corpus", "value": 6},
+            {"name": "review.answerToNextVisible", "metric": "frames", "unit": "frames", "percentile": "p99",
+             "fixture": "review-corpus", "value": 7},
+            {"name": "review.startToFirstCard", "metric": "duration", "unit": "ms", "percentile": "p95",
+             "value": 120.0}]))
         ev = perf_gate.evaluate(catalog(), inputs(ui("ReviewLoopPerfTests", rows)), bl)
         self.assertEqual(ev["status"], "pass", failure_text(ev))
 
@@ -343,6 +355,23 @@ class EvaluateRules(unittest.TestCase):
         ev = perf_gate.evaluate(catalog(), [], {})
         self.assertEqual(ev["status"], "warn")
 
+    def test_rows_at_other_sizes_are_judged_but_only_the_catalog_fixture_proves_a_budget(self):
+        # R1803: at 1M only completion counts and at 500k the 2x rule; both
+        # are judged, neither proves the budget stated at 150k.
+        for fixture, value in (("1m", 5000), ("500k", 150 * 1.9), ("10k", 100)):
+            ev = perf_gate.evaluate(catalog(), inputs(bench("open", [row("collection.open", value, fixture=fixture)])),
+                                    {})
+            self.assertEqual(ev["status"], "pass", failure_text(ev))
+            self.assertEqual(ev["budgets"]["R1823"], "missing", fixture)
+            self.assertEqual(ev["groups"]["open"]["status"], "missing", fixture)
+        res = bench("open", [row("collection.open", 140, fixture="150k"), row("collection.open", 5000, fixture="1m")])
+        ev = perf_gate.evaluate(catalog(), inputs(res), {})
+        self.assertEqual((ev["status"], ev["budgets"]["R1823"]), ("pass", "pass"), failure_text(ev))
+        # A breach at another size still fails the budget.
+        res = bench("open", [row("collection.open", 140, fixture="150k"), row("collection.open", 310, fixture="500k")])
+        ev = perf_gate.evaluate(catalog(), inputs(res), {})
+        self.assertEqual((ev["status"], ev["budgets"]["R1823"]), ("fail", "fail"))
+
     def test_groups(self):
         res = [bench("open", [row("collection.open", 100)]),
                ui("ReviewLoopPerfTests", [row("review.startToFirstCard", 200)], runner=IPHONE)]
@@ -354,6 +383,62 @@ class EvaluateRules(unittest.TestCase):
         self.assertEqual(groups["editor"]["pending"], ["U244"])
         self.assertEqual(groups["search"]["status"], "missing")
         self.assertEqual(groups["review-loop"]["status"], "missing")
+
+
+class Completeness(unittest.TestCase):
+    """R1861: a declared interval is not an emitted one. Every result of a
+    suite must measure each case the catalog gates on that suite (pending
+    cases aside), or the gate fails."""
+
+    def test_a_suite_that_declares_the_probe_but_never_measures_it_fails(self):
+        # The probe's test removed, testLaunch kept: the result holds the
+        # launch time only, and SmokePerfTests still declares the probe.
+        res = ui("SmokePerfTests", [row("xctest.application-launch", 900.0, test="SmokePerfTests/testLaunch()")])
+        ev = perf_gate.evaluate(catalog(), inputs(res), {})
+        self.assertEqual(ev["status"], "fail")
+        self.assertIn("probe.syntheticDelay", failure_text(ev))
+        self.assertIn("probe-synthetic-delay/delay", failure_text(ev))
+        self.assertEqual(ev["groups"]["smoke"]["status"], "missing")
+        res = ui("SmokePerfTests", [row("probe.syntheticDelay", 30.0)])
+        self.assertNotEqual(perf_gate.evaluate(catalog(), inputs(res), {})["status"], "fail")
+
+    def test_a_result_without_one_of_its_suites_cases_fails_and_names_the_budget(self):
+        res = ui("ReviewLoopPerfTests", review_rows(omit=("review.touchDownToTint",)), runner=IPHONE)
+        ev = perf_gate.evaluate(catalog(), inputs(res), {})
+        self.assertEqual(ev["status"], "fail")
+        self.assertIn("R1816/same-frame", failure_text(ev))
+        self.assertIn("review.touchDownToTint", failure_text(ev))
+        self.assertEqual(ev["budgets"]["R1816"], "missing")
+
+    def test_rows_only_at_a_fixture_the_case_does_not_take_are_missing(self):
+        rows = [dict(r, fixture="review-corpus-scripted") if r["name"] == "review.answerToNextVisible" else r
+                for r in review_rows()]
+        ev = perf_gate.evaluate(catalog(), inputs(ui("ReviewLoopPerfTests", rows, runner=IPHONE)), {})
+        self.assertEqual(ev["status"], "fail")
+        self.assertIn("R1807/frames-p95", failure_text(ev))
+        self.assertIn("review-corpus-scripted", failure_text(ev))
+
+    def test_a_core_bench_must_measure_its_cases_too(self):
+        ev = perf_gate.evaluate(catalog(), inputs(bench("open", [row("collection.close", 5)])), {})
+        self.assertEqual(ev["status"], "fail")
+        self.assertIn("R1823/core", failure_text(ev))
+
+    def test_pending_cases_other_devices_and_instruction_counts_are_not_required(self):
+        # MemoryPerfTests' only case waits on U245.
+        ev = perf_gate.evaluate(catalog(), inputs(ui("MemoryPerfTests", [row("xctest.application-launch", 1.0)])), {})
+        self.assertNotEqual(ev["status"], "fail", failure_text(ev))
+        # R1816 is iPhone and iPad only: the Mac host's run does not owe it.
+        res = ui("ReviewLoopPerfTests", review_rows(omit=("review.touchDownToTint",)), runner=MAC)
+        ev = perf_gate.evaluate(catalog(), inputs(res), {})
+        self.assertEqual(ev["status"], "pass", failure_text(ev))
+        # Instruction counts are judged against their baseline, not cases.
+        raw = raw_catalog()
+        [b for b in raw["budgets"] if b["id"] == "R1823"][0]["cases"][0]["where"] = ["core-docker", "core-mac"]
+        res = bench("open", [row("open.instructions", 10, metric="instructions", unit="count", percentile=None)],
+                    runner=DOCKER, kind="instruction-count")
+        ev = perf_gate.evaluate(catalog(raw), inputs(res), {})
+        self.assertNotIn("R1823", failure_text(ev))
+        self.assertEqual(ev["status"], "warn")
 
 
 class Baselines(unittest.TestCase):
@@ -469,24 +554,48 @@ public struct BridgeCall {
     public static let coreVersion = BridgeCall("core_version")
 }
 """
-    TESTS = {
-        "SmokePerfTests.swift": """
+    SMOKE = """
 final class SmokePerfTests: PerfTestCase {
     override nonisolated class var intervalNames: [String] { [IntervalNames.probeSyntheticDelay.name] }
+
+    func testProbe() throws {
+        let app = launch(MeguriLaunch(route: "perf/probe"))
+        try measure(app: app) { _ in post("probe") }
+    }
+
+    func testLaunch() throws {
+        measureLaunch(MeguriLaunch(animations: false))
+    }
 }
-""",
+"""
+    TESTS = {
+        "SmokePerfTests.swift": SMOKE,
+        # The measuring call in a base class's helper.
         "ReviewLoopPerfTests.swift": """
 class ReviewPerfBase: PerfTestCase {
     override nonisolated class var intervalNames: [String] {
         [IntervalNames.answerToNextVisible.name, "probe.nativeSwap",
          IntervalNames.reviewStartToFirstCard.name]
     }
+
+    func session(_ app: XCUIApplication) throws {
+        try measure(
+            app: app, prepare: { _ in }) { _ in }
+    }
 }
-final class ReviewLoopPerfTests: ReviewPerfBase {}
+final class ReviewLoopPerfTests: ReviewPerfBase {
+    func testSession() throws { try session(launch(MeguriLaunch())) }
+}
 """,
+        # ... and in an extension.
         "BrowserSearchPerfTests.swift": """
 final class BrowserSearchPerfTests: PerfTestCase {
     override nonisolated class var intervalNames: [String] { [IntervalNames.searchFirstPage.name] }
+    func testPlain() throws { try search() }
+}
+
+extension BrowserSearchPerfTests {
+    func search() throws { try self.measure(app: launch(MeguriLaunch())) { _ in } }
 }
 """,
     }
@@ -565,6 +674,30 @@ final class BrowserSearchPerfTests: PerfTestCase {
         self.assertTrue(any("review.answerToNext" in e and "IntervalNames" in e for e in errors), errors)
         self.entry(raw, "R1807")["cases"][0]["pending"] = "U243"
         self.assertFalse(any("review.answerToNext " in e for e in self.check(raw)))
+
+    def write_test(self, name, text):
+        with open(os.path.join(self.root, "tests", name), "w") as f:
+            f.write(text)
+
+    def test_a_suite_that_declares_an_interval_but_never_measures_it_fails(self):
+        # The probe's test removed, testLaunch kept: the declaration stays,
+        # but measureLaunch measures no interval, so nothing emits the probe.
+        smoke = self.SMOKE.replace("""    func testProbe() throws {
+        let app = launch(MeguriLaunch(route: "perf/probe"))
+        try measure(app: app) { _ in post("probe") }
+    }
+""", """    /// The probe used to be measured with measure(app:) here.
+    func measure(app: XCUIApplication, action: () -> Void) {}
+""")
+        self.assertNotEqual(smoke, self.SMOKE)
+        self.write_test("SmokePerfTests.swift", smoke)
+        errors = self.check(self.raw())
+        self.assertTrue(any("SmokePerfTests" in e and "probe.syntheticDelay" in e and "measure(app:" in e
+                            for e in errors), errors)
+        # A measured interval the catalog does not need is not an error.
+        raw = self.raw()
+        raw["probes"][0]["cases"][0]["pending"] = "U243"
+        self.assertEqual(self.check(raw), [])
 
     def test_a_case_whose_suite_does_not_declare_its_interval_fails(self):
         raw = self.raw()
@@ -677,6 +810,33 @@ class DeviceRun(unittest.TestCase):
         outcome, message, _ = perf_gate.verify_device_report(report, catalog(), "ipad", ["R1813"])
         self.assertEqual(outcome, "fail")
 
+    def test_a_1m_completion_does_not_satisfy_the_150k_budget(self):
+        # R1803: at 1M the start only has to complete; R1813 is stated at 150k.
+        results = inputs(ui("ReviewLoopPerfTests", review_rows(start=5000.0, start_fixture="1m"), runner=IPHONE),
+                         ui("BrowserSearchPerfTests", [row("search.firstPage", 80.0)], runner=IPHONE))
+        report = self.report(results)
+        r1813 = [b for b in report["budgets"] if b["id"] == "R1813"][0]
+        self.assertEqual(r1813["status"], "incomplete")
+        self.assertIn("missing", [c["status"] for c in r1813["cases"]])
+        outcome, message, _ = perf_gate.verify_device_report(report, catalog(), "iphone", ["R1813"])
+        self.assertEqual(outcome, "fail")
+        self.assertIn("R1813/warm", message)
+        self.assertIn("150k", message)
+        # With the 150k measurement too, the budget passes.
+        rows = review_rows(start=120.0) + [row("review.startToFirstCard", 5000.0, fixture="1m")]
+        report = self.report(inputs(ui("ReviewLoopPerfTests", rows, runner=IPHONE)))
+        outcome, message, _ = perf_gate.verify_device_report(report, catalog(), "iphone", ["R1813"])
+        self.assertEqual(outcome, "pass", message)
+
+    def test_a_report_whose_only_record_of_a_case_is_a_1m_completion_fails(self):
+        # A hand-made report: R1813's one record moved to 1M, still "pass".
+        report = self.report()
+        b = [b for b in report["budgets"] if b["id"] == "R1813"][0]
+        b["cases"] = [dict(c, fixture="1m", value=5000.0, raw=5000.0) for c in b["cases"]]
+        outcome, message, _ = perf_gate.verify_device_report(report, catalog(), "iphone", ["R1813"])
+        self.assertEqual(outcome, "fail")
+        self.assertIn("150k", message)
+
     def test_a_report_needs_device_results(self):
         ev = perf_gate.evaluate(catalog(), inputs(ui("SmokePerfTests", [row("probe.syntheticDelay", 30)])), {})
         _, problems = perf_gate.device_report(catalog(), ev, "M1", "iphone", COMMIT)
@@ -755,6 +915,76 @@ class RealCatalog(unittest.TestCase):
         for groups in self.milestones["perf_gate_groups"].values():
             for g in groups:
                 self.assertIn(g, self.catalog["groups"])
+
+    def device_clauses(self, rid):
+        return sorted((c["name"], c["limit"], c["fixture"]) for c in self.catalog["cases"]
+                      if c["budget"] == rid and "device" in c["where"])
+
+    def test_every_clause_of_the_sync_import_and_media_budgets_has_a_device_case(self):
+        # R1802: every budget holds on the user's devices, so each limit the
+        # requirement states is measured there, not only in the Mac benches.
+        r1842 = [limit for _, limit, _ in self.device_clauses("R1842")]
+        self.assertIn(1000, r1842)  # 1 s of local work
+        self.assertIn(3000, r1842)  # 3 s end to end
+        r1843 = self.device_clauses("R1843")
+        for name in ("sync.fullUpload.localWork", "sync.fullDownload.localWork"):
+            self.assertIn((name, 3000, "private-collection"), r1843)  # the user's collection
+            self.assertIn((name, 10000, "150k"), r1843)
+        r1846 = self.device_clauses("R1846")
+        self.assertIn(("import.apkg", 3000, "apkg-10k"), r1846)
+        self.assertIn(10000, [limit for name, limit, _ in r1846 if name == "import.colpkg"])
+        self.assertEqual(sorted(n for n, _, _ in self.device_clauses("R1855")),
+                         ["media.fileHashes", "media.folderListings"])
+
+    def iphone_results(self, *suites):
+        return inputs(*(ui(s, rows, runner=IPHONE) for s, rows in suites))
+
+    def test_a_device_report_without_those_clauses_stays_incomplete(self):
+        results = self.iphone_results(
+            ("SyncPerfTests", [row("sync.startToEnd", 2000.0),
+                               row("sync.fullDownload.localWork", 2000.0, fixture="private-collection")]),
+            ("MaintenancePerfTests", [row("import.apkg", 2000.0, fixture="apkg-10k")]))
+        required = ["R1842", "R1843", "R1846"]
+        ev = perf_gate.evaluate(self.catalog, results, {})
+        report, problems = perf_gate.device_report(self.catalog, ev, "M1", "iphone", COMMIT)
+        self.assertEqual(problems, [])
+        statuses = {b["id"]: b["status"] for b in report["budgets"]}
+        self.assertEqual([statuses[r] for r in required], ["incomplete"] * 3)
+        outcome, message, _ = perf_gate.verify_device_report(report, self.catalog, "iphone", required)
+        self.assertEqual(outcome, "pending", message)  # U256 lands the device legs
+        # Once U256 lands them, the report misses them: it fails.
+        raw = copy.deepcopy(self.raw)
+        for b in raw["budgets"]:
+            if b["id"] in required:
+                for c in b["cases"]:
+                    if c["where"] == ["device"]:
+                        c.pop("pending", None)
+        landed, errors = perf_gate.normalize(raw)
+        self.assertEqual(errors, [])
+        ev = perf_gate.evaluate(landed, results, {})
+        report, _ = perf_gate.device_report(landed, ev, "M1", "iphone", COMMIT)
+        self.assertEqual([b["status"] for b in report["budgets"] if b["id"] in required], ["incomplete"] * 3)
+        outcome, message, _ = perf_gate.verify_device_report(report, landed, "iphone", required)
+        self.assertEqual(outcome, "fail")
+        for name in ("sync.normal.localWork", "sync.fullUpload.localWork", "import.colpkg"):
+            case = [c for c in landed["cases"] if c["name"] == name and c["where"] == ["device"]][0]
+            self.assertIn(case["key"], message)
+
+    def test_a_1m_launch_does_not_prove_the_150k_launch_budget(self):
+        rows = [row(n, 900.0, fixture="1m") for n in
+                ("xctest.application-launch", "launch.toDeckListInteractive", "launch.resumeToInteractive")]
+        ev = perf_gate.evaluate(self.catalog, self.iphone_results(("LaunchHomePerfTests", rows)), {})
+        report, problems = perf_gate.device_report(self.catalog, ev, "M1", "iphone", COMMIT)
+        self.assertEqual(problems, [])
+        self.assertEqual([b["status"] for b in report["budgets"] if b["id"] == "R1818"], ["incomplete"])
+        outcome, message, _ = perf_gate.verify_device_report(report, self.catalog, "iphone", ["R1818"])
+        self.assertNotEqual(outcome, "pass", message)
+
+    def test_the_smoke_without_its_probe_fails(self):
+        res = ui("SmokePerfTests", [row("xctest.application-launch", 900.0, test="SmokePerfTests/testLaunch()")])
+        ev = perf_gate.evaluate(self.catalog, inputs(res), {})
+        self.assertEqual(ev["status"], "fail")
+        self.assertIn("probe.syntheticDelay", failure_text(ev))
 
 
 if __name__ == "__main__":
