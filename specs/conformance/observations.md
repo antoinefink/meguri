@@ -48,6 +48,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
 | `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
+| `fields_check` | `{cases: [{notetype, fields} \| {note: #nN, fields?}, ...]}`, at most one request per step | `[{state, duplicates?}, ...]`, one per case: the field check of `specs/notes/field-check.md` on unsaved drafts, `duplicates` (logical note ids) only with the state `duplicate` (`note-ops.md` N4); never changes the collection |
 | `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |

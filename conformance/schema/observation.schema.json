@@ -254,6 +254,31 @@
             ]
           }
         },
+        "fields_check": {
+          "description": "specs/conformance/note-ops.md N4: one result per case, in case order; duplicates only with the state duplicate.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["state"],
+                "additionalProperties": false,
+                "properties": {
+                  "state": { "enum": ["normal", "empty", "missing_cloze", "notetype_not_cloze", "field_not_cloze"] }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["state", "duplicates"],
+                "additionalProperties": false,
+                "properties": {
+                  "state": { "const": "duplicate" },
+                  "duplicates": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/note_key" } }
+                }
+              }
+            ]
+          }
+        },
         "db_dump": { "$ref": "#/$defs/db_dump" },
         "sync": {
           "description": "specs/conformance/sync-ops.md S4: a result, or a rejection of the op's closed list.",

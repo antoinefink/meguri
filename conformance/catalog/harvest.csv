@@ -349,63 +349,63 @@ h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong
 h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
 had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",,deferred
 hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes restores the earlier row, removes an added key and restores a removed one; scenarios come with the undo op (U25)",,deferred
-h00dd7a3ecf58,python,tag,notes,unclassified,,,open
-h086997a07e68,python,tag,notes,unclassified,,,open
-h093e8eefc4fb,python,tag,notes,unclassified,,,open
-h0e48526720ac,python,tag,notes,unclassified,,,open
-h1753942ba715,python,tag,notes,unclassified,,,open
-h1a6674d12546,python,tag,notes,unclassified,,,open
-h21b38b36b10e,python,tag,notes,unclassified,,,open
-h29bfba9891f3,python,tag,notes,unclassified,,,open
-h498f28841425,python,tag,notes,unclassified,,,open
-h4fd1c300c9be,python,tag,notes,unclassified,,,open
-h7c0167c254eb,python,tag,notes,unclassified,,,open
-h8ec017fa8bdc,python,tag,notes,unclassified,,,open
-hb3be21cbb738,python,tag,notes,unclassified,,,open
-hb4a338c747b2,python,tag,notes,unclassified,,,open
-hb78d6a2b0271,python,tag,notes,unclassified,,,open
-hbc1c4bad3495,python,tag,notes,unclassified,,,open
-hc2d41d1889af,python,tag,notes,unclassified,,,open
-hc8ae2d43aae9,python,tag,notes,unclassified,,,open
-hcf98d05f053c,python,tag,notes,unclassified,,,open
-hf90ff3b47fc0,python,tag,notes,unclassified,,,open
-h0bc924c8e05f,rust,tag,notes,unclassified,,,open
-h0e7337c9f130,rust,tag,notes,unclassified,,,open
-h1145d1f031f2,rust,tag,notes,unclassified,,,open
-h1ec2b2ea9c20,rust,tag,notes,unclassified,,,open
-h28ba189d8c7e,rust,tag,notes,unclassified,,,open
-h29a2723c264d,rust,tag,notes,unclassified,,,open
-h2ed53ea93d68,rust,tag,notes,unclassified,,,open
-h346f0091fba0,rust,tag,notes,unclassified,,,open
-h3bc595fa00b0,rust,tag,notes,unclassified,,,open
-h4907663a10e2,rust,tag,notes,unclassified,,,open
-h4ee2959fd8e8,rust,tag,notes,unclassified,,,open
-h55e8477eea21,rust,tag,notes,unclassified,,,open
-h57651ff721da,rust,tag,notes,unclassified,,,open
-h5a6b3bd92841,rust,tag,notes,unclassified,,,open
-h5eb1c8260e8c,rust,tag,notes,unclassified,,,open
-h66f7a2aeee4f,rust,tag,notes,unclassified,,,open
-h6ce76081385b,rust,tag,notes,unclassified,,,open
-h7acd0470902a,rust,tag,notes,unclassified,,,open
-h7ba73914c295,rust,tag,notes,unclassified,,,open
-h7f3ad7c57016,rust,tag,notes,unclassified,,,open
-h83c15fb8bf40,rust,tag,notes,unclassified,,,open
-h87ed9c949919,rust,tag,notes,unclassified,,,open
-h8fb237008b4c,rust,tag,notes,unclassified,,,open
-h97fb2906cd6a,rust,tag,notes,unclassified,,,open
-h9c660fb50a5e,rust,tag,notes,unclassified,,,open
-ha4fba0e6523a,rust,tag,notes,unclassified,,,open
-hab1f710886fe,rust,tag,notes,unclassified,,,open
-hab3e195632ce,rust,tag,notes,unclassified,,,open
-haeb2e195c8b5,rust,tag,notes,unclassified,,,open
-hc981fbc25c3f,rust,tag,notes,unclassified,,,open
-hcc385fabbd1f,rust,tag,notes,unclassified,,,open
-he1455a2bccbd,rust,tag,notes,unclassified,,,open
-he257a95c303c,rust,tag,notes,unclassified,,,open
-he3c37320b8ea,rust,tag,notes,unclassified,,,open
-hf306bec628a4,rust,tag,notes,unclassified,,,open
-hf580907ab941,rust,tag,notes,unclassified,,,open
-hfc559c975ab6,rust,tag,notes,unclassified,,,open
+h00dd7a3ecf58,python,tag,notes,in-scope,"Rendering a card of a note not yet added, with a given template (template preview, U71)",,deferred
+h086997a07e68,python,tag,notes,in-scope,"Rendering a card of a note not yet added at a given ordinal (template preview, U71)",,deferred
+h093e8eefc4fb,python,tag,notes,not-applicable,The Python note object's mapping interface; Meguri has no such API,,done
+h0e48526720ac,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers; the stored tags follow tags/tags T4,,done
+h1753942ba715,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers; the stored tags follow tags/tags T4,,done
+h1a6674d12546,python,tag,notes,in-scope,A new note's card has ordinal 0,notes/records/add,done
+h21b38b36b10e,python,tag,notes,in-scope,"New cloze cards follow the deck their siblings share, else the note type's last deck",cardgen/placement/existing-note,done
+h29bfba9891f3,python,tag,notes,in-scope,"Rendering a card of a note not yet added (template preview, U71)",,deferred
+h498f28841425,python,tag,notes,in-scope,"Removing cards and the notes they leave empty, with graves (notes/note-records D2); its scenario op comes with Empty Cards (U35)",,deferred
+h4fd1c300c9be,python,tag,notes,in-scope,"Empty Cards with special fields on the front (U35, U131)",,deferred
+h7c0167c254eb,python,tag,notes,not-applicable,The Python note object refusing to save a note not yet added,,done
+h8ec017fa8bdc,python,tag,notes,in-scope,Fields stored joined by U+001F,notes/records/add,done
+hb3be21cbb738,python,tag,notes,not-applicable,The Python note object's in-memory tag helpers,,done
+hb4a338c747b2,python,tag,notes,in-scope,"The cloze numbers of a note's fields, seen through the ordinals of its cards",cardgen/cloze/numbers,done
+hb78d6a2b0271,python,tag,notes,in-scope,"Rendering a cloze card of a note not yet added (template preview, U71)",,deferred
+hbc1c4bad3495,python,tag,notes,in-scope,The field check of a plain note is normal,notes/fields-check/states,done
+hc2d41d1889af,python,tag,notes,not-applicable,The Python note object raising on an unknown field name,,done
+hc8ae2d43aae9,python,tag,notes,not-applicable,The Python note constructor's argument rules,,done
+hcf98d05f053c,python,tag,notes,in-scope,"Cards from an added template (U34), Empty Cards (U35) and an edit that adds a card; the template and Empty Cards parts wait for those units",cardgen/normal/edits-only-add,deferred
+hf90ff3b47fc0,python,tag,notes,not-applicable,The Python note object's in-memory tag string helpers; the stored tags follow tags/tags T4,,done
+h0bc924c8e05f,rust,tag,notes,in-scope,Change Deck recomputes memory states with the target preset (U87 with U49's hook),,deferred
+h0e7337c9f130,rust,tag,notes,in-scope,Updating notes stores their new fields and adds required cards,notes/save/untouched-fields cardgen/normal/edits-only-add,done
+h1145d1f031f2,rust,tag,notes,in-scope,Change Deck recomputes memory states (U87 with U49's hook),,deferred
+h1ec2b2ea9c20,rust,tag,notes,in-scope,Deleting notes removes their cards,storage/graves/delete-note,done
+h28ba189d8c7e,rust,tag,notes,in-scope,"Transforming many notes with or without card generation and stamps (the bulk-operation framework, U86)",,deferred
+h29a2723c264d,rust,tag,notes,in-scope,Change Deck moves the cards to the target deck (U87),,deferred
+h2ed53ea93d68,rust,tag,notes,in-scope,Change Deck leaves scheduling alone (U87),,deferred
+h346f0091fba0,rust,tag,notes,in-scope,Change Deck to the same deck recomputes nothing (U87),,deferred
+h3bc595fa00b0,rust,tag,notes,in-scope,The field names of the selected notes for Find and Replace (U86),,deferred
+h4907663a10e2,rust,tag,notes,in-scope,Undo and redo of adding and deleting notes; scenarios come with the undo op (U25),,deferred
+h4ee2959fd8e8,rust,tag,notes,in-scope,Saving an unchanged note keeps its stamps; a change stamps it,storage/noop/identical-note-rewrite notes/save/untouched-fields,done
+h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),,deferred
+h57651ff721da,rust,tag,notes,in-scope,A note type's default deck for the Add screen (U191),,deferred
+h5a6b3bd92841,rust,tag,notes,in-scope,Change Deck remaps remaining learning steps to the new preset (U87 with U49's hook),,deferred
+h5eb1c8260e8c,rust,tag,notes,not-applicable,Reading a note through the protobuf interface; Meguri reads rows by model/row-records,,done
+h66f7a2aeee4f,rust,tag,notes,in-scope,Change Deck keeps remaining steps when the old preset had none (U87 with U49's hook),,deferred
+h6ce76081385b,rust,tag,notes,in-scope,Adding a note gives it an id; a request without a note is the protobuf interface's,notes/records/add,done
+h7acd0470902a,rust,tag,notes,not-applicable,Listing a note's card ids through the protobuf interface; no stored behavior,,done
+h7ba73914c295,rust,tag,notes,in-scope,"Add-screen defaults for deck and note type, current deck rules (U191)",,deferred
+h7f3ad7c57016,rust,tag,notes,in-scope,"GUID text encoding (text/guid G2, G4); checked by U20's Rust tests against G4's table, since GUIDs Anki creates are random",,deferred
+h83c15fb8bf40,rust,tag,notes,in-scope,"Regenerating cards and stamps after outside changes to notes (the bulk-operation framework, U86)",,deferred
+h87ed9c949919,rust,tag,notes,in-scope,Change Deck with FSRS off computes no memory state (U87),,deferred
+h8fb237008b4c,rust,tag,notes,in-scope,Change Deck recomputes memory states only for the moved cards (U87 with U49's hook),,deferred
+h97fb2906cd6a,rust,tag,notes,in-scope,Adding a note: a note requiring no card gets one; the refusals of a wrong field count or note type are Meguri tests,cardgen/normal/conditionals notes/records/add,done
+h9c660fb50a5e,rust,tag,notes,in-scope,Bulk add (notes/note-records A5); its scenarios come with the importers (U120),,deferred
+ha4fba0e6523a,rust,tag,notes,in-scope,"Updating several notes without an undo step, as the local servers do (U137)",,deferred
+hab1f710886fe,rust,tag,notes,in-scope,Add-screen defaults for deck and note type (U191),,deferred
+hab3e195632ce,rust,tag,notes,in-scope,Deleting notes removes them with their cards and graves,storage/graves/delete-note,done
+haeb2e195c8b5,rust,tag,notes,in-scope,The field check through the protobuf interface,notes/fields-check/states,done
+hc981fbc25c3f,rust,tag,notes,in-scope,A note that requires no card gets ordinal 0; edits add the cards that become required; cloze numbers above 500 map to ordinal 499,cardgen/normal/conditionals cardgen/normal/edits-only-add cardgen/cloze/numbers cardgen/cloze/above-500,done
+hcc385fabbd1f,rust,tag,notes,in-scope,Change Deck skips cards already in the target deck (U87),,deferred
+he1455a2bccbd,rust,tag,notes,in-scope,Change Deck remaps remaining relearning steps to the new preset (U87 with U49's hook),,deferred
+he257a95c303c,rust,tag,notes,in-scope,"The field check states: empty, cloze in a standard note type, missing cloze, cloze outside a cloze field, duplicate",notes/fields-check/states notes/fields-check/duplicates,done
+he3c37320b8ea,rust,tag,notes,in-scope,"The cloze numbers of a note, seen through the ordinals of its cards",cardgen/cloze/numbers,done
+hf306bec628a4,rust,tag,notes,in-scope,First-field checksum,text/fields/checksum,done
+hf580907ab941,rust,tag,notes,in-scope,"The single note type of selected notes, for Change Note Type (U35)",,deferred
+hfc559c975ab6,rust,tag,notes,in-scope,NFC on save follows normalize_note_text; the search half is U81's,notes/save/normalize-off,done
 h14ea0a8ef304,python,tag,notetypes,unclassified,,,open
 h1d25e53134b6,python,tag,notetypes,unclassified,,,open
 h29e9a6801163,python,tag,notetypes,unclassified,,,open
@@ -456,7 +456,7 @@ h6df8b626e405,rust,tag,notetypes,unclassified,,,open
 h706cf39b03b8,rust,tag,notetypes,unclassified,,,open
 h74bea2ac61c6,rust,tag,notetypes,unclassified,,,open
 h82e783a37a13,rust,tag,notetypes,unclassified,,,open
-h862557d9421e,rust,supplementary,notetypes,unclassified,,,open
+h862557d9421e,rust,supplementary,notetypes,in-scope,"Main-branch test of the deck fallback chain (override or siblings, then the given deck, then Default), which R791 and R792 ask for; at 26.09.3 Anki goes to Default at once, so Meguri's behavior is a deviation (deck-placement-chain)",cardgen/placement/new-note cardgen/placement/existing-note,done
 h87642d5d640c,rust,tag,notetypes,unclassified,,,open
 h8c43ce71aafa,rust,tag,notetypes,unclassified,,,open
 h8fe1bf6272d1,rust,tag,notetypes,unclassified,,,open
