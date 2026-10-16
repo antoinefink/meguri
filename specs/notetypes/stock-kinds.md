@@ -103,7 +103,8 @@ The runtime falls back to its own colors when a property is missing; Meguri defi
 ## K9. What is compared with Anki
 
 - Compared (scenarios and goldens): names, field names, order, count, options, tags and protection, template names and count, `kind`, `original_stock_kind`, sort field, card requirements, ids and stamps of a new collection, and the cards that notes of each kind generate.
-- Not compared: template text, CSS and the LaTeX values' effect. The CSS and templates are Meguri's by design (R908 deviation); goldens never hold Anki's (R1959). Meguri's own tests (`core/crates/meguri-engine/tests/stock_kinds.rs`) check K5–K7 on Meguri's text: the referenced fields and filters, `<hr id=answer>`, the Image Occlusion ids, setup call, toggle button and the six properties.
+- Compared live (T1), as a status only: every card of a note of each kind gets, when Anki renders it for review from Meguri's templates, the status Anki's own templates give it (`ok` for every card of `stock-render-handoff`; `specs/conformance/render-ops.md` Q4). A Meguri template that references a field the kind lacks, leaves a section open, or whose front Anki finds blank where its own is not, fails there.
+- Not compared: template text, CSS, the rendered question and answer (text and length) and the LaTeX values' effect. The CSS and templates are Meguri's by design (R908 deviation); goldens never hold Anki's (R1959). Meguri's own tests (`core/crates/meguri-engine/tests/stock_kinds.rs`) check K5–K7 on Meguri's text: the referenced fields and filters, `<hr id=answer>`, the Image Occlusion ids, setup call, toggle button and the six properties.
 
 ## K10. Scenarios
 
@@ -111,5 +112,6 @@ The runtime falls back to its own colors when a property is missing; Meguri defi
 |---|---|
 | `notetypes/records/stock-new-collection` | K2 |
 | `notetypes/records/stock-structure` | K1, K3, K4 through `notetype_structure`; K8 |
-| `notetypes/records/stock-handoff` | live (T1): a collection Meguri creates, read by the oracle: the same structure, the cards notes of each kind generate, and no Check Database problem |
+| `notetypes/records/stock-render-handoff` | live (T1): Meguri's new collection, handed over before any step; the oracle adds one note of each kind by its stored name (Basic (optional reversed card) with `Add Reverse` filled, Cloze with `c1` and `c2`, Image Occlusion with two masks, an image, a header, back extra and comments) and reports each card's render status, the cards each kind generated, and no Check Database problem: K2, K4, K5, K7 as Anki renders them |
+| `notetypes/records/stock-handoff` | live (T1): notes of each kind that Meguri adds (U27), read by the oracle: the same structure, the cards Meguri generated, and no Check Database problem |
 | `notetypes/records/io-on-demand` | `notetypes/records` N9 |

@@ -206,7 +206,7 @@ A clone is a new note type copied from an existing one:
 
 ## N12. Scenarios
 
-Every scenario below has its golden. Each runs on Meguri with U29's adapters and fresh collection (`specs/conformance/notetype-ops.md` T10) plus what the last column names; it is `pending` until those exist, and the unit that adds the last of them makes it active in `conformance/scenarios/notetypes/area.yaml` (D9.1). U29 makes active those with nothing in the last column.
+Every scenario below has its golden. Each runs on Meguri with U29's adapters and fresh collection (`specs/conformance/notetype-ops.md` T10) plus what the last column names; it is `pending` until those exist, and the unit that adds the last of them makes it active in `conformance/scenarios/notetypes/area.yaml` (D9.1). U29 makes active those with nothing in the last column. A live scenario needs on Meguri only what Meguri's own segments use (`specs/conformance/dsl.md` D9.2), and T1 alone runs it.
 
 | Scenario | Covers | Meguri also needs |
 |---|---|---|
@@ -218,7 +218,8 @@ Every scenario below has its golden. Each runs on Meguri with U29's adapters and
 | `notetypes/records/stamps` | N3.1, N3.2, N8; deviation `notetype-unchanged-save` | `setup.decks` (U28) |
 | `notetypes/records/clone` | N7 | `legacy_update` (U36) |
 | `notetypes/records/preserve-on-edit` | N1, N3.2; deviation `notetype-unknown-fields-kept` | `legacy_update`, `blob_decode`, `legacy_json` (U36) |
-| `notetypes/records/stock-handoff` (live, T1) | `notetypes/stock-kinds` K2, K4, K9 | `add_note` (U27) |
+| `notetypes/records/stock-render-handoff` (live, T1) | `notetypes/stock-kinds` K2, K4, K5, K7, K9: Anki adds notes of every stock kind on the note types Meguri wrote and renders their cards without errors | (Meguri's segment is empty: it needs `handoff` and the new collection of T10.2, which holds the default deck the oracle adds the notes to) |
+| `notetypes/records/stock-handoff` (live, T1) | `notetypes/stock-kinds` K2, K4, K9, with the notes Meguri adds | `add_note` (U27) |
 
 The gate scenarios (`notetypes/schema-changes` G8) also need `setup.notes` (U27) and U34's edits.
 
