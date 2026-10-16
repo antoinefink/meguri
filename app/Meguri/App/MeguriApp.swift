@@ -61,6 +61,7 @@ struct MeguriApp: App {
         .windowResizability(.contentMinSize)
         .commands {
             SidebarCommands()
+            MainWindowCommands()
         }
         #else
         WindowGroup {

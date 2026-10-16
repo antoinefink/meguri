@@ -8,7 +8,8 @@ Date: 2026-10-16. Unit: U150. Toolchain: Xcode 27.0 (27A266a), macOS 27.0.1 (26A
 - `NavigationLayoutTests` in the VM (`tools/mg ui-test --platform mac --suite NavigationLayoutTests`, run 20261016T105834Z-94766), no synthesized input:
   - `testClosingTheMacWindowQuitsWithoutIntegrations`: flag off, close the window.
   - `testClosingTheMacWindowKeepsTheAppWithIntegrationsAndReopeningShowsIt`: flag on, close the window, then open the running app again with `NSWorkspace.openApplication` (what a Dock click sends).
-- In the app's own process (`ShellSnapshotTests`): the menu bar has no New Window item, no ⌘N and no Settings item, and the Window menu has a "Meguri" item.
+- In the app's own process (`ShellSnapshotTests`): the menu bar has no New Window item, no ⌘N and no Settings item.
+- The Window menu after the window closed, read by the same UI test (run 20261016T131637Z-52970).
 
 ## Result
 
@@ -17,9 +18,10 @@ Date: 2026-10-16. Unit: U150. Toolchain: Xcode 27.0 (27A266a), macOS 27.0.1 (26A
 | Flag off, window closed | the app quits (not running within 2 s) |
 | Flag on, window closed | no window, the process keeps running |
 | Flag on, app opened again | the window comes back, on the same deck page: the process and its navigation state survived |
+| Window menu, window closed | no item for the window: Close, Minimize, Zoom, the tiling items, Bring All to Front; no "Meguri" |
 
-The delegate's answer overrides the `Window` scene's quit-on-close.
+The delegate's answer overrides the `Window` scene's quit-on-close. The `Window` scene does not add a Window menu item that reopens it (swiftui-arch §2 assumed it would).
 
 ## Decision
 
-Keep `Window` plus the delegate adaptor (KTD10). The fallback (`WindowGroup` with `.commandsRemoved()` and no ⌘N) is not needed. Window > Meguri comes from the `Window` scene; the Dock icon reopens the window through `applicationShouldHandleReopen`. The integrations controller (U144) sets `AppDelegate.keepsRunningWithoutWindow` while an integration is enabled. Clicking Window > Meguri itself was not driven: synthesized input does not reach the app on macOS 27.0.1 (user step `mac-input`); the in-process menu check covers the item's presence.
+Keep `Window` plus the delegate adaptor (KTD10). The fallback (`WindowGroup` with `.commandsRemoved()` and no ⌘N) is not needed. The app adds Window > Meguri itself (`Mac/MainWindowCommands.swift`, `openWindow(id: "main")`); the Dock icon reopens the window through `applicationShouldHandleReopen`. The integrations controller (U144) sets `AppDelegate.keepsRunningWithoutWindow` while an integration is enabled. Clicking Window > Meguri was not driven: synthesized input does not reach the app on macOS 27.0.1 (user step `mac-input`); the tests check the item is there, with the window open (in process) and after it closed (run 20261016T141307Z-24112).

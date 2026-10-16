@@ -10,7 +10,7 @@ import AppKit
 
 @testable import Meguri
 
-/// The app shell (U150) in the app's own process: which layouts its
+/// The app shell (U150) in the app's own process: which states its
 /// snapshots cover, and on the Mac the window's lifetime policy (R11) and the
 /// menu bar, where nothing opens a second window (R6, R110). The snapshots
 /// themselves render in `ScreenSnapshots` (`MatrixRegistry` lists
@@ -21,18 +21,14 @@ import AppKit
         MatrixRegistry.screenCases(on: platform).filter { $0.subject == "shell.root" && $0.cell.deferredReason == nil }
     }
 
-    /// The tab layout on the iPhone in every state, the sidebar layout on
-    /// the iPad. The Mac's off-screen render cannot draw the split view
-    /// (MatrixRegistry).
-    @Test func theShellIsSnapshottedInBothLayouts() {
+    /// The tab layout on the iPhone in every state. The sidebar layout's
+    /// renders are not deterministic yet (MatrixRegistry, U252).
+    @Test func theShellsTabLayoutIsSnapshottedInEveryState() {
         #expect(ShellRootPreview.previewStates == [.typical, .error, .loading])
         let iphone = shellCells(on: .iphone)
-        let ipad = shellCells(on: .ipad)
         #expect(!iphone.isEmpty && iphone.allSatisfy { !$0.cell.device.horizontalSizeClassIsRegular })
-        #expect(!ipad.isEmpty && ipad.allSatisfy { $0.cell.device.horizontalSizeClassIsRegular })
-        #expect(shellCells(on: .mac).isEmpty)
         #expect(Set(iphone.map(\.state)) == ["typical", "loading", "error"])
-        #expect(Set(ipad.map(\.state)) == ["typical"])
+        #expect(shellCells(on: .ipad).isEmpty && shellCells(on: .mac).isEmpty)
     }
 
     #if os(macOS)
@@ -49,6 +45,11 @@ import AppKit
         #expect(!titles.contains { $0.hasPrefix("New Meguri Window") }, "\(titles)")
         #expect(!items.contains { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }, "⌘N opens something")
         #expect(!titles.contains { $0.hasPrefix("Settings") }, "a Settings item opens a Settings window (R110)")
+    }
+
+    @Test func theWindowMenuShowsTheMainWindow() throws {
+        let window = try #require(NSApp.mainMenu?.items.first { $0.title == "Window" }?.submenu, "no Window menu")
+        #expect(window.items.contains { $0.title == "Meguri" }, "\(window.items.map(\.title))")
     }
 
     @Test func closingTheWindowQuitsUnlessAnIntegrationIsOn() {
