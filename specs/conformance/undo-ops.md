@@ -59,7 +59,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `add_deck` | Add Deck | |
 | `add_note` | Add Note | `add_note`, `setup.notes` |
 | `add_note_type` | Add Note Type | |
-| `answer_card` | Answer Card | `answer` |
+| `answer_card` | Answer Card | `answer` (`sched/answering` A7) |
 | `build_deck` | Build Deck | (building or rebuilding a filtered deck) |
 | `bury` | Bury | |
 | `change_deck` | Change Deck | |
@@ -108,4 +108,4 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 ## V6. Driver and executor status
 
 - The oracle driver implements `undo`, `redo`, `remove_config`, `set_config`'s `undoable` and `undo_status` with U25's oracle-maintainer work, together with `protocol.json` and the testkit's scenario model; until then the undo scenarios have no goldens.
-- Meguri's executor implements `undo`, `redo` and `undo_status` in its undo adapter (`core/crates/meguri-testkit/src/exec/undo.rs`), and `undoable` and `remove_config` beside `set_config`, once the conformance session runs ops through the engine (U38's `CoreHost::open`). Until then the undo scenarios are `pending` (`dsl.md` D10), and so is any that needs another area's adapter (`edit_note` and `delete_notes`: U27; `answer`: U44).
+- Meguri's executor implements `undo`, `redo` and `undo_status` in its undo adapter (`core/crates/meguri-testkit/src/exec/undo.rs`), and `undoable` and `remove_config` beside `set_config`, once the conformance session runs ops through the engine (U38's `CoreHost::open`). Until then the undo scenarios are `pending` (`dsl.md` D10), and so is any that needs another area's adapter (`edit_note` and `delete_notes`: U27; `answer`: U44) or the new collection that every undo scenario starts from (`dsl.md` D8, U28).
