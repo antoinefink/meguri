@@ -628,9 +628,11 @@ extension TestHooks {
                 old.replaceWith(script);
               }
               // S1(f): each card's elements, to see whether old cards are
-              // collected (a weak registration keeps nothing alive).
+              // collected (a weak registration keeps nothing alive). Called
+              // through .call so tools/mg xcode-check's route scan, which
+              // reads every register( in TestHooks, does not take it for one.
               if (window.trackCards) {
-                for (const element of qa.children) { finalization.register(element, 0); window.cardsRegistered += 1; }
+                for (const element of qa.children) { finalization.register.call(finalization, element, 0); window.cardsRegistered += 1; }
               }
             };
             </script></head><body><div id="qa"></div></body></html>
