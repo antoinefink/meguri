@@ -492,7 +492,7 @@ fn closing_on_day_n_and_opening_on_day_n_plus_one_unburies_before_the_collection
 }
 
 #[test]
-fn legacy_timing_survives_an_answer_and_a_sync_without_creation_offset_and_switches_with_one() {
+fn legacy_timing_survives_a_card_write_and_a_sync_without_creation_offset_and_switches_with_one() {
     // D4's example: crt 2030-01-14 23:30 +01:00 seen on 2030-06-01 10:00
     // +02:00 is day 137 in legacy timing, 138 with creationOffset -60.
     let d = Day::paris_with(Timing::Legacy, &[("UPDATE col SET crt = 1894660200", Vec::new())]);
@@ -500,9 +500,14 @@ fn legacy_timing_survives_an_answer_and_a_sync_without_creation_offset_and_switc
     d.at(1_906_531_200);
     let next = 1_906_596_000;
     assert_eq!(d.check().today, 137);
+    // The rows an answer writes (card and revlog), by a stand-in: no
+    // scheduler answer path exists yet. U44 runs a real answer in
+    // `sched/day/legacy-timing-after-answer` (plan amendment, review-log
+    // U40 A2).
     let (_, review, _) = buried_cards(&d.c);
     steps::answer(&d.c, None, review).unwrap();
     assert_eq!(d.check(), report(137, next, None));
+    assert_eq!(d.config("creationOffset"), None);
 
     // A sync that leaves creationOffset absent (it moves `col.ls`).
     let subscription = d.subscribe();

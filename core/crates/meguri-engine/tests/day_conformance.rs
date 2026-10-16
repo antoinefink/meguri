@@ -5,9 +5,10 @@
 //! `conformance/deviations.yaml` applied (dsl.md D13).
 //!
 //! The scenarios start from a new collection, which Meguri's executor makes
-//! only once U28's bootstrap (or U29's stand-in) exists; until then T0 lists
-//! them pending, and this file plays them as Meguri's adapters would, with
-//! the engine's real day clock:
+//! only once U28's bootstrap exists; until then T0 lists them pending, U28
+//! activates them (plan, U40 Verification as amended, review-log U40 A1),
+//! and this file plays them as Meguri's adapters would, with the engine's
+//! real day clock:
 //!
 //! - **The new collection**: `tests/common/day.rs`, a copy of the schema-18
 //!   fixture with no notes or cards, `crt` and `creationOffset` from D11
@@ -26,7 +27,8 @@
 //!   runs the first check (D8).
 //!
 //! `sched/day/legacy-timing-after-answer` needs notes and answers (U27, U44;
-//! D14.3) and waits for them.
+//! D14.3) and waits for them: U44 runs it through the real answer path
+//! (review-log U40 A2).
 
 mod common;
 
