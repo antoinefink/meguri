@@ -1,0 +1,766 @@
+#!/usr/bin/env bats
+# Self-tests for the test tiers, merge gate, quarantine and scheduled runs
+# (U19: R1950-R1953, R1880, R1876, R1937, R1991; AE82 ordering). Each test
+# runs a sandbox repository with the gate's own families (gate, merge,
+# quarantine, nightly, milestone, session) and a tiers.yaml of made-up runs:
+# `t-job <name>` reports what $FX/<name>.* says (status, a status sequence,
+# failure ids, counts, details), and a fake `similarity` scan flags a file on
+# demand. The planning, evaluation, static checks, receipts, escalations and
+# fast-forwards are the real ones. A test that checks the real tiers.yaml
+# against the real job registry closes the file.
+
+bats_require_minimum_version 1.5.0
+# bats file_tags=gate
+
+REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+TRAILERS=$'Role: implementer\nSpec: sched/answer#A1\nSession: s-20261016T000000Z-0badcafe'
+
+setup_file() {
+  local t="$BATS_FILE_TMPDIR/template" f
+  mkdir -p "$t/core" "$t/docs" "$t/conformance/scenarios/smoke" "$t/conformance/scenarios/sched"
+  cp -R "$REPO_ROOT/tools" "$t/tools"
+  cp "$REPO_ROOT/.gitignore" "$t/"
+  for f in "$t"/tools/mg.d/*.sh; do
+    case "$(basename "$f")" in
+      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | session.sh) ;;
+      *) rm -f "$f" ;;
+    esac
+  done
+  printf 'id: smoke/a\n' >"$t/conformance/scenarios/smoke/a.yaml"
+  printf 'id: sched/b\n' >"$t/conformance/scenarios/sched/b.yaml"
+  printf '# notes\n' >"$t/docs/notes.md"
+  printf '[workspace]\n' >"$t/core/Cargo.toml"
+  cat >"$t/tools/gate/tiers.yaml" <<'EOF'
+version: 1
+tiers:
+  T0: {when: every change}
+  T1: {when: core changes}
+  T2: {when: nightly}
+  T3: {when: milestones}
+  T4: {when: milestones, on devices}
+runs:
+  - {id: static, job: static-checks, args: [--base, "{base}"], tier: T0, stage: static, placement: host, class: static, budget_s: 60}
+  - {id: static-tree, job: static-checks, args: [--base, "{base}"], merge_args: [--rev, "{tip}", --base, "{base}"], tier: T0, stage: static, placement: host, class: static, budget_s: 60, local: false, where: main}
+  - {id: pin-canary, job: t-job, args: [pin-canary], tier: T0, stage: canary, placement: docker:dev, class: unit, triggers: [core/], budget_s: 60}
+  - {id: unit, job: t-job, args: [unit], tier: T0, placement: docker:dev, class: unit, triggers: [core/], budget_s: 60}
+  - {id: conf, job: t-job, args: [conf], tier: T0, placement: [host, docker:dev], class: conformance, triggers: [core/, conformance/], budget_s: 60}
+  - {id: ui, job: t-job, args: [ui], tier: T0, placement: vm, needs: [simulator], class: ui, triggers: [app/], budget_s: 60}
+  - {id: slow, job: t-job, args: [slow], tier: T0, placement: host, class: tooling, triggers: [tools/slow/], budget_s: 1}
+  - {id: sim, job: similarity, args: [--base, "{base}"], merge_args: [--rev, "{tip}", --base, "{base}"], tier: T0, placement: [host, docker:similarity], needs: [refs], class: similarity, triggers: [core/, app/], budget_s: 60, local: false, where: main}
+  - {id: later, job: notices, tier: T0, placement: host, class: static, triggers: [core/], budget_s: 60, pending: U16}
+  - id: live
+    job: t-job
+    args: [live]
+    tier: T1
+    placement: [host, docker:oracle]
+    needs: [oracle]
+    oracle: true
+    local: false
+    class: conformance
+    budget_s: 60
+    filters:
+      core/: [smoke]
+      core/crates/meguri-sched/: [sched]
+      conformance/: ["*"]
+  - {id: fuzz, job: t-job, args: [fuzz, --seed, "{seed}"], tier: T2, schedule: nightly, placement: docker:fuzz, class: unit, budget_s: 60}
+  - {id: soak, job: t-job, args: [soak], tier: T2, schedule: weekly, placement: [host, docker:oracle], needs: [oracle, sync-server], class: sync, budget_s: 60}
+  - id: harvest
+    job: t-job
+    args: [harvest]
+    tier: T3
+    placement: host
+    class: conformance
+    budget_s: 60
+    require:
+      - {id: R1880-unclassified, summary: unclassified, max: 0}
+      - {id: R1880-in-scope, detail: harvest.by_classification.in-scope.statuses, only_keys: [pass], release: true}
+  - {id: audit, job: release-audit, tier: T3, release_only: true, placement: host, class: static, budget_s: 60, pending: U17}
+  - {id: device, job: device-run, tier: T4, placement: host, needs: [device], class: perf, budget_s: 60, user_step: device-run}
+utilities:
+  - {job: gate, why: runs the tiers}
+  - {job: merge, why: merges}
+  - {job: escalation, why: escalations}
+  - {job: quarantine, why: quarantine}
+  - {job: nightly, why: T2}
+  - {job: milestone, why: T3}
+  - {job: session, why: sessions}
+EOF
+  cat >"$t/tools/mg.d/zz-fakes.sh" <<'EOF'
+mg_job t-job host t_job "fake run: t-job <name> [args...]; reports what \$FX/<name>.* says"
+mg_job similarity host t_similarity "fake similarity scan: flags core/x.rs when \$FX/similarity.flag exists"
+# $FX/<name>@<checkout basename>.* overrides $FX/<name>.* in that checkout.
+t_job() {
+  local name="$1" root f status=pass line
+  shift
+  root="$(basename "$MG_ROOT")"
+  echo "t-job $name${*:+ $*} @$root" >>"$STUB_LOG"
+  f="$FX/$name"
+  { [ -e "$FX/$name@$root.status" ] || [ -e "$FX/$name@$root.seq" ]; } && f="$FX/$name@$root"
+  if [ -s "$f.seq" ]; then
+    status="$(head -n 1 "$f.seq")"
+    tail -n +2 "$f.seq" >"$f.seq.tmp" && mv "$f.seq.tmp" "$f.seq"
+  elif [ -f "$f.status" ]; then
+    status="$(cat "$f.status")"
+  fi
+  [ ! -f "$FX/$name.write" ] || printf 'written by a job\n' >"$MG_ROOT/$(cat "$FX/$name.write")"
+  [ ! -f "$FX/$name.sleep" ] || sleep "$(cat "$FX/$name.sleep")"
+  if [ -f "$FX/$name.counts" ]; then
+    while read -r k v; do mg_count "$k" "$v"; done <"$FX/$name.counts"
+  fi
+  if [ -f "$FX/$name.details" ]; then
+    jq -c 'to_entries[] | {(.key): .value}' "$FX/$name.details" >>"$MG_STATE/details.jsonl"
+  fi
+  case "$status" in
+    queued) mg_detail queued true; status=warn ;;
+    fail | error)
+      if [ -f "$FX/$name.failures" ]; then
+        while IFS= read -r line; do mg_failure "$line" "made-up failure $line"; done <"$FX/$name.failures"
+      else
+        mg_failure "$name-$status" "made-up $status"
+      fi
+      ;;
+  esac
+  mg_message "t-job $name: $status"
+  mg_status "$status"
+}
+t_similarity() {
+  echo "similarity $* @$(basename "$MG_ROOT")" >>"$STUB_LOG"
+  if [ -f "$FX/similarity.flag" ]; then
+    printf '# implementer view\ncore/x.rs lines 1-9: struct 12%%\n' >"$MG_RUN_DIR/implementer.md"
+    printf '{"flags": [{"path": "core/x.rs"}]}\n' >"$MG_RUN_DIR/implementer.json"
+    printf 'reviewer view, with the matching corpus file\n' >"$MG_RUN_DIR/reviewer.md"
+    mg_artifact similarity-implementer "$MG_RUN_DIR/implementer.md" "implementer view"
+    mg_artifact similarity-implementer-json "$MG_RUN_DIR/implementer.json"
+    mg_artifact similarity-reviewer "$MG_RUN_DIR/reviewer.md" "reviewer view"
+    mg_failure "similarity:core/x.rs:struct" "core/x.rs lines 1-9: struct 12%; rewrite this region from the spec"
+    mg_status fail
+  else
+    mg_status pass
+  fi
+}
+EOF
+  git -C "$t" init -q -b trunk
+  git -C "$t" add -A
+  git -C "$t" -c user.name=selftest -c user.email=selftest@localhost commit -qm template
+}
+
+setup() {
+  SB="$BATS_TEST_TMPDIR/main"
+  cp -R "$BATS_FILE_TMPDIR/template" "$SB"
+  SB="$(cd "$SB" && pwd -P)"
+  git -C "$SB" config user.name selftest
+  git -C "$SB" config user.email selftest@localhost
+  BASE0="$(git -C "$SB" rev-parse HEAD)"
+  FX="$BATS_TEST_TMPDIR/fx"
+  export FX STUB_LOG="$BATS_TEST_TMPDIR/stub.log" MG_GATE_NOW=2026-10-16T12:00:00Z
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$FX" "$HOME"
+  : >"$STUB_LOG"
+}
+
+teardown() {
+  [ -z "${result:-}" ] || [ ! -f "$result" ] || jq -c '{job, status, message, failures: [.failures[] | {id, message: (.message // "" | .[0:400])}]}' "$result"
+  [ -z "${stderr:-}" ] || printf '%s\n' "$stderr" | tail -n 20
+}
+
+# mg <args>: the main checkout's tools/mg; mg_in <dir> <args>: another one's.
+mg() { mg_in "$SB" "$@"; }
+mg_in() {
+  local dir="$1"
+  shift
+  run --separate-stderr "$dir/tools/mg" "$@"
+  result="${lines[${#lines[@]} - 1]:-}"
+}
+
+field() { jq -r "$@" "$result"; }
+receipt() { jq -r '.artifacts[] | select(.kind == "receipt") | .path' "$result"; }
+rq() { jq -r "$@" "$(receipt)"; }
+outcome() { rq --arg id "$1" '.runs[] | select(.id == $id) | .outcome'; }
+validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
+called() { grep -c -- "$1" "$STUB_LOG" || true; }
+
+# commit_in <dir> <path> <contents> [message]: one commit changing one file.
+commit_in() {
+  mkdir -p "$(dirname "$1/$2")"
+  printf '%s\n' "$3" >"$1/$2"
+  git -C "$1" add -- "$2"
+  git -C "$1" commit -qm "${4:-change $2}"
+}
+
+# fx <name> <status> [failure ids...]
+fx() {
+  local name="$1" status="$2"
+  shift 2
+  printf '%s\n' "$status" >"$FX/$name.status"
+  rm -f "$FX/$name.failures"
+  [ "$#" -eq 0 ] || printf '%s\n' "$@" >"$FX/$name.failures"
+}
+
+# worktree <dir> <branch> [role]: a worktree on a new branch from trunk,
+# marked with a role the way tools/mg worktree new marks it.
+worktree() {
+  git -C "$SB" worktree add -q -b "$2" "$1" trunk
+  [ -z "${3:-}" ] || jq -n --arg r "$3" '{role: $r, session: "s-20261016T000000Z-0badcafe"}' \
+    >"$(git -C "$1" rev-parse --absolute-git-dir)/meguri-session.json"
+}
+
+# --- T0 selection --------------------------------------------------------
+
+@test "a change touching only docs/ runs the static checks only and passes in seconds" {
+  commit_in "$SB" docs/notes.md "# more notes"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(field .status)" = pass ]
+  [ "$(rq '[.runs[] | select(.result != null) | .id] | join(" ")')" = "static static-tree" ]
+  [ "$(outcome unit)" = not-triggered ]
+  [ "$(outcome live)" = not-triggered ]
+  [ ! -s "$STUB_LOG" ]
+  [ "$(field .duration_ms)" -lt 30000 ]
+  [ "$(rq .pass)" = true ]
+  [ "$(rq .merge_ready)" = true ]
+  [ "$(rq .commit)" = "$(git -C "$SB" rev-parse HEAD)" ]
+  validate "$result"
+}
+
+@test "a change under core/crates/meguri-sched/ adds the T1 live suites for sched and the similarity scan" {
+  commit_in "$SB" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(called "^t-job live sched smoke @main$")" = 1 ]
+  [ "$(called "^similarity --base $BASE0 @main$")" = 1 ]
+  [ "$(called '^t-job unit @main$')" = 1 ]
+  [ "$(outcome live)" = pass ]
+  [ "$(outcome later)" = pending ]
+  [ "$(rq '.runs[] | select(.id == "later") | .message')" = "job lands with U16" ]
+  # T0 before T1, canaries before both.
+  [ "$(grep -n 'pin-canary' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n 't-job unit' "$STUB_LOG" | cut -d: -f1)" ]
+  [ "$(grep -n 't-job unit' "$STUB_LOG" | cut -d: -f1)" -lt "$(grep -n 't-job live' "$STUB_LOG" | cut -d: -f1)" ]
+}
+
+@test "a pin bump fails at the canary first and the gate stops there (AE82 ordering)" {
+  commit_in "$SB" core/Cargo.lock 'name = "rand"
+version = "0.9.5"' "Bump rand
+
+$TRAILERS"
+  fx pin-canary fail 'layering-check::canary_pins$cargo_lock_matches_the_pins'
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(rq '.blocking[0].id')" = run:pin-canary ]
+  [ "$(rq '.blocking[1].id')" = 't-job:layering-check::canary_pins$cargo_lock_matches_the_pins' ]
+  [ "$(called 't-job pin-canary')" = 1 ]
+  [ "$(called 't-job unit')" = 0 ]
+  [ "$(called 't-job live')" = 0 ]
+  [ "$(called '^similarity')" = 0 ]
+  [ "$(outcome unit)" = skipped-after-canary ]
+  [ "$(outcome live)" = skipped-after-canary ]
+  [ "$(rq '[.blocking[] | select(.id | startswith("run:"))] | length')" = 1 ]
+  validate "$result"
+}
+
+@test "a failing T0 run keeps T1 from starting and fails the gate" {
+  commit_in "$SB" core/crates/meguri-text/src/lib.rs "pub fn f() {}" "Change text
+
+$TRAILERS"
+  fx conf fail "native:text/fold/x"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  [ "$(outcome conf)" = fail ]
+  [ "$(outcome live)" = skipped-after-t0 ]
+  [ "$(called 't-job live')" = 0 ]
+  [ "$(called 't-job unit')" = 1 ]
+  jq -e '.failures[] | select(.id == "t-job:native:text/fold/x")' "$result"
+}
+
+@test "gate --local runs every run but the similarity scan and oracle-image runs, and its receipt never merges" {
+  commit_in "$SB" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  mg gate --local --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(outcome sim)" = skipped-local ]
+  [ "$(outcome live)" = skipped-local ]
+  [ "$(outcome static-tree)" = skipped-local ]
+  [ "$(outcome unit)" = pass ]
+  [ "$(called '^similarity')" = 0 ]
+  [ "$(rq .mode)" = local ]
+  [ "$(rq .merge_ready)" = false ]
+}
+
+@test "in an implementer worktree the main-checkout runs are deferred to tools/mg merge" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  mg_in "$wt" gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(outcome sim)" = deferred-main ]
+  [ "$(outcome static-tree)" = deferred-main ]
+  [ "$(rq '.runs[] | select(.id == "sim") | .merge_args | join(" ")')" = "--rev $(git -C "$wt" rev-parse HEAD) --base $BASE0" ]
+  [ "$(rq '.incomplete | join(" ")')" = "static-tree sim" ]
+  [ "$(rq .merge_ready)" = false ]
+  [ "$(called '^similarity')" = 0 ]
+}
+
+@test "a queued VM run passes with a note, a run over its budget is reported, a job that writes to the tree fails the gate" {
+  commit_in "$SB" app/Meguri/View.swift "struct V {}" "Change a view
+
+$TRAILERS"
+  fx ui queued
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(outcome ui)" = queued ]
+
+  commit_in "$SB" tools/slow/x.sh "true"
+  printf '1.5\n' >"$FX/slow.sleep"
+  mg gate --base "$BASE0"
+  [ "$(rq '.runs[] | select(.id == "slow") | .over_budget')" = true ]
+  [ "$(field .status)" = warn ]
+
+  rm -f "$FX/slow.sleep"
+  printf 'stray.txt\n' >"$FX/slow.write"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  jq -e '.failures[] | select(.id == "tree-changed")' "$result"
+}
+
+# --- flakes and quarantine (R1953) ---------------------------------------
+
+@test "a flaky test fails the gate once with no retry; quarantined with evidence and approval it passes until its deadline" {
+  local t='meguri-sync::transport$resumes_after_reset' failed passed
+  commit_in "$SB" core/crates/meguri-sync/src/lib.rs "pub fn f() {}" "Change sync
+
+$TRAILERS"
+  printf 'fail\npass\n' >"$FX/unit.seq"
+  printf '%s\n' "$t" >"$FX/unit.failures"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  [ "$(called 't-job unit')" = 1 ]
+  jq -e --arg t "t-job:$t" '.failures[] | select(.id == $t)' "$result"
+  failed="$(field .run_id)"
+
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(called 't-job unit')" = 2 ]
+  passed="$(field .run_id)"
+
+  # Without Antoine's approval, or without evidence of one commit passing
+  # and failing, the entry is refused.
+  mg quarantine add --run unit --test "$t" --class sync --owner U105 --reason "drops a reset now and then" \
+    --deadline 2026-10-30 --failed "$failed" --passed "$passed"
+  [ "$status" -eq 1 ]
+  [[ "$(field '.failures[0].message')" == *"approved_by: antoine"* ]]
+  mg quarantine add --run unit --test "$t" --class sync --owner U105 --reason "drops a reset now and then" \
+    --deadline 2026-10-30 --failed "$failed" --passed "$failed" --approved-by antoine
+  [ "$status" -eq 1 ]
+  [[ "$(jq -r '[.failures[].message] | join(" | ")' "$result")" == *"no unit run that passed"* ]]
+  mg quarantine add --run unit --test "$t" --class unit --owner U105 --reason "flaky" \
+    --deadline 2026-10-30 --failed "$failed" --passed "$passed" --approved-by antoine
+  [ "$status" -eq 0 ]
+  git -C "$SB" diff --quiet -- tools/gate/quarantine.yaml && return 1
+  git -C "$SB" checkout -q -- tools/gate/quarantine.yaml
+
+  mg quarantine add --run unit --test "$t" --class sync --owner U105 --reason "drops a reset now and then" \
+    --deadline 2026-10-30 --failed "$failed" --passed "$passed" --approved-by antoine
+  [ "$status" -eq 0 ] || return 1
+  grep -q 'approved_by: antoine' "$SB/tools/gate/quarantine.yaml"
+  git -C "$SB" commit -qam "Quarantine a flaky sync test"
+
+  printf 'fail\n' >"$FX/unit.seq"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(field .status)" = warn ]
+  [ "$(outcome unit)" = quarantined ]
+  [ "$(rq '.quarantine.active[0].failed_here')" = true ]
+
+  # After the deadline the gate fails, whether or not the test failed.
+  MG_GATE_NOW=2026-10-31T00:00:00Z mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  jq -e --arg t "quarantine-expired:unit:$t" '.failures[] | select(.id == $t)' "$result"
+}
+
+@test "a hand-written quarantine entry without approval or evidence fails the gate" {
+  cat >>"$SB/tools/gate/quarantine.yaml" <<'EOF'
+  - test: "x$y"
+    run: unit
+    class: unit
+    owner: U90
+    reason: flaky
+    deadline: 2026-12-01
+EOF
+  git -C "$SB" commit -qam "Quarantine by hand"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  [[ "$(jq -r '[.failures[] | select(.id | startswith("quarantine-invalid:"))][0].message' "$result")" == *"approved_by: antoine"* ]]
+  [[ "$(jq -r '[.failures[] | select(.id | startswith("quarantine-invalid:"))][0].message' "$result")" == *"evidence"* ]]
+  mg quarantine check
+  [ "$status" -eq 1 ]
+}
+
+@test "a quarantined test of a conformance run must be classed conformance" {
+  local t="native:render/x" failed passed
+  commit_in "$SB" conformance/scenarios/smoke/c.yaml "id: smoke/c"
+  printf 'fail\npass\n' >"$FX/conf.seq"
+  printf '%s\n' "$t" >"$FX/conf.failures"
+  mg gate --base "$BASE0"
+  failed="$(field .run_id)"
+  mg gate --base "$BASE0"
+  passed="$(field .run_id)"
+  mg quarantine add --run conf --test "$t" --class unit --owner U60 --reason flaky --deadline 2026-10-30 \
+    --failed "$failed" --passed "$passed" --approved-by antoine
+  [ "$status" -eq 1 ]
+  [[ "$(field '.failures[0].message')" == *"conformance tests"* ]]
+}
+
+# --- static checks -------------------------------------------------------
+
+@test "a scenario that names an AnkiWeb host fails the static check (R1876); only U116 and U255 scripts may be allowed" {
+  local host
+  host="$(printf 'sync.%s.%s' ankiweb net)"
+  commit_in "$SB" conformance/scenarios/smoke/leak.yaml "id: smoke/leak
+endpoint: https://$host/"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 1 ]
+  jq -e '.failures[] | select(.id == "static-checks:ankiweb-hosts:conformance/scenarios/smoke/leak.yaml:2")' "$result"
+
+  mg static-checks --check ankiweb-hosts
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "ankiweb-hosts:conformance/scenarios/smoke/leak.yaml:2" ]
+  # The committed tree is scanned the same way (the merge's --rev run).
+  mg static-checks --check ankiweb-hosts --rev HEAD
+  [ "$status" -eq 1 ]
+
+  printf 'conformance/scenarios/smoke/leak.yaml U105\n' >>"$SB/tools/gate/static-checks/ankiweb-allow.txt"
+  mg static-checks --check ankiweb-hosts
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = ankiweb-hosts-error ]
+  # A host written as a regular expression is a host too.
+  git -C "$SB" checkout -q -- tools/gate/static-checks/ankiweb-allow.txt
+  git -C "$SB" rm -q conformance/scenarios/smoke/leak.yaml
+  printf 're = r"%s\\.%s"\n' ankiweb net >"$SB/tools/probe.py"
+  mg static-checks --check ankiweb-hosts
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "ankiweb-hosts:tools/probe.py:1" ]
+}
+
+@test "the trailer check fails a core/ commit that skipped the commit-msg hook" {
+  commit_in "$SB" core/crates/meguri-text/src/lib.rs "pub fn f() {}" "Change text without trailers"
+  local bad
+  bad="$(git -C "$SB" rev-parse --short=12 HEAD)"
+  commit_in "$SB" core/crates/meguri-text/src/more.rs "pub fn g() {}" "Change text
+
+$TRAILERS"
+  mg static-checks --base "$BASE0"
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "trailers:$bad" ]
+  [[ "$(field '.failures[0].message')" == *"need a Role: trailer"* ]]
+  mg static-checks --base "$BASE0" --rev HEAD
+  [ "$status" -eq 1 ]
+  validate "$result"
+}
+
+@test "the no-retries check fails a test plan or a script that reruns failing tests (R1953)" {
+  mkdir -p "$SB/app/TestPlans"
+  printf '{"defaultOptions": {"testRepetitionMode": "none"}, "testTargets": [{"target": {"name": "T"}}]}\n' >"$SB/app/TestPlans/Unit.xctestplan"
+  mg static-checks --check no-retries
+  [ "$status" -eq 0 ]
+  printf '{"defaultOptions": {}, "testTargets": [{"target": {"name": "T"}, "testRepetitionMode": "retryOnFailure"}]}\n' >"$SB/app/TestPlans/Unit.xctestplan"
+  mg static-checks --check no-retries
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "no-retries:app/TestPlans/Unit.xctestplan:0" ]
+  rm "$SB/app/TestPlans/Unit.xctestplan"
+  mkdir -p "$SB/core/.config"
+  printf '[profile.default]\nretries = 2\n' >"$SB/core/.config/nextest.toml"
+  mg static-checks --check no-retries
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "no-retries:core/.config/nextest.toml:2" ]
+  printf '[profile.default]\nretries = 0\n' >"$SB/core/.config/nextest.toml"
+  printf 'cargo nextest run --retr%s 3\n' ies >"$SB/tools/run-tests.sh"
+  mg static-checks --check no-retries
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "no-retries:tools/run-tests.sh:1" ]
+}
+
+# --- merge, escalations (R1951, R1957, R1991) ------------------------------
+
+@test "merge fast-forwards the integration branch only on a passing receipt for the branch tip" {
+  local wt="$BATS_TEST_TMPDIR/U90" tip
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  tip="$(git -C "$wt" rev-parse HEAD)"
+  fx unit fail
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+  [ "$(rq .pass)" = false ]
+  [ "$(rq .commit)" = "$tip" ]
+  [ "$(outcome unit)" = fail ]
+  [[ "$(field .message)" == *"trunk not moved"* ]]
+
+  fx unit pass
+  : >"$STUB_LOG"
+  mg merge unit/U90
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(git -C "$SB" rev-parse trunk)" = "$tip" ]
+  [ "$(field .details.merged)" = true ]
+  # The worktree ran the worktree runs; the main checkout scanned the tip.
+  [ "$(called "^t-job unit @U90$")" -ge 1 ]
+  [ "$(called "^similarity --rev $tip --base $BASE0 @main$")" = 1 ]
+  [ "$(outcome sim)" = pass ]
+  [ "$(outcome static-tree)" = pass ]
+  [ "$(rq .merge_ready)" = true ]
+  validate "$result"
+}
+
+@test "merge refuses a branch that does not contain the integration head, a dirty worktree, and runs only in the main checkout" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" docs/a.md "a"
+  commit_in "$SB" docs/b.md "b"
+  mg merge unit/U90
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = not-fast-forward ]
+  git -C "$wt" merge -q --no-edit trunk
+  printf 'x\n' >"$wt/docs/dirty.md"
+  mg merge unit/U90
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = worktree-not-at-tip ]
+  rm "$wt/docs/dirty.md"
+  mg_in "$wt" merge unit/U90
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = not-main ]
+}
+
+@test "a similarity flag sends only the implementer view to the worktree and records an escalation" {
+  local wt="$BATS_TEST_TMPDIR/U90" tip feedback
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  tip="$(git -C "$wt" rev-parse HEAD)"
+  : >"$FX/similarity.flag"
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  ! git -C "$SB" merge-base --is-ancestor "$tip" trunk
+  feedback="$(field .details.implementer_feedback)"
+  [[ "$feedback" == "$wt/build/mg/merge-feedback/"* ]]
+  [ -f "$feedback/implementer.md" ]
+  [ -f "$feedback/implementer.json" ]
+  [ -z "$(find "$wt/build" -name 'reviewer*')" ]
+  ! jq -e '.artifacts[] | select(.kind | test("reviewer"))' "$result"
+  jq -e '.failures[] | select(.id == "similarity:similarity:core/x.rs:struct")' "$result"
+  [ "$(jq -s '[.[] | select(.kind == "approval" and .unit == "U90" and .state == "open")] | length' "$SB/docs/process/provenance/escalations.jsonl")" = 1 ]
+  # The escalation is committed on trunk, which moves by that commit only.
+  [ "$(git -C "$SB" diff --name-only "$BASE0" trunk)" = docs/process/provenance/escalations.jsonl ]
+}
+
+@test "a unit with an open escalation (red after its sixth round) stays unmerged while a unit that does not depend on it merges" {
+  local a="$BATS_TEST_TMPDIR/U90" b="$BATS_TEST_TMPDIR/U91" id
+  mg escalation add --kind blocked-red --unit U90 --summary "no green gate after six review rounds"
+  [ "$status" -eq 0 ]
+  id="$(field .details.escalation.id)"
+  worktree "$a" unit/U90 implementer
+  worktree "$b" unit/U91 implementer
+  commit_in "$a" docs/a.md "a"
+  commit_in "$b" docs/b.md "b"
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "escalation:$id" ]
+  ! git -C "$SB" merge-base --is-ancestor unit/U90 trunk
+  mg merge unit/U91
+  [ "$status" -eq 0 ]
+  git -C "$SB" merge-base --is-ancestor unit/U91 trunk
+
+  mg escalation list --open
+  [ "$(field '.details.escalations | length')" = 1 ]
+  mg escalation resolve "$id" --by antoine --resolution "split the unit"
+  [ "$status" -eq 0 ]
+  mg escalation list --open
+  [ "$(field '.details.escalations | length')" = 0 ]
+  git -C "$a" merge -q --no-edit trunk
+  mg merge unit/U90
+  [ "$status" -eq 0 ]
+  mg escalation add --kind nonsense --unit U90 --summary x
+  [ "$status" -eq 2 ]
+}
+
+@test "an oracle run the worktree cannot run is supplied by a full checkout's receipt for the same tip" {
+  local wt="$BATS_TEST_TMPDIR/U90" full="$BATS_TEST_TMPDIR/full" tip
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  tip="$(git -C "$wt" rev-parse HEAD)"
+  printf 'error\n' >"$FX/live@U90.status"
+  printf 'oracle-tree-differs\n' >"$FX/live.failures"
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  [ "$(outcome live)" = needs-oracle-tree ]
+  [[ "$(jq -r '.failures[] | select(.id == "run:live") | .message' "$result")" == *"--receipt"* ]]
+
+  git -C "$SB" worktree add -q --detach "$full" "$tip"
+  mg_in "$full" gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(outcome live)" = pass ]
+  local extra
+  extra="$(receipt)"
+  mg merge unit/U90 --receipt "$extra"
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(git -C "$SB" rev-parse trunk)" = "$tip" ]
+  [ "$(rq '.runs[] | select(.id == "live") | .supplied_by')" = "$extra" ]
+}
+
+# --- nightly and milestone runs ----------------------------------------------
+
+@test "nightly runs the nightly T2 runs with one logged seed; --weekly adds the weekly ones (R1937)" {
+  mg nightly --seed 77
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job fuzz --seed 77 @main$')" = 1 ]
+  [ "$(called 't-job soak')" = 0 ]
+  [ "$(called 't-job unit')" = 0 ]
+  [ "$(field .details.seed)" = 77 ]
+  [[ "$(field .message)" == *"seed 77"* ]]
+  jq -e '.user_steps[] | select(.id == "nightly-scheduler" and .state == "missing")' "$result"
+  validate "$result"
+
+  mg nightly --weekly
+  [ "$status" -eq 0 ]
+  [ "$(called 't-job soak')" = 1 ]
+  [ "$(field '.details.seed | type')" = number ]
+
+  mg nightly --print-schedule
+  [ "$status" -eq 0 ]
+  grep -q '<string>nightly</string>' "$(dirname "$result")/com.meguri.nightly.plist"
+  grep -q '<string>--weekly</string>' "$(dirname "$result")/com.meguri.nightly.weekly.plist"
+}
+
+@test "a milestone run fails on one unclassified harvest row (R1880) and waits on device runs" {
+  printf 'unclassified 1\n' >"$FX/harvest.counts"
+  mg milestone M1
+  [ "$status" -eq 1 ]
+  jq -e '.failures[] | select(.id == "t-job:R1880-unclassified")' "$result"
+  # Every per-change run runs in full at a milestone.
+  [ "$(called '^t-job unit @main$')" = 1 ]
+  [ "$(called '^t-job live smoke @main$')" = 0 ]
+  [ "$(called '^t-job live @main$')" = 1 ]
+
+  printf 'unclassified 0\n' >"$FX/harvest.counts"
+  mg milestone M1
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field '.details.awaiting_user[0].id')" = device ]
+  # Release-only runs are not part of a milestone run.
+  [ -z "$(outcome audit)" ]
+
+  # At release every in-scope scenario passes too.
+  printf '{"harvest": {"by_classification": {"in-scope": {"rows": 4, "statuses": {"pass": 3, "pending": 1}}}}}\n' >"$FX/harvest.details"
+  mg milestone M1
+  [ "$status" -eq 0 ]
+  mg milestone release
+  [ "$status" -eq 1 ]
+  [[ "$(jq -r '.failures[] | select(.id == "t-job:R1880-in-scope") | .message' "$result")" == *"1 pending"* ]]
+  [ "$(outcome audit)" = pending ]
+}
+
+@test "a milestone run fails while a sync test is quarantined" {
+  local t='meguri-sync::x$y' failed passed
+  commit_in "$SB" core/crates/meguri-sync/src/lib.rs "pub fn f() {}" "Change sync
+
+$TRAILERS"
+  printf 'fail\npass\n' >"$FX/unit.seq"
+  printf '%s\n' "$t" >"$FX/unit.failures"
+  mg gate --base "$BASE0"
+  failed="$(field .run_id)"
+  mg gate --base "$BASE0"
+  passed="$(field .run_id)"
+  mg quarantine add --run unit --test "$t" --class sync --owner U105 --reason flaky --deadline 2026-10-30 \
+    --failed "$failed" --passed "$passed" --approved-by antoine
+  [ "$status" -eq 0 ]
+  git -C "$SB" commit -qam "Quarantine"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  mg milestone M1
+  [ "$status" -eq 1 ]
+  jq -e --arg t "quarantine-protected:unit:$t" '.failures[] | select(.id == $t)' "$result"
+}
+
+@test "a milestone run refuses a dirty tree or a worktree" {
+  printf 'x\n' >"$SB/docs/untracked.md"
+  mg milestone M0
+  [ "$status" -eq 2 ]
+  rm "$SB/docs/untracked.md"
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  mg_in "$wt" milestone M0
+  [ "$status" -eq 2 ]
+  mg milestone M9
+  [ "$status" -eq 2 ]
+}
+
+# --- tiers.yaml validation --------------------------------------------------
+
+@test "the gate refuses a tiers.yaml that leaves a job without a tier or keeps a landed job pending" {
+  cat >>"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
+mg_job notices host t_job "made-up: U16 landed"
+mg_job orphan host t_job "made-up: no tier"
+EOF
+  mg gate --plan
+  [ "$status" -eq 2 ]
+  jq -e '.failures[] | select(.message | test("job orphan has no tier"))' "$result"
+  jq -e '.failures[] | select(.message | test("job notices exists now; remove `pending: U16`"))' "$result"
+}
+
+@test "the gate refuses placements that break R1952 and runs that a merge could not place" {
+  python3 - "$SB/tools/gate/tiers.yaml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+s = s.replace("  - {id: ui, job: t-job, args: [ui], tier: T0, placement: vm,", "  - {id: ui, job: t-job, args: [ui], tier: T0, placement: docker:dev,")
+s = s.replace("needs: [oracle]\n    oracle: true\n    local: false", "needs: [oracle]\n    oracle: true\n    local: true")
+s = s.replace("{id: fuzz, job: t-job, args: [fuzz, --seed, \"{seed}\"], tier: T2, schedule: nightly", "{id: fuzz, job: t-job, args: [fuzz, --seed, \"{sed}\"], tier: T2, schedule: nightly")
+open(p, "w").write(s)
+PY
+  mg gate --plan
+  [ "$status" -eq 2 ]
+  jq -e '.failures[] | select(.message | test("run ui: needs simulator, which run on the host or the test VM"))' "$result"
+  jq -e '.failures[] | select(.message | test("run live: an oracle-image run cannot run in gate --local"))' "$result"
+  jq -e '.failures[] | select(.message | test("unknown placeholder \\{sed\\}"))' "$result"
+}
+
+@test "the real tiers.yaml gives every registered tools/mg job a tier, with valid placements and filters" {
+  local reg="$BATS_TEST_TMPDIR/registry.tsv" out="$BATS_TEST_TMPDIR/config.json"
+  "$REPO_ROOT/tools/mg" --list >"$reg"
+  run python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
+    --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$reg" --conformance "$REPO_ROOT/conformance" --out "$out"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(jq '.quarantine.invalid | length' "$out")" = 0 ]
+  # The canaries run first; T0 covers Rust, Swift, goldens, lint, deny, UI and the similarity scan.
+  [ "$(jq -r '[.runs[] | select(.stage == "canary") | .id] | join(" ")' "$out")" = "pin-canary canary-scenarios" ]
+  for id in core-test conformance goldens-check lint-ui core-lint core-deny swift-test-core snapshots a11y-iphone similarity perf-smoke notices; do
+    jq -e --arg id "$id" '.runs[] | select(.id == $id and .tier == "T0")' "$out" >/dev/null || { echo "no T0 run $id"; return 1; }
+  done
+  jq -e '.runs[] | select(.id == "live-oracle" and .tier == "T1" and .oracle)' "$out" >/dev/null
+  jq -e '.runs[] | select(.id == "core-fuzz" and .tier == "T2" and (.args | index("{seed}")))' "$out" >/dev/null
+  jq -e '.runs[] | select(.id == "private-suite" and .tier == "T3" and .where == "main")' "$out" >/dev/null
+  jq -e '.runs[] | select(.id == "harvest-coverage" and (.require | map(.id) | index("R1880-unclassified")))' "$out" >/dev/null
+
+  # The sched change of the plan's scenario selects sched's live suites and the scan.
+  printf 'core/crates/meguri-sched/src/answer.rs\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  jq -e '.runs[] | select(.id == "live-oracle" and .action == "run" and (.args | index("sched")) and (.args | index("fp-probe")))' \
+    "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+  jq -e '.runs[] | select(.id == "similarity" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
+  # A docs-only change runs nothing but the static checks.
+  printf 'docs/process/notes.md\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode full \
+    --main-capable yes --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.action == "run") | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "static static-tree" ]
+}
