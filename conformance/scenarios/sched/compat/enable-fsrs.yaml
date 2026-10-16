@@ -1,0 +1,151 @@
+# AE29, R702 (specs/sched/fsrs-policy.md E1-E4): a collection with FSRS off
+# whose cards carry SM-2 history gets memory states when FSRS is turned on,
+# and no due date, interval, queue, card type or review-log row changes.
+#
+# The SM-2 state is written with db_exec, as another client leaves it:
+#   Words (Default preset, empty parameter list)
+#     alpha    review card, learning start, a Hard review       -> s, d, dr, decay
+#     bravo    review card, reviews only (no learning start)     -> s, d, dr, decay
+#     charlie  relearning card that lapsed ten minutes ago        -> s, d, dr, decay
+#     delta    learning card with one answer                     -> s, d, dr, decay
+#     echo     new card                                          -> unchanged
+#     foxtrot  suspended review card                             -> s, d, dr, decay
+#     golf     review card with no review-log entry              -> unchanged
+#     hotel    review card whose only entry is a Set Due Date    -> dr, decay, no s or d
+#     india    review card carrying custom data (cd)             -> cd kept
+#   Tuned (21 parameters ending in 0.3, desired retention 0.85)
+#     juliet   alpha's history; kilo  delta's history
+#   Legacy (19 parameters): lima, charlie's history before the lapse
+#   Own (Default preset, the deck's own desired retention 80 %): mike
+# Clock: created 2030-01-01 (day 0), FSRS enabled on 2030-03-01 (day 59).
+id: sched/compat/enable-fsrs
+description: Turning FSRS on for an SM-2 collection writes memory states, desired retention and decay for cards with history and changes no due date, interval or review log.
+clock: {tz: UTC, start: "2030-01-01T10:00:00"}
+setup:
+  config:
+    fsrs: false
+    cardStateCustomizer: ""
+    newCardsIgnoreReviewLimit: false
+    applyAllParentLimits: false
+    fsrsHealthCheck: true
+  presets:
+    - name: Tuned
+      desired_retention: 0.85
+      fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.3]
+    - name: Legacy
+      fsrs_params: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]
+  decks:
+    - Words
+    - {name: Tuned, preset: Tuned}
+    - {name: Legacy, preset: Legacy}
+    - Own
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [alpha, a]}
+    - {notetype: Pair, deck: Words, fields: [bravo, b]}
+    - {notetype: Pair, deck: Words, fields: [charlie, c]}
+    - {notetype: Pair, deck: Words, fields: [delta, d]}
+    - {notetype: Pair, deck: Words, fields: [echo, e]}
+    - {notetype: Pair, deck: Words, fields: [foxtrot, f]}
+    - {notetype: Pair, deck: Words, fields: [golf, g]}
+    - {notetype: Pair, deck: Words, fields: [hotel, h]}
+    - {notetype: Pair, deck: Words, fields: [india, i]}
+    - {notetype: Pair, deck: Tuned, fields: [juliet, j]}
+    - {notetype: Pair, deck: Tuned, fields: [kilo, k]}
+    - {notetype: Pair, deck: Legacy, fields: [lima, l]}
+    - {notetype: Pair, deck: Own, fields: [mike, m]}
+steps:
+  - observe: [timing]
+  - legacy_update: {deck: Own, patch: {desiredRetention: 80}}
+  # word, type, queue, due, ivl, factor, reps, lapses, left
+  - db_exec:
+      sql: >-
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5,
+        factor = v.column6, reps = v.column7, lapses = v.column8, left = v.column9
+        FROM (VALUES
+        ('alpha', 2, 2, 56, 25, 2350, 7, 0, 0),
+        ('bravo', 2, 2, 69, 35, 2500, 5, 0, 0),
+        ('charlie', 3, 1, 1898589600, 1, 2300, 6, 1, 1),
+        ('delta', 1, 1, 1898589900, 0, 0, 1, 0, 1),
+        ('foxtrot', 2, -1, 27, 9, 2500, 4, 0, 0),
+        ('golf', 2, 2, 70, 30, 2500, 3, 0, 0),
+        ('hotel', 2, 2, 60, 10, 2500, 0, 0, 0),
+        ('india', 2, 2, 69, 35, 2500, 5, 0, 0),
+        ('juliet', 2, 2, 56, 25, 2350, 7, 0, 0),
+        ('kilo', 1, 1, 1898589960, 0, 0, 1, 0, 1),
+        ('lima', 2, 2, 43, 24, 2500, 5, 0, 0),
+        ('mike', 2, 2, 69, 35, 2500, 4, 0, 0)) AS v, notes n
+        WHERE n.sfld = v.column1 AND cards.nid = n.id
+  - db_exec:
+      sql: >-
+        UPDATE cards SET data = '{"cd":"{\"v\":1}"}'
+        WHERE nid = (SELECT id FROM notes WHERE sfld = 'india')
+  # word, id (review instant, ms), ease, ivl, lastIvl, factor, time, type
+  - db_exec:
+      sql: >-
+        INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type)
+        SELECT v.column2, c.id, 0, v.column3, v.column4, v.column5, v.column6, v.column7, v.column8
+        FROM (VALUES
+        ('alpha', 1894269600000, 1, -60, 0, 0, 9000, 0),
+        ('alpha', 1894269660000, 3, -600, -60, 0, 6000, 0),
+        ('alpha', 1894270260000, 3, 1, -600, 2500, 5000, 0),
+        ('alpha', 1894356000000, 3, 3, 1, 2500, 4000, 1),
+        ('alpha', 1894615200000, 3, 8, 3, 2500, 7000, 1),
+        ('alpha', 1895306400000, 2, 10, 8, 2350, 15000, 1),
+        ('alpha', 1896170400000, 3, 25, 10, 2350, 6000, 1),
+        ('bravo', 1895133601000, 3, 15, 6, 2500, 5000, 1),
+        ('bravo', 1896429601000, 3, 35, 15, 2500, 8000, 1),
+        ('charlie', 1893837602000, 3, -600, -60, 0, 7000, 0),
+        ('charlie', 1893838202000, 3, 1, -600, 2500, 4000, 0),
+        ('charlie', 1893924002000, 3, 4, 1, 2500, 3000, 1),
+        ('charlie', 1894269602000, 3, 10, 4, 2500, 6000, 1),
+        ('charlie', 1895133602000, 3, 24, 10, 2500, 5000, 1),
+        ('charlie', 1898589000000, 1, -600, 24, 2300, 12000, 1),
+        ('delta', 1898589300000, 3, -600, -60, 0, 8000, 0),
+        ('foxtrot', 1894701603000, 3, -600, -60, 0, 6000, 0),
+        ('foxtrot', 1894702203000, 3, 1, -600, 2500, 5000, 0),
+        ('foxtrot', 1894788003000, 3, 3, 1, 2500, 4000, 1),
+        ('foxtrot', 1895047203000, 3, 9, 3, 2500, 4000, 1),
+        ('hotel', 1897812004000, 0, 10, 0, 2500, 0, 4),
+        ('india', 1895133605000, 3, 15, 6, 2500, 5000, 1),
+        ('india', 1896429605000, 3, 35, 15, 2500, 8000, 1),
+        ('juliet', 1894269606000, 1, -60, 0, 0, 9000, 0),
+        ('juliet', 1894269666000, 3, -600, -60, 0, 6000, 0),
+        ('juliet', 1894270266000, 3, 1, -600, 2500, 5000, 0),
+        ('juliet', 1894356006000, 3, 3, 1, 2500, 4000, 1),
+        ('juliet', 1894615206000, 3, 8, 3, 2500, 7000, 1),
+        ('juliet', 1895306406000, 2, 10, 8, 2350, 15000, 1),
+        ('juliet', 1896170406000, 3, 25, 10, 2350, 6000, 1),
+        ('kilo', 1898589360000, 3, -600, -60, 0, 8000, 0),
+        ('lima', 1893837607000, 3, -600, -60, 0, 7000, 0),
+        ('lima', 1893838207000, 3, 1, -600, 2500, 4000, 0),
+        ('lima', 1893924007000, 3, 4, 1, 2500, 3000, 1),
+        ('lima', 1894269607000, 3, 10, 4, 2500, 6000, 1),
+        ('lima', 1895133607000, 3, 24, 10, 2500, 5000, 1),
+        ('mike', 1893664808000, 3, -600, -60, 0, 7000, 0),
+        ('mike', 1893665408000, 3, 1, -600, 2500, 4000, 0),
+        ('mike', 1895133608000, 3, 15, 6, 2500, 5000, 1),
+        ('mike', 1896429608000, 3, 35, 15, 2500, 8000, 1)) AS v
+        JOIN notes n ON n.sfld = v.column1 JOIN cards c ON c.nid = n.id
+  - set_clock: "2030-03-01T10:00:00"
+  - observe: [timing]
+  - db_exec: {sql: "SELECT n.sfld, d.name, c.type, c.queue, c.due, c.ivl, c.factor, c.reps, c.lapses, c.left, c.odue, c.odid, c.flags, c.mod, c.usn, c.data FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}
+  - advance: 1m
+  - enable_fsrs: {}
+  - db_exec: {sql: "SELECT n.sfld, d.name, c.type, c.queue, c.due, c.ivl, c.factor, c.reps, c.lapses, c.left, c.odue, c.odid, c.flags, c.mod, c.usn, c.data FROM cards c JOIN notes n ON n.id = c.nid JOIN decks d ON d.id = c.did ORDER BY n.sfld"}
+  - db_exec: {sql: "SELECT id, cid, usn, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id"}
+  # Rows written at the enable instant (10:01:00) besides cards: only fsrs.
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE mtime_secs >= 1898589660 ORDER BY KEY"}
+  - db_exec:
+      sql: >-
+        SELECT 'decks', id, mtime_secs, usn FROM decks WHERE mtime_secs >= 1898589660
+        UNION ALL SELECT 'deck_config', id, mtime_secs, usn FROM deck_config WHERE mtime_secs >= 1898589660
+        UNION ALL SELECT 'notes', id, mod, usn FROM notes WHERE mod >= 1898589660
+        UNION ALL SELECT 'notetypes', id, mtime_secs, usn FROM notetypes WHERE mtime_secs >= 1898589660
+        UNION ALL SELECT 'graves', oid, type, usn FROM graves
+        ORDER BY 1, 2
+  - db_exec: {sql: "SELECT mod FROM col"}

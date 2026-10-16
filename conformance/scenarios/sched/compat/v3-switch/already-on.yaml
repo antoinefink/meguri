@@ -1,0 +1,16 @@
+# R705 (specs/sched/fsrs-policy.md V1-V3): a collection already on the
+# current scheduler. Opening it writes nothing, and Anki's scheduler update
+# (enable_v3, fsrs-policy-ops.md F3) writes nothing either: the row keeps the
+# stamps the new collection gave it and col.mod does not move.
+id: sched/compat/v3-switch/already-on
+description: A collection with sched2021 true is left as it is by Meguri's open and by Anki's scheduler update.
+clock: {tz: UTC, start: "2030-06-01T10:00:00"}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  - reopen: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'sched2021'"}
+  - enable_v3: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('sched2021', 'schedVer') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT mod FROM col"}

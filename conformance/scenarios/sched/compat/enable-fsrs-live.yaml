@@ -1,0 +1,69 @@
+# AE29 as a live chain (dsl.md D9.2; specs/sched/fsrs-policy.md E1-E4):
+# Anki studies a collection with FSRS off for a week, so the cards carry real
+# SM-2 history (learning steps, graduation, a Hard review, a lapse).
+# Meguri then opens the collection and turns FSRS on. The golden is Anki
+# turning FSRS on itself (fsrs-policy-ops.md F2), so Meguri's memory states,
+# desired retention and decay must equal Anki's, and no due date, interval,
+# queue or review-log row may change.
+id: sched/compat/enable-fsrs-live
+description: Meguri turns FSRS on for a collection Anki studied for a week with SM-2, writing what Anki writes when it turns FSRS on.
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    fsrs: false
+    cardStateCustomizer: ""
+    newCardsIgnoreReviewLimit: false
+    applyAllParentLimits: false
+    fsrsHealthCheck: true
+  presets:
+    - {name: Tuned, desired_retention: 0.85}
+  decks:
+    - Words
+    - {name: Tuned, preset: Tuned}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [river, rio]}
+    - {notetype: Pair, deck: Words, fields: [stone, piedra]}
+    - {notetype: Pair, deck: Words, fields: [cloud, nube]}
+    - {notetype: Pair, deck: Words, fields: [field, campo]}
+    - {notetype: Pair, deck: Tuned, fields: [bridge, puente]}
+    - {notetype: Pair, deck: Tuned, fields: [tower, torre]}
+steps:
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: again, time_ms: 9000}
+  - answer: {card: "#c3", rating: easy, time_ms: 3000}
+  - answer: {card: "#c5", rating: good, time_ms: 5000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c2", rating: good, time_ms: 6000}
+  - answer: {card: "#c5", rating: good, time_ms: 4000}
+  - advance: 1m
+  - answer: {card: "#c2", rating: good, time_ms: 5000}
+  - advance: 1d
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: hard, time_ms: 8000}
+  - answer: {card: "#c5", rating: good, time_ms: 3000}
+  - answer: {card: "#c6", rating: good, time_ms: 6000}
+  - advance: 3d
+  - observe: [timing]
+  - answer: {card: "#c1", rating: again, time_ms: 11000}
+  - answer: {card: "#c3", rating: good, time_ms: 4000}
+  - answer: {card: "#c5", rating: easy, time_ms: 2000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 5000}
+  - advance: 3d
+  - observe: [timing]
+  - answer: {card: "#c2", rating: good, time_ms: 5000}
+  - answer: {card: "#c6", rating: good, time_ms: 4000}
+  - handoff: meguri
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, odue, did, odid FROM cards ORDER BY id"}
+  - enable_fsrs: {}
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, odue, did, odid FROM cards ORDER BY id"}
+  - observe: [db_dump]

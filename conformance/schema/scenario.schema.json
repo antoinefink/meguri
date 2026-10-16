@@ -685,6 +685,16 @@
           "type": "object",
           "maxProperties": 0
         },
+        "enable_fsrs": {
+          "description": "Stable (specs/conformance/fsrs-policy-ops.md F2): turn FSRS on without rescheduling. Meguri runs enableFsrs; the oracle runs Anki's deck options save with FSRS on, which must change nothing but cards, the fsrs key and col.mod.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "enable_v3": {
+          "description": "Stable (specs/conformance/fsrs-policy-ops.md F3): Anki's scheduler update to the current scheduler. Meguri does nothing: it switches when it opens a collection.",
+          "type": "object",
+          "maxProperties": 0
+        },
         "actor": {
           "description": "The actor that runs the next steps (sync-ops.md S2.3); declared in actors.",
           "$ref": "#/$defs/actor_name"

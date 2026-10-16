@@ -800,7 +800,7 @@ h53ef76bc5048,rust,tag,sched,unclassified,,,open
 h557e34da0263,rust,tag,sched,unclassified,,,open
 h55e6099a6eb9,rust,tag,sched,unclassified,,,open
 h561dc186a5dc,rust,tag,sched,unclassified,,,open
-h567aebc9fabb,rust,tag,sched,unclassified,,,open
+h567aebc9fabb,rust,tag,sched,out-of-scope,"Upgrading a v1-scheduler collection: Meguri refuses v1 collections and has no scheduler upgrade (R705, R1482)",,done
 h5811eae76235,rust,tag,sched,unclassified,,,open
 h5b374d4c4d55,rust,tag,sched,unclassified,,,open
 h5ba74e3a7864,rust,tag,sched,unclassified,,,open

@@ -1,0 +1,17 @@
+# R705 (specs/sched/fsrs-policy.md V1-V3): sched2021 missing.
+# Step 4 reads the row right after the reopen: Meguri has already switched
+# (deviation sched-v3-switch-at-open), Anki has not. enable_v3 is Anki's
+# scheduler update, which Meguri does not have (fsrs-policy-ops.md F3): from
+# step 6 on, both sides must hold what Anki's update wrote.
+id: sched/compat/v3-switch/missing
+description: A v2 collection without sched2021 opens with sched2021 true, as Anki's scheduler update writes it.
+clock: {tz: UTC, start: "2030-06-01T10:00:00"}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = 'sched2021'"}
+  - advance: 1m
+  - reopen: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'sched2021'"}
+  - enable_v3: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('sched2021', 'schedVer') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT mod FROM col"}

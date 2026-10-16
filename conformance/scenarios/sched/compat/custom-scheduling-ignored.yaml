@@ -1,0 +1,58 @@
+# R763, R764 (specs/sched/fsrs-policy.md K1-K3): a collection whose custom
+# scheduling script would move every Good answer to 99 days and shorten
+# relearning. Answers ignore it: the intervals and card states are the
+# scheduler's own, which are also what Anki's scheduler core writes (only
+# Anki's desktop reviewer runs the script). The script and the other keys
+# Meguri never edits keep their bytes, usn and mtime through two days of
+# answers and a day rollover; so do the preset's Easy Days and the deck's
+# extend limits. The load balancer is off, so Easy Days play no part.
+id: sched/compat/custom-scheduling-ignored
+description: Answers ignore the custom scheduling script, and the scheduling keys Meguri never edits keep their bytes through answers and a rollover.
+clock: {tz: Europe/Berlin, start: "2030-04-01T08:00:00"}
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+    cardStateCustomizer: "if (states.good.normal && states.good.normal.review) { states.good.normal.review.scheduledDays = 99; } customData.good.seen = 1;"
+    fsrsLegacyEvaluate: true
+    fsrsHealthCheck: false
+    fsrsShortTermWithStepsEnabled: false
+    newCardsIgnoreReviewLimit: true
+    applyAllParentLimits: true
+    xAddonScheduling: {mode: strict, weights: [1, 2.5], note: "kept"}
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+    - {notetype: Pair, deck: Words, fields: [sea, mar]}
+steps:
+  - observe: [timing]
+  - legacy_update: {preset: Default, patch: {easyDaysPercentages: [1.0, 0.5, 1.0, 1.0, 1.0, 0.0, 1.0]}}
+  - legacy_update: {deck: Words, patch: {extendNew: 10, extendRev: 50}}
+  - advance: 1m
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, hex(val) FROM config WHERE KEY IN ('applyAllParentLimits', 'cardStateCustomizer', 'fsrsHealthCheck', 'fsrsLegacyEvaluate', 'fsrsShortTermWithStepsEnabled', 'loadBalancerEnabled', 'newCardsIgnoreReviewLimit', 'xAddonScheduling') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT id, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: easy, time_ms: 3000}
+  - answer: {card: "#c3", rating: again, time_ms: 9000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c3", rating: good, time_ms: 5000}
+  - advance: 1d
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: good, time_ms: 4000}
+  - answer: {card: "#c3", rating: again, time_ms: 8000}
+  - advance: 10m
+  - answer: {card: "#c3", rating: good, time_ms: 5000}
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, left, data FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT id, cid, ease, ivl, lastIvl, factor, time, type FROM revlog ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, hex(val) FROM config WHERE KEY IN ('applyAllParentLimits', 'cardStateCustomizer', 'fsrsHealthCheck', 'fsrsLegacyEvaluate', 'fsrsShortTermWithStepsEnabled', 'loadBalancerEnabled', 'newCardsIgnoreReviewLimit', 'xAddonScheduling') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT id, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - observe:
+      - legacy_json: {decks: [Words], presets: [Default]}

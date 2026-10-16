@@ -1,0 +1,57 @@
+# R763 (specs/sched/fsrs-policy.md K1-K3) across sync (sync-ops.md): client_a
+# (Anki) holds a custom scheduling script, other scheduling keys Meguri never
+# edits, Easy Days and deck extend limits. Meguri downloads the collection,
+# studies for two days and syncs back; client_a then holds every one of those
+# values as it had them, and all actors converge.
+id: sched/compat/keys-survive-sync
+description: Scheduling keys and values Meguri never edits travel through Meguri's study and normal sync unchanged.
+clock: {tz: UTC, start: "2030-04-01T08:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  config:
+    fsrs: true
+    loadBalancerEnabled: false
+    cardStateCustomizer: "if (states.good.normal && states.good.normal.review) { states.good.normal.review.scheduledDays = 99; }"
+    fsrsLegacyEvaluate: true
+    fsrsHealthCheck: false
+    newCardsIgnoreReviewLimit: true
+    applyAllParentLimits: true
+    xAddonScheduling: {mode: strict, weights: [1, 2.5]}
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [moon, luna]}
+    - {notetype: Pair, deck: Words, fields: [star, estrella]}
+steps:
+  - observe: [timing]
+  - legacy_update: {preset: Default, patch: {easyDaysPercentages: [1.0, 0.5, 1.0, 1.0, 1.0, 0.0, 1.0]}}
+  - legacy_update: {deck: Words, patch: {extendNew: 10, extendRev: 50}}
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - advance: 1m
+  - actor: meguri
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: easy, time_ms: 3000}
+  - advance: 1d
+  - observe: [timing]
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - advance: 1m
+  - sync: {kind: normal}
+  - advance: 1m
+  - actor: client_a
+  - observe: [timing]
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('applyAllParentLimits', 'cardStateCustomizer', 'fsrs', 'fsrsHealthCheck', 'fsrsLegacyEvaluate', 'loadBalancerEnabled', 'newCardsIgnoreReviewLimit', 'xAddonScheduling') ORDER BY KEY"}
+  - observe:
+      - legacy_json: {decks: [Words], presets: [Default]}
+  - converge: {}

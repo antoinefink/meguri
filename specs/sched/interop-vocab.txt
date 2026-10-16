@@ -16,6 +16,18 @@ fsrs_params_6
 fsrs_params_5
 fsrs_params_4
 desiredRetention
+# FSRS policy (sched/fsrs-policy): config keys, the later-list key and the
+# preset and deck fields it keeps.
+sched2021
+schedVer
+cardStateCustomizer
+fsrsParams7
+easyDaysPercentages
+easy_days_percentages
+extendNew
+extendRev
+extend_new
+extend_review
 maxIvl
 leechFails
 delays
