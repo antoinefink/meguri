@@ -131,6 +131,16 @@ It also drops it when the collection is opened and after a raw write (`db_exec` 
 
 Anki drops its cached result only when the collection is opened, when its own settings code writes `rollover` or `creationOffset`, when a sync changes `crt`, and when the scheduler version changes. A write of `rollover` or `creationOffset` by another path (sync, add-on, the generic config API) and a change of offset leave its cached day in place until the boundary passes. D12.1 and D12.2 list what this changes.
 
+### D6.1 Where Anki does not use the cached day
+
+Not every Anki path reads the cached result. These compute the day afresh for the instant of the call (with D5's writes, under the current offset and the stored `rollover`), and so ignore D6:
+
+- the deck list's due counts (its unbury check still uses the cached day);
+- the day a study queue is built for;
+- the interval labels on the answer buttons (seconds left until `next_day_at`).
+
+Answers, searches that compare due days, statistics, the browser's due column and the `timing` observation use the cached day. The two agree except after an offset change, a `rollover` or `creationOffset` write outside Anki's settings code, or a clock that moved back, all before the cached boundary. Meguri has one day everywhere, the day clock's (D8), which in the first two cases equals Anki's fresh computation (D12.1, D12.2) and after a clock moved back equals Anki's cached day. Units that compare deck counts or queues at such instants (U41, U43) decide their scenarios with this in mind.
+
 ## D7. Unburying at the start of a day
 
 The unbury check runs at the end of every day query (D5 step 3).
@@ -149,6 +159,7 @@ The unbury check runs at the end of every day query (D5 step 3).
 - Then it writes `lastUnburied` = today, also when no card was buried. The write follows D5's rules: row stamped, `col.mod` unchanged.
 - The unbury is not recorded for undo and does not clear the undo history by itself (D9 clears it when the day changes).
 - Because the check runs at every query, the first day query on a new day unburies, whether or not this session saw the change: a collection opened on a later day is unburied at its first query (D8), before anything reads counts.
+- `lastUnburied` is synced with the other config keys, and an incremental sync replaces the receiver's whole config (`specs/conformance/sync-ops.md` S7.3). A device that receives another device's `lastUnburied` equal to today before its own first day query of the day finds nothing to do and keeps its own cards buried until the next day. So the unbury runs before a sync exchanges anything: Anki's client runs a day query with the unbury check when its status check calls for an incremental sync, before the exchange (not when nothing changed and not before a one-way sync), and Anki's sync server does the same on its own collection when a sync starts. Meguri runs `checkRollover()` before every sync and lets its op commit before the sync applies incoming data (D8).
 
 Example (AE24): Paris, rollover 4, cards buried on day 5 (`lastUnburied` 5). At 2030-01-21 03:59:59 today is 5 and nothing changes. At 04:00:00 today is 6: the cards return to their queues as in the table, `lastUnburied` becomes 6, and `col.mod` keeps its value.
 
@@ -157,7 +168,8 @@ Example (AE24): Paris, rollover 4, cards buried on day 5 (`lastUnburied` 5). At 
 The engine keeps one day clock per open collection: the cached result (D6) and the last day, `next_day_at` and IANA zone id it reported. It exposes:
 
 - `checkRollover()`: runs the day query and reports what changed (below). Idempotent and cheap: a second call in the same state writes nothing and emits nothing.
-- `today` and `nextDayAt`: the values of a day query run at the time of the read. Every core path that needs the day gets it through these or `checkRollover()`.
+- `today` and `nextDayAt`: the values of a day query run at the time of the read. Every core path that needs the day gets it through these or `checkRollover()`. A read that finds no valid cached result (D6) runs `checkRollover()` first, so its writes, unbury and events follow the steps below.
+- Code running inside an op on the writer thread never runs the day query itself: it would have to submit the `Rollover` op and wait for the writer it occupies. Its caller runs `checkRollover()` before submitting the op and passes the day in (U43 does so before every answer).
 
 Each `checkRollover()`:
 
@@ -169,7 +181,9 @@ Each `checkRollover()`:
 
 The first `checkRollover()` after the collection opens records the values and emits nothing; it still writes and unburies as D5 and D7 say. It is an open-time step of the lifecycle (U24): it runs before the collection is `Ready`.
 
-Callers: the open-time step; the app on foreground, on its timer at `next_day_at` and on a system time, zone or clock change (U51); the sync preflight before every sync (U107); the study session before every answer (U43). A change set that touches `rollover`, `creationOffset` or `crt`, from any source, makes the day clock compute afresh and report at once.
+A generation change (`engine/lifecycle` L8: one-way sync, restore, `.colpkg` import) counts as an open: the day clock drops its cached result and the values it reported, and the first `checkRollover()` on the new generation records, emits nothing, writes and unburies. It runs before anything reads counts on the new generation, as at open, so a downloaded collection's cards buried on an earlier day are restored first. The app reads `today` and `nextDayAt` again on `CollectionReplaced`, as after an open. `engine/lifecycle` L8 runs no open steps today; U40 adds this step there or registers the day clock as a `GenerationListener` whose check runs once the state is `Ready`.
+
+Callers: the open-time step; the app on foreground, on its timer at `next_day_at` and on a system time, zone or clock change (U51); the sync preflight before every sync (U107), whose `Rollover` op commits before the sync applies incoming data (D7); the study session before every answer (U43). A change set that touches `rollover`, `creationOffset` or `crt`, from any source, makes the day clock compute afresh and report at once. U107 also calls `checkRollover()` after each sync (R597).
 
 The core runs no timer (R1854). In legacy timing `next_day_at` equals `now` for the whole first second of a day (D4), so a host timer armed at `next_day_at` must wait for an instant after `now`, at least the next whole second, or it fires in a loop during that second.
 
@@ -212,7 +226,7 @@ The collection stores `crt` in the `col` row and `creationOffset` among the conf
 
 ### D12.1 The offset changes (R464, R597)
 
-Meguri computes the day afresh at the first query after the current offset changes (D6). Anki keeps a day computed under the old offset until its boundary passes. Paris, rollover 4, day computed on 2030-03-30 at noon: on 2030-03-31 at 03:59:59 +02:00 Meguri's `next_day_at` is 04:00 +02:00 and Anki's 04:00 +01:00; at 04:00:00 +02:00 Meguri starts day 2 and Anki stays on day 1 until 05:00 +02:00. Deviations `day-clock-offset-change-*`, scenario `sched/day/offset-change-recompute`. After travel east past the rollover hour, Meguri starts the new day at the first query; Anki waits until the old boundary passes.
+Meguri computes the day afresh at the first query after the current offset changes (D6). Anki keeps a day computed under the old offset until its boundary passes, except on the paths of D6.1, whose day equals Meguri's. Paris, rollover 4, day computed on 2030-03-30 at noon: on 2030-03-31 at 03:59:59 +02:00 Meguri's `next_day_at` is 04:00 +02:00 and Anki's 04:00 +01:00; at 04:00:00 +02:00 Meguri starts day 2 and Anki stays on day 1 until 05:00 +02:00. Deviations `day-clock-offset-change-*`, scenario `sched/day/offset-change-recompute`. After travel east past the rollover hour, Meguri starts the new day at the first query; Anki waits until the old boundary passes.
 
 ### D12.2 Timing keys change by sync or config write (R597, R760)
 
@@ -220,7 +234,7 @@ Meguri computes the day afresh as soon as `rollover`, `creationOffset` or `crt` 
 
 ### D12.3 Legacy collections stay legacy (R595)
 
-Anki's desktop layer adds `creationOffset` (the offset in effect at `crt`) whenever it opens a collection that lacks it, which changes the day count when the two timings differ (D4). Meguri never does. Deviations `legacy-timing-kept-on-reopen-*`, scenario `sched/day/legacy-timing-kept-on-reopen`.
+Anki's desktop layer adds `creationOffset` (the offset in effect at `crt`) whenever it opens a collection that lacks it, which changes the day count when the two timings differ (D4). Meguri never does. A `creationOffset` that arrives by sync (another device added it) is collection data: the day clock computes afresh with it at once (D6, D8), and the collection uses timing with a creation offset from then on. A sync that leaves the key absent leaves the timing legacy. Deviations `legacy-timing-kept-on-reopen-*`, scenario `sched/day/legacy-timing-kept-on-reopen`.
 
 ### D12.4 Not reproduced, not observable through the oracle
 
@@ -259,10 +273,11 @@ All have goldens. The unbury scenarios write their notes and cards with `db_exec
 
 - The `timing` observation (`specs/conformance/observations.md` O4) is one `checkRollover()` on Meguri and one day query with its unbury check on the oracle. It can write the timing keys and restore cards.
 - Meguri runs it too whenever the engine opens a collection (scenario setup, `reopen` and handoffs may do so; the storage area's `open` step uses the storage open gate and runs none, `specs/conformance/storage-ops.md` P1), before an answer, and right after a `set_config` of `rollover` or `creationOffset` (D8). The oracle runs a day query without the unbury check inside `answer` and `next_states`, and none when it opens a collection or writes config. `card`, `db_exec`, `set_clock` and `advance` run none on either side; a `db_exec` that writes drops Meguri's cached day (D6).
+- In actor scenarios (`specs/conformance/sync-ops.md`), an oracle actor's `sync: {kind: normal}` runs a day query with the unbury check only when the status check calls for an incremental sync; Meguri actors run `checkRollover()` before every sync (D7, D8). The scenario's sync server, Anki's own (`sync-ops.md` S3.1), runs one on its collection when a sync starts. A one-way sync reopens the actor's collection, which adds `creationOffset` to a legacy collection on the oracle (D12.3).
 - So that both sides write and unbury at the same instants, a scenario that reads the timing keys' rows, `col.mod` or buried cards:
   - starts with `observe: [timing]`;
   - observes `timing` right after every `reopen` and handoff, before the clock moves;
-  - after moving the clock across a boundary, observes `timing` before any `answer` or read.
+  - after moving the clock across a boundary, observes `timing` before any `answer`, `sync` or read.
 - The oracle reuses a computed day (D6). To compare a day after an offset change or a `set_config` of `rollover` or `creationOffset`, a scenario either reopens the collection at that instant and observes `timing` (not for legacy collections: the oracle's open adds `creationOffset`, D12.3), or observes only after the clock has passed the oracle's cached `next_day_at`. In the second case the config change must not start a new day at the instant it is written, or Meguri unburies and writes `lastUnburied` at that earlier instant. Otherwise the scenario needs a deviation.
 
 ### D14.3 Waiting for other areas
@@ -270,3 +285,5 @@ All have goldens. The unbury scenarios write their notes and cards with `db_exec
 - Deck counts at the rollover instants (AE84's counts, R1897) need the queue area's `deck_tree` observation (U41).
 - `sched/day/legacy-timing-after-answer` needs note setup (U27) and answers (U44).
 - Meguri's executor needs the `timing` observation and the `reopen` op (U40 implements both adapters).
+- The sync half of U40's legacy-timing test ("keeps its timing mode after a sync") has no scenario: actor scenarios are live, Meguri actors need the sync units (U106, U107), and an actor's first sync of a collection that holds cards is a one-way sync, which reopens the collection, after which the oracle's collection is no longer legacy (D12.3). U40 checks it with engine tests: a `SyncIncoming` op whose change set leaves `creationOffset` absent keeps legacy timing (today unchanged, no `creationOffset` row), and one that adds it switches the count at once (D12.3).
+- Meguri-only behavior has no scenario and is checked by U40's engine tests: D8's events (`TimeZoneChanged` for Europe/Paris to Africa/Ceuta without `RolledOver`; one event for two calls on the same day; one recompute and at most one event for a `SyncIncoming` change of `rollover` from 4 to 6), D9 (undo cleared with `ClearedByRollover`, a refused or parked `Rollover` op run once the state is `Ready`), D8's generation change, and the absence of core timers (R1854).
