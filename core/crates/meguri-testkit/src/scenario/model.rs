@@ -145,10 +145,51 @@ impl<'de> Deserialize<'de> for NoArgs {
     }
 }
 
-/// `sync: {kind}` (sync-ops.md S4).
+/// `sync: {kind, credentials?}` (sync-ops.md S4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncSpec {
     pub kind: SyncKind,
+    /// What a `login` sends (S4.5); `Account` for every other kind.
+    pub credentials: Credentials,
+}
+
+impl SyncSpec {
+    /// The rejections a sync step records (S4.4, dsl.md D7.2): the list a
+    /// Meguri sync adapter registers with `Registry::op_rejecting`.
+    pub const REJECTIONS: [&'static str; 3] = ["auth_failed", "clock_incorrect", "network"];
+}
+
+/// How a `login` derives its credentials from the scenario's account
+/// (sync-ops.md S4.5). A scenario never names a credential.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Credentials {
+    /// The account's user name and password.
+    #[default]
+    Account,
+    /// The account's user name with its password followed by `-wrong`: the
+    /// server refuses it (`auth_failed`).
+    WrongPassword,
+}
+
+impl Credentials {
+    /// What `wrong_password` appends to the account's password (S4.5).
+    pub const WRONG_PASSWORD_SUFFIX: &'static str = "-wrong";
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Credentials::Account => "account",
+            Credentials::WrongPassword => "wrong_password",
+        }
+    }
+
+    /// The password a login with these credentials sends for an account
+    /// whose password is `password`.
+    pub fn password(self, password: &str) -> String {
+        match self {
+            Credentials::Account => password.to_owned(),
+            Credentials::WrongPassword => format!("{password}{}", Credentials::WRONG_PASSWORD_SUFFIX),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -178,9 +219,31 @@ impl<'de> Deserialize<'de> for SyncSpec {
         struct Raw {
             kind: SyncKind,
         }
-        let map = mapping(deserializer, "sync")?;
+        let mut map = mapping(deserializer, "sync")?;
+        // Read by hand, so its errors name the argument and a present
+        // `credentials: null` is not taken for a missing one.
+        let credentials = map.remove("credentials");
         let raw: Raw = serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)?;
-        Ok(SyncSpec { kind: raw.kind })
+        let credentials = match credentials {
+            None => Credentials::Account,
+            Some(_) if raw.kind != SyncKind::Login => {
+                return Err(de::Error::custom(format!(
+                    "sync {}: credentials are allowed only with kind login (sync-ops.md S4.5)",
+                    raw.kind.as_str()
+                )));
+            }
+            Some(Value::String(text)) if text == "account" => Credentials::Account,
+            Some(Value::String(text)) if text == "wrong_password" => Credentials::WrongPassword,
+            Some(other) => {
+                return Err(de::Error::custom(format!(
+                    "sync credentials {other} is not account or wrong_password (sync-ops.md S4.5)"
+                )));
+            }
+        };
+        Ok(SyncSpec {
+            kind: raw.kind,
+            credentials,
+        })
     }
 }
 

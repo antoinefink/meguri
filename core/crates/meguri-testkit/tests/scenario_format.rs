@@ -992,6 +992,73 @@ fn actor_scenarios_are_checked_when_they_load() {
 }
 
 #[test]
+fn a_login_says_how_it_derives_its_credentials() {
+    use meguri_testkit::scenario::{Credentials, SyncKind};
+
+    // sync-ops.md S4.5: after a login, a second sync step with these
+    // arguments; `account` is the default.
+    let second = |args: &str| {
+        actor_scenario(&format!(
+            "id: sync/creds\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nactors: [meguri]\n\
+             steps: [{{sync: {{kind: login}}}}, {{sync: {args}}}]\n"
+        ))
+    };
+    for (args, kind, credentials) in [
+        ("{kind: login}", SyncKind::Login, Credentials::Account),
+        (
+            "{kind: login, credentials: account}",
+            SyncKind::Login,
+            Credentials::Account,
+        ),
+        (
+            "{kind: login, credentials: wrong_password}",
+            SyncKind::Login,
+            Credentials::WrongPassword,
+        ),
+        ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+    ] {
+        let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
+        let Step::Sync(spec) = &parsed.steps[1] else {
+            panic!("{args}: not a sync step")
+        };
+        assert_eq!((spec.kind, spec.credentials), (kind, credentials), "{args}");
+    }
+    for (args, why) in [
+        ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: full_upload, credentials: wrong_password}", "credentials"),
+        ("{kind: login, credentials: other}", "other"),
+        ("{kind: login, credentials: null}", "credentials"),
+        ("{kind: login, credentials: 1}", "credentials"),
+        ("{kind: login, credentials: [account]}", "credentials"),
+        ("{kind: login, password: secret}", "password"),
+    ] {
+        let err = second(args).expect_err(args);
+        assert!(err.contains(why), "{args}: {err}");
+    }
+
+    // The committed scenario parses with the wrong password on its first login.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/transport/login-wrong-password.yaml")).unwrap();
+    assert!(matches!(
+        &loaded.scenario.steps[1],
+        Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
+    ));
+}
+
+#[test]
+fn the_wrong_password_is_the_accounts_password_followed_by_wrong() {
+    use meguri_testkit::scenario::{Credentials, SyncSpec};
+
+    // sync-ops.md S4.5: every executor derives it the same way.
+    assert_eq!(Credentials::Account.password("meguri-test-a"), "meguri-test-a");
+    assert_eq!(
+        Credentials::WrongPassword.password("meguri-test-a"),
+        "meguri-test-a-wrong"
+    );
+    // S4.4: the closed list of rejections, auth_failed among them.
+    assert_eq!(SyncSpec::REJECTIONS, ["auth_failed", "clock_incorrect", "network"]);
+}
+
+#[test]
 fn meguri_actors_need_what_they_run_and_nothing_else() {
     let path = conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml");
     let loaded = scenario::load(&path).unwrap();

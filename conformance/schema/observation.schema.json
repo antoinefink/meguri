@@ -367,7 +367,7 @@
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["clock_incorrect", "network"] } } }
+                { "properties": { "error": { "enum": ["auth_failed", "clock_incorrect", "network"] } } }
               ]
             }
           ]

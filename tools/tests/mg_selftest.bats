@@ -787,7 +787,7 @@ layering/restricted/meguri-sched -> tokio" ]
   m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-package -> meguri-stats") | .message' "$result")"
   [[ "$m" == *"edges.toml row 8"*"(row 8)"*siblings* ]]
   [ "$(field '.failures[0].repro')" = "tools/mg core-lint" ]
-  [ "$(field -c .summary)" = '{"total":3,"passed":2,"failed":1,"skipped":0}' ]
+  [ "$(field -c .summary)" = '{"total":4,"passed":3,"failed":1,"skipped":0}' ]
   validate "$result"
 }
 
@@ -805,6 +805,22 @@ layering/restricted/meguri-sched -> tokio" ]
   [[ "$ids" == *"fmt/crates/meguri-search/src/lib.rs"* ]]
   [ "$(field '.failures | length')" -eq 2 ]
   [[ "$(jq -r '.failures[] | select(.id | startswith("clippy/")) | .message' "$result")" == *"std::time::SystemTime::now"* ]]
+  validate "$result"
+}
+
+@test "core-lint's AnkiWeb scan flags a name meguri-sync compiles in without its features, not a gated one" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate meguri-sync '#[cfg(feature = "ankiweb")]
+pub static GATED: &str = "sync.ankiweb.example";
+pub static LEAKED: &str = "Sync with AnkiWeb";'
+  printf '\n[features]\nankiweb = []\n' >>"$SB/core/crates/meguri-sync/Cargo.toml"
+  mg core-lint
+  [ "$status" -eq 1 ]
+  # The stand-in workspace has no layering-check; that failure is expected.
+  [ "$(failure_ids | grep -c '^ankiweb/')" -eq 1 ]
+  [[ "$(jq -r '.failures[] | select(.id | startswith("ankiweb/")) | .message' "$result")" == *'holds "AnkiWeb" in '* ]]
+  [ -s "$(jq -r '.artifacts[] | select(.kind == "ankiweb-scan-jsonl") | .path' "$result")" ]
   validate "$result"
 }
 
