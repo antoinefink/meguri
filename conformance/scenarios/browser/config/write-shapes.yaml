@@ -1,16 +1,20 @@
-# Every browser config key written once through browser_config_set
-# (specs/conformance/browser-config-ops.md B1) with a value of its shape
-# (specs/browser/config-keys.md K1): the stored text is the compact form of
-# storage/config-table C5 (object members sorted by code point, a tab and a
-# backslash escaped, non-ASCII kept as UTF-8, unknown column keys and the
-# empty column key kept in place), as a BLOB with usn -1 and mtime_secs now,
-# and Anki's reads give the values back. An hour later the same values,
-# objects with their members in another order, write nothing (K10.1): no row
-# is stamped and col.mod does not move. Needs browser_config_set, db_exec
-# (record-ops.md W1) and the browser_config observation (B2).
+# Starts from the schema-18 storage fixture (specs/conformance/storage-ops.md
+# P1), whose config holds sortType "noteFld" and sortBackwards false as a new
+# collection does. Every browser config key written once through
+# browser_config_set (specs/conformance/browser-config-ops.md B1) with a value
+# of its shape (specs/browser/config-keys.md K1): the stored text is the
+# compact form of storage/config-table C5 (object members sorted by code
+# point, a tab and a backslash escaped, non-ASCII kept as UTF-8, unknown
+# column keys and the empty column key kept in place), as a BLOB with usn -1
+# and mtime_secs now, and Anki's reads give the values back. An hour later
+# the same values, objects with their members in another order, write nothing
+# (K10.1): no row is stamped and col.mod does not move. Needs open
+# (storage-ops.md P1), browser_config_set, db_exec (record-ops.md W1) and the
+# browser_config observation (B2).
 id: browser/config/write-shapes
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 steps:
+  - open: {fixture: storage/schema-18.anki2}
   - browser_config_set: {key: activeCols, value: [question, answer, noteFld, addonX, cardDue]}
   - browser_config_set: {key: activeNoteCols, value: [noteTags, "", noteFld]}
   - browser_config_set: {key: sortType, value: cardDue}

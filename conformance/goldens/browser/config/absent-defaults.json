@@ -5,6 +5,7 @@
   },
   "observations": {
     "steps": [
+      {},
       {
         "db_exec": {
           "rows": []
@@ -49,10 +50,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "0c564359de72f4dd507414a66cf201603c8259f152cc16d631bd4f78b7841060",
+    "driver_sha256": "dc3d7c77948b10a4b8cd3032fc442684b36d8812e1a70ebdc054d37387c41e6e",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "browser/config/absent-defaults",
-  "scenario_sha256": "841e977d7d71b5fe37224677b76a9051256b6c5a0a5b346d40f98b79cf8ad8b8",
+  "scenario_sha256": "f37a638c484dcc6aab55942501aa103d73b64759cd4dd83234286e3124a9cdad",
   "tz": "UTC"
 }
