@@ -644,11 +644,18 @@ t_sync_rig_records_decoded_exchanges() {
     expect "recorder health" "$(field -c '.details.recorder | {ok, written, errors}')" '{"ok":true,"written":2,"errors":0}' &&
     expect "lines after status" "$(wc -l <"$rec/exchanges.jsonl" | tr -d ' ')" 2 || return 1
   # The recording becomes a directory, so the next exchange cannot be written.
-  mv "$rec/exchanges.jsonl" "$rec/exchanges.done" && mkdir "$rec/exchanges.jsonl" || return 1
-  curl --noproxy '*' -s -o /dev/null --max-time 10 --data-binary @"$SB/meta.zst" "${url}sync/meta"
+  # The swap runs in the container: one made on the Mac reaches the container's
+  # view of the bind mount up to a few hundred ms later, and an exchange in
+  # between still lands in the renamed file.
+  sbcompose --profile spec-record exec -T mitmdump sh -c \
+    'mv /recordings/exchanges.jsonl /recordings/exchanges.done && mkdir /recordings/exchanges.jsonl' </dev/null ||
+    return 1
+  code="$(curl --noproxy '*' -s -o /dev/null -w '%{http_code}' --max-time 10 --data-binary @"$SB/meta.zst" "${url}sync/meta")"
   mg sync-rig status
   jq -c '{status, failures, recorder: .details.recorder}' "$RESULT"
-  expect "status exit" "$RC" 1 &&
+  expect "reply while the recording is unwritable" "$code" 200 &&
+    expect "lines in the renamed recording" "$(wc -l <"$rec/exchanges.done" | tr -d ' ')" 2 &&
+    expect "status exit" "$RC" 1 &&
     expect "status" "$(field .status)" fail &&
     expect "recorder failure" "$(field '[.failures[].id] | index("recorder-unhealthy") != null')" true &&
     expect "recorder health" "$(field -c '.details.recorder | {ok, written, errors}')" '{"ok":false,"written":2,"errors":1}' || return 1
