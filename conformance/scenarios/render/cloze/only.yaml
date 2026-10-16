@@ -1,0 +1,22 @@
+# specs/render/cloze.md C9: cloze-only: output, hints or ... on the front and
+# plain contents on the back, joined with ", " (R963).
+id: render/cloze/only
+description: "cloze-only: output"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [only_front, only_back]
+          inputs:
+            - ["{{c1::Paris::capital}} and {{c1::Rome}}", 1]
+            - ["{{c1,2::Seine}} and {{c1::Loire}} or {{c2::Rhône}}", 1]
+            - ["{{c1,2::Seine}} and {{c1::Loire}} or {{c2::Rhône}}", 2]
+            - ["{{c1::a {{c1::b}}}}", 1]
+            - ["{{c1::a {{c2::b}} c}}", 1]
+            - ["{{c1::a {{c2::b}} c}}", 2]
+            - ["no cloze here", 1]
+            - ["{{c1::x::}} {{c1::y}}", 1]
+            - ["{{c1::<i>styled</i>::<b>hint</b>}}", 1]
+            - ["{{c1::\\(<b>m</b>\\)}}", 1]
+            - ["{{c2::a}} {{c1::b}} {{c2::c}}", 2]
+            - ["{{c1::image-occlusion:rect:left=.1:top=.2:width=.3:height=.4}}", 1]

@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "cloze": {
+          "back": ["<span class=\"cloze\" data-ordinal=\"1,2,3\">Danube</span>", "<span class=\"cloze\" data-ordinal=\"1,2,3\">Danube</span>", "<span class=\"cloze\" data-ordinal=\"1,2,3\">Danube</span>", "", "<span class=\"cloze\" data-ordinal=\"1,2\">Seine</span> and <span class=\"cloze\" data-ordinal=\"1\">Loire</span> or <span class=\"cloze-inactive\" data-ordinal=\"2\">Rhône</span>", "<span class=\"cloze\" data-ordinal=\"1,2\">Seine</span> and <span class=\"cloze-inactive\" data-ordinal=\"1\">Loire</span> or <span class=\"cloze\" data-ordinal=\"2\">Rhône</span>", "", "<span class=\"cloze\" data-ordinal=\"1,2\">Rhine</span>", "<span class=\"cloze\" data-ordinal=\"1,2\">Rhine</span>", "<span class=\"cloze\" data-ordinal=\"0,1\">Elbe</span>", "<span class=\"cloze\" data-ordinal=\"0,2\">Oder</span> <span class=\"cloze\" data-ordinal=\"2\">Vistula</span>", "<span class=\"cloze\" data-ordinal=\"2,10\">Po</span>", "<span class=\"cloze\" data-ordinal=\"2,10\">Po</span>", "<span class=\"cloze\" data-ordinal=\"1,2\">wide <span class=\"cloze-inactive\" data-ordinal=\"3\">narrow</span></span>", "<span class=\"cloze-inactive\" data-ordinal=\"1,2\">wide <span class=\"cloze\" data-ordinal=\"3\">narrow</span></span>"],
+          "front": ["<span class=\"cloze\" data-cloze=\"Danube\" data-ordinal=\"1,2,3\">[...]</span>", "<span class=\"cloze\" data-cloze=\"Danube\" data-ordinal=\"1,2,3\">[...]</span>", "<span class=\"cloze\" data-cloze=\"Danube\" data-ordinal=\"1,2,3\">[...]</span>", "", "<span class=\"cloze\" data-cloze=\"Seine\" data-ordinal=\"1,2\">[...]</span> and <span class=\"cloze\" data-cloze=\"Loire\" data-ordinal=\"1\">[...]</span> or <span class=\"cloze-inactive\" data-ordinal=\"2\">Rhône</span>", "<span class=\"cloze\" data-cloze=\"Seine\" data-ordinal=\"1,2\">[...]</span> and <span class=\"cloze-inactive\" data-ordinal=\"1\">Loire</span> or <span class=\"cloze\" data-cloze=\"Rh&#xF4;ne\" data-ordinal=\"2\">[...]</span>", "", "<span class=\"cloze\" data-cloze=\"Rhine\" data-ordinal=\"1,2\">[river]</span>", "<span class=\"cloze\" data-cloze=\"Rhine\" data-ordinal=\"1,2\">[river]</span>", "<span class=\"cloze\" data-cloze=\"Elbe\" data-ordinal=\"0,1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"Oder\" data-ordinal=\"0,2\">[...]</span> <span class=\"cloze\" data-cloze=\"Vistula\" data-ordinal=\"2\">[...]</span>", "<span class=\"cloze\" data-cloze=\"Po\" data-ordinal=\"2,10\">[...]</span>", "<span class=\"cloze\" data-cloze=\"Po\" data-ordinal=\"2,10\">[...]</span>", "<span class=\"cloze\" data-cloze=\"wide&#x20;&lt;span&#x20;class&#x3D;&quot;cloze&#x2D;inactive&quot;&#x20;data&#x2D;ordinal&#x3D;&quot;3&quot;&gt;narrow&lt;&#x2F;span&gt;\" data-ordinal=\"1,2\">[...]</span>", "<span class=\"cloze-inactive\" data-ordinal=\"1,2\">wide <span class=\"cloze\" data-cloze=\"narrow\" data-ordinal=\"3\">[...]</span></span>"],
+          "only_back": ["Danube", "Danube", "Danube", "", "Seine, Loire", "Seine, Rhône", "", "Rhine", "Rhine", "Elbe", "Oder, Vistula", "Po", "Po", "wide narrow", "narrow"],
+          "only_front": ["...", "...", "...", "", "..., ...", "..., ...", "", "river", "river", "...", "..., ...", "...", "...", "...", "..."],
+          "typing": ["Danube", "Danube", "Danube", "", "Seine, Loire", "Seine, Rhône", "", "Rhine", "Rhine", "Elbe", "Oder, Vistula", "Po", "Po", "wide narrow", "narrow"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "09cd906bf8cf0daa13a1dcb841fcc42e97f2d7f3c5c2e43585d32f2d457aa10f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/multi-number",
+  "scenario_sha256": "c085554d6863abb1fc28f8d3fa792b77641504026ac4c5fa9f4f0782719306c3",
+  "tz": "UTC"
+}

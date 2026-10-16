@@ -9,13 +9,15 @@
 //! wait in the subscription.
 //!
 //! Variants are added by their owning units (KTD9 lists them). Stream kinds
-//! that have no `CoreEventKind` variant yet are skipped (U37 adds them).
+//! that have no `CoreEventKind` variant yet (lifecycle, availability, write
+//! delays, extensions) are skipped until their units add one.
 
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use meguri_engine::{ChangeStream, Event, EventKind, Generation, JobId, Qos, Seq, Subscription, ThreadRegistry};
 
 use crate::callback;
+use crate::changes::ChangeSet;
 use crate::error::CoreError;
 use crate::jobs::JobOutcome;
 use crate::runtime;
@@ -36,8 +38,16 @@ pub struct CoreEvent {
     pub kind: CoreEventKind,
 }
 
+// Lowered into a buffer for Swift by value; one per event, never stored.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum CoreEventKind {
+    /// An op committed these changes (U24, `engine/change-stream` S1); the
+    /// envelope's `seq` is the op's.
+    Changes { changes: ChangeSet },
+    /// The collection file was replaced and `generation` is open now
+    /// (`engine/lifecycle` L8); exactly once per replacement.
+    CollectionReplaced { generation: u64 },
     /// A job started by a `start_*` export ended (KTD9). Exactly one per job.
     JobFinished { id: u64, outcome: JobOutcome },
 }
@@ -59,21 +69,24 @@ pub fn set_event_listener(listener: Arc<dyn CoreEventListener>) -> Result<(), Co
 }
 
 /// Publishes an event into the process engine's change stream and returns
-/// its `seq`.
+/// its `seq`. `Changes` and `CollectionReplaced` come only from the engine's
+/// executor and lifecycle: they are refused here.
 pub fn publish(generation: u64, cause_seq: Option<u64>, kind: CoreEventKind) -> Result<u64, CoreError> {
+    let kind = stream_kind(kind)?;
     let stream = runtime::engine()?.stream();
-    Ok(stream
-        .publish(Generation(generation), cause_seq.map(Seq), stream_kind(kind))
-        .0)
+    Ok(stream.publish(Generation(generation), cause_seq.map(Seq), kind).0)
 }
 
-/// The stream kind of a `CoreEvent` kind.
-fn stream_kind(kind: CoreEventKind) -> EventKind {
+/// The stream kind of a `CoreEvent` kind that may be published from here.
+fn stream_kind(kind: CoreEventKind) -> Result<EventKind, CoreError> {
     match kind {
-        CoreEventKind::JobFinished { id, outcome } => EventKind::JobFinished {
+        CoreEventKind::JobFinished { id, outcome } => Ok(EventKind::JobFinished {
             id: JobId(id),
             outcome: outcome.into(),
-        },
+        }),
+        CoreEventKind::Changes { .. } | CoreEventKind::CollectionReplaced { .. } => Err(CoreError::InvalidArgument {
+            message: "only the engine publishes Changes and CollectionReplaced".to_owned(),
+        }),
     }
 }
 
@@ -81,13 +94,17 @@ fn stream_kind(kind: CoreEventKind) -> EventKind {
 /// yet.
 fn core_event(event: &Event) -> Option<CoreEvent> {
     let kind = match &event.kind {
+        EventKind::Changes(changes) => CoreEventKind::Changes {
+            changes: changes.as_ref().into(),
+        },
+        EventKind::CollectionReplaced { generation } => CoreEventKind::CollectionReplaced {
+            generation: generation.0,
+        },
         EventKind::JobFinished { id, outcome } => CoreEventKind::JobFinished {
             id: id.0,
             outcome: outcome.clone().into(),
         },
-        EventKind::Changes(_)
-        | EventKind::CollectionReplaced { .. }
-        | EventKind::Lifecycle(_)
+        EventKind::Lifecycle(_)
         | EventKind::Available
         | EventKind::WriteDelay { .. }
         | EventKind::WriteDelayEnded { .. }
@@ -169,7 +186,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use meguri_engine::{ChangeSet, OpSource};
+    use crate::changes::{self, CardChange, ChangeKind, IdChange, NameChange, NotetypeChange, OpSource};
 
     struct Recorder(mpsc::Sender<(CoreEvent, Option<String>)>);
     impl CoreEventListener for Recorder {
@@ -184,6 +201,56 @@ mod tests {
             id,
             outcome: JobOutcome::Succeeded,
         })
+        .unwrap()
+    }
+
+    /// `changes::sample()` as Swift must receive it, written out.
+    fn sample_record() -> ChangeSet {
+        let id = |id, kind| IdChange { id, kind };
+        let name = |name: &str, kind| NameChange {
+            name: name.to_owned(),
+            kind,
+        };
+        ChangeSet {
+            source: OpSource::LocalApi,
+            cards: vec![
+                CardChange {
+                    id: 11,
+                    note_id: 21,
+                    kind: ChangeKind::Updated,
+                    memory_state_only: true,
+                },
+                CardChange {
+                    id: 12,
+                    note_id: 21,
+                    kind: ChangeKind::Added,
+                    memory_state_only: false,
+                },
+            ],
+            notes: vec![id(21, ChangeKind::Added)],
+            notetypes: vec![NotetypeChange {
+                id: 31,
+                kind: ChangeKind::Updated,
+                schema_changed: true,
+            }],
+            decks: vec![id(41, ChangeKind::Removed)],
+            deck_configs: vec![id(51, ChangeKind::Added)],
+            config_keys: vec![name("curDeck", ChangeKind::Updated)],
+            tags: vec![name("leech", ChangeKind::Added)],
+            revlog_added: vec![61],
+            revlog_removed: vec![62],
+            media_added: vec!["a.jpg".to_owned()],
+            media_removed: vec!["b.mp3".to_owned()],
+            collection_row: true,
+        }
+    }
+
+    /// A change set naming only card `id`.
+    fn card_changed(id: i64) -> EventKind {
+        let mut changes = changes::sample();
+        changes.cards.truncate(1);
+        changes.cards[0].id = meguri_model::ids::CardId(id);
+        EventKind::Changes(Arc::new(changes))
     }
 
     fn start() -> (ChangeStream, Arc<Dispatcher>) {
@@ -235,24 +302,105 @@ mod tests {
         // An op reserves its seq at commit and publishes after its observers;
         // a job ending meanwhile waits behind it.
         let op = stream.reserve();
+        let op_seq = op.seq().0;
         let job = stream.publish(Generation(1), None, finished(1));
         assert!(
             rx.recv_timeout(Duration::from_millis(50)).is_err(),
             "held behind the op"
         );
-        op.fill(
-            Generation(1),
-            None,
-            EventKind::Changes(Arc::new(ChangeSet::empty(OpSource::UserUndoable))),
-        );
+        op.fill(Generation(1), None, EventKind::Changes(Arc::new(changes::sample())));
         let empty_op = stream.reserve();
         let second = stream.publish(Generation(1), None, finished(2));
         empty_op.give_up();
-        let delivered: Vec<u64> = (0..2)
-            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap().0.seq)
+        let replaced = stream.publish(
+            Generation(2),
+            None,
+            EventKind::CollectionReplaced {
+                generation: Generation(2),
+            },
+        );
+        let delivered: Vec<CoreEvent> = (0..4)
+            .map(|_| rx.recv_timeout(Duration::from_secs(5)).unwrap().0)
             .collect();
-        assert_eq!(delivered, [job.0, second.0], "each once, in seq order");
+        assert_eq!(
+            delivered.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            [op_seq, job.0, second.0, replaced.0],
+            "each once, in seq order"
+        );
+        assert_eq!(
+            delivered[0],
+            CoreEvent {
+                seq: op_seq,
+                generation: 1,
+                cause_seq: None,
+                kind: CoreEventKind::Changes {
+                    changes: sample_record()
+                },
+            }
+        );
+        assert_eq!(
+            delivered[3],
+            CoreEvent {
+                seq: replaced.0,
+                generation: 2,
+                cause_seq: None,
+                kind: CoreEventKind::CollectionReplaced { generation: 2 },
+            }
+        );
         assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+    }
+
+    #[test]
+    fn a_thousand_op_change_sets_from_four_threads_reach_the_listener_once_in_seq_order() {
+        let (stream, dispatcher) = start();
+        let (tx, rx) = mpsc::channel();
+        dispatcher.set_listener(Arc::new(Recorder(tx)));
+        // Each op as the writer publishes it: a seq reserved at commit, filled
+        // with its change set once its observers ran.
+        let threads: Vec<_> = (0..4i64)
+            .map(|t| {
+                let stream = stream.clone();
+                thread::spawn(move || {
+                    (0..250)
+                        .map(|i| {
+                            let op = stream.reserve();
+                            let seq = op.seq().0;
+                            op.fill(Generation(1), None, card_changed(t * 1_000 + i));
+                            (seq, t * 1_000 + i)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let mut published: Vec<(u64, i64)> = threads.into_iter().flat_map(|t| t.join().unwrap()).collect();
+        published.sort_unstable();
+
+        let delivered: Vec<(u64, i64)> = (0..1_000)
+            .map(|_| {
+                let (event, thread) = rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("change set not delivered");
+                assert_eq!(thread.as_deref(), Some(DISPATCHER_THREAD_NAME));
+                match event.kind {
+                    CoreEventKind::Changes { changes } => (event.seq, changes.cards[0].id),
+                    other => panic!("{other:?}"),
+                }
+            })
+            .collect();
+        assert_eq!(delivered, published, "every op once, in seq order");
+        assert!(rx.recv_timeout(Duration::from_millis(50)).is_err());
+    }
+
+    #[test]
+    fn publishing_changes_or_a_replacement_from_outside_the_engine_is_refused() {
+        for kind in [
+            CoreEventKind::Changes {
+                changes: sample_record(),
+            },
+            CoreEventKind::CollectionReplaced { generation: 2 },
+        ] {
+            assert!(matches!(publish(1, None, kind), Err(CoreError::InvalidArgument { .. })));
+        }
     }
 
     #[test]
