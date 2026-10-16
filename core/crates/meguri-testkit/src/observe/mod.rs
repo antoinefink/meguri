@@ -1,5 +1,8 @@
 //! Observation values: canonical JSON text, f32 formatting and tolerances
-//! (specs/conformance/observations.md O6, O7; dsl.md D3, D11).
+//! (specs/conformance/observations.md O6, O7; dsl.md D3, D11), and the macOS
+//! overlay goldens (`overlay`, float-determinism.md F7-F9).
+
+pub mod overlay;
 
 use std::collections::BTreeMap;
 
@@ -306,7 +309,8 @@ pub fn f32_value(x: f32) -> Result<Value, FormatError> {
         .ok_or_else(|| FormatError::new("non-finite"))
 }
 
-/// Relative tolerance on memory states inside `next_states` (O7).
+/// Relative tolerance on memory states inside `next_states` and on the
+/// stability and difficulty columns of `fsrs_next` rows (O7).
 pub const MEMORY_STATE_TOLERANCE: f64 = 1e-5;
 /// Relative tolerance on fractional numbers inside `stats` (O7).
 pub const STATS_TOLERANCE: f64 = 1e-6;
@@ -322,6 +326,43 @@ pub fn tolerance(segments: &[String]) -> Option<f64> {
                 .then_some(MEMORY_STATE_TOLERANCE)
         }
         "stats" => Some(STATS_TOLERANCE),
+        // The stability and difficulty columns of an fsrs_next row
+        // (float-determinism.md F3.3, F5.6).
+        "fsrs_next" => match segments {
+            [_, _, _, rows, _, column] if rows == "rows" => fsrs_next_column(column)
+                .filter(|c| !c.is_multiple_of(3))
+                .map(|_| MEMORY_STATE_TOLERANCE),
+            _ => None,
+        },
         _ => None,
     }
+}
+
+/// The values of an `fsrs_next` row: days, stability and difficulty for
+/// again, hard, good and easy (float-determinism.md F3.3).
+pub const FSRS_NEXT_COLUMNS: usize = 12;
+
+/// The names of an `fsrs_next` row's columns, in order (F3.3).
+pub const FSRS_NEXT_COLUMN_NAMES: [&str; FSRS_NEXT_COLUMNS] = [
+    "again_days",
+    "again_s",
+    "again_d",
+    "hard_days",
+    "hard_s",
+    "hard_d",
+    "good_days",
+    "good_s",
+    "good_d",
+    "easy_days",
+    "easy_s",
+    "easy_d",
+];
+
+/// A pointer segment naming an `fsrs_next` column: `0` to `11`, no leading
+/// zero.
+pub fn fsrs_next_column(segment: &str) -> Option<usize> {
+    (segment == "0" || !segment.starts_with('0'))
+        .then(|| segment.parse::<usize>().ok())
+        .flatten()
+        .filter(|c| *c < FSRS_NEXT_COLUMNS)
 }

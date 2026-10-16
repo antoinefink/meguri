@@ -127,3 +127,4 @@ dupe
 has-cd
 image-occlusion
 latex
+param_search

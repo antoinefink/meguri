@@ -80,7 +80,7 @@ The same source and salt give a byte-identical clone (`collection.anki2`, every 
 | `decks` | `id`, `mtime_secs`, `usn`, `common` | unchanged |
 | `decks` | `name` | A11.1 |
 | `decks` | `kind` | unchanged except a normal deck's description and a filtered deck's searches (A11.3) |
-| `deck_config` | all | unchanged (preset names included) |
+| `deck_config` | all | unchanged, preset names included, and each preset's FSRS optimizer search (`param_search`, preset config field 45), which may name decks or tags: only the optimizer reads it, never the queues or next states. V4 reports it |
 | `notetypes`, `fields`, `templates` | all | unchanged (note type, field and template names, templates and CSS included) |
 | `tags` | `tag` | A12.3; `usn`, `collapsed`, `config` unchanged |
 | `config` | `KEY`, `usn`, `mtime_secs` | unchanged |
@@ -176,7 +176,7 @@ Card generation reads cloze numbers from the raw field text, tags and comments i
 - G1 keeps replaced text from forming a new opener: `{{x1::` never becomes `{{c1::`.
 - Image-occlusion data: when an opener shape is directly followed by `image-occlusion:`, the text from there to the next opener shape or `}}` is shape data: `image-occlusion:`, then a shape name, then properties `:<name>=<value>`, where a value runs to the next `:` not escaped by `\` (`\:` and `\\` are escapes inside a value). All of it is kept (shape names, coordinates, `oi`, colors) except the value of each `text` property, which is replaced as text (its `\` escapes are punctuation and stay). This applies in any note.
 
-Example: `{{c1::der Hund::animal}}` becomes `{{c1::` + 3 lower-case letters + ` ` + 1 upper-case and 3 lower-case letters + `::` + 6 lower-case letters + `}}`: the answer keeps its 8 characters and its space.
+Example: `{{c1::der Hund::animal}}` becomes `{{c1::` + 3 lower-case letters + ` ` + 1 upper-case and 3 lower-case letters + `::` + 6 lower-case letters + `}}`. The answer `der Hund` is 8 characters, the kept space included, so 7 letters are replaced. The plan's test scenario says 9 random characters there; it miscounts, and this spec's count is the one tests use.
 
 ## A8. Furigana and bracket annotations
 
@@ -215,7 +215,15 @@ Every regular file of the source media folder is written into the clone's `colle
 
 ### A10.2 Image-occlusion images
 
-A note is an image-occlusion note when its note type's config has `original_stock_kind` 6. Every file referenced (A9.2, well-formed) by any field of such a note whose extension, ASCII case-insensitive, is `jpg`, `jpeg`, `png`, `gif`, `webp`, `ico`, `avif` or `svg` gets a valid placeholder. The image-occlusion review page sizes its canvas and masks from the image's natural size, so the placeholder has the source image's pixel dimensions:
+A note is an image-occlusion note when its note type's config has `original_stock_kind` 6. Its fields follow the rules every note's fields follow; no field is skipped or kept whole:
+
+- the occlusions field holds the shape data of A7, kept except the values of `text` properties;
+- the image field holds an `<img>` tag whose name is mapped (A9.2), the rest of the tag per A6;
+- the header, back extra and comments fields are text (A6.3).
+
+The note type, its field roles (each field's `tag` in `fields.config`), templates and CSS are unchanged (A4). So Anki finds the image and the shapes in the clone as in the source, and the cloze numbers that give the note its cards are the same.
+
+Every file referenced (A9.2, well-formed) by any field of such a note whose extension, ASCII case-insensitive, is `jpg`, `jpeg`, `png`, `gif`, `webp`, `ico`, `avif` or `svg` gets a valid placeholder. The image-occlusion review page sizes its canvas and masks from the image's natural size, so the placeholder has the source image's pixel dimensions:
 
 | Source file starts with | Width and height |
 |---|---|
@@ -358,9 +366,19 @@ The rewritten value is written in the compact form of `storage/config-table#C5`;
 
 ### A14.2 SQLite statistics
 
-`sqlite_stat1` holds counts only and is kept, so the clone's queries are planned from the source's statistics, stale ones included. `sqlite_stat4` keeps sample index keys: its rows for `idx_decks_name`, `ix_notes_csum` and the `tags` primary key (`sqlite_autoindex_tags_1`), which hold deck names, checksums of first fields and tag names, are deleted; its other rows stay.
+`sqlite_stat1` holds counts only and is kept, so the clone's queries are planned from the source's statistics, stale ones included. `sqlite_stat4` holds sample index keys. Its rows whose `idx` is one of these three are deleted, because their samples hold names:
 
-Without those samples SQLite may plan a range query on deck names differently. One such query matters to scheduling: the one that lists a studied deck and its subdecks, whose row order the review orders that sort by deck use. The default orders do not; V3 shows any effect on a collection whose presets use them.
+| `idx` | Samples hold |
+|---|---|
+| `idx_decks_name` | deck names |
+| `ix_notes_csum` | checksums of first fields |
+| `tags` | tag names |
+
+Its other rows stay: their samples hold note type, field, template and preset names, which are kept (A4), or integers.
+
+The `idx` value `tags` stands for the primary key of the `tags` table. That table is `WITHOUT ROWID`, so SQLite files its key samples, and its `sqlite_stat1` row, under the table's own name. No row has the `idx` `sqlite_autoindex_tags_1`: a rule that names it deletes nothing and leaves every tag name in the clone.
+
+Deleting samples can only change how SQLite estimates a range on these columns. One such query bears on scheduling: the one that lists a studied deck and its subdecks, whose row order the review orders that sort by deck use. It selects only deck ids by name, so `idx_decks_name` answers it alone and returns the rows in name order, which ranks keep (A11.1). With SQLite 3.54 built with `SQLITE_ENABLE_STAT4`, and a case-insensitive collation standing in for `unicase`, that plan was the same with and without the deck samples for every shape tried (1 to 2,000 decks, a studied deck with 0 to 1,900 subdecks). V3 would show any other effect. No query that orders cards reads checksums or tags.
 
 ### A14.3 Writing the clone
 
@@ -416,12 +434,12 @@ Field text, tag names and media do not affect queues or next states. Field empti
 ## A17. Validation
 
 - **V1 Structure** (the anonymizer, every field): tokenizing the clone field with A6 gives the source's token sequence, kept tokens byte-equal and each replaced run of the same length with each character in the same A5.2 class (a replaced entity counting as its character); the opener shapes (A7) are the same, at the same character positions; E1 emptiness is the same; the clone's well-formed local references (`text/media-references#M4`) are the source's, mapped. A failure is A18 `structure_changed`.
-- **V2 Rows** (the anonymizer): `col`, `cards`, `revlog`, `graves`, `deck_config`, `notetypes`, `fields`, `templates` and `sqlite_stat1` hold the same rows (value and storage class); `notes` and `decks` hold the same ids, each row equal except the columns A4 rewrites; `config` holds the same keys, equal except A13.5's; `tags` holds as many rows.
+- **V2 Rows** (the anonymizer): `col`, `cards`, `revlog`, `graves`, `deck_config`, `notetypes`, `fields`, `templates` and `sqlite_stat1` hold the same rows (value and storage class); `notes` and `decks` hold the same ids, each row equal except the columns A4 rewrites; `config` holds the same keys, equal except A13.5's; `tags` holds as many rows; `sqlite_stat4` holds the source's rows minus those A14.2 removes, each unchanged.
 - **V3 Oracle** (`tools/mg anonymize`): `tools/mg oracle check <source> --schedule` and `tools/mg oracle check <clone> --schedule` with the same `--now` and `--tz` (A2.3). The reports must have equal `counts`, `timing`, `check_db` and `schedule` (`collection-check.md` K11; equal `schedule.sha256`), and every table in the clone's `changed_tables` must be in the source's or be `col` or `config`. A difference fails with the members that differ (for `schedule`, the deck ids whose digests differ). The clone's `check_db` must also show zero problems: a count above 0, or the rejection `{"error": "corrupt"}` (`collection-check.md` K4, K5), fails V3 even when the source's `check_db` is the same, naming the clone's kinds above 0 with their counts, or the rejection. Repair such a source with Anki's Check Database, then anonymize it again. This is the only condition V3 takes from the clone's report alone; the K9 status of either check job is not used.
 - **V4 Leak scan** (the anonymizer):
   - Tokens: maximal runs of letters, marks and digits (A5.1) of at least 4 characters taken from the source's deck name components, tag components (A12.1 kept ones excepted), media file names (`_` ones excepted), saved search names and flag labels; dropping runs of only ASCII digits, runs of only hex digits (`0-9a-fA-F`), and runs that occur, under U2, as a run in any note type, field, template or preset name.
-  - Scanned: every text and blob value (blobs read as UTF-8, invalid sequences as U+FFFD) of every clone table except `notes.flds` and `notes.sfld` (replaced text, A5) and the unchanged `notetypes`, `fields`, `templates` and `deck_config`; and every clone media file name. A value is split into runs the same way and each run compared with the tokens under U2.
-  - A hit in `decks.name`, `tags.tag`, `notes.tags` or a media file name other than a `_` name fails (`checks.leak.status` `fail`): those must be fully rewritten. A hit anywhere else is a review item (`warn`): a location the spec keeps on purpose (a config value, `decks.common`, `cards.data`) may legitimately hold the word. `locations` lists `{table, column, key, hits}` (`key`: the config key or the row id), never the token.
+  - Scanned: every text and blob value (blobs read as UTF-8, invalid sequences as U+FFFD) of every clone table except `notes.flds` and `notes.sfld` (replaced text, A5) and the unchanged `notetypes`, `fields` and `templates`; and every clone media file name. `deck_config` is scanned although it is unchanged, because a preset's `param_search` can name a deck or tag. A value is split into runs the same way and each run compared with the tokens under U2.
+  - A hit in `decks.name`, `tags.tag`, `notes.tags`, `sqlite_stat4.sample` or a media file name other than a `_` name fails (`checks.leak.status` `fail`): those must be fully rewritten, or for samples removed (A14.2). The samples that stay hold only note type, field, template and preset names, which tokens exclude, and integers. (`sqlite_stat4.tbl` and `.idx` hold table and index names such as `notes`; a hit there is a review item like any other.) A hit anywhere else is a review item (`warn`): a location the spec keeps on purpose (a config value, `decks.common`, `cards.data`, a preset's `param_search`) may legitimately hold the word. `locations` lists `{table, column, key, hits}` (`key`: the config key or the row id), never the token.
 - **V5 Media** (the anonymizer): every clone media file name is a clone name of a source file; sizes equal, except image-occlusion placeholders counted in `io_images_larger`; every PNG placeholder starts with the PNG signature and an IHDR holding the dimensions A10.2 read.
 
 ## A18. Errors
@@ -483,8 +501,8 @@ Field `<b>Hund</b> {{c1::der Hund::animal}} [sound:dog.mp3]` → `<b>` + 1 upper
 - tags `jp::n5`, `JP::N5` and `jp` on three notes → one hashed pair, `jp` its parent; `leech` kept; note tag strings canonical (A12.2);
 - an image-occlusion note type (`original_stock_kind` 6) with a 3 × 2 PNG and a 3 × 2 JPEG source image: both placeholders are the 3 × 2 PNG of A10.3 padded to their source sizes;
 - a filtered deck with search `deck:Japanese -tag:jp*`, a `savedFilters` value and `defaultSearchText`: A13's rewrites; an unparsable search counted;
-- V2 on the synthetic collection: unchanged tables equal; `sqlite_stat4` rows of the three indexes gone (after `ANALYZE` on the synthetic source);
-- V4: a config value holding a deck name is a review item; a deck name left in `decks.name` (by a test hook) fails;
+- V2 on the synthetic collection: unchanged tables equal. After `ANALYZE` on the synthetic source (with SQLite built with `SQLITE_ENABLE_STAT4`, as Anki's and Meguri's bundled SQLite are), the source has `sqlite_stat4` rows under each of `idx_decks_name`, `ix_notes_csum` and `tags`. The test asserts this first, so it cannot pass vacuously. The clone has none of them, `stat4_rows_deleted` equals their count, and every other `sqlite_stat4` row is unchanged;
+- V4: a config value holding a deck name is a review item, and so is a preset whose `param_search` names a deck; a deck name left in `decks.name` (by a test hook) fails, and so does a tag name left in a `sqlite_stat4` sample;
 - errors: `out_not_empty`, `salt`, `invalid_utf8`, `media_name_collision` (two files whose names differ only in case, on a case-sensitive file system).
 
 The whole-collection checks run through `tools/mg anonymize`: the 10k generated collection (`tools/mg fixtures 10k`) gives V3 equality, and the private collection only locally through the vault.

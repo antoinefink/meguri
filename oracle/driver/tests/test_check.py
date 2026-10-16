@@ -6,8 +6,8 @@ Each stored problem is planted here with SQL on a collection Anki made, so the
 expected count is the number of rows planted. Expected zones come from
 zoneinfo, expected render sizes from the templates' own text. K11's expected
 queue orders follow the default preset's gather and sort orders (deck by deck
-in name order, then position); its digests are recomputed here from K11.2's
-line form."""
+in name order, then position) and a filtered deck's search order; its digests
+are recomputed here from K11.2's line form."""
 
 from __future__ import annotations
 
@@ -24,9 +24,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import anki.errors
-from anki import notetypes_pb2
+from anki import decks_pb2, notetypes_pb2
 from anki._backend import RustBackend
 from anki.collection import Collection
+from anki.decks import DeckId
 
 from driver import harness
 from driver.canon import golden_text
@@ -594,6 +595,36 @@ class Schedule(CheckBase):
         for did in (ids["a"], ids["b"]):
             self.assertEqual(after["decks"][str(did)], before["decks"][str(did)])
         self.assertNotEqual(after["sha256"], before["sha256"])
+
+    def test_a_filtered_deck_reports_the_cards_it_holds_in_its_own_order(self):
+        """K11.1 step 2 builds filtered decks' queues too; K11.3 counts a
+        filtered deck's cards by did, so its home deck no longer has them."""
+        ids = {}
+
+        def plant(col, nids, cids):
+            order = decks_pb2.Deck.Filtered.SearchTerm.Order
+            deck = col.sched.get_or_create_filtered_deck(deck_id=DeckId(0))
+            deck.name = "F"
+            deck.config.reschedule = True
+            del deck.config.search_terms[:]
+            # The two latest notes' cards, newest first.
+            deck.config.search_terms.add(search="deck:D", limit=2, order=order.REVERSE_ADDED)
+            ids.update(cids=cids, d=col.decks.id_for_name("D"), f=col.sched.add_or_update_filtered_deck(deck).id)
+
+        report = self.schedule(build(self.tmp, "filtered", plant, notes=4))
+        cids = ids["cids"]
+        d, f = report["decks"][str(ids["d"])], report["decks"][str(ids["f"])]
+        two_new = {"new": 2, "learning": 0, "review": 0}
+        self.assertEqual((f["cards"], f["tree"]), (2, two_new))
+        self.assertEqual(f["queue"], {
+            **two_new, "entries": 2, "order_sha256": lines_sha256([f"{cids[3]}\tnew", f"{cids[2]}\tnew"]),
+        })
+        self.assertNotEqual(f["next_states_sha256"], EMPTY_SHA256)
+        self.assertEqual((d["cards"], d["tree"]), (2, two_new))
+        self.assertEqual(d["queue"], {
+            **two_new, "entries": 2, "order_sha256": lines_sha256([f"{cids[0]}\tnew", f"{cids[1]}\tnew"]),
+        })
+        self.assertEqual(report["cards"], 4)
 
     def test_one_cards_due_changes_its_decks_next_states_and_the_whole_digest(self):
         ids = {}

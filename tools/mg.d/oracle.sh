@@ -8,16 +8,26 @@
 # test, bump and lock refuse to run there (mg_oracle__own_tree): they copy or
 # rewrite oracle/ files, and a copy under that checkout's build/ is outside
 # U2's deny rules. Copies they make are deleted when they finish.
+#
+# --platform apple (hello, record, compare; arm64 Mac only) runs the same
+# driver natively through oracle/macos/run-native.sh, from a venv under the
+# oracle tree's checkout (build/oracle-macos-venv/, covered by U2's deny
+# rules), for overlay goldens (specs/conformance/float-determinism.md F6, F7).
+# lock --platform apple writes oracle/macos/requirements-macos.lock.
 
 mg_job oracle host mg_oracle \
-  "Anki oracle: build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock | test [pattern]"
+  "Anki oracle: build | hello [--platform apple] [--tz Z] | record [--platform apple] [--jobs N] [filter...] | compare [--platform apple] [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock [--platform apple] | test [pattern]"
 
 MG_ORACLE_UV_VERSION=0.12.24
 # uv resolves for this platform tag; the lock still hashes every published wheel.
 MG_ORACLE_LOCK_PLATFORM=x86_64-manylinux_2_40
+# The native lane's lock: the same versions as requirements.lock (its
+# constraint), resolved for an arm64 Mac.
+MG_ORACLE_MACOS_LOCK_PLATFORM=aarch64-apple-darwin
+MG_ORACLE_MACOS_LOCK=macos/requirements-macos.lock
 
 mg_oracle__usage() {
-  mg_failure usage "usage: tools/mg oracle build | hello [--tz Z] | record [--jobs N] [filter...] | compare [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock | test [pattern]" "tools/mg oracle build"
+  mg_failure usage "usage: tools/mg oracle build | hello [--platform apple] [--tz Z] | record [--platform apple] [--jobs N] [filter...] | compare [--platform apple] [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock [--platform apple] | test [pattern]" "tools/mg oracle build"
   mg_message "oracle: $1"
   mg_status error
 }
@@ -138,6 +148,7 @@ mg_oracle__cleanup() {
   # shellcheck disable=SC2086 # one container id per word
   [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1
   [ -z "${MG_ORACLE_STAGED:-}" ] || mg_oracle__unstage "$MG_ORACLE_STAGED"
+  [ -z "${MG_ORACLE_NATIVE_SCRATCH:-}" ] || rm -rf "$MG_ORACLE_NATIVE_SCRATCH"
   return 0
 }
 
@@ -153,17 +164,28 @@ mg_oracle__hello() {
   jq -e '.ok == true' "$4" >/dev/null 2>&1
 }
 
-# mg_oracle__lock <dir>: regenerate <dir>/requirements.lock from requirements.in
-# (uv in the oracle's base image, default network: it only talks to PyPI).
+# mg_oracle__lock <dir> [apple]: regenerate <dir>/requirements.lock from
+# requirements.in, or with apple <dir>/macos/requirements-macos.lock pinned to
+# requirements.lock's versions (uv in the oracle's base image, default
+# network: it only talks to PyPI).
 mg_oracle__lock() {
-  local dir="$1" base
+  local dir="$1" base cmd
   base="$(sed -n 's/^FROM \(python:[^ ]*\).*/\1/p' "$dir/Dockerfile" | head -n 1)"
-  docker run --rm --init --label "meguri.mg.run-id=$MG_RUN_ID" -v "$dir:/lock" -w /lock "$base" sh -c "
-    pip install --quiet --disable-pip-version-check --root-user-action=ignore uv==$MG_ORACLE_UV_VERSION &&
-    uv pip compile --quiet --generate-hashes --python-version 3.12 \
+  if [ "${2:-}" = apple ]; then
+    mkdir -p "$dir/macos"
+    cmd="uv pip compile --quiet --generate-hashes --python-version 3.12 \
+      --python-platform $MG_ORACLE_MACOS_LOCK_PLATFORM --constraint requirements.lock \
+      --custom-compile-command 'tools/mg oracle lock --platform apple' \
+      requirements.in -o $MG_ORACLE_MACOS_LOCK"
+  else
+    cmd="uv pip compile --quiet --generate-hashes --python-version 3.12 \
       --python-platform $MG_ORACLE_LOCK_PLATFORM \
       --custom-compile-command 'tools/mg oracle lock' \
-      requirements.in -o requirements.lock" >&2
+      requirements.in -o requirements.lock"
+  fi
+  docker run --rm --init --label "meguri.mg.run-id=$MG_RUN_ID" -v "$dir:/lock" -w /lock "$base" sh -c "
+    pip install --quiet --disable-pip-version-check --root-user-action=ignore uv==$MG_ORACLE_UV_VERSION &&
+    $cmd" >&2
 }
 
 # mg_oracle__harness <tag> <context> <goldens dir> harness args...: record or compare
@@ -336,13 +358,19 @@ mg_oracle_build() {
 }
 
 mg_oracle_hello() {
-  local tz=UTC out="$MG_RUN_DIR/hello.json"
+  local tz=UTC out="$MG_RUN_DIR/hello.json" platform=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --tz) tz="${2:-}"; shift 2 || { mg_oracle__usage "--tz needs a zone"; return 0; } ;;
+      --platform) platform="${2:-}"; shift 2 || { mg_oracle__usage "--platform needs apple"; return 0; } ;;
       *) mg_oracle__usage "hello: unexpected argument '$1'"; return 0 ;;
     esac
   done
+  case "$platform" in
+    "") ;;
+    apple) mg_oracle__native_hello "$tz"; return 0 ;;
+    *) mg_oracle__usage "--platform takes apple"; return 0 ;;
+  esac
   mg_oracle__docker_ok || return 0
   mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
   if ! mg_oracle__hello "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" "$tz" "$out"; then
@@ -358,20 +386,26 @@ mg_oracle_hello() {
 }
 
 mg_oracle_record_compare() {
-  local cmd="$1" jobs=12 report="$MG_RUN_DIR/report.json" rc
+  local cmd="$1" jobs=12 report="$MG_RUN_DIR/report.json" rc platform=""
   shift
   local filters=() selected=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --jobs) jobs="${2:-}"; shift 2 || { mg_oracle__usage "--jobs needs a number"; return 0; } ;;
+      --platform) platform="${2:-}"; shift 2 || { mg_oracle__usage "--platform needs apple"; return 0; } ;;
       --*) mg_oracle__usage "$cmd: unknown option '$1'"; return 0 ;;
       *) filters[${#filters[@]}]="--filter"; filters[${#filters[@]}]="$1"; selected[${#selected[@]}]="$1"; shift ;;
     esac
   done
   case "$jobs" in '' | *[!0-9]* | 0) mg_oracle__usage "--jobs needs a positive number"; return 0 ;; esac
+  case "$platform" in "" | apple) ;; *) mg_oracle__usage "--platform takes apple"; return 0 ;; esac
   if [ ! -d "$MG_ROOT/conformance/scenarios" ]; then
     mg_failure no-scenarios "conformance/scenarios does not exist"
     mg_status fail
+    return 0
+  fi
+  if [ "$platform" = apple ]; then
+    mg_oracle__native_record_compare "$cmd" "$jobs" ${filters[0]+"${filters[@]}"}
     return 0
   fi
   mg_oracle__docker_ok || return 0
@@ -387,6 +421,160 @@ mg_oracle_record_compare() {
   rc=$?
   mg_oracle__sync_stop
   mg_oracle__report "$cmd" "$rc" "$report"
+}
+
+# --- the macOS native lane: --platform apple (float-determinism.md F6, F7) ----
+# The same driver natively on this Mac through oracle/macos/run-native.sh,
+# from the venv it bootstraps under its own checkout's build/oracle-macos-venv/
+# (covered by U2's deny rules). It copies nothing out of oracle/. Workers are
+# accepted only when they answer macos-arm64, the pinned anki_version and the
+# pin's macos_lock_sha256 (conformance/oracle.json; the harness checks every
+# worker, hello here).
+
+MG_ORACLE_NATIVE=""
+MG_ORACLE_NATIVE_SCRATCH=""
+
+# mg_oracle__native_host: usage error anywhere but an arm64 Mac.
+mg_oracle__native_host() {
+  if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
+    mg_oracle__usage "--platform apple runs only on an arm64 Mac (the native oracle lane)"
+    return 1
+  fi
+}
+
+# mg_oracle__native_setup: the oracle tree (mg_oracle__tree), its launcher
+# (MG_ORACLE_NATIVE) and a venv bootstrapped from its pins.
+mg_oracle__native_setup() {
+  mg_oracle__tree || return 1
+  MG_ORACLE_NATIVE="$MG_ORACLE_DIR/macos/run-native.sh"
+  if [ ! -x "$MG_ORACLE_NATIVE" ] || [ ! -f "$MG_ORACLE_DIR/$MG_ORACLE_MACOS_LOCK" ]; then
+    mg_failure no-native-lane "$MG_ORACLE_DIR has no macos/run-native.sh or $MG_ORACLE_MACOS_LOCK"
+    mg_status error
+    return 1
+  fi
+  if ! "$MG_ORACLE_NATIVE" bootstrap </dev/null; then
+    mg_failure native-bootstrap "oracle/macos/run-native.sh bootstrap failed; see log.txt"
+    mg_status error
+    return 1
+  fi
+}
+
+# mg_oracle__native_refusal <hello file>: why the pin refuses that worker, or nothing.
+mg_oracle__native_refusal() {
+  jq -r --slurpfile pin "$MG_ROOT/conformance/oracle.json" '$pin[0] as $p | [
+    (if .platform != "macos-arm64" then "platform \(.platform)" else empty end),
+    (if .anki_version != $p.anki_version then "anki \(.anki_version), the pin is \($p.anki_version)" else empty end),
+    (if ($p.macos_lock_sha256 // "") == "" then "conformance/oracle.json has no macos_lock_sha256"
+     elif .lock_sha256 != $p.macos_lock_sha256 then "lock \(.lock_sha256[0:12]), the pin is \($p.macos_lock_sha256[0:12])"
+     else empty end)] | join("; ")' "$1"
+}
+
+mg_oracle__native_hello() {
+  local tz="$1" out="$MG_RUN_DIR/hello.json" why
+  mg_oracle__native_host || return 0
+  mg_oracle__native_setup || return 0
+  if ! "$MG_ORACLE_NATIVE" hello --tz "$tz" >"$out" </dev/null || ! jq -e '.ok == true' "$out" >/dev/null 2>&1; then
+    mg_failure hello "the native worker did not answer hello: $(head -c 2000 "$out" 2>/dev/null)"
+    mg_status fail
+    return 0
+  fi
+  mg_artifact json "$out" "hello response"
+  mg_detail hello "$(jq -c 'del(.ok)' "$out")"
+  why="$(mg_oracle__native_refusal "$out")"
+  if [ -n "$why" ]; then
+    mg_failure oracle-mismatch "the native worker is not the pinned oracle: $why" "tools/mg oracle hello --platform apple"
+    mg_message "oracle (apple): refused, $why"
+    mg_status fail
+    return 0
+  fi
+  mg_message "oracle (apple): $(jq -r '"anki \(.anki_version), \(.platform), time control \(.time_control), tz \(.tz), lock \(.lock_sha256[0:12]), driver \(.driver_sha256[0:12])"' "$out")"
+  if [ "$(jq -r .time_control "$out")" = faketime ]; then
+    mg_status pass
+  else
+    mg_failure no-faketime "the native worker runs on the real clock (time_control none): record and compare run only clock-free scenarios" \
+      "tools/mg oracle hello --platform apple"
+    mg_status warn
+  fi
+}
+
+# mg_oracle__native_record_compare <record|compare> <jobs> [--filter F]...
+mg_oracle__native_record_compare() {
+  local cmd="$1" jobs="$2" report="$MG_RUN_DIR/report.json" rc
+  shift 2
+  mg_oracle__native_host || return 0
+  if [ ! -f "$MG_ROOT/conformance/oracle.json" ]; then
+    mg_failure no-pin "conformance/oracle.json does not exist"
+    mg_status error
+    return 0
+  fi
+  mg_oracle__native_setup || return 0
+  MG_ORACLE_NATIVE_SCRATCH="$MG_RUN_DIR/scratch"
+  mkdir -p "$MG_ORACLE_NATIVE_SCRATCH"
+  ORACLE_SCRATCH_ROOT="$MG_ORACLE_NATIVE_SCRATCH" ORACLE_FIXTURES="$MG_ROOT/conformance/fixtures" \
+    "$MG_ORACLE_NATIVE" harness "$cmd-apple" \
+    --scenarios "$MG_ROOT/conformance/scenarios" --goldens "$MG_ROOT/conformance/goldens" \
+    --overlays "$MG_ROOT/conformance/goldens-apple" --pin "$MG_ROOT/conformance/oracle.json" \
+    --jobs "$jobs" --report "$report" ${1+"$@"} </dev/null
+  rc=$?
+  rm -rf "$MG_ORACLE_NATIVE_SCRATCH"
+  MG_ORACLE_NATIVE_SCRATCH=""
+  mg_oracle__native_report "$cmd" "$rc" "$report"
+}
+
+# mg_oracle__native_report <record|compare> <harness rc> <report.json>
+mg_oracle__native_report() {
+  local cmd="$1" rc="$2" report="$3" ok total passed unsupported failed
+  if [ ! -s "$report" ] || [ "$rc" -ge 2 ]; then
+    mg_failure harness "the native harness exited with code $rc without a report; see log.txt"
+    mg_status error
+    return 0
+  fi
+  mg_artifact report "$report" "$cmd --platform apple report"
+  ok='["recorded", "no_difference"]'
+  [ "$cmd" = compare ] && ok='["pass"]'
+  total="$(jq '.scenario_count' "$report")"
+  passed="$(jq --argjson ok "$ok" '[.scenarios[] | select(.status | IN($ok[]))] | length' "$report")"
+  unsupported="$(jq '[.scenarios[] | select(.status == "clock_unsupported")] | length' "$report")"
+  failed=$((total - passed - unsupported))
+  mg_count total "$total"
+  mg_count passed "$passed"
+  mg_count failed "$failed"
+  mg_count skipped "$unsupported"
+  mg_detail oracle "$(jq -c '.oracle' "$report")"
+  mg_detail totals "$(jq -c '.totals' "$report")"
+  mg_detail timing "$(jq -c '{jobs, wall_s, mean_worker_ms}' "$report")"
+  [ "$cmd" = compare ] || mg_detail overlays "$(jq -c '.overlay_totals' "$report")"
+  jq -c --argjson ok "$ok" --arg cmd "$cmd" '.scenarios[] | select((.status | IN($ok[])) | not)
+    | select(.status != "clock_unsupported")
+    | {id: .scenario,
+       message: (.status
+         + (if .error then ": " + (.error | tostring) else "" end)
+         + (if .pointer then " at " + .pointer else "" end)
+         + (if (.outside_class // []) != [] then ": \(.outside_class | length) entries outside the fp-libm-boundary class, first " + .outside_class[0].pointer + " (linux " + (.outside_class[0].linux | tostring) + ", apple " + (.outside_class[0].apple | tostring) + ")" else "" end)
+         + (if .diffs then " at " + .diffs[0].pointer + " (expected " + (.diffs[0].expected | tostring) + ", got " + (.diffs[0].actual | tostring) + ")" else "" end)),
+       repro: ("tools/mg oracle " + $cmd + " --platform apple " + (.scenario | @sh))}' "$report" >>"$MG_STATE/failures.jsonl"
+  local what
+  if [ "$cmd" = record ]; then
+    what="$(jq -r '.overlay_totals | "\(.overlays_written) overlays written, \(.overlays_deleted) deleted; \(.entries) entries (\(.day_entries) days, \(.memory_entries) memory, \(.other_entries) other), \(.outside_class) outside the class"' "$report")"
+  else
+    what="$(jq -r '"\([.scenarios[].overlay_applied // 0] | add // 0) overlay entries applied"' "$report")"
+  fi
+  if [ "$total" -eq 0 ]; then
+    mg_failure no-scenarios "no scenario matched"
+    mg_message "oracle $cmd (apple): no scenario matched"
+    mg_status fail
+  elif [ "$failed" -gt 0 ]; then
+    mg_message "oracle $cmd (apple): $passed/$total ok, $failed failed, $unsupported not run (clock_unsupported); $what"
+    mg_status fail
+  elif [ "$unsupported" -gt 0 ]; then
+    mg_failure clock_unsupported "$unsupported scenarios were not run: the native worker has no faketime and they are not clock-free" \
+      "tools/mg oracle hello --platform apple"
+    mg_message "oracle $cmd (apple): $passed/$total ok, $unsupported not run (clock_unsupported); $what"
+    mg_status warn
+  else
+    mg_message "oracle $cmd (apple): $passed/$total ok; $what"
+    mg_status pass
+  fi
 }
 
 # recordings <filter>... (sync-ops.md S9, R1933): the only writer of
@@ -633,16 +821,27 @@ mg_oracle__check_result() {
 }
 
 mg_oracle_lock() {
-  [ "$#" -eq 0 ] || { mg_oracle__usage "lock takes no arguments"; return 0; }
-  mg_oracle__own_tree "lock rewrites oracle/requirements.lock" || return 0
+  local platform="" file=requirements.lock
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --platform) platform="${2:-}"; shift 2 || { mg_oracle__usage "--platform needs apple"; return 0; } ;;
+      *) mg_oracle__usage "lock: unexpected argument '$1'"; return 0 ;;
+    esac
+  done
+  case "$platform" in "") ;; apple) file="$MG_ORACLE_MACOS_LOCK" ;; *) mg_oracle__usage "--platform takes apple"; return 0 ;; esac
+  mg_oracle__own_tree "lock rewrites oracle/$file" || return 0
   mg_oracle__docker_ok || return 0
-  if ! mg_oracle__lock "$MG_ROOT/oracle"; then
-    mg_failure lock "uv could not resolve oracle/requirements.in; see log.txt"
+  if ! mg_oracle__lock "$MG_ROOT/oracle" "$platform"; then
+    mg_failure lock "uv could not resolve oracle/requirements.in for oracle/$file; see log.txt"
     mg_status fail
     return 0
   fi
-  mg_artifact lock "$MG_ROOT/oracle/requirements.lock"
-  mg_message "oracle: oracle/requirements.lock regenerated (lock $(mg_oracle__sha256 <"$MG_ROOT/oracle/requirements.lock" | cut -c1-12))"
+  mg_artifact lock "$MG_ROOT/oracle/$file"
+  if [ "$platform" = apple ]; then
+    mg_message "oracle: oracle/$file regenerated (lock $(mg_oracle__sha256 <"$MG_ROOT/oracle/$file" | cut -c1-12)); conformance/oracle.json's macos_lock_sha256 moves only with an oracle bump"
+  else
+    mg_message "oracle: oracle/requirements.lock regenerated (lock $(mg_oracle__sha256 <"$MG_ROOT/oracle/requirements.lock" | cut -c1-12))"
+  fi
   mg_status pass
 }
 
@@ -683,6 +882,13 @@ mg_oracle__bump() {
     return 0
   fi
   mg_artifact lock "$staging/oracle/requirements.lock" "staged lock for anki $version"
+  # The native lane's lock moves with it (float-determinism.md F6.1).
+  if ! mg_oracle__lock "$staging/oracle" apple || [ ! -s "$staging/oracle/$MG_ORACLE_MACOS_LOCK" ]; then
+    mg_failure lock "uv could not resolve anki==$version for the macOS native lane; see log.txt"
+    mg_status fail
+    return 0
+  fi
+  mg_artifact lock "$staging/oracle/$MG_ORACLE_MACOS_LOCK" "staged macOS lock for anki $version"
   old_tag="$(mg_oracle__tag "$MG_ORACLE_DIR")"
   mg_oracle__build "$staging/oracle" || return 0
   local hello="$MG_RUN_DIR/hello-new.json"
@@ -691,13 +897,16 @@ mg_oracle__bump() {
     mg_status fail
     return 0
   fi
-  # The conformance pin (conformance/oracle.json) moves with the lock file.
+  # The conformance pin (conformance/oracle.json) moves with both lock files.
+  local macos_lock
+  macos_lock="$(mg_oracle__sha256 <"$staging/oracle/$MG_ORACLE_MACOS_LOCK")"
   mkdir -p "$staging/conformance"
   if [ -f "$MG_ROOT/conformance/oracle.json" ]; then
-    jq --slurpfile h "$hello" '.anki_version = $h[0].anki_version | .lock_sha256 = $h[0].lock_sha256' \
+    jq --slurpfile h "$hello" --arg m "$macos_lock" \
+      '.anki_version = $h[0].anki_version | .lock_sha256 = $h[0].lock_sha256 | .macos_lock_sha256 = $m' \
       "$MG_ROOT/conformance/oracle.json" >"$staging/conformance/oracle.json"
   else
-    jq '{anki_version, lock_sha256}' "$hello" >"$staging/conformance/oracle.json"
+    jq --arg m "$macos_lock" '{anki_version, lock_sha256, macos_lock_sha256: $m}' "$hello" >"$staging/conformance/oracle.json"
   fi
   mg_artifact pin "$staging/conformance/oracle.json" "staged conformance pin"
   # Re-recording actor scenarios needs the fault proxy (sync-ops.md S8.2).
@@ -762,7 +971,7 @@ mg_oracle__bump() {
     mg_message "oracle bump to $version: $failed of $total scenarios could not be recorded, $orphans goldens have no scenario, $changed goldens changed; see bump-report.md"
     mg_status fail
   else
-    mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock, staging/conformance/oracle.json and staging/goldens in one change, with tools/mg harvest-inventory at the new tag (R1882; tools/mg harvest-report fails until then)"
+    mg_message "oracle bump to $version: $changed goldens changed; review bump-report.md, then adopt staging/oracle/requirements.in, requirements.lock, $MG_ORACLE_MACOS_LOCK, staging/conformance/oracle.json and staging/goldens in one change, with tools/mg harvest-inventory at the new tag (R1882; tools/mg harvest-report fails until then) and the overlays re-recorded on the new lock (tools/mg oracle record --platform apple)"
     mg_status pass
   fi
 }

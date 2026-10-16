@@ -161,7 +161,7 @@ The report gains one member:
   - `next_states_sha256`: the next-states digest of those cards;
   - `queue`: `entries`, the number of entries step 2 read; `new`, `learning`, `review`, the counts Anki gave; `order_sha256`, the queue digest;
   - `tree`: the deck's step 1 numbers, or `null` when the deck tree leaves the deck out (an empty default deck without subdecks).
-- `root`: the deck tree root's numbers.
+- `root`: the deck tree root's numbers. The root has numbers but no queue: Anki builds a queue only for a selected deck, and the root is not one (every top-level deck's queue is reported under its id).
 - `sha256`: the SHA-256 of `{"cards":…,"decks":…,"root":…}` written compactly (no whitespace, members sorted by name).
 
 Ids are the collection's own; no deck name, tag or field text appears. A report from the private collection stays in its run directory; only pass counts are committed (R1940).

@@ -3,6 +3,7 @@
 
 mod anonymize;
 mod conformance;
+mod fp_probe;
 mod generate;
 mod private;
 mod profile_extract;
@@ -12,6 +13,7 @@ fn main() {
     let status = match args.split_first() {
         Some((command, rest)) if command == "conformance" => conformance::main(rest),
         Some((command, rest)) if command == "generate" => generate::main(rest),
+        Some((command, rest)) if command == "fp-probe" => fp_probe::main(rest),
         Some((command, rest)) if command == "profile-extract" => profile_extract::main(rest),
         Some((command, rest)) if command == "private" => private::main(rest),
         Some((command, rest)) if command == "anonymize" => anonymize::main(rest),
@@ -22,6 +24,7 @@ fn main() {
         _ => {
             eprintln!("usage: meguri-cli conformance <command> ...   (meguri-cli conformance help)");
             eprintln!("       meguri-cli generate <size>|worst-case <name>|recipe <name> --out DIR [options]");
+            eprintln!("       meguri-cli fp-probe eval|report ...   (meguri-cli fp-probe help)");
             eprintln!("       meguri-cli profile-extract <collection> --media-dir <dir> --tz <IANA zone> --out <file>");
             eprintln!("       meguri-cli private copy|tokens|suite ...   (the private vault, U15)");
             eprintln!(

@@ -32,6 +32,9 @@ pub struct Report {
     pub oracle_pin: OraclePin,
     pub outcomes: Vec<Outcome>,
     pub wall_ms: u64,
+    /// T0 on macOS: totals and text count the overlay entries applied
+    /// (float-determinism.md F9).
+    pub overlays: bool,
 }
 
 impl Report {
@@ -40,9 +43,11 @@ impl Report {
         self.outcomes.iter().filter(|o| o.fails(self.tier)).collect()
     }
 
-    /// Scenario count per status, every status listed.
+    /// Scenario count per status, every status listed; on macOS T0 also
+    /// `overlay_applied` (entries) and `overlay_scenarios` (scenarios with at
+    /// least one).
     pub fn totals(&self) -> Map<String, Value> {
-        Status::ALL
+        let mut totals: Map<String, Value> = Status::ALL
             .iter()
             .map(|s| {
                 (
@@ -50,7 +55,19 @@ impl Report {
                     json!(self.outcomes.iter().filter(|o| o.status == *s).count()),
                 )
             })
-            .collect()
+            .collect();
+        if self.overlays {
+            let (entries, scenarios) = self.overlay_totals();
+            totals.insert("overlay_applied".to_owned(), json!(entries));
+            totals.insert("overlay_scenarios".to_owned(), json!(scenarios));
+        }
+        totals
+    }
+
+    /// (overlay entries applied, scenarios with at least one).
+    pub fn overlay_totals(&self) -> (usize, usize) {
+        let applied = self.outcomes.iter().filter_map(|o| o.overlay_applied);
+        (applied.clone().sum(), applied.filter(|n| *n > 0).count())
     }
 
     pub fn to_json(&self) -> Value {
@@ -73,10 +90,14 @@ impl Report {
         for outcome in self.outcomes.iter().filter(|o| o.status != Status::Pass) {
             text.push_str(&outcome.render_text());
         }
-        let counts: Vec<String> = self
-            .totals()
-            .into_iter()
-            .filter(|(_, n)| n.as_u64() != Some(0))
+        if self.overlays {
+            let (entries, scenarios) = self.overlay_totals();
+            text.push_str(&format!("overlays: {entries} values in {scenarios} scenarios\n"));
+        }
+        let counts: Vec<String> = Status::ALL
+            .iter()
+            .map(|s| (s.as_str(), self.outcomes.iter().filter(|o| o.status == *s).count()))
+            .filter(|(_, n)| *n != 0)
             .map(|(status, n)| format!("{n} {status}"))
             .collect();
         text.push_str(&format!(
@@ -136,6 +157,9 @@ fn outcome_json(o: &Outcome, tier: Tier) -> Value {
     }
     if !o.deviations_applied.is_empty() {
         map.insert("deviations_applied".to_owned(), json!(o.deviations_applied));
+    }
+    if let Some(applied) = o.overlay_applied {
+        map.insert("overlay_applied".to_owned(), json!(applied));
     }
     out
 }
