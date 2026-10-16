@@ -1,6 +1,6 @@
 //! `specs/render/cloze.md` through the public cloze functions: the spec's
-//! own examples and the plan's U61 test scenarios (where C13 says the spec
-//! and the oracle differ from the plan, the spec's expectation is used).
+//! own examples and the plan's U61 test scenarios, as amended to the
+//! oracle's behavior (A1 and A2, `docs/process/review-log/U61.md`).
 
 use meguri_template::cloze::{self, Side};
 use meguri_template::{CardSpecials, FieldMap, ParsedTemplate};
@@ -450,7 +450,7 @@ fn spans_inside_math_lose_their_tags() {
     assert_eq!(back(text, 1), r"\(a b c\)");
 }
 
-/// Plan (R973) with the oracle's result (C8, C13): `}}` inside math closes.
+/// R973 as amended (A1; C8, C13): `}}` inside math closes the cloze.
 #[test]
 fn math_does_not_shield_the_closer() {
     let text = r"{{c1::\(a}}b\)}}";
@@ -578,7 +578,7 @@ fn the_engine_renders_cloze_filters_for_the_card_and_side() {
 fn type_answers_follow_the_c10_table() {
     let cases = [
         ("{{c1::a}} {{c1::a}}", 1, "a"),
-        // C13: the plan expected `a, b`; the oracle keeps duplicates.
+        // R977 as amended (A2; C13): duplicates stay unless all are identical.
         ("{{c1::a}} {{c1::a}} {{c1::b}}", 1, "a, a, b"),
         ("{{c1::a  }} {{c1::a}}", 1, "a  , a"),
         ("{{c1::x {{c1::x}}}}", 1, "x x, x"),
