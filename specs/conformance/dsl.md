@@ -153,6 +153,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `clear_unused_tags` | `{}` | `{count}` | stable (`tag-ops.md` G6) |
 | `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | stable (`tag-ops.md` G7) |
 | `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | stable (`tag-ops.md` G8) |
+| `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | stable (`browser-config-ops.md` B1) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |

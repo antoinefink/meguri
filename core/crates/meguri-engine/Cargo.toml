@@ -14,6 +14,9 @@ test-hooks = ["meguri-model/test-hooks", "meguri-storage/test-hooks"]
 
 [dependencies]
 meguri-model.workspace = true
+# The browser and search config keys (U83): their reading and the values
+# each user action writes (`browser_config.rs`).
+meguri-search.workspace = true
 # The day clock's math (sched/day-clock, timing/).
 meguri-sched.workspace = true
 meguri-storage.workspace = true
