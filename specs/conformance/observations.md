@@ -56,6 +56,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `blob_decode` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: "ok" \| "invalid_blob"}, decks?: {...}, presets?: {...}}`, whether each record's protobuf blobs decode now (`model-ops.md` L4) |
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
+| `fsrs_next` | `{param_sets: {<name>: [<number>, ...]}, inputs: [<input>, ...]}`, at most once per observe step | `{rows: [<row>, ...]}`: the FSRS next states of a review card per input, as twelve values (days, stability and difficulty for again, hard, good and easy); never reads or changes the scenario's collection (`float-determinism.md` F3, F5) |
 | `media_dir` | none | `{<name>: {sha1, size} \| {dir: true}}`: the media folder's entries as listed (`media-ops.md` F9) |
 | `media_trash` | none | `[{name, sha1, size}]`: the media trash's entries, sorted by name, then sha1 (`media-ops.md` F10) |
 | `media_pending` | none | `{<name>: <sha1> \| null}`: after a full registration of the folder, the entries pending for the next media sync, `null` for a deletion (`media-ops.md` F11) |
@@ -77,7 +78,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 
 ## O7. Comparison
 
-The runner compares the golden's observations (expected) with the executor's (actual) after applying deviation transforms to expected (`dsl.md` D13) and set comparison to both (`compare.set`).
+The runner compares the golden's observations (expected) with the executor's (actual) after applying, on macOS, the scenario's Apple overlay to expected (`float-determinism.md` F9), then deviation transforms to expected (`dsl.md` D13), and set comparison to both (`compare.set`).
 
 - Objects compare member by member: a member on one side only is a difference, shown as `<absent>` on the other side.
 - Arrays compare item by item; extra items on either side are differences. Under `compare.set` the two arrays are first sorted by the JCS text of their items, ties broken by a text that keeps the number kind (JCS writes 1 and 1.0 alike), so two equal multisets always line up.
@@ -88,9 +89,12 @@ The runner compares the golden's observations (expected) with the executor's (ac
   | Where | Tolerance |
   |---|---|
   | `stability` and `difficulty` in any `memory_state` inside `next_states` | 1e-5 |
+  | the stability and difficulty columns (1, 2, 4, 5, 7, 8, 10, 11) of `fsrs_next` rows | 1e-5 |
   | any number inside `stats` | 1e-6 |
 
   Card rows, review-log rows and every other kind are exact: a stored value that a tolerance could hide is a real difference.
+
+  These tolerances compare Meguri with the expected values. The `fp-libm-boundary` class (`float-determinism.md` F8.3) allows a wider stability difference between the Linux and Apple oracles. Such a difference reaches this comparison only as an overlay value, never as a tolerance (`float-determinism.md` F11.3).
 - The first divergence is the smallest step index among the differing pointers. Differences are reported in pointer order (members in key order, items in index order).
 
 ## O8. `db_dump`

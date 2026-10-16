@@ -74,6 +74,47 @@ lrt
 nextPos
 localOffset
 db-check
+# Floating-point probe and the macOS native oracle lane
+# (float-determinism.md): the observation, its inputs and row, overlay
+# goldens, the deviation class, protocol and report members, lock and lane
+# file names, and the libfaketime and dyld variables the lane sets.
+fsrs_next
+param_sets
+card_id
+max_ivl
+clock-free
+goldens-apple
+fp-libm-boundary
+apple_overlay
+linux_observations_sha256
+macos_lock_sha256
+macos-arm64
+linux-arm64
+linux-x86_64
+time_control
+faketime
+fsrs_context
+desired_retention
+overlay_applied
+overlay_scenarios
+fp-probe
+requirements-macos.lock
+run-native.sh
+oracle-macos-venv
+libfaketime
+DYLD_INSERT_LIBRARIES
+DYLD_FORCE_FLAT_NAMESPACE
+FAKETIME_TIMESTAMP_FILE
+FAKETIME_NO_CACHE
+FAKETIME_FMT
+DONT_FAKE_MONOTONIC
+ANKI_TEST_MODE
+fsrsParams6
+fsrsParams5
+fsrsWeights
+desiredRetention
+loadBalancerEnabled
+fsrsShortTermWithStepsEnabled
 # Media setup, ops, observations and rejections (media-ops.md, U31).
 media_files
 media_outside

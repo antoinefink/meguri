@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/overlay.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/float-determinism.md F7, F8. File: conformance/goldens-apple/<scenario id>.json, written only by tools/mg oracle record --platform apple. The schema checks the shape; goldens-check also checks freshness (F7.3), that each pointer resolves in the Linux golden to the linux value, pointer order, and the fp-libm-boundary class (F8).",
+  "title": "macOS native oracle overlay golden",
+  "type": "object",
+  "required": ["scenario_id", "scenario_sha256", "linux_observations_sha256", "oracle", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": { "type": "string", "minLength": 1 },
+    "scenario_sha256": { "$ref": "#/$defs/sha256" },
+    "linux_observations_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "sha256 of the RFC 8785 (JCS) text of the overlaid Linux golden's observations value."
+    },
+    "oracle": {
+      "type": "object",
+      "required": ["anki_version", "lock_sha256", "driver_sha256", "platform"],
+      "additionalProperties": false,
+      "properties": {
+        "anki_version": { "type": "string" },
+        "lock_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 of oracle/macos/requirements-macos.lock." },
+        "driver_sha256": { "$ref": "#/$defs/sha256" },
+        "platform": { "const": "macos-arm64" }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["pointer", "linux", "apple"],
+        "additionalProperties": false,
+        "properties": {
+          "pointer": { "type": "string", "pattern": "^/steps/(0|[1-9][0-9]*)(/[^/]*)+$" },
+          "linux": { "$ref": "#/$defs/scalar" },
+          "apple": { "$ref": "#/$defs/scalar" },
+          "unrounded": {
+            "description": "Day entries only (F8.2): the rating's unrounded FSRS interval on each side, as a 64-bit float.",
+            "type": "object",
+            "required": ["linux", "apple"],
+            "additionalProperties": false,
+            "properties": {
+              "linux": { "type": "number", "exclusiveMinimum": 0 },
+              "apple": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "scalar": { "type": ["number", "string", "boolean", "null"] }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "apple": 2.8599067,
+      "linux": 2.859907,
+      "pointer": "/steps/0/fsrs_next/rows/10/11"
+    }
+  ],
+  "linux_observations_sha256": "071dc822e95d9270c1284398837e844971496b00a5452ec5cdc2144a982194b9",
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "13cf6de5f143a7dee18bcd1284c268f98b9c88deaf971385a9856489aaefb682",
+    "lock_sha256": "869b29c42af493bd7b46960d5ee4e72e99ff92bfc8b2a10c190dc54a5513a244",
+    "platform": "macos-arm64"
+  },
+  "scenario_id": "fp-probe/next-states-edges",
+  "scenario_sha256": "763439f9417d10cb70e66f381710ec2762696bbbaacf5e16c03255ab6000b238"
+}
