@@ -9,3 +9,15 @@ publish.workspace = true
 [dependencies]
 blake3.workspace = true
 difflib.workspace = true
+# data-cloze attribute encoding (specs/render/cloze.md C7): a parity pin.
+htmlescape.workspace = true
+# Markup removal inside MathJax in cloze output (cloze.md C8, strip-html H2).
+meguri-text.workspace = true
+# The C8 MathJax match: leftmost-first, lazy.
+regex.workspace = true
+
+[dev-dependencies]
+# Reads the render/cloze scenarios (YAML 1.2 core schema) and their hashes for
+# tests/cloze_goldens.rs, until T0 runs them.
+meguri-testkit.workspace = true
+serde_json.workspace = true
