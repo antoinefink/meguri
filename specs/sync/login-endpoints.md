@@ -85,6 +85,7 @@ Example (the official server): request body `{"u":"<user name>","p":"<password>"
 
 - A 403 on any request, login or any later method, is reported as `status` 403 (`transport.md` T11), which U106 names the authentication failure. The app then clears the stored host key and asks the user to log in again (U151).
 - The official server answers 403 to a wrong password and to a user name it does not know alike, and to a host key it does not know on any later request (`transport.md` T14). A failed login leaves no host key.
+- In actor scenarios a 403 is the rejection `auth_failed` of the `sync` step, for every kind, and the actor holds no host key afterwards, even one that an earlier login gave it (`specs/conformance/sync-ops.md` S4.4).
 
 ## L7. The host key
 
@@ -98,7 +99,7 @@ Actor scenarios under `conformance/scenarios/sync/transport/` (`specs/conformanc
 | Scenario | Shows | Golden |
 |---|---|---|
 | `login` | two logins succeed (L5) | recorded |
-| `login-wrong-password` | a wrong password gives `auth_failed`, then the right one succeeds (L5, L6) | waits for the driver's `credentials` and `auth_failed` (sync-ops.md S4.4, S4.5) |
+| `login-wrong-password` | a wrong password gives `auth_failed`, then the right one succeeds (L5, L6; sync-ops.md S4.4, S4.5) | recorded |
 | `login-reset` | a login whose answer is reset gives `network`, then succeeds (`transport.md` T11) | recorded |
 | `identity-accepted` | after another client uploads, Meguri's status check ends with `full_download` (`transport.md` T3) | recorded |
 
