@@ -1,5 +1,6 @@
 //! The storage area's adapters (U22, U23): `open` (storage-ops.md P1),
-//! `db_exec` and `set_config` (record-ops.md W1, W4), the observations
+//! `db_exec` and `set_config` (record-ops.md W1, W4), `setup.config`
+//! (dsl.md D6.1, written as `set_config` writes), the observations
 //! `schema_objects` (P3) and `db_dump` (observations.md O8), the handoff
 //! adapters that make Meguri a side of live chains (dsl.md D9.2), and the
 //! schema guard the runner asserts around every Meguri operation
@@ -22,12 +23,13 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 use super::{ExecError, OpResult, Registry, Session};
-use crate::scenario::{DUMP_TABLES, LoadedScenario, ObservationArgs, ObservationRequest, SqlParam, Step};
+use crate::scenario::{DUMP_TABLES, LoadedScenario, ObservationArgs, ObservationRequest, Setup, SqlParam, Step};
 
 pub(super) fn register(registry: &mut Registry) {
     registry.op_rejecting("open", &["file_too_old", "file_too_new", "v1_scheduler"], open);
     registry.op("db_exec", db_exec);
     registry.op("set_config", set_config);
+    registry.setup("config", setup_config);
     registry.observation("schema_objects", schema_objects);
     registry.observation("db_dump", db_dump);
     registry.handoff(hand_out, hand_in);
@@ -281,22 +283,40 @@ fn set_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecEr
             "set_config with undoable: true records an undo step; the session has no engine yet (U38)",
         ));
     }
-    let value = config_value(&args.value)?;
+    write_config(session, &args.key, &args.value)?;
+    Ok(OpResult::Done)
+}
+
+/// dsl.md D6.1: the mapping's keys in sorted order, each written as
+/// `set_config` writes it (W4).
+fn setup_config(session: &mut Session<'_>, setup: &Setup) -> Result<(), ExecError> {
+    let mut entries: Vec<(&String, &Value)> = setup.config.iter().flatten().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    for (key, value) in entries {
+        write_config(session, key, value)?;
+    }
+    Ok(())
+}
+
+/// W4's write of one key: through the config API, as an operation of its
+/// own that keeps no undo entry.
+fn write_config(session: &mut Session<'_>, key: &str, value: &Value) -> Result<(), ExecError> {
+    let value = config_value(value)?;
     let clock = session.clock.clone();
     let collection = collection(session)?;
     let mut scope = collection
         .writer()
         .begin_write(StampMode::Local, &*clock, None)
         .map_err(core)?;
-    let written = scope.set_config(&args.key, &value).map_err(core)?;
+    let written = scope.set_config(key, &value).map_err(core)?;
     scope.commit().map_err(core)?;
     // The engine's day clock computes afresh right after a change of its
     // keys (`sched/day-clock` D8, D14.2).
-    if written.changed() && matches!(args.key.as_str(), "rollover" | "creationOffset") {
+    if written.changed() && matches!(key, "rollover" | "creationOffset") {
         session.day.clear();
         super::sched::day_query_now(session)?;
     }
-    Ok(OpResult::Done)
+    Ok(())
 }
 
 /// sync-ops.md S6: closes the session's collection and opens it again from
@@ -568,6 +588,83 @@ fn finish(session: &mut Session<'_>) -> Result<(), ExecError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// dsl.md D6.1 written as W4 writes: each key a local change at the
+    /// clock's instant that moves `col.mod`, and a `rollover` change computes
+    /// the day afresh at once (`sched/day-clock` D8, D14.2). The day is
+    /// D12.2's example: `crt` 2030-01-15 04:00 +01:00, rollover 12 at
+    /// 2030-01-20 10:00 in Paris is day 4 until 12:00.
+    #[test]
+    fn setup_config_writes_each_key_as_set_config_does() {
+        use std::sync::Arc;
+
+        use meguri_model::clock::UtcOffset;
+        use meguri_model::rng::SeededRandom;
+
+        use crate::exec::clock::ScenarioClock;
+
+        assert!(
+            crate::exec::MeguriExecutor::new()
+                .capabilities()
+                .setup
+                .contains("config")
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scenarios/sched/setup-config.yaml");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            "id: sched/setup-config\nclock: {tz: Europe/Paris, start: \"2030-01-20T10:00:00\", mode: step}\n\
+             setup:\n  config: {rollover: 12, collapseTime: 600}\n",
+        )
+        .unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let mut session = Session {
+            scenario: &loaded,
+            clock: Arc::new(ScenarioClock::new("Europe/Paris", "2030-01-20T10:00:00").unwrap()),
+            random: Arc::new(SeededRandom::new(1)),
+            notes: Vec::new(),
+            cards: Vec::new(),
+            actor: None,
+            storage: Storage::default(),
+            day: Default::default(),
+        };
+        let file = session.storage.dir().unwrap().join(COLLECTION);
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance/fixtures/storage/schema-18.anki2"),
+            &file,
+        )
+        .unwrap();
+        let opened = open_collection(&file, &OpenOptions::new(&*session.clock, &*session.random)).unwrap();
+        session.storage.opened(opened).unwrap();
+        let sql = |session: &Session<'_>, sql: &str| {
+            db_exec_rows(&collection(session).unwrap().writer().execute_raw(sql, &[]).unwrap())
+        };
+        sql(&session, "UPDATE col SET crt = 1894676400");
+        sql(
+            &session,
+            "UPDATE config SET val = CAST('-60' AS BLOB) WHERE KEY = 'creationOffset'",
+        );
+
+        setup_config(&mut session, &loaded.scenario.setup).unwrap();
+        assert_eq!(
+            sql(
+                &session,
+                "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('collapseTime', \
+                 'rollover') ORDER BY KEY"
+            ),
+            json!([
+                ["collapseTime", -1, 1_895_130_000, "600"],
+                ["rollover", -1, 1_895_130_000, "12"]
+            ])
+        );
+        assert_eq!(sql(&session, "SELECT mod FROM col"), json!([[1_895_130_000_000_i64]]));
+        let day = session
+            .day
+            .valid_at(1_895_130_000, UtcOffset::from_seconds(3600).unwrap())
+            .expect("the day query ran");
+        assert_eq!((day.today, day.next_day_at), (4, 1_895_137_200));
+    }
 
     #[test]
     fn sql_text_normalizes_as_p3_2_says() {
