@@ -1,0 +1,19 @@
+# The text filter (specs/render/filters.md F3, R962): text/strip-html H4 on the
+# field's text.
+id: render/filters/text
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Text Probe, fields: [Key, Front]}
+          cases:
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "<b>a&amp;b</b>"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "<i>x</i> &bogus;"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "&nbsp;x&nbsp;"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "<style>p { color: red }</style>y"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "<!-- c -->z<br>w"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "a < b > c"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "&#x41;&#66;&lt;&gt;"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "<img src=\"cat.jpg\">[sound:meow.mp3]"]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, ""]}
+            - {front: "{{Key}}[{{text:Front}}]", fields: [k, "日本語 <div>❤️</div>"]}

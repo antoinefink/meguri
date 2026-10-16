@@ -1,0 +1,1072 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "template": [
+          {
+            "answer": "[anki:tts lang=en_US]Back textBack text[/anki:tts]<!-- [anki:tts lang=ja_JP voices=Kyoko speed=0.9]&nbsp;}}[/anki:tts]\n}}",
+            "empty": false,
+            "question": "[anki:tts lang=en_US]Back textBack text[/anki:tts]<!-- [anki:tts lang=ja_JP voices=Kyoko speed=0.9]&nbsp;}}[/anki:tts]"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "<br>Corpus Basic"
+          },
+          {
+            "error": {
+              "kind": "unclosed_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "Card 2\n",
+            "empty": false,
+            "question": "Card 2"
+          },
+          {
+            "answer": "{",
+            "empty": false,
+            "question": "<!-- c --> \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint93c3ae62c8be1cbe').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hint93c3ae62c8be1cbe\" class=hint style=\"display: none\"><img src=\"a.png\"></div>\nflag0-->"
+          },
+          {
+            "answer": "😀}😀:[sound:q.mp3]",
+            "empty": false,
+            "question": "😀}😀"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "^"
+          },
+          {
+            "answer": "x[]]{&bogus;{{Front}}&amp;日本日本",
+            "empty": false,
+            "question": "x[]]{&bogus;{{Front}}&amp;日本"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<!--{{type:kanji:Extra}}-->#<div></div>"
+          },
+          {
+            "answer": "<ruby><rb>私</rb><rt>わたし</rt></ruby> [[type:nc:Extra]]日本私 ",
+            "empty": false,
+            "question": "[[type:Extra]]&nbsp;私[わたし] }x[]]a>b[c][sound:a.mp3]　\tx[y]"
+          },
+          {
+            "answer": " <BR/><img src=\"a.png\">0\n",
+            "empty": false,
+            "question": " <BR/><img src=\"a.png\">0"
+          },
+          {
+            "answer": "&amp; Back textword&nbsp;\n<br>word }[anki:tts lang=ja_JP voices=Kyoko speed=0.9]word&nbsp;[/anki:tts]",
+            "empty": false,
+            "question": "&amp; Back textword&nbsp;"
+          },
+          {
+            "answer": "\t<!-- c -->\t\nx[y]",
+            "empty": false,
+            "question": "[[type:nc:Back]][sound:q.mp3][[type:cloze:Extra]]<!-- c -->}"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": "[[type:nc:Back]]"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "}} </b><br><img src=\"a.png\">[sound:a.mp3]}\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintd5c2096c6f779156').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hintd5c2096c6f779156\" class=hint style=\"display: none\">😀</div>\n<hr id=answer>Q: #",
+            "empty": false,
+            "question": "}} </b><br><img src=\"a.png\">[sound:a.mp3]}\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintd5c2096c6f779156').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hintd5c2096c6f779156\" class=hint style=\"display: none\">😀</div>\n"
+          },
+          {
+            "error": {
+              "kind": "mismatched_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "<!-- c --><b>bold</b>Back textCard 1",
+            "empty": false,
+            "question": "[[type:Front]]^<!--{{　#c2}}{{{{{\n/c2\n}}{{{　Card　}}{{{#c500　}}{{ Front}}{{/c500　}}-->"
+          },
+          {
+            "answer": "\t&nbsp;^<!--}--><hr id=answer>\n<b>bold</b>\n<b>bold</b>",
+            "empty": false,
+            "question": "\t&nbsp;^<!--}-->"
+          },
+          {
+            "answer": "[[type:Back]]<b>bold</b>&#x41;<b>bold</b>&#x41;<b>bold</b>&#x41; {{Front}}[sound:a.mp3] {{Front}}[sound:a.mp3]}&nbsp;wordwordword",
+            "empty": false,
+            "question": "[[type:Back]]<b>bold</b>&#x41;<b>bold</b>&#x41;<b>bold</b>&#x41;"
+          },
+          {
+            "answer": "{{Front}}{{Front}}{{Front}}{{Front}}\n<!--<b>{{{Extra}}}-->-->",
+            "empty": false,
+            "question": "{{Front}}{{Front}}{{Front}}{{Front}}"
+          },
+          {
+            "answer": "&#x41;a><ruby><rb>b</rb><rt>c</rt></ruby><!-- --></div>:{",
+            "empty": false,
+            "question": "&#x41;a><ruby><rb>b</rb><rt>c</rt></ruby><!-- --></div>:"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]wordx[]][/anki:tts]wordx[]]<!--</b>--><!-- {{　Text:nc:Front }}{{#FrontSide}}{{{{custom:Back\n}}{{/FrontSide}}<!--<script>var a = {b: 1};</script>-->[anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:nc:Extra]][/anki:tts]Q: <hr id=answer>[anki:tts lang=ja_JP voices=Kyoko speed=0.9]wordx[]][/anki:tts]<img src=\"a.png\">",
+            "empty": false,
+            "question": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]wordx[]][/anki:tts]wordx[]]<!--</b>--><!-- {{　Text:nc:Front }}{{#FrontSide}}{{{{custom:Back\n}}{{/FrontSide}}<!--<script>var a = {b: 1};</script>-->[anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:nc:Extra]][/anki:tts]Q: "
+          },
+          {
+            "answer": "<!--</b>-->(Deck)\n[anki:tts lang=ja_JP voices=Kyoko speed=0.9][/anki:tts]</b>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint569e13ff3e2dfe14').style.display='block';\nreturn false;\" draggable=false>\nFront</a>\n<div id=\"hint569e13ff3e2dfe14\" class=hint style=\"display: none\">[[type:Front]]</div>\n",
+            "empty": false,
+            "question": "<!--</b>-->(Deck)"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<!--}-->"
+          },
+          {
+            "answer": "<!--{{Front　}}}-->#}}}}",
+            "empty": false,
+            "question": "日本<b>x::y-->}} "
+          },
+          {
+            "answer": "<!--{{#Extra }}{{{{　Extra }}{{/Extra}}-->alpha-->[anki:tts lang=en_US]<div></div>[/anki:tts]&nbsp;私[わたし]Back text[[type:nc:Extra]](Deck)<img src=\"a.png\">",
+            "empty": false,
+            "question": "<!--{{#Extra }}{{{{　Extra }}{{/Extra}}-->alpha-->[anki:tts lang=en_US]<div></div>[/anki:tts]"
+          },
+          {
+            "answer": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]<b>bold</b><ruby><rb>x</rb><rt>]</rt></ruby><ruby><rb>x</rb><rt>]</rt></ruby>[/anki:tts]\n&nbsp;<!--<hr id=answer>--><b>bold</b>x[]]x[]]\n<!--<script>var a = {b: 1};</script>--><!--",
+            "empty": false,
+            "question": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]<b>bold</b><ruby><rb>x</rb><rt>]</rt></ruby><ruby><rb>x</rb><rt>]</rt></ruby>[/anki:tts]\n&nbsp;<!--<hr id=answer>--><b>bold</b>x[]]x[]]"
+          },
+          {
+            "answer": "<div class=front>",
+            "empty": false,
+            "question": "[[type:cloze:Front]]x[]]&nbsp;&amp;&#x41;&amp;[anki:tts lang=en_US][/anki:tts]"
+          },
+          {
+            "answer": "<div class=front><br><div class=front>word[sound:a.mp3]<script>var a = {b: 1};</script><!--word[sound:a.mp3]<i>it</i> &lt;tag&gt;{{Front}}#%>",
+            "empty": false,
+            "question": "<span></span><br>[anki:ttslang=en_US]]"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "[sound:q.mp3]"
+          },
+          {
+            "answer": "<img src=\"a.png\"><div></div>&bogus;<b><img src=\"a.png\"><div></div>&bogus;<!--</div>--><img src=\"a.png\"><div></div>&bogus;\n</div>😀<!-- c -->😀&nbsp;私[わたし][sound:a.mp3]",
+            "empty": false,
+            "question": "<img src=\"a.png\"><div></div>&bogus;<b><img src=\"a.png\"><div></div>&bogus;<!--</div>--><img src=\"a.png\"><div></div>&bogus;"
+          },
+          {
+            "answer": "<hr id=answer>",
+            "empty": false,
+            "question": "<b>:😀&bogus;\t😀&bogus;\t"
+          },
+          {
+            "answer": "x[y][anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:cloze:Back]][/anki:tts]",
+            "empty": false,
+            "question": "}}}}}}x[y]"
+          },
+          {
+            "answer": "日本",
+            "empty": false,
+            "question": "[[type:nc:Extra]][anki:tts lang=ja_JP voices=Kyoko speed=0.9] 日本[にほん]語[ご][/anki:tts][anki:tts lang=ja_JP voices=Kyoko speed=0.9]x[]]&nbsp;[/anki:tts][anki:tts lang=ja_JP voices=Kyoko speed=0.9] 日本[にほん]語[ご][/anki:tts]}"
+          },
+          {
+            "answer": "(Deck)[[type:nc:Extra]]Corpus Basic",
+            "empty": false,
+            "question": "(Deck)"
+          },
+          {
+            "answer": "alpha beta--><hr id=answer><!--</b>-->x[y]%><i>it</i> &lt;tag&gt; 日本[にほん]語[ご]",
+            "empty": false,
+            "question": "alpha beta-->"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "-->}<br>😀x[y]\n",
+            "empty": false,
+            "question": "-->}<br>😀x[y]"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9][/anki:tts][anki:tts lang=en_US][/anki:tts]"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "[sound:q.mp3]Q: \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintc99682a3a30074dd').style.display='block';\nreturn false;\" draggable=false>\nFront</a>\n<div id=\"hintc99682a3a30074dd\" class=hint style=\"display: none\">&#x41;Back text</div>\n",
+            "empty": false,
+            "question": "&bogus;<i>it</i> &lt;tag&gt;<b>-->"
+          },
+          {
+            "answer": "[anki:tts lang=en_US]\té[/anki:tts]",
+            "empty": false,
+            "question": "\té#"
+          },
+          {
+            "answer": "<div class=front><hr id=answer>%>",
+            "empty": false,
+            "question": "}word&amp;"
+          },
+          {
+            "answer": "<!--</div>{{ custom:text:CardFlag}}#-->\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hinte59c70c8d3854ce0').style.display='block';\nreturn false;\" draggable=false>\nExtra</a>\n<div id=\"hinte59c70c8d3854ce0\" class=hint style=\"display: none\">x[]]<i>it</i> &lt;tag&gt;</div>\n%><BR/>&amp;",
+            "empty": false,
+            "question": "[anki:tts lang=en_US]\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint2214dff3143e4b76').style.display='block';\nreturn false;\" draggable=false>\nFront</a>\n<div id=\"hint2214dff3143e4b76\" class=hint style=\"display: none\"><BR/>&amp;</div>\n[/anki:tts]<br>[anki:tts lang=en_US]x[]]<!-- c -->[/anki:tts][[type:nc:Front]]}"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "^"
+          },
+          {
+            "answer": "\n<!--<!--<br>-->😀-->　<i>it</i> &lt;tag&gt;}}",
+            "empty": false,
+            "question": "<b>bold</b>語[sound:b.mp3]é  <b>bold</b>語[sound:b.mp3]--> \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint276bf3dfbe357f0d').style.display='block';\nreturn false;\" draggable=false>\nBack</a>\n<div id=\"hint276bf3dfbe357f0d\" class=hint style=\"display: none\"><b>bold</b>語[sound:b.mp3]</div>\n"
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "mismatched_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "Back text😀\n<!--{{{{　Subdeck}}<br>--><br>&bogus;[sound:a.mp3]<!-- Back text",
+            "empty": false,
+            "question": "Back text😀"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "}{}^"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "}}<!--<script>var a = {b: 1};</script>-->a>b[c]x[]]<!--日本--> : ",
+            "empty": false,
+            "question": "}}<!--<script>var a = {b: 1};</script>-->a>b[c]x[]]<!--日本-->"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": " "
+          },
+          {
+            "answer": "</b>a>b[c]<i>it</i> &lt;tag&gt;}<!-- a>b[c]<i>it</i> &lt;tag&gt;<hr id=answer>[[type:cloze:My Field]]&#x41;}}<!-- c -->",
+            "empty": false,
+            "question": "[anki:tts lang=en_US][[type:日本語]][/anki:tts]日本\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint2a8f020641a0aa80').style.display='block';\nreturn false;\" draggable=false>\nReading</a>\n<div id=\"hint2a8f020641a0aa80\" class=hint style=\"display: none\"><b>bold</b> {{Front}}</div>\n<script>var a = {b: 1};</script>"
+          },
+          {
+            "answer": "　a>b[c]<b>bold</b><hr id=answer><script>var a = {b: 1};</script><BR/>{{Front}}",
+            "empty": false,
+            "question": "　a>b[c]<b>bold</b>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<b>"
+          },
+          {
+            "answer": "</b>\n 日本[にほん]語[ご][sound:a.mp3]",
+            "empty": false,
+            "question": "[[type:Word]]<br>"
+          },
+          {
+            "answer": "<script>var a = {b: 1};</script>{",
+            "empty": false,
+            "question": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]}}[/anki:tts]<div class=front>"
+          },
+          {
+            "answer": " {{Front}}{{Front}}:</div> ",
+            "empty": false,
+            "question": "[[type:cloze:日本語]]}}"
+          },
+          {
+            "answer": "　<span></span>é[anki:tts lang=ja_JP voices=Kyoko speed=0.9][/anki:tts]&nbsp;\n&nbsp;私[わたし]<!-- c --> <br><!-- 　<span></span>é}x[y]",
+            "empty": false,
+            "question": "　<span></span>é[anki:tts lang=ja_JP voices=Kyoko speed=0.9][/anki:tts]&nbsp;"
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "error": {
+              "kind": "unclosed_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "\n"
+          },
+          {
+            "answer": "}}<BR/><br>a>b[c]<div></div><BR/>",
+            "empty": false,
+            "question": "<!--{{editable:custom:text:CardFlag　}}-->\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintb1244b3d08962420').style.display='block';\nreturn false;\" draggable=false>\n日本語</a>\n<div id=\"hintb1244b3d08962420\" class=hint style=\"display: none\"><br>é</div>\n語[sound:b.mp3]\t"
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "\n"
+          },
+          {
+            "answer": "&nbsp;私[わたし][sound:q.mp3]<hr id=answer> ",
+            "empty": false,
+            "question": "&nbsp;私[わたし][sound:q.mp3]"
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "[[type:cloze:Word]]:0x[y]<hr id=answer><!--{{　^CardID\n}}日本{{　/CardID }}{{#Reading\n}}<b><% Front{{{\n/Reading }}-->}}<hr id=answer>",
+            "empty": false,
+            "question": "[[type:cloze:Word]]:0x[y]"
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "語[sound:b.mp3]é&bogus;x[y]",
+            "empty": false,
+            "question": "語[sound:b.mp3]é&bogus;"
+          },
+          {
+            "answer": "&amp;é",
+            "empty": false,
+            "question": "😀<span></span>{(Deck)[[type:My Field]]"
+          },
+          {
+            "answer": "[[type:日本語]]^<hr id=answer>😀",
+            "empty": false,
+            "question": "[[type:日本語]]^"
+          },
+          {
+            "answer": "[[type:cloze:Reading]][sound:a.mp3]\n[anki:tts lang=en_US][sound:a.mp3][/anki:tts][sound:a.mp3]<script>var a = {b: 1};</script>",
+            "empty": false,
+            "question": "[[type:cloze:Reading]][sound:a.mp3]"
+          },
+          {
+            "answer": "[[type:cloze:日本語]]</div>[[type:nc:CardFlag]]😀",
+            "empty": false,
+            "question": "[[type:cloze:日本語]]</div>"
+          },
+          {
+            "answer": " ",
+            "empty": false,
+            "question": "\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintd2a6047a377a4223').style.display='block';\nreturn false;\" draggable=false>\nReading</a>\n<div id=\"hintd2a6047a377a4223\" class=hint style=\"display: none\">[[type:cloze:Reading]]</div>\n\t"
+          },
+          {
+            "answer": "<br><img src=\"a.png\">\n\n&#x41;<i>it</i> &lt;tag&gt;",
+            "empty": false,
+            "question": "<br><img src=\"a.png\">\n"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<BR/>}<!--<b>-->"
+          },
+          {
+            "answer": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]&amp;&amp;[/anki:tts][anki:tts lang=en_US][[type:Reading]][/anki:tts]&amp;&amp;</b>",
+            "empty": false,
+            "question": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]&amp;&amp;[/anki:tts][anki:tts lang=en_US][[type:Reading]][/anki:tts]&amp;&amp;"
+          },
+          {
+            "answer": "x[]]&nbsp;\n😀",
+            "empty": false,
+            "question": "x[]]&nbsp;"
+          },
+          {
+            "answer": "<i>it</i> &lt;tag&gt;</div>x[y]\t😀",
+            "empty": false,
+            "question": "<i>it</i> &lt;tag&gt;</div>"
+          },
+          {
+            "answer": "\n\n}}-->[[type:Subdeck]]\t　<hr id=answer><hr id=answer>}}&#x41;<!-- ",
+            "empty": false,
+            "question": "\n\n}}-->[[type:Subdeck]]\t　"
+          },
+          {
+            "answer": "<!--日本-->  \t  \t",
+            "empty": false,
+            "question": "x::y&amp;a>b[c]"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "<div></div>{{Front}}<b>0\néé&nbsp;",
+            "empty": false,
+            "question": "<div></div>{{Front}}<b>0"
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "}}&nbsp;私[わたし]x[y]\n}}&nbsp;私[わたし]",
+            "empty": false,
+            "question": "}}&nbsp;私[わたし]x[y]"
+          },
+          {
+            "answer": "<!--日本-->",
+            "empty": false,
+            "question": "word<div></div>&nbsp;(Deck)}"
+          },
+          {
+            "error": {
+              "kind": "unclosed_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "<img src=\"a.png\">(Deck)<script>var a = {b: 1};</script><img src=\"a.png\">[anki:tts lang=en_US]<img src=\"a.png\">[/anki:tts]<div class=front>[anki:tts lang=ja_JP voices=Kyoko speed=0.9](Deck)[/anki:tts]<hr id=answer><!-- [anki:tts lang=en_US]<BR/>word<b>bold</b>[/anki:tts]",
+            "empty": false,
+            "question": "<img src=\"a.png\">(Deck)<script>var a = {b: 1};</script><img src=\"a.png\">[anki:tts lang=en_US]<img src=\"a.png\">[/anki:tts]<div class=front>[anki:tts lang=ja_JP voices=Kyoko speed=0.9](Deck)[/anki:tts]"
+          },
+          {
+            "answer": "\n&amp;}0&nbsp;<hr id=answer><img src=\"a.png\"><div></div>",
+            "empty": false,
+            "question": "\n&amp;}0&nbsp;"
+          },
+          {
+            "error": {
+              "kind": "unclosed_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "Back texta>b[c][[type:cloze:Word]]<br><ruby><rb>[</rb><rt>type:nc:Reading</rt></ruby>]<hr id=answer>}}}<!--%>-->-->[anki:tts lang=en_US]Card 500[/anki:tts]",
+            "empty": false,
+            "question": "Back texta>b[c][[type:cloze:Word]]<br><ruby><rb>[</rb><rt>type:nc:Reading</rt></ruby>]"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<div></div><div></div>}日本"
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "answer": "<div></div>&nbsp;[sound:a.mp3]#\n",
+            "empty": false,
+            "question": "<div></div>&nbsp;[sound:a.mp3]#"
+          },
+          {
+            "answer": "<br><b>bold</b><img src=\"a.png\"> 日本[にほん]語[ご]<!-- c -->[[type:c2]]</div>&#x41;<img src=\"a.png\">&nbsp;<hr id=answer></b>-->{",
+            "empty": false,
+            "question": "<br><b>bold</b><img src=\"a.png\"> 日本[にほん]語[ご]<!-- c -->[[type:c2]]</div>&#x41;<img src=\"a.png\">&nbsp;"
+          },
+          {
+            "answer": "\n}}\n}}",
+            "empty": false,
+            "question": "(Deck)"
+          },
+          {
+            "answer": "&nbsp;word} é<hr id=answer>Q: ",
+            "empty": false,
+            "question": "&nbsp;word} é"
+          },
+          {
+            "answer": "[anki:tts<ruby><rb>lang=en_US]</rb><rt>anki:tts lang=en_US</rt></ruby><span></span><br><ruby><rb>[/anki:tts]</rb><rt>/anki:tts</rt></ruby>-->^[anki:tts<ruby><rb>lang=en_US]</rb><rt>anki:tts lang=en_US</rt></ruby><span></span><br><ruby><rb>[/anki:tts]</rb><rt>/anki:tts</rt></ruby>-->{",
+            "empty": false,
+            "question": "[anki:tts<ruby><rb>lang=en_US]</rb><rt>anki:tts lang=en_US</rt></ruby><span></span><br><ruby><rb>[/anki:tts]</rb><rt>/anki:tts</rt></ruby>-->"
+          },
+          {
+            "answer": "<br>😀<!-- {{Tags}}<%{{editable:text:Front　}}<!--x[y]--><b>bold</b>}}[sound:q.mp3]",
+            "empty": false,
+            "question": "<br>😀<!-- {{Tags}}<%{{editable:text:Front　}}<!--x[y]-->"
+          },
+          {
+            "answer": "[anki:tts lang=en_US]<i>it</i> &lt;tag&gt;\n<br>[/anki:tts][[type:nc:Tags]]{<i>it</i> &lt;tag&gt;\n<br>　<img src=\"a.png\"><hr id=answer><!-- 　<img src=\"a.png\"><br><script>var a = {b: 1};</script>&amp;\t &nbsp;\n　<img src=\"a.png\"> ",
+            "empty": false,
+            "question": "[anki:tts lang=en_US]<i>it</i> &lt;tag&gt;\n<br>[/anki:tts][[type:nc:Tags]]{<i>it</i> &lt;tag&gt;\n<br>　<img src=\"a.png\">"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "}</div>x[y]"
+          },
+          {
+            "answer": "<!--{{{{tts ja_JP voices=Kyoko speed=0.9:c2\n}}{{　type:furigana:Tags }}{{type-cloze:c2 }}{{tts ja_JP voices=Kyoko speed=0.9:CardID}}-->}[sound:a.mp3]\n[sound:a.mp3]}a>b[c]語[sound:b.mp3] a>b[c]語[sound:b.mp3] &#x41;<b>bold</b><div></div><hr id=answer>",
+            "empty": false,
+            "question": "<!--{{{{tts ja_JP voices=Kyoko speed=0.9:c2\n}}{{　type:furigana:Tags }}{{type-cloze:c2 }}{{tts ja_JP voices=Kyoko speed=0.9:CardID}}-->}[sound:a.mp3]"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<b>"
+          },
+          {
+            "answer": " <b><!--</div>{{edit:c2}}-->#",
+            "empty": false,
+            "question": "[sound:q.mp3]"
+          },
+          {
+            "answer": "<BR/>&#x41;^0<!-- [sound:a.mp3]",
+            "empty": false,
+            "question": "<BR/>&#x41;"
+          },
+          {
+            "answer": "<span></span>[sound:a.mp3]&amp;<BR/>\n(Deck)",
+            "empty": false,
+            "question": "<span></span>[sound:a.mp3]&amp;<BR/>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": ""
+          },
+          {
+            "answer": "word \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hinta4181548fdf449ea').style.display='block';\nreturn false;\" draggable=false>\nFront</a>\n<div id=\"hinta4181548fdf449ea\" class=hint style=\"display: none\">\n&nbsp;</div>\n1-->[[type:Front]]\n<hr id=answer>{😀^",
+            "empty": false,
+            "question": "word \n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hinta4181548fdf449ea').style.display='block';\nreturn false;\" draggable=false>\nFront</a>\n<div id=\"hinta4181548fdf449ea\" class=hint style=\"display: none\">\n&nbsp;</div>\n1-->[[type:Front]]\n"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "--><!-- {{{\nkana:tts en_US:Front}}-->"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "😀&bogus;<div></div>😀&bogus;<div></div>\nworda>b[c]",
+            "empty": false,
+            "question": "😀&bogus;<div></div>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "日本"
+          },
+          {
+            "answer": "😀Card 1:<!---->--></div>",
+            "empty": false,
+            "question": "a>b[c]<i>it</i> &lt;tag&gt;語[sound:b.mp3]にほんご] 日本[にほん]語[ご]x[]]"
+          },
+          {
+            "answer": "　&nbsp;<img src=\"a.png\">&bogus;",
+            "empty": false,
+            "question": "　"
+          },
+          {
+            "answer": " 日本[にほん]語[ご]{{Front}}　",
+            "empty": false,
+            "question": "Back text😀{{Front}} 日本[にほん]語[ご]{{Front}}　"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": " <script>var a = {b: 1};</script><!--日本{{\nedit:furigana:custom:Type}}#-->"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<!--{{\nFrontSide}}-->"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "\n"
+          },
+          {
+            "answer": "[anki:tts lang=en_US][[type:c2]][/anki:tts][sound:a.mp3]<!-- c -->&amp;}}x[y]",
+            "empty": false,
+            "question": "[anki:tts lang=en_US][[type:c2]][/anki:tts][sound:a.mp3]<!-- c -->&amp;}}"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "[[type:cloze:Tags]]:"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<div></div><div></div><!--{{hint:ci:c2　}}{{{　#Front}}}{{{ /Front}}{{ editable:hint:Front}}{{Tags}}--><!--}}-->"
+          },
+          {
+            "answer": "[anki:ttslang=en_US]<br>[anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:Tags]][/anki:tts]<hr id=answer></div> ",
+            "empty": false,
+            "question": "[anki:ttslang=en_US]<br>[anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:Tags]][/anki:tts]"
+          },
+          {
+            "answer": "\n<b>bold</b>é[anki:tts lang=ja_JP voices=Kyoko speed=0.9][/anki:tts]:\n</b>",
+            "empty": false,
+            "question": "\n<b>bold</b>é[anki:tts lang=ja_JP voices=Kyoko speed=0.9][/anki:tts]:"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "<!--{{\nFrontSide\n}}</div>-->worda>b[c]}}\n<b>日本<!--{{\nFrontSide\n}}</div>-->worda>b[c]}}Corpus Shadow",
+            "empty": false,
+            "question": "<!--{{\nFrontSide\n}}</div>-->worda>b[c]}}"
+          },
+          {
+            "answer": "\n<img src=\"a.png\">[[type:cloze:Card]]<span></span>x[y]<span></span>\n<span></span>",
+            "empty": false,
+            "question": "\n<img src=\"a.png\">[[type:cloze:Card]]<span></span>x[y]<span></span>"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "[[type:cloze:Front]]é",
+            "empty": false,
+            "question": "[[type:cloze:Front]]é"
+          },
+          {
+            "answer": "#",
+            "empty": false,
+            "question": "😀[sound:q.mp3] &bogus;"
+          },
+          {
+            "answer": "<div></div>:日本</b>(Deck)<hr id=answer><div></div>:日本</b>(Deck)}</b> <div></div>:日本</b>(Deck)",
+            "empty": false,
+            "question": "<div></div>:日本</b>(Deck)"
+          },
+          {
+            "answer": "<!--{{Type }}{{ type-nc:FrontSide }}{{ ^c0\n}}{{{{　#c0\n}}\n{{/c0}}{{ /c0}}-->(Deck)<!--{{　Deck}}\n{--><hr id=answer> &amp;<div class=front> 日本[にほん]語[ご]{{Front}} <script>var a = {b: 1};</script>",
+            "empty": false,
+            "question": "<!--{{Type }}{{ type-nc:FrontSide }}{{ ^c0\n}}{{{{　#c0\n}}\n{{/c0}}{{ /c0}}-->(Deck)<!--{{　Deck}}\n{-->"
+          },
+          {
+            "answer": "bold 日本[にほん]語[ご]}",
+            "empty": false,
+            "question": "[[type:c2]]\nword"
+          },
+          {
+            "answer": "}\n&nbsp;私[わたし]é}}<span></span>",
+            "empty": false,
+            "question": "}"
+          },
+          {
+            "error": {
+              "kind": "unopened_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "[[type:nc:Tags]]-->",
+            "empty": false,
+            "question": "-->"
+          },
+          {
+            "answer": "<!-- <BR/>x[]]é語[sound:b.mp3]a>b[c]\n<!--[[type:nc:CardFlag]]<BR/>x[]]<!--Corpus Shadow<hr id=answer>é語[sound:b.mp3]a>b[c]",
+            "empty": false,
+            "question": "<!-- <BR/>x[]]é語[sound:b.mp3]a>b[c]"
+          },
+          {
+            "answer": "[[type:c2]]\n\n{\n",
+            "empty": false,
+            "question": "[[type:c2]]\n\n"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "[[type:c2]]"
+          },
+          {
+            "answer": "</div> ^{{",
+            "empty": false,
+            "question": "語[sound:b.mp3]　:"
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "answer": "\n語[sound:b.mp3]\t[[type:nc:Text]][anki:tts lang=ja_JP voices=Kyoko speed=0.9]\n語[sound:b.mp3]/anki:tts-->",
+            "empty": false,
+            "question": "[[type:nc:Text]][anki:tts lang=ja_JP voices=Kyoko speed=0.9]\n語[sound:b.mp3]/anki:tts"
+          },
+          {
+            "answer": "\n&#x41;Card 1</b><br>Corpus Single^Q: 日本\n\n&#x41;\n&#x41;\n&#x41;\n&#x41;",
+            "empty": false,
+            "question": "\n&#x41;Card 1</b><br>Corpus Single^Q: 日本"
+          },
+          {
+            "answer": "<%<!--{{\nText}}-->",
+            "empty": false,
+            "question": "😀&amp;😀&amp;Card 2<!--{{^Text}}{{/Text\n}}<!--{{\nText}}-->😀&amp;😀&amp;-->"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "answer"
+            }
+          },
+          {
+            "answer": "[anki:tts lang=en_US]😀a>b[c][/anki:tts]</b></b>😀a>b[c]#<hr id=answer>😀a>b[c]<!--x[y]}😀a>b[c][[type:cloze:Text]]😀a>b",
+            "empty": false,
+            "question": "[anki:tts lang=en_US]😀a>b[c][/anki:tts]</b></b>😀a>b[c]#"
+          },
+          {
+            "answer": "<img src=\"a.png\"><b><img src=\"a.png\">}[sound:q.mp3]\n\n<!--{{{{#Text }}</div>{{{　furigana:Text}}{{　/Text }}:{{Text}}{{　text:furigana:Text　}}--><img src=\"a.png\">",
+            "empty": false,
+            "question": "<img src=\"a.png\"><b><img src=\"a.png\">}[sound:q.mp3]"
+          },
+          {
+            "answer": "😀<div></div><!--x[y]-->\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint9bfe494fc990c6c1').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint9bfe494fc990c6c1\" class=hint style=\"display: none\">\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint827d91b7aa0493c3').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint827d91b7aa0493c3\" class=hint style=\"display: none\">😀<div></div></div>\n</div>\n😀<div></div><!--{{{{editable:Text }}<!--</b>-->😀<div></div>-->",
+            "empty": false,
+            "question": "😀<div></div>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "%>}&nbsp;"
+          },
+          {
+            "answer": "Back text}}<hr id=answer><hr id=answer>[sound:q.mp3][[type:nc:Text]]<!-- Back text}}Back text}}😀Q: ",
+            "empty": false,
+            "question": "Back text}}<hr id=answer><hr id=answer>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "}<div class=front>"
+          },
+          {
+            "answer": "&amp;&amp;}",
+            "empty": false,
+            "question": "[[type:nc:Text]]}}&amp;</b>0"
+          },
+          {
+            "answer": "語[sound:b.mp3]語[sound:b.mp3]語[sound:b.mp3]\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint2443dead1a092440').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint2443dead1a092440\" class=hint style=\"display: none\">語[sound:b.mp3]</div>\n<hr id=answer>",
+            "empty": false,
+            "question": "語[sound:b.mp3]語[sound:b.mp3][[type:cloze:Text]]"
+          },
+          {
+            "answer": "\n<br>a>b[c]\n<br>a>b[c]&nbsp;😀<hr id=answer>%>\n<br>a>b[c]\n<br>a>b[c]&nbsp;😀\n<br>a>b[c]",
+            "empty": false,
+            "question": "\n<br>a>b[c]\n<br>a>b[c]&nbsp;😀"
+          },
+          {
+            "answer": "Card 500[anki:tts lang=en_US][/anki:tts]\n😀<div class=front><!--:<!-- -->x[y]-->",
+            "empty": false,
+            "question": "Card 500[anki:tts lang=en_US][/anki:tts]"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "%>"
+          },
+          {
+            "answer": "x[]]{{Front}}x[y]<!--{{　Text }}-->x[]]{{Front}}x[]]{{Front}}x[]]{{Front}}}{}<!-- x[]]{{Front}}",
+            "empty": false,
+            "question": "x[]]{{Front}}x[]]{{Front}}x[]]{{Front}}}{"
+          },
+          {
+            "answer": " 日本[にほん]語[ご]<b>bold</b>[sound:q.mp3] 日本[にほん]語[ご]<b>bold</b>にほんご<b>bold</b>",
+            "empty": false,
+            "question": " 日本[にほん]語[ご]<b>bold</b>[sound:q.mp3] 日本[にほん]語[ご]<b>bold</b>"
+          },
+          {
+            "answer": "😀}😀</div><hr id=answer>:flag0[[type:nc:Text]]x[y]",
+            "empty": false,
+            "question": "😀}😀</div>"
+          },
+          {
+            "answer": "[[type:Text]]　&bogus;\n#　&bogus;　&bogus;",
+            "empty": false,
+            "question": "[[type:Text]]　&bogus;"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "日本語 x::y<i>it</i> &lt;tag&gt;<i>it</i> &lt;tag&gt; <div class=front>-->",
+            "empty": false,
+            "question": "<i>it</i> &lt;tag&gt;日本"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "#日本"
+          },
+          {
+            "answer": "[[type:c1]][anki:tts lang=ja_JP voices=Kyoko speed=0.9]Corpus/anki:tts<!--\n-->",
+            "empty": false,
+            "question": "[[type:c1]]"
+          },
+          {
+            "answer": "\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint5840fb1bd307e497').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint5840fb1bd307e497\" class=hint style=\"display: none\">&bogus;<div></div><!-- c --></div>\n日本\n<div class=front>&bogus;<div></div><!-- c -->",
+            "empty": false,
+            "question": "\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint5840fb1bd307e497').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint5840fb1bd307e497\" class=hint style=\"display: none\">&bogus;<div></div><!-- c --></div>\n日本"
+          },
+          {
+            "answer": "&nbsp;私[わたし]<BR/>&nbsp;<!--{{{{#Deck}}<%</div>{{{/Deck }}{{\nfurigana:hint:Text\n}}-->}",
+            "empty": false,
+            "question": "&nbsp;私[わたし]<BR/>&nbsp;<!--{{type-nc:Text }}{{{{ Text}}-->"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint5eecc71f4e136d2d').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint5eecc71f4e136d2d\" class=hint style=\"display: none\">[[type:Text]]</div>\n<!--{{ :Text}}-->"
+          },
+          {
+            "answer": "[sound:a.mp3]&amp;[sound:a.mp3]&amp;[sound:a.mp3]&amp;\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint581d183f096cdbdd').style.display='block';\nreturn false;\" draggable=false>\nCardFlag</a>\n<div id=\"hint581d183f096cdbdd\" class=hint style=\"display: none\">flag0</div>\n\n<!-- [sound:a.mp3]&amp;}}",
+            "empty": false,
+            "question": "[sound:a.mp3]&amp;[sound:a.mp3]&amp;[sound:a.mp3]&amp;\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint581d183f096cdbdd').style.display='block';\nreturn false;\" draggable=false>\nCardFlag</a>\n<div id=\"hint581d183f096cdbdd\" class=hint style=\"display: none\">flag0</div>\n"
+          },
+          {
+            "answer": "Q: Back textword<b>bold</b>日本",
+            "empty": false,
+            "question": "Back textword<b>bold</b>}Q: Back textword<b>bold</b>-->[[type:cloze:Text]]"
+          },
+          {
+            "answer": " {{Front}}&nbsp;私[わたし] {{Front}}私%><hr id=answer> {{Front}}&nbsp;私[わたし]<% Front",
+            "empty": false,
+            "question": " {{Front}}&nbsp;私[わたし] {{Front}}私%>"
+          },
+          {
+            "answer": "<b>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint581d183f096cdbdd').style.display='block';\nreturn false;\" draggable=false>\nCardFlag</a>\n<div id=\"hint581d183f096cdbdd\" class=hint style=\"display: none\">flag0</div>\n}\n<br>&bogus;<br>&bogus;:",
+            "empty": false,
+            "question": "<b>\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint581d183f096cdbdd').style.display='block';\nreturn false;\" draggable=false>\nCardFlag</a>\n<div id=\"hint581d183f096cdbdd\" class=hint style=\"display: none\">flag0</div>\n}"
+          },
+          {
+            "answer": "0{",
+            "empty": false,
+            "question": "<span></span>&nbsp;私[わたし][[type:cloze:Text]]<span></span>&nbsp;私[わたし]"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "Q: "
+          },
+          {
+            "answer": "語[sound:b.mp3]&nbsp;私[わたし]語[sound:b.mp3]&nbsp;私[わたし](Deck)語[sound:b.mp3]&nbsp;私[わたし]<div class=front><hr id=answer>",
+            "empty": false,
+            "question": "語[sound:b.mp3]&nbsp;私[わたし]語[sound:b.mp3]&nbsp;私[わたし](Deck)語[sound:b.mp3]&nbsp;私[わたし]<div class=front>"
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "\t\t"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "語[sound:b.mp3]&#x41;{{Front}}語[sound:b.mp3]&#x41;{{Front}}語[sound:b.mp3]&#x41;{{Front}}-->\nCard 1",
+            "empty": false,
+            "question": "語[sound:b.mp3]&#x41;{{Front}}語[sound:b.mp3]&#x41;{{Front}}語[sound:b.mp3]&#x41;{{Front}}-->"
+          },
+          {
+            "answer": "語[sound:b.mp3]\n{{Front}}</div><script>var a = {b: 1};</script>",
+            "empty": false,
+            "question": "[anki:tts lang=ja_JP voices=Kyoko speed=0.9]語[sound:b.mp3]\n{{Front}}[/anki:tts]<!-- 語[sound:b.mp3]\n{{Front}}</div>"
+          },
+          {
+            "answer": "<i>it</i> &lt;tag&gt;&nbsp;<b>-->\n[anki:tts lang=ja_JP voices=Kyoko speed=0.9]<i>it</i> &lt;tag&gt;&nbsp;[/anki:tts]<i>it</i> &lt;tag&gt;&nbsp;<i>it</i> &lt;tag&gt;&nbsp;\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hint34e6f300ee260233').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hint34e6f300ee260233\" class=hint style=\"display: none\"><i>it</i> &lt;tag&gt;&nbsp;</div>\n",
+            "empty": false,
+            "question": "<i>it</i> &lt;tag&gt;&nbsp;<b>-->"
+          },
+          {
+            "answer": "<!-- c -->&nbsp;}flag0日本^<!--{{{Text\n}}}--><hr id=answer><!-- c -->&nbsp;}flag0日本^<!--{{{Text\n}}}-->[anki:tts lang=ja_JP voices=Kyoko speed=0.9]<!-- c --> [/anki:tts]",
+            "empty": false,
+            "question": "<!-- c -->&nbsp;}flag0日本^<!--{{{Text\n}}}-->"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          },
+          {
+            "answer": "é}Corpus Single[[type:cloze:Text]]é<!--<% :Text　%><%\nType %>--><hr id=answer>é[[type:nc:Subdeck]]1é:Card 1",
+            "empty": false,
+            "question": "é}Corpus Single[[type:cloze:Text]]é<!--<% :Text　%><%\nType %>-->"
+          },
+          {
+            "answer": "<br>flag0\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintb9504c561342fa4d').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hintb9504c561342fa4d\" class=hint style=\"display: none\"><img src=\"a.png\">\t</div>\n&nbsp;",
+            "empty": false,
+            "question": "<img src=\"a.png\">\t#\n<a class=hint href=\"#\"\nonclick=\"this.style.display='none';\ndocument.getElementById('hintb9504c561342fa4d').style.display='block';\nreturn false;\" draggable=false>\nText</a>\n<div id=\"hintb9504c561342fa4d\" class=hint style=\"display: none\"><img src=\"a.png\">\t</div>\n"
+          },
+          {
+            "answer": "\n<div></div>　[anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:Text]][/anki:tts]<!--#--><hr id=answer>[anki:tts lang=en_US]flag0[/anki:tts]flag0\n<div></div>　",
+            "empty": false,
+            "question": "\n<div></div>　[anki:tts lang=ja_JP voices=Kyoko speed=0.9][[type:Text]][/anki:tts]<!--#-->"
+          },
+          {
+            "error": {
+              "kind": "unknown_conditional",
+              "side": "question"
+            }
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": "<BR/><BR/>[[type:nc:Text]][sound:q.mp3]<!--<!--}-->[[type:nc:Text]]--> [anki:tts lang=ja_JP voices=Kyoko speed=0.9]<BR/>[/anki:tts]<BR/>"
+          },
+          {
+            "answer": "&nbsp;私[わたし]&nbsp;😀(Deck)}&nbsp;私[わたし]&nbsp;<hr id=answer>%>&nbsp;私[わたし]&nbsp;&nbsp;私[わたし]&nbsp;&nbsp;私[わたし]&nbsp;",
+            "empty": false,
+            "question": "&nbsp;私[わたし]&nbsp;😀(Deck)}&nbsp;私[わたし]&nbsp;"
+          },
+          {
+            "answer": "x[]][[type:Text]]<br>x[]]",
+            "empty": false,
+            "question": "x[]][[type:Text]]<br>"
+          },
+          {
+            "error": {
+              "kind": "unknown_field",
+              "side": "question"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "aeac0ec295e2e34082a4d084d08e6a5f40ef7e0ebb45ac49e5e1139b1a16affc",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/corpus/templates-20",
+  "scenario_sha256": "aaba20bba1758deeaa7b2495cbefc6ab172d25c979b8d0e57518b4105fff6393",
+  "tz": "UTC"
+}
