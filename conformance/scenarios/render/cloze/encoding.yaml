@@ -1,0 +1,21 @@
+# specs/render/cloze.md C7: data-cloze attribute encoding of quotes, markup,
+# ASCII punctuation, controls, Latin-1, and characters from U+0100 up; a sound tag
+# inside a hidden cloze is encoded on the front (R974, R1020).
+id: render/cloze/encoding
+description: "data-cloze entity encoding"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back]
+          inputs:
+            - ["{{c1::\"quoted\" & 'single' <tag>}}", 1]
+            - ["{{c1::a b\tc\nd\re}}", 1]
+            - ["{{c1::!#$%()*+,-./:;=?@[\\]^_`{|}~}}", 1]
+            - ["{{c1::café naïve ß ÿ\u00a0end}}", 1]
+            - ["{{c1::\u0080\u009f¡¿}}", 1]
+            - ["{{c1::Ā ł € 日本 😀 \u2028 end}}", 1]
+            - ["{{c1::\u0000nul\u0001}}", 1]
+            - ["{{c1::[sound:river.mp3]}} {{c2::[sound:sea.mp3]}}", 1]
+            - ["{{c1::<img src=\"map.png\">}}", 1]
+            - ["{{c1::&amp;&nbsp;&#x41;}}", 1]
