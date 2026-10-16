@@ -549,6 +549,134 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
 }
 
+/// deck-options-ops.md E1, E2: the op and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn deck_options_ops_follow_the_schema() {
+    use meguri_testkit::scenario::{IgnoredBeforeCountRequest, LeechAction, ObservationArgs, ObservationKind};
+
+    let parse = |steps: &str| {
+        let text = format!("id: sched/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{save_deck_options: {deck: Words}}, \
+         {save_deck_options: {deck: Misc, preset: Lang, deck_desired_retention: 0.75}}, \
+         {save_deck_options: {deck: Phrases, deck_desired_retention: null, options: {desired_retention: 0.85, \
+           fsrs_params: [0.2, 1], learn_steps: [1m, 1d], leech_action: tag_only, historical_retention: 0.8, \
+           ignore_reviews_before: \"2025-10-03\"}}}, \
+         {observe: [{ignored_before_count: {preset: Default, dates: [\"2026-01-01\", \"\", \" 2026-1-3\"]}}]}]",
+    )
+    .unwrap();
+    let saves: Vec<_> = parsed
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::SaveDeckOptions(args) => Some(args),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(saves.len(), 3);
+    assert_eq!(
+        (
+            saves[0].deck.as_str(),
+            saves[0].preset.as_deref(),
+            saves[0].deck_desired_retention
+        ),
+        ("Words", None, None)
+    );
+    assert!(saves[0].options.is_none());
+    assert_eq!(
+        (saves[1].preset.as_deref(), saves[1].deck_desired_retention),
+        (Some("Lang"), Some(Some(0.75)))
+    );
+    assert_eq!(saves[2].deck_desired_retention, Some(None));
+    let options = saves[2].options.as_ref().unwrap();
+    assert_eq!(options.desired_retention, Some(0.85));
+    assert_eq!(options.fsrs_params.as_deref(), Some(&[0.2, 1.0][..]));
+    assert_eq!(
+        options
+            .learn_steps
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|d| d.seconds())
+            .collect::<Vec<_>>(),
+        [60, 86_400]
+    );
+    assert_eq!(options.leech_action, Some(LeechAction::TagOnly));
+    assert_eq!(options.historical_retention, Some(0.8));
+    assert_eq!(options.ignore_reviews_before.as_deref(), Some("2025-10-03"));
+    assert_eq!(options.new_per_day, None);
+    let Step::Observe(requests) = &parsed.steps[3] else {
+        panic!("not an observe step")
+    };
+    assert_eq!(requests[0].kind, ObservationKind::IgnoredBeforeCount);
+    let ObservationArgs::Mapping(map) = &requests[0].args else {
+        panic!("not a mapping")
+    };
+    assert_eq!(
+        IgnoredBeforeCountRequest::from_mapping(map).unwrap(),
+        IgnoredBeforeCountRequest {
+            preset: "Default".to_owned(),
+            dates: vec!["2026-01-01".to_owned(), String::new(), " 2026-1-3".to_owned()],
+        }
+    );
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("save_deck_options"));
+    assert!(needs.observations.contains("ignored_before_count"));
+    for (bad, why) in [
+        ("[{save_deck_options: {}}]", "deck"),
+        ("[{save_deck_options: {deck: \"\"}}]", "non-empty deck"),
+        ("[{save_deck_options: {deck: A, preset: \"\"}}]", "non-empty name"),
+        ("[{save_deck_options: {deck: A, preset: null}}]", "invalid type"),
+        ("[{save_deck_options: {deck: A, options: null}}]", "invalid type"),
+        ("[{save_deck_options: {deck: A, colour: red}}]", "unknown field"),
+        ("[{save_deck_options: {deck: A, options: {name: P}}}]", "unknown field"),
+        (
+            "[{save_deck_options: {deck: A, options: {new_per_day: \"7\"}}}]",
+            "invalid type",
+        ),
+        (
+            "[{save_deck_options: {deck: A, options: {ignore_reviews_before: 20251003}}}]",
+            "invalid type",
+        ),
+        (
+            "[{save_deck_options: {deck: A, deck_desired_retention: \"0.8\"}}]",
+            "invalid type",
+        ),
+        ("[{save_deck_options: A}]", "invalid type"),
+        ("[{observe: [ignored_before_count]}]", "does not take"),
+        (
+            "[{observe: [{ignored_before_count: {preset: P}}]}]",
+            "takes {preset, dates}",
+        ),
+        (
+            "[{observe: [{ignored_before_count: {preset: P, dates: []}}]}]",
+            "non-empty list",
+        ),
+        (
+            "[{observe: [{ignored_before_count: {preset: P, dates: [1]}}]}]",
+            "non-empty list",
+        ),
+        (
+            "[{observe: [{ignored_before_count: {preset: \"\", dates: [x]}}]}]",
+            "non-empty preset",
+        ),
+        (
+            "[{observe: [{ignored_before_count: {preset: P, dates: [x], deck: A}}]}]",
+            "takes {preset, dates}",
+        ),
+        (
+            "[{observe: [{ignored_before_count: {preset: P, dates: [x]}}, {ignored_before_count: {preset: Q, dates: [y]}}]}]",
+            "more than once",
+        ),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn text_requests_follow_the_schema() {
     let parse = |request: &str| {

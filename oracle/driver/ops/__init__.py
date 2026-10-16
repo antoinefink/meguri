@@ -4,6 +4,7 @@
 from . import (  # noqa: F401
     clock,
     collection,
+    deck_options,
     decks,
     handoff,
     maintenance,

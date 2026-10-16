@@ -17,6 +17,7 @@ Only spec writers and oracle maintainers work here. Implementers never read this
 - Worker and harness stderr reaches tools/mg logs that implementers read. Log exceptions only through `errors.log_exception` (class and driver `file:line`s; no source line, Anki frame or message), never `traceback.print_exc`. For whole tracebacks, start a worker by hand with `ORACLE_FULL_TRACEBACKS=1`; no tools/mg job sets it.
 - Protobuf values go through `convert.message` and other f32 values through `numbers.f32_value`, or they print as widened f64 (11.262236595153809 instead of 11.262237).
 - Time moves only through `Clock.set`/`advance` (epoch seconds in the libfaketime file, `FAKETIME_FMT=%s`, never the `@` form). Pass the frozen instant explicitly where Anki takes a timestamp argument (`answered_at_millis`). `time.monotonic`/`perf_counter` are real.
+- A new collection gets `rollover` 4 the first time Anki computes the day (any timing call, a deck options save included): a test comparing config rows around the first such op sets `rollover` in its setup.
 - `ANKI_TEST_MODE` turns Anki's fuzz off and shifts its clock: the entrypoint unsets it and the worker refuses to start with it.
 - Workers need `/scratch` on tmpfs (the compose service has it). On the container overlay a scenario is ~10x slower.
 - `canon.py` defines scenario_sha256 (RFC 8785 of the YAML 1.2 core-schema parse). meguri-testkit's scenario parser must produce the same bytes (its tests compare with every golden); change both together.

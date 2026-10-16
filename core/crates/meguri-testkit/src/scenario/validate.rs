@@ -12,8 +12,9 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FsrsNextRequest, LegacyUpdate, LogicalRef, ObservationKind,
-    RefKind, Scenario, Side, Step, SyncKind, TemplateRequest, TextRequest,
+    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FsrsNextRequest, IgnoredBeforeCountRequest, LegacyUpdate,
+    LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario, Side, Step, SyncKind, TemplateRequest,
+    TextRequest,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -101,6 +102,9 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
         if let Step::LegacyUpdate(update) = step {
             legacy_update(update).map_err(at)?;
+        }
+        if let Step::SaveDeckOptions(args) = step {
+            save_deck_options(args).map_err(at)?;
         }
         record_op(step).map_err(at)?;
         if let Step::Observe(requests) = step {
@@ -281,6 +285,17 @@ fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
     Ok(())
 }
 
+/// deck-options-ops.md E1: non-empty deck and preset names.
+fn save_deck_options(args: &SaveDeckOptionsArgs) -> Result<(), FormatError> {
+    if args.deck.is_empty() {
+        return Err(FormatError::new("save_deck_options needs a non-empty deck name"));
+    }
+    if args.preset.as_ref().is_some_and(String::is_empty) {
+        return Err(FormatError::new("save_deck_options preset is a non-empty name"));
+    }
+    Ok(())
+}
+
 /// model-ops.md L6: an export with `legacy` is exactly
 /// `{format: apkg, name: <package file name>, legacy: true}`. Other forms stay
 /// draft (D7.2).
@@ -322,14 +337,17 @@ fn package_name(value: &Value) -> Result<(), FormatError> {
 const PACKAGE_COLUMNS: [&str; 6] = ["ver", "conf", "models", "decks", "dconf", "tags"];
 
 /// The schema's rules for the mapping form of an observation request.
-/// observations.md O2: a kind whose value is a list (`template`) is
-/// requested at most once per step; two lists do not merge.
+/// observations.md O2: a kind whose value is a list (`template`,
+/// `ignored_before_count`) is requested at most once per step; two lists do
+/// not merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
-    let templates = requests.iter().filter(|r| r.kind == ObservationKind::Template).count();
-    if templates > 1 {
-        return Err(FormatError::new(
-            "observation template is requested more than once in one step",
-        ));
+    for kind in [ObservationKind::Template, ObservationKind::IgnoredBeforeCount] {
+        if requests.iter().filter(|r| r.kind == kind).count() > 1 {
+            return Err(FormatError::new(format!(
+                "observation {} is requested more than once in one step",
+                kind.name()
+            )));
+        }
     }
     Ok(())
 }
@@ -429,6 +447,10 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         }
         ObservationKind::FsrsNext => {
             FsrsNextRequest::from_mapping(map)?;
+        }
+        // deck-options-ops.md E2.
+        ObservationKind::IgnoredBeforeCount => {
+            IgnoredBeforeCountRequest::from_mapping(map)?;
         }
         // render-ops.md Q1.1-Q1.3, Q1.6.
         ObservationKind::Template => {

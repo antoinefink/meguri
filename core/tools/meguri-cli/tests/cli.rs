@@ -34,11 +34,20 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         json["supports"]["observations"],
         serde_json::json!(["cloze", "db_dump", "fsrs_next", "schema_objects", "template", "text"])
     );
-    // dsl.md D7.2: 26 ops besides observe, the actor ops of sync-ops.md, the
-    // model ops of model-ops.md, storage-ops.md's open and record-ops.md's
-    // set_config among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 26);
-    for op in ["actor", "sync", "net_fault", "converge", "reopen", "open", "set_config"] {
+    // dsl.md D7.2: 27 ops besides observe, the actor ops of sync-ops.md, the
+    // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
+    // set_config and deck-options-ops.md's save_deck_options among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 27);
+    for op in [
+        "actor",
+        "sync",
+        "net_fault",
+        "converge",
+        "reopen",
+        "open",
+        "set_config",
+        "save_deck_options",
+    ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
@@ -73,8 +82,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .any(|k| k == "legacy_json")
     );
     // observations.md O4: blob_decode and package_col are kinds of the
-    // language, which Meguri's executor does not run yet (model-ops.md L5).
-    for kind in ["blob_decode", "package_col"] {
+    // language, which Meguri's executor does not run yet (model-ops.md L5),
+    // and so is ignored_before_count (deck-options-ops.md E3).
+    for kind in ["blob_decode", "package_col", "ignored_before_count"] {
         assert!(
             json["language"]["observations"]
                 .as_array()
