@@ -1,0 +1,25 @@
+# specs/render/cloze.md C10: what a {{type:cloze:F}} field expects (R977): one
+# entry per active cloze, a single entry when all are identical.
+id: render/cloze/typing
+description: "type-in cloze extraction"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [typing]
+          inputs:
+            - ["{{c1::a}} {{c1::a}}", 1]
+            - ["{{c1::a}} {{c1::a}} {{c1::b}}", 1]
+            - ["{{c1::a  }} {{c1::a}}", 1]
+            - ["{{c1::x {{c1::x}}}}", 1]
+            - ["{{c2::a}}", 1]
+            - ["{{c1::<b>Paris</b>}}", 1]
+            - ["{{c1::Paris::capital}}", 1]
+            - ["{{c1,2::Seine}} and {{c2::Rhône}}", 2]
+            - ["{{c1::Rhône}} {{c1::Rhône}} {{c1::Rhône}}", 1]
+            - ["{{c1::Rhône}} {{c1::Rhône}}", 1]
+            - ["{{c1::}} {{c1::}}", 1]
+            - ["{{c1::}} {{c1::x}}", 1]
+            - ["{{c1::a}} {{c2::b}} {{c1::a}}", 1]
+            - ["", 1]
+            - ["{{c1::[sound:a.mp3]}}", 1]
