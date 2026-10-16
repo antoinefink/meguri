@@ -90,7 +90,7 @@ pub(crate) fn run(
     let mut flush = WalFlush::default();
     loop {
         flush.observe(&shared, collection.as_ref());
-        let task = match shared.next_task(flush.due) {
+        let mut task = match shared.next_task(flush.due) {
             WriterWake::Task(task) => task,
             WriterWake::Flush => {
                 let _busy = activity.busy();
@@ -99,7 +99,6 @@ pub(crate) fn run(
             }
             WriterWake::Stop => break,
         };
-        let mut task = task;
         resolve_restore(&shared, &mut task.meta);
         {
             let _busy = activity.busy();

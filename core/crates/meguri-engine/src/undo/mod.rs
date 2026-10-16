@@ -412,9 +412,10 @@ impl Collection {
         Ok(self.undo_manager()?.peek(Side::Redo, scope))
     }
 
-    /// Undoes the top step of `scope` as an op (M4). Refused with
-    /// `UndoUnavailable` when there is none, it was uploaded or is pending
-    /// upload, or its rows changed.
+    /// Undoes the top step of `scope` as an op (M4): the step on top when
+    /// the writer takes the op (M4.1). Refused with `UndoUnavailable` when
+    /// there is none, it was uploaded or is pending upload, or its rows
+    /// changed.
     pub fn submit_undo(&self, scope: UndoScope) -> Pending<OpResult<StepInfo>> {
         self.submit_restore(UndoAction::Undo(scope))
     }
