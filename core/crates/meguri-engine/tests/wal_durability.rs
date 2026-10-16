@@ -147,7 +147,7 @@ fn queued_ops_do_not_starve_a_flush_and_a_long_op_flushes_earlier_commits_first(
 }
 
 #[test]
-fn a_failed_replace_still_flushes_the_reopened_writers_upgrade() {
+fn a_replace_that_fails_after_swapping_the_file_still_flushes_the_reopened_writers_upgrade() {
     let h = Harness::open();
     h.collection.record_durability_events();
     let commit = add_note_with_card(&h.collection, OpSource::UserUndoable, &["old writer", "x"]);
@@ -178,8 +178,11 @@ fn a_failed_replace_still_flushes_the_reopened_writers_upgrade() {
     let returned = monotonic::now();
     drop(exclusive);
     drop(slot);
-    assert_eq!(h.collection.current_generation(), generation);
-    let reader = h.collection.reader(ReaderRole::Sync).unwrap();
+    // The file changed, so the swap counts as a replacement despite its error
+    // (`engine/lifecycle` L8).
+    assert_eq!(h.collection.current_generation().0, generation.0 + 1);
+    let current = h.engine.collection().unwrap();
+    let reader = current.reader(ReaderRole::Sync).unwrap();
     let snapshot = reader.snapshot().unwrap();
     assert_eq!(snapshot.col().unwrap().version, 18);
     loop {
