@@ -11,7 +11,7 @@ h1df457b7a669,rust,supplementary,deckconfig,unclassified,,,open
 h27c58d269610,rust,tag,deckconfig,unclassified,,,open
 h29179d9ceae2,rust,supplementary,deckconfig,unclassified,,,open
 h2e6e22823ea4,rust,supplementary,deckconfig,unclassified,,,open
-h2e8ed638f17b,rust,supplementary,deckconfig,unclassified,,,open
+h2e8ed638f17b,rust,supplementary,deckconfig,in-scope,With no ignore date every card with a learning row is included,sched/memory/ignore-before-count,done
 h3219d2cb2ba0,rust,tag,deckconfig,unclassified,,,open
 h351975c45911,rust,supplementary,deckconfig,unclassified,,,open
 h385f4aeda2a6,rust,supplementary,deckconfig,unclassified,,,open
@@ -35,10 +35,10 @@ h7f7645f98775,rust,tag,deckconfig,unclassified,,,open
 h81d3f640e8fd,rust,tag,deckconfig,unclassified,,,open
 h87ef468beabc,rust,supplementary,deckconfig,unclassified,,,open
 habc378b0ea2b,rust,supplementary,deckconfig,unclassified,,,open
-hac8e0ee77853,rust,supplementary,deckconfig,unclassified,,,open
+hac8e0ee77853,rust,supplementary,deckconfig,in-scope,A date text that does not read as a date is refused,sched/memory/ignore-before-count,done
 hae800fcda356,rust,tag,deckconfig,unclassified,,,open
 hb50a0cec5249,rust,supplementary,deckconfig,unclassified,,,open
-hba00bf856693,rust,supplementary,deckconfig,unclassified,,,open
+hba00bf856693,rust,supplementary,deckconfig,in-scope,The ignore-date count includes cards with a learning row after the date,sched/memory/ignore-before-count,done
 hbfa3b0173663,rust,supplementary,deckconfig,unclassified,,,open
 hc06112477870,rust,supplementary,deckconfig,unclassified,,,open
 hc77e5ddeebb7,rust,supplementary,deckconfig,unclassified,,,open
@@ -758,30 +758,30 @@ h05a411d3dbbc,rust,tag,sched,unclassified,,,open
 h0875e3e791c6,rust,tag,sched,unclassified,,,open
 h0c5d8c72ae63,rust,tag,sched,unclassified,,,open
 h0cc7ca135634,rust,tag,sched,unclassified,,,open
-h0d55a293e421,rust,tag,sched,unclassified,,,open
+h0d55a293e421,rust,tag,sched,in-scope,A Reset row drops the history before it; the training form is checked with the optimizer (U47),sched/memory/reset sched/memory/crafted-rows,done
 h0d7374461795,rust,tag,sched,unclassified,,,open
 h10961bb95b4d,rust,tag,sched,unclassified,,,open
-h14c25ad44110,rust,tag,sched,unclassified,,,open
+h14c25ad44110,rust,tag,sched,in-scope,Training leaves out cards whose learning started before the ignore date; checked with the optimizer (U47),,deferred
 h151bd9c1b80b,rust,tag,sched,unclassified,,,open
 h19b87e6f451b,rust,tag,sched,unclassified,,,open
 h1a440165e319,rust,tag,sched,unclassified,,,open
-h1a6dc1b4024f,rust,tag,sched,unclassified,,,open
+h1a6dc1b4024f,rust,tag,sched,in-scope,Set-due-date rows do not count in a card's history,sched/memory/skipped-rows,done
 h1d5bffd22663,rust,tag,sched,unclassified,,,open
-h2023616b1a59,rust,tag,sched,unclassified,,,open
+h2023616b1a59,rust,tag,sched,in-scope,Cram rows (filtered reviews without rescheduling) do not count in a card's history,sched/memory/skipped-rows,done
 h20b239907832,rust,tag,sched,unclassified,,,open
 h23a9ff8b09f0,rust,tag,sched,unclassified,,,open
 h23b15f93e355,rust,tag,sched,unclassified,,,open
 h23fc56a0a5b6,rust,tag,sched,unclassified,,,open
 h256ac6828508,rust,tag,sched,unclassified,,,open
 h279126fd92b9,rust,tag,sched,unclassified,,,open
-h2bf702951408,rust,tag,sched,unclassified,,,open
+h2bf702951408,rust,tag,sched,in-scope,A history wholly before the ignore date gives no item,sched/memory/ignore-before,done
 h319667c38026,rust,tag,sched,unclassified,,,open
 h34810b99051e,rust,tag,sched,unclassified,,,open
 h37681aedbc38,rust,tag,sched,unclassified,,,open
 h3ba7c0fbc8f2,rust,tag,sched,unclassified,,,open
 h3d0ce2bbaef8,rust,tag,sched,unclassified,,,open
 h3dbeef95c3db,rust,tag,sched,unclassified,,,open
-h3dcf94a2f6fe,rust,tag,sched,unclassified,,,open
+h3dcf94a2f6fe,rust,tag,sched,out-of-scope,Saving deck options with FSRS turned off removes memory states; Meguri never turns FSRS off (R702),,done
 h3f11a775e29c,rust,tag,sched,unclassified,,,open
 h4037ce91c431,rust,tag,sched,unclassified,,,open
 h40a4438f58cc,rust,tag,sched,unclassified,,,open
@@ -806,7 +806,7 @@ h5b374d4c4d55,rust,tag,sched,unclassified,,,open
 h5ba74e3a7864,rust,tag,sched,unclassified,,,open
 h5c6480ebd12f,rust,tag,sched,unclassified,,,open
 h5e228991cac8,rust,tag,sched,unclassified,,,open
-h6139479db902,rust,tag,sched,unclassified,,,open
+h6139479db902,rust,tag,sched,in-scope,Graded rows within a day before the first interday one do not start a history without learning rows,sched/memory/sm2-history,done
 h63e4063e58e3,rust,tag,sched,unclassified,,,open
 h6a2f74d641e5,rust,tag,sched,unclassified,,,open
 h6a6910e0bd6f,rust,tag,sched,unclassified,,,open
@@ -835,7 +835,7 @@ h9f3550e3fa5f,rust,tag,sched,unclassified,,,open
 ha2425ed999f7,rust,tag,sched,unclassified,,,open
 ha258d562e101,rust,tag,sched,unclassified,,,open
 ha338afcecf02,rust,tag,sched,unclassified,,,open
-ha8aa8d31b248,rust,tag,sched,unclassified,,,open
+ha8aa8d31b248,rust,tag,sched,in-scope,A card whose history has no learning row begins from the SM-2 form of its first interday graded row,sched/memory/sm2-history,done
 hab96efc6f164,rust,tag,sched,unclassified,,,open
 habaf407e202f,rust,tag,sched,unclassified,,,open
 habc95d948b8b,rust,tag,sched,unclassified,,,open
@@ -845,17 +845,17 @@ hb46e7a2d004c,rust,tag,sched,unclassified,,,open
 hb643b497ade7,rust,tag,sched,unclassified,,,open
 hb7be1ced7f3a,rust,tag,sched,unclassified,,,open
 hb8dcf303d0e0,rust,tag,sched,unclassified,,,open
-hbafc4dc77cce,rust,tag,sched,unclassified,,,open
-hbc3d71afcb34,rust,tag,sched,unclassified,,,open
+hbafc4dc77cce,rust,tag,sched,in-scope,A single learning row gives a memory item but no training item; the training form is checked with the optimizer (U47),sched/memory/on-the-fly sched/memory/ignore-before,done
+hbc3d71afcb34,rust,tag,sched,in-scope,A card without a usable history gets its memory state from its own interval and ease,sched/memory/no-history sched/memory/sm2-history,done
 hc05411e145f1,rust,tag,sched,unclassified,,,open
 hc3bd9890e06a,rust,tag,sched,unclassified,,,open
 hc67d7d3b1875,rust,tag,sched,unclassified,,,open
 hc96dda7dd94f,rust,tag,sched,unclassified,,,open
 hcbe165cda562,rust,tag,sched,unclassified,,,open
-hccc87afa9021,rust,tag,sched,unclassified,,,open
+hccc87afa9021,rust,tag,sched,in-scope,Training items are sorted by review time with their card ids aligned; checked with the optimizer (U47),,deferred
 hceea58e626d5,rust,tag,sched,unclassified,,,open
 hcf4081192234,rust,tag,sched,unclassified,,,open
-hd5745d5de78c,rust,tag,sched,unclassified,,,open
+hd5745d5de78c,rust,tag,sched,in-scope,A card without a memory state gets one from its history when its states are computed,sched/memory/on-the-fly,done
 hd79744504c35,rust,tag,sched,unclassified,,,open
 hda7aa551feeb,rust,tag,sched,unclassified,,,open
 hda9e7531d7db,rust,tag,sched,unclassified,,,open
@@ -863,13 +863,13 @@ hdb3d8a73ac7b,rust,tag,sched,unclassified,,,open
 hdbe181187e8a,rust,tag,sched,unclassified,,,open
 hdd2d2f703388,rust,tag,sched,unclassified,,,open
 hdeb239c0cf40,rust,tag,sched,unclassified,,,open
-hdf5b05a2842f,rust,tag,sched,unclassified,,,open
-he2dcd7bd5b1c,rust,tag,sched,unclassified,,,open
+hdf5b05a2842f,rust,tag,sched,in-scope,Training leaves out a card whose learning rows straddle the ignore date; checked with the optimizer (U47),,deferred
+he2dcd7bd5b1c,rust,tag,sched,in-scope,"With an ignore date and no learning row, the history starts at the first interday graded row after the date",sched/memory/ignore-before sched/memory/ignore-before-boundary,done
 he31eded34d00,rust,tag,sched,unclassified,,,open
 he4c4fc933d44,rust,tag,sched,unclassified,,,open
 he544632aa73a,rust,tag,sched,unclassified,,,open
-he594f0a7a983,rust,tag,sched,unclassified,,,open
-he71ab01c9816,rust,tag,sched,unclassified,,,open
+he594f0a7a983,rust,tag,sched,in-scope,Elapsed days between a card's reviews counted in days back from the next day boundary,sched/memory/on-the-fly sched/memory/sm2-history,done
+he71ab01c9816,rust,tag,sched,in-scope,An ignore date inside a card's learning rows makes its history start after the date,sched/memory/ignore-before,done
 he7fa6992322b,rust,tag,sched,unclassified,,,open
 heceeaa17fdbb,rust,tag,sched,unclassified,,,open
 hee209ed2ac1b,rust,tag,sched,unclassified,,,open
@@ -983,7 +983,7 @@ h47132fac7656,rust,tag,storage,in-scope,Check Database repair of invalid card id
 h493cbb0fdf6b,rust,supplementary,storage,unclassified,,,open
 h4c7fe3f35b39,rust,tag,storage,in-scope,review-order SQL ordering when FSRS data is missing; specified with queue building (U41),,deferred
 h51930b326444,rust,supplementary,storage,unclassified,,,open
-h589819e41760,rust,tag,storage,in-scope,Check Database repair of card properties; specified with Check Database (U128),,deferred
+h589819e41760,rust,tag,storage,in-scope,"Check Database repairs the last review time from the review log (rule U46, run by U128)",sched/memory/lrt-repair,done
 h5a31d6105048,rust,supplementary,storage,unclassified,,,open
 h6b2af222819b,rust,tag,storage,in-scope,18 is the newest schema opened; newer files are refused,storage/open/refuse-versions,done
 h6c9e358dc5b8,rust,tag,storage,in-scope,A second card added at the same instant gets a different id: next id after the largest,storage/ids/same-instant,done

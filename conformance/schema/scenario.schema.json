@@ -336,6 +336,16 @@
             },
             "stats": { "description": "Draft.", "type": ["object", "null"] },
             "digest": { "type": "null" },
+            "ignored_before_count": {
+              "description": "deck-options-ops.md E2: the count behind N of M cards included, for each date text.",
+              "type": "object",
+              "required": ["preset", "dates"],
+              "additionalProperties": false,
+              "properties": {
+                "preset": { "type": "string", "minLength": 1 },
+                "dates": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+              }
+            },
             "legacy_json": {
               "description": "model-ops.md L1: schema-11 objects of the named records.",
               "type": "object",
@@ -625,6 +635,45 @@
         },
         "update_preset": {
           "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"], "properties": { "name": { "type": "string" } } }]
+        },
+        "save_deck_options": {
+          "description": "Stable (deck-options-ops.md E1): the deck options screen's Save for deck, switched to preset, with options applied to that preset and the deck's own desired retention set (a number), removed (null) or kept (missing).",
+          "type": "object",
+          "required": ["deck"],
+          "additionalProperties": false,
+          "properties": {
+            "deck": { "type": "string", "minLength": 1 },
+            "preset": { "type": "string", "minLength": 1 },
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "learn_steps": { "$ref": "#/$defs/preset_options/learn_steps" },
+                "relearn_steps": { "$ref": "#/$defs/preset_options/relearn_steps" },
+                "graduating_interval_days": { "$ref": "#/$defs/preset_options/graduating_interval_days" },
+                "easy_interval_days": { "$ref": "#/$defs/preset_options/easy_interval_days" },
+                "new_per_day": { "$ref": "#/$defs/preset_options/new_per_day" },
+                "reviews_per_day": { "$ref": "#/$defs/preset_options/reviews_per_day" },
+                "max_interval_days": { "$ref": "#/$defs/preset_options/max_interval_days" },
+                "min_lapse_interval_days": { "$ref": "#/$defs/preset_options/min_lapse_interval_days" },
+                "starting_ease": { "$ref": "#/$defs/preset_options/starting_ease" },
+                "easy_bonus": { "$ref": "#/$defs/preset_options/easy_bonus" },
+                "hard_interval": { "$ref": "#/$defs/preset_options/hard_interval" },
+                "interval_modifier": { "$ref": "#/$defs/preset_options/interval_modifier" },
+                "lapse_new_interval": { "$ref": "#/$defs/preset_options/lapse_new_interval" },
+                "leech_threshold": { "$ref": "#/$defs/preset_options/leech_threshold" },
+                "leech_action": { "$ref": "#/$defs/preset_options/leech_action" },
+                "bury_new": { "$ref": "#/$defs/preset_options/bury_new" },
+                "bury_reviews": { "$ref": "#/$defs/preset_options/bury_reviews" },
+                "bury_interday_learning": { "$ref": "#/$defs/preset_options/bury_interday_learning" },
+                "desired_retention": { "$ref": "#/$defs/preset_options/desired_retention" },
+                "fsrs_params": { "$ref": "#/$defs/preset_options/fsrs_params" },
+                "historical_retention": { "type": "number" },
+                "ignore_reviews_before": { "type": "string" }
+              }
+            },
+            "deck_desired_retention": { "type": ["number", "null"] }
+          }
         },
         "legacy_update": {
           "description": "model-ops.md L2: merge patch into a record's schema-11 object and save it.",

@@ -42,3 +42,28 @@ StdRng
 seed_from_u64
 random_range
 fuzz_table
+# Memory states and FSRS items (sched/memory-state, sched/fsrs-items):
+# review-log columns, card data keys, preset keys and protobuf fields, and
+# the pinned fsrs crate's item and memory-state API.
+revlog
+cid
+ease
+lastIvl
+factor
+dr
+decay
+sm2Retention
+historical_retention
+ignoreRevlogsBeforeDate
+ignore_revlogs_before_date
+weightSearch
+param_search
+FSRSItem
+FSRSReview
+rating
+delta_t
+memory_state_from_sm2
+memory_state_batch
+ComputeParametersInput
+train_set
+card_ids

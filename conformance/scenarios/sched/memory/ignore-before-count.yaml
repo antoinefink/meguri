@@ -1,0 +1,103 @@
+# The count behind "N of M cards included" next to "Ignore cards reviewed
+# before" (specs/sched/memory-state.md M5; R690): of the preset's cards that
+# are neither new nor suspended (M), those with a review-log row of stored
+# type 0 after the date's UTC midnight (N). Then how dates are read
+# (specs/sched/fsrs-items.md I1.3). Needs ignored_before_count
+# (specs/conformance/deck-options-ops.md E2).
+# Deck Recent uses the preset Since2026; Elsewhere uses Default.
+# c1: a learning row on 2026-01-02 09:00 and a review: included from
+#     2026-01-01, not from 2026-01-03.
+# c2: a learning row at exactly 2026-01-01T00:00:00.000Z: not after the
+#     cutoff of 2026-01-01.
+# c3: a learning row a second before 2026-01-01, then a review.
+# c4: review rows only: never included.
+# c5: suspended: in neither count.
+# c6: a new card: in neither count.
+# c7: a type-0 row without a button, 2026-01-05 10:00: included (the button
+#     does not matter).
+# c8: a graded row stored with type 7: not included (the stored type counts).
+# c9: in Elsewhere: in neither count.
+# c10: a review card without review log: in M only.
+# Dates: the canonical form, empty and 1970-01-01 (no cutoff), a date after
+# every row, then spellings of 2026-01-03 that Anki reads, years 26 and
+# -2026, and texts it refuses.
+id: sched/memory/ignore-before-count
+clock: {tz: UTC, start: "2026-03-02T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets: [{name: Since2026}]
+  decks: [{name: Recent, preset: Since2026}, {name: Elsewhere}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Recent, fields: [one, back]}
+    - {notetype: Pair, deck: Recent, fields: [two, back]}
+    - {notetype: Pair, deck: Recent, fields: [three, back]}
+    - {notetype: Pair, deck: Recent, fields: [four, back]}
+    - {notetype: Pair, deck: Recent, fields: [five, back]}
+    - {notetype: Pair, deck: Recent, fields: [six, back]}
+    - {notetype: Pair, deck: Recent, fields: [seven, back]}
+    - {notetype: Pair, deck: Recent, fields: [eight, back]}
+    - {notetype: Pair, deck: Elsewhere, fields: [nine, back]}
+    - {notetype: Pair, deck: Recent, fields: [ten, back]}
+steps:
+  # c1: a learning row on 2026-01-02 09:00, then a review
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: [2, 2, -54, 4, 2500, 2, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767344400001, 3, 1, -60, 2500, 0), (1767434400001, 3, 4, 1, 2500, 1)) AS v"
+  # c2: a learning row at exactly 2026-01-01T00:00:00.000Z
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: [2, 2, -59, 1, 2500, 1, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767225600000, 3, 1, -60, 2500, 0)) AS v"
+  # c3: a learning row on 2025-12-31 23:59:59, a review in 2026
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: [2, 2, -47, 4, 2500, 2, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767225599003, 3, 1, -60, 2500, 0), (1768039200003, 3, 4, 1, 2500, 1)) AS v"
+  # c4: review rows only, in 2026
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+      params: [2, 2, -37, 10, 2500, 2, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768039200004, 3, 4, 1, 2500, 1), (1768384800004, 3, 10, 4, 2500, 1)) AS v"
+  # c5: suspended, a learning row on 2026-01-05
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+      params: [2, -1, -55, 1, 2500, 1, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767603600005, 3, 1, -60, 2500, 0)) AS v"
+  # c6: a new card
+  # c7: a type-0 row without a button on 2026-01-05
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6)"
+      params: [2, 2, -55, 1, 2500, 1, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 6), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767607200007, 0, 1, -60, 2500, 0)) AS v"
+  # c8: a graded row of type 7 on 2026-01-06
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7)"
+      params: [2, 2, -54, 1, 2500, 1, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 7), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767693600008, 3, 1, -60, 2500, 7)) AS v"
+  # c9: Elsewhere: a learning row on 2026-01-02
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8)"
+      params: [2, 2, -58, 1, 2500, 1, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 8), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767344400009, 3, 1, -60, 2500, 0)) AS v"
+  # c10: a review card without review log
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 9)"
+      params: [2, 2, 3, 10, 2500, 9, 1, 0, "{}"]
+  - observe:
+      - ignored_before_count:
+          preset: Since2026
+          dates: ["2026-01-01", "", "1970-01-01", "2026-03-01", "2026-01-03", "2026-1-3", " 2026-01-03", "2026- 1- 3", "+2026-01-03", "26-01-03", "-2026-01-03", "2026-01-03 ", "02026-01-03", "2026-02-30", "2026-13-01", "2026/01/03", "2026-01-03T00:00", "garbage"]

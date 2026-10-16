@@ -115,3 +115,9 @@ fsrsWeights
 desiredRetention
 loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
+save_deck_options
+ignored_before_count
+deck_desired_retention
+ignore_reviews_before
+historical_retention
+invalid_date

@@ -1,0 +1,72 @@
+# "Ignore cards reviewed before" (specs/sched/fsrs-items.md I1.3, I3, I4;
+# R685, R690): with the date 2026-01-01, rows before 2026-01-01T00:00:00Z
+# cannot start a card's history. All cards are in the deck Recent (preset
+# Since2026); states are observed without a date, then with it.
+# H as in sched/memory/on-the-fly; the 2026 rows:
+#   2026-01-10T10:00:00     type 1 ease 3 ivl     40 lastIvl     25 factor 2300
+#   2026-02-20T10:00:00     type 1 ease 3 ivl     90 lastIvl     40 factor 2300
+#   2026-01-02T09:00:00     type 0 ease 3 ivl   -600 lastIvl    -60 factor    0
+#   2026-01-02T09:10:00     type 0 ease 3 ivl      1 lastIvl   -600 factor 2500
+#   2026-01-03T10:00:00     type 1 ease 3 ivl      4 lastIvl      1 factor 2500
+#   2026-01-20T10:00:00     type 1 ease 3 ivl     15 lastIvl      4 factor 2500
+# c1: H, then the two reviews of 2026-01-10 and 2026-02-20: with the date, the
+#     learning rows are before it, so the history starts from the SM-2
+#     conversion of the 2026-01-10 row, and c1 has the memory states of c2.
+# c2: the two 2026 reviews alone.
+# c3: learning on 2026-01-02 and reviews after it: unchanged by the date.
+# c4: H, wholly before the date: no item with the date, so the card's own
+#     interval and ease count.
+# c5: a single learning row before the date (Easy, graduated): it is the
+#     card's last row, so it still starts the history.
+id: sched/memory/ignore-before
+clock: {tz: UTC, start: "2026-03-02T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets: [{name: Since2026}]
+  decks: [{name: Recent, preset: Since2026}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Recent, fields: [one, back]}
+    - {notetype: Pair, deck: Recent, fields: [two, back]}
+    - {notetype: Pair, deck: Recent, fields: [three, back]}
+    - {notetype: Pair, deck: Recent, fields: [four, back]}
+    - {notetype: Pair, deck: Recent, fields: [five, back]}
+steps:
+  # c1: H, then two reviews in 2026
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: [2, 2, 78, 90, 2300, 11, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200001, 3, -600, -60, 0, 0), (1759309800001, 3, 1, -600, 2500, 0), (1759399200001, 3, 3, 1, 2500, 1), (1759658400001, 3, 9, 3, 2500, 1), (1760436000001, 1, -600, 9, 2300, 1), (1760436600001, 3, 2, -600, 2300, 2), (1760608800001, 3, 6, 2, 2300, 1), (1761127200001, 4, 20, 6, 2450, 1), (1762855200001, 2, 25, 20, 2300, 1), (1768039200001, 3, 40, 25, 2300, 1), (1771581600001, 3, 90, 40, 2300, 1)) AS v"
+  # c2: the two 2026 reviews alone
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: [2, 2, 78, 90, 2300, 11, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1768039200002, 3, 40, 25, 2300, 1), (1771581600002, 3, 90, 40, 2300, 1)) AS v"
+  # c3: a history wholly in 2026
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: [2, 2, -27, 15, 2500, 4, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1767344400003, 3, -600, -60, 0, 0), (1767345000003, 3, 1, -600, 2500, 0), (1767434400003, 3, 4, 1, 2500, 1), (1768903200003, 3, 15, 4, 2500, 1)) AS v"
+  # c4: H, wholly before 2026
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"
+      params: [2, 2, -86, 25, 2300, 9, 1, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1759309200004, 3, -600, -60, 0, 0), (1759309800004, 3, 1, -600, 2500, 0), (1759399200004, 3, 3, 1, 2500, 1), (1759658400004, 3, 9, 3, 2500, 1), (1760436000004, 1, -600, 9, 2300, 1), (1760436600004, 3, 2, -600, 2300, 2), (1760608800004, 3, 6, 2, 2300, 1), (1761127200004, 4, 20, 6, 2450, 1), (1762855200004, 2, 25, 20, 2300, 1)) AS v"
+  # c5: one learning row before 2026, which graduated the card (Easy)
+  - db_exec:
+      sql: "UPDATE cards SET type = ?, queue = ?, due = ?, ivl = ?, factor = ?, reps = ?, lapses = ?, left = ?, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"
+      params: [2, 2, -68, 4, 2500, 1, 0, 0, "{}"]
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1, (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4), -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (VALUES (1766224800005, 4, 4, -60, 2500, 0)) AS v"
+  # Without a date: every row counts.
+  - observe: ["next_states(#c1, #c2, #c3, #c4, #c5)"]
+  - legacy_update: {preset: Since2026, patch: {ignoreRevlogsBeforeDate: "2026-01-01"}}
+  - observe: ["next_states(#c1, #c2, #c3, #c4, #c5)"]

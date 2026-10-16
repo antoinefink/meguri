@@ -1,0 +1,162 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2026-03-02T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "check_db": {
+          "card_last_review_time": 8,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"lrt\":1762855200}", 1772445600, 5],
+            ["{\"lrt\":1762855200}", 1772445600, 5],
+            ["{}", 1772445600, 5],
+            ["{\"lrt\":1000}", 1772445600, 5],
+            ["{\"lrt\":5000}", 1772445600, 5],
+            ["{\"lrt\":1762855200}", 1772445600, 5],
+            ["{\"lrt\":1762855200}", 1772445600, 5],
+            ["{\"lrt\":1762907200}", 1772445600, 5],
+            ["{\"lrt\":1764576000}", 1772445600, 5],
+            ["{\"lrt\":1772442600}", 1772445600, 5],
+            ["{\"pos\":3,\"s\":30.0,\"d\":6.0,\"dr\":0.9,\"decay\":0.154,\"lrt\":1762855200}", 1772445600, 5]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d242c316ccc15adbecf1514c8b7cc469057e11fb38054dc00fb496b302f2b634",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/memory/lrt-repair",
+  "scenario_sha256": "22ab953f10cbf46dd61122652e5e980ec39f2a7409ebd5987d2e1e384c74b52a",
+  "tz": "UTC"
+}
