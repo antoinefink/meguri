@@ -65,7 +65,7 @@ Facts marked "verified" were observed against the official sync server of Anki 2
 ## T4. Session key
 
 - A job creates one session key when it starts and sends it as `s` in every request of the job: the `meta` retry after a redirect (T7) and the media requests the job makes included. Every job, a login included, has a new key.
-- Form: 8 characters from `0-9 A-Z a-z`, drawn from the job's random source (`meguri_model::rng`, so tests can seed it).
+- Form: 8 characters from `0-9 A-Z a-z`, taken from fresh draws of the core's random source (`meguri_model::rng`) when the job starts. The source is seeded once per process and never per job, so two jobs get different keys even when a test seeds it, and a seeded run repeats its keys.
 - Why it matters: the server binds the state of an incremental sync to the key that called `start`. A later request of that sync with a different key gets 409 (verified), and a new `start` with another key ends the old sync on the server. Anki's client uses a random 32-bit number written in base 62 (at most 6 characters); the server only compares keys for equality, so any non-empty ASCII key works.
 
 ## T5. Request bodies (R1507)
