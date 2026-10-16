@@ -222,7 +222,7 @@ fn the_typed_model_reads_every_v0_op_and_rejects_unknown_ones() {
     let text = r##"
 id: area/all-ops
 clock: {tz: UTC, start: "2030-01-15T10:00:00Z", mode: frozen}
-compare: {set: ["/steps/*/search/ids"]}
+compare: {set: ["/steps/*/search/*/ids"]}
 setup:
   config: {rollover: 4}
   presets: [{name: Default, learn_steps: [30s, 1d], leech_action: tag_only}]
@@ -257,7 +257,8 @@ steps:
       - timing
       - {next_states: ["#c1"]}
       - {fuzz_table: {card: "#c1", pairs: [[1, 0]], intervals: [3]}}
-      - {search: {query: "deck:A"}}
+      - {search: [{query: "deck:A"}]}
+      - {canonical_search: ["deck:A"]}
       - queue
       - deck_tree
       - render(#c1)
@@ -433,8 +434,33 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ),
         ("steps: [{observe: [{net_probe: {host: h}}]}]", "net_probe"),
         (
-            "steps: [{observe: [{search: {query: q, kind: decks}}]}]",
+            "steps: [{observe: [{search: [{query: q, kind: decks}]}]}]",
             "cards or notes",
+        ),
+        // search-ops.md S1, S2: non-empty lists of requests and of texts.
+        ("steps: [{observe: [{search: []}]}]", "at least one request"),
+        ("steps: [{observe: [{search: {query: q}}]}]", "does not take"),
+        ("steps: [{observe: [search]}]", "does not take"),
+        ("steps: [{observe: [{search: [{query: 1}]}]}]", "query string"),
+        ("steps: [{observe: [{search: [{query: q, order: id}]}]}]", "\"order\""),
+        ("steps: [{observe: [{search: [q]}]}]", "{query, kind?}"),
+        (
+            "steps: [{observe: [{canonical_search: []}]}]",
+            "at least one search text",
+        ),
+        (
+            "steps: [{observe: [{canonical_search: [q, 1]}]}]",
+            "every item is a string",
+        ),
+        ("steps: [{observe: [canonical_search]}]", "does not take"),
+        // observations.md O2: a kind whose value is a list, once per step.
+        (
+            "steps: [{observe: [{search: [{query: a}]}, {search: [{query: b}]}]}]",
+            "search is requested more than once",
+        ),
+        (
+            "steps: [{observe: [{canonical_search: [a]}, {canonical_search: [b]}]}]",
+            "canonical_search is requested more than once",
         ),
         ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
         ("steps: [{handoff: elsewhere}]", "unknown variant"),

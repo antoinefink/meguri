@@ -1,0 +1,24 @@
+# specs/render/cloze.md C6 and C9: one cloze per number, a hint, inactive clozes,
+# cards with no cloze (empty output, R975), HTML around and inside clozes.
+id: render/cloze/basic
+description: "cloze: and cloze-only: output of simple clozes on both sides"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back, only_front, only_back, typing]
+          inputs:
+            - ["{{c1::Paris::capital}} is in {{c2::France}}", 1]
+            - ["{{c1::Paris::capital}} is in {{c2::France}}", 2]
+            - ["{{c1::Paris::capital}} is in {{c2::France}}", 3]
+            - ["{{c1::Lisbon}}", 1]
+            - ["{{c1::Lisbon}}", 2]
+            - ["{{c2::Berlin}}", 2]
+            - ["{{c2::Berlin}}", 1]
+            - ["Oslo has no cloze", 1]
+            - ["", 1]
+            - ["<div>{{c1::Madrid}}</div><br>Spain", 1]
+            - ["{{c1::}}", 1]
+            - ["{{c3::Athens}} {{c1::Greece}} {{c2::Europe}}", 2]
+            - ["line one\n{{c1::two}}\nline three", 1]
+            - ["{{c1::<b>Vienna</b>}} on the <i>Danube</i>", 1]

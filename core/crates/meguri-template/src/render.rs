@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use meguri_text::field_empty;
 
 use crate::analysis::Form;
+use crate::cloze;
 use crate::error::{ErrorKind, TemplateError};
-use crate::filters;
+use crate::filters::{self, CardContext};
 use crate::parser::{NodeKind, ParsedTemplate, error};
 
 /// The special whose replacement is resolved by the engine itself (P4).
@@ -119,6 +120,25 @@ impl FieldMap {
     pub fn ord(&self) -> u32 {
         self.ord
     }
+
+    /// `render/cloze#C1`: the card number, the ordinal plus one.
+    pub fn card_number(&self) -> u32 {
+        self.ord.saturating_add(1)
+    }
+
+    /// T10 for a cloze note type (`render/cloze#C15`): whether no value of
+    /// the map, special values included, has the card number among its
+    /// cloze numbers. The templates play no part. Card generation reads the
+    /// note's fields only (U27), so it does not use this.
+    pub fn is_blank_cloze_card(&self) -> bool {
+        let Ok(card) = u16::try_from(self.card_number()) else {
+            return true;
+        };
+        !self
+            .values
+            .values()
+            .any(|value| cloze::numbers(&value.text).contains(&card))
+    }
 }
 
 /// The side being rendered (T1).
@@ -129,6 +149,17 @@ pub enum Side<'a> {
     Answer {
         front_side: &'a str,
     },
+}
+
+impl Side<'_> {
+    /// The cloze filters' side (`render/cloze#C1`): the question template is
+    /// the front, the answer template the back.
+    pub fn cloze_side(self) -> cloze::Side {
+        match self {
+            Side::Question => cloze::Side::Front,
+            Side::Answer { .. } => cloze::Side::Back,
+        }
+    }
 }
 
 /// T7: a section key that is not in the map but reads as `c` and an
@@ -146,6 +177,10 @@ impl ParsedTemplate {
         if let Some(error) = self.structure_error() {
             return Err(error.clone());
         }
+        let context = CardContext {
+            card: fields.card_number(),
+            side: side.cloze_side(),
+        };
         let mut out = String::new();
         // One entry per enclosing section: whether it shows. Output is
         // written only while none is hidden.
@@ -169,7 +204,7 @@ impl ParsedTemplate {
                         // T7 rule 2: nothing, and no error.
                     } else if let Some(value) = fields.get(key) {
                         if visible {
-                            out.push_str(&filters::apply(value, key, filters));
+                            out.push_str(&filters::apply(value, key, filters, context));
                         }
                     } else {
                         return Err(error(ErrorKind::UnknownField, node, None));
@@ -195,7 +230,7 @@ impl ParsedTemplate {
     /// error, whether it is blank, that is whether its strict analysis
     /// (T11.2) finds nothing to render for the names whose values are
     /// non-empty. Cloze note types decide by their cloze numbers instead
-    /// (U61).
+    /// ([`FieldMap::is_blank_cloze_card`]).
     pub fn is_blank_question(&self, fields: &FieldMap) -> bool {
         !self.renders_something(|name| fields.is_nonempty(name), Form::Strict)
     }

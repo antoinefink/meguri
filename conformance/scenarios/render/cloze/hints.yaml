@@ -1,0 +1,22 @@
+# specs/render/cloze.md C4: a text run inside a cloze is split at its first ::,
+# the rest is the hint, and a later run of the same cloze replaces it.
+id: render/cloze/hints
+description: "cloze hints"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back, only_front, typing]
+          inputs:
+            - ["{{c1::Tokyo::capital of Japan}}", 1]
+            - ["{{c1::a::b::c}}", 1]
+            - ["{{c1::Kyoto::}}", 1]
+            - ["{{c1::x::h1 {{c2::y}} z::h2}}", 1]
+            - ["{{c1::x::h1 {{c2::y}} z::h2}}", 2]
+            - ["{{c1::x::h{{c2::y}}z}}", 1]
+            - ["{{c1::{{c2::y}}::after}}", 1]
+            - ["{{c1::a {{c2::b::hb}} c}}", 2]
+            - ["{{c1::Nile::<b>long</b> & \"wide\"}}", 1]
+            - ["top::level {{c1::x}}", 1]
+            - ["{{c1::::only hint}}", 1]
+            - ["{{c1,2::shared::both}}", 2]

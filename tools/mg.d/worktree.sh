@@ -170,12 +170,13 @@ EOF
     profile_json="$(jq -nc --arg p "$profile" --arg s "$profile_sha" '{source: $p, installed: ".claude/settings.local.json", sha256: $s}')"
   fi
 
-  # The provenance-trailer hook, for every role. A foreign hook or
-  # core.hooksPath blocks it: the worktree is still made, with a warning.
+  # The provenance-trailer and private-token hooks, for every role. A
+  # foreign hook or core.hooksPath blocks them: the worktree is still made,
+  # with a warning.
   local hook_ok=true
   if ! mg_hooks_install; then
     hook_ok=false
-    mg_failure "$MG_HOOKS_FAILURE" "$MG_HOOKS_MESSAGE; until it is fixed, commits are not checked for provenance trailers" "tools/mg hooks install"
+    mg_failure "$MG_HOOKS_FAILURE" "$MG_HOOKS_MESSAGE; until it is fixed, commits are not checked for provenance trailers or private tokens" "tools/mg hooks install"
   fi
 
   local id record git_dir
@@ -199,7 +200,7 @@ EOF
     mg_message "worktree $name at $path (role $role, branch $branch, session $id)"
     mg_status pass
   else
-    mg_message "worktree $name at $path (role $role, branch $branch, session $id); the commit-msg hook is not installed: $MG_HOOKS_MESSAGE"
+    mg_message "worktree $name at $path (role $role, branch $branch, session $id); the git hooks are not installed: $MG_HOOKS_MESSAGE"
     mg_status warn
   fi
 }

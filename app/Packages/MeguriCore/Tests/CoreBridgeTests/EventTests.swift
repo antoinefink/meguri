@@ -118,6 +118,37 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
         #expect(zip(seqs, seqs.dropFirst()).allSatisfy { $0 < $1 })
     }
 
+    @Test func aChangesEventArrivesWithEveryListOfItsChangeSet() async throws {
+        try await CoreEventStream.shared.install()
+        let events = CoreEventStream.shared.events
+        let seq = try await MaintenanceLane.shared.call("test.emitChanges") { try testEmitChanges() }
+
+        var received: CoreBridge.CoreEvent.Kind?
+        for await event in events where event.seq == seq {
+            received = event.kind
+            break
+        }
+        // The sample the hook publishes (Rust `changes::sample`).
+        let expected = CoreBridge.ChangeSet(
+            source: .localApi,
+            cards: [
+                .init(id: 11, noteID: 21, change: .updated, memoryStateOnly: true),
+                .init(id: 12, noteID: 21, change: .added, memoryStateOnly: false),
+            ],
+            notes: [.init(id: 21, change: .added)],
+            notetypes: [.init(id: 31, change: .updated, schemaChanged: true)],
+            decks: [.init(id: 41, change: .removed)],
+            deckConfigs: [.init(id: 51, change: .added)],
+            configKeys: [.init(name: "curDeck", change: .updated)],
+            tags: [.init(name: "leech", change: .added)],
+            revlogAdded: [61],
+            revlogRemoved: [62],
+            mediaAdded: ["a.jpg"],
+            mediaRemoved: ["b.mp3"],
+            collectionRow: true)
+        #expect(received == .changes(expected))
+    }
+
     @Test func progressFiredAThousandTimesASecondReachesSwiftAtMostElevenTimesInAnySecond() async throws {
         // 1 ms sleeps overshoot, so ask for 2,000 a second and check below
         // that Rust really fired at least 1,000.
