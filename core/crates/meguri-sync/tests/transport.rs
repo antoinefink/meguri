@@ -12,14 +12,14 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures_core::Stream;
 use meguri_engine::monotonic;
-use meguri_engine::{CancelToken, Progress, ProgressListener, ProgressSink};
+use meguri_engine::{CancelToken, Progress, ProgressListener, ProgressSink, Qos, ThreadInfo, ThreadRegistry};
 use meguri_model::rng::SeededRandom;
 use meguri_sync::endpoint_guard::ANKIWEB_HOST;
 use meguri_sync::transport::runtime;
@@ -44,6 +44,12 @@ fn random() -> SeededRandom {
     SeededRandom::new(105)
 }
 
+/// The process's thread registry, as the engine's would be.
+fn threads() -> &'static ThreadRegistry {
+    static THREADS: OnceLock<ThreadRegistry> = OnceLock::new();
+    THREADS.get_or_init(ThreadRegistry::new)
+}
+
 fn base(url: &str) -> Endpoint {
     Endpoint::parse(url).unwrap_or_else(|rule| panic!("{url}: {rule:?}"))
 }
@@ -60,7 +66,9 @@ fn new_job(options: &JobOptions) -> Job {
 /// body.
 fn request(job: &mut Job, method: Method, payload: Payload) -> Result<Vec<u8>, SyncError> {
     let cancel = CancelToken::new();
-    runtime::block_on(&cancel, async { job.request(method, payload).await?.bytes().await })
+    runtime::block_on(threads(), &cancel, async {
+        job.request(method, payload).await?.bytes().await
+    })
 }
 
 fn ok_meta() -> Reply {
@@ -374,7 +382,14 @@ fn login_returns_the_host_key_and_sends_an_empty_k() {
     let scratch = std::env::temp_dir().join(format!("meguri-sync-login-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
     std::env::set_current_dir(&scratch).unwrap();
-    let key = login_blocking(&options, &random(), "  someone@example.test \t", " pass word ").unwrap();
+    let key = login_blocking(
+        threads(),
+        &options,
+        &random(),
+        "  someone@example.test \t",
+        " pass word ",
+    )
+    .unwrap();
     assert_eq!(key, HostKey::new("4f2c0a"));
     assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
     std::fs::remove_dir(&scratch).unwrap();
@@ -394,11 +409,11 @@ fn an_empty_user_name_or_password_sends_nothing() {
     let stub = SyncStub::serve(|_| Reply::ok(br#"{"key":"k"}"#));
     let options = options(&stub.url());
     assert_eq!(
-        login_blocking(&options, &random(), " \t", "pw"),
+        login_blocking(threads(), &options, &random(), " \t", "pw"),
         Err(SyncError::InvalidInput(meguri_sync::InvalidInput::UserName))
     );
     assert_eq!(
-        login_blocking(&options, &random(), "someone", ""),
+        login_blocking(threads(), &options, &random(), "someone", ""),
         Err(SyncError::InvalidInput(meguri_sync::InvalidInput::Password))
     );
     assert!(stub.requests().is_empty());
@@ -413,7 +428,7 @@ fn a_403_on_login_is_an_auth_failure_and_gives_no_key() {
             .with_body(vec![Part::Bytes(b"403".to_vec())])
     });
     let options = options(&stub.url());
-    let err = login_blocking(&options, &random(), "someone", "wrong").unwrap_err();
+    let err = login_blocking(threads(), &options, &random(), "someone", "wrong").unwrap_err();
     assert_eq!(
         err,
         SyncError::Status {
@@ -437,7 +452,7 @@ fn a_login_answer_without_a_non_empty_key_is_a_protocol_error() {
         let stub = SyncStub::serve(move |_| Reply::ok(&payload));
         let options = options(&stub.url());
         assert_eq!(
-            login_blocking(&options, &random(), "someone", "pw"),
+            login_blocking(threads(), &options, &random(), "someone", "pw"),
             Err(SyncError::Protocol(ProtocolError::BadLoginAnswer)),
             "{}",
             String::from_utf8_lossy(answer)
@@ -452,7 +467,7 @@ fn a_success_without_an_original_size_is_refused_before_any_data() {
     let stub = SyncStub::serve(|_| Reply::ok(br#"{"cont":true}"#).without_header("anki-original-size"));
     let mut job = new_job(&options(&stub.url()));
     let cancel = CancelToken::new();
-    let result = runtime::block_on(&cancel, job.request(Method::Meta, Payload::empty()));
+    let result = runtime::block_on(threads(), &cancel, job.request(Method::Meta, Payload::empty()));
     assert_eq!(
         result.err(),
         Some(SyncError::Protocol(ProtocolError::MissingOriginalSize))
@@ -492,7 +507,7 @@ fn a_malformed_or_repeated_original_size_is_refused() {
 fn drain(body: &mut ResponseBody) -> (u64, Result<(), SyncError>) {
     let cancel = CancelToken::new();
     let mut delivered = 0u64;
-    let end = runtime::block_on(&cancel, async {
+    let end = runtime::block_on(threads(), &cancel, async {
         while let Some(piece) = body.chunk().await? {
             delivered += piece.len() as u64;
         }
@@ -504,7 +519,7 @@ fn drain(body: &mut ResponseBody) -> (u64, Result<(), SyncError>) {
 fn response(stub: &SyncStub, method: Method) -> Result<ResponseBody, SyncError> {
     let mut job = new_job(&options(&stub.url()));
     let cancel = CancelToken::new();
-    runtime::block_on(&cancel, job.request(method, Payload::empty()))
+    runtime::block_on(threads(), &cancel, job.request(method, Payload::empty()))
 }
 
 #[test]
@@ -1035,7 +1050,11 @@ fn a_cancelled_token_ends_a_slow_request_within_200_ms() {
         at.store(now().as_micros() as u64, Ordering::SeqCst);
         token.cancel();
     });
-    let result = runtime::block_on(options.cancel_token(), job.request(Method::Meta, Payload::empty()));
+    let result = runtime::block_on(
+        threads(),
+        options.cancel_token(),
+        job.request(Method::Meta, Payload::empty()),
+    );
     let returned = now();
     canceller.join().unwrap();
     assert_eq!(result.err(), Some(SyncError::Cancelled));
@@ -1053,7 +1072,12 @@ fn a_cancelled_token_also_ends_a_body_being_read() {
     let options = options(&stub.url());
     let token = Arc::clone(options.cancel_token());
     let mut job = new_job(&options);
-    let mut body = runtime::block_on(&CancelToken::new(), job.request(Method::Download, Payload::empty())).unwrap();
+    let mut body = runtime::block_on(
+        threads(),
+        &CancelToken::new(),
+        job.request(Method::Download, Payload::empty()),
+    )
+    .unwrap();
     let canceller = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(300));
         token.cancel();
@@ -1072,6 +1096,54 @@ fn the_next_job_starts_a_new_runtime_after_a_shut_down() {
     runtime::shut_down();
     request(&mut new_job(&options(&stub.url())), Method::Meta, Payload::empty()).unwrap();
     assert_eq!(stub.requests().len(), 2);
+}
+
+/// Polls `done` until it holds, for at most 5 s.
+#[track_caller]
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let deadline = now() + Duration::from_secs(5);
+    while !done() {
+        assert!(now() < deadline, "{what}: not within 5 s");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn the_runtime_threads_are_listed_in_the_thread_registry_until_shut_down() {
+    // engine/jobs J6: every thread the core creates is listed, at its QoS
+    // (user-initiated: the user started the sync, J2), busy only while it
+    // works. The runtime has two workers (KTD14).
+    let sync_threads = || -> Vec<ThreadInfo> {
+        threads()
+            .threads()
+            .into_iter()
+            .filter(|t| t.name == "meguri-sync")
+            .collect()
+    };
+    assert!(sync_threads().is_empty());
+    let stub = SyncStub::serve(|_| ok_meta());
+    let mut job = new_job(&options(&stub.url()));
+    let busy_in_a_task = runtime::block_on(threads(), &CancelToken::new(), async {
+        job.request(Method::Meta, Payload::empty()).await?.bytes().await?;
+        // A task runs on a worker, which is busy while it runs.
+        Ok(tokio::spawn(async { threads().busy_threads() })
+            .await
+            .expect("the task runs"))
+    })
+    .unwrap();
+    assert!(
+        busy_in_a_task.iter().any(|t| t.name == "meguri-sync"),
+        "{busy_in_a_task:?}"
+    );
+    wait_until("both workers are listed", || sync_threads().len() >= 2);
+    assert!(
+        sync_threads().iter().all(|t| t.qos == Qos::UserInitiated),
+        "{:?}",
+        sync_threads()
+    );
+    wait_until("parked workers are idle", || sync_threads().iter().all(|t| !t.busy));
+    runtime::shut_down();
+    wait_until("ended threads leave the list", || sync_threads().is_empty());
 }
 
 // --- Network, TLS and proxies (T10, T11) --------------------------------------
@@ -1408,7 +1480,7 @@ fn rig_login_returns_a_host_key_for_an_empty_k_and_writes_nothing() {
     let scratch = std::env::temp_dir().join(format!("meguri-sync-rig-login-{}", std::process::id()));
     std::fs::create_dir_all(&scratch).unwrap();
     std::env::set_current_dir(&scratch).unwrap();
-    let key = login_blocking(&options, &random(), &rig.user, &rig.password).unwrap();
+    let key = login_blocking(threads(), &options, &random(), &rig.user, &rig.password).unwrap();
     // T14: the official server's key is 40 lowercase hex digits; L7 says not
     // to rely on it, so only its presence is the contract.
     assert!(!key.as_str().is_empty());
@@ -1420,7 +1492,7 @@ fn rig_login_returns_a_host_key_for_an_empty_k_and_writes_nothing() {
     assert_eq!(sent[0].sync_member("c"), Some(&json!(client_identity())));
     // A second login gets a key too (login-endpoints.md L8, `login`).
     assert!(
-        !login_blocking(&options, &random(), &rig.user, &rig.password)
+        !login_blocking(threads(), &options, &random(), &rig.user, &rig.password)
             .unwrap()
             .as_str()
             .is_empty()
@@ -1438,7 +1510,7 @@ fn rig_wrong_password_is_an_auth_failure() {
         (rig.user.clone(), format!("{}-wrong", rig.password)),
         (format!("{}-unknown", rig.user), rig.password.clone()),
     ] {
-        let err = login_blocking(&options, &random(), &user, &password).unwrap_err();
+        let err = login_blocking(threads(), &options, &random(), &user, &password).unwrap_err();
         assert!(err.is_auth_failure(), "{err}");
         assert!(matches!(err, SyncError::Status { code: 403, .. }), "{err}");
     }
@@ -1450,7 +1522,7 @@ fn rig_accepts_the_meguri_identity_and_empty_bodies() {
     let rig = rig();
     let options = options(&rig.base);
     let random = random();
-    let key = login_blocking(&options, &random, &rig.user, &rig.password).unwrap();
+    let key = login_blocking(threads(), &options, &random, &rig.user, &rig.password).unwrap();
     let mut job = Job::new(&options, Some(key), &random).unwrap();
     // T3: `cv` is the identity too; T14: the server answers `cont: true`.
     let meta = Payload::json(&json!({"v": 11, "cv": client_identity()})).unwrap();

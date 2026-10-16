@@ -4,6 +4,7 @@
 //! password nor the key. A 403 is `status` 403, the authentication failure
 //! ([`SyncError::is_auth_failure`]).
 
+use meguri_engine::ThreadRegistry;
 use meguri_model::rng::RandomSource;
 use serde_json::Value;
 
@@ -21,8 +22,10 @@ pub async fn login(job: &mut Job, user_name: &str, password: &str) -> Result<Hos
 }
 
 /// [`login`] as a blocking call on the sync runtime (T9), in a job of its
-/// own with its own session key.
+/// own with its own session key. `threads` is the engine's thread registry
+/// ([`runtime::block_on`]).
 pub fn login_blocking(
+    threads: &ThreadRegistry,
     options: &JobOptions,
     random: &dyn RandomSource,
     user_name: &str,
@@ -30,7 +33,7 @@ pub fn login_blocking(
 ) -> Result<HostKey, SyncError> {
     login_body(user_name, password)?;
     let mut job = Job::new(options, None, random)?;
-    runtime::block_on(options.cancel_token(), login(&mut job, user_name, password))
+    runtime::block_on(threads, options.cancel_token(), login(&mut job, user_name, password))
 }
 
 /// `{"u":<user name>,"p":<password>}`, compact, members in that order.
