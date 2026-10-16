@@ -7,9 +7,11 @@
 //!
 //! - `browser/config/new-collection` starts from the new collection
 //!   (dsl.md D8), which Meguri's executor gets with U28
-//!   (docs/process/review-log/U83.md, A1). Until then `open` of the
-//!   oracle-made schema-18 storage fixture, a new collection of the pinned
-//!   Anki, stands in for it in front of the scenario's steps.
+//!   (docs/process/review-log/U83.md, A1). The note type area's stand-in
+//!   (notetype-ops.md T10.2), which Meguri's executor runs until then, holds
+//!   none of the keys the scenario reads, so here `open` of the oracle-made
+//!   schema-18 storage fixture, a new collection of the pinned Anki, stands
+//!   in for it in front of the scenario's steps.
 //! - `browser/config/live-roundtrip` is a live chain (D9.2), which only T1
 //!   runs. Here Meguri runs every segment from the same stand-in, handing
 //!   the collection over to itself through the storage area's handoff
@@ -122,13 +124,17 @@ fn new_collection() {
     play("new-collection");
 }
 
-/// Meguri's executor lacks only the new collection, and only
-/// `browser/config/new-collection` needs it; the live chain's Meguri
-/// segment needs nothing it lacks. Once U28 registers the new collection,
-/// this fails: activate new-collection in `browser/area.yaml` and drop its
-/// stand-in here.
+/// Meguri's executor lacks nothing the browser/config scenarios use, the
+/// live chain's Meguri segment included. The new collection that
+/// `browser/config/new-collection` starts from is the note type area's
+/// stand-in (notetype-ops.md T10.2) until U28's bootstrap. That stand-in
+/// holds none of K1's new-collection keys (T10.2 leaves them to U28), so T0
+/// reports the scenario `fail` and it stays inactive, while `new_collection`
+/// above plays it on the fixture. Once U28's bootstrap replaces the
+/// stand-in, activate new-collection in `browser/area.yaml` and drop the
+/// fixture here.
 #[test]
-fn meguri_lacks_only_the_new_collection() {
+fn meguri_lacks_nothing_the_browser_scenarios_use() {
     let executor = MeguriExecutor::new();
     for entry in std::fs::read_dir(conformance().join("scenarios/browser/config")).unwrap() {
         let path = entry.unwrap().path();
@@ -145,11 +151,6 @@ fn meguri_lacks_only_the_new_collection() {
             path.display(),
             missing.observations
         );
-        let setup: Vec<&str> = missing.setup.iter().map(String::as_str).collect();
-        if loaded.scenario.id == "browser/config/new-collection" {
-            assert_eq!(setup, ["new_collection"], "{}", path.display());
-        } else {
-            assert!(setup.is_empty(), "{}: {setup:?}", path.display());
-        }
+        assert!(missing.setup.is_empty(), "{}: {:?}", path.display(), missing.setup);
     }
 }

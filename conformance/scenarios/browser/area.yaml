@@ -5,10 +5,12 @@
 # Meguri segment opens the collection the oracle hands over
 # (specs/browser/config-keys.md K13). config/new-collection starts from the
 # new collection (dsl.md D8); U28, which gives Meguri's executor that
-# collection, activates it here (docs/process/review-log/U83.md, A1).
-# Meanwhile core/crates/meguri-testkit/tests/browser_config_conformance.rs
-# plays it on Meguri's executor against its golden, with the fixture
-# standing in.
+# collection, activates it here (docs/process/review-log/U83.md, A1). Until
+# then the executor runs it on the note type area's stand-in
+# (specs/conformance/notetype-ops.md T10.2), which holds none of K1's keys,
+# and T0 reports it fail. Meanwhile
+# core/crates/meguri-testkit/tests/browser_config_conformance.rs plays it on
+# Meguri's executor against its golden, with the fixture standing in.
 area: browser
 active:
   - "config/absent-defaults"
