@@ -1165,6 +1165,7 @@ dependencies = [
  "meguri-engine",
  "meguri-model",
  "meguri-sched",
+ "meguri-search",
  "meguri-storage",
  "meguri-sync",
  "meguri-template",

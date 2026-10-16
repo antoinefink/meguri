@@ -1,0 +1,16 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
+# the testkit's search adapter (meguri-search). The scenarios with a setup
+# (errors/run and the structure result scenarios) need the notetypes and
+# notes setup sections (U29, U27) and, where tagged needs-*, the terms of
+# U81 and U82; they become active as those land.
+area: search
+active:
+  - "canonical/*"
+  - "errors/arguments"
+  - "errors/escapes"
+  - "errors/kinds"
+  - "errors/order"
+  - "lexing/*"
+  - "structure/groups"
+  - "structure/negation"
+  - "structure/operators"
