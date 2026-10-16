@@ -378,8 +378,8 @@ impl<'f> DerivedTx<'f> {
     }
 
     pub fn commit(mut self) -> Result<(), StorageError> {
-        self.open = false;
         self.conn.execute_batch("COMMIT")?;
+        self.open = false;
         Ok(())
     }
 

@@ -612,6 +612,64 @@ fn a_full_text_table_survives_the_swap() {
 }
 
 #[test]
+fn a_failed_commit_rolls_back_and_allows_another_transaction_and_rebuild() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(derived::FILE_NAME);
+    let (mut file, _) = DerivedFile::open(&path).unwrap();
+    let registry = registry(vec![ComponentSchema::new("mirror", 1).table(TableDef::columns(
+        "rows",
+        "(k INTEGER PRIMARY KEY REFERENCES meguri_stamp(id) DEFERRABLE INITIALLY DEFERRED, v TEXT NOT NULL)",
+    ))]);
+    let schema = registry.get("mirror").unwrap();
+    let stamp = Stamp {
+        mark: mark(1, 2, 3),
+        clean: true,
+    };
+    let tx = file.begin().unwrap();
+    tx.sync_components(&registry).unwrap();
+    tx.set_stamp(&stamp).unwrap();
+    put(&tx, schema, Target::Live, 1, "live");
+    tx.set_ready("mirror", true).unwrap();
+    tx.commit().unwrap();
+    let old_build = file.components().unwrap()[0].build;
+
+    let tx = file.begin().unwrap();
+    assert_eq!(pragma(tx.tables(schema, Target::Live).conn(), "foreign_keys"), 1);
+    put(&tx, schema, Target::Live, 2, "invalid");
+    tx.set_ready("mirror", false).unwrap();
+    let error = tx.commit().unwrap_err();
+    assert!(
+        matches!(error, StorageError::Sqlite { extended_code, .. }
+            if extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+        "{error:?}"
+    );
+
+    let tx = file.begin().unwrap();
+    assert_eq!(
+        rows(tx.tables(schema, Target::Live).conn(), "mirror__rows"),
+        [(1, "live".to_owned())]
+    );
+    put(&tx, schema, Target::Live, 1, "updated");
+    tx.commit().unwrap();
+    assert!(file.components().unwrap()[0].ready);
+
+    let tx = file.begin().unwrap();
+    tx.begin_staging(schema).unwrap();
+    put(&tx, schema, Target::Staging, 1, "rebuilt");
+    tx.finish_staging(schema).unwrap();
+    tx.commit().unwrap();
+    let record = &file.components().unwrap()[0];
+    assert!(record.ready);
+    assert_eq!(record.build, old_build + 1);
+    assert_eq!(file.stamp().unwrap(), Some(stamp));
+    file.close().unwrap();
+
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(rows(&conn, "mirror__rows"), [(1, "rebuilt".to_owned())]);
+    assert!(!names(&conn, "table").iter().any(|t| t.starts_with("meguri_build__")));
+}
+
+#[test]
 fn a_savepoint_rolls_back_only_its_part() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(derived::FILE_NAME);
