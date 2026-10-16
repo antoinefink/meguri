@@ -3,7 +3,7 @@
   "$id": "https://meguri.local/conformance/schema/protocol.json",
   "$comment": "SPDX-License-Identifier: MPL-2.0. Meguri-owned protocol between Meguri tooling and oracle workers.",
   "title": "Meguri oracle worker protocol, version 1",
-  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, whose result.json gives the image as details.image.tag (meguri-oracle:<tag>), then `MEGURI_ORACLE_TAG=<tag> docker compose -f docker/compose.yml run --rm -T --no-deps -e TZ=<zone> oracle`. A checkout without oracle/ (an implementer worktree) works the same way: tools/mg builds the image from the main worktree's oracle/, and the run needs only the built image. Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats. Actor scenarios (specs/conformance/sync-ops.md) also read ORACLE_SYNC_FAULTS (host:port of the toxiproxy API on oracle-internal; needed for runs with a fault proxy) and ORACLE_SYNC_RECORDER (host:port of the recorder, an HTTP forward proxy; set only for recording runs). The worker removes http_proxy, https_proxy, all_proxy and no_proxy (any case) from its environment at start. Scenarios with an open step (specs/conformance/storage-ops.md P1.4) also read ORACLE_FIXTURES: the checkout's conformance/fixtures directory, mounted read-only into the worker; open copies <ORACLE_FIXTURES>/<fixture> into the session and never writes the fixture itself. A check request (tools/mg oracle check, specs/conformance/collection-check.md) checks a copy of a collection directory outside any scenario. On an arm64 Mac, `oracle/macos/run-native.sh` starts the same driver as a native worker (platform macos-arm64) from the host venv build/oracle-macos-venv/, with the same environment variables, stdio and requests (specs/conformance/float-determinism.md F6); tools/mg reaches it through `tools/mg oracle hello|record|compare --platform apple`.",
+  "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, whose result.json gives the image as details.image.tag (meguri-oracle:<tag>), then `MEGURI_ORACLE_TAG=<tag> docker compose -f docker/compose.yml run --rm -T --no-deps -e TZ=<zone> oracle`. A checkout without oracle/ (an implementer worktree) works the same way: tools/mg builds the image from the main worktree's oracle/, and the run needs only the built image. Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats. Actor scenarios (specs/conformance/sync-ops.md) also read ORACLE_SYNC_FAULTS (host:port of the toxiproxy API on oracle-internal; needed for runs with a fault proxy) and ORACLE_SYNC_RECORDER (host:port of the recorder, an HTTP forward proxy; set only for recording runs). The worker removes http_proxy, https_proxy, all_proxy and no_proxy (any case) from its environment at start. Scenarios with an open step (specs/conformance/storage-ops.md P1.4) also read ORACLE_FIXTURES: the checkout's conformance/fixtures directory, mounted read-only into the worker; open copies <ORACLE_FIXTURES>/<fixture> into the session and never writes the fixture itself. A check request (tools/mg oracle check, specs/conformance/collection-check.md) checks a copy of a collection directory outside any scenario. A time request (tools/mg oracle time, specs/conformance/timed-operations.md) times the T6 operations on copies of one; only a timing worker serves it: one started with ORACLE_CLOCK_CACHE=1 after its clock file was written with the request's now (libfaketime then reads that file once, so its clock stays there; T2.3). On an arm64 Mac, `oracle/macos/run-native.sh` starts the same driver as a native worker (platform macos-arm64) from the host venv build/oracle-macos-venv/, with the same environment variables, stdio and requests (specs/conformance/float-determinism.md F6); tools/mg reaches it through `tools/mg oracle hello|record|compare --platform apple`.",
   "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/response" }],
   "$defs": {
     "id": {
@@ -16,7 +16,8 @@
         { "$ref": "#/$defs/begin_request" },
         { "$ref": "#/$defs/step_request" },
         { "$ref": "#/$defs/end_request" },
-        { "$ref": "#/$defs/check_request" }
+        { "$ref": "#/$defs/check_request" },
+        { "$ref": "#/$defs/time_request" }
       ]
     },
     "hello_request": {
@@ -157,6 +158,48 @@
       },
       "additionalProperties": false
     },
+    "time_request": {
+      "description": "specs/conformance/timed-operations.md T2-T7, outside any scenario, in the worker's zone (its TZ). Only a timing worker serves it (ORACLE_CLOCK_CACHE=1, its clock at now); any other worker, or another now, answers protocol_error. The worker copies <dir>/collection.anki2 (and <dir>/collection.anki2-wal when present) into scratch and folds the WAL in with SQLite (the image, T2.1), counts the rows of a copy (T2.2), then runs each named operation in catalogue order: one warm-up and `repeat` timed runs, each on a fresh copy of the image (T3.2). The worker never writes dir (tools/mg mounts it read-only). Errors: no_collection when dir holds no collection.anki2 file, open_failed when SQLite cannot read that file or Anki cannot open a copy of the image, session_open while an interactive session is open; any other failure of the run is anki_error or internal_error. An operation that fails is an entry with status error in the response, never an error response.",
+      "type": "object",
+      "required": ["cmd", "dir", "now", "ops", "repeat"],
+      "properties": {
+        "cmd": { "const": "time" },
+        "id": { "$ref": "#/$defs/id" },
+        "dir": { "type": "string", "minLength": 1, "description": "A directory the worker can read." },
+        "now": { "type": "integer", "minimum": 0, "description": "The frozen instant, epoch seconds: what the worker's clock file held when it started." },
+        "ops": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["collection.open", "decks.counts", "queue.build", "review.answer", "search.deck", "search.state", "search.tag", "search.text", "search.regex", "search.prop", "search.rated", "search.combined", "browser.sort_field", "browser.sort_due", "stats.graphs", "maintenance.check_db", "package.apkg_export", "package.colpkg_export", "package.apkg_import", "sync.full_upload", "sync.full_download", "fsrs.recompute_memory_states"] },
+          "description": "T6 names. They run, and are reported, once each in catalogue order, whatever their order here."
+        },
+        "repeat": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Timed runs per operation, after one warm-up run." }
+      },
+      "additionalProperties": false
+    },
+    "time_response": {
+      "type": "object",
+      "required": ["ok", "timing", "elapsed_ms"],
+      "properties": {
+        "ok": { "const": true },
+        "id": { "$ref": "#/$defs/id" },
+        "timing": {
+          "description": "The members of the timing.schema.json report that the worker knows: all but report_version, side, platform and oracle, which the harness adds (side anki; hello gives platform and oracle).",
+          "type": "object",
+          "required": ["now", "tz", "protocol", "collection", "operations"],
+          "properties": {
+            "now": { "type": "integer" },
+            "tz": { "type": "string" },
+            "protocol": { "type": "object" },
+            "collection": { "type": "object" },
+            "operations": { "type": "array", "items": { "type": "object" } }
+          },
+          "additionalProperties": false
+        },
+        "elapsed_ms": { "type": "number", "minimum": 0, "description": "Wall time inside the worker; never part of a report." }
+      },
+      "additionalProperties": false
+    },
     "response": {
       "oneOf": [
         {
@@ -169,7 +212,8 @@
             { "$ref": "#/$defs/begin_response" },
             { "$ref": "#/$defs/step_response" },
             { "$ref": "#/$defs/end_response" },
-            { "$ref": "#/$defs/check_response" }
+            { "$ref": "#/$defs/check_response" },
+            { "$ref": "#/$defs/time_response" }
           ]
         },
         { "$ref": "#/$defs/error_response" }
@@ -355,7 +399,7 @@
             "no_collection",
             "open_failed"
           ],
-          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); protocol_error: the line is not a JSON request (NaN and Infinity are not JSON), or a run request's segment fields are malformed, or a step request's done or dumps do not fit the next step (sync-ops.md S10.4); anki_error: Anki raised outside an op's rejection kinds (exception names its class; a refusal in the op's list is an output, dsl.md D7.3); handoff_error: no ORACLE_HANDOFF, or a handoff directory that is missing, already there or outside it; sync_unavailable: an actor scenario's sync server did not start or accept connections within 10 s, or its fault proxy could not be created (no ORACLE_SYNC_FAULTS, API unreachable or refusing; sync-ops.md S10.5); fixture_error: an open step in a worker without ORACLE_FIXTURES, or whose fixture is not a regular file under it (storage-ops.md P1.4), checked before the session's collection is closed; no_collection, open_failed: a check request's directory holds no collection.anki2 file, or Anki could not open the copy (collection-check.md K7); internal_error: a driver bug, including a response JSON cannot carry (then id is echoed only if it can be)."
+          "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); protocol_error: the line is not a JSON request (NaN and Infinity are not JSON), or a run request's segment fields are malformed, or a step request's done or dumps do not fit the next step (sync-ops.md S10.4), or a time request reached a worker that is not a timing worker or whose clock stands at another instant, or a request would move a timing worker's clock; anki_error: Anki raised outside an op's rejection kinds (exception names its class; a refusal in the op's list is an output, dsl.md D7.3); handoff_error: no ORACLE_HANDOFF, or a handoff directory that is missing, already there or outside it; sync_unavailable: an actor scenario's sync server did not start or accept connections within 10 s, or its fault proxy could not be created (no ORACLE_SYNC_FAULTS, API unreachable or refusing; sync-ops.md S10.5); fixture_error: an open step in a worker without ORACLE_FIXTURES, or whose fixture is not a regular file under it (storage-ops.md P1.4), checked before the session's collection is closed; no_collection, open_failed: a check or time request's directory holds no collection.anki2 file, or Anki could not open the copy (collection-check.md K7, timed-operations.md T8); internal_error: a driver bug, including a response JSON cannot carry (then id is echoed only if it can be)."
         },
         "step": { "type": "integer", "minimum": 0, "description": "Index of the failing step." },
         "op": { "type": "string" },

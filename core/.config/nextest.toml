@@ -14,6 +14,12 @@ threads-required = "num-test-threads"
 filter = 'test(/_at_150k$/)'
 threads-required = "num-test-threads"
 
+# The timing protocol's interval test (U18) bounds a 5 ms timed part
+# against 400 ms of setup and check.
+[[profile.default.overrides]]
+filter = 'package(meguri-testkit) and test(=timing_measures_only_the_timed_part)'
+threads-required = "num-test-threads"
+
 # meguri-sync's transport tests that time stalls (`*times_out`, transport.md
 # T8: the watchdog fires within a second of its timeout, and a trickle never
 # trips it), cancellation (`a_cancelled_token_*`, T9: within 200 ms) and the
