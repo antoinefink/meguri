@@ -25,3 +25,17 @@ was copied. The research note behind the operation list is
 The raw zstd frame of T5.5.1 was checked with the reference `zstd` command
 (1 to 400,000 bytes, an exact multiple of 128 KiB, and empty content), not
 taken from Anki.
+
+The driver (`driver/timed_operations.py`, oracle maintainer) also read, at the
+same tag, for how the desktop client makes each call:
+
+| Anki file | Read for |
+|---|---|
+| `qt/aqt/browser/table/state.py` (`CardState.find_items`) | T6.6: the browser's card search is `find_cards(search, column, reverse)` |
+| `pylib/anki/decks.py` (`update_deck_configs`, `get_deck_configs_for_update`), `ts/routes/deck-options/lib.ts` (`dataForSaving`), `proto/anki/deck_config.proto` | T6.14.1: the save's fields, the current preset last, limits and collection-wide options from the screen's state |
+| `rslib/src/backend/mod.rs` (`web_client`), `rslib/src/sync/http_client/io_monitor.rs`, `full_sync.rs`, `rslib/src/sync/collection/upload.rs` | T5.5: one client per backend with the system proxy settings (hence `NO_PROXY` for the loopback stub), a streamed (chunked) zstd request body, the required `anki-original-size`, the stall timer on the monotonic clock |
+| `rslib/src/stats/graphs/mod.rs` | T6.7: the revlog range a days value selects |
+
+libfaketime 0.9.13 (`src/libfaketime.c`, not Anki) for T2.3: with
+`FAKETIME_NO_CACHE` unset, the timestamp file is read again only after
+`FAKETIME_CACHE_DURATION` real seconds.
