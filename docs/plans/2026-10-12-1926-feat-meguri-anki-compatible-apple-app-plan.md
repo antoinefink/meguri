@@ -8311,7 +8311,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 **Approach:**
 - Wire codecs follow wire-format.md. Tuples accept the numeric float forms Anki accepts. Notetypes, decks and deck configs travel as schema-11 JSON produced by U21's converters, with protobuf `other` keys flattened into the object (R1464). Numbers decode into the types the spec names (f32 for FSRS values, i64 for ids; rust-stack JSON precision note). Unknown protobuf fields cannot travel through schema-11 JSON; they survive only locally (same limitation as Anki).
 - `meta` (R1513): sends `v` and `cv`. If `cont` is false, the job stops with a server-message error (R1514). Clock skew over 300 s → clock-incorrect error before any local or remote write (R1515). The comparison yields NoChanges, Normal, or OneWay with upload/download availability (R1517, R1518). A non-empty `msg` is returned verbatim; sanitising and display are U151's job (R1516, R168).
-- Offline status (R1559) is read from the col row (`ls`, `mod`, `scm`). The online result is cached in memory for 300 s and invalidated by any ChangeSet that moves `mod`, by a login or server change, and after every sync.
+- Offline status (R1559) is read from the col row (`ls`, `mod`, `scm`). The online result is remembered in memory for 300 s as `specs/sync/meta-status.md` M6 and M6.1 say (its age limit and the outcomes of syncs are the oracle's, `sync/meta/status`): a change that moves `mod` (or `scm`) past `ls` answers offline before the remembered answer is read; the answer serves only the base and host key it came with, so a server or account change asks again and replaces it, while a new login to the same account keeps it; every completed sync job replaces it with its own outcome, and a failed or cancelled job leaves it; closing or replacing the collection (other than by a one-way sync) forgets it (amended 2026-10-16 after U106's review; `docs/process/review-log/U106.md`, A1).
 - Meta-only probe: returns the server `mod` so the optimizer write gate (KTD8, U47) can check that the server is unchanged since sync 1.
 - Error taxonomy (errors.md, Meguri-original classification): one enum with kind, retryability, R165 class (transient / actionable / blocking) and message parameters. Kinds: auth failed (403), conflict (409), client too old (501), server error (500/502/503/504), database check required (400), proxy auth (407), network/offline, timeout, TLS (with an "HTTPS / TLS 1.2" hint flag), clock incorrect, server message, upload too large, sanity check failed, notetype schema changed (R1525), missing notetype (R1528), cancelled, interrupted, disk full (R2015), session active (R458), exclusive busy, media resync failed. Swift localises each kind through String Catalog keys (U151, U160).
 - No panic may cross FFI: every decoder returns typed errors. The fuzz target covers all response decoders.
@@ -8330,7 +8330,9 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - Table test through the stub, which omits `anki-original-size` on every error status: each status in R1561 maps to the expected kind and class.
 - Nightly: the `sync_json` fuzz target runs 10 minutes without a panic.
 
-**Verification:** Wire goldens pass in T0 on macOS and Linux; meta scenarios pass against U13; the fuzz target builds and runs.
+**Verification:** Wire goldens pass in T0 on macOS and Linux; the status check, the sync status and the meta probe pass against U13 in the `rig_*` tests of `core/crates/meguri-sync/tests/status.rs` (AE63 among them), run at the integrated head; the fuzz target builds and runs. The actor scenarios under `conformance/scenarios/sync/meta/` run on Meguri's executor with U117.
+
+Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). This line first asked for the meta scenarios to pass against U13. They are actor scenarios: a Meguri actor uploads, downloads and runs normal syncs in them, and Meguri's executor gets the `sync` op only with U117 (after U107 and U109), so T0 reports them `pending` (`specs/conformance/sync-ops.md` S10.2). U106 checks its own calls on the rig's official server instead. `tools/mg sync-rig up` refuses a unit branch whose `oracle/` differs from the main worktree's, so those tests run at the integrated head.
 
 ### U107. Normal sync with hold-back
 
@@ -8776,7 +8778,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - R1590 sweep: for each incremental op in the op set, after a Meguri sync the server `scm` is unchanged.
 - Exchange comparison for a normal sync with 300 objects shows the same method sequence and body shapes as Anki's recording.
 
-**Verification:** All `conformance/scenarios/sync/**` suites pass in T1 in Docker; the exchange comparison has no unexplained differences; a once-per-milestone manual AnkiMobile check is recorded (see coverage).
+**Verification:** All `conformance/scenarios/sync/**` suites pass in T1 in Docker, `sync/meta/` included (its Meguri runs moved from U106, amended 2026-10-16; `docs/process/review-log/U106.md`, A2); the exchange comparison has no unexplained differences; a once-per-milestone manual AnkiMobile check is recorded (see coverage).
 
 ### U118. Sync robustness, property tests and budgets
 

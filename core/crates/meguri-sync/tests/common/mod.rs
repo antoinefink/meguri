@@ -1,6 +1,6 @@
-//! Helpers the wire, status and error tests share: the conformance tree, the
-//! sync runtime, jobs against meguri-testkit's scripted stub (transport.md
-//! T13), and answers fetched through it.
+//! Helpers the test binaries share: the conformance tree, the sync runtime,
+//! jobs against meguri-testkit's scripted stub (transport.md T13), answers
+//! fetched through it, and the U13 rig.
 
 // Each test binary uses its own part of this module.
 #![allow(dead_code)]
@@ -94,4 +94,72 @@ pub fn bytes(value: &Value) -> Vec<u8> {
 /// Bytes read as JSON.
 pub fn json(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).unwrap_or_else(|err| panic!("{err}: {}", String::from_utf8_lossy(bytes)))
+}
+
+// --- The U13 rig (transport.md T14) -------------------------------------------
+//
+// Anki's own sync server, as `tools/mg sync-rig up` runs it on this Mac's
+// loopback. `rig_*` tests are ignored by default; with the rig up:
+//   tools/mg core-test -- --run-ignored only -E 'package(meguri-sync) & test(/^rig_/)'
+
+/// The rig and one of its test accounts.
+pub struct Rig {
+    pub base: String,
+    pub user: String,
+    pub password: String,
+}
+
+/// Where the rig listens, from the latest `tools/mg sync-rig` result in this
+/// checkout, and the password of its first test user, from the rig's env
+/// files (docker/syncserver.env overrides the example, as compose reads
+/// them). Inside the dev container, the Mac's loopback is the Docker host,
+/// `host.docker.internal`.
+pub fn rig() -> Rig {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let result = root.join("build/mg/sync-rig/latest/result.json");
+    let result: Value = serde_json::from_slice(&std::fs::read(&result).expect("tools/mg sync-rig up first"))
+        .expect("a tools/mg result is JSON");
+    let details = &result["details"];
+    assert_eq!(
+        details["running"],
+        Value::Bool(true),
+        "the rig is down: tools/mg sync-rig up"
+    );
+    let endpoint = details["endpoints"]["syncserver"]
+        .as_str()
+        .expect("the rig reports its endpoint");
+    let port: u16 = endpoint
+        .trim_end_matches('/')
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .expect("the endpoint has a port");
+    let user = details["users"][0]
+        .as_str()
+        .expect("the rig reports its test users")
+        .to_owned();
+    let mut password = None;
+    for file in ["docker/syncserver.env.example", "docker/syncserver.env"] {
+        let Ok(text) = std::fs::read_to_string(root.join(file)) else {
+            continue;
+        };
+        for line in text.lines() {
+            if let Some((_, account)) = line.split_once('=')
+                && line.starts_with("SYNC_USER")
+                && let Some((name, secret)) = account.split_once(':')
+                && name == user
+            {
+                password = Some(secret.to_owned());
+            }
+        }
+    }
+    let host = std::net::ToSocketAddrs::to_socket_addrs(&("host.docker.internal", port))
+        .ok()
+        .and_then(|mut addresses| addresses.next())
+        .unwrap_or_else(|| std::net::SocketAddr::from(([127, 0, 0, 1], port)));
+    Rig {
+        base: format!("http://{host}/"),
+        user,
+        password: password.expect("the rig's env files hold the user's password"),
+    }
 }

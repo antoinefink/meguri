@@ -1,7 +1,8 @@
 //! The `meta` status check, the sync status and the meta probe
 //! (specs/sync/meta-status.md) against meguri-testkit's scripted stub: the
 //! official server never answers `cont` false, a non-empty `msg` or an
-//! undecodable `meta`, and a stub's clock is the test's to set (M9).
+//! undecodable `meta`, and a stub's clock is the test's to set (M9). The
+//! `rig_*` tests make the same calls against the U13 rig's official server.
 //!
 //! Expected values come from the spec's tables, never from the code under
 //! test.
@@ -11,7 +12,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use common::{HOST_KEY, base, block_on, job, job_with_key, options};
+use common::{HOST_KEY, base, block_on, job, job_with_key, options, random, rig, threads};
 use meguri_model::card::{Card, CardQueue, CardType};
 use meguri_model::card_data::CardData;
 use meguri_model::clock::{FixedClock, StepClock, UtcOffset};
@@ -23,10 +24,12 @@ use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
 use meguri_storage::{CollectionBuilder, OpenOptions, StampMode, open_collection};
 use meguri_sync::status::{self, MAX_CLOCK_OFFSET_SECS};
+use meguri_sync::wire::{self, ServerMeta};
 use meguri_sync::{
-    CheckResult, Endpoint, ErrorKind, JobError, LocalRecord, Method, OfflineStatus, StatusMemory, SyncStatus,
+    CheckResult, Endpoint, ErrorKind, HostKey, Job, JobError, JobOptions, LocalRecord, Method, OfflineStatus, Payload,
+    Proxy, StatusMemory, SyncStatus, login_blocking,
 };
-use meguri_testkit::sync_stub::{Reply, SyncStub};
+use meguri_testkit::sync_stub::{ProxyRules, Recorded, Reply, SyncStub};
 
 /// The device's clock in these tests: 2030-01-15T10:03:00Z.
 const NOW_MS: i64 = 1_894_701_780_000;
@@ -702,4 +705,202 @@ fn the_probe_returns_the_servers_record_and_fails_as_the_check_does() {
         let mut job = job(&options(&stub.url()));
         assert_kind(block_on(status::probe(&mut job, &clock())), kind);
     }
+}
+
+// --- Against the U13 rig ---------------------------------------------------------------
+//
+// The check, the status and the probe on the official server's own `meta`
+// answers (M9 lists what only the stub can show). The actor scenarios of
+// conformance/scenarios/sync/meta/ wait for Meguri's executor to sync (U117).
+// With the rig up:
+//   tools/mg core-test -- --run-ignored only -E 'package(meguri-sync) & test(/^rig_/)'
+
+/// A login to the rig through a recording proxy, which shows every request
+/// sent after it.
+fn rig_login() -> (JobOptions, HostKey, SyncStub) {
+    let rig = rig();
+    let proxy = SyncStub::proxy(ProxyRules::default());
+    let options = options(&rig.base).proxy(Proxy::new(proxy.url()));
+    let key = login_blocking(threads(), &options, &random(), &rig.user, &rig.password).unwrap();
+    (options, key, proxy)
+}
+
+fn rig_job(options: &JobOptions, key: &HostKey) -> Job {
+    Job::new(options, Some(key.clone()), &random()).unwrap()
+}
+
+/// The device's clock: the server's own `ts` from a plain `meta` request
+/// (the core reads no system clock, R1875), moved `ahead_ms` forward, and
+/// the server's record from that answer.
+fn rig_clock(options: &JobOptions, key: &HostKey, ahead_ms: i64) -> (StepClock, ServerMeta) {
+    let mut job = rig_job(options, key);
+    let body = block_on(async {
+        let request = Payload::Json(wire::encode_meta_request());
+        job.request(Method::Meta, request).await?.bytes().await
+    })
+    .unwrap();
+    let server = wire::decode_meta(&body).unwrap();
+    let clock = StepClock::new(server.server_time.0 * 1000 + ahead_ms, UtcOffset::UTC, "UTC");
+    (clock, server)
+}
+
+fn rig_paths(proxy: &SyncStub) -> Vec<String> {
+    proxy
+        .requests()
+        .iter()
+        .map(|r: &Recorded| r.head.path().to_owned())
+        .collect()
+}
+
+/// `hostKey`, then `meta` `count` times.
+fn login_then_metas(count: usize) -> Vec<String> {
+    let mut paths = vec!["/sync/hostKey".to_owned()];
+    paths.extend(std::iter::repeat_n("/sync/meta".to_owned(), count));
+    paths
+}
+
+#[test]
+#[ignore = "needs tools/mg sync-rig up"]
+fn rig_the_check_and_the_probe_read_the_servers_own_record() {
+    let (options, key, proxy) = rig_login();
+    let (clock, server) = rig_clock(&options, &key, 0);
+    // M2: the server answers `cont` true with no message.
+    assert!(server.can_continue && server.message.is_empty(), "{server:?}");
+    // M7: the probe returns the same record.
+    let probe = block_on(status::probe(&mut rig_job(&options, &key), &clock)).unwrap();
+    assert_eq!(
+        (probe.server.modified, probe.server.schema_modified, probe.server.usn),
+        (server.modified, server.schema_modified, server.usn)
+    );
+    assert_eq!(probe.new_endpoint, None);
+    // M3, from the real record: equal `mod`; a newer local `mod`; a schema
+    // that moved on a device without cards (one-way: download, and upload
+    // only onto an empty server).
+    let same = LocalRecord {
+        modified: server.modified,
+        schema_modified: server.schema_modified,
+        usn: server.usn,
+        last_sync: server.modified,
+        has_cards: true,
+    };
+    let newer = EpochMillis(server.modified.0 + 1);
+    for (local, expected) in [
+        (same, CheckResult::NoChanges),
+        (
+            LocalRecord {
+                modified: newer,
+                ..same
+            },
+            CheckResult::Normal { local_is_newer: true },
+        ),
+        (
+            LocalRecord {
+                modified: newer,
+                schema_modified: EpochMillis(server.schema_modified.0 + 1),
+                has_cards: false,
+                ..same
+            },
+            CheckResult::OneWay {
+                upload: server.empty,
+                download: true,
+            },
+        ),
+    ] {
+        let outcome = block_on(status::check(&mut rig_job(&options, &key), &local, &clock)).unwrap();
+        assert_eq!(outcome.result, expected, "{local:?}");
+        assert_eq!(outcome.server.modified, server.modified);
+        assert_eq!(outcome.local_usn, server.usn);
+        assert_eq!((outcome.server_message, outcome.new_endpoint), (None, None));
+    }
+    assert_eq!(rig_paths(&proxy), login_then_metas(5));
+}
+
+#[test]
+#[ignore = "needs tools/mg sync-rig up"]
+fn rig_ae63_a_device_360_s_ahead_stops_the_check_and_nothing_changes() {
+    // AE63, M2 step 3: the server's clock 360 s behind the device's. The
+    // check and the status fail with clock_incorrect after `meta` alone; the
+    // collection file and the server's record stay as they were.
+    let (options, key, proxy) = rig_login();
+    let (ahead, server) = rig_clock(&options, &key, 360_000);
+    let dir = tempfile::tempdir().unwrap();
+    let path = collection(dir.path(), &synced_col(), true);
+    let random = SeededRandom::new(7);
+    let fixed = FixedClock::new(NOW_MS, UtcOffset::UTC);
+    open_collection(&path, &OpenOptions::new(&fixed, &random))
+        .unwrap()
+        .close()
+        .unwrap();
+    let untouched = std::fs::read(&path).unwrap();
+
+    let opened = open_collection(&path, &OpenOptions::new(&fixed, &random)).unwrap();
+    let record = LocalRecord::read(opened.writer()).unwrap();
+    let check = block_on(status::check(&mut rig_job(&options, &key), &record, &ahead));
+    let mut memory = StatusMemory::new();
+    let status = block_on(memory.status(&mut rig_job(&options, &key), &record, &ahead));
+    for err in [check.unwrap_err(), status.unwrap_err()] {
+        assert_eq!(err.method, Some(Method::Meta), "{err}");
+        let ErrorKind::ClockIncorrect { offset_secs } = err.kind else {
+            panic!("{err}");
+        };
+        // The server's clock moves on between its answers.
+        assert!((-360..=-355).contains(&offset_secs), "{err}");
+    }
+    opened.close().unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), untouched);
+
+    let (_, after) = rig_clock(&options, &key, 0);
+    assert_eq!(
+        (
+            after.modified,
+            after.schema_modified,
+            after.usn,
+            after.media_usn,
+            after.empty
+        ),
+        (
+            server.modified,
+            server.schema_modified,
+            server.usn,
+            server.media_usn,
+            server.empty
+        )
+    );
+    assert_eq!(rig_paths(&proxy), login_then_metas(4));
+}
+
+#[test]
+#[ignore = "needs tools/mg sync-rig up"]
+fn rig_the_status_asks_once_then_remembers_and_answers_local_changes_offline() {
+    // M6: nothing pending locally, so the server answers (no changes: equal
+    // `mod`); a second status within 300 s and a status after a local change
+    // send nothing.
+    let (options, key, proxy) = rig_login();
+    let (clock, server) = rig_clock(&options, &key, 0);
+    let synced = EpochMillis(server.modified.0.max(server.schema_modified.0).max(1));
+    let local = LocalRecord {
+        modified: server.modified,
+        schema_modified: server.schema_modified,
+        usn: server.usn,
+        last_sync: synced,
+        has_cards: true,
+    };
+    assert_eq!(local.offline_status(), OfflineStatus::NothingPending);
+    let mut memory = StatusMemory::new();
+    let status = |memory: &mut StatusMemory, local: &LocalRecord| {
+        block_on(memory.status(&mut rig_job(&options, &key), local, &clock))
+            .unwrap()
+            .status
+    };
+    assert_eq!(status(&mut memory, &local), SyncStatus::NoChanges);
+    assert_eq!(rig_paths(&proxy), login_then_metas(2));
+    clock.step_ms(60_000);
+    assert_eq!(status(&mut memory, &local), SyncStatus::NoChanges);
+    let edited = LocalRecord {
+        modified: EpochMillis(synced.0 + 1),
+        ..local
+    };
+    assert_eq!(edited.offline_status(), OfflineStatus::PendingChanges);
+    assert_eq!(status(&mut memory, &edited), SyncStatus::NormalSync);
+    assert_eq!(rig_paths(&proxy), login_then_metas(2));
 }
