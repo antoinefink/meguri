@@ -1049,6 +1049,7 @@ dependencies = [
  "jiff",
  "meguri-testkit",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -1158,6 +1159,7 @@ dependencies = [
  "libc",
  "meguri-engine",
  "meguri-model",
+ "meguri-sched",
  "meguri-storage",
  "meguri-sync",
  "meguri-template",
