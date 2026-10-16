@@ -20,7 +20,7 @@ steps:
           # in U values
           - '\x'
           - '\%'
-          - '\foo'
+          - '\fern'
           - '\x\y'
           - 'a\\\x'
           - 'a\\x\y'

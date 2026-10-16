@@ -8,7 +8,7 @@
       {
         "canonical_search": [
           {
-            "text": "prop:ease>1"
+            "text": "prop:ease<1"
           },
           {
             "text": "prop:ease>1"
@@ -92,7 +92,7 @@
             "text": "prop:cdn:k=-2.25"
           },
           {
-            "text": "prop:ivl>=5"
+            "text": "prop:ivl>=6"
           },
           {
             "text": "prop:ivl>7"
@@ -139,10 +139,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/canonical/numbers",
-  "scenario_sha256": "b1da2db114c0f89041fd13b54b7ac0e4b0cfe090f46270f056f2d3e7e4f32062",
+  "scenario_sha256": "46509390ffd004df700b684abdf0d40a96b77cd0d747e123f1b4b2cdb060b438",
   "tz": "UTC"
 }

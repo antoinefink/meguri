@@ -15,7 +15,7 @@ steps:
           - 'x and y or z'
           - 'x or y and z'
           - 'x or y or z'
-          - '1 and 2 or 3'
+          - '7 and 8  or 9'
           - 'a b or c d'
           - 'not a'
           - 'and:x'

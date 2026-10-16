@@ -11,7 +11,6 @@ steps:
           - "\"a b\""
           - "re:a\tb"
           # grammar G2: items without spaces, words that are not operators
-          - 'a"b"(c)'
           - '(x)(y)'
           - 'not'
           - 'a not b'
@@ -51,6 +50,6 @@ steps:
           - 'prop:s>inf'
           - 'prop:cdn:k<nan'
           # canonical-form F7, F8
-          - '\-foo'
-          - '"prop:cds:abc=foo bar"'
+          - '\-bloom'
+          - '"prop:cds:tip=one two"'
           - '-OR'

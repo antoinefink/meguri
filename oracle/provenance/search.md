@@ -18,7 +18,7 @@ card and note searches on small collections, damaged ones included).
 | errors E3 | `rslib/src/error/db.rs`, `rslib/src/error/mod.rs`, `rslib/src/backend/error.rs`, `rslib/src/search/sqlwriter.rs` | invalid regex mapped from the SQL function's failure (so only when a row reaches it); database errors from a negated operator word, non-ASCII id digits, expression depth |
 | errors E6 | oracle runs | nesting depth at which Anki's process aborts (about 10 000 groups) |
 | canonical-form F1–F6 | `rslib/src/search/writer.rs`, `rslib/src/search/service/mod.rs`, `rslib/src/search/service/search_node.rs`, `rslib/src/search/builder.rs`, `qt/aqt/browser/browser.py` | the writer per node, the quoting rule, the top-level group unwrapping of the builder used when the browser commits a search, f32 `Display` |
-| canonical-form F7 | oracle runs | the three shapes whose canonical text does not round-trip |
+| canonical-form F7 | oracle runs | the four shapes whose canonical text does not round-trip (the fourth, a group holding only a group, follows from the builder's one-level unwrapping) |
 | query-model Q4–Q6 | `rslib/src/search/sqlwriter.rs`, `rslib/src/search/mod.rs` | per-term table requirements and how they combine, the cards-only / notes-only / joined statements, distinct note ids |
 | query-model Q8 | `rslib/src/search/sqlwriter.rs`, `rslib/src/config/bool.rs`, `rslib/src/config/mod.rs` | which outside values each term reads; config keys and their defaults |
 | search-ops S1–S3 | `pylib/anki/collection.py`, `rslib/src/search/service/mod.rs`, `rslib/src/i18n` (Fluent isolation marks) | card and note searches without order, the browser's normalization call, how messages carry the reported texts |

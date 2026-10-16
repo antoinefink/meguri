@@ -17,5 +17,5 @@ steps:
           - '(-a)'
           - '(deck:*)'
           - '("a b")'
-          - '(is:due or is:new) flag:1'
-          - '((is:due or is:new) (flag:1 or flag:2))'
+          - '(is:learn or is:review) flag:3'
+          - '((is:learn or is:review) (flag:3 or flag:5))'

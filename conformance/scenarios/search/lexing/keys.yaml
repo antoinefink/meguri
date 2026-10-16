@@ -25,7 +25,7 @@ steps:
           - 'CID:1'
           - 'ADDED:1'
           - 'Edited:2'
-          - 'INTRODUCED:3'
+          - 'INTRODUCED:4'
           - 'Rated:1'
           - 'RESCHED:1'
           - 'DUPE:1,x'

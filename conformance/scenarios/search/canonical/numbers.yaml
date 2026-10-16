@@ -6,7 +6,7 @@ steps:
   - observe:
       - canonical_search:
           # floats
-          - 'prop:ease>1.0'
+          - 'prop:ease<1.0'
           - 'prop:ease>1.'
           - 'prop:ease>1E0'
           - 'prop:ease>2.50'
@@ -35,7 +35,7 @@ steps:
           - 'prop:r>=0.5e1'
           - 'prop:cdn:k=-2.25'
           # whole numbers
-          - 'prop:ivl>=+5'
+          - 'prop:ivl>=+6'
           - 'prop:ivl>007'
           - 'prop:due=-0'
           - 'prop:due>+3'

@@ -17,15 +17,15 @@
           },
           {
             "error": "invalid_state",
-            "provided": "New"
+            "provided": "Buried"
           },
           {
             "error": "invalid_state",
-            "provided": "DUE"
+            "provided": "LEARN"
           },
           {
             "error": "invalid_state",
-            "provided": "learn "
+            "provided": "review  "
           },
           {
             "error": "invalid_state",
@@ -77,12 +77,12 @@
           {
             "context": "added:",
             "error": "invalid_positive_whole_number",
-            "provided": "-1"
+            "provided": "-12"
           },
           {
             "context": "added:",
             "error": "invalid_positive_whole_number",
-            "provided": "1.1"
+            "provided": "2.5"
           },
           {
             "context": "added:",
@@ -117,7 +117,7 @@
           {
             "context": "resched:",
             "error": "invalid_positive_whole_number",
-            "provided": "-1"
+            "provided": "-3"
           },
           {
             "context": "resched:",
@@ -137,27 +137,27 @@
           {
             "context": "rated:",
             "error": "invalid_positive_whole_number",
-            "provided": "-1"
+            "provided": "-9"
           },
           {
-            "context": "1:",
+            "context": "3:",
             "error": "invalid_answer_button",
             "provided": ""
           },
           {
-            "context": "2:-1",
+            "context": "5:-2",
             "error": "invalid_answer_button",
-            "provided": "-1"
+            "provided": "-2"
           },
           {
-            "context": "3:1.1",
+            "context": "6:2.5",
             "error": "invalid_answer_button",
-            "provided": "1.1"
+            "provided": "2.5"
           },
           {
-            "context": "0:foo",
+            "context": "0:yes",
             "error": "invalid_answer_button",
-            "provided": "foo"
+            "provided": "yes"
           },
           {
             "context": "1:5",
@@ -205,14 +205,14 @@
             "provided": ""
           },
           {
-            "context": "1.1",
+            "context": "2.5",
             "error": "invalid_whole_number",
-            "provided": "1.1"
+            "provided": "2.5"
           },
           {
-            "context": "foo",
+            "context": "pine",
             "error": "invalid_whole_number",
-            "provided": "foo"
+            "provided": "pine"
           },
           {
             "context": "x,a",
@@ -238,27 +238,27 @@
           },
           {
             "error": "invalid_property",
-            "provided": "=1"
+            "provided": "<4"
           },
           {
             "error": "invalid_property",
-            "provided": "DUE<5"
+            "provided": "Lapses>2"
           },
           {
             "error": "invalid_property",
-            "provided": "cdn=5"
+            "provided": "cdn>7"
           },
           {
             "error": "invalid_property",
-            "provided": "cdn:=5"
+            "provided": "cdn:<2"
           },
           {
             "error": "invalid_property",
-            "provided": "cds=s"
+            "provided": "cds<t"
           },
           {
             "error": "invalid_property",
-            "provided": "cds:=s"
+            "provided": "cds:>q"
           },
           {
             "error": "invalid_property",
@@ -278,15 +278,15 @@
           },
           {
             "error": "invalid_operator",
-            "provided": "lapses"
-          },
-          {
-            "error": "invalid_operator",
             "provided": "pos"
           },
           {
             "error": "invalid_operator",
-            "provided": "reps"
+            "provided": "lapses"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "ivl"
           },
           {
             "error": "invalid_operator",
@@ -329,24 +329,24 @@
             "provided": "resched"
           },
           {
-            "context": "ivl>",
+            "context": "ivl<=",
             "error": "invalid_positive_whole_number",
             "provided": ""
           },
           {
-            "context": "ivl=0.5",
+            "context": "ivl=2.5",
             "error": "invalid_positive_whole_number",
-            "provided": "0.5"
+            "provided": "2.5"
           },
           {
-            "context": "ivl!=-1",
+            "context": "ivl!=-6",
             "error": "invalid_positive_whole_number",
-            "provided": "-1"
+            "provided": "-6"
           },
           {
-            "context": "ivl<foo",
+            "context": "ivl<ten",
             "error": "invalid_positive_whole_number",
-            "provided": "foo"
+            "provided": "ten"
           },
           {
             "context": "reps>x",
@@ -379,14 +379,14 @@
             "provided": ">1"
           },
           {
-            "context": "due>",
+            "context": "due!=",
             "error": "invalid_whole_number",
             "provided": ""
           },
           {
-            "context": "due=0.5",
+            "context": "due=1.5",
             "error": "invalid_whole_number",
-            "provided": "0.5"
+            "provided": "1.5"
           },
           {
             "context": "due=2147483648",
@@ -394,7 +394,7 @@
             "provided": "2147483648"
           },
           {
-            "context": "ease>",
+            "context": "ease>=",
             "error": "invalid_number",
             "provided": ""
           },
@@ -404,14 +404,14 @@
             "provided": ""
           },
           {
-            "context": "ease!=one",
+            "context": "ease<=half",
             "error": "invalid_number",
-            "provided": "one"
+            "provided": "half"
           },
           {
-            "context": "ease<1,3",
+            "context": "ease>2,5",
             "error": "invalid_number",
-            "provided": "1,3"
+            "provided": "2,5"
           },
           {
             "context": "ease>0x10",
@@ -555,10 +555,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/errors/arguments",
-  "scenario_sha256": "e445ab35de1f0ef63d315124266bc420f6bc9ed313fd2001535b2979d435bedb",
+  "scenario_sha256": "109d7349854d3f1cfce24e642e3ebe8835dbd7c09b7158006efd4b5b823b378d",
   "tz": "UTC"
 }

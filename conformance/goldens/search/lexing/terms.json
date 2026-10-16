@@ -8,10 +8,10 @@
       {
         "canonical_search": [
           {
-            "text": "a b (c)"
+            "text": "p q (r)"
           },
           {
-            "text": "\"f o o\" bar"
+            "text": "\"k l m\" no"
           },
           {
             "text": "a (b)"
@@ -56,10 +56,10 @@
             "text": "\"(\""
           },
           {
-            "text": "\")(\""
+            "text": "\"x)(y\""
           },
           {
-            "text": "\")(\""
+            "text": "\")x(\""
           },
           {
             "text": "\"a:b c\""
@@ -74,10 +74,10 @@
             "text": "ü"
           },
           {
-            "text": "foo \"b a r\""
+            "text": "cedar \"p q r\""
           },
           {
-            "text": "field:va\\\"lue"
+            "text": "stem:le\\\"af"
           },
           {
             "text": "\"key:value with spaces\""
@@ -98,10 +98,10 @@
             "text": "a:b: c"
           },
           {
-            "text": "field:foo"
+            "text": "stem:oak"
           },
           {
-            "text": "field:va\\\"lue"
+            "text": "stem:le\\\"af"
           },
           {
             "text": "\"deck:a b\""
@@ -131,7 +131,7 @@
             "text": "\"Or\""
           },
           {
-            "text": "\"aNd\" \"oR\""
+            "text": "\"Or\" \"aND\""
           }
         ]
       }
@@ -139,10 +139,10 @@
   },
   "oracle": {
     "anki_version": "26.9.3",
-    "driver_sha256": "d2f67def9b3797bc20524877a69a923d387c0dd7304bc4160d9f94c126291d71",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
     "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
   },
   "scenario_id": "search/lexing/terms",
-  "scenario_sha256": "a8f9a19aeb691248f0663d22b15542eb2354b29e5709c8d09d3c151e22578ea9",
+  "scenario_sha256": "9c62147253b9c8be371fcf4344d6c2f13c746e8185ad33602fb5c0a89781e392",
   "tz": "UTC"
 }
