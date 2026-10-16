@@ -1,19 +1,19 @@
 # specs/search/errors.md E3: searches that parse but cannot run fail with
 # search_failed (negated operator words, ids with non-ASCII digits); parse
 # errors come back from search as from canonical_search.
+# No setup (specs/conformance/storage-ops.md P1.3): the collection is the
+# schema-18 storage fixture with its notes and cards replaced by one note of
+# its first note type and that note's card, written with db_exec.
 id: search/errors/run
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
-setup:
-  notetypes:
-    - name: Single
-      fields: [Front, Back]
-      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
-      css: ".card { margin: 0; }"
-  notes:
-    - {notetype: Single, fields: [dog, x]}
 steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "DELETE FROM cards"}
+  - db_exec: {sql: "DELETE FROM notes"}
+  - db_exec: {sql: "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (1893456000001, 'mgRun1', (SELECT min(id) FROM notetypes), 1893456000, 0, '', 'otter' || char(31) || 'x', 'otter', 2256459996, 0, '')"}
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1893456000101, 1893456000001, 1, 0, 1893456000, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, '{}')"}
   - observe:
-      - canonical_search: ["-and", "-or", "a -and b", "nid:\u0661", "cid:\u0661,2", "did:\u0663"]
+      - canonical_search: ["-and", "-or", "a -and b", "nid:١", "cid:١,2", "did:٣"]
       - search:
           - {query: '-and'}
           - {query: '-and', kind: notes}
@@ -31,8 +31,8 @@ steps:
           - {query: 'did:٣', kind: notes}
           - {query: '(a'}
           - {query: '(a', kind: notes}
-          - {query: 'is:foo'}
-          - {query: 'is:foo', kind: notes}
+          - {query: 'is:asleep'}
+          - {query: 'is:asleep', kind: notes}
           - {query: 'prop:ivl>x'}
           - {query: 'prop:ivl>x', kind: notes}
           - {query: 'nid:1,a'}
