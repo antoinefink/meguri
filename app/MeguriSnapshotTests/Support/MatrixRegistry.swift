@@ -61,6 +61,22 @@ enum MatrixRegistry {
         ScreenRegistration(type: TestHooks.SampleDeckOverview.self) { platform, state in
             platform == .iphone && state == .overflow ? .pairwise : .keyVariants
         },
+        // The shell: the tab layout on the iPhone in every state (typical in
+        // the pairwise set), the sidebar layout on the iPad in its typical
+        // state's key variants (the loading and error states change only the
+        // detail column, and the iPad's full-screen renders weigh about 1 MB
+        // each). Not on the Mac:
+        // the off-screen render (cacheDisplay) cannot draw the AppKit split
+        // view's sidebar materials (a black selection, a white detail column
+        // in dark mode); the Mac shell is judged from `tools/mg screenshot
+        // --platform mac` and the device session.
+        ScreenRegistration(type: ShellRootPreview.self) { platform, state in
+            switch platform {
+            case .mac: nil
+            case .iphone: state == .typical ? .pairwise : .keyVariants
+            case .ipad: state == .typical ? .keyVariants : nil
+            }
+        },
     ]
 
     /// Platforms the gallery components are snapshotted on: iPad renders

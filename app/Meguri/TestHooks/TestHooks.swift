@@ -14,6 +14,26 @@ enum TestHooks {
     struct Session {
         var options = LaunchOptions()
         var error: TestHookError?
+        /// A shell route's state and features.
+        var shell: ShellLaunch?
+
+        /// A launch with any hook option starts from a fresh UI state and
+        /// leaves none behind, so a run never depends on the previous one;
+        /// a launch with none restores the device's as usual.
+        var startsFresh: Bool { error != nil || options != LaunchOptions() }
+
+        /// Puts the navigation in the shell route's state and starts the
+        /// run-time commands (`ShellCommands`).
+        func start(_ navigation: AppNavigation) {
+            #if os(macOS)
+            if let integrations = options.integrations {
+                AppDelegate.keepsRunningWithoutWindow = integrations
+            }
+            #endif
+            guard error == nil else { return }
+            shell?.prepare(navigation)
+            ShellCommands.shared.listen(navigation: navigation, sizeClass: options.sizeClass)
+        }
     }
 
     static func prepare(
@@ -25,22 +45,24 @@ enum TestHooks {
         WebContentWarmup.shared.listen()
         do throws(TestHookError) {
             let options = try LaunchOptions(arguments: Array(arguments.dropFirst()))
-            try options.apply(
+            let shell = try options.apply(
                 to: &configuration,
                 installer: FixtureInstaller(bundleIdentifier: bundleIdentifier),
                 routes: .standard
             )
             AppearanceOverrides.applyProcessWide(options)
-            return Session(options: options)
+            return Session(options: options, shell: shell)
         } catch {
             return Session(error: error)
         }
     }
 
     /// Wraps the app's root view: the hook error, or the root with the
-    /// appearance overrides.
+    /// appearance overrides, the forced size class and, for a shell route,
+    /// the navigation state probe.
     struct Root<Content: View>: View {
         let session: Session
+        let navigation: AppNavigation
         @ViewBuilder let content: () -> Content
 
         var body: some View {
@@ -48,6 +70,16 @@ enum TestHooks {
                 ErrorView(error: error)
             } else {
                 content()
+                    // Mid-screen, clear of bars and back buttons; it takes
+                    // no touches.
+                    .overlay(alignment: .center) {
+                        if session.shell?.probe == true {
+                            ShellStateProbe(navigation: navigation)
+                        }
+                    }
+                    #if os(iOS)
+                    .background(SizeClassOverride(sizeClass: session.options.sizeClass))
+                    #endif
                     .modifier(AppearanceOverrides(options: session.options))
             }
         }

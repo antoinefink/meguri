@@ -29,41 +29,70 @@ extension TestHooks {
 
     /// Maps routes to what the app shows at launch. Each UI area registers its
     /// routes (screens and their states, menus, sheets, error states) in
-    /// `standard`, from a `<Area>Routes.swift` file in this folder.
+    /// `standard`, from a `<Area>Routes.swift` file in this folder. A route
+    /// either presents a view over the shell (`register`) or puts the shell
+    /// itself in a state, with the features it hosts (`registerShell`).
     struct RouteRegistry {
         typealias Handler = (RouteContext) -> InitialPresentation
+        typealias ShellHandler = (RouteContext) -> ShellLaunch
+
+        enum Resolution {
+            case presentation(InitialPresentation)
+            case shell(ShellLaunch)
+        }
 
         private var handlers: [Route: Handler] = [:]
+        private var shellHandlers: [Route: ShellHandler] = [:]
 
         static var standard: RouteRegistry {
             var registry = RouteRegistry()
             SampleRoutes.register(in: &registry)
             DesignSystemRoutes.register(in: &registry)
             PerfRoutes.register(in: &registry)
+            ShellRoutes.register(in: &registry)
             return registry
         }
 
-        var routes: [Route] { handlers.keys.sorted() }
+        var routes: [Route] { (Array(handlers.keys) + Array(shellHandlers.keys)).sorted() }
 
         /// Registers `path`; a malformed or repeated path is a programming error.
         mutating func register(_ path: String, _ handler: @escaping Handler) {
+            handlers[newRoute(path)] = handler
+        }
+
+        /// Registers a shell route: `path` opens the shell in a state.
+        mutating func registerShell(_ path: String, _ handler: @escaping ShellHandler) {
+            shellHandlers[newRoute(path)] = handler
+        }
+
+        private func newRoute(_ path: String) -> Route {
             let route: Route
             do {
                 route = try Route(path)
             } catch {
                 preconditionFailure(error.message)
             }
-            precondition(handlers[route] == nil, "route \(path) is registered twice")
-            handlers[route] = handler
+            precondition(handlers[route] == nil && shellHandlers[route] == nil, "route \(path) is registered twice")
+            return route
         }
 
-        func presentation(for route: Route, configuration: LaunchConfiguration) throws(TestHookError) -> InitialPresentation {
-            guard let handler = handlers[route] else {
-                throw TestHookError(
-                    "-MeguriRoute: no route '\(route)'; registered: \(routes.map(\.path).joined(separator: ", "))"
-                )
+        func resolve(_ route: Route, configuration: LaunchConfiguration) throws(TestHookError) -> Resolution {
+            let context = RouteContext(route: route, configuration: configuration)
+            if let handler = handlers[route] {
+                return .presentation(handler(context))
             }
-            return handler(RouteContext(route: route, configuration: configuration))
+            if let handler = shellHandlers[route] {
+                return .shell(handler(context))
+            }
+            throw TestHookError("-MeguriRoute: no route '\(route)'; registered: \(routes.map(\.path).joined(separator: ", "))")
+        }
+
+        /// The presentation a presenting route shows.
+        func presentation(for route: Route, configuration: LaunchConfiguration) throws(TestHookError) -> InitialPresentation {
+            guard case let .presentation(presentation) = try resolve(route, configuration: configuration) else {
+                throw TestHookError("-MeguriRoute: '\(route)' opens the shell in a state; it presents nothing")
+            }
+            return presentation
         }
     }
 }
