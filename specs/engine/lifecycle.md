@@ -24,7 +24,7 @@ Transitions: `NoCollection`/`Failed` → `Opening` (open) → `Upgrading` (only 
 
 1. The state becomes `Opening`; the gate's upgrade progress moves it to `Upgrading` and back to `Opening`.
 2. Once the gate succeeds, the generation increases by one and the writer thread starts, owning the gate's writer connection. Readers open lazily (L11).
-3. The open steps registered at open (U43's pending-answer replay, U40's rollover check) run in order, each with a privileged handle (L4) of the new generation: their ops are the only ones admitted.
+3. The open steps registered at open (U43's pending-answer replay, U40's rollover check) run in order, each with a privileged handle (L4) of the new generation: their ops are the only ones admitted. The derived store's step comes first, before any op of the open commits (`storage/derived-store` D5).
 4. The state becomes `Ready{generation}`.
 
 A gate refusal or error, or an open step's error, leaves `Failed{reason}` with nothing open.
@@ -105,3 +105,4 @@ Admission stops (queued ops still commit), parked ops fail with `CollectionUnava
 
 - The engine hands out read-only connections by role (KTD3, `storage/open-and-connections` C6): interactive, query, one per search worker, sync, maintenance, two server readers. Each is opened when first asked for and kept until the collection closes or is replaced; one user holds it at a time.
 - Long-lived snapshots go to the sync reader (normal and one-way sync) or the shared maintenance reader (backups, `VACUUM INTO`, stats cache builds, derived rebuilds, planning heavy ops), never to the interactive, query or server readers. A sync holding the sync reader therefore never delays a backup, a stats build, a search or an interactive read.
+- When a reader is leased, the derived store's attachment is checked for the lease's generation: the store's file is attached as schema `derived` when the store is bound to that generation, and detached otherwise (`storage/derived-store` D9).

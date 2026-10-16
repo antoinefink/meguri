@@ -299,6 +299,7 @@ impl Engine {
         let core = Arc::new(CollectionCore {
             exec: Arc::clone(&exec),
             readers: Readers::new(opened.reader_factory()),
+            derived: std::sync::OnceLock::new(),
         });
         let reopen = Reopen {
             clock: Arc::clone(&config.clock),

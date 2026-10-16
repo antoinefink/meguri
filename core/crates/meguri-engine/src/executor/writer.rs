@@ -346,6 +346,7 @@ fn run_op<T>(
                     revlog_added: &derived.revlog_added,
                     revlog_removed: &derived.revlog_removed,
                     config: &derived.config,
+                    collection: derived.collection.as_ref(),
                 },
             );
         }

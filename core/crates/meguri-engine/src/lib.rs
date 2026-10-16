@@ -6,10 +6,12 @@
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
 //! registry, the ports, cancellation and progress. Specs:
 //! `specs/engine/op-model.md`, `change-stream.md`, `lifecycle.md`, `jobs.md`.
+//! The derived store's host (U26): `specs/storage/derived-store.md`.
 
 pub mod cancel;
 pub mod changes;
 pub mod collection;
+pub mod derived_host;
 pub mod error;
 pub mod executor;
 pub mod jobs;
@@ -24,6 +26,7 @@ pub use cancel::CancelToken;
 pub use changes::observers::{CardDelta, ConfigDelta, ObservedCommit};
 pub use changes::stream::{ChangeStream, Event, EventKind, ExtensionEvent, Reservation, Seq, Subscription};
 pub use collection::Collection;
+pub use derived_host::{DerivedHost, DerivedReadiness, Readiness};
 pub use error::EngineError;
 pub use executor::catalog::OpDef;
 pub use executor::op::{OpContext, OpResult, OpSpec, OpTiming, Pending, UndoMeta, WriteDelay};
