@@ -345,6 +345,17 @@ vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebui
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
+@test "ui-test --platform mac runs the named suites in the VM" {
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.mac_runner)" = vm ]
+  [ "$(field .details.platform)" = mac ]
+  called "^vm-xcodebuild test-without-building .* -only-testing:MeguriUITests/NavigationLayoutTests\$"
+  not_called "^host-xcodebuild"
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+}
+
 @test "a locked Mac with its display asleep does not hold up a VM run" {
   stub "$BIN/ioreg" 'echo "+-o Root  <class IORegistryEntry>"; echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes,\"CGSSessionScreenIsLocked\"=Yes})"'
   stub "$BIN/system_profiler" 'echo "{\"SPDisplaysDataType\": [{\"spdisplays_ndrvs\": [{\"_name\": \"Display\", \"spdisplays_asleep\": \"spdisplays_yes\"}]}]}"'
