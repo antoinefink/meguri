@@ -29,14 +29,30 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["ops"],
         serde_json::json!([
+            "add_notetype",
+            "add_stock_notetype",
             "advance",
+            "clone_notetype",
             "db_exec",
+            "ensure_io_notetype",
             "handoff",
             "open",
             "reopen",
             "set_clock",
-            "set_config"
+            "set_config",
+            "update_notetype",
+            "update_notetype.css",
+            "update_notetype.field_options",
+            "update_notetype.rename",
+            "update_notetype.rename_template",
+            "update_notetype.template"
         ])
+    );
+    // dsl.md D8: the new collection is a setup capability; U29's stand-in
+    // (notetype-ops.md T10.2) declares it.
+    assert_eq!(
+        json["supports"]["setup"],
+        serde_json::json!(["config", "new_collection", "notetypes"])
     );
     assert_eq!(
         json["supports"]["observations"],
@@ -45,6 +61,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "cloze",
             "db_dump",
             "fsrs_next",
+            "notetype_structure",
             "schema_objects",
             "search",
             "template",
@@ -112,10 +129,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .iter()
             .any(|k| k == "undo_status")
     );
-    // observations.md O4: blob_decode and package_col (model-ops.md L5) and
-    // notetype_structure (notetype-ops.md T8) are kinds of the language,
-    // which Meguri's executor does not run yet.
-    for kind in ["blob_decode", "package_col", "notetype_structure"] {
+    // observations.md O4: blob_decode and package_col are kinds of the
+    // language, which Meguri's executor does not run yet (model-ops.md L5).
+    for kind in ["blob_decode", "package_col"] {
         assert!(
             json["language"]["observations"]
                 .as_array()

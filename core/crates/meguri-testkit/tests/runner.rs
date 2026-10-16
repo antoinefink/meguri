@@ -1007,10 +1007,9 @@ fn live_scenarios_are_pending_or_live_in_t0_and_never_run_there() {
     registry.new_collection(|_| Ok(()));
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
-    // With the storage area's own handoff adapters too.
-    let mut registry = MeguriExecutor::core_registry();
-    registry.new_collection(|_| Ok(()));
-    let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
+    // With the storage area's own handoff adapters and the note type area's
+    // new collection (notetype-ops.md T10.2) too.
+    let report = suite.run(&[], &MeguriExecutor::new(), "test");
     assert_eq!(report.outcomes[0].status, Status::Live, "{}", report.render_text());
     assert_eq!(report.outcomes[0].repro, "tools/mg conformance --live smoke/chain");
     assert!(report.failures().is_empty());
@@ -1041,16 +1040,14 @@ fn an_op_anki_refuses_is_recorded_and_the_run_goes_on() {
     let suite = Suite::open(root).unwrap();
 
     // delete_notes touches the collection: the run starts from the new
-    // collection (dsl.md D8), a stand-in here.
+    // collection (dsl.md D8), the note type area's (notetype-ops.md T10.2).
     let mut registry = MeguriExecutor::core_registry();
-    registry.new_collection(|_| Ok(()));
     registry.op_rejecting("delete_notes", &["no_such_note"], refuse);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
 
     // A kind outside the op's list is the adapter's error, not a rejection.
     let mut registry = MeguriExecutor::core_registry();
-    registry.new_collection(|_| Ok(()));
     registry.op_rejecting("delete_notes", &["no_such_note"], refuse_oddly);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Error);
@@ -1123,10 +1120,8 @@ fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
         missing.observations.iter().map(String::as_str).collect::<Vec<_>>(),
         ["card"]
     );
-    assert_eq!(
-        missing.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["new_collection"]
-    );
+    // Its new collection is the note type area's (notetype-ops.md T10.2).
+    assert!(missing.setup.is_empty(), "{:?}", missing.setup);
     assert!(report.failures().is_empty(), "{}", report.render_text());
 
     // Once Meguri has what its actor needs, the scenario is live: T0 still
