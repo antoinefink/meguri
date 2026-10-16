@@ -7,9 +7,13 @@
 //! message; [`Query::canonical_text`] writes Anki's canonical text; a
 //! [`Plan`] compiles a query for cards mode or notes mode against a
 //! [`SearchContext`]. Nothing here recurses on the input's nesting depth.
+//!
+//! U83 (`specs/browser/config-keys.md`): [`config`] reads the browser and
+//! search config keys and computes what each user action writes.
 
 pub mod ast;
 pub mod canonical;
+pub mod config;
 pub mod context;
 pub mod error;
 mod lexer;

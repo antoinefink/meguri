@@ -62,6 +62,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `undo_status` | none | `{undo, redo}`: the step an `undo` and a `redo` would apply now, each a step id or `null` (`undo-ops.md` V2, V4); reading it changes neither history |
 | `cloze` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: cloze numbers, `cloze:` and `cloze-only:` output and type-in extraction (`cloze-ops.md` Z1); never reads or changes the scenario's collection |
 | `fsrs_next` | `{param_sets: {<name>: [<number>, ...]}, inputs: [<input>, ...]}`, at most once per observe step | `{rows: [<row>, ...]}`: the FSRS next states of a review card per input, as twelve values (days, stability and difficulty for again, hard, good and easy); never reads or changes the scenario's collection (`float-determinism.md` F3, F5) |
+| `browser_config` | none | `{<key>: <value>, ...}`: the 23 browser and search config keys as Anki's own reads give them, defaults included (`browser-config-ops.md` B2) |
 
 ## O5. Scheduling states
 

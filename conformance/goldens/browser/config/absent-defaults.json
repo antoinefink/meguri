@@ -1,0 +1,59 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "browser_config": {
+          "activeCols": ["noteFld", "template", "cardDue", "deck"],
+          "activeNoteCols": ["noteFld", "note", "template", "noteTags"],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": false,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": {},
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": true,
+          "noteSortType": null,
+          "previewBothSides": false,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {},
+          "setDueBrowser": "0",
+          "sortBackwards": false,
+          "sortType": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc3d7c77948b10a4b8cd3032fc442684b36d8812e1a70ebdc054d37387c41e6e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/config/absent-defaults",
+  "scenario_sha256": "f37a638c484dcc6aab55942501aa103d73b64759cd4dd83234286e3124a9cdad",
+  "tz": "UTC"
+}

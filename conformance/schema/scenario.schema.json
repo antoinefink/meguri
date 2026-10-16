@@ -273,7 +273,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest|undo_status|tag_tree|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -318,6 +318,7 @@
             },
             "deck_tree": { "type": "null" },
             "tag_tree": { "description": "tag-ops.md G9.", "type": "null" },
+            "browser_config": { "description": "browser-config-ops.md B2.", "type": "null" },
             "search": {
               "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
               "type": "array",
@@ -708,6 +709,53 @@
           "required": ["cards", "flag"],
           "additionalProperties": false,
           "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "flag": { "$ref": "#/$defs/uint" } }
+        },
+        "browser_config_set": {
+          "description": "browser-config-ops.md B1: set one browser config key to a whole value of its shape, without an undo entry.",
+          "type": "object",
+          "required": ["key", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "enum": [
+                "activeCols", "activeNoteCols", "sortType", "noteSortType", "sortBackwards", "browserNoteSortBackwards",
+                "browserTableShowNotesMode", "savedFilters", "flagLabels", "collapseSavedSearches", "collapseToday",
+                "collapseFlags", "collapseCardState", "collapseDecks", "collapseNotetypes", "collapseTags",
+                "previewBothSides", "setDueBrowser", "defaultSearchText", "ignoreAccentsInSearch",
+                "restorePositionBrowser", "resetCountsBrowser"
+              ]
+            },
+            "value": true
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "key": {
+                    "enum": [
+                      "sortBackwards", "browserNoteSortBackwards", "browserTableShowNotesMode", "collapseSavedSearches",
+                      "collapseToday", "collapseFlags", "collapseCardState", "collapseDecks", "collapseNotetypes",
+                      "collapseTags", "previewBothSides", "ignoreAccentsInSearch", "restorePositionBrowser",
+                      "resetCountsBrowser"
+                    ]
+                  }
+                }
+              },
+              "then": { "properties": { "value": { "type": "boolean" } } }
+            },
+            {
+              "if": { "properties": { "key": { "enum": ["sortType", "noteSortType", "setDueBrowser", "defaultSearchText"] } } },
+              "then": { "properties": { "value": { "type": "string" } } }
+            },
+            {
+              "if": { "properties": { "key": { "enum": ["activeCols", "activeNoteCols"] } } },
+              "then": { "properties": { "value": { "type": "array", "items": { "type": "string" } } } }
+            },
+            {
+              "if": { "properties": { "key": { "enum": ["savedFilters", "flagLabels"] } } },
+              "then": { "properties": { "value": { "type": "object", "additionalProperties": { "type": "string" } } } }
+            }
+          ]
         },
         "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
         "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },

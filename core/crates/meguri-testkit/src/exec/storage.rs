@@ -241,7 +241,7 @@ fn db_exec(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
 
 /// A scenario's JSON value as a config value (W4): a number with a fraction
 /// or an exponent is a float, one without an integer.
-fn config_value(value: &Value) -> Result<ConfigValue, ExecError> {
+pub(super) fn config_value(value: &Value) -> Result<ConfigValue, ExecError> {
     Ok(match value {
         Value::Null => ConfigValue::Null,
         Value::Bool(b) => ConfigValue::Bool(*b),

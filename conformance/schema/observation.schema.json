@@ -288,6 +288,43 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "browser_config": {
+          "description": "specs/conformance/browser-config-ops.md B2: the 23 browser and search config keys as Anki's own reads give them; the last eight are stored JSON values of any shape.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "browserTableShowNotesMode", "collapseSavedSearches", "collapseToday", "collapseFlags", "collapseCardState",
+            "collapseDecks", "collapseNotetypes", "collapseTags", "previewBothSides", "ignoreAccentsInSearch",
+            "restorePositionBrowser", "resetCountsBrowser", "normalize_note_text", "setDueBrowser", "defaultSearchText",
+            "activeCols", "activeNoteCols", "sortType", "noteSortType", "sortBackwards", "browserNoteSortBackwards",
+            "savedFilters", "flagLabels"
+          ],
+          "properties": {
+            "browserTableShowNotesMode": { "type": "boolean" },
+            "collapseSavedSearches": { "type": "boolean" },
+            "collapseToday": { "type": "boolean" },
+            "collapseFlags": { "type": "boolean" },
+            "collapseCardState": { "type": "boolean" },
+            "collapseDecks": { "type": "boolean" },
+            "collapseNotetypes": { "type": "boolean" },
+            "collapseTags": { "type": "boolean" },
+            "previewBothSides": { "type": "boolean" },
+            "ignoreAccentsInSearch": { "type": "boolean" },
+            "restorePositionBrowser": { "type": "boolean" },
+            "resetCountsBrowser": { "type": "boolean" },
+            "normalize_note_text": { "type": "boolean" },
+            "setDueBrowser": { "type": "string" },
+            "defaultSearchText": { "type": "string" },
+            "activeCols": true,
+            "activeNoteCols": true,
+            "sortType": true,
+            "noteSortType": true,
+            "sortBackwards": true,
+            "browserNoteSortBackwards": true,
+            "savedFilters": true,
+            "flagLabels": true
+          }
+        },
         "add_note_tags": { "description": "specs/conformance/tag-ops.md G1: notes written.", "$ref": "#/$defs/op_count" },
         "remove_note_tags": { "description": "tag-ops.md G2: notes written.", "$ref": "#/$defs/op_count" },
         "delete_tags": { "description": "tag-ops.md G3: notes written.", "$ref": "#/$defs/op_count" },
