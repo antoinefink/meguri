@@ -413,7 +413,7 @@ h29fa8d30a069,python,tag,notetypes,unclassified,,,open
 h2ef9d9aa9a2d,python,tag,notetypes,unclassified,,,open
 h38373cc87211,python,tag,notetypes,unclassified,,,open
 h3db0bf46358b,python,tag,notetypes,unclassified,,,open
-h51425d9fe4e8,python,tag,notetypes,unclassified,,,open
+h51425d9fe4e8,python,tag,notetypes,in-scope,"A cloze note's cards take their ordinals from its cloze numbers, whatever filters the template chains (notes/card-generation G4)",cardgen/cloze/numbers,done
 h6ace0b701063,python,tag,notetypes,unclassified,,,open
 h6ebbfe4093c4,python,tag,notetypes,unclassified,,,open
 h76dd5ce91b19,python,tag,notetypes,unclassified,,,open
@@ -427,11 +427,11 @@ he8993d36dc09,python,tag,notetypes,unclassified,,,open
 heb9c41d43b4a,python,tag,notetypes,unclassified,,,open
 h0477377c20e5,rust,tag,notetypes,unclassified,,,open
 h147c5a8d09f4,rust,tag,notetypes,unclassified,,,open
-h16006d8f10dd,rust,tag,notetypes,unclassified,,,open
+h16006d8f10dd,rust,tag,notetypes,in-scope,"Per-note-type config key names, as the note type's last deck _nt_<id>_lastDeck uses them (notes/note-records A4)",notes/records/add cardgen/placement/new-note,done
 h166c2f8e68af,rust,tag,notetypes,unclassified,,,open
 h1bd8d77a66bd,rust,tag,notetypes,unclassified,,,open
-h1dcc09aa4435,rust,tag,notetypes,unclassified,,,open
-h1eb30503b690,rust,tag,notetypes,unclassified,,,open
+h1dcc09aa4435,rust,tag,notetypes,in-scope,A note field named like a special name replaces it in card generation (notes/card-generation G2),cardgen/normal/conditionals cardgen/normal/specials-and-emptiness,done
+h1eb30503b690,rust,tag,notetypes,in-scope,A standard note whose front names a non-empty field gets that template's card (notes/card-generation G3),cardgen/normal/specials-and-emptiness,done
 h1fa35be82523,rust,tag,notetypes,unclassified,,,open
 h224d46dc7428,rust,tag,notetypes,unclassified,,,open
 h2443a4d809ec,rust,tag,notetypes,unclassified,,,open
@@ -439,11 +439,11 @@ h28dfe5355334,rust,tag,notetypes,unclassified,,,open
 h2a20e219bd99,rust,tag,notetypes,unclassified,,,open
 h41a12a3b4594,rust,tag,notetypes,unclassified,,,open
 h4503178aea0c,rust,tag,notetypes,unclassified,,,open
-h4a0f14238e91,rust,tag,notetypes,unclassified,,,open
+h4a0f14238e91,rust,tag,notetypes,in-scope,"FrontSide counts as empty on the front in card generation (notes/card-generation G2, G3)",cardgen/normal/specials-and-emptiness,done
 h4a6d6847cdd7,rust,tag,notetypes,unclassified,,,open
 h4bc311c17611,rust,tag,notetypes,unclassified,,,open
 h538b6bc82ab1,rust,tag,notetypes,unclassified,,,open
-h5c2b22e2f617,rust,tag,notetypes,unclassified,,,open
+h5c2b22e2f617,rust,tag,notetypes,in-scope,"Several cloze numbers give one card each, ordinal number minus 1 (notes/card-generation G4)",cardgen/cloze/numbers,done
 h5d402c6f2c03,rust,tag,notetypes,unclassified,,,open
 h5dab017523ab,rust,tag,notetypes,unclassified,,,open
 h5f775d295960,rust,tag,notetypes,unclassified,,,open
@@ -461,18 +461,18 @@ h87642d5d640c,rust,tag,notetypes,unclassified,,,open
 h8c43ce71aafa,rust,tag,notetypes,unclassified,,,open
 h8fe1bf6272d1,rust,tag,notetypes,unclassified,,,open
 h9032dd80f5a7,rust,tag,notetypes,unclassified,,,open
-h919a58a1a82a,rust,tag,notetypes,unclassified,,,open
+h919a58a1a82a,rust,tag,notetypes,in-scope,One cloze number gives one card (notes/card-generation G4),cardgen/cloze/numbers,done
 h91e61b0cbd90,rust,tag,notetypes,unclassified,,,open
 h95ef12a29223,rust,tag,notetypes,unclassified,,,open
 h9836b2bac499,rust,tag,notetypes,unclassified,,,open
-h9c3d56d899d8,rust,tag,notetypes,unclassified,,,open
-h9e510243ea25,rust,tag,notetypes,unclassified,,,open
+h9c3d56d899d8,rust,tag,notetypes,in-scope,"A Tags section on the front requires no card for an untagged note, which still gets ordinal 0 (notes/card-generation G3, G6)",cardgen/normal/conditionals,done
+h9e510243ea25,rust,tag,notetypes,in-scope,Random insertion positions are a seeded draw from the counter value (notes/deck-placement-and-position P4),cardgen/position/random,done
 ha1bb31fa12da,rust,tag,notetypes,unclassified,,,open
 ha2b5da04d17c,rust,tag,notetypes,unclassified,,,open
 ha5a622e9741a,rust,tag,notetypes,unclassified,,,open
 ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
 haa4b9cb7903d,rust,tag,notetypes,unclassified,,,open
-haf0842771063,rust,tag,notetypes,unclassified,,,open
+haf0842771063,rust,tag,notetypes,in-scope,"A Tags section on the front requires a card for a tagged note (notes/card-generation G2, G3)",cardgen/normal/conditionals,done
 hb543398f1a4c,rust,tag,notetypes,unclassified,,,open
 hb560a619968b,rust,tag,notetypes,unclassified,,,open
 hb8d4e91cec36,rust,tag,notetypes,unclassified,,,open
@@ -487,7 +487,7 @@ hdf581e6e5983,rust,tag,notetypes,unclassified,,,open
 he9ab9d659d6c,rust,tag,notetypes,unclassified,,,open
 hebcc44832da5,rust,tag,notetypes,unclassified,,,open
 heee51bc192e5,rust,tag,notetypes,unclassified,,,open
-hf0e8584063a7,rust,tag,notetypes,unclassified,,,open
+hf0e8584063a7,rust,tag,notetypes,in-scope,Generation skips the ordinals the note's cards already have (notes/card-generation G7),cardgen/normal/edits-only-add,done
 hf53f4d36434a,rust,tag,notetypes,unclassified,,,open
 hf6670629d7af,rust,tag,notetypes,unclassified,,,open
 hf8bc5a7dc25e,rust,tag,notetypes,unclassified,,,open

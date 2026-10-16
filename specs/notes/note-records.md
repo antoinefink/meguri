@@ -53,7 +53,7 @@ The new row holds:
 - `guid` from A1;
 - `id`: allocated by `storage/ids-usn-mtime` I2 with I3's cap, before any of the note's cards.
 
-Then the note's cards are created (`notes/card-generation` G1, G6) and placed (`notes/deck-placement-and-position`). The operation sets `col.mod` to `now_ms` once.
+Then the note's cards are created (`notes/card-generation` G1, G6) and placed (`notes/deck-placement-and-position`). The operation sets `col.mod` to `now_ms` once. It returns the new note's id and the number of cards it created (at least 1).
 
 Examples (scenario `notes/records/add`):
 
@@ -82,7 +82,7 @@ Anki writes the three keys on every add, whichever program adds. Meguri's local 
 ## A5. Undo and bulk adds
 
 - An add is one undo step, "Add Note" (`engine/undo`). Undo removes the note, its cards, the tags it registered and its config writes; it adds no grave.
-- A bulk add takes a list of A1 inputs and runs them in list order as one operation and one undo step, "Add Note". Each note is handled exactly as a single add: its own id, its own position draw (P2), its own A4 writes when the flag is set. Importers (U120) and local servers (U139) use it.
+- A bulk add takes a list of A1 inputs and runs them in list order as one operation and one undo step, "Add Note". Each note is handled exactly as a single add: its own id, its own position draw (P2), its own A4 writes when the flag is set. It returns the new note ids in list order. Importers (U120) and local servers (U139) use it.
 
 ## U1. Updating a note: input
 

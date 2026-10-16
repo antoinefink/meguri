@@ -48,7 +48,7 @@ Anki writes the note's id (decimal) in the first column, under the header that n
 
 ## L3. When
 
-- The note deletion of `notes/note-records` D1 appends one line per note that exists when it runs, in ascending note id order, before it removes the rows. A deletion whose notes all no longer exist appends nothing and does not create the file.
+- The note deletion of `notes/note-records` D1 appends one line per note that exists when it runs, in ascending note id order, before it removes the rows. A deletion whose notes all no longer exist appends nothing and does not create the file (Anki's shell creates it with the three header lines even then; nothing observes the difference).
 - One deletion opens the file once, writes the header when needed and all its lines, and closes it.
 - Nothing else appends: deleting a deck or a note type, Empty Cards, removing cards that leave a note empty (`notes/note-records` D2), incoming sync deletions, imports, undo and redo.
 
