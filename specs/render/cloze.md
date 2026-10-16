@@ -192,7 +192,7 @@ The input is the field's stored text and the output keeps its HTML as written (`
   | not active | `cloze-inactive` |
   | back and active | `cloze-highlight` |
 
-  The element is `<div class="` class `" data-ordinal="` L `" ` + the shape attributes + `></div>`. The shape attributes, produced from the shape text, are U63/U64's (`render/image-occlusion`).
+  The element is `<div class="` class `" data-ordinal="` L `" ` + the shape attributes + `></div>`. The shape attributes, produced from the shape text, are U64's (`render/image-occlusion-render#I2`).
 - C8 still applies to the whole output afterwards.
 - U61 provides this element through a hook that U64 fills in. Until then the hook returns the empty string. No U61 scenario renders an image-occlusion cloze with `cloze:`; `render/cloze/numbers` and `render/cloze/only` contain one, where it is an ordinary cloze.
 - C5, C9 and C10 treat image-occlusion clozes as ordinary clozes: their numbers count, and their plain content is the text starting with `image-occlusion:`.

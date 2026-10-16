@@ -57,7 +57,7 @@ For each case, independently:
 3. Apply the blank check (T10) to the note type's kind and the field map. When blank, the value is the question output with `answer` null and `empty` true. The answer template is not evaluated.
 4. Otherwise render `back` on the answer side with the FrontSide text equal to the question output of step 2. On an error, the value is that error with side `answer`; otherwise the two outputs with `empty` false.
 
-The outputs are the template engine's text only: no audio or TTS tag is extracted, nothing is turned into play markers, LaTeX is not rendered and no media name is changed (those are U62's, observed by `render`). FrontSide therefore carries the question output as it is, where review would pass the play-marker form (P4).
+The outputs are the template engine's text only: no audio or TTS tag is extracted, nothing is turned into play markers, LaTeX is not rendered and no media name is changed (those are U62's and U64's, observed by `render` and `review_html`). FrontSide therefore carries the question output as it is, where review would pass the play-marker form (P4).
 
 ### Q1.5 Value
 

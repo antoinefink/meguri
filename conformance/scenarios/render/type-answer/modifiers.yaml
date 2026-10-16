@@ -1,0 +1,34 @@
+# The `nc` marker (specs/render/type-answer.md A4.1, A6, R964, R537): `type:nc:` and
+# the legacy `type-nc:` ignore combining characters in the comparison only;
+# the box is the same. Chains that Anki 26.09.3 reads as the plain marker
+# (`type:ci:`, combined modifiers) compare as plain markers here; Meguri's own
+# reading of them is render/type-answer/meguri-modifiers.
+id: render/type-answer/modifiers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Accents
+      fields: [Word, Spelling]
+      templates:
+        - {name: Plain, front: "1 {{Word}}{{type:Spelling}}", back: "{{FrontSide}}<hr id=answer>{{Spelling}}"}
+        - {name: No combining, front: "2 {{Word}}{{type:nc:Spelling}}", back: "{{FrontSide}}<hr id=answer>{{Spelling}}"}
+        - {name: Legacy, front: "3 {{Word}}{{type-nc:Spelling}}", back: "{{FrontSide}}<hr id=answer>{{Spelling}}"}
+  notes:
+    # #c1-#c3
+    - {notetype: Accents, fields: [CV, résumé]}
+    # #c4-#c6
+    - {notetype: Accents, fields: [book, "ほん<br>が"]}
+    # #c7-#c9
+    - {notetype: Accents, fields: [station, "¿Dónde está la estación de tren?"]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: resume}
+          - {card: "#c2", typed: resume}
+          - {card: "#c3", typed: resume}
+          - {card: "#c2", typed: résumé}
+          - {card: "#c2", typed: resumes}
+          - {card: "#c4", typed: ほん か}
+          - {card: "#c5", typed: ほん か}
+          - {card: "#c8", typed: donde esta la estacion de tre}
+          - {card: "#c7", typed: donde esta la estacion de tre}

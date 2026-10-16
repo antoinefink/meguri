@@ -1,0 +1,1227 @@
+{
+ "id": "render/type-answer/corpus/compare-01",
+ "description": "Generated type-in comparisons, part 1 of 10 (corpora/type-answer/generate.py).",
+ "tags": [
+  "generated"
+ ],
+ "clock": {
+  "tz": "UTC",
+  "start": "2030-01-15T10:00:00"
+ },
+ "steps": [
+  {
+   "observe": [
+    {
+     "type_answer": {
+      "fns": [
+       "compare",
+       "compare_nc"
+      ],
+      "inputs": [
+       [
+        "々 a-b",
+        "々 a-b"
+       ],
+       [
+        "½, ぱん, \"quoted\"",
+        "½, ぱんd \"quoted\""
+       ],
+       [
+        "Tokyo",
+        "Toky"
+       ],
+       [
+        "̀勉強する ①② ½",
+        "̀u強する ①② ½"
+       ],
+       [
+        "a-b",
+        "a-"
+       ],
+       [
+        "<!-- c -->مَدْرَسَة",
+        "مدرسة"
+       ],
+       [
+        "<div>Tokyo &amp; ①②</div><div></div>",
+        "Tokyo か①②"
+       ],
+       [
+        "　읽다&amp;nbsp;Москва<br />",
+        "읽다 оМсква"
+       ],
+       [
+        "<b><span style=\"color: red\">สวัสดี</span></b>",
+        "สวัสดб"
+       ],
+       [
+        "ﬁne Ébène[sound:say it.mp3]",
+        "ﬁne Ébène"
+       ],
+       [
+        "<b>東京</b>",
+        "東京"
+       ],
+       [
+        "c'est",
+        "c'es゚t"
+       ],
+       [
+        "jalapeño, 学习",
+        "jгalapeño, 学习"
+       ],
+       [
+        "<div><i>學習 ıtır ?! สวัสดี</i></div>",
+        "學習ıtır?!สวัสดี"
+       ],
+       [
+        "&nbsp;❤̇&nbsp;Full[sound:say it.mp3]",
+        "❤̇ ｕｌｌ"
+       ],
+       [
+        "[sound:a.ogg]naïve 學習 👍 Москва &quot;quoted&quot; naïve, naïve 學習 👍 Москва &quot;quoted&quot; naïve, 学习 λόγος नमस्ते 한국어 crème brûlée नमस्तेَ, naïve 學習 👍 Москва &quot;quoted&quot; naïve ❤ ひらがな 🇯🇵 naïve 學習 👍 Москва &quot;quoted&quot; naïve naïve 學習 👍 Москва &quot;quoted&quot; naïve",
+        "naïve 學習 👍 Москва \"quoted\" naïve, naïve 學習 👍 Москва \"quoted\" naïve, 学习 λόγος नमस्ते 한국어 crème brûlée नमस्तेَ, naïve 學習 👍 Москва \"quoted\" naïve ❤ ひらがな 🇯🇵 naïve 學習 👍 Москва \"quoted\" naïve naïve 學習 👍 Москва \"quoted\" naïve"
+       ],
+       [
+        "<i>日本語</i>",
+        "日本"
+       ],
+       [
+        "façade 🇯🇵",
+        "façade "
+       ],
+       [
+        "한국어",
+        "한국어"
+       ],
+       [
+        " <!-- c -->كَتَبَ́ ",
+        "كَتبَ́"
+       ],
+       [
+        "<br>東京 كَتَبَ",
+        "東京 كَتَبs"
+       ],
+       [
+        "λόγος",
+        "λογος"
+       ],
+       [
+        "jalapeño",
+        "jalapeno"
+       ],
+       [
+        "<br>3.14",
+        "ぱん"
+       ],
+       [
+        "你好, ıtır, 한국어<br>[sound:say it.mp3]",
+        "你好, ıtır, t국어"
+       ],
+       [
+        "<div><i>ıtır</i></div>",
+        "ıtr"
+       ],
+       [
+        "&nbsp;jalapeño",
+        "jalapeño"
+       ],
+       [
+        "ǅemal",
+        ""
+       ],
+       [
+        "สวัสดี ™ cat",
+        "สวัสดี ™ cat"
+       ],
+       [
+        "\n한국어, über",
+        "한국ä어, über"
+       ],
+       [
+        "❤️ 3.14 你好 كتب",
+        "❤️ 3δ.14 你好 كت ب"
+       ],
+       [
+        "नमस्ते<div>ǅemal",
+        "नमस्तेǅemal"
+       ],
+       [
+        "읽다, كَتَبَ, a-b",
+        ""
+       ],
+       [
+        "house&nbsp;",
+        "house"
+       ],
+       [
+        "Ångström",
+        "Ång漢tröm"
+       ],
+       [
+        "a-b",
+        "aß-b"
+       ],
+       [
+        "&nbsp;[sound:a.ogg]Madrid, jalapeño, ǅemal, résumé",
+        "madrid, jalapeño, ǆemal, résumé"
+       ],
+       [
+        "the end",
+        "the end"
+       ],
+       [
+        "<i>&quot;quoted&quot; &quot;quoted&quot;</i>",
+        "\"quoted\" \"quoted\"\"quoted\" \"quoted\""
+       ],
+       [
+        "\"quoted\"",
+        "quoted\""
+       ],
+       [
+        "½",
+        "F"
+       ],
+       [
+        "<span style=\"color: red\">كَتَبَ, ❤️</span>",
+        "كتب, ❤"
+       ],
+       [
+        "हिन्दी, 읽다",
+        "हिन्दी, 읽다"
+       ],
+       [
+        "λόγος, ΟΔΟΣ",
+        "ガギグ über"
+       ],
+       [
+        "々 house",
+        "々 house"
+       ],
+       [
+        "<br>Ébène 👍 كَتَبَ Ærø̇",
+        "Ébène 👍 كَتَبp Ærø̇"
+       ],
+       [
+        "house &amp;amp; щука",
+        "House щука"
+       ],
+       [
+        "?! 你好",
+        "?! 你好"
+       ],
+       [
+        "\tοδός̃\n",
+        "οδόx̃"
+       ],
+       [
+        "3.14",
+        ""
+       ],
+       [
+        "مَدْرَسَة שָׁלוֹם[sound:say it.mp3]",
+        "مَدْرَسَة שָׁלוֹם"
+       ],
+       [
+        "\n½َ<img src=\"pic.png\">",
+        "ßt½"
+       ],
+       [
+        "　smörgåsbord",
+        "smörgåsbord"
+       ],
+       [
+        "<i>你好️</i>",
+        "你好う"
+       ],
+       [
+        "　ΟΔΟΣ smörgåsbord",
+        "ΟΔΟΣ  smörgåsbord"
+       ],
+       [
+        "<i>ΟΔΟΣ̵ 🇯🇵</i>",
+        ""
+       ],
+       [
+        "한국어",
+        "국어"
+       ],
+       [
+        "house οδός",
+        "house οδός"
+       ],
+       [
+        " <i>Ελλάδα️</i> ",
+        "Ελλάδαá️"
+       ],
+       [
+        "한국어 ёлка 東京",
+        "한국 어ёлка 東京"
+       ],
+       [
+        "house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño<br>house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño<br>house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño<br>house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño,<br>שלום<br>नमस्ते<br>façade,<br>x²<br>한국어<br>ёлка゙<br>house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño<br>house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño,<br>house<br>🇯🇵<br>ёлка<br>Ærø<br>jalapeño",
+        "house 🇯🇵 ёлка Ærø jalapeño house 🇯🇵 ёлка Ærø jalapeño house 🇯🇵 ёлка Ærø jalapeño house 🇯🇵 ёлка Ærø jalapeño, שלום नमस्ते façade, x² 한국어 ёлка゙ house 🇯🇵 ёлка Ærø jalapeño house 🇯🇵 ёлка Ærø jalapeño, house 🇯🇵 ёлка Ærø jalapeño"
+       ],
+       [
+        "<b>學習 ёлка (x + y) 学习 👩‍👩‍👧 the end Ελλάδα 👍🏽 smörgåsbord 學習 ёлка (x + y) 学习 👩‍👩‍👧 the end, 學習 ёлка (x + y) 学习 👩‍👩‍👧 the end c'est naïve Tokyo 學習 ёлка (x + y) 学习 👩‍👩‍👧 the end 學習 ёлка (x + y) 学习 👩‍👩‍👧 the end</b>",
+        "學習 елкう (x + y) 学习 👩‍👩‍👧 the end Ελλαδα 👍🏽 smorgasbord 學習 елка (x + y) 学习 👩‍👩‍👧 the end, 學習 елка (x + y) 学习 👩‍👩‍👧 the end c'est naive Tokyo 學習 елка (x + y) 学习 👩‍👩‍👧 the end 學習 елка (x + y) 学习 👩‍👩‍👧 the end"
+       ],
+       [
+        "한국어",
+        "한국어"
+       ],
+       [
+        "<!-- c -->カタカナ, \"quoted\"<img src=\"pic.png\">",
+        "カタカナ, \"quoted\""
+       ],
+       [
+        "a-b Ærø&nbsp;",
+        "a-b Ærø"
+       ],
+       [
+        "<br>בְּרֵאשִׁית",
+        "בראשית"
+       ],
+       [
+        "cat",
+        "Cat"
+       ],
+       [
+        "&nbsp;дом",
+        "дом"
+       ],
+       [
+        "smörgåsbord",
+        "smörgåsbord"
+       ],
+       [
+        "3.14, Ångström",
+        "3.14, Ångíström"
+       ],
+       [
+        "ﬁne Straße ?!",
+        "ﬁnあ Straße ?!"
+       ],
+       [
+        "　❤️ naïve 👍",
+        "❤️ naïve 👍"
+       ],
+       [
+        "Ｆｕｌｌ<br />",
+        "Ｆｕｌｌ"
+       ],
+       [
+        "❤<br />",
+        " ❤"
+       ],
+       [
+        "<span style=\"color: red\">Madrid</span>",
+        "Madrid"
+       ],
+       [
+        "َカタカナ",
+        "َカタカナ"
+       ],
+       [
+        "щука, - дом, - 日本語, - 勉強する<img src=\"pic.png\">",
+        "щука, дом, 日本語, 強勉する"
+       ],
+       [
+        "<i>οδός̧ ½ Москва façade</i>",
+        "οδός̧ ½k Москва façade"
+       ],
+       [
+        "house",
+        "house"
+       ],
+       [
+        "&nbsp;Straße 東京",
+        "?!, x², ひらがな"
+       ],
+       [
+        "<i><span style=\"color: red\">ǅemal, ΟΔΟΣ</span></i>",
+        "ǅemal, ΟΔΟΣ"
+       ],
+       [
+        "<span style=\"color: red\">괜찮아요</span>",
+        "괜β찮아요"
+       ],
+       [
+        "<span style=\"color: red\">c'est,<br>Ångström,<br>مَدْرَسَة</span>",
+        "c'est, ångström, مَدْرَسَة"
+       ],
+       [
+        "<!-- c --><b>crème brûlée cat cat</b>",
+        "crème brûlée cat cat"
+       ],
+       [
+        "<span style=\"color: red\">ひらがな, 3.14, ❤️</span>",
+        "東京 カタカナ"
+       ],
+       [
+        "\t한국어, smörgåsbord\n",
+        "한국어"
+       ],
+       [
+        "smörgåsbord Ångström İstanbul щука كتب smörgåsbord Ångström İstanbul щука كتب smörgåsbord Ångström İstanbul щука كتب, 한국어 مَدْرَسَة नमस्ते smörgåsbord Ångström İstanbul щука كتب, smörgåsbord Ångström İstanbul щука كتب",
+        "smörgåsbord Ångström İstannbul щука كتب smörgåsbord Ångström İstanbul щука كتب smörgåsbord Ångström İstanbul щука كتب, 한국어 مَدْرَسَة नमस्ते smörgåsbord Ångström İstanbul щука كتب, smörgåsbord Ångström İstanbul щука كتب"
+       ],
+       [
+        "ｶﾀｶﾅ&nbsp;Łódź",
+        "ｶﾀｶﾅ łÓDŹ"
+       ],
+       [
+        "[sound:a.ogg] ガギグ゚ ",
+        "ガギグ゚"
+       ],
+       [
+        "cat<br>c'est",
+        "дом ﬁne"
+       ],
+       [
+        "<!-- c -->مَدْرَسَة 👍🏽",
+        "مدرسة 👍🏽"
+       ],
+       [
+        "façade 々",
+        "açade 々"
+       ],
+       [
+        "Ébèneَ 괜찮아요 カタカナ",
+        "Ébèneَ 괜찮아요 カタカナ"
+       ],
+       [
+        "\nǅemalָ",
+        "ǅemalָ"
+       ],
+       [
+        "ガギグ",
+        "가ギグ"
+       ],
+       [
+        "<!-- c -->naïve",
+        "nïve"
+       ],
+       [
+        "❤️,\nָjalapeño[sound:say it.mp3]",
+        "❤️, ָjalapeño"
+       ],
+       [
+        "\"quoted\"<br />",
+        "\"quoted\""
+       ],
+       [
+        " がっこう[sound:say it.mp3] ",
+        "がっこ"
+       ],
+       [
+        "a/b̧, ™, Київ",
+        "aa/b̧, ™, Київ"
+       ],
+       [
+        "ぱん゚[sound:say it.mp3]",
+        "はん"
+       ],
+       [
+        "<!-- c -->Ébène c'est",
+        "Ébènec'est"
+       ],
+       [
+        "ぱん<br />",
+        "ぱ漢ん"
+       ],
+       [
+        "学习",
+        ""
+       ],
+       [
+        "ภาษาไทย, Ångström",
+        "ภาษาไย, Ångström"
+       ],
+       [
+        "naïve 学习 ıtır ぱん",
+        "naïve ú学习 ıtır ぱん"
+       ],
+       [
+        "　the end",
+        "the ewd"
+       ],
+       [
+        "ıtır<br />",
+        "gıtır"
+       ],
+       [
+        "ガギグ",
+        "カキク"
+       ],
+       [
+        "　ǅemalָ",
+        "ǅemalָ"
+       ],
+       [
+        "Київ",
+        "acade בראשית"
+       ],
+       [
+        "①② the end 々",
+        "①②theend々"
+       ],
+       [
+        "Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧, Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧, 勉強する a/b ❤️ がっこう カタカナ كتب Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧 Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧 Ｆｕｌｌ 3.14 c'est, Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧 Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧",
+        "Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧, Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧, 勉強する a/b ❤️ がっこう カタカナ كتب Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧 Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧 Ｆｕｌｌ 3.14 c'est, Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧 Tokyo 学习 42 ﬁne สวัสดี 👩‍👩‍👧"
+       ],
+       [
+        "\n勉強する\n™",
+        "勉強する ™"
+       ],
+       [
+        "c'est",
+        "cbest"
+       ],
+       [
+        "日本語, ΟΔΟΣ",
+        "日本語, ΟΔΟΣ"
+       ],
+       [
+        "ㄱㄴㄷ<img src=\"pic.png\">",
+        "ㄱㄴㄷ"
+       ],
+       [
+        "ひらがな<br />",
+        "oひらがな"
+       ],
+       [
+        "résumé ½ Ærø[sound:say it.mp3]",
+        "réqumé ½ Ærø"
+       ],
+       [
+        "Ελλάδαשלום\"quoted\"3.14,Ελλάδαשלום\"quoted\"3.14\"quoted\"읽다МоскваΕλλάδαÅngströmtheend,Ελλάδαשלום\"quoted\"3.14Straße½TokyoΕλλάδαשלום\"quoted\"3.14勉強するكَتَبَ々,々ıtır한국어Ελλάδαשלום\"quoted\"3.14<br />",
+        "Ελλάδα שלום \"quoted\" 3.14, Ελλάδα שלום \"quoted\" 3.14 \"quoted\" 읽다 Москва Ελλάδα Ångström the end, Ελλάδα שלום \"quoted\" 3.14 Straße 1⁄2 Tokyo Ελλάδα שלום \"quoted\" 3.14 勉強する كَتَبَ 々, 々 ıtır 한국어 Ελλάδα שלום \"quoted\" 3.14"
+       ],
+       [
+        "בְּרֵאשִׁית ぱん[sound:say it.mp3]",
+        "בְּר나אשִׁית ぱん"
+       ],
+       [
+        "™゙<br>",
+        "™゙ ™゙"
+       ],
+       [
+        "　괜찮아요",
+        "괜찮아요"
+       ],
+       [
+        "[sound:a.ogg]ㄱㄴㄷ Київ",
+        "ㄴㄱㄷ Київ"
+       ],
+       [
+        "crème brûlée<br>",
+        "crème brûlée"
+       ],
+       [
+        "jalapeño Straße",
+        "jalaweño Straße"
+       ],
+       [
+        "3.14, Straße, 👍, ガギグ",
+        "3.14, Straße, 👍, ガギグ"
+       ],
+       [
+        "a/b",
+        "a/b"
+       ],
+       [
+        "<b>Straße️</b>",
+        "Strßae️"
+       ],
+       [
+        "<div>house</div><div></div>",
+        "house"
+       ],
+       [
+        "\t42 你好\n",
+        "42 好"
+       ],
+       [
+        "Madrid",
+        ""
+       ],
+       [
+        "<i>שלום a/b</i>",
+        "שלוhם a/b"
+       ],
+       [
+        "a-b&nbsp;",
+        "b-b"
+       ],
+       [
+        "🇯🇵",
+        "🇯🇵"
+       ],
+       [
+        "<br>Madrid",
+        "Madrid"
+       ],
+       [
+        "<span style=\"color: red\">house 勉強する 👩‍👩‍👧 οδός</span>",
+        "house 勉強する 👩‍👩‍👧 οόδς"
+       ],
+       [
+        "\"quoted\", كَتَبَ, ｶﾀｶﾅ<img src=\"pic.png\">",
+        "\"QUOTED\", كَتَبَ, ｶﾀｶﾅ"
+       ],
+       [
+        "<br><div>İstanbul</div><div></div>",
+        "İstanbul İstanbul"
+       ],
+       [
+        "\t<b>שָׁלוֹם, &amp;amp; Ærø</b>\n",
+        "שָgלוֹם, Ærø"
+       ],
+       [
+        "a/b, ㄱㄴㄷ[sound:say it.mp3]<br />",
+        "a/b, ㄱㄴㄷ"
+       ],
+       [
+        "ぱん, Москва, ぱん",
+        "ぱん, Москва, ぱん"
+       ],
+       [
+        "<div>がっこう</div><div></div>",
+        "pっこう"
+       ],
+       [
+        " हिन्दी über ",
+        "हनद uber"
+       ],
+       [
+        "οδός 읽다",
+        "Οδός 읽다"
+       ],
+       [
+        "<span style=\"color: red\"><div>house(x+y)</div><div></div></span>",
+        "housöe (x + y)"
+       ],
+       [
+        "<i>ﬁne résumé ภาษาไทย שלום jalapeño дом नमस्ते ❤️ ❤ Ångström 学习 smörgåsbord, ﬁne résumé ภาษาไทย שלום jalapeño дом ½̵ ﬁne the end, οδός مَدْرَسَة ıtır ﬁne résumé ภาษาไทย שלום jalapeño дом, ﬁne résumé ภาษาไทย שלום jalapeño дом</i><br>",
+        "ﬁne résumé ภาษาไทย שלום jalapeño дом नमस्ते ❤️ ❤ Ånhström 学习 smörgåsbord, ﬁne résumé ภาษาไทย שלום jalapeño дом ½̵ ﬁne the end, οδός مَدْرَسَة ıtır ﬁne résumé ภาษาไทย שלום jalapeño дом, ﬁne résumé ภาษาไทย שלום jalapeño дом ﬁne résumé ภาษาไทย שלום jalapeño дом नमस्ते ❤️ ❤ Ånhström 学习 smörgåsbord, ﬁne résumé ภาษาไทย שלום jalapeño дом ½̵ ﬁne the end, οδός مَدْرَسَة ıtır ﬁne résumé ภาษาไทย שלום jalapeño дом, ﬁne résumé ภาษาไทย שלום jalapeño дом"
+       ],
+       [
+        "<br><!-- c -->Ｆｕｌｌ",
+        "Ｆｕｌ"
+       ],
+       [
+        "ガギグָ",
+        "ガَギグָ"
+       ],
+       [
+        "<br>(x + y), ?!️",
+        "(x + y), ?!️"
+       ],
+       [
+        "كَتَبَ, ぱん",
+        "كَتَبَ, ぱん"
+       ],
+       [
+        "<b>Tokyo 한국어 괜찮아요</b>",
+        "Tokyo 한국어 괜찮아요"
+       ],
+       [
+        "　дом, كتب",
+        "ひらがな️ Ｆｕｌｌ"
+       ],
+       [
+        "<br>\nनमस्ते",
+        ""
+       ],
+       [
+        "\nλόγος",
+        "λόγος"
+       ],
+       [
+        "Straßeָ, a/b",
+        "Straße, a/b"
+       ],
+       [
+        "3.14 ❤",
+        " 3.14 ❤"
+       ],
+       [
+        "crème brûlée",
+        "crèmejbrûlée"
+       ],
+       [
+        "　\"quoted\"ָ 東京",
+        "\"quotedָ\" 東京"
+       ],
+       [
+        "<div>\nבְּרֵאשִׁית, ①②</div>",
+        "בְּרֵאשִׁית, ①②"
+       ],
+       [
+        "ёлкӓ Ångström[sound:say it.mp3]",
+        "ёлкӓ Ångぎtröm"
+       ],
+       [
+        "한국어̵ smörgåsbord[sound:say it.mp3]",
+        "λόγος̇"
+       ],
+       [
+        "½[sound:say it.mp3]",
+        "i"
+       ],
+       [
+        "&nbsp;你好, ｶﾀｶﾅ",
+        "你好, ｶﾀｶﾅ"
+       ],
+       [
+        "كَتَبَ̈&nbsp;👍🏽",
+        "كَتَبَ̈ 👍🏽"
+       ],
+       [
+        "housè",
+        "house"
+       ],
+       [
+        "👩‍👩‍👧 crème brûlée 👩‍👩‍👧ָ<img src=\"pic.png\">",
+        "👩‍👩‍👧 crème brûlée n👩‍👩‍👧ָ"
+       ],
+       [
+        "дом हिन्दी",
+        "дом हनद"
+       ],
+       [
+        "<div>שלום</div><div></div>",
+        "שלום"
+       ],
+       [
+        "house 學習 the end",
+        "house"
+       ],
+       [
+        "สวัสดี",
+        "สวสัดี"
+       ],
+       [
+        "　&nbsp;cat",
+        "at"
+       ],
+       [
+        "&nbsp;<b>日本語</b>",
+        "日本語"
+       ],
+       [
+        "(x + y)",
+        "(x + y)"
+       ],
+       [
+        "<div>괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" ภาษาไทย ½ مَدْرَسَة 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\", 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" résumé हिन्दी 한국어</div><div></div>",
+        "괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" ภาษาไทย ½ مَدْرَسَة 괜찮아요 Łódź \"qoted\" 괜찮아요 Łódź \"quoted\", 괜찮아요 Łódź \"quoted\" 괜찮아요 Łódź \"quoted\" résumé हिन्दी 한국어"
+       ],
+       [
+        "שָׁלוֹם̧ ½<img src=\"pic.png\">",
+        "ָׁלוֹם̧ ½"
+       ],
+       [
+        "Ångström[sound:say it.mp3]",
+        "Ångsrtöm"
+       ],
+       [
+        "the end",
+        "the 가nd"
+       ],
+       [
+        "हिन्दी゚<img src=\"pic.png\">",
+        "❤️ naïve"
+       ],
+       [
+        "crème brûlée 42 Straße नमस्ते",
+        " crème brûlée 42 Straße नमस्ते"
+       ],
+       [
+        "ıtır",
+        "δrıtızr"
+       ],
+       [
+        "学习 👩‍👩‍👧",
+        "学习 👩‍👩‍ü"
+       ],
+       [
+        "Łódź カタカナ a/b",
+        "Łódźa カタカナ a/b"
+       ],
+       [
+        "<b>\nКиїв 👍 smörgåsbord</b>",
+        "Київ 👍 smörgåsbord"
+       ],
+       [
+        "<br>괜찮아요[sound:say it.mp3]",
+        "괜찮아요"
+       ],
+       [
+        "[sound:a.ogg]👩‍👩‍👧 42َ",
+        "👩‍👩‍👧 "
+       ],
+       [
+        " 々 كَتَبَ ",
+        "々 كتب"
+       ],
+       [
+        "the end",
+        "THE END"
+       ],
+       [
+        "Madrid Ångström̧",
+        "аadrid Ångström̧"
+       ],
+       [
+        "the end ?!",
+        "he end ?!"
+       ],
+       [
+        "学习 Київ",
+        "学习Київ"
+       ],
+       [
+        "<!-- c -->smörgåsbord̵",
+        "smorgasbord"
+       ],
+       [
+        "Ærø",
+        " Ærø"
+       ],
+       [
+        "学习",
+        "k学习"
+       ],
+       [
+        "Москва - ぱん - a/b - ❤ - 👩‍👩‍👧 - 東京 - Москва - ぱん - a/b - ❤ - 👩‍👩‍👧 - 東京 - Москва - ぱん - a/b - ❤ - 👩‍👩‍👧 - 東京, - Москва - ぱん - a/b - ❤ - 👩‍👩‍👧 - 東京 - naïve - สวัสดี - smörgåsbord, - naïve - בְּרֵאשִׁית - ｶﾀｶﾅ, - Москва - ぱん - a/b - ❤ - 👩‍👩‍👧 - 東京, - Москва - ぱん - a/b - ❤ - 👩‍👩‍👧 - 東京",
+        "Москва ぱん a/b ❤ 👩‍👩‍👧 東京 Москва ぱん a/b ❤ 👩‍👩‍👧 東京 Москва ぱん a/b ❤ 👩‍👩‍👧 東京, Москва ぱん a/b ❤ 👩‍👩‍👧 東京 naïve สวัสดี smörgåsbord, naïve בְּרֵאשִׁית ｶﾀｶﾅ, Москва ぱん a/b ❤ 👩‍👩‍👧 東京, Москва ぱん a/b ❤ 👩‍👩‍👧 東京"
+       ],
+       [
+        "<i>👩‍👩‍👧</i>&nbsp;",
+        "👩‍👩‍字"
+       ],
+       [
+        "cat, ภาษาไทย",
+        "cat, ภาษา́ไทย"
+       ],
+       [
+        "<div><div>jalapeño, สวัสดี</div><div></div></div>",
+        "jalapeño, สวัสดี"
+       ],
+       [
+        "?! caẗ",
+        "?が caẗ"
+       ],
+       [
+        "👍, ™&nbsp;",
+        "👍, ™"
+       ],
+       [
+        "勉強する",
+        "勉強る"
+       ],
+       [
+        "Ångström",
+        "Ångtröm"
+       ],
+       [
+        "jalapeño, Ébène<img src=\"pic.png\">",
+        "jalapeño, Ébène"
+       ],
+       [
+        "̃كَتَبَ, ǅemal",
+        "̃كَتَبَ, ǅemal "
+       ],
+       [
+        "ﬁne ひらがなَ Київ ❤️ がっこう, ﬁne ひらがなَ Київ ❤️ がっこう, ﬁne ひらがなَ Київ ❤️ がっこう ǅemal ™ ぱん ﬁne ひらがなَ Київ ❤️ がっこう ﬁne ひらがなَ Київ ❤️ がっこう, Київ Łódź 你好 ﬁne ひらがなَ Київ ❤️ がっこう ﬁne 日本語 ָ42, ﬁne ひらがなَ Київ ❤️ がっこう",
+        "FINE ひらがなَ кИЇВ ❤️ がっこう, FINE ひらがなَ кИЇВ ❤️ がっこう, FINE ひらがなَ кИЇВ ❤️ がっこう ǅEMAL ™ ぱん FINE ひらがなَ кИЇВ ❤️ がっこう FINE ひらがなَ кИЇВ ❤️ がっこう, кИЇВ łÓDŹ 你好 FINE ひらがなَ кИЇВ ❤️ がっこう FINE 日本語 ָ42, FINE ひらがなَ кИЇВ ❤️ がっこう"
+       ],
+       [
+        "\tكَتَبَ, \"quoted\", שלום\n",
+        ""
+       ],
+       [
+        "a-b",
+        "ab"
+       ],
+       [
+        "🇯🇵&nbsp;",
+        "🇯🇵 "
+       ],
+       [
+        "한국어,, 👍🏽",
+        "한국어, 👍🏽"
+       ],
+       [
+        "<br>Łódźָ",
+        "Łóβźָ"
+       ],
+       [
+        "हिन्दी",
+        "हन"
+       ],
+       [
+        "3.14<br />",
+        ""
+       ],
+       [
+        "كتب゙",
+        "tتب゙"
+       ],
+       [
+        "<br>学习 東京̵ 日本語",
+        "学习 東京̵ 日本語"
+       ],
+       [
+        "&nbsp;house jalapeño 東京 한국어 house ぱん 🇯🇵 学习, İstanbul カタカナ สวัสดี ｶﾀｶﾅ 괜찮아요 ™ Москва ﬁne كَتَبَ house jalapeño 東京 한국어 house, ﬁne בְּרֵאשִׁית x², house jalapeño 東京 한국어 house house jalapeño 東京 한국어 house, über 🇯🇵 Москва",
+        "house jalapeño 東京 한국어 house ぱん 🇯🇵 学习, İstanbul カタカナ สวัสดี ｶﾀｶﾅ 괜찮아요 ™ Москва ﬁne كَتَبَ house jalapeño 東京 한국어 house, ﬁne בְּרֵאשִׁית x², huse jalapeño 東京 한국어 house house jalapeño 東京 한국어 house, über 🇯🇵 Москва"
+       ],
+       [
+        "\tüber ﬁne 你好 οδός\n",
+        "über ﬁne 你好 ο"
+       ],
+       [
+        "<!-- c -->東京",
+        "東京"
+       ],
+       [
+        "❤️",
+        "❤i"
+       ],
+       [
+        "<div>щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते ぱん 42 42 🇯🇵 \"quoted\" Ångström, щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते ｶﾀｶﾅ house house</div>",
+        "щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते ぱん 42 42 🇯🇵 \"quoted\" Ångström, щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते щука 👍🏽 Ελλάδα नमस्ते カタカナ house house"
+       ],
+       [
+        "Madrid がっこう Москва",
+        "mADRID がっこう мОСКВА"
+       ],
+       [
+        "ｶﾀｶﾅ",
+        "ｶÇｶ"
+       ],
+       [
+        "[sound:a.ogg]👩‍👩‍👧 Ｆｕｌｌ",
+        "👩i‍👩‍"
+       ],
+       [
+        "<i>日本語 οδός カタカナ the end</i>",
+        "日本語 οδος カタカナ the end"
+       ],
+       [
+        "Ångström̧ / οδός",
+        "Angstrom οδος"
+       ],
+       [
+        "42,\n❤",
+        "42, ❤"
+       ],
+       [
+        "a-b नमस्ते",
+        "g②"
+       ],
+       [
+        "&quot;quoted&quot; ひらがな",
+        "\"quoted\" ひらかな"
+       ],
+       [
+        "[sound:a.ogg]the end Ærø the end",
+        "the end Ærø theend"
+       ],
+       [
+        "<span style=\"color: red\">َsmörgåsbord, c'est, 42</span>",
+        "َsmörgåsbord, c'est, 42"
+       ],
+       [
+        "[sound:a.ogg]jalapeño",
+        "JALAPEÑO"
+       ],
+       [
+        "\t™ a-b 👍\n",
+        "™ A-B 👍"
+       ],
+       [
+        "<!-- c -->❤ ½ ❤️",
+        "❤ ½ ❤"
+       ],
+       [
+        "　the<br>end<br>smörgåsbordָ<br>❤️",
+        "the end smorgasbord ❤"
+       ],
+       [
+        "&nbsp;<div>house&nbsp;❤</div><div></div>",
+        "house ❤"
+       ],
+       [
+        "東京 カタカナ ガギグ",
+        "東京qカカナ ガギグ"
+       ],
+       [
+        "Ébène, שָׁלוֹם, a/b",
+        "3.14"
+       ],
+       [
+        "Łódź",
+        "Łódź "
+       ],
+       [
+        "Straße̵",
+        "Straße̵"
+       ],
+       [
+        "ひらがな 읽다 Ångström",
+        "ひらがな ᅵᆰ다 Ångst"
+       ],
+       [
+        "　Ελλάδα,, カタカナ&nbsp;",
+        "Ελλάδα"
+       ],
+       [
+        "cat, &amp; हिन्दी️",
+        "cat, हनद"
+       ],
+       [
+        "\t שָׁלוֹם \n",
+        "ָׁלוֹם"
+       ],
+       [
+        "<div>Ærø - 👩‍👩‍👧</div><div></div>",
+        "Ærø 👩‍👩‍👧"
+       ],
+       [
+        "\t괜찮아요\n",
+        "괜찮아요"
+       ],
+       [
+        "<i>™</i>",
+        "ä"
+       ],
+       [
+        "ひらがな",
+        "ひらвがな ひらuな"
+       ],
+       [
+        "Ébène дом",
+        "éBÈNE ДОМ"
+       ],
+       [
+        "façade",
+        " ́FAÇADEJFINE"
+       ],
+       [
+        "a-b ΟΔΟΣ",
+        "a-b ΟΟΣ"
+       ],
+       [
+        "Łódź̀",
+        "?!"
+       ],
+       [
+        "👍 a-b smörgåsbord",
+        "👍 a-b smörgåsbord"
+       ],
+       [
+        "\tสวัสดี\n",
+        "สัสดี"
+       ],
+       [
+        "Łódź<img src=\"pic.png\">",
+        "cŁod́"
+       ],
+       [
+        "<span style=\"color: red\">x² Tokyo Ærø</span>",
+        "x² Tokyo Ærø"
+       ],
+       [
+        "Tokyo Ærøَ&nbsp;",
+        "Tokyo"
+       ],
+       [
+        "\na/b, ёлка",
+        "a/bß, ёлка"
+       ],
+       [
+        "　щука",
+        "щук̵а"
+       ],
+       [
+        "the\nend",
+        "हिन्दी゙"
+       ],
+       [
+        "Madrid,&nbsp;Łódź",
+        "Madrid, ŁódźMadrid, Łódź"
+       ],
+       [
+        "Ærø",
+        "rø"
+       ],
+       [
+        "<span style=\"color: red\">がっこう</span>",
+        "がっこう"
+       ],
+       [
+        "?!ָ",
+        "ç!ָ"
+       ],
+       [
+        "\tMadrid\n",
+        "Madrifd"
+       ],
+       [
+        "ひらがな",
+        "ひらかな"
+       ],
+       [
+        "<div>々 ?! 한국어 日本語</div><img src=\"pic.png\">",
+        ""
+       ],
+       [
+        "jalapeño, ❤, בְּרֵאשִׁית, the end",
+        "falapeño, ❤, בְּרֵאשִׁית, ths end"
+       ],
+       [
+        "　МоскваÉbène",
+        "Москва Ébèrne"
+       ],
+       [
+        "fine 々 Ελλάδα",
+        "ﬁne 々 Ελλαδα"
+       ],
+       [
+        "كَتَبَ ™",
+        "x² façade"
+       ],
+       [
+        "ガギグ a-b がっこう the end",
+        " ガギグ a-b がっこう the end"
+       ],
+       [
+        "house a/b Ångström&nbsp;[sound:say it.mp3]",
+        "house a/b ngström"
+       ],
+       [
+        "Ångström",
+        "gÅngström"
+       ],
+       [
+        "ｶﾀｶﾅ̈",
+        "ｶﾀｶﾅ̈"
+       ],
+       [
+        "naïve Madrid ぱん",
+        "naïve Madrid ぱん"
+       ],
+       [
+        "résumé (x + y)",
+        "résumé (x + y)"
+       ],
+       [
+        "smörgåsbord كَتَبَ \"quoted\"",
+        "①②"
+       ],
+       [
+        "&nbsp;①②̧, 東京",
+        "①②̧, 東京"
+       ],
+       [
+        "a-b a-b",
+        "a-b a"
+       ],
+       [
+        "👍",
+        "👍"
+       ],
+       [
+        "3.14",
+        "3.14"
+       ],
+       [
+        "[sound:a.ogg]İstanbul,\n읽다",
+        "İstanbul, 읽다"
+       ],
+       [
+        "c'est&amp;nbsp;ㄱㄴㄷ&amp;nbsp;Straße",
+        "한국어 בְּרֵאשִׁית"
+       ],
+       [
+        "οδός",
+        ""
+       ],
+       [
+        "Москва",
+        "Моéсква"
+       ],
+       [
+        "👩‍👩‍👧",
+        "👩‍👩‍👧"
+       ],
+       [
+        "a-b̃",
+        ""
+       ],
+       [
+        "<div>\tבְּרֵאשִׁית 👩‍👩‍👧 ﬁne\n</div>",
+        "ǅemal"
+       ],
+       [
+        "<div>مَدْرَسَة がっこう smörgåsbord Łódź</div><div></div>",
+        "مَدْرَسَة  がっこう  smörgåsbord  Łódź"
+       ],
+       [
+        "كَتَبَ щукаָ ™",
+        "كَتَبَ ЩУКАָ ™"
+       ],
+       [
+        "　42, नमस्ते, َüber, über",
+        "42, नमस्ते, َüber, über "
+       ],
+       [
+        "über<br><br>",
+        "üдber"
+       ],
+       [
+        "읽다 ภาษาไทย",
+        "읽다 ภาdษาไทย"
+       ],
+       [
+        "Київ̵ ǅemal",
+        "きв ǅe"
+       ],
+       [
+        "Ébène résumé゚ 勉強する",
+        "Ébène résumé゚ 勉強する Ébène résumé゚ 勉強する"
+       ],
+       [
+        "οδός",
+        "كَتَبَ สวัสดี"
+       ],
+       [
+        "ﬁne",
+        "ﬁгe"
+       ],
+       [
+        "a/b",
+        "/ab"
+       ],
+       [
+        "<div>한국어̀, Ελλάδα</div><div></div>",
+        "한국어̀, Ελάδα"
+       ],
+       [
+        "<!-- c -->smörgåsbord 你好 🇯🇵<img src=\"pic.png\">",
+        "sörgåsbord 你好 🇯🇵"
+       ],
+       [
+        "smörgåsbord",
+        "SMÖRúGÅSBOR다"
+       ]
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

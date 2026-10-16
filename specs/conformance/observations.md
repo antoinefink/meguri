@@ -23,7 +23,7 @@ What each observation kind records, how values are written, and how the runner c
 - `kind(#c1, #c3)`: the kind for these references, in the order given;
 - `{kind: <arguments>}`: kinds that take structured arguments.
 
-Requesting a per-card kind twice in one step merges the two results when they name different cards; naming a card twice in one step is invalid. A kind whose value is a list (`template`) may be requested once per step.
+Requesting a per-card kind twice in one step merges the two results when they name different cards; naming a card twice in one step is invalid. A kind whose value is a list (`template`, `review_html`) may be requested once per step.
 
 ## O3. Pointers and patterns
 
@@ -57,6 +57,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
 | `cloze` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: cloze numbers, `cloze:` and `cloze-only:` output and type-in extraction (`cloze-ops.md` Z1); never reads or changes the scenario's collection |
+| `type_answer` | `{fns: [<function>, ...], inputs: [[<expected>, <typed>], ...]}` | `{<function>: [<output>, ...], ...}`: the type-in comparison HTML, with combining characters counted (`compare`) or ignored (`compare_nc`) (`type-answer-ops.md` K1); never reads or changes the scenario's collection |
+| `review_html` | `[{card: #cN, typed?}, ...]` | `[{question, answer}, ...]`, one per case: the HTML review shows for a stored card, media names encoded and the type-in box and comparison applied, play markers kept and warnings as tokens (`type-answer-ops.md` K2); at most one request per step; never changes the scenario's collection |
 | `fsrs_next` | `{param_sets: {<name>: [<number>, ...]}, inputs: [<input>, ...]}`, at most once per observe step | `{rows: [<row>, ...]}`: the FSRS next states of a review card per input, as twelve values (days, stability and difficulty for again, hard, good and easy); never reads or changes the scenario's collection (`float-determinism.md` F3, F5) |
 
 ## O5. Scheduling states

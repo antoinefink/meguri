@@ -1,0 +1,46 @@
+# Meguri's own type-in modifiers (specs/render/type-answer.md A9, R964): `ci`
+# and combined modifiers, read from the question template. Anki 26.09.3 reads
+# these chains as the plain marker, so its answers here compare case-sensitive
+# texts with combining characters and against the whole cloze field; the
+# deviation entries type-answer-ci-* and type-answer-cloze-* in
+# conformance/deviations.yaml give Meguri's answers. The questions are the same on both sides, and so is the
+# answer when the typed text already matches exactly (#c1 typed Hola).
+id: render/type-answer/meguri-modifiers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Ignore case
+      fields: [Prompt, Answer]
+      templates:
+        - {name: Case, front: "1 {{Prompt}}{{type:ci:Answer}}", back: "{{FrontSide}}<hr id=answer>{{Answer}}"}
+        - {name: Case and marks, front: "2 {{Prompt}}{{type:nc:ci:Answer}}", back: "{{FrontSide}}<hr id=answer>{{Answer}}"}
+        - {name: Marks and case, front: "3 {{Prompt}}{{type:ci:nc:Answer}}", back: "{{FrontSide}}<hr id=answer>{{Answer}}"}
+    - name: Gaps without marks
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}{{type:cloze:nc:Text}}", back: "{{cloze:Text}}<hr id=answer>{{type:cloze:nc:Text}}"}
+    - name: Gaps without case
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}{{type:ci:cloze:Text}}", back: "{{cloze:Text}}<hr id=answer>{{type:ci:cloze:Text}}"}
+  notes:
+    # #c1-#c3
+    - {notetype: Ignore case, fields: [greeting, Hola Amiga]}
+    # #c4-#c6
+    - {notetype: Ignore case, fields: [wood, Ébène]}
+    # #c7
+    - {notetype: Gaps without marks, fields: ["{{c1::café}} y {{c1::té}}"]}
+    # #c8
+    - {notetype: Gaps without case, fields: ["{{c1::Paris}} is big"]}
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1", typed: Hola Amiga}
+          - {card: "#c1", typed: hola amiga}
+          - {card: "#c1", typed: hola amigo}
+          - {card: "#c5", typed: EBENE}
+          - {card: "#c6", typed: ebene}
+          - {card: "#c7", typed: "cafe, te"}
+          - {card: "#c8", typed: paris}

@@ -207,6 +207,29 @@
             }
           }
         },
+        "type_answer": {
+          "description": "specs/conformance/type-answer-ops.md K1: one array per requested function, one comparison per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "compare": { "$ref": "#/$defs/text_strings" },
+            "compare_nc": { "$ref": "#/$defs/text_strings" }
+          }
+        },
+        "review_html": {
+          "description": "specs/conformance/type-answer-ops.md K2: one result per case, in case order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["question", "answer"],
+            "additionalProperties": false,
+            "properties": {
+              "question": { "type": "string" },
+              "answer": { "type": "string" }
+            }
+          }
+        },
         "text": {
           "description": "O4 text: one array per requested function, one output per input in input order.",
           "type": "object",

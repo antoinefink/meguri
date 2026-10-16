@@ -1,0 +1,29 @@
+# The display encoding of local media names (specs/render/media-display.md D2,
+# text/media-references#M6, R530) on the plan's examples: a space and `#`
+# encoded, non-ASCII kept, entities left as written, remote names untouched,
+# every media tag kind, sound tags untouched.
+id: render/media-escape/strings
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - text:
+          fns: [iri_encode]
+          inputs:
+            - "<img src=\"my file#1.jpg\">"
+            - "<img src=\"日本.png\">"
+            - "<img src=\"a&quot;b.jpg\">"
+            - "<img src=\"https://example.org/a b.png\">"
+            - "<img src=\"http://example.org/a b.png\">"
+            - "<img src='single quoted.png'>"
+            - "<img src=plain.png alt=\"x y\">"
+            - "<audio src=\"clip one.mp3\"></audio><video src=\"film #2.mp4\"></video>"
+            - "<video><source src=\"a b.webm\"></video>"
+            - "<object data=\"plan v2.svg\"></object>"
+            - "<img data-src=\"lazy one.png\">"
+            - "[sound:voice clip.mp3]"
+            - "<img src=\"100% sure.png\">"
+            - "<img src=\"tab\there.png\">"
+            - "<img src=\"q&amp;a.png\">"
+            - "<img src=\"ünïcödé ñame.png\">"
+            - "<IMG SRC=\"UPPER CASE.PNG\">"
+            - "<img src=\"a b.png\"><img src=\"a b.png\">"

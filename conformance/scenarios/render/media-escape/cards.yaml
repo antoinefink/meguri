@@ -1,0 +1,41 @@
+# Media names in review HTML (specs/render/media-display.md D1-D4, R530): the
+# question and answer sides are encoded as a whole, so names written in the
+# template, inserted from a field and repeated through {{FrontSide}} are all
+# encoded once; remote names, sound tags, the type-in box and the comparison
+# are not touched; the comparison reads the field as stored.
+id: render/media-escape/cards
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pictures
+      fields: [Word, Image, File, Audio]
+      css: ".card img { height: 120px; }"
+      templates:
+        - name: Picture
+          front: "{{Word}}<br>{{Image}}<img src=\"{{File}}\"><img src=\"_shared logo.png\">{{Audio}}"
+          back: "{{FrontSide}}<hr id=answer><img src=\"https://example.org/remote pic.png\">"
+        - name: Typed
+          front: "<img src=\"{{File}}\">{{type:Word}}"
+          back: "{{FrontSide}}<hr id=answer>{{Image}}"
+  notes:
+    # #c1, #c2
+    - notetype: Pictures
+      fields:
+        - "le chat"
+        - "<img src=\"my file#1.jpg\"><img src=\"日本.png\"><img src=\"a&quot;b.jpg\">"
+        - "cat photo 3.jpg"
+        - "[sound:cat sound.mp3]<audio src=\"meow 2.ogg\" controls></audio>"
+    # #c3, #c4: a word whose own text holds an image
+    - notetype: Pictures
+      fields:
+        - "<img src=\"word art.png\"> chien"
+        - ""
+        - "dog.jpg"
+        - ""
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1"}
+          - {card: "#c2", typed: le chat}
+          - {card: "#c3"}
+          - {card: "#c4", typed: chien}

@@ -618,7 +618,7 @@ ha7fabd60b085,python,tag,render,unclassified,,,open
 hb2bdcde89b3a,python,tag,render,unclassified,,,open
 hf42c35381599,python,tag,render,unclassified,,,open
 hf55fc72cd71b,python,tag,render,unclassified,,,open
-h012e392276c1,rust,tag,render,unclassified,,,open
+h012e392276c1,rust,tag,render,in-scope,Hangul syllables compared as whole characters,render/type-answer/compare,done
 h03d7c32a8571,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h04f16e0d77d0,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
 h0714128d5513,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
@@ -626,12 +626,12 @@ h0e52b45b7b7a,rust,tag,render,unclassified,,,open
 h1126a583e576,rust,tag,render,unclassified,,,open
 h12960db75e39,rust,tag,render,in-scope,"Template rendering: replacements, sections, card-number keys, unknown fields and filters",render/template/conditionals render/template/errors render/template/tags render/filters/chains,done
 h163ba9c3036c,rust,tag,render,in-scope,Plain HTML stripping (text area),text/strip/markup,done
-h176cf97aef7a,rust,tag,render,unclassified,,,open
+h176cf97aef7a,rust,tag,render,in-scope,Token sequence of a comparison with several kinds of edits,render/type-answer/compare,done
 h1a3728db5353,rust,tag,render,not-applicable,"A backend render mode without the reviewer's chain completion; Meguri reproduces the reviewer, where an unknown filter ends the chain",,done
 h1f36598666ed,rust,tag,render,in-scope,Preview render from a schema-11 template object,render/special-fields/new-note,done
 h1f6151e74934,rust,tag,render,in-scope,Image-occlusion clozes with several numbers; U63/U64,,deferred
 h21a1ea45b18d,rust,tag,render,unclassified,,,open
-h22e00b0f1c78,rust,supplementary,render,unclassified,,,open
+h22e00b0f1c78,rust,supplementary,render,not-applicable,Case-insensitive comparison is not in Anki 26.09.3; Meguri's own ci is render/type-answer#A9,,done
 h2d70fb39c79e,rust,tag,render,in-scope,TTS filter markup,render/filters/tts,done
 h3448f09e0c2c,rust,tag,render,in-scope,Image-occlusion cloze element; shape attributes are U63/U64,,deferred
 h3a116c42ce7b,rust,tag,render,in-scope,Media name encoding and decoding (text area),text/refs/iri,done
@@ -641,7 +641,7 @@ h3f026c7e31bb,rust,tag,render,unclassified,,,open
 h429c8ae08c83,rust,tag,render,unclassified,,,open
 h450787d61876,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h4726941374ef,rust,tag,render,in-scope,"Preview render of a note not yet added, both sides",render/special-fields/new-note render/template/blank,done
-h47dca159695d,rust,tag,render,unclassified,,,open
+h47dca159695d,rust,tag,render,in-scope,"Expected text without markup, media and non-breaking spaces",render/type-answer/compare,done
 h4820dda6cd77,rust,tag,render,unclassified,,,open
 h492c28d52d9d,rust,tag,render,in-scope,cloze-only: with number lists,render/cloze/only,done
 h4b173b76b6d5,rust,tag,render,unclassified,,,open
@@ -654,13 +654,13 @@ h6442084ed16c,rust,tag,render,in-scope,"Template tokenizing: tags, comments, whi
 h67f6485701c2,rust,tag,render,in-scope,cloze: output by card number and side; empty when no cloze is active,render/cloze/basic,done
 h6954b568831d,rust,tag,render,in-scope,Hints on clozes with number lists,render/cloze/multi-number render/cloze/hints,done
 h6a3197e57c5e,rust,tag,render,unclassified,,,open
-h6b5987957b1c,rust,tag,render,unclassified,,,open
+h6b5987957b1c,rust,tag,render,in-scope,One dash per missing character in the typed line,render/type-answer/compare,done
 h6d969fd370f8,rust,tag,render,in-scope,Nested clozes and hints on both sides,render/cloze/nesting render/cloze/hints,done
 h71a7fc765fe3,rust,tag,render,in-scope,Type-in markers and the chain rewrite,render/filters/type,done
 h71ac67d3a8db,rust,tag,render,in-scope,Hint filter markup and ids,render/filters/hint,done
 h73a554417784,rust,tag,render,in-scope,Legacy per-template card rules stored when a note type is saved,render/template/legacy-req,done
 h74230fbcabe8,rust,tag,render,in-scope,cloze-only: output on the front and the back,render/cloze/only,done
-h7489852a175a,rust,tag,render,unclassified,,,open
+h7489852a175a,rust,tag,render,in-scope,Empty typed answer shows the stripped expected text,render/type-answer/compare,done
 h79f7d4c21f4b,rust,tag,render,in-scope,Numbers of a cloze with a number list,render/cloze/numbers,done
 h7ff155030ad4,rust,tag,render,unclassified,,,open
 h82c4a097602a,rust,tag,render,unclassified,,,open
@@ -679,8 +679,8 @@ hae0105ed752c,rust,tag,render,unclassified,,,open
 hafc40dbe3447,rust,tag,render,unclassified,,,open
 hb1cbcd219c60,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 hb6a47ef46c2d,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
-hbf81ece4b03e,rust,tag,render,unclassified,,,open
-hc6cc252a0cb5,rust,tag,render,unclassified,,,open
+hbf81ece4b03e,rust,tag,render,in-scope,Wrong typed answer shows the typed and expected lines,render/type-answer/compare,done
+hc6cc252a0cb5,rust,tag,render,in-scope,Comparison without combining marks (nc),render/type-answer/compare render/type-answer/modifiers,done
 hc74368fae72d,rust,tag,render,in-scope,Stripping that keeps media names (text area),text/strip/keep-media,done
 hcafcd1e3bdc2,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 hcb43355dfe31,rust,tag,render,in-scope,data-ordinal lists every number of the cloze on each card,render/cloze/multi-number,done
@@ -691,19 +691,19 @@ hdff9a98c5773,rust,tag,render,in-scope,Ruby filters,render/filters/furigana,done
 he0d5169d5e60,rust,tag,render,in-scope,Card render of a cloze note through the render pipeline (U62),,deferred
 he406938dc7f7,rust,tag,render,in-scope,Nested clozes with number lists,render/cloze/multi-number render/cloze/nesting,done
 he505c5cfe56e,rust,tag,render,in-scope,Blank question in a preview render,render/template/blank,done
-he79db754bc77,rust,tag,render,unclassified,,,open
+he79db754bc77,rust,tag,render,in-scope,Long mixed-script comparison completes,render/type-answer/compare render/type-answer/corpus/compare-01,done
 he865b016fdd9,rust,tag,render,unclassified,,,open
 he8aa29c82e65,rust,tag,render,unclassified,,,open
 hea39d04c13ef,rust,tag,render,in-scope,Unknown filter ends the chain with the text so far,render/filters/chains,done
-heb300a3dbe24,rust,tag,render,unclassified,,,open
+heb300a3dbe24,rust,tag,render,in-scope,Correct typed answer shown as one good span,render/type-answer/compare,done
 heba27d0f9639,rust,tag,render,in-scope,Type-in cloze extraction by card number,render/cloze/typing,done
 hebddab91941f,rust,tag,render,unclassified,,,open
-hee35c52dd8b3,rust,supplementary,render,unclassified,,,open
+hee35c52dd8b3,rust,supplementary,render,not-applicable,Case-insensitive comparison without combining marks is not in Anki 26.09.3; Meguri's own is render/type-answer#A9,,done
 heed8d3ae61bd,rust,tag,render,in-scope,Whether a template renders something for a set of non-empty fields,render/template/blank render/template/legacy-req,done
 hf064837658a8,rust,tag,render,in-scope,Markup inside MathJax removed from cloze output with entities kept,render/cloze/mathjax,done
 hf2d2c23247a1,rust,tag,render,in-scope,Rendering a stored card with its real values,render/special-fields/cards,done
 hf2f1c863cdca,rust,tag,render,in-scope,Duplicate and zero and empty pieces in number lists,render/cloze/numbers render/cloze/markers,done
-hf6db24b439e4,rust,tag,render,unclassified,,,open
+hf6db24b439e4,rust,tag,render,in-scope,Typed and expected text HTML-escaped in the comparison,render/type-answer/compare,done
 hf8d1651d6b66,rust,tag,render,in-scope,Non-ASCII text without clozes has no cloze numbers,render/cloze/numbers,done
 h0b343b3380e0,typescript,tag,review,unclassified,,,open
 h14162d344ef9,typescript,tag,review,unclassified,,,open

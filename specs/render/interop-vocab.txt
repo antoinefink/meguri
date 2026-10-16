@@ -20,6 +20,38 @@ tts
 tts-voices
 type-nc
 type-cloze
+# render/type-answer: the type-in box, the comparison markup and the CSS
+# classes and ids that note type CSS and card scripts select.
+typeans
+_typeAnsPress
+onkeypress
+typeGood
+typeBad
+typeMissed
+typearrow
+darr
+autocapitalize
+autocorrect
+spellcheck
+readonly
+font-family
+font-size
+# render/image-occlusion-render: the data attributes the occlusion script
+# reads.
+data-shape
+data-left
+data-top
+data-width
+data-height
+data-angle
+data-fill
+data-rx
+data-ry
+data-points
+data-occludeInactive
+data-text
+data-scale
+data-font-size
 nc
 ci
 cloze

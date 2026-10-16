@@ -76,6 +76,52 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/render/type-answer.md A9 (R964): Meguri reads `ci` and combined type-in
+  # modifiers from the question template. Anki 26.09.3 reads these chains as the
+  # plain marker, so its answers compare case-sensitively, with combining
+  # characters, against the whole field. The questions are equal.
+  - id: type-answer-ci-lowercase
+    requirement: R964
+    summary: "With {{type:ci:Answer}}, typing the answer in lower case is correct: Meguri shows the expected text as one good token where Anki marks the case differences."
+    test: render/type-answer/meguri-modifiers
+    scenarios: [render/type-answer/meguri-modifiers]
+    pointer: /steps/0/review_html/1/answer
+    transform: {replace: "<style></style>1 greeting<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Hola Amiga</span></code></div>Hola Amiga"}
+  - id: type-answer-ci-mistake
+    requirement: R964
+    summary: "With {{type:ci:Answer}}, a typed text that differs in case and in one letter shows only the letter as wrong; case differences count as good."
+    test: render/type-answer/meguri-modifiers
+    scenarios: [render/type-answer/meguri-modifiers]
+    pointer: /steps/0/review_html/2/answer
+    transform: {replace: "<style></style>1 greeting<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>hola amig</span><span class=typeBad>o</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Hola Amig</span><span class=typeMissed>a</span></code></div>Hola Amiga"}
+  - id: type-answer-ci-nc
+    requirement: R964
+    summary: "With {{type:nc:ci:Answer}}, a typed text without accents and in upper case is correct; Anki compares it as the plain marker."
+    test: render/type-answer/meguri-modifiers
+    scenarios: [render/type-answer/meguri-modifiers]
+    pointer: /steps/0/review_html/3/answer
+    transform: {replace: "<style></style>2 wood<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Ébène</span></code></div>Ébène"}
+  - id: type-answer-ci-nc-order
+    requirement: R964
+    summary: "With {{type:ci:nc:Answer}} (modifiers in the other order), a typed text without accents is correct; Anki compares it as the plain marker."
+    test: render/type-answer/meguri-modifiers
+    scenarios: [render/type-answer/meguri-modifiers]
+    pointer: /steps/0/review_html/4/answer
+    transform: {replace: "<style></style>3 wood<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Ébène</span></code></div>Ébène"}
+  - id: type-answer-cloze-nc
+    requirement: R964
+    summary: "With {{type:cloze:nc:Text}}, the card's cloze answers are expected without combining characters; Anki compares the plain marker against the whole field."
+    test: render/type-answer/meguri-modifiers
+    scenarios: [render/type-answer/meguri-modifiers]
+    pointer: /steps/0/review_html/5/answer
+    transform: {replace: "<style></style><span class=\"cloze\" data-ordinal=\"1\">café</span> y <span class=\"cloze\" data-ordinal=\"1\">té</span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>café, té</span></code></div>"}
+  - id: type-answer-cloze-ci
+    requirement: R964
+    summary: "With {{type:ci:cloze:Text}}, the card's cloze answer is expected regardless of case; Anki compares the plain marker against the whole field."
+    test: render/type-answer/meguri-modifiers
+    scenarios: [render/type-answer/meguri-modifiers]
+    pointer: /steps/0/review_html/6/answer
+    transform: {replace: "<style></style><span class=\"cloze\" data-ordinal=\"1\">Paris</span> is big<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Paris</span></code></div>"}
   # specs/conformance/float-determinism.md F8, F9 (KTD24): Meguri uses the
   # platform math library, as Anki does. On macOS the expected FSRS next-state
   # values come from the Apple oracle's overlay (conformance/goldens-apple/)

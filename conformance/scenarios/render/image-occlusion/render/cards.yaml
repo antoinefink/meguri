@@ -1,0 +1,30 @@
+# Image-occlusion cards as review shows them (specs/render/
+# image-occlusion-render.md I5, render/media-display#D1, R539 inputs): a note
+# type of the scenario's own whose question and answer hold the shapes in a
+# hidden element over the image; three masks and a label; the image's name
+# encoded for display.
+id: render/image-occlusion/render/cards
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Occlusion probe
+      kind: cloze
+      fields: [Occlusion, Image, Notes]
+      css: ".pic img { max-width: 100%; }"
+      templates:
+        - name: Mask
+          front: "<div class=io hidden>{{cloze:Occlusion}}</div><div class=pic>{{Image}}</div>"
+          back: "<div class=io hidden>{{cloze:Occlusion}}</div><div class=pic>{{Image}}</div>{{Notes}}"
+  notes:
+    # #c1-#c3
+    - notetype: Occlusion probe
+      fields:
+        - "{{c1::image-occlusion:rect:left=.1:top=.2:width=.3:height=.4:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.5:rx=.1:ry=.2:oi=1}}<br>{{c3::image-occlusion:polygon:left=.6:top=.1:points=.6,.1 .9,.1 .75,.3:oi=1}}<br>{{c0::image-occlusion:text:left=.1:top=.8:text=Left atrium:scale=1.:fs=.05:oi=1}}<br>"
+        - "<img src=\"heart diagram #2.png\">"
+        - "from the <i>anatomy</i> deck"
+steps:
+  - observe:
+      - review_html:
+          - {card: "#c1"}
+          - {card: "#c2"}
+          - {card: "#c3"}
