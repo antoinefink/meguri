@@ -161,14 +161,7 @@ fn a_generation_change_rejects_old_handles_publishes_one_replaced_event_and_reop
     assert_eq!(new.generation(), Generation(2));
     assert_eq!(*listener.0.lock().unwrap(), [(Generation(1), Generation(2))]);
     let events = drain(&subscription, Duration::from_millis(100));
-    let replaced: Vec<Generation> = events
-        .iter()
-        .filter_map(|e| match e.kind {
-            EventKind::CollectionReplaced { generation } => Some(generation),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(replaced, [Generation(2)]);
+    assert_eq!(replaced_generations(&events), [Generation(2)]);
 
     let stale = old
         .run(OpSpec::named("late", OpSource::UserUndoable), |_| Ok(()))
@@ -197,6 +190,114 @@ fn a_generation_change_rejects_old_handles_publishes_one_replaced_event_and_reop
             generation: Generation(2)
         }
     );
+}
+
+/// The `CollectionReplaced` generations among `events`.
+fn replaced_generations(events: &[Arc<meguri_engine::Event>]) -> Vec<Generation> {
+    events
+        .iter()
+        .filter_map(|e| match e.kind {
+            EventKind::CollectionReplaced { generation } => Some(generation),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_swap_that_fails_after_replacing_the_file_still_moves_to_the_next_generation() {
+    let listener = Arc::new(Listener::default());
+    let h = Harness::open_with(Ports::default().generation_listener(listener.clone()));
+    let old = h.collection.clone();
+    let (nid, _) = add_note_with_card(&old, OpSource::UserUndoable, &["before swap", "x"]).value;
+    let replacement = h.dir.path().join("replacement.anki2");
+    std::fs::copy(common::fixture("schema-18.anki2"), &replacement).unwrap();
+    let subscription = h.engine.stream().subscribe();
+
+    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(true).unwrap();
+    // The file is in place, then a later step of the swap (say, syncing the
+    // directory) fails.
+    let failure = EngineError::Internal {
+        message: "syncing the directory failed".to_owned(),
+    };
+    let returned = failure.clone();
+    let error = exclusive
+        .replace(move |live| {
+            std::fs::rename(&replacement, live).unwrap();
+            Err(returned)
+        })
+        .unwrap_err();
+    assert_eq!(error, failure);
+    // The phase's handle follows the file that is open now.
+    assert_eq!(exclusive.collection().generation(), Generation(2));
+    exclusive
+        .collection()
+        .run(OpSpec::named("restore_step", OpSource::Maintenance), |_| Ok(()))
+        .unwrap();
+    drop(exclusive);
+
+    assert_eq!(
+        h.engine.state(),
+        LifecycleState::Ready {
+            generation: Generation(2)
+        }
+    );
+    assert_eq!(*listener.0.lock().unwrap(), [(Generation(1), Generation(2))]);
+    let events = drain(&subscription, Duration::from_millis(100));
+    assert_eq!(replaced_generations(&events), [Generation(2)]);
+    assert_eq!(
+        old.run(OpSpec::named("late", OpSource::UserUndoable), |_| Ok(()))
+            .unwrap_err(),
+        EngineError::StaleGeneration {
+            planned: Generation(1),
+            current: Generation(2)
+        }
+    );
+    assert!(matches!(
+        old.reader(ReaderRole::Query),
+        Err(EngineError::StaleGeneration { .. })
+    ));
+    let current = h.engine.collection().unwrap();
+    assert_eq!(current.generation(), Generation(2));
+    assert!(
+        current.reader(ReaderRole::Query).unwrap().note(nid).unwrap().is_none(),
+        "the readers read the new file"
+    );
+    // The slot belongs to the new generation: its holder can enter again.
+    drop(slot.enter_exclusive(false).unwrap());
+}
+
+#[test]
+fn a_swap_that_fails_before_touching_the_file_keeps_the_generation() {
+    let listener = Arc::new(Listener::default());
+    let h = Harness::open_with(Ports::default().generation_listener(listener.clone()));
+    let old = h.collection.clone();
+    let (nid, _) = add_note_with_card(&old, OpSource::UserUndoable, &["kept", "x"]).value;
+    let subscription = h.engine.stream().subscribe();
+
+    let slot = h.engine.acquire_slot(LongOp::Restore).unwrap();
+    let mut exclusive = slot.enter_exclusive(true).unwrap();
+    let failure = EngineError::Internal {
+        message: "the staging copy failed its integrity check".to_owned(),
+    };
+    let returned = failure.clone();
+    let error = exclusive.replace(move |_| Err(returned)).unwrap_err();
+    assert_eq!(error, failure);
+    assert_eq!(exclusive.collection().generation(), Generation(1));
+    drop(exclusive);
+    drop(slot);
+
+    assert_eq!(
+        h.engine.state(),
+        LifecycleState::Ready {
+            generation: Generation(1)
+        }
+    );
+    assert!(listener.0.lock().unwrap().is_empty());
+    assert!(replaced_generations(&drain(&subscription, Duration::from_millis(100))).is_empty());
+    // Old handles keep working on the reopened, unchanged file.
+    assert!(old.reader(ReaderRole::Query).unwrap().note(nid).unwrap().is_some());
+    add_note_with_card(&old, OpSource::UserUndoable, &["after the failed swap", "x"]);
 }
 
 #[test]

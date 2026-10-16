@@ -1072,6 +1072,7 @@ name = "meguri-ffi"
 version = "0.0.0"
 dependencies = [
  "meguri-engine",
+ "meguri-model",
  "uniffi",
 ]
 
@@ -1139,6 +1140,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "difflib",
+ "htmlescape",
  "meguri-testkit",
  "meguri-text",
  "regex",

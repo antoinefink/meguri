@@ -168,6 +168,23 @@
             "tags": { "type": "object", "additionalProperties": { "type": "integer" } }
           }
         },
+        "cloze": {
+          "description": "specs/conformance/cloze-ops.md Z1: one array per requested function, one output per input in input order.",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "numbers": {
+              "type": "array",
+              "items": { "type": "array", "uniqueItems": true, "items": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+            },
+            "front": { "$ref": "#/$defs/text_strings" },
+            "back": { "$ref": "#/$defs/text_strings" },
+            "only_front": { "$ref": "#/$defs/text_strings" },
+            "only_back": { "$ref": "#/$defs/text_strings" },
+            "typing": { "$ref": "#/$defs/text_strings" }
+          }
+        },
         "fsrs_next": {
           "description": "float-determinism.md F3.3, F5.2: one row per input, in input order: days, stability and difficulty for again, hard, good and easy.",
           "type": "object",

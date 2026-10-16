@@ -5,4 +5,4 @@ Every value is plain JSON keyed by logical ids; f32 values are shortest
 round-trip f32 decimals; no localized text (R1884, R1887).
 """
 
-from . import cards, db_dump, diag, fsrs_next, ids, schema, sched, search, template, text, timing  # noqa: F401
+from . import cards, cloze, db_dump, diag, fsrs_next, ids, schema, sched, search, template, text, timing  # noqa: F401
