@@ -69,18 +69,20 @@ enum TestHooks {
             if let error = session.error {
                 ErrorView(error: error)
             } else {
-                content()
-                    // Mid-screen, clear of bars and back buttons; it takes
-                    // no touches.
-                    .overlay(alignment: .center) {
-                        if session.shell?.probe == true {
-                            ShellStateProbe(navigation: navigation)
-                        }
+                // The probe takes a strip below the shell rather than a
+                // place over it: it covers no text that a test, an agent's
+                // hierarchy check or a screenshot needs, nothing scrolls
+                // under it, and the iPhone's overlaid sidebar leaves it be.
+                VStack(spacing: 0) {
+                    content()
+                    if session.shell?.probe == true {
+                        ShellStateProbe(navigation: navigation)
                     }
-                    #if os(iOS)
-                    .background(SizeClassOverride(sizeClass: session.options.sizeClass))
-                    #endif
-                    .modifier(AppearanceOverrides(options: session.options))
+                }
+                #if os(iOS)
+                .background(SizeClassOverride(sizeClass: session.options.sizeClass))
+                #endif
+                .modifier(AppearanceOverrides(options: session.options))
             }
         }
     }

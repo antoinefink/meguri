@@ -70,16 +70,16 @@ final class NavigationLayoutTests: XCTestCase {
         throw XCTSkip("taps do not reach the Mac app on this toolchain; AppNavigationTests covers the logic")
         #else
         let app = try launch(route: "shell/root/browse-pushed", sizeClass: "compact")
-        XCTAssert(element(app, "testhooks.shell.noteTypes.row.1").waitForExistence(timeout: 15), "Note Types is not pushed on Browse")
+        XCTAssert(element(app, "testhooks.shell.noteTypesRow.1").waitForExistence(timeout: 15), "Note Types is not pushed on Browse")
         let browseTab = element(app, "shell.root.tab.browse")
         XCTAssert(browseTab.waitForExistence(timeout: 5), "no Browse tab")
         browseTab.tap()
-        XCTAssert(element(app, "testhooks.shell.browse.row.20").waitForExistence(timeout: 5), "the first reselect did not pop to Browse")
+        XCTAssert(element(app, "testhooks.shell.browseRow.20").waitForExistence(timeout: 5), "the first reselect did not pop to Browse")
         keepScreen(app, "reselect-first")
         XCTAssertTrue(probe(app).contains("browse= "), probe(app))
-        XCTAssertFalse(element(app, "testhooks.shell.browse.row.1").isHittable, "the first reselect also scrolled to the top")
+        XCTAssertFalse(element(app, "testhooks.shell.browseRow.1").isHittable, "the first reselect also scrolled to the top")
         browseTab.tap()
-        XCTAssert(waitUntil { self.element(app, "testhooks.shell.browse.row.1").isHittable }, "the second reselect did not scroll to the top")
+        XCTAssert(waitUntil { self.element(app, "testhooks.shell.browseRow.1").isHittable }, "the second reselect did not scroll to the top")
         #endif
     }
 
@@ -92,7 +92,7 @@ final class NavigationLayoutTests: XCTestCase {
         throw XCTSkip("the Mac has no size class")
         #else
         let app = try launch(route: "shell/root/browse-pushed", sizeClass: "compact")
-        XCTAssert(element(app, "testhooks.shell.noteTypes.row.1").waitForExistence(timeout: 15))
+        XCTAssert(element(app, "testhooks.shell.noteTypesRow.1").waitForExistence(timeout: 15))
         let before = navigationState(app)
         XCTAssertTrue(before.contains("section=browse deck=\(spanishMining) home= browse=noteTypes"), before)
         XCTAssertTrue(before.contains("scroll.browse=row-20"), before)
@@ -101,23 +101,23 @@ final class NavigationLayoutTests: XCTestCase {
         XCTAssert(waitUntil { self.probe(app).hasPrefix("layout=sidebar") }, "the sidebar layout did not take over: \(probe(app))")
         keepScreen(app, "switch-regular")
         XCTAssert(element(app, "shell.root.sidebar.browse").waitForExistence(timeout: 10), "no sidebar")
-        XCTAssert(element(app, "testhooks.shell.noteTypes.row.1").waitForExistence(timeout: 5), "Note Types is no longer pushed on Browse")
+        XCTAssert(element(app, "testhooks.shell.noteTypesRow.1").waitForExistence(timeout: 5), "Note Types is no longer pushed on Browse")
         XCTAssertEqual(navigationState(app), before)
         XCTAssertTrue(element(app, "shell.root.sidebar.browse").isSelected, "the sidebar does not show Browse selected")
 
         toggleSizeClass()
         XCTAssert(waitUntil { self.probe(app).hasPrefix("layout=compact") }, "the tab layout did not come back: \(probe(app))")
         XCTAssert(app.tabBars.firstMatch.waitForExistence(timeout: 10), "no tab bar")
-        XCTAssert(element(app, "testhooks.shell.noteTypes.row.1").waitForExistence(timeout: 5))
+        XCTAssert(element(app, "testhooks.shell.noteTypesRow.1").waitForExistence(timeout: 5))
         XCTAssertEqual(navigationState(app), before)
         let browseTab = element(app, "shell.root.tab.browse")
         XCTAssert(waitUntil { browseTab.exists && browseTab.isSelected }, "the Browse tab is not selected")
 
         // Back on Browse's root: still at row 20.
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssert(element(app, "testhooks.shell.browse.row.20").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(app, "testhooks.shell.browse.row.20").isHittable)
-        XCTAssertFalse(element(app, "testhooks.shell.browse.row.1").isHittable, "Browse's root lost its scroll position")
+        XCTAssert(element(app, "testhooks.shell.browseRow.20").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(app, "testhooks.shell.browseRow.20").isHittable)
+        XCTAssertFalse(element(app, "testhooks.shell.browseRow.1").isHittable, "Browse's root lost its scroll position")
         #endif
     }
 
@@ -185,7 +185,7 @@ final class NavigationLayoutTests: XCTestCase {
         app.swipeUp()
         app.swipeUp()
         let row = try XCTUnwrap(
-            (1...40).lazy.map { self.element(app, "testhooks.shell.deckPage.row.\($0)") }.first { $0.exists && $0.isHittable && $0.frame.minY > 200 },
+            (1...40).lazy.map { self.element(app, "testhooks.shell.deckPageRow.\($0)") }.first { $0.exists && $0.isHittable && $0.frame.minY > 200 },
             "no deck page row on screen after scrolling"
         )
         let frame = row.frame
@@ -212,7 +212,7 @@ final class NavigationLayoutTests: XCTestCase {
     func testDeepLinksOpenADeckOrBrowseAndRefuseAMissingDeck() throws {
         let japanese = "1700000000002"
         // Each device's own layout: on an iPhone forced to regular width the
-        // sidebar covers the screen and hides the probe.
+        // sidebar covers the screen and hides the deck page.
         let app = try launch(route: "shell/root/browse-pushed")
         XCTAssert(element(app, "testhooks.shell.state").waitForExistence(timeout: 15))
 

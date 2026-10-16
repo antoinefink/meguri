@@ -174,7 +174,7 @@ extension TestHooks {
                             .padding(Spacing.small)
                             .background(.token(.backgroundSecondary), in: .rect(cornerRadius: Radius.small))
                             .id(SampleSectionContent.rowID(row))
-                            .accessibilityIdentifier("testhooks.shell.\(prefix).row.\(row)")
+                            .accessibilityIdentifier("testhooks.shell.\(prefix)Row.\(row)")
                     }
                 }
                 .scrollTargetLayout()
@@ -264,7 +264,8 @@ extension TestHooks {
 
     /// The navigation's state in one line, for UI tests: what no screen
     /// shows at once (the selected deck while Browse is shown, every stack,
-    /// the scroll positions, the columns).
+    /// the scroll positions, the columns). A strip below the shell
+    /// (`TestHooks.Root`), so screenshots show it beside the screen.
     struct ShellStateProbe: View {
         let navigation: AppNavigation
         #if os(iOS)
@@ -282,9 +283,14 @@ extension TestHooks {
         var body: some View {
             Text(verbatim: "layout=\(layout) " + Self.describe(navigation))
                 .font(.caption2)
+                // A few lines at any text size, never cut: the screen above
+                // it is what an accessibility-size screenshot is for.
+                .dynamicTypeSize(...DynamicTypeSize.large)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(.token(.textSecondary))
-                .frame(maxWidth: ContentWidth.primaryAction)
-                .padding(Spacing.xxSmall)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Spacing.medium)
+                .padding(.vertical, Spacing.xxSmall)
                 .background(.token(.backgroundSecondary))
                 .allowsHitTesting(false)
                 .accessibilityIdentifier("testhooks.shell.state")

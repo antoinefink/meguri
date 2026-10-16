@@ -330,22 +330,29 @@ final class AgentDriver {
         try settleIdentifiers(app)
     }
 
-    /// Waits, at most `limit` seconds, until two hierarchies in a row have
-    /// the same identifiers. SwiftUI gives some UIKit views theirs a moment
-    /// after launch: the first hierarchy shows an iPhone tab bar's buttons
-    /// without them (U150). A launch's capture is the settled state, never
-    /// that transient one (R1965).
-    private func settleIdentifiers(_ app: XCUIApplication, limit: TimeInterval = 3) throws {
+    /// Waits, at most `limit` seconds, until the hierarchy's identifiers
+    /// have not changed for `quiet` seconds. SwiftUI gives some UIKit views
+    /// theirs a moment after launch: the first hierarchy shows an iPhone tab
+    /// bar's buttons without them (U150). Two equal hierarchies 0.25 s apart
+    /// were not enough: in 2 of 5 iPhone drives the identifiers came just
+    /// after such a pair (2026-10-16). A launch's capture is the settled
+    /// state, never that transient one (R1965).
+    private func settleIdentifiers(_ app: XCUIApplication, quiet: TimeInterval = 1, limit: TimeInterval = 5) throws {
         func identifiers() throws -> [String] {
             try HierarchyExport.tree(app).root.allNodes().map(\.identifier)
         }
         let deadline = Date().addingTimeInterval(limit)
         var previous = try identifiers()
+        var unchangedSince = Date()
         while Date() < deadline {
             RunLoop.current.run(until: Date().addingTimeInterval(0.25))
             let current = try identifiers()
-            if current == previous { return }
-            previous = current
+            if current != previous {
+                previous = current
+                unchangedSince = Date()
+            } else if Date().timeIntervalSince(unchangedSince) >= quiet {
+                return
+            }
         }
     }
 
