@@ -32,8 +32,8 @@ pub(crate) struct Replacement {
 
 /// L8: closes the readers and the writer, runs `swap` with nothing open,
 /// reopens through the open gate, and, when the file changed, moves to the
-/// next generation, publishes `CollectionReplaced` once and tells every
-/// `GenerationListener`.
+/// next generation, publishes `CollectionReplaced` once, tells every
+/// `GenerationListener` and starts the day clock again.
 pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Privilege, swap: Swap) -> Replacement {
     engine.set_exclusive_phase(core, ExclusivePhase::Replacing);
     core.exec.wait_idle();
@@ -54,6 +54,13 @@ pub(crate) fn replace(engine: &Engine, core: &Arc<CollectionCore>, privilege: Pr
             privilege: Some(privilege),
         }
     });
+    if let Some(collection) = &moved
+        && let Err(error) = collection.restart_day_clock()
+    {
+        // The day clock starts again as at an open (`sched/day-clock` D8);
+        // a failure here leaves the next check to compute afresh.
+        tracing::warn!(%error, "the day clock's first check on the new generation");
+    }
     if reopened {
         engine.set_exclusive_phase(core, ExclusivePhase::Working);
     } else if let Some(error) = &replaced.error {

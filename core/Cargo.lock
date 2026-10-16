@@ -1621,6 +1621,7 @@ dependencies = [
  "criterion",
  "libc",
  "meguri-model",
+ "meguri-sched",
  "meguri-storage",
  "meguri-testkit",
  "meguri-text",

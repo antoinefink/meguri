@@ -18,6 +18,7 @@ use meguri_engine::{ChangeStream, Event, EventKind, Generation, JobId, Qos, Seq,
 
 use crate::callback;
 use crate::changes::ChangeSet;
+use crate::day_clock;
 use crate::error::CoreError;
 use crate::jobs::JobOutcome;
 use crate::runtime;
@@ -50,6 +51,15 @@ pub enum CoreEventKind {
     CollectionReplaced { generation: u64 },
     /// A job started by a `start_*` export ended (KTD9). Exactly one per job.
     JobFinished { id: u64, outcome: JobOutcome },
+    /// The scheduler day changed, either way (U40, `sched/day-clock` D8),
+    /// after the rollover op committed: queues and counts are stale.
+    RolledOver { old_day: u32, new_day: u32 },
+    /// The device's IANA time zone differs from the one the day clock last
+    /// saw, even when the day and the offset did not change (D8).
+    TimeZoneChanged { zone_id: String },
+    /// The next day boundary moved (D8), epoch seconds: re-arm the day
+    /// clock's timer (U51).
+    NextDayAtChanged { next_day_at: i64 },
 }
 
 /// Implemented in Swift by `CoreEventStream`, which only yields each event
@@ -84,8 +94,12 @@ fn stream_kind(kind: CoreEventKind) -> Result<EventKind, CoreError> {
             id: JobId(id),
             outcome: outcome.into(),
         }),
-        CoreEventKind::Changes { .. } | CoreEventKind::CollectionReplaced { .. } => Err(CoreError::InvalidArgument {
-            message: "only the engine publishes Changes and CollectionReplaced".to_owned(),
+        CoreEventKind::Changes { .. }
+        | CoreEventKind::CollectionReplaced { .. }
+        | CoreEventKind::RolledOver { .. }
+        | CoreEventKind::TimeZoneChanged { .. }
+        | CoreEventKind::NextDayAtChanged { .. } => Err(CoreError::InvalidArgument {
+            message: "only the engine publishes Changes, CollectionReplaced and the day clock's events".to_owned(),
         }),
     }
 }
@@ -104,6 +118,9 @@ fn core_event(event: &Event) -> Option<CoreEvent> {
             id: id.0,
             outcome: outcome.clone().into(),
         },
+        kind @ (EventKind::RolledOver { .. }
+        | EventKind::TimeZoneChanged { .. }
+        | EventKind::NextDayAtChanged { .. }) => day_clock::core_event_kind(kind)?,
         EventKind::Lifecycle(_)
         | EventKind::Available
         | EventKind::WriteDelay { .. }
@@ -398,6 +415,11 @@ mod tests {
                 changes: sample_record(),
             },
             CoreEventKind::CollectionReplaced { generation: 2 },
+            CoreEventKind::RolledOver { old_day: 1, new_day: 2 },
+            CoreEventKind::TimeZoneChanged {
+                zone_id: "UTC".to_owned(),
+            },
+            CoreEventKind::NextDayAtChanged { next_day_at: 1 },
         ] {
             assert!(matches!(publish(1, None, kind), Err(CoreError::InvalidArgument { .. })));
         }

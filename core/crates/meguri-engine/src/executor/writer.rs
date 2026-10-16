@@ -21,7 +21,7 @@ use crate::changes::{self, MediaNotes};
 use crate::error::EngineError;
 use crate::executor::exclusive::Privilege;
 use crate::executor::live_file::LiveFile;
-use crate::executor::op::{OpContext, OpResult, OpSpec, OpTiming, UndoMeta, WriteDelay};
+use crate::executor::op::{CommitNotice, OpContext, OpResult, OpSpec, OpTiming, UndoMeta, WriteDelay};
 use crate::executor::preconditions::{self, TouchIndex};
 use crate::executor::source::QueueKind;
 use crate::executor::{ExecShared, WriterWake};
@@ -76,6 +76,17 @@ pub(crate) struct Reopen {
     pub initializers: Initializers,
 }
 
+thread_local! {
+    /// Set on writer threads: work there must never wait for the writer
+    /// (the day query, `sched/day-clock` D8).
+    static ON_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the current thread is a collection's writer thread.
+pub(crate) fn on_writer_thread() -> bool {
+    ON_WRITER.with(std::cell::Cell::get)
+}
+
 /// The writer thread's loop: runs tasks until the executor stops and its
 /// queues are empty.
 pub(crate) fn run(
@@ -85,6 +96,7 @@ pub(crate) fn run(
     floor: Seq,
     activity: &ThreadActivity,
 ) {
+    ON_WRITER.with(|on| on.set(true));
     let mut collection = Some(collection);
     let mut touched = TouchIndex::new(floor);
     let mut flush = WalFlush::default();
@@ -325,6 +337,7 @@ fn run_op<T>(
         undo_notes: UndoNotes::default(),
         restore: meta.restore,
         last_seq: shared.last_seq(),
+        on_commit: Vec::new(),
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&mut context)));
     let media = MediaNotes {
@@ -332,6 +345,7 @@ fn run_op<T>(
         removed: std::mem::take(&mut context.media_removed),
     };
     let undo_notes = std::mem::take(&mut context.undo_notes);
+    let hooks = std::mem::take(&mut context.on_commit);
     let value = match outcome {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -393,6 +407,23 @@ fn run_op<T>(
             );
         }
         reservation.fill(generation, None, EventKind::Changes(Arc::clone(&change_set)));
+    }
+    let notice = CommitNotice {
+        seq,
+        generation,
+        published: !change_set.is_empty(),
+    };
+    for hook in hooks {
+        // The commit stands whatever a hook does.
+        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hook(notice))) {
+            let message = crate::error::panic_message(payload.as_ref());
+            tracing::error!(op = meta.name, %message, "a commit hook panicked");
+        }
+    }
+    // The day clock computes afresh after a change of its keys or of `col`
+    // (`sched/day-clock` D6, D8).
+    if !change_set.is_empty() && shared.day_clock.note_commit(&change_set) {
+        shared.day_clock.schedule_check(shared);
     }
     drop(delay);
 
