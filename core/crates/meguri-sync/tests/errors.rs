@@ -308,6 +308,26 @@ fn a_refused_redirect_carries_its_code() {
 }
 
 #[test]
+fn a_refused_redirects_detail_holds_no_credentials_from_its_location() {
+    // E1: `detail` never holds a URL with credentials. transport.md T7
+    // refuses such a target; the `Location` text is the server's to choose.
+    for (code, location) in [
+        (308, "https://USER:SECRET@127.0.0.1:9/"),
+        (301, "http://USER:SECRET@127.0.0.1:9/next?token=SECRET#SECRET"),
+        (308, "//USER:SECRET@127.0.0.1:9/"),
+        (307, "not a URL, USER:SECRET@"),
+    ] {
+        let stub = SyncStub::serve(move |_| Reply::redirect(code, Some(location)));
+        let err = check_fails(&options(&stub.url()));
+        assert_eq!(err.kind, ErrorKind::RedirectRefused { code }, "{location}");
+        for secret in ["SECRET", "USER"] {
+            assert!(!err.detail.contains(secret), "{err}");
+            assert!(!err.to_string().contains(secret), "{err}");
+        }
+    }
+}
+
+#[test]
 fn a_success_that_breaks_the_transports_checks_is_bad_response() {
     // E6 via transport.md T6.2: no `anki-original-size`.
     let stub = SyncStub::serve(|_| Reply::ok(b"{}").without_header("anki-original-size"));
