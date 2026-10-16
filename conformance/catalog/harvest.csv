@@ -1047,44 +1047,44 @@ hdaef1892f535,rust,tag,sync,unclassified,,,open
 he0cb4f886c79,rust,supplementary,sync,unclassified,,,open
 hf0311a8adc67,rust,tag,sync,in-scope,"a server that stays silent past the stall timeout fails the request; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
 hfa9987445e9e,rust,tag,sync,unclassified,,,open
-h12a8b8c90d0b,python,tag,tags,unclassified,,,open
-h15bbd0ab00e1,python,tag,tags,unclassified,,,open
-h16d1d167d5e7,python,tag,tags,unclassified,,,open
-h22d21da07c9d,python,tag,tags,unclassified,,,open
-h24a44aea4cbd,python,tag,tags,unclassified,,,open
-h35c21a97404e,python,tag,tags,unclassified,,,open
-h407bcbbdc1cb,python,tag,tags,unclassified,,,open
-h7bab481264fc,python,tag,tags,unclassified,,,open
-h84b96a6b7b4b,python,tag,tags,unclassified,,,open
-h86fd2d43f4c8,python,tag,tags,unclassified,,,open
-ha4e6d06a529b,python,tag,tags,unclassified,,,open
-hae2d723b054e,python,tag,tags,unclassified,,,open
-hb84a3b9d0887,python,tag,tags,unclassified,,,open
-hd16c24f88495,python,tag,tags,unclassified,,,open
-hda41aef53f19,python,tag,tags,unclassified,,,open
-hf6d2b53b1903,python,tag,tags,unclassified,,,open
-h04e3f5f5228e,rust,tag,tags,unclassified,,,open
-h0b434e5e6376,rust,tag,tags,unclassified,,,open
-h0e99ed421e1d,rust,tag,tags,unclassified,,,open
-h102f0046f2fd,rust,tag,tags,unclassified,,,open
-h4068299df64b,rust,tag,tags,unclassified,,,open
-h423183febc3e,rust,tag,tags,unclassified,,,open
-h4bf8df530930,rust,tag,tags,unclassified,,,open
-h657d1b2b3255,rust,tag,tags,unclassified,,,open
-h6d9e5bc856c0,rust,tag,tags,unclassified,,,open
-h719a952d33d5,rust,tag,tags,unclassified,,,open
-h762285c157a4,rust,tag,tags,unclassified,,,open
-h8838c90310d2,rust,tag,tags,unclassified,,,open
-h8a531508a003,rust,tag,tags,unclassified,,,open
-h9f3686b61815,rust,tag,tags,unclassified,,,open
-h9f452a4faaf3,rust,tag,tags,unclassified,,,open
-hab1bc9fa2604,rust,tag,tags,unclassified,,,open
-hac48d18d7071,rust,tag,tags,unclassified,,,open
-hafc1cda6babf,rust,tag,tags,unclassified,,,open
-hca878bd8d66c,rust,tag,tags,unclassified,,,open
-hcd7b5a34f3ac,rust,tag,tags,unclassified,,,open
-hd8d86a3d37b3,rust,tag,tags,unclassified,,,open
-he58668dea421,rust,tag,tags,unclassified,,,open
+h12a8b8c90d0b,python,tag,tags,in-scope,unused registry rows removed,tags/clear-unused/parents,done
+h15bbd0ab00e1,python,tag,tags,not-applicable,legacy Python wrappers that forward to the bulk add and remove operations,,done
+h16d1d167d5e7,python,tag,tags,in-scope,every tag a note uses is registered and listed,tags/canon/spelling,done
+h22d21da07c9d,python,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h24a44aea4cbd,python,tag,tags,in-scope,moving a tag under another tag,tags/reparent/rules,done
+h35c21a97404e,python,tag,tags,not-applicable,a Python string helper with wildcard patterns; Meguri has no such interface,,done
+h407bcbbdc1cb,python,tag,tags,not-applicable,legacy Python wrapper that forwards to Clear Unused Tags,,done
+h7bab481264fc,python,tag,tags,in-scope,"stored tag text: single spaces with a leading and a trailing space, empty for no tags",tags/canon/normalize,done
+h84b96a6b7b4b,python,tag,tags,in-scope,renaming a tag on its notes,tags/rename/basic,done
+h86fd2d43f4c8,python,tag,tags,in-scope,flag in the low three bits with the other bits kept; flag searches belong to the search area,tags/flags/set,done
+ha4e6d06a529b,python,tag,tags,in-scope,collapsed state stored in the registry and shown in the tree,tags/collapse/set tags/tree/structure,done
+hae2d723b054e,python,tag,tags,not-applicable,a legacy helper that returns its input unchanged; tag canonicalization is covered by the canon scenarios,,done
+hb84a3b9d0887,python,tag,tags,in-scope,deleting a tag from every note and the registry,tags/delete/children,done
+hd16c24f88495,python,tag,tags,in-scope,"adding tags to selected notes, sorted and deduplicated",tags/bulk/add,done
+hda41aef53f19,python,tag,tags,in-scope,removing tags from selected notes,tags/bulk/remove,done
+hf6d2b53b1903,python,tag,tags,in-scope,tag tree built from the registry with implicit parents,tags/tree/structure,done
+h04e3f5f5228e,rust,tag,tags,in-scope,missing tags added case-insensitively and the result sorted,tags/bulk/add,done
+h0b434e5e6376,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h0e99ed421e1d,rust,tag,tags,in-scope,collapsed state reflected in the tag tree,tags/collapse/set tags/tree/structure,done
+h102f0046f2fd,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h4068299df64b,rust,tag,tags,in-scope,"matching a tag and its descendants case-insensitively, literal names",tags/rename/basic tags/rename/refused tags/bulk/remove,done
+h423183febc3e,rust,tag,tags,in-scope,"tag names normalized, existing spelling adopted, duplicates dropped and items split on save",tags/canon/normalize tags/canon/spelling,done
+h4bf8df530930,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
+h657d1b2b3255,rust,tag,tags,in-scope,deleting a tag from every note and the registry,tags/delete/children,done
+h6d9e5bc856c0,rust,tag,tags,in-scope,added tags take the registered spelling and are stored,tags/bulk/add,done
+h719a952d33d5,rust,tag,tags,in-scope,registered names listed,tags/canon/spelling,done
+h762285c157a4,rust,tag,tags,in-scope,clearing unused tags keeps their collapsed state; deleting a tag removes its descendants,tags/clear-unused/parents tags/delete/children,done
+h8838c90310d2,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h8a531508a003,rust,tag,tags,in-scope,renaming a tag and its descendants,tags/rename/basic,done
+h9f3686b61815,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
+h9f452a4faaf3,rust,tag,tags,in-scope,"tag tree with implicit parents, case and order",tags/tree/structure tags/canon/spelling,done
+hab1bc9fa2604,rust,tag,tags,in-scope,"reparenting rules, merges and moves to the top level",tags/reparent/rules,done
+hac48d18d7071,rust,tag,tags,in-scope,a blank new name is refused and nothing changes,tags/rename/refused,done
+hafc1cda6babf,rust,tag,tags,in-scope,moving a tag to the top level,tags/reparent/rules,done
+hca878bd8d66c,rust,tag,tags,in-scope,tags still used by notes are kept,tags/clear-unused/parents,done
+hcd7b5a34f3ac,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+hd8d86a3d37b3,rust,tag,tags,in-scope,removal from listed notes leaves other notes alone,tags/bulk/remove,done
+he58668dea421,rust,tag,tags,in-scope,moving a tag under another tag,tags/reparent/rules,done
 h26e80efa4ec6,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
 ha04d63efb2f8,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
 hf0908a412138,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done

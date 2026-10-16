@@ -104,7 +104,7 @@ class _InvalidBlob(Exception):
 def _decode_status(session, section: str, name: str) -> str:
     rid = _record_id(session, section, name)
     backend = session.col._backend
-    probe = _KindProbe(backend, backend_pb2.BackendError.PROTO_ERROR, _InvalidBlob)
+    probe = KindProbe(backend, backend_pb2.BackendError.PROTO_ERROR, _InvalidBlob)
     try:
         getattr(type(backend), GETTERS[section])(probe, rid)
     except _InvalidBlob:
@@ -136,7 +136,7 @@ def merge_patch(target: Any, patch: Any) -> Any:
     return result
 
 
-class _KindProbe:
+class KindProbe:
     """Stands in for the RustBackend in one generated backend call: a backend
     error of `kind` raises `raises()`, any other error the exception pylib
     would raise."""
@@ -160,7 +160,7 @@ class _KindProbe:
 
 def _save(session, section: str, obj: dict) -> None:
     backend = session.col._backend
-    probe = _KindProbe(backend, backend_pb2.BackendError.JSON_ERROR, lambda: Rejected("invalid_json"))
+    probe = KindProbe(backend, backend_pb2.BackendError.JSON_ERROR, lambda: Rejected("invalid_json"))
     data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
     generated = type(backend)
     if section == "notetypes":

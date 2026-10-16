@@ -29,13 +29,21 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["ops"],
         serde_json::json!([
+            "add_note_tags",
             "advance",
+            "clear_unused_tags",
             "db_exec",
+            "delete_tags",
             "handoff",
             "open",
+            "remove_note_tags",
+            "rename_tag",
             "reopen",
+            "reparent_tags",
             "set_clock",
-            "set_config"
+            "set_config",
+            "set_flag",
+            "set_tag_collapsed"
         ])
     );
     assert_eq!(
@@ -47,15 +55,17 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "fsrs_next",
             "schema_objects",
             "search",
+            "tag_tree",
             "template",
             "text",
             "timing"
         ])
     );
-    // dsl.md D7.2: 29 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 37 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
-    // set_config and undo-ops.md's undo, redo and remove_config among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 29);
+    // set_config, undo-ops.md's undo, redo and remove_config and the eight
+    // ops of tag-ops.md among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 37);
     for op in [
         "actor",
         "sync",
@@ -67,6 +77,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "undo",
         "redo",
         "remove_config",
+        "rename_tag",
+        "set_flag",
     ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),

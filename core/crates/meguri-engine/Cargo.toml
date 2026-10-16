@@ -19,6 +19,9 @@ meguri-sched.workspace = true
 meguri-storage.workspace = true
 # The touch index compares tag keys with the collection's `unicase` folding.
 meguri-text.workspace = true
+# Tag matching (`specs/tags/tags.md` T5): Unicode 16.0 simple case folding
+# is the pinned crate's case-insensitive mode.
+regex.workspace = true
 tracing.workspace = true
 
 # The pthread QoS calls of the thread registry (KTD9).
@@ -45,6 +48,12 @@ harness = false
 # R1811).
 [[bench]]
 name = "undo"
+harness = false
+
+# Criterion wall-clock suite: bulk tag operations on 10k notes
+# (`specs/tags/tags.md` T7, T10; R1831).
+[[bench]]
+name = "tags"
 harness = false
 
 [[test]]

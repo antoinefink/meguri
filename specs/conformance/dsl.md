@@ -146,6 +146,13 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `remove_config` | `{key}`: remove one collection config key, as an undoable step | none | stable (`undo-ops.md` V3.2) |
 | `undo` | `{}`: apply the top step of the undo history | none; rejections `nothing_to_undo`, `changed_externally` (Meguri's only) | stable (`undo-ops.md` V1) |
 | `redo` | `{}`: apply the top step of the redo history | none; rejections `nothing_to_redo`, `changed_externally` (Meguri's only) | stable (`undo-ops.md` V1) |
+| `add_note_tags`, `remove_note_tags` | `{notes: [#nN, ...], tags: <text>}`: add the tags of the text to the notes, or remove the matching tags from them | `{count}` | stable (`tag-ops.md` G1, G2) |
+| `delete_tags` | `{tags: <text>}`: remove the tags and their descendants from every note and from the registry | `{count}` | stable (`tag-ops.md` G3) |
+| `rename_tag` | `{from: <name>, to: <text>}` | `{count}`; rejection `invalid_name` | stable (`tag-ops.md` G4) |
+| `reparent_tags` | `{tags: [<name>, ...], parent: <name or "">}` | `{count}` | stable (`tag-ops.md` G5) |
+| `clear_unused_tags` | `{}` | `{count}` | stable (`tag-ops.md` G6) |
+| `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | stable (`tag-ops.md` G7) |
+| `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | stable (`tag-ops.md` G8) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
