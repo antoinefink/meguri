@@ -6,3 +6,4 @@
 - Canonical text is checked only against oracle goldens (`canonical_search` in T0) and the spec's examples, never against Meguri's own output.
 - Terms compile in `plan/sql.rs` `compile_term`; U81 and U82 replace its `NotYetSupported` stubs (a `BuildError`, never a silent `0`). `build_with` raises E3's `search_failed` before any stub, left to right: keep plan-time errors in that one pass.
 - `Term::scope` is Q3's table and decides the rows (Q5): a term must read only the tables its scope names.
+- `tests/canonical_roundtrip.rs` runs plans through `Plan::build_with` (test-hooks, turned on by the testkit dev-dependency) with a stand-in term compiler, on in-memory tables that hold ids only. The product's term compilers (U81/U82) need a schema-18 collection instead.
