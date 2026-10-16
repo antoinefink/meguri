@@ -26,10 +26,11 @@ use meguri_model::rng::SeededRandom;
 use meguri_model::tag::Tag;
 use meguri_model::time::{EpochMillis, EpochSecs};
 use meguri_model::usn::Usn;
+use meguri_storage::raw::{PlainDatabase, RawValue};
 use meguri_storage::{CollectionBuilder, OpenOptions, StampMode, open_collection};
 use meguri_testkit::private::redact::Candidates;
 use meguri_testkit::private::suite::{self, Check, CheckCounts, Outcome};
-use meguri_testkit::private::vault::{self, Vault, VaultError, VaultOptions};
+use meguri_testkit::private::vault::{self, CopyStep, Vault, VaultError, VaultOptions};
 use sha2::{Digest, Sha256};
 
 // ------------------------------------------------------------------ helpers
@@ -436,6 +437,149 @@ fn folders_that_are_not_a_plain_profile_are_refused() {
         VaultError::DestinationExists
     ));
     assert_eq!(fs::read_dir(&taken).unwrap().count(), 0);
+}
+
+// ------------------------------------------- the collection and its log
+
+/// A collection in WAL mode as a running Anki leaves it: rows 1 to 10
+/// checkpointed into the database file, rows 11 to 20 only in its log. The
+/// connection returned is Anki's: while it is open, the log is not folded
+/// into the database.
+fn wal_source(root: &Path) -> PlainDatabase {
+    let path = root.join("collection.anki2");
+    fs::write(&path, b"").unwrap();
+    let db = PlainDatabase::open(&path).unwrap();
+    db.rows("PRAGMA journal_mode = WAL", &[]).unwrap();
+    db.rows("PRAGMA wal_autocheckpoint = 0", &[]).unwrap();
+    db.execute_batch("CREATE TABLE t (n INTEGER)").unwrap();
+    for n in 1..=20 {
+        if n == 11 {
+            checkpoint(&db);
+        }
+        db.execute("INSERT INTO t VALUES (?)", &[RawValue::Integer(n)]).unwrap();
+    }
+    assert!(
+        fs::metadata(root.join("collection.anki2-wal")).unwrap().len() > 0,
+        "rows 11 to 20 are in the log"
+    );
+    db
+}
+
+/// A checkpoint as Anki's: the log folded into the database and truncated.
+fn checkpoint(db: &PlainDatabase) {
+    db.rows("PRAGMA wal_checkpoint(TRUNCATE)", &[]).unwrap();
+}
+
+/// The rows a copied collection holds, read as SQLite reads it (its log
+/// included).
+fn rows_in(copy: &Path) -> Vec<i64> {
+    let db = PlainDatabase::open(&copy.join("collection.anki2")).unwrap();
+    db.rows("SELECT n FROM t ORDER BY n", &[])
+        .unwrap()
+        .into_iter()
+        .map(|row| match row[0] {
+            RawValue::Integer(n) => n,
+            ref other => panic!("{other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_checkpoint_between_the_collection_and_its_log_starts_the_copy_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("profile");
+    fs::create_dir(&root).unwrap();
+    let anki = wal_source(&root);
+    let dest = dir.path().join("copy");
+    let mut steps = Vec::new();
+
+    let report = Vault::open(&root, &test_options())
+        .unwrap()
+        .copy_to_observed(&dest, &mut |step| {
+            // Once, after the database file is copied and before its log is
+            // read: Anki commits row 21 and checkpoints, truncating the log.
+            if steps.is_empty() {
+                anki.execute("INSERT INTO t VALUES (21)", &[]).unwrap();
+                checkpoint(&anki);
+            }
+            steps.push(step);
+        })
+        .unwrap();
+
+    // Every committed row: the old database file with the new, empty log
+    // would hold rows 1 to 10 only.
+    assert_eq!(rows_in(&dest), (1..=21).collect::<Vec<_>>());
+    assert_eq!(
+        steps,
+        vec![
+            CopyStep::CollectionCopied { attempt: 1 },
+            CopyStep::CollectionCopied { attempt: 2 }
+        ]
+    );
+    assert_eq!(
+        report.collection.sha256,
+        sha256_hex(&fs::read(root.join("collection.anki2")).unwrap())
+    );
+    assert_eq!(report.wal.as_ref().map(|wal| wal.bytes), Some(0));
+    drop(anki);
+}
+
+#[test]
+fn a_log_folded_in_and_removed_between_the_two_files_starts_the_copy_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("profile");
+    fs::create_dir(&root).unwrap();
+    let mut anki = Some(wal_source(&root));
+    let dest = dir.path().join("copy");
+    let mut attempts = 0;
+
+    let report = Vault::open(&root, &test_options())
+        .unwrap()
+        .copy_to_observed(&dest, &mut |_| {
+            attempts += 1;
+            // Anki quits: its last connection checkpoints and deletes the log.
+            if let Some(db) = anki.take() {
+                db.close().unwrap();
+                assert!(!root.join("collection.anki2-wal").exists());
+            }
+        })
+        .unwrap();
+
+    assert_eq!(rows_in(&dest), (1..=20).collect::<Vec<_>>());
+    assert_eq!(attempts, 2);
+    assert!(report.wal.is_none());
+    assert_eq!(
+        report.access,
+        vec!["collection.anki2", "collection.anki2-wal", "collection.anki2"]
+    );
+}
+
+#[test]
+fn a_collection_that_changes_at_every_attempt_is_refused_and_no_copy_is_left() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("profile");
+    fs::create_dir(&root).unwrap();
+    let anki = wal_source(&root);
+    let dest = dir.path().join("copy");
+    let mut n = 20;
+
+    let err = Vault::open(&root, &test_options())
+        .unwrap()
+        .copy_to_observed(&dest, &mut |_| {
+            n += 1;
+            anki.execute("INSERT INTO t VALUES (?)", &[RawValue::Integer(n)])
+                .unwrap();
+        })
+        .unwrap_err();
+
+    assert!(
+        matches!(err, VaultError::CollectionBusy { attempts } if attempts == vault::COLLECTION_ATTEMPTS),
+        "{err}"
+    );
+    assert_eq!(n, 20 + i64::from(vault::COLLECTION_ATTEMPTS));
+    assert!(!dest.exists(), "a refused copy leaves nothing");
+    // The message names no file of the collection beyond the vault's own.
+    assert!(err.to_string().contains("collection.anki2"));
 }
 
 // ------------------------------------------------- the guard's candidates

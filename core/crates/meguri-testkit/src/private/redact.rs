@@ -4,8 +4,9 @@
 //! This module only collects them. Matching is the scanner's
 //! (`tools/scripts/private-scan/private_scan.py`), which also runs as the
 //! pre-commit hook: it splits every candidate into words with its own
-//! tokenizer, keeps those of four or more characters, and drops what already
-//! occurs in the repository. So the field words here are the field's text
+//! tokenizer, keeps every deck, tag and media name and the field words of
+//! four or more characters, and drops what is already committed in the
+//! repository. So the field words here are the field's text
 //! (markup and entities removed, `meguri_text::html::strip_markup`) split at
 //! white space and ASCII punctuation only, where every tokenizer splits.
 //!

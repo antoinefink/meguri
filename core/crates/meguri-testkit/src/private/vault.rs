@@ -18,7 +18,6 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
 
@@ -120,8 +119,11 @@ pub enum VaultError {
     NotAllowed(&'static str),
     /// The destination already exists.
     DestinationExists,
-    /// A source file changed while it was copied (size or modification time).
+    /// A media file changed while it was copied (another file, size or
+    /// modification time).
     SourceChanged(&'static str),
+    /// The collection or its log changed during each of `attempts` copies.
+    CollectionBusy { attempts: u32 },
     /// Reading or writing failed; `what` is a fixed description.
     Io { what: &'static str, source: io::Error },
 }
@@ -138,6 +140,10 @@ impl fmt::Display for VaultError {
             VaultError::NotAllowed(what) => write!(f, "refused: {what}"),
             VaultError::DestinationExists => write!(f, "the destination already exists"),
             VaultError::SourceChanged(name) => write!(f, "{name} changed while it was copied"),
+            VaultError::CollectionBusy { attempts } => write!(
+                f,
+                "{COLLECTION} or {COLLECTION_WAL} changed during each of {attempts} copies; quit Anki (or let it sit idle) and copy again"
+            ),
             VaultError::Io { what, source } => write!(f, "{what}: {source}"),
         }
     }
@@ -168,8 +174,21 @@ pub struct CopyReport {
     /// Media folder entries left out: subfolders, symlinks, other kinds.
     pub media_skipped: u64,
     /// Every path the vault opened, relative to the folder, in order: the
-    /// collection, the log, the media folder (listed) and each media file.
+    /// collection and the log (again for each attempt the source changed
+    /// during), the media folder (listed) and each media file.
     pub access: Vec<String>,
+}
+
+/// How many times [`Vault::copy_to`] copies the collection and its log
+/// before it gives up on a source that keeps changing.
+pub const COLLECTION_ATTEMPTS: u32 = 5;
+
+/// A point of [`Vault::copy_to_observed`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyStep {
+    /// The database file is copied (attempt `attempt`, from 1); its log is
+    /// next.
+    CollectionCopied { attempt: u32 },
 }
 
 /// A profile folder opened for reading.
@@ -211,9 +230,25 @@ impl Vault {
 
     /// Copies the allowed files into `dest`, which must not exist yet: the
     /// collection and its log at the top, the media files under
-    /// [`MEDIA_DIR`]. Each file is hashed as it is copied, and its size and
-    /// modification time must be the same after as before.
+    /// [`MEDIA_DIR`]. Each file is hashed as it is copied.
+    ///
+    /// The collection and its log are one state only together: a checkpoint
+    /// moves committed pages from the log into the database file and then
+    /// empties the log. So the two are copied as a pair: the files' stamps
+    /// (device, inode, size, modification time to the nanosecond; the log's
+    /// absence counts) are taken before the database file is copied and again
+    /// after the log is, and any difference starts the pair over, up to
+    /// [`COLLECTION_ATTEMPTS`] times ([`VaultError::CollectionBusy`]). The
+    /// read-only mount does not stop Anki on the host from writing. A media
+    /// file must keep its stamp while it is copied ([`VaultError::SourceChanged`]).
+    /// On an error, `dest` is removed.
     pub fn copy_to(&self, dest: &Path) -> Result<CopyReport, VaultError> {
+        self.copy_to_observed(dest, &mut |_| {})
+    }
+
+    /// [`Vault::copy_to`], telling `observer` each [`CopyStep`] as it is
+    /// reached, so a test can change the source at that moment.
+    pub fn copy_to_observed(&self, dest: &Path, observer: &mut dyn FnMut(CopyStep)) -> Result<CopyReport, VaultError> {
         match fs::symlink_metadata(dest) {
             Ok(_) => return Err(VaultError::DestinationExists),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -228,29 +263,17 @@ impl Vault {
             fs::create_dir_all(parent).map_err(io_error("creating the destination's parent"))?;
         }
         fs::create_dir(dest).map_err(io_error("creating the destination"))?;
+        let copied = self.copy_into(dest, observer);
+        if copied.is_err() {
+            // A part copy of the private collection is of no use to anyone.
+            let _ = fs::remove_dir_all(dest);
+        }
+        copied
+    }
 
+    fn copy_into(&self, dest: &Path, observer: &mut dyn FnMut(CopyStep)) -> Result<CopyReport, VaultError> {
         let mut access = Vec::new();
-        access.push(COLLECTION.to_owned());
-        let collection = copy_file(&self.root.join(COLLECTION), &dest.join(COLLECTION), COLLECTION)?;
-
-        let wal = match fs::symlink_metadata(self.root.join(COLLECTION_WAL)) {
-            Ok(meta) if meta.file_type().is_file() => {
-                access.push(COLLECTION_WAL.to_owned());
-                Some(copy_file(
-                    &self.root.join(COLLECTION_WAL),
-                    &dest.join(COLLECTION_WAL),
-                    COLLECTION_WAL,
-                )?)
-            }
-            Ok(_) => return Err(VaultError::NotAllowed("collection.anki2-wal is not a regular file")),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
-            Err(e) => {
-                return Err(VaultError::Io {
-                    what: "reading collection.anki2-wal",
-                    source: e,
-                });
-            }
-        };
+        let (collection, wal) = self.copy_collection(dest, &mut access, observer)?;
 
         let (mut media_files, mut media_bytes, mut media_skipped) = (0, 0, 0);
         let media = self.root.join(MEDIA_DIR);
@@ -296,17 +319,121 @@ impl Vault {
             access,
         })
     }
+
+    /// The collection and its log, copied as one pair (see
+    /// [`Vault::copy_to`]).
+    fn copy_collection(
+        &self,
+        dest: &Path,
+        access: &mut Vec<String>,
+        observer: &mut dyn FnMut(CopyStep),
+    ) -> Result<(FileCopy, Option<FileCopy>), VaultError> {
+        let (db, wal) = (self.root.join(COLLECTION), self.root.join(COLLECTION_WAL));
+        let (db_copy, wal_copy) = (dest.join(COLLECTION), dest.join(COLLECTION_WAL));
+        for attempt in 1..=COLLECTION_ATTEMPTS {
+            let before = (pair_stamp(&db, COLLECTION)?, pair_stamp(&wal, COLLECTION_WAL)?);
+            if before.0.is_none() {
+                return Err(VaultError::NoCollection);
+            }
+            access.push(COLLECTION.to_owned());
+            let collection = copy_bytes(&db, &db_copy)?;
+            observer(CopyStep::CollectionCopied { attempt });
+            let log = match before.1 {
+                Some(_) => {
+                    access.push(COLLECTION_WAL.to_owned());
+                    // A log that went away since the stamp is a change, seen below.
+                    copy_bytes_if_present(&wal, &wal_copy)?
+                }
+                None => None,
+            };
+            let after = (pair_stamp(&db, COLLECTION)?, pair_stamp(&wal, COLLECTION_WAL)?);
+            let sizes_match = before.0.map(|stamp| stamp.len) == Some(collection.bytes)
+                && before.1.map(|stamp| stamp.len) == log.as_ref().map(|copy| copy.bytes);
+            if before == after && sizes_match {
+                return Ok((collection, log));
+            }
+            for path in [&db_copy, &wal_copy] {
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(VaultError::Io {
+                            what: "removing a stale copy",
+                            source: e,
+                        });
+                    }
+                }
+            }
+        }
+        Err(VaultError::CollectionBusy {
+            attempts: COLLECTION_ATTEMPTS,
+        })
+    }
 }
 
-/// The size and modification time a source file must keep while it is
-/// copied.
-fn stamp(meta: &fs::Metadata) -> (u64, Option<SystemTime>) {
-    (meta.len(), meta.modified().ok())
+/// What a source file must keep while it is copied: which file it is
+/// (device and inode), its size and its modification time, to the
+/// nanosecond.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: (i64, i64),
 }
 
-fn copy_file(source: &Path, dest: &Path, name: &'static str) -> Result<FileCopy, VaultError> {
-    let mut input = File::open(source).map_err(io_error("opening a source file"))?;
-    let before = stamp(&input.metadata().map_err(io_error("reading a source file"))?);
+impl Stamp {
+    fn of(meta: &fs::Metadata) -> Stamp {
+        use std::os::unix::fs::MetadataExt;
+        Stamp {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            len: meta.len(),
+            mtime: (meta.mtime(), meta.mtime_nsec()),
+        }
+    }
+}
+
+/// The stamp of the collection or its log, `None` when it does not exist.
+/// Anything there but a regular file is refused.
+fn pair_stamp(path: &Path, name: &'static str) -> Result<Option<Stamp>, VaultError> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_file() => Ok(Some(Stamp::of(&meta))),
+        Ok(_) => Err(VaultError::NotAllowed(if name == COLLECTION {
+            "collection.anki2 is not a regular file"
+        } else {
+            "collection.anki2-wal is not a regular file"
+        })),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(VaultError::Io {
+            what: if name == COLLECTION {
+                "reading collection.anki2"
+            } else {
+                "reading collection.anki2-wal"
+            },
+            source: e,
+        }),
+    }
+}
+
+/// [`copy_bytes`], or `None` when `source` no longer exists.
+fn copy_bytes_if_present(source: &Path, dest: &Path) -> Result<Option<FileCopy>, VaultError> {
+    match File::open(source) {
+        Ok(input) => copy_from(input, dest).map(Some),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(VaultError::Io {
+            what: "opening a source file",
+            source: e,
+        }),
+    }
+}
+
+/// Copies `source` to the new file `dest`, hashing it; no stamp check.
+fn copy_bytes(source: &Path, dest: &Path) -> Result<FileCopy, VaultError> {
+    copy_from(File::open(source).map_err(io_error("opening a source file"))?, dest)
+}
+
+fn copy_from(mut input: File, dest: &Path) -> Result<FileCopy, VaultError> {
     let mut output = File::create_new(dest).map_err(io_error("creating a copy"))?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 1 << 20];
@@ -321,12 +448,20 @@ fn copy_file(source: &Path, dest: &Path, name: &'static str) -> Result<FileCopy,
         bytes += n as u64;
     }
     output.sync_all().map_err(io_error("writing a copy"))?;
-    let after = stamp(&fs::metadata(source).map_err(io_error("reading a source file"))?);
-    if before != after || bytes != after.0 {
-        return Err(VaultError::SourceChanged(name));
-    }
     Ok(FileCopy {
         bytes,
         sha256: crate::generate::hex(&hasher.finalize()),
     })
+}
+
+/// Copies one media file, which must keep its stamp while it is copied.
+fn copy_file(source: &Path, dest: &Path, name: &'static str) -> Result<FileCopy, VaultError> {
+    let input = File::open(source).map_err(io_error("opening a source file"))?;
+    let before = Stamp::of(&input.metadata().map_err(io_error("reading a source file"))?);
+    let copied = copy_from(input, dest)?;
+    let after = Stamp::of(&fs::metadata(source).map_err(io_error("reading a source file"))?);
+    if before != after || copied.bytes != after.len {
+        return Err(VaultError::SourceChanged(name));
+    }
+    Ok(copied)
 }
