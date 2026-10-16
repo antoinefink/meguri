@@ -1,13 +1,15 @@
 //! Typed records of a schema-18 Anki collection, their protobuf blobs with
 //! unknown-field capture, the card `data` JSON, the schema-11 JSON form, and
 //! the seams every core crate takes time and randomness from (R1875) and puts
-//! its fault points through (R2003).
+//! its fault points through (R2003), and the change value types every
+//! committed op reports (KTD2).
 //!
 //! Specs: `specs/model/row-records.md`, `protobuf-records.md`,
 //! `card-data-json.md`, `schema11-json.md` and `json-numbers.md`.
 
 pub mod card;
 pub mod card_data;
+pub mod changes;
 pub mod clock;
 pub mod col;
 pub mod config;

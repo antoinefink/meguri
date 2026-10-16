@@ -121,6 +121,308 @@ fn assert_close(what: &str, distance: Option<f64>, limit: f64) {
     assert!(distance <= limit, "{what}: distance {distance:.4} > {limit}");
 }
 
+/// Total variation distance between two weightings of the same buckets:
+/// half the sum of the share differences (F3). A weighting whose total is
+/// 0 has every share 0.
+fn variation_distance(a: &[f64], b: &[f64]) -> f64 {
+    assert_eq!(a.len(), b.len(), "the same buckets");
+    let total = |w: &[f64]| w.iter().sum::<f64>();
+    let share = |x: f64, t: f64| if t == 0.0 { 0.0 } else { x / t };
+    let (ta, tb) = (total(a), total(b));
+    a.iter()
+        .zip(b)
+        .map(|(&x, &y)| (share(x, ta) - share(y, tb)).abs())
+        .sum::<f64>()
+        / 2.0
+}
+
+fn as_f64(counts: &[u64]) -> Vec<f64> {
+    counts.iter().map(|&c| c as f64).collect()
+}
+
+/// F3.1: the lengths a generated field is compared with: its profile
+/// `field_bytes`, with a normal note type's 0-byte first fields counted in
+/// the bucket holding 1 (F4.8 writes them as one letter).
+fn expected_field_bytes(shape: &profile::NotetypeShape, field: usize) -> Vec<f64> {
+    let lengths = &shape.field_bytes[field];
+    let mut counts = as_f64(&lengths.counts);
+    if field == 0 && shape.kind == "normal" {
+        let one = lengths
+            .edges
+            .windows(2)
+            .position(|w| w[0] <= 1 && 1 < w[1])
+            .expect("a bucket holds 1");
+        counts[one] += std::mem::take(&mut counts[0]);
+    }
+    counts
+}
+
+/// F3.1: generated field lengths follow the profile, pooled over every
+/// field of every note type (each field's shares weighted by its note
+/// type's notes) and per field of every note type with at least 2,000
+/// generated notes. Returns how many fields were compared one by one.
+fn assert_field_lengths(what: &str, measured: &Profile, p: &Profile) -> usize {
+    assert_eq!(measured.notetypes.len(), p.notetypes.len(), "{what}: note types");
+    let buckets = p.notetypes[0].field_bytes[0].counts.len();
+    let (mut pooled_measured, mut pooled_expected) = (vec![0.0; buckets], vec![0.0; buckets]);
+    let mut per_field = Vec::new();
+    for (i, (generated, shape)) in measured.notetypes.iter().zip(&p.notetypes).enumerate() {
+        assert_eq!(generated.fields, shape.fields, "{what}: note type {i} fields");
+        for f in 0..shape.fields as usize {
+            assert_eq!(generated.field_bytes[f].edges, shape.field_bytes[f].edges);
+            let got = as_f64(&generated.field_bytes[f].counts);
+            let expected = expected_field_bytes(shape, f);
+            let weigh = |slots: &mut [f64], counts: &[f64], notes: u64| {
+                let total: f64 = counts.iter().sum();
+                if total > 0.0 {
+                    for (slot, c) in slots.iter_mut().zip(counts) {
+                        *slot += c / total * notes as f64;
+                    }
+                }
+            };
+            weigh(&mut pooled_measured, &got, generated.notes);
+            weigh(&mut pooled_expected, &expected, shape.notes);
+            if generated.notes >= 2000 {
+                per_field.push((i, f, variation_distance(&got, &expected)));
+            }
+        }
+    }
+    let pooled = variation_distance(&pooled_measured, &pooled_expected);
+    let worst = per_field
+        .iter()
+        .fold((0, 0, 0.0f64), |w, &d| if d.2 > w.2 { d } else { w });
+    eprintln!(
+        "{what}: field lengths pooled {pooled:.4}; {} fields compared, the farthest note type {} field {} at {:.4}",
+        per_field.len(),
+        worst.0,
+        worst.1,
+        worst.2
+    );
+    assert!(
+        pooled <= 0.05,
+        "{what}: pooled field lengths at distance {pooled:.4} > 0.05"
+    );
+    for (i, f, d) in &per_field {
+        assert!(
+            *d <= 0.05,
+            "{what}: note type {i} field {f} lengths at distance {d:.4} > 0.05"
+        );
+    }
+    per_field.len()
+}
+
+/// References per note of a whole profile (F3.2's mean): every field's
+/// `media_refs`, images and sounds, of every note type, over
+/// `totals.notes`.
+fn references_per_note(x: &Profile) -> f64 {
+    let refs: u64 = x
+        .notetypes
+        .iter()
+        .flat_map(|nt| &nt.media_refs)
+        .map(|[images, sounds]| images + sounds)
+        .sum();
+    refs as f64 / x.totals.notes as f64
+}
+
+/// F3.2: generated references per note follow the profile, pooled over
+/// every note type (the profile's shares weighted by its notes, against
+/// the generated counts summed), per note type with at least 2,000
+/// generated notes, and as a mean. Returns how many note types were
+/// compared one by one.
+fn assert_references_per_note(what: &str, measured: &Profile, p: &Profile) -> usize {
+    assert_eq!(measured.notetypes.len(), p.notetypes.len(), "{what}: note types");
+    let buckets = p.notetypes[0].refs_per_note.counts.len();
+    let (mut pooled_measured, mut pooled_expected) = (vec![0.0; buckets], vec![0.0; buckets]);
+    let mut per_type = Vec::new();
+    for (i, (generated, shape)) in measured.notetypes.iter().zip(&p.notetypes).enumerate() {
+        assert_eq!(generated.refs_per_note.edges, shape.refs_per_note.edges);
+        for (slot, &c) in pooled_measured.iter_mut().zip(&generated.refs_per_note.counts) {
+            *slot += c as f64;
+        }
+        for (slot, share) in pooled_expected.iter_mut().zip(shape.refs_per_note.shares()) {
+            *slot += share * shape.notes as f64;
+        }
+        if generated.notes >= 2000 {
+            let d = generated.refs_per_note.distance(&shape.refs_per_note).unwrap();
+            per_type.push((i, d));
+        }
+    }
+    let pooled = variation_distance(&pooled_measured, &pooled_expected);
+    let (got, want) = (references_per_note(measured), references_per_note(p));
+    let relative = (got - want).abs() / want;
+    let worst = per_type.iter().fold((0, 0.0f64), |w, &d| if d.1 > w.1 { d } else { w });
+    eprintln!(
+        "{what}: references per note pooled {pooled:.4}, mean {got:.4} vs {want:.4} ({relative:.4}); {} note types compared, the farthest note type {} at {:.4}",
+        per_type.len(),
+        worst.0,
+        worst.1
+    );
+    assert!(
+        pooled <= 0.05,
+        "{what}: pooled references per note at distance {pooled:.4} > 0.05"
+    );
+    assert!(
+        relative <= 0.05,
+        "{what}: references per note {got:.4} vs the profile's {want:.4}, {relative:.4} > 5%"
+    );
+    for (i, d) in &per_type {
+        assert!(
+            *d <= 0.05,
+            "{what}: note type {i} references per note at distance {d:.4} > 0.05"
+        );
+    }
+    per_type.len()
+}
+
+/// A media reference in a field: `<img src="name">` or `[sound:name]`.
+#[derive(Debug)]
+struct FieldRef {
+    start: usize,
+    end: usize,
+    name: String,
+    image: bool,
+}
+
+/// The references the generator writes, in field order.
+fn references_in(field: &str) -> Vec<FieldRef> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    loop {
+        let img = field[at..].find("<img src=\"").map(|i| (at + i, true));
+        let sound = field[at..].find("[sound:").map(|i| (at + i, false));
+        let (start, image) = match (img, sound) {
+            (Some(a), Some(b)) => {
+                if a.0 < b.0 {
+                    a
+                } else {
+                    b
+                }
+            }
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => break,
+        };
+        let (open, close) = if image {
+            ("<img src=\"", "\">")
+        } else {
+            ("[sound:", "]")
+        };
+        let name_at = start + open.len();
+        let name_end = name_at + field[name_at..].find(close).expect("a closed reference");
+        out.push(FieldRef {
+            start,
+            end: name_end + close.len(),
+            name: field[name_at..name_end].to_owned(),
+            image,
+        });
+        at = name_end + close.len();
+    }
+    out
+}
+
+fn is_words(text: &str) -> bool {
+    text.bytes().all(|b| b.is_ascii_lowercase() || b == b' ')
+}
+
+/// F4.8 on the stored notes of a profile collection (not the `media_files`
+/// worst case): a normal front is never empty; a cloze first field starts
+/// with its deletions c1 to cN (N its cards, answers of 3 to 14 bytes, or
+/// all of 1 byte); references sit only in fields the profile gives
+/// references, after the field's words, one space apart, and are numbered
+/// from 0 across the note in field order; the rest is words. Returns the
+/// references seen.
+fn check_note_fields(path: &Path, p: &Profile) -> usize {
+    let collection = open(path);
+    let types = collection.writer().ids_after(Table::Notetypes, None, 1000).unwrap();
+    drop(collection);
+    let index_of: HashMap<i64, usize> = types.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let mut cards_of: HashMap<i64, usize> = HashMap::new();
+    for card in all_cards(path) {
+        *cards_of.entry(card.note_id.0).or_default() += 1;
+    }
+    let mut references = 0;
+    for note in all_notes(path) {
+        let id = note.id;
+        let shape = &p.notetypes[index_of[&note.notetype_id.0]];
+        let values: Vec<&str> = note.field_values().collect();
+        assert_eq!(values.len() as u64, shape.fields, "note {id}");
+        let mut numbers = Vec::new();
+        let mut prefix: Option<String> = None;
+        for (f, value) in values.iter().enumerate() {
+            let shown: String = value.chars().take(160).collect();
+            let at = format!("note {id}, field {f}: {shown:?}");
+            let mut rest: &str = value;
+            if f == 0 && shape.kind == "normal" {
+                assert!(!value.is_empty(), "{at}: an empty front");
+            }
+            if f == 0 && shape.kind == "cloze" {
+                let cards = cards_of[&id.0];
+                let mut answers = Vec::new();
+                for k in 1..=cards {
+                    let open = format!("{{{{c{k}::");
+                    rest = rest.strip_prefix(open.as_str()).unwrap_or_else(|| panic!("{at}: c{k}"));
+                    let close = rest.find("}}").unwrap_or_else(|| panic!("{at}: c{k} closes"));
+                    assert!(is_words(&rest[..close]), "{at}: answer {k}");
+                    answers.push(close);
+                    rest = &rest[close + 2..];
+                    if k < cards {
+                        rest = rest
+                            .strip_prefix(' ')
+                            .unwrap_or_else(|| panic!("{at}: a space after c{k}"));
+                    }
+                }
+                assert!(
+                    answers.iter().all(|&a| a == 1) || answers.iter().all(|a| (3..=14).contains(a)),
+                    "{at}: answers {answers:?}"
+                );
+                assert!(!rest.contains("{{c"), "{at}: more deletions");
+                rest = rest.strip_prefix(' ').unwrap_or(rest);
+            }
+            let refs = references_in(rest);
+            if let Some(first) = refs.first() {
+                let [images, sounds] = shape.media_refs[f];
+                assert!(images + sounds > 0, "{at}: a reference in a field without references");
+                let words = &rest[..first.start];
+                assert!(
+                    words.is_empty() || words.ends_with(' ') && is_words(words),
+                    "{at}: words, then a space, before the references"
+                );
+                let tail: Vec<&str> = refs.iter().map(|r| &rest[r.start..r.end]).collect();
+                assert_eq!(
+                    &rest[first.start..],
+                    tail.join(" "),
+                    "{at}: references last, one space apart"
+                );
+            } else {
+                assert!(is_words(rest), "{at}: words");
+            }
+            for r in &refs {
+                let ext = if r.image { ".png" } else { ".mp3" };
+                let stem = r
+                    .name
+                    .strip_suffix(ext)
+                    .unwrap_or_else(|| panic!("{at}: {} ends {ext}", r.name));
+                let (head, n) = stem.rsplit_once('-').unwrap_or_else(|| panic!("{at}: {}", r.name));
+                let head = head.strip_prefix("mg").unwrap_or_else(|| panic!("{at}: {}", r.name));
+                assert!(head.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+                assert_eq!(
+                    prefix.get_or_insert_with(|| head.to_owned()),
+                    head,
+                    "{at}: one note index"
+                );
+                numbers.push(n.parse::<usize>().unwrap());
+            }
+        }
+        assert_eq!(
+            numbers,
+            (0..numbers.len()).collect::<Vec<_>>(),
+            "note {id}: reference numbers"
+        );
+        references += numbers.len();
+    }
+    references
+}
+
 /// Shares of cards per note type, in note type order.
 fn card_shares(p: &Profile) -> profile::Mix {
     p.notetypes
@@ -577,6 +879,27 @@ fn ten_thousand_cards_are_reproducible_and_follow_the_profile() {
         Some(profile::mix_distance(&ma.cards.states, &p.cards.states)),
         0.05,
     );
+    // F3.1 at 10k: only note types with at least 2,000 generated notes are
+    // compared field by field.
+    assert!(assert_field_lengths("10k", &ma, &p) > 0, "a field compared one by one");
+    assert_field_lengths("10k, seed 2", &mc, &p);
+    // F3.2 at 10k, both seeds.
+    assert!(
+        assert_references_per_note("10k", &ma, &p) > 0,
+        "a note type compared one by one"
+    );
+    assert_references_per_note("10k, seed 2", &mc, &p);
+    // F4.8: the stored fields' structure. The references this test's own
+    // parser finds are the ones `measure` counted.
+    let seen = check_note_fields(&collection(dir_a.path()), &p);
+    assert!(seen > 0, "references written");
+    let counted: u64 = ma
+        .notetypes
+        .iter()
+        .flat_map(|nt| &nt.media_refs)
+        .map(|r| r[0] + r[1])
+        .sum();
+    assert_eq!(seen as u64, counted, "references parsed and measured");
 
     // FSRS and the load balancer on, sibling burying on in every preset.
     let collection = open(&collection(dir_a.path()));
@@ -622,6 +945,12 @@ fn hundred_thousand_cards_follow_the_temporal_shape_and_keep_ids_historical() {
         "note creation to first review",
         m.revlog.first_review_gap_secs.distance(&p.revlog.first_review_gap_secs),
         0.05,
+    );
+    // F3.1 and F3.2 at 100k.
+    assert!(assert_field_lengths("100k", &m, &p) > 0, "fields compared one by one");
+    assert!(
+        assert_references_per_note("100k", &m, &p) > 0,
+        "note types compared one by one"
     );
 
     let path = collection(dir.path());
@@ -846,6 +1175,14 @@ fn worst_case_one_megabyte_fields() {
         .collect();
     large.sort_unstable();
     assert_eq!(large.len() as u64, wanted.notes);
+    // F4.8: a large field is exactly that many bytes of words, without the
+    // references its note type would otherwise put there.
+    for note in all_notes(&path) {
+        for value in note.field_values().filter(|f| f.len() as u64 >= wanted.bytes) {
+            assert_eq!(value.len() as u64, wanted.bytes, "note {}", note.id);
+            assert!(is_words(value), "note {}: words only", note.id);
+        }
+    }
     // The notes the oracle check renders (meguri-cli generate's
     // large_field_notes), read without changing a row.
     assert_eq!(generate::notes_with_field_of(&path, wanted.bytes).unwrap(), large);
@@ -1216,9 +1553,26 @@ fn media_files_mode_writes_every_reference() {
     let mut request = Request::new(shape(), 1500, 4);
     request.media = MediaMode::Files;
     let (dir, manifest) = run(&request);
+    assert!(
+        manifest.counts.media_refs > 0,
+        "the profile's media fields hold references"
+    );
     assert_eq!(manifest.counts.media_files, manifest.counts.media_refs);
     let m = measured(dir.path(), 0);
     assert_eq!(m.totals.media_files, manifest.counts.media_files);
+    // Every written reference names a written file, and nothing else is
+    // written (F4.8: a reference that does not fit has no file).
+    let files: HashSet<String> = std::fs::read_dir(dir.path().join("collection.media"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    let mut named = HashSet::new();
+    for note in all_notes(&collection(dir.path())) {
+        for value in note.field_values() {
+            named.extend(references_in(value).into_iter().map(|r| r.name));
+        }
+    }
+    assert_eq!(named, files);
 }
 
 // ------------------------------------------------------------ the budget
@@ -1242,6 +1596,179 @@ fn one_million_cards_within_budget() {
             .unwrap();
         assert!(kb < 2 * 1024 * 1024, "peak {kb} kB");
     }
+}
+
+/// F4.8's examples, for note index 7,978 (`1f2a`): the stored field for a
+/// drawn length and its markup, with the bytes of the spec's table. The
+/// markup counts inside the drawn length; words fill the rest.
+#[test]
+fn fields_follow_the_f4_8_examples() {
+    use generate::notes::{FieldText, answer_bytes, cloze_deletions, note_media, reference_threshold};
+    let mut rng = generate::rng::Rng::stream(5, generate::rng::Stream::Note, 7978);
+    let rng = &mut rng;
+    let image = note_media(5, 7978, 0, media::MediaKind::Image, 1000).reference();
+    assert_eq!(image, "<img src=\"mg1f2a-0.png\">");
+    assert_eq!(image.len(), 24);
+    let sound = note_media(5, 7978, 1, media::MediaKind::Audio, 1000).reference();
+    assert_eq!(sound, "[sound:mg1f2a-1.mp3]");
+
+    // No markup: the drawn length in words. A normal second field drawn
+    // at 0 is empty; a normal front drawn at 0 is built at 1 byte.
+    assert_eq!(FieldText::new(0).finish(rng), "");
+    let letter = FieldText::new(1).finish(rng);
+    assert!(letter.len() == 1 && is_words(&letter) && letter != " ", "{letter:?}");
+
+    // 40: 15 bytes of words, a space, the reference.
+    let mut field = FieldText::new(40);
+    assert!(field.fits(&image));
+    field.push_reference(image.clone());
+    let text = field.finish(rng);
+    assert_eq!(text.len(), 40);
+    let words = text.strip_suffix(&format!(" {image}")).unwrap();
+    assert!(
+        words.len() == 15 && is_words(words) && !words.starts_with(' '),
+        "{text:?}"
+    );
+
+    // 25: the reference alone, one byte short (1 byte left).
+    let mut field = FieldText::new(25);
+    assert!(field.fits(&image));
+    field.push_reference(image.clone());
+    assert_eq!(field.finish(rng), image);
+
+    // The thresholds are the longest reference 0 can be: the largest note
+    // index is 999,998 (`f423e`), positions staying below 1,000,000.
+    let longest_image = note_media(5, 999_998, 0, media::MediaKind::Image, 1000).reference();
+    let longest_sound = note_media(5, 999_998, 0, media::MediaKind::Audio, 1000).reference();
+    assert_eq!(longest_image, "<img src=\"mgf423e-0.png\">");
+    assert_eq!(longest_sound, "[sound:mgf423e-0.mp3]");
+    assert_eq!((longest_image.len(), longest_sound.len()), (25, 21));
+    assert_eq!(reference_threshold(media::MediaKind::Image), 25);
+    assert_eq!(reference_threshold(media::MediaKind::Audio), 21);
+
+    // 20: below the image threshold, so no reference is drawn (it would
+    // not fit either): 20 bytes of words.
+    assert!(20 < reference_threshold(media::MediaKind::Image));
+    let field = FieldText::new(20);
+    assert!(!field.fits(&image));
+    let text = field.finish(rng);
+    assert!(text.len() == 20 && is_words(&text), "{text:?}");
+
+    // A second reference fits only with its separating space: 24 + 1 + 20.
+    let mut field = FieldText::new(45);
+    field.push_reference(image.clone());
+    assert!(field.fits(&sound));
+    // 44: the sound does not fit and is not written: 19 bytes of words, a
+    // space, the image.
+    let mut field = FieldText::new(44);
+    field.push_reference(image.clone());
+    assert!(!field.fits(&sound));
+    let text = field.finish(rng);
+    assert_eq!(text.len(), 44);
+    let words = text.strip_suffix(&format!(" {image}")).unwrap();
+    assert!(
+        words.len() == 19 && is_words(words) && !words.starts_with(' '),
+        "{text:?}"
+    );
+
+    // A cloze first field, N = 2, answers drawn 5 and 8 bytes, at 60:
+    // 13 + 1 + 16 bytes of deletions, a space, 29 bytes of words.
+    assert_eq!(answer_bytes(vec![5, 8], 60), [5, 8]);
+    let deletions = vec!["{{c1::kamor}}".to_owned(), "{{c2::sutenowa}}".to_owned()];
+    assert_eq!((deletions[0].len(), deletions[1].len()), (13, 16));
+    let text = FieldText::with_deletions(60, deletions).finish(rng);
+    assert_eq!(text.len(), 60);
+    let words = text.strip_prefix("{{c1::kamor}} {{c2::sutenowa}} ").unwrap();
+    assert!(
+        words.len() == 29 && is_words(words) && !words.starts_with(' '),
+        "{text:?}"
+    );
+
+    // The same at 20: 30 bytes is longer, so every answer is 1 byte; 9 + 1
+    // + 9 bytes, the deletions alone (1 byte left).
+    assert_eq!(answer_bytes(vec![5, 8], 20), [1, 1]);
+    let one_byte = vec!["{{c1::k}}".to_owned(), "{{c2::s}}".to_owned()];
+    assert_eq!(
+        FieldText::with_deletions(20, one_byte.clone()).finish(rng),
+        "{{c1::k}} {{c2::s}}"
+    );
+    // A reference after them fits only in 19 + 1 + 24 bytes.
+    assert!(FieldText::with_deletions(44, one_byte.clone()).fits(&image));
+    assert!(!FieldText::with_deletions(43, one_byte).fits(&image));
+
+    // A cloze first field, N = 3, at 10: 1-byte answers whatever was
+    // drawn, 29 bytes, the deletions alone.
+    for drawn in [[3, 3, 3], [14, 14, 14]] {
+        assert_eq!(answer_bytes(drawn.to_vec(), 10), [1, 1, 1]);
+    }
+    let text = FieldText::with_deletions(10, cloze_deletions(3, 10, rng)).finish(rng);
+    assert_eq!(text.len(), 29, "{text:?}");
+    for (k, deletion) in text.split(' ').enumerate() {
+        let answer = deletion
+            .strip_prefix(&format!("{{{{c{}::", k + 1))
+            .and_then(|d| d.strip_suffix("}}"))
+            .unwrap_or_else(|| panic!("{text:?}"));
+        assert!(answer.len() == 1 && is_words(answer) && answer != " ");
+    }
+    // Drawn answers of 3 to 14 bytes are kept when the deletions fit.
+    for _ in 0..50 {
+        for (k, deletion) in cloze_deletions(2, 60, rng).iter().enumerate() {
+            let answer = &deletion[format!("{{{{c{}::", k + 1).len()..deletion.len() - 2];
+            assert!((3..=14).contains(&answer.len()) && is_words(answer), "{deletion:?}");
+        }
+    }
+    // `{{c10::..}}` takes its extra digit: ten 2-byte answers make 9 × 10
+    // + 11 + 9 spaces = 110 bytes.
+    assert_eq!(answer_bytes(vec![2; 10], 110), [2; 10]);
+    assert_eq!(answer_bytes(vec![2; 10], 109), [1; 10]);
+}
+
+/// F4.8's worked example of a field's reference rate: 50 lengths in
+/// `[16, 32)`, 50 in `[32, 64)`, `media_refs` `[30, 10]`, 100 notes. The
+/// values are the spec's, worked out by hand.
+#[test]
+fn the_reference_rate_follows_the_f4_8_example() {
+    use generate::notes::{length_share, reference_rate};
+    let mut lengths = Histogram::log2(24);
+    lengths.add_n(16, 50);
+    lengths.add_n(32, 50);
+    let close = |what: &str, got: f64, want: f64| {
+        assert!((got - want).abs() < 1e-12, "{what}: {got} vs {want}");
+    };
+    close("s(25)", length_share(&lengths, 25), 0.71875);
+    close("s(21)", length_share(&lengths, 21), 0.84375);
+    // Bucket edges: all of `[32, 64)` is at 32 or more, none of `[16, 32)`.
+    close("s(32)", length_share(&lengths, 32), 0.5);
+    close("s(16)", length_share(&lengths, 16), 1.0);
+    close("s(64)", length_share(&lengths, 64), 0.0);
+
+    let mut shape = profile::NotetypeShape {
+        kind: "normal".to_owned(),
+        stock_kind: 0,
+        fields: 2,
+        templates: 1,
+        notes: 100,
+        cards: 100,
+        css_bytes: 0,
+        template_bytes: vec![[0, 0]],
+        script_bytes: 0,
+        cards_per_note: Histogram::linear(1, 64, 1),
+        field_bytes: vec![lengths.clone(), lengths.clone()],
+        media_refs: vec![[0, 0], [30, 10]],
+        refs_per_note: Histogram::linear(0, 64, 1),
+    };
+    // q = (30 × 0.71875 + 10 × 0.84375) / 40 = 0.75; r = 40 / 75.
+    close("r", reference_rate(&shape, 1), 40.0 / 75.0);
+    close("a field without references", reference_rate(&shape, 0), 0.0);
+    // q = 0: every length is below both thresholds.
+    let mut short = Histogram::log2(24);
+    short.add_n(10, 100);
+    shape.field_bytes[1] = short;
+    close("q = 0", reference_rate(&shape, 1), 0.0);
+    // A shape without notes.
+    shape.field_bytes[1] = lengths;
+    shape.notes = 0;
+    close("no notes", reference_rate(&shape, 1), 0.0);
 }
 
 #[test]
@@ -1681,7 +2208,7 @@ fn check_collection_rows(path: &Path, now_ms: i64, offset_secs: i32, rollover: u
 fn collection_rows_are_those_of_a_new_collection() {
     let p = shape();
     let (dir, manifest) = run(&Request::new(p.clone(), 1500, 31));
-    assert_eq!(manifest.generator_version, 2);
+    assert_eq!(manifest.generator_version, 4, "F10.4");
     assert_eq!(manifest.utc_offset_secs, p.utc_offset_secs);
     check_collection_rows(
         &collection(dir.path()),
