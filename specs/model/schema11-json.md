@@ -359,7 +359,7 @@ A field and a template of a note type (shape only):
 {"name":"Card 1","ord":0,"qfmt":"{{Front}}","afmt":"{{Back}}","bqfmt":"","bafmt":"","did":null,"bfont":"","bsize":0,"id":3100154441998115515}
 ```
 
-Anki applies range checks to preset values when it reads a preset (the scheduling area's preset spec, U42), so an object Anki writes from a preset with an out-of-range value already holds the replacement. The conversion in this file has no range checks.
+Anki applies range checks to preset values when it reads a preset (`sched/presets#V3`), so an object Anki writes from a preset with an out-of-range value already holds the replacement. The conversion in this file has no range checks; its callers convert the preset as read with those checks applied.
 
 ## S14. Goldens as conversion pairs
 

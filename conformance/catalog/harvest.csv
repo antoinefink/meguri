@@ -762,7 +762,7 @@ h0d55a293e421,rust,tag,sched,unclassified,,,open
 h0d7374461795,rust,tag,sched,unclassified,,,open
 h10961bb95b4d,rust,tag,sched,unclassified,,,open
 h14c25ad44110,rust,tag,sched,unclassified,,,open
-h151bd9c1b80b,rust,tag,sched,unclassified,,,open
+h151bd9c1b80b,rust,tag,sched,in-scope,"A card's last new position: its own position while it is new (the original due in a filtered deck), otherwise its saved pos; Forget and Set Due Date use it",sched/data/positions,deferred
 h19b87e6f451b,rust,tag,sched,unclassified,,,open
 h1a440165e319,rust,tag,sched,unclassified,,,open
 h1a6dc1b4024f,rust,tag,sched,unclassified,,,open
@@ -795,7 +795,7 @@ h4ad2bd959137,rust,tag,sched,unclassified,,,open
 h4d0c7354dfcd,rust,tag,sched,unclassified,,,open
 h4dcd915bda8e,rust,tag,sched,unclassified,,,open
 h4eb04b88ea52,rust,tag,sched,unclassified,,,open
-h53acbb05c3fb,rust,tag,sched,unclassified,,,open
+h53acbb05c3fb,rust,tag,sched,in-scope,A deck's studied-today counters after answers,sched/data/deck-counters,done
 h53ef76bc5048,rust,tag,sched,unclassified,,,open
 h557e34da0263,rust,tag,sched,unclassified,,,open
 h55e6099a6eb9,rust,tag,sched,unclassified,,,open
@@ -867,7 +867,7 @@ hdf5b05a2842f,rust,tag,sched,unclassified,,,open
 he2dcd7bd5b1c,rust,tag,sched,unclassified,,,open
 he31eded34d00,rust,tag,sched,unclassified,,,open
 he4c4fc933d44,rust,tag,sched,unclassified,,,open
-he544632aa73a,rust,tag,sched,unclassified,,,open
+he544632aa73a,rust,tag,sched,in-scope,A deck's own desired retention wins over its preset's when a card is answered,sched/data/desired-retention,done
 he594f0a7a983,rust,tag,sched,unclassified,,,open
 he71ab01c9816,rust,tag,sched,unclassified,,,open
 he7fa6992322b,rust,tag,sched,unclassified,,,open

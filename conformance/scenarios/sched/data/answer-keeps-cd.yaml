@@ -1,0 +1,38 @@
+# An answer rewrites s, d, dr, decay and lrt and keeps the rest of the card
+# data (specs/sched/card-data.md K5, R588, R591): cd written by another
+# client's custom scheduler survives unchanged and pos of a card that is no
+# longer new stays. c1 is a review card due today with a memory state, its
+# last review three days ago, and an old dr and decay; c2 is a learning card
+# in the intraday queue, due a minute ago, with its first step left. Their data
+# is read back byte for byte.
+# c3 is c1's twin with two unknown keys. Meguri keeps them (R1461); Anki drops
+# them (deviation card-data-unknown-keys-answer). Its data is read through
+# json_extract so that the deviation holds no FSRS values.
+id: sched/data/answer-keeps-cd
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, fields: [one, back]}
+    - {notetype: Pair, fields: [two, back]}
+    - {notetype: Pair, fields: [three, back]}
+steps:
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3, factor = 2500, reps = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"
+      params: ['{"s":3.5,"d":6.25,"cd":"{\"k\":true,\"n\":[1,2]}","lrt":1894442400,"dr":0.8,"decay":0.2,"pos":4}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = 1894701540, left = 2, reps = 1, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"
+      params: ['{"pos":9,"s":2.3065,"d":2.118,"dr":0.9,"decay":0.154,"lrt":1894701480,"cd":"{\"step\":1}"}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3, factor = 2500, reps = 3, data = ? WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"
+      params: ['{"xyz":[1,2],"s":3.5,"d":6.25,"cd":"{\"k\":true}","lrt":1894442400,"pos":4,"zz":"x"}']
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: good}
+  - answer: {card: "#c3", rating: good}
+  - db_exec: {sql: "SELECT type, queue, data FROM cards ORDER BY id LIMIT 2"}
+  - db_exec: {sql: "SELECT json_extract(data, '$.pos'), json_extract(data, '$.cd'), json_extract(data, '$.xyz'), json_extract(data, '$.zz') FROM cards ORDER BY id LIMIT 1 OFFSET 2"}

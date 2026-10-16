@@ -1,0 +1,60 @@
+# Preset values outside Anki's read bounds (specs/sched/presets.md V3, R753).
+# Four presets get their deck config blob written directly:
+#   Bounds   out of range or missing: reviews/day 10000, starting ease 1.3,
+#            easy bonus 5.5, hard interval NaN, interval modifier 0.4,
+#            maximum interval and easy interval and answer cap missing (0),
+#            minimum lapse interval 36501, leech threshold 10000,
+#            new_per_day_minimum 10000, desired retention NaN, historical
+#            retention 0.98; new cards/day missing (0, in range) and lapse
+#            multiplier 1.0 (in range)
+#   Edges    every bound at its upper or exact value: 9999 for the limits,
+#            starting ease 1.31, easy bonus 5.0, hard 0.5, modifier 2.0,
+#            maximum interval 1, desired retention 0.7, historical 0.97
+#   Edges2   the other ends: new and review limits 0, starting ease 5.0, easy
+#            bonus 1.0, hard 1.3, modifier 0.5, leech threshold and answer
+#            cap 1, desired retention 0.99, historical 0.7
+#   Outside  one f32 step past a bound, or infinite, or negative
+# Reading never writes (the stored bytes stay); the legacy JSON shows the
+# replacements; an answer uses them (dr in card data, the answer time cap in
+# the review log); saving another preset leaves these bytes alone; saving
+# Bounds stores its replacement values.
+id: sched/data/preset-bounds
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets: [{name: Bounds}, {name: Edges}, {name: Edges2}, {name: Outside}, {name: Other}]
+  decks:
+    - {name: B, preset: Bounds}
+    - {name: E, preset: Edges}
+    - {name: E2, preset: Edges2}
+    - {name: O, preset: Outside}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: B, fields: [one, back]}
+    - {notetype: Pair, deck: E, fields: [two, back]}
+    - {notetype: Pair, deck: E2, fields: [three, back]}
+    - {notetype: Pair, deck: O, fields: [four, back]}
+steps:
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0a080000803f00002041120400002041221c0000803f0000803f0000803f0000803f0000803f0000803f0000803f50904e5d6666a63f650000b0406d0000c07f750000803f7dcdcccc3e8801959d029001949d02a80101b001904e9802904ead020000c07fc50248e17a3fe00201' WHERE name = 'Bounds'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0a080000803f00002041120400002041221c0000803f0000803f0000803f0000803f0000803f0000803f0000803f488f4e508f4e5d14aea73f650000a0406d0000003f7d000000408001018801949d029001019801949d02a80101b0018f4ec0018f4e98028f4ead023333333fc502ec51783fe00201' WHERE name = 'Edges'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0a080000803f00002041120400002041221c0000803f0000803f0000803f0000803f0000803f0000803f0000803f5d0000a040650000803f6d6666a63f750000803f7d0000003f8001949d028801019001949d02980101a80101b00101c00101ad02a4707d3fc5023333333fe00201' WHERE name = 'Edges2'"}
+  - db_exec: {sql: "UPDATE deck_config SET config = X'0a080000803f00002041120400002041221c0000803f0000803f0000803f0000803f0000803f0000803f0000803f48904e50c8015d13aea73f650000807f6d6766a63f75000080bf7d000080bf8001959d029001959d02980104a80101c001904ead02a5707d3fc5023233333fe00201' WHERE name = 'Outside'"}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - observe:
+      - legacy_json: {presets: [Bounds, Edges, Edges2, Outside]}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - answer: {card: "#c1", rating: good, time_ms: 100000}
+  - answer: {card: "#c2", rating: good, time_ms: 100000}
+  - answer: {card: "#c3", rating: good, time_ms: 100000}
+  - answer: {card: "#c4", rating: good, time_ms: 100000}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT time FROM revlog ORDER BY id"}
+  - advance: 10s
+  - legacy_update: {preset: Other, patch: {}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}
+  - legacy_update: {preset: Bounds, patch: {desiredRetention: 0.85}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn, hex(config) FROM deck_config ORDER BY id"}

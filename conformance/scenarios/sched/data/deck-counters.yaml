@@ -1,0 +1,55 @@
+# The studied-today counters of a deck (specs/sched/presets.md D4, R765): an
+# answer adds to the counters of the card's deck and of every ancestor, after
+# resetting those whose day is not today; new counts answers from the new
+# queue, review those from the review and interday learning queues, the time
+# counter every answer's time capped by the preset (60 s here). The learning
+# counter is never added to, only reset. Reading on a later day writes
+# nothing; the first answer of the day resets.
+# Day 0: Child's learning counter is set to 5 through its legacy JSON, then c1
+# (new), c2 (review due today), c3 (intraday learning) and c4 (interday
+# learning) are answered in Child. Day 1: c5 (new) in Child, c6 (new) in
+# Parent.
+id: sched/data/deck-counters
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Parent, "Parent::Child"]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: "Parent::Child", fields: [one, back]}
+    - {notetype: Pair, deck: "Parent::Child", fields: [two, back]}
+    - {notetype: Pair, deck: "Parent::Child", fields: [three, back]}
+    - {notetype: Pair, deck: "Parent::Child", fields: [four, back]}
+    - {notetype: Pair, deck: "Parent::Child", fields: [five, back]}
+    - {notetype: Pair, deck: Parent, fields: [six, back]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 0, ivl = 3, factor = 2500, reps = 3, data = '{\"s\":3.5,\"d\":6.25,\"lrt\":1894442400}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894701540, left = 2, reps = 1, data = '{\"s\":2.3065,\"d\":2.118,\"lrt\":1894701480}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 3, due = 0, left = 1, reps = 2, data = '{\"s\":2.3065,\"d\":2.118,\"lrt\":1894615200}' WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - legacy_update: {deck: "Parent::Child", patch: {lrnToday: [0, 5]}}
+  - observe:
+      - legacy_json: {decks: [Default, Parent, "Parent::Child"]}
+  - advance: 10s
+  - answer: {card: "#c1", rating: good, time_ms: 5000}
+  - answer: {card: "#c2", rating: good, time_ms: 7000}
+  - answer: {card: "#c3", rating: good, time_ms: 100000}
+  - answer: {card: "#c4", rating: good, time_ms: 1000}
+  - observe:
+      - legacy_json: {decks: [Default, Parent, "Parent::Child"]}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY id"}
+  - set_clock: "2030-01-16T10:00:00"
+  - observe: [timing]
+  - observe:
+      - legacy_json: {decks: [Parent, "Parent::Child"]}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY id"}
+  - answer: {card: "#c5", rating: good, time_ms: 2000}
+  - observe:
+      - legacy_json: {decks: [Parent, "Parent::Child"]}
+  - answer: {card: "#c6", rating: good, time_ms: 3000}
+  - observe:
+      - legacy_json: {decks: [Parent, "Parent::Child"]}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY id"}

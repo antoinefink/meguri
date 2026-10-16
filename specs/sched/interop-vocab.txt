@@ -21,6 +21,20 @@ leechFails
 delays
 fsrsShortTermWithStepsEnabled
 loadBalancerEnabled
+# Scheduling config keys (sched/config-keys); the others are listed by the
+# storage, fixtures and day-clock vocabularies.
+newCardsIgnoreReviewLimit
+applyAllParentLimits
+fsrsHealthCheck
+fsrsLegacyEvaluate
+setDueReviewer
+setDueBrowser
+restorePositionReviewer
+restorePositionBrowser
+resetCountsReviewer
+resetCountsBrowser
+randomOrderReposition
+shiftPositionOfExistingCards
 scheduled_days
 elapsed_days
 scheduled_secs

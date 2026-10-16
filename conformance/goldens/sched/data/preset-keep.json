@@ -1,0 +1,108 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["0A080000803F00002041120400002041221C0000803F0000003F0000803F0000803F0000803F000000000000803F2A4C091BCE3E6688973F6F124B408A0E7B419F3CE640FED4083F63EEBA3F99BB963B23DBC53F211FF43DC976823F8941F83FAE47E13DDE93973E67441140560E6D3EE2583F409F3C043F637F293F481450C8015D33331340653333B33F6DCDCC8C3F75CDCC4C3E7D6666663F8001949D02880101900102980105A80101B00108C0013C980203AD026666663FC502AE47613FE00201EA02066465636B3A4BFA0F337B22785F6164646F6E5F7363686564223A7B22656E61626C6564223A747275652C226C6576656C73223A5B312C322C335D7D7D"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701610, -1, "0A080000803F00002041120400002041221C0000803F0000003F0000803F0000803F0000803F000000000000803F2A4C091BCE3E6688973F6F124B408A0E7B419F3CE640FED4083F63EEBA3F99BB963B23DBC53F211FF43DC976823F8941F83FAE47E13DDE93973E67441140560E6D3EE2583F409F3C043F637F293F481450C8015D33331340653333B33F6DCDCC8C3F75CDCC4C3E7D6666663F8001949D02880101900102980105A80101B00108C0013C980203AD029A99593FC502AE47613FE00201EA02066465636B3A4BFA0F337B22785F6164646F6E5F7363686564223A7B22656E61626C6564223A747275652C226C6576656C73223A5B312C322C335D7D7D"]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "presets": {
+            "Keep": {
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.85,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 0.5, 1.0, 1.0, 1.0, 0.0, 1.0],
+              "fsrsParams5": [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621],
+              "fsrsParams6": [],
+              "fsrsWeights": [],
+              "id": 1894701600000,
+              "ignoreRevlogsBeforeDate": "",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.2
+              },
+              "maxTaken": 60,
+              "mod": 1894701610,
+              "name": "Keep",
+              "new": {
+                "bury": false,
+                "delays": [1.0, 10.0],
+                "initialFactor": 2300,
+                "ints": [2, 5, 0],
+                "order": 1,
+                "perDay": 20
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 3,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.4,
+                "hardFactor": 1.1,
+                "ivlFct": 0.9,
+                "maxIvl": 36500,
+                "perDay": 200
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.88,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": -1,
+              "waitForAudio": true,
+              "weightSearch": "deck:K",
+              "x_addon_sched": {
+                "enabled": true,
+                "levels": [1, 2, 3]
+              }
+            }
+          }
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"pos\":1,\"s\":3.173,\"d\":5.282,\"dr\":0.85,\"decay\":0.5,\"lrt\":1894701610}"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/data/preset-keep",
+  "scenario_sha256": "9126632c417251ec81c81bde9f4ce157a44a01f33c65d9f403a6290d9e6fb436",
+  "tz": "UTC"
+}
