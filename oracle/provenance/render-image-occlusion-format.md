@@ -18,3 +18,5 @@ Read at tag 26.09.3 (`refs/anki-26.09.3`) to write `specs/render/image-occlusion
 | image-occlusion-ops J3 | `rslib/src/image_occlusion/service.rs`, `rslib/src/image_occlusion/imagedata.rs`, `pylib/anki/collection.py` | the backend calls `get_image_occlusion_note` and `get_image_occlusion_fields`, the error for a note type without roles, and that a note save changes CR, NUL, U+001F and non-NFC text (seen in the oracle) |
 
 Harvest links: `h5cd95f995780` and `h1f6151e74934` (`rslib/src/cloze.rs`) and `hae0105ed752c` (`rslib/src/image_occlusion/imageocclusion.rs`) in `oracle/harvest/links.csv`.
+
+The driver's `observe/image_occlusion.py` (oracle maintainer, U63) was written from `rslib/src/image_occlusion/service.rs` and `imagedata.rs` (the two queries, the `error` member of the note response, the field-index error), `rslib/src/cloze.rs` (`parse_image_occlusions`: numbers from a hash map), `rslib/src/backend/error.rs` and `rslib/src/error/mod.rs` (DatabaseCheckRequired is kind InvalidInput with the "please check database" message), `rslib/src/notetype/schema11.rs` (the legacy field key `tag`), and the `anki` wheel's generated backend calls.

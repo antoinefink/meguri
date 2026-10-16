@@ -1,0 +1,254 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "image_occlusion": {
+          "parse": [
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".2081"],
+                        ["top", "0.2081"],
+                        ["width", "+.2081"],
+                        ["height", "2.081e-1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "1."],
+                        ["top", "1"],
+                        ["width", "1.0000"],
+                        ["height", "1E0"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "."],
+                        ["top", "-0."],
+                        ["width", ".0000"],
+                        ["height", "-."]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "-0.25"],
+                        ["top", "-1."],
+                        ["width", "1e-3"],
+                        ["height", ".5E2"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "abc"],
+                        ["top", " 1"],
+                        ["width", "1 "],
+                        ["height", "1,5"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "0x10"],
+                        ["top", "inf"],
+                        ["width", "NaN"],
+                        ["height", "1e400"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["angle", "-2500"],
+                        ["width", ".1"],
+                        ["height", ".1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["angle", "10000"],
+                        ["width", ".1"],
+                        ["height", ".1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["angle", "2500.7"],
+                        ["width", ".1"],
+                        ["height", ".1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "."],
+                        ["top", ".5"],
+                        ["points", ".,.5 .25,. 1.,1."]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["points", ".1,.1  .2,.2 .3"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "9"],
+                        ["scale", "1.5"],
+                        ["fs", ".0667"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/image-occlusion/format/parse-numbers",
+  "scenario_sha256": "d6508741614a70f4f6b5578c32c9900f2c2ae630d2799f28ec3301c4a9ff14fd",
+  "tz": "UTC"
+}

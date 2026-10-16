@@ -1,0 +1,591 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "image_occlusion": {
+          "parse": [
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".2325"],
+                        ["top", ".3261"],
+                        ["width", ".202"],
+                        ["height", ".0975"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".2325"],
+                        ["top", ".3261"],
+                        ["angle", "2500"],
+                        ["width", ".202"],
+                        ["height", ".0975"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".2"],
+                        ["rx", ".05"],
+                        ["ry", ".08"],
+                        ["fill", "#ff0000"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 3,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".4"],
+                        ["points", ".3,.45 .5,.4 .35,.6"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["text", "a:b\\c"],
+                        ["scale", "1."],
+                        ["fs", ".0667"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".5"],
+                        ["top", ".25"],
+                        ["angle", "1250"],
+                        ["text", "Label"],
+                        ["scale", "1.5"],
+                        ["fs", ".05"],
+                        ["fill", "#1e90ff"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".2"],
+                        ["top", ".7"],
+                        ["text", "line 1\nline 2"],
+                        ["scale", ".75"],
+                        ["fs", ".04"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 0,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".6"],
+                        ["top", ".6"],
+                        ["text", "日本:語"],
+                        ["scale", "1."],
+                        ["fs", ".05"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "text"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 4,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".0000"],
+                        ["top", "1."],
+                        ["angle", "-2500"],
+                        ["width", "1."],
+                        ["height", ".5"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 5,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "."],
+                        ["top", "-0."],
+                        ["width", ".0313"],
+                        ["height", ".9688"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 6,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".2"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["zz", "q:r"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".1"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    },
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".1"],
+                        ["width", ".1"],
+                        ["height", ".1"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".1"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "0.3"],
+                        ["top", "0.1"],
+                        ["fill", "#ffeba2"],
+                        ["width", "0.2"],
+                        ["height", "0.08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 3,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".55"],
+                        ["top", ".1"],
+                        ["rx", ".1"],
+                        ["ry", ".04"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                },
+                {
+                  "number": 4,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".3"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 5,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".3"],
+                        ["points", ".3,.3 .5,.32 .4,.4"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                },
+                {
+                  "number": 6,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".55"],
+                        ["top", ".3"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 7,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".5"],
+                        ["angle", "833"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["fill", "#cc3344"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": true,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".1"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", "0.3"],
+                        ["top", "0.1"],
+                        ["fill", "#ffeba2"],
+                        ["width", "0.2"],
+                        ["height", "0.08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 3,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".55"],
+                        ["top", ".1"],
+                        ["rx", ".1"],
+                        ["ry", ".04"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                },
+                {
+                  "number": 4,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".0625"],
+                        ["top", ".35"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 5,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".3"],
+                        ["points", ".3,.3 .5,.32 .4,.4"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                },
+                {
+                  "number": 7,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".5"],
+                        ["angle", "833"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["fill", "#cc3344"],
+                        ["oi", "1"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "hide_all": false,
+              "numbers": [
+                {
+                  "number": 1,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".1"],
+                        ["width", ".2"],
+                        ["height", ".08"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 2,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".1"],
+                        ["width", ".2"],
+                        ["height", ".08"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 3,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".55"],
+                        ["top", ".1"],
+                        ["rx", ".1"],
+                        ["ry", ".04"]
+                      ],
+                      "shape": "ellipse"
+                    }
+                  ]
+                },
+                {
+                  "number": 4,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".3"],
+                        ["width", ".2"],
+                        ["height", ".08"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 5,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".3"],
+                        ["top", ".3"],
+                        ["points", ".3,.3 .5,.32 .4,.4"]
+                      ],
+                      "shape": "polygon"
+                    }
+                  ]
+                },
+                {
+                  "number": 6,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".55"],
+                        ["top", ".3"],
+                        ["width", ".2"],
+                        ["height", ".08"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                },
+                {
+                  "number": 7,
+                  "shapes": [
+                    {
+                      "props": [
+                        ["left", ".05"],
+                        ["top", ".5"],
+                        ["angle", "833"],
+                        ["width", ".2"],
+                        ["height", ".08"],
+                        ["fill", "#cc3344"]
+                      ],
+                      "shape": "rect"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "6ec0471caa7ac410187b9a65e4f507f035131593c035c72ebe301727f32db313",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/image-occlusion/format/written",
+  "scenario_sha256": "d5c1c0c1d043d52eba3cb003f3b2bf5b9b045c9a704dc9df7f0aa6dc2218e4c2",
+  "tz": "UTC"
+}
