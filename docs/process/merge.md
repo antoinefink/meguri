@@ -4,7 +4,7 @@
 
 ## What it does
 
-1. Refuses when the unit has an open escalation, when the branch does not contain the integration head (merge the integration branch into the unit branch first), or when the branch's worktree is not clean at the branch tip.
+1. Refuses when the unit has an open escalation in the main checkout's ledger joined with the branch tip's (an escalation added or resolved in the unit's worktree counts; a ledger that does not parse is refused), when the branch does not contain the integration head (merge the integration branch into the unit branch first), or when the branch's worktree is not clean at the branch tip.
 2. Runs `tools/mg gate --base <integration head>` in the branch's worktree, with the branch's own tiers and tools: the worktree-safe T0 and T1 runs (docs/process/tiers.md).
 3. Runs what the worktree left, in the plan's order and under the gate's rules (nothing after a failed canary; T1 only when T0 has nothing blocking):
    - the `where: main` runs from the main checkout against the branch's tree: `static-checks --rev <tip>` (which also reads `oracle/`) and `similarity --rev <tip>` (which needs `refs/`);
@@ -31,4 +31,4 @@ From a sparse role worktree, an oracle-image run uses the main checkout's `oracl
 | `behavior-gap` | a spec or the oracle cannot settle a behavior |
 | `stop-condition` | a Goal Capsule stop condition |
 
-`tools/mg escalation add --kind <kind> --unit <id> --summary <text> [--detail <JSON>]` records one; `tools/mg escalation resolve <id> --by <name> --resolution <text>` settles it after Antoine decides; `tools/mg escalation list [--open] [--unit <id>]` reads them. Lines are only appended and committed on the checkout's current branch (union merge). The orchestrator records `blocked-red` after the sixth red round. A unit with an open escalation stays unmerged; units that do not depend on it go on. This is not a pause.
+`tools/mg escalation add --kind <kind> --unit <id> --summary <text> [--detail <JSON>]` records one; `tools/mg escalation resolve <id> --by <name> --resolution <text>` settles it after Antoine decides; `tools/mg escalation list [--open] [--unit <id>]` reads them. Lines are only appended and committed on the checkout's current branch (union merge); `list` reads that checkout's ledger only. The orchestrator records `blocked-red` after the sixth red round. A unit with an open escalation stays unmerged; units that do not depend on it go on. This is not a pause.

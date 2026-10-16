@@ -17,7 +17,9 @@
 #
 # docs/process/provenance/escalations.jsonl is append-only: an `add` line per
 # escalation and a `resolve` line when Antoine settles it; the last line of an
-# id is its state. A unit with an open escalation is never merged.
+# id is its state. A unit with an open escalation is never merged: the merge
+# reads the main checkout's ledger joined with the branch tip's, since an
+# escalation can be added or resolved in the unit's worktree.
 
 mg_job merge host mg_merge \
   "Merge a unit branch into the integration branch (the main checkout's branch), only path to it (R1951): <branch> [--worktree <dir>] [--unit <id>]; gate in the branch's worktree, similarity scan and static checks from the main checkout against the branch's tree, where: tip and oracle runs in a full checkout of the tip, fast-forward only on a passing complete receipt"
@@ -27,13 +29,30 @@ mg_job escalation host mg_escalation \
 MG_ESCALATIONS_FILE="docs/process/provenance/escalations.jsonl"
 MG_ESCALATION_KINDS="behavior-gap approval blocked-red stop-condition"
 
-# mg_escalation__state [<checkout>]: one JSON object per escalation (its
-# current state), from the ledger of that checkout's working tree.
+# mg_escalation__state [<checkout> [<commit>...]]: one JSON object per
+# escalation (its current state), from the ledger of that checkout's working
+# tree joined with the ledger at each <commit>. A line both hold counts once,
+# and every add line is read before any resolve line, so an escalation either
+# side opened stays open until either side resolves it. Returns 1 when a
+# ledger cannot be read or does not parse: a caller that gates on it must
+# refuse, never read it as empty.
 mg_escalation__state() {
-  local f="${1:-$MG_ROOT}/$MG_ESCALATIONS_FILE"
-  [ -f "$f" ] || return 0
-  jq -c -s 'reduce .[] as $l ({}; if $l.state == "open" and (.[$l.id] | not) then .[$l.id] = $l
-      elif .[$l.id] then .[$l.id] += ($l | del(.id)) else . end) | .[]' "$f"
+  local root="${1:-$MG_ROOT}" rev ledger="" part
+  [ "$#" -eq 0 ] || shift
+  if [ -f "$root/$MG_ESCALATIONS_FILE" ]; then
+    ledger="$(cat "$root/$MG_ESCALATIONS_FILE")" || return 1
+  fi
+  for rev in ${1+"$@"}; do
+    git -C "$root" cat-file -e "$rev:$MG_ESCALATIONS_FILE" 2>/dev/null || continue
+    part="$(git -C "$root" show "$rev:$MG_ESCALATIONS_FILE")" || return 1
+    ledger="$ledger
+$part"
+  done
+  jq -c -s 'reduce .[] as $l ({seen: {}, lines: []}; ($l | tojson) as $k
+      | if .seen[$k] then . else .seen[$k] = true | .lines += [$l] end)
+    | .lines | map(select(.state == "open")) + map(select(.state != "open"))
+    | reduce .[] as $l ({}; if $l.state == "open" and (.[$l.id] | not) then .[$l.id] = $l
+      elif .[$l.id] then .[$l.id] += ($l | del(.id)) else . end) | .[]' <<<"$ledger"
 }
 
 # mg_escalation_add <checkout> <kind> <unit> <summary> <detail JSON> <source>:
@@ -252,10 +271,19 @@ mg_merge() {
     '{branch: $b, tip: $t, into: $into, into_head: $h, unit: $u}')"
 
   # A unit with an open escalation stays unmerged until Antoine resolves it.
-  local open
-  open="$(mg_escalation__state | jq -c --arg u "$unit" 'select(.unit == $u and .state == "open")')"
+  # The tip's ledger is what the fast-forward would bring in: an escalation
+  # added or resolved in the unit's worktree counts as much as the main
+  # checkout's.
+  local state open
+  if ! state="$(mg_escalation__state "$MG_ROOT" "$tip")"; then
+    mg_merge__fail escalation-ledger "$MG_ESCALATIONS_FILE does not parse in the main checkout or at $branch's tip ($(git -C "$MG_ROOT" rev-parse --short "$tip")); fix it there (a merge conflict left in it?)" \
+      "jq -s . $MG_ESCALATIONS_FILE; git show $tip:$MG_ESCALATIONS_FILE | jq -s ." error
+    return 0
+  fi
+  open="$(jq -c --arg u "$unit" 'select(.unit == $u and .state == "open")' <<<"$state")"
   if [ -n "$open" ]; then
-    jq -c '{id: ("escalation:" + .id), message: ("open \(.kind) escalation \(.id) for \(.unit): \(.summary)"), repro: "tools/mg escalation list --open"}' \
+    jq -c --arg r "tools/mg escalation list --open --unit $unit, in the main checkout and in $branch's worktree" \
+      '{id: ("escalation:" + .id), message: ("open \(.kind) escalation \(.id) for \(.unit): \(.summary)"), repro: $r}' \
       <<<"$open" >>"$MG_STATE/failures.jsonl"
     mg_message "merge: $unit has $(printf '%s\n' "$open" | wc -l | tr -d ' ') open escalation(s); $target not moved"
     mg_status fail

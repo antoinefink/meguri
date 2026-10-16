@@ -759,6 +759,47 @@ $TRAILERS"
   [ "$status" -eq 2 ]
 }
 
+@test "merge reads the escalations at the branch tip: one opened only on the branch blocks it, one resolved only there does not" {
+  local a="$BATS_TEST_TMPDIR/U90" b="$BATS_TEST_TMPDIR/U91" id
+  # Opened in the unit's worktree: committed on unit/U90 only.
+  worktree "$a" unit/U90 implementer
+  commit_in "$a" docs/a.md "a"
+  mg_in "$a" escalation add --kind stop-condition --unit U90 --summary "a Goal Capsule stop condition"
+  [ "$status" -eq 0 ]
+  id="$(field .details.escalation.id)"
+  [ -z "$(git -C "$SB" show trunk:docs/process/provenance/escalations.jsonl 2>/dev/null)" ]
+  mg merge unit/U90
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].id')" = "escalation:$id" ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+
+  # Opened on trunk, resolved in the unit's worktree after it took trunk in.
+  mg escalation add --kind approval --unit U91 --summary "an allowlist entry"
+  [ "$status" -eq 0 ]
+  id="$(field .details.escalation.id)"
+  worktree "$b" unit/U91 implementer
+  commit_in "$b" docs/b.md "b"
+  mg_in "$b" escalation resolve "$id" --by antoine --resolution "approved in chat"
+  [ "$status" -eq 0 ]
+  mg escalation list --open --unit U91
+  [ "$(field '.details.escalations | length')" = 1 ]
+  mg merge unit/U91
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$(git -C "$b" rev-parse HEAD)" ]
+}
+
+@test "merge refuses a branch whose escalation ledger does not parse, rather than reading it as empty" {
+  local wt="$BATS_TEST_TMPDIR/U90"
+  worktree "$wt" unit/U90 implementer
+  commit_in "$wt" docs/process/provenance/escalations.jsonl '<<<<<<< ours
+{"id": "E-1", "kind": "approval", "state": "open", "unit": "U90", "summary": "s"}
+>>>>>>> theirs'
+  mg merge unit/U90
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = escalation-ledger ]
+  [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+}
+
 # wt_outcome <run id>: the run's outcome in the worktree gate a merge ran.
 wt_outcome() {
   jq -r --arg id "$1" '.details.receipt.runs[] | select(.id == $id) | .outcome' \
