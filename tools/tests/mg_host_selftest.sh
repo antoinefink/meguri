@@ -766,12 +766,26 @@ t_sim_pool_on_macos_bash() {
 }
 
 # Host lease, Mac UI gate and sim-setup (U8) under macOS bash 3.2 and BSD
-# tools, with the real session check (ioreg, system_profiler) and caffeinate.
+# tools, with caffeinate and the real session check reading a fixed session:
+# fake ioreg and system_profiler say unlocked with a display awake, or locked
+# with FAKE_SESSION_LOCKED set. This Mac's own session must not decide the
+# result: the gate runs this suite unattended, often while it is locked.
 t_host_lease_gate_and_sim_setup_on_macos_bash() {
   local dir="$SB/host-lease" first u
   local MEGURI_HOST_LEASE_DIR="$dir/host.lock" MEGURI_HOST_LEASE_POLL_SECONDS=1 MEGURI_MAC_UI_DIR="$dir/mac-ui" FX_LOG="$dir/fx.log"
-  export MEGURI_HOST_LEASE_DIR MEGURI_HOST_LEASE_POLL_SECONDS MEGURI_MAC_UI_DIR FX_LOG
-  mkdir -p "$dir" && : >"$FX_LOG" || return 1
+  local PATH="$dir/bin:$PATH" FAKE_SESSION_LOCKED=""
+  export MEGURI_HOST_LEASE_DIR MEGURI_HOST_LEASE_POLL_SECONDS MEGURI_MAC_UI_DIR FX_LOG PATH FAKE_SESSION_LOCKED
+  mkdir -p "$dir/bin" && : >"$FX_LOG" || return 1
+  cat >"$dir/bin/ioreg" <<'EOF'
+#!/bin/sh
+echo '+-o Root  <class IORegistryEntry>'
+echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes${FAKE_SESSION_LOCKED:+,\"CGSSessionScreenIsLocked\"=Yes})"
+EOF
+  cat >"$dir/bin/system_profiler" <<'EOF'
+#!/bin/sh
+echo '{"SPDisplaysDataType": [{"spdisplays_ndrvs": [{"_name": "Display", "spdisplays_asleep": "spdisplays_no"}]}]}'
+EOF
+  chmod +x "$dir/bin/ioreg" "$dir/bin/system_profiler" || return 1
   cat >"$SB/tools/mg.d/zz-host-fixture.sh" <<'EOF'
 mg_job fx-lease host fx_lease "fixture: hold the host lease for FX_HOLD seconds"
 mg_job fx-gate host fx_gate "fixture: take the Mac UI gate"
@@ -786,7 +800,15 @@ EOF
   expect "second lease exit" "$RC" 0 &&
     expect "leases in turn" "$(tr '\n' ' ' <"$FX_LOG")" "start a end a start b end b " &&
     expect "lease released" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free || return 1
+  # A locked session blocks the job after it takes the lease, and frees it.
   : >"$FX_LOG"
+  FAKE_SESSION_LOCKED=1 mg fx-lease c
+  expect "locked session exit" "$RC" 2 &&
+    expect "locked session result" "$(field .status) $(field '.failures[0].id') $(field .details.host_session)" \
+      "error blocked-host locked" &&
+    expect "locked session user step" "$(field '[.user_steps[] | select(.id == "host-session")] | length')" 1 &&
+    expect "the job did not run" "$(cat "$FX_LOG")" "" &&
+    expect "lease released after the block" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free || return 1
   mg fx-gate
   expect "gate allows the first run" "$(field .status) $(cat "$FX_LOG")" "pass allowed 1" || return 1
   mg fx-gate
@@ -794,12 +816,12 @@ EOF
     expect "queued reason" "$(field .message | grep -c 'the next may start at 20')" 1 || return 1
   rm -f "$SB/tools/mg.d/zz-host-fixture.sh"
 
-  local PATH="$dir/bin:$PATH" STUB_LOG="$dir/stub.log" FAKE_SIM_DB="$dir/sims.json"
+  local STUB_LOG="$dir/stub.log" FAKE_SIM_DB="$dir/sims.json"
   local MEGURI_SIM_POOL_DIR="$dir/pool" MEGURI_SIM_DEVICES_DIR="$dir/Devices" MEGURI_SIM_POOL_SETTLE_SECONDS=0
   local MEGURI_MAC_VM_CONFIG="$dir/no-mac-vm.json" MEGURI_SIM_ALLOW_HOST=1
-  export PATH STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR MEGURI_SIM_POOL_SETTLE_SECONDS
+  export STUB_LOG FAKE_SIM_DB MEGURI_SIM_POOL_DIR MEGURI_SIM_DEVICES_DIR MEGURI_SIM_POOL_SETTLE_SECONDS
   export MEGURI_MAC_VM_CONFIG MEGURI_SIM_ALLOW_HOST
-  mkdir -p "$dir/bin" "$MEGURI_SIM_DEVICES_DIR" && : >"$STUB_LOG" || return 1
+  mkdir -p "$MEGURI_SIM_DEVICES_DIR" && : >"$STUB_LOG" || return 1
   ln -s "$SB/tools/tests/sim_pool_fake_xcrun.sh" "$dir/bin/xcrun" || return 1
   mg sim-setup
   u="$(jq -r '.devices.iphone.udids[0]' "$SB/build/sim-devices.local.json")"

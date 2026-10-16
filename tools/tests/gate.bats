@@ -2,11 +2,13 @@
 # Self-tests for the test tiers, merge gate, quarantine and scheduled runs
 # (U19: R1950-R1953, R1880, R1876, R1937, R1991; AE82 ordering). Each test
 # runs a sandbox repository with the gate's own families (gate, merge,
-# quarantine, nightly, milestone, session, and host and oracle for their
-# helpers) and a tiers.yaml of made-up runs: `t-job <name>` reports what
-# $FX/<name>.* says (status, a status sequence, failure ids, counts, details),
-# a fake `similarity` scan flags a file on demand, and the fake oracle jobs
-# pick their oracle/ with the real mg_oracle__tree and mg_oracle__own_tree.
+# quarantine, nightly, milestone, session, and host, oracle and conformance
+# for their helpers) and a tiers.yaml of made-up runs: `t-job <name>` reports
+# what $FX/<name>.* says (status, a status sequence, failure ids, counts,
+# details), a fake `similarity` scan flags a file on demand, the fake oracle
+# jobs pick their oracle/ with the real mg_oracle__tree and
+# mg_oracle__own_tree, and the fake oracle metadata check finds its oracle/
+# file with the real mg_conf__oracle_file.
 # Implementer worktrees are sparse without oracle/, as `tools/mg worktree new`
 # makes them. The planning, evaluation, static checks, receipts, escalations,
 # tip checkouts and fast-forwards are the real ones. A test that checks the
@@ -20,12 +22,13 @@ TRAILERS=$'Role: implementer\nSpec: sched/answer#A1\nSession: s-20261016T000000Z
 
 setup_file() {
   local t="$BATS_FILE_TMPDIR/template" f
-  mkdir -p "$t/core" "$t/docs" "$t/conformance/scenarios/smoke" "$t/conformance/scenarios/sched" "$t/oracle/driver"
+  mkdir -p "$t/core" "$t/docs" "$t/conformance/scenarios/smoke" "$t/conformance/scenarios/sched" "$t/conformance/catalog" \
+    "$t/oracle/driver" "$t/oracle/harvest"
   cp -R "$REPO_ROOT/tools" "$t/tools"
   cp "$REPO_ROOT/.gitignore" "$t/"
   for f in "$t"/tools/mg.d/*.sh; do
     case "$(basename "$f")" in
-      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | session.sh | host.sh | oracle.sh) ;;
+      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | session.sh | host.sh | oracle.sh | conformance.sh) ;;
       *) rm -f "$f" ;;
     esac
   done
@@ -35,6 +38,10 @@ setup_file() {
   printf '[workspace]\n' >"$t/core/Cargo.toml"
   printf 'FROM scratch\n' >"$t/oracle/Dockerfile"
   printf 'print("op")\n' >"$t/oracle/driver/ops.py"
+  # The pin's lock and the harvest inventory, and what the conformance side
+  # holds of them (goldens-check and harvest-report compare the two).
+  printf 'anki==25.09\n' | tee "$t/oracle/requirements.lock" >"$t/conformance/oracle.lock"
+  printf 'test_a,25.09\n' | tee "$t/oracle/harvest/links.csv" >"$t/conformance/catalog/harvest.csv"
   printf 'main\n' >"$t/tools/similarity/marker.txt"
   cat >"$t/tools/gate/tiers.yaml" <<'EOF'
 version: 1
@@ -55,6 +62,8 @@ runs:
   - {id: sim, job: similarity, args: [--base, "{base}"], merge_args: [--rev, "{tip}", --base, "{base}"], tier: T0, placement: [host, docker:similarity], needs: [refs], class: similarity, triggers: [core/, app/], budget_s: 60, local: false, where: main}
   - {id: stest, job: t-scan-selftest, tier: T0, placement: [host, docker:similarity], needs: [refs], class: tooling, triggers: [tools/similarity/], budget_s: 60, local: false, where: tip}
   - {id: later, job: notices, tier: T0, placement: host, class: static, triggers: [core/], budget_s: 60, pending: U16}
+  - {id: goldens, job: t-oracle-files, args: [goldens, requirements.lock, conformance/oracle.lock], tier: T0, placement: [host, docker:dev], class: conformance, triggers: [conformance/], oracle_files: true, budget_s: 60}
+  - {id: catalog, job: t-oracle-files, args: [catalog, harvest/links.csv, conformance/catalog/harvest.csv], tier: T0, placement: [host, docker:dev], class: conformance, triggers: [conformance/catalog/], oracle_files: true, budget_s: 60}
   - id: live
     job: t-oracle
     args: [live]
@@ -94,6 +103,10 @@ utilities:
   - {job: milestone, why: T3}
   - {job: session, why: sessions}
   - {job: oracle, why: its tree helpers}
+  - {job: conformance, why: its oracle file lookup}
+  - {job: goldens-check, why: conformance.sh}
+  - {job: harvest-report, why: conformance.sh}
+  - {job: harvest-inventory, why: conformance.sh}
   - {job: mac-ui, why: host.sh}
 EOF
   cat >"$t/tools/mg.d/zz-fakes.sh" <<'EOF'
@@ -102,6 +115,7 @@ mg_job similarity host t_similarity "fake similarity scan: flags core/x.rs when 
 mg_job t-oracle host t_oracle "fake oracle-image run (conformance --live): t-oracle <name> [args...]"
 mg_job t-oracle-own host t_oracle_own "fake oracle test: t-oracle-own <name> [args...]"
 mg_job t-scan-selftest host t_scan_selftest "fake similarity-selftest"
+mg_job t-oracle-files host t_oracle_files "fake oracle metadata check: t-oracle-files <name> <file under oracle/> <its conformance side>"
 # $FX/<name>@<checkout basename>.* overrides $FX/<name>.* in that checkout.
 t_job() {
   local name="$1" root f status=pass line
@@ -180,6 +194,21 @@ t_oracle_own() {
   mg_oracle__own_tree "test copies oracle/ into its host checks" || { echo "t-oracle-own $* @$root refused" >>"$STUB_LOG"; return 0; }
   echo "t-oracle-own $* @$root" >>"$STUB_LOG"
   t_job "$@"
+}
+# The oracle metadata checks' contract (goldens-check, harvest-report): they
+# read a file of this checkout's oracle/, or of the main checkout's when this
+# one has none (mg_conf__oracle_file), and fail when the branch's conformance
+# side disagrees with it (pin_mismatch, the leak check).
+t_oracle_files() {
+  local file
+  file="$(mg_conf__oracle_file "$2")"
+  echo "t-oracle-files $1 @$(basename "$MG_ROOT") oracle=$(case "$file" in "$MG_ROOT"/*) echo own ;; "") echo none ;; *) echo main ;; esac)" >>"$STUB_LOG"
+  if [ -n "$file" ] && cmp -s "$file" "$MG_ROOT/$3"; then
+    mg_status pass
+  else
+    mg_failure "pin_mismatch:$1" "$3 does not match oracle/$2"
+    mg_status fail
+  fi
 }
 # similarity-selftest's contract: refused in a role worktree, the checkout's
 # own scanner tests, the corpus from MG_SIMILARITY_REFS or refs/ (calibration
@@ -769,6 +798,45 @@ $TRAILERS"
   validate "$result"
 }
 
+@test "a branch that bumps the oracle pin gets its oracle metadata checks from the merge, in a full checkout of the tip" {
+  local wt="$BATS_TEST_TMPDIR/U90" spec="$BATS_TEST_TMPDIR/U90-spec" next="$BATS_TEST_TMPDIR/U91" tip
+  worktree "$wt" unit/U90 implementer
+  worktree "$spec" spec/U90 oracle-maintainer
+  # A bump: the new lock and its pin, re-inventoried in the same change (R1882).
+  printf 'anki==25.10\n' | tee "$spec/oracle/requirements.lock" >"$spec/conformance/oracle.lock"
+  printf 'test_a,25.10\ntest_b,25.10\n' | tee "$spec/oracle/harvest/links.csv" >"$spec/conformance/catalog/harvest.csv"
+  git -C "$spec" add -A
+  git -C "$spec" commit -qm "Bump the oracle to 25.10"
+  git -C "$wt" merge -q --no-edit spec/U90
+  commit_in "$wt" core/crates/meguri-sched/src/lib.rs "pub fn f() {}" "Change sched
+
+$TRAILERS"
+  tip="$(git -C "$wt" rev-parse HEAD)"
+  mg merge unit/U90
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(git -C "$SB" rev-parse trunk)" = "$tip" ]
+  # The main checkout's oracle/ still had the old lock and inventory, so the
+  # worktree left both checks to the merge instead of failing them.
+  [ "$(wt_outcome goldens)" = deferred-tip ]
+  [ "$(wt_outcome catalog)" = deferred-tip ]
+  [ "$(called '^t-oracle-files .* @U90 ')" = 0 ]
+  [ "$(called '^t-oracle-files goldens @merge-tip oracle=own$')" = 1 ]
+  [ "$(called '^t-oracle-files catalog @merge-tip oracle=own$')" = 1 ]
+  [ "$(outcome goldens)" = pass ]
+  [ "$(outcome catalog)" = pass ]
+  [ "$(rq .merge_ready)" = true ]
+
+  # Integrated, the bump is the main checkout's: the next branch checks
+  # against it in its own worktree.
+  worktree "$next" unit/U91 implementer
+  commit_in "$next" conformance/scenarios/smoke/d.yaml "id: smoke/d"
+  : >"$STUB_LOG"
+  mg_in "$next" gate --local --base "$tip"
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(outcome goldens)" = pass ]
+  [ "$(called '^t-oracle-files goldens @U91 oracle=main$')" = 1 ]
+}
+
 @test "oracle test refuses an implementer worktree (no-oracle-tree), so the merge runs it in a full checkout of the tip" {
   local wt="$BATS_TEST_TMPDIR/U90"
   worktree "$wt" unit/U90 implementer
@@ -1033,6 +1101,16 @@ PY
   grep -qF 'live="$MG_RUN_DIR/t1-live.json"' "$REPO_ROOT/tools/mg.d/conformance.sh"
   # The scanner's own tests run the branch's scanner, in a full checkout of the tip.
   jq -e '.runs[] | select(.id == "similarity-selftest" and .where == "tip" and .merge_args == null)' "$out" >/dev/null
+  # The jobs that compare the branch with the lock and the harvest inventory
+  # under oracle/ read that tree's files.
+  [ "$(jq -r '[.runs[] | select(.oracle_files) | .id] | join(" ")' "$out")" = "goldens-check harvest-report harvest-coverage" ]
+  # A pin bump in a sparse worktree whose main checkout has the old oracle/:
+  # gate --local runs the rest and leaves those two to the merge.
+  printf 'conformance/oracle.json\0conformance/catalog/harvest.csv\0' >"$BATS_TEST_TMPDIR/changed"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" plan --config "$out" --changed "$BATS_TEST_TMPDIR/changed" --mode local \
+    --oracle-tree differs --var base=b --var tip=t --out "$BATS_TEST_TMPDIR/plan.json"
+  [ "$(jq -r '[.runs[] | select(.outcome == "deferred-tip") | .id] | join(" ")' "$BATS_TEST_TMPDIR/plan.json")" = "goldens-check harvest-report" ]
+  jq -e '.runs[] | select(.id == "conformance" and .action == "run")' "$BATS_TEST_TMPDIR/plan.json" >/dev/null
 
   # The sched change of the plan's scenario selects sched's live suites and the scan.
   printf 'core/crates/meguri-sched/src/answer.rs\0' >"$BATS_TEST_TMPDIR/changed"

@@ -44,14 +44,15 @@ SCHEDULES = ("nightly", "weekly")
 # a full checkout of the branch tip (the branch's code and oracle/, the main
 # checkout's corpus).
 WHERE = ("worktree", "main", "tip")
-# Whose oracle/ this checkout's oracle-image runs would use (gate.sh): its
-# own, the main checkout's when that is exactly this HEAD's, or neither.
+# Whose oracle/ this checkout's oracle-image runs, and the runs that read the
+# oracle/ files (oracle_files), would use (gate.sh): its own, the main
+# checkout's when that is exactly this HEAD's, or neither.
 ORACLE_TREES = ("own", "same", "differs")
 RECEIPT_VERSION = 2
 RUN_KEYS = {
     "id", "job", "args", "merge_args", "tier", "stage", "placement", "class", "triggers", "filters",
-    "budget_s", "local", "where", "oracle", "needs", "schedule", "pending", "disabled", "blocking",
-    "require", "release_only", "user_step", "why",
+    "budget_s", "local", "where", "oracle", "oracle_files", "needs", "schedule", "pending", "disabled",
+    "blocking", "require", "release_only", "user_step", "why",
 }
 QUARANTINE_KEYS = {"test", "run", "class", "owner", "reason", "deadline", "approved_by", "evidence", "escalation"}
 EVIDENCE_KEYS = {"commit", "failed", "passed"}
@@ -213,7 +214,7 @@ def check_run(run, index, tiers, registry, conformance, errors):
         "stage": run.get("stage", "main"), "placement": run.get("placement"), "class": run.get("class"),
         "triggers": run.get("triggers"), "filters": run.get("filters"), "budget_s": run.get("budget_s"),
         "local": run.get("local", True), "where": run.get("where", "worktree"), "oracle": run.get("oracle", False),
-        "needs": run.get("needs", []), "schedule": run.get("schedule"), "pending": run.get("pending"),
+        "oracle_files": run.get("oracle_files", False), "needs": run.get("needs", []), "schedule": run.get("schedule"), "pending": run.get("pending"),
         "disabled": run.get("disabled"), "blocking": run.get("blocking", True), "require": run.get("require", []),
         "release_only": run.get("release_only", False), "user_step": run.get("user_step"),
     }
@@ -228,7 +229,7 @@ def check_run(run, index, tiers, registry, conformance, errors):
         errors.append("%s: class must be one of %s, got %r" % (where, ", ".join(CLASSES), out["class"]))
     if not isinstance(out["budget_s"], int) or isinstance(out["budget_s"], bool) or out["budget_s"] <= 0:
         errors.append("%s: budget_s (seconds) must be a positive integer" % where)
-    for flag in ("local", "oracle", "blocking", "release_only"):
+    for flag in ("local", "oracle", "oracle_files", "blocking", "release_only"):
         if not isinstance(out[flag], bool):
             errors.append("%s: %s must be true or false" % (where, flag))
     if out["where"] not in WHERE:
@@ -577,7 +578,10 @@ def plan_runs(config, changed, mode, main_capable, values, all_paths=False, only
                 item["action"], item["outcome"] = "skip", "deferred-tip"
                 item["reason"] = ("needs the branch's own code with the main checkout's corpus; "
                                   "tools/mg merge runs it in a full checkout of the tip")
-            elif run["oracle"] and oracle_tree == "differs":
+            elif (run["oracle"] or run["oracle_files"]) and oracle_tree == "differs":
+                # An oracle_files run would compare the branch with another
+                # oracle/ (the main checkout's lock, its harvest inventory) and
+                # fail as an ordinary run, which no merge replaces.
                 item["action"], item["outcome"] = "skip", "deferred-tip"
                 item["reason"] = ("this checkout has no oracle/ and the main checkout's is not this branch's; "
                                   "tools/mg merge runs it in a full checkout of the tip")

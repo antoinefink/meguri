@@ -38,7 +38,11 @@
 #   oracle        an oracle-image run: it needs the branch's own oracle/. A
 #                 checkout without one uses the main checkout's when that is
 #                 this HEAD's; otherwise the merge runs it in its tip checkout
-#   class         unit, conformance, sync, data-safety, ui, perf, static,
+#   oracle_files  reads files of the branch's oracle/ without its image (the
+#                 pin's lock, the harvest inventory): runs in gate --local, but
+#                 where the oracle/ it would read is not this HEAD's, the gate
+#                 defers it as it does an oracle-image run
+#   class        unit, conformance, sync, data-safety, ui, perf, static,
 #                 tooling or similarity; quarantined tests of a conformance,
 #                 sync or data-safety run fail every milestone run (R1953)
 #   schedule      T2: nightly or weekly
@@ -146,6 +150,7 @@ runs:
     placement: [host, docker:dev]
     class: conformance
     triggers: [conformance/, core/crates/meguri-testkit/, core/tools/meguri-cli/, tools/conformance/, tools/mg.d/conformance.sh]
+    oracle_files: true
     budget_s: 900
   - id: harvest-report
     job: harvest-report
@@ -153,6 +158,7 @@ runs:
     placement: [host, docker:dev]
     class: conformance
     triggers: [conformance/catalog/, conformance/scenarios/, core/crates/meguri-testkit/src/catalog.rs, tools/mg.d/conformance.sh]
+    oracle_files: true
     budget_s: 900
 
   # --- T0: tooling self-tests -------------------------------------------------
@@ -568,6 +574,7 @@ runs:
     tier: T3
     placement: [host, docker:dev]
     class: conformance
+    oracle_files: true
     budget_s: 900
     require:
       - {id: R1880-unclassified, summary: unclassified, max: 0}

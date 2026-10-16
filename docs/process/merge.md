@@ -15,7 +15,7 @@
 
 ## Oracle runs
 
-From a sparse role worktree, an oracle-image run uses the main checkout's `oracle/` when that is exactly the branch's (same tree id, nothing changed under it). When the branch changes `oracle/` (a spec side's driver change), the worktree's gate leaves the run to the merge (`deferred-tip`); a job that refuses its tree anyway (`oracle test` always does without its own `oracle/`) reports `needs-oracle-tree`. The merge runs both kinds in its tip checkout, against the branch's exact tree.
+From a sparse role worktree, an oracle-image run uses the main checkout's `oracle/` when that is exactly the branch's (same tree id, nothing changed under it). When the branch changes `oracle/` (a spec side's driver change or an oracle bump), the worktree's gate leaves the run to the merge (`deferred-tip`), and with it goldens-check and harvest-report, which compare the branch with the lock and the harvest inventory under `oracle/` (`oracle_files`); a job that refuses its tree anyway (`oracle test` always does without its own `oracle/`) reports `needs-oracle-tree`. The merge runs both kinds in its tip checkout, against the branch's exact tree.
 
 ## What reaches the implementer, and escalations
 
