@@ -5,6 +5,7 @@ from . import (  # noqa: F401
     clock,
     collection,
     decks,
+    fsrs_policy,
     handoff,
     maintenance,
     model,
