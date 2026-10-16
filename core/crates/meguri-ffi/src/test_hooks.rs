@@ -7,11 +7,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crate::callback;
+use meguri_engine::{EventKind, Generation};
+
 use crate::cancel::CancelToken;
 use crate::error::CoreError;
 use crate::events::{self, CoreEventKind};
 use crate::jobs::{self, JobHandle, JobOutcome};
+use crate::{callback, changes, runtime};
 
 /// Returns `error`, so Swift can check how each error crosses the bridge.
 #[uniffi::export]
@@ -73,6 +75,18 @@ pub fn test_emit_events(producers: u32, per_producer: u32) -> Result<(), CoreErr
         producer.join().map_err(|p| CoreError::from_panic(p.as_ref()))??;
     }
     Ok(())
+}
+
+/// Publishes one `Changes` event with `changes::sample()`'s change set
+/// (every list filled; its values are listed there), as the engine's
+/// executor would, at generation 0, and returns its `seq`.
+#[uniffi::export]
+pub fn test_emit_changes() -> Result<u64, CoreError> {
+    callback::enter("test_emit_changes");
+    let stream = runtime::engine()?.stream();
+    Ok(stream
+        .publish(Generation(0), None, EventKind::Changes(Arc::new(changes::sample())))
+        .0)
 }
 
 /// Starts a job that reports progress `reports_per_second` times a second for
