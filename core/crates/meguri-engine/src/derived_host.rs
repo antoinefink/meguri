@@ -12,7 +12,8 @@
 //!   a builder thread (`meguri-derived-builder`, utility) and hands its
 //!   batches to the writer (D7).
 //! - Readers attach the file as `derived` for the generation the store is
-//!   bound to (D9).
+//!   bound to (D9); `is_current` tells a consumer whether a component holds
+//!   every commit its snapshot sees, from the stamp's `seq` (D8).
 //!
 //! U38 builds the host before the collection opens, passes its ports to
 //! `Engine::open_raw` (its open step first) and closes it after
@@ -23,7 +24,7 @@ use std::collections::VecDeque;
 use std::fmt;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::JoinHandle;
@@ -122,6 +123,22 @@ pub struct DerivedReadiness {
 }
 
 impl ExtensionEvent for DerivedReadiness {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// The change-stream event of the derived writer's progress (D8): the store
+/// holds every commit up to `through` in each component `Ready` for
+/// `generation`. A consumer that found a component not current asks
+/// [`DerivedHost::is_current`] again with a later snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DerivedApplied {
+    pub generation: Generation,
+    pub through: Seq,
+}
+
+impl ExtensionEvent for DerivedApplied {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -266,6 +283,8 @@ struct Shared {
     threads: ThreadRegistry,
     registry: Registry,
     components: Vec<Arc<dyn Erased>>,
+    /// The seq of the last commit the observer sent to the derived writer.
+    sent: Arc<AtomicU64>,
     state: Mutex<SharedState>,
     changed: Condvar,
 }
@@ -340,6 +359,7 @@ impl DerivedHostBuilder {
             threads: self.engine.threads().clone(),
             registry,
             components: self.components,
+            sent: Arc::default(),
             state: Mutex::new(SharedState {
                 bound: None,
                 collection: None,
@@ -405,6 +425,7 @@ impl DerivedHost {
             .observer(Arc::new(HostObserver {
                 sender: self.sender.clone(),
                 components: self.shared.components.clone(),
+                sent: Arc::clone(&self.shared.sent),
             }))
             .generation_listener(port.clone())
             .suspend_participant(port.clone());
@@ -426,10 +447,49 @@ impl DerivedHost {
             })
     }
 
-    /// Whether `component` holds the current content for `generation`.
+    /// Whether `component` is `Ready` for `generation`: it follows the
+    /// commits, but the latest may not have reached it yet. Before reading
+    /// its tables, ask [`DerivedHost::is_current`].
     pub fn is_ready(&self, component: &str, generation: Generation) -> bool {
         self.readiness(component)
             .is_some_and(|r| r.generation == generation && r.readiness == Readiness::Ready)
+    }
+
+    /// Whether `component`'s tables, as `snapshot` reads them, hold every
+    /// commit the snapshot sees (D8). Commits reach the store after they
+    /// are published, so a `Ready` component can be behind the snapshot.
+    /// The answer comes from the store as the snapshot reads it, so it holds
+    /// for each of the snapshot's reads of `derived`, before or after it.
+    /// When it is false, read without the component, and ask again with a
+    /// later snapshot at the next [`DerivedApplied`] or `Ready`.
+    pub fn is_current(&self, component: &str, snapshot: &Snapshot<'_>) -> bool {
+        let seq = snapshot.seq();
+        // In this order: once every op up to the snapshot's has run the
+        // observers, `sent` is at or after each commit the store was sent.
+        let observed = self.shared.stream.settled_through() >= seq;
+        let sent = Seq(self.shared.sent.load(Ordering::SeqCst));
+        let bound = self
+            .shared
+            .lock()
+            .bound
+            .as_ref()
+            .is_some_and(|bound| bound.generation == snapshot.generation());
+        if !bound {
+            return false;
+        }
+        match snapshot.derived_seq(component) {
+            // The store holds every commit up to `held`; the commits after
+            // it that it was not sent change nothing in it.
+            Ok(Some(held)) => {
+                let held = Seq(u64::try_from(held).unwrap_or(0));
+                held >= seq || (observed && held >= sent)
+            }
+            Ok(None) => false,
+            Err(error) => {
+                tracing::warn!(%error, component, "reading the derived store's stamp");
+                false
+            }
+        }
     }
 
     /// Rebuilds every component through staging (D10).
@@ -520,10 +580,13 @@ fn unprivileged(core: &Arc<CollectionCore>, generation: Generation) -> Collectio
     }
 }
 
-/// The observer: captures on the collection writer thread (D6).
+/// The observer: captures on the collection writer thread (D6). It holds
+/// no `Shared`: that keeps a `Collection`, which keeps the observers.
 struct HostObserver {
     sender: Sender<Msg>,
     components: Vec<Arc<dyn Erased>>,
+    /// `Shared::sent`.
+    sent: Arc<AtomicU64>,
 }
 
 impl ChangeObserver for HostObserver {
@@ -548,6 +611,8 @@ impl ChangeObserver for HostObserver {
         if deltas.is_empty() && mark.is_none() {
             return Ok(());
         }
+        // Before the commit is published (`is_current`).
+        self.sent.fetch_max(commit.seq.0, Ordering::SeqCst);
         let _ = self.sender.send(Msg::Commit(CommitMsg {
             seq: commit.seq,
             generation: commit.generation,
@@ -704,31 +769,36 @@ struct Running {
     kept: Vec<(Seq, AnyDelta)>,
     /// Too much was kept, or a commit asked for a rebuild: start again.
     restart: bool,
+    /// A commit asked for a rebuild: start again as one, even a catch-up,
+    /// which may not see what that commit changed (D6).
+    rebuild: bool,
     /// A batch failed: the refresh fails, whatever its build made of it.
     failed_batch: Option<EngineError>,
 }
 
 impl Running {
+    /// The refresh to queue in its place.
     fn queued(&self) -> Queued {
         Queued {
             slot: self.slot,
-            kind: self.kind,
+            kind: if self.rebuild { Kind::Rebuild } else { self.kind },
             cause: self.cause,
         }
     }
 
     /// Keeps a commit's capture for the refresh's last transaction (D6, D7).
     fn keep(&mut self, seq: Seq, capture: Capture<AnyDelta>) {
-        if self.restart {
-            return;
-        }
         match capture {
             Capture::Nothing => {}
             Capture::Rebuild => {
+                if !self.rebuild {
+                    self.cause = Some(seq);
+                }
+                self.rebuild = true;
                 self.restart = true;
-                self.cause = Some(seq);
                 self.kept.clear();
             }
+            Capture::Delta(_) if self.restart => {}
             Capture::Delta(delta) if self.kept.len() < MAX_KEPT => self.kept.push((seq, delta)),
             Capture::Delta(_) => {
                 self.restart = true;
@@ -755,6 +825,9 @@ struct Worker {
     collection: Option<Collection>,
     generation: Option<Generation>,
     bind_seq: Seq,
+    /// The seq of the last commit handled: every ready component holds the
+    /// commits up to it (the stamp's `seq`, D3).
+    through: Seq,
     epoch: u64,
     mark: Option<CollectionMark>,
     slots: Vec<SlotState>,
@@ -784,6 +857,7 @@ impl Worker {
             collection: None,
             generation: None,
             bind_seq: Seq(0),
+            through: Seq(0),
             epoch: 0,
             mark: None,
             slots: vec![SlotState::Failed; count],
@@ -911,7 +985,8 @@ impl Worker {
         if let Found::Recreated { reason } = &found {
             tracing::warn!(%reason, path = %path.display(), "the derived store was replaced");
         }
-        let verdicts = match bind_file(&mut file, &self.shared.registry, &mark) {
+        let through = self.through.max(seq);
+        let verdicts = match bind_file(&mut file, &self.shared.registry, &mark, through) {
             Ok(verdicts) => verdicts,
             Err(error) => {
                 tracing::warn!(%error, "binding the derived store");
@@ -923,6 +998,7 @@ impl Worker {
         self.collection = Some(collection.clone());
         self.generation = Some(generation);
         self.bind_seq = seq;
+        self.through = through;
         self.mark = Some(mark);
         self.queue.clear();
         let mut state = self.shared.lock();
@@ -964,25 +1040,28 @@ impl Worker {
 
     /// D6.
     fn apply_commits(&mut self, batch: Vec<CommitMsg>) {
+        let Some(through) = batch.iter().map(|c| c.seq).max() else {
+            return;
+        };
+        self.through = self.through.max(through);
         let Some(generation) = self.generation else { return };
         let mut commits: Vec<CommitMsg> = batch
             .into_iter()
             .filter(|c| c.generation == generation && c.seq > self.bind_seq)
             .collect();
-        let Some(last) = commits.last().map(|c| c.seq) else {
-            return;
-        };
-        // The running refresh keeps its deltas first: they wait in memory
-        // for its last transaction, whatever becomes of this batch's.
-        if let Some(running) = self.running.as_mut() {
-            for commit in &mut commits {
-                let deltas = std::mem::take(&mut commit.deltas);
-                for (slot, capture) in deltas {
-                    if slot == running.slot {
-                        running.keep(commit.seq, capture);
-                    } else {
-                        commit.deltas.push((slot, capture));
-                    }
+        let last = commits.last().map_or(through, |c| c.seq);
+        // Before the transaction, whatever becomes of it: the running
+        // refresh keeps its deltas in memory for its last transaction, and a
+        // "rebuild" capture makes a waiting catch-up a rebuild.
+        for commit in &mut commits {
+            let deltas = std::mem::take(&mut commit.deltas);
+            for (slot, capture) in deltas {
+                if let Some(running) = self.running.as_mut().filter(|r| r.slot == slot) {
+                    running.keep(commit.seq, capture);
+                } else if self.slots[slot] == SlotState::Queued && matches!(capture, Capture::Rebuild) {
+                    self.rebuild_queued(slot, commit.seq);
+                } else {
+                    commit.deltas.push((slot, capture));
                 }
             }
         }
@@ -992,6 +1071,7 @@ impl Worker {
             return;
         }
         let shared = Arc::clone(&self.shared);
+        let held = stored_seq(self.through);
         let Some(file) = self.file.as_mut() else { return };
         let mut failed: Vec<(usize, Seq)> = Vec::new();
         let mut mark = self.mark;
@@ -1039,6 +1119,7 @@ impl Worker {
             {
                 tx.set_stamp(&Stamp { mark, clean: false })?;
             }
+            tx.set_seq(held)?;
             tx.commit()?;
             Ok(())
         })();
@@ -1048,6 +1129,7 @@ impl Worker {
                 for (slot, cause) in failed {
                     self.queue_refresh(slot, Kind::Rebuild, Some(cause));
                 }
+                self.publish_applied(generation);
             }
             Err(error) => {
                 tracing::warn!(%error, "a derived transaction failed");
@@ -1075,6 +1157,36 @@ impl Worker {
         }
         for slot in ready {
             self.queue_refresh(slot, Kind::Rebuild, Some(cause));
+        }
+    }
+
+    /// Tells consumers the store holds every commit up to `through`, when a
+    /// component can be read (D8).
+    fn publish_applied(&self, generation: Generation) {
+        let state = self.shared.lock();
+        let readable = state
+            .slots
+            .iter()
+            .any(|slot| slot.generation == generation && slot.readiness == Readiness::Ready);
+        if readable {
+            let event = DerivedApplied {
+                generation,
+                through: self.through,
+            };
+            self.shared
+                .stream
+                .publish(generation, Some(self.through), EventKind::Extension(Arc::new(event)));
+        }
+    }
+
+    /// A commit asked `slot` for a rebuild while its refresh waits: a
+    /// catch-up may not see what that commit changed, so it rebuilds (D6).
+    fn rebuild_queued(&mut self, slot: usize, cause: Seq) {
+        if let Some(queued) = self.queue.iter_mut().find(|queued| queued.slot == slot)
+            && queued.kind != Kind::Rebuild
+        {
+            queued.kind = Kind::Rebuild;
+            queued.cause = Some(cause);
         }
     }
 
@@ -1128,6 +1240,7 @@ impl Worker {
             abort: Arc::clone(&abort),
             kept: Vec::new(),
             restart: false,
+            rebuild: false,
             failed_batch: None,
         });
         {
@@ -1273,7 +1386,8 @@ impl Worker {
     }
 
     /// The last transaction of a refresh: the swap (rebuild), the deltas kept
-    /// after the snapshot, `ready` 1.
+    /// after the snapshot, `ready` 1. The component then holds every commit
+    /// the writer handled: the stamp's `seq` says so.
     fn finish(
         &mut self,
         schema: &ComponentSchema,
@@ -1282,6 +1396,7 @@ impl Worker {
         snapshot: Seq,
     ) -> Result<(), EngineError> {
         let component = Arc::clone(&self.shared.components[slot]);
+        let held = stored_seq(self.through);
         let file = self.file.as_mut().ok_or(EngineError::Cancelled)?;
         let tx = file.begin()?;
         if running.kind == Kind::Rebuild {
@@ -1293,6 +1408,7 @@ impl Worker {
             }
         }
         tx.set_ready(&schema.name, true)?;
+        tx.set_seq(held)?;
         tx.commit()?;
         Ok(())
     }
@@ -1370,6 +1486,10 @@ impl Worker {
         self.abort_running();
         self.queue.clear();
         let generation = collection.generation();
+        if let Some((_, seq)) = mark {
+            self.through = self.through.max(seq);
+        }
+        let held = stored_seq(self.through);
         let schemas = self.shared.registry.schemas().to_vec();
         let reset = self.file.as_mut().map(|file| -> Result<(), EngineError> {
             let tx = file.begin()?;
@@ -1378,6 +1498,7 @@ impl Worker {
             }
             if let Some((mark, _)) = mark {
                 tx.set_stamp(&Stamp { mark, clean: false })?;
+                tx.set_seq(held)?;
             }
             tx.commit()?;
             Ok(())
@@ -1506,9 +1627,14 @@ impl Worker {
 }
 
 /// D5.1 and D5.2 on the file: syncs the components, assesses each, stamps
-/// the collection's mark with `clean` 0 and clears `ready` of every
-/// component that is not fresh.
-fn bind_file(file: &mut DerivedFile, registry: &Registry, mark: &CollectionMark) -> Result<Vec<Verdict>, EngineError> {
+/// the collection's mark with `clean` 0 and the bind's seq `through`, and
+/// clears `ready` of every component that is not fresh.
+fn bind_file(
+    file: &mut DerivedFile,
+    registry: &Registry,
+    mark: &CollectionMark,
+    through: Seq,
+) -> Result<Vec<Verdict>, EngineError> {
     let tx = file.begin()?;
     let synced = tx.sync_components(registry)?;
     let stamp = tx.stamp()?;
@@ -1525,8 +1651,14 @@ fn bind_file(file: &mut DerivedFile, registry: &Registry, mark: &CollectionMark)
         mark: *mark,
         clean: false,
     })?;
+    tx.set_seq(stored_seq(through))?;
     tx.commit()?;
     Ok(verdicts)
+}
+
+/// A seq as the stamp stores it (D3).
+fn stored_seq(seq: Seq) -> i64 {
+    i64::try_from(seq.0).unwrap_or(i64::MAX)
 }
 
 /// Whether a builder may read now.

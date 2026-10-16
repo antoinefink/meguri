@@ -1,5 +1,5 @@
 //! The derived store's file, stamp, components, staging swap and reader
-//! attachment (`specs/storage/derived-store.md` D1 to D5, D7, D9). The engine
+//! attachment (`specs/storage/derived-store.md` D1 to D5, D7 to D9). The engine
 //! side (threads, observer, readiness, generations) is tested in
 //! `meguri-engine/tests/derived_lag.rs`.
 
@@ -739,6 +739,59 @@ fn readers_attach_the_store_read_only_and_join_it_with_the_collection() {
             "{role:?}: detached"
         );
     }
+    file.close().unwrap();
+    opened.close().unwrap();
+}
+
+#[test]
+fn a_snapshot_reads_the_stamps_seq_of_a_ready_component_from_its_own_view_of_the_store() {
+    let (_dir, collection) = copy_fixture("schema-18.anki2");
+    let opened = open(&collection).unwrap();
+    let path = derived::derived_path(&collection);
+    let mut file = filled(&path, &[(1, "a")], mark(1, 2, 3));
+    let tx = file.begin().unwrap();
+    tx.set_seq(41).unwrap();
+    tx.set_stamp(&Stamp {
+        mark: mark(1, 2, 4),
+        clean: false,
+    })
+    .unwrap();
+    tx.commit().unwrap();
+
+    let mut reader = opened.open_reader(ReaderRole::Query).unwrap();
+    {
+        let snapshot = reader.begin_snapshot().unwrap();
+        assert_eq!(snapshot.derived_seq("mirror").unwrap(), None, "no store attached");
+    }
+    reader.attach_derived(&path, 1).unwrap();
+    let snapshot = reader.begin_snapshot().unwrap();
+    assert_eq!(
+        snapshot.derived_seq("mirror").unwrap(),
+        Some(41),
+        "writing the mark keeps the seq"
+    );
+    assert_eq!(snapshot.derived_seq("other").unwrap(), None, "no such component");
+    let tx = file.begin().unwrap();
+    tx.set_seq(42).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        snapshot.derived_seq("mirror").unwrap(),
+        Some(41),
+        "the snapshot keeps its view of the store"
+    );
+    drop(snapshot);
+    {
+        let snapshot = reader.begin_snapshot().unwrap();
+        assert_eq!(snapshot.derived_seq("mirror").unwrap(), Some(42));
+    }
+    let tx = file.begin().unwrap();
+    tx.set_ready("mirror", false).unwrap();
+    tx.commit().unwrap();
+    {
+        let snapshot = reader.begin_snapshot().unwrap();
+        assert_eq!(snapshot.derived_seq("mirror").unwrap(), None, "not ready");
+    }
+    drop(reader);
     file.close().unwrap();
     opened.close().unwrap();
 }

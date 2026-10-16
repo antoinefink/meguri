@@ -26,7 +26,7 @@ pub use cancel::CancelToken;
 pub use changes::observers::{CardDelta, ConfigDelta, ObservedCommit};
 pub use changes::stream::{ChangeStream, Event, EventKind, ExtensionEvent, Reservation, Seq, Subscription};
 pub use collection::Collection;
-pub use derived_host::{DerivedHost, DerivedReadiness, Readiness};
+pub use derived_host::{DerivedApplied, DerivedHost, DerivedReadiness, Readiness};
 pub use error::EngineError;
 pub use executor::catalog::OpDef;
 pub use executor::op::{OpContext, OpResult, OpSpec, OpTiming, Pending, UndoMeta, WriteDelay};

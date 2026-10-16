@@ -209,6 +209,12 @@ impl ChangeStream {
         Seq(self.inner.lock().next_seq)
     }
 
+    /// The last seq up to which nothing is pending: every op up to it has
+    /// run its in-core observers and was published or given up.
+    pub(crate) fn settled_through(&self) -> Seq {
+        Seq(self.inner.lock().next_release - 1)
+    }
+
     fn settle(&self, seq: Seq, event: Option<Event>) {
         let wakers = {
             let mut state = self.inner.lock();

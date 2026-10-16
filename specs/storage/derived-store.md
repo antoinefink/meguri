@@ -22,7 +22,7 @@ Meguri's own indexes (count caches, folded text and full-text search, browser ca
 
   | Table | Columns |
   |---|---|
-  | `meguri_stamp` | `id` (always 1), `crt`, `scm`, `col_mod`, `clean` |
+  | `meguri_stamp` | `id` (always 1), `crt`, `scm`, `col_mod`, `clean`, `seq` |
   | `meguri_components` | `name` (key), `version`, `ready`, `build` |
 
 - Every other table belongs to one component (D4). Its stored name is `<component>__<table>`; an index's is `<component>__<index>__<build>`. Tables named `meguri_build__<component>__<table>` exist only while a rebuild runs (D7). A table name starts with a letter, so each stored name has one owner: `foo___rows` is table `rows` of `foo_`, never of `foo`. Emptying, swapping or dropping a component's tables takes exactly the names it owns, never a prefix match.
@@ -31,8 +31,9 @@ Meguri's own indexes (count caches, folded text and full-text search, browser ca
 
 - `crt`, `scm` (seconds and milliseconds as the `col` row stores them) and `col_mod` are the collection mark: which collection the store was derived from and the `col.mod` of the last commit whose changes every ready component holds.
 - `clean` is 1 only when the store was closed or suspended (D11) after applying every commit it had been told about; it is set to 0 when the store is bound to an open collection (D5) and when it resumes.
+- `seq` is the seq (`engine/op-model` O4) of the last commit the derived writer handled: every ready component holds every commit up to it. The bind writes the bind's seq (D5); each transaction of commits (D6) and the last transaction of each refresh (D7) write the writer's latest. Seqs restart with every process, so `seq` means something only to the process that bound the store; every bind writes it again, and D5.2 never reads it.
 - Per component: `version` (the component's own schema version), `ready` (1 when its tables hold the content for the stamp's mark) and `build` (a counter that names its indexes).
-- In memory only: the collection generation the store is bound to (`engine/lifecycle` L3) and the seq of the bind (`engine/op-model` O4). Generations and seqs restart with every process, so they are never stored.
+- In memory only: the collection generation the store is bound to (`engine/lifecycle` L3), which restarts with every process.
 - Stamp and component rows change in the same transaction as the derived rows they describe, so the store is never ahead of what it records. A transaction of the derived file is atomic only for that file: every derived update must be idempotent, because the collection commit it follows may be applied again by catch-up (D7) after a crash.
 
 ## D4. Components
@@ -82,7 +83,7 @@ Each component gets one verdict, from the first matching row:
 | `clean` is 0 | catch-up from the stamp's `col_mod` (a crash between a collection commit and its derived update; also when `col_mod` is equal, since a `Raw` write does not move it) |
 | otherwise | fresh: `Ready` |
 
-The stamp then takes the collection's mark with `clean` 0, and every component that is not fresh gets `ready` 0 in the same transaction, so a crash during its catch-up or rebuild rebuilds it next time.
+The stamp then takes the collection's mark with `clean` 0 and the bind's seq, and every component that is not fresh gets `ready` 0 in the same transaction, so a crash during its catch-up or rebuild rebuilds it next time.
 
 ## D6. Incremental updates
 
@@ -92,25 +93,27 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
   - ready: the delta is applied in a savepoint. A failing or panicking apply rolls back that component's part, marks it `ready` 0 and queues its rebuild; the other components and the stamp go on.
   - refreshing (D7): the delta is kept with its seq, before the transaction begins, so a transaction that then fails loses nothing the refresh needs.
   - waiting for a refresh: the delta is dropped, because the refresh's snapshot will hold it.
-  - a "rebuild" capture queues a rebuild of that component.
+  - a "rebuild" capture queues a rebuild of a ready component, and makes a waiting or running catch-up a rebuild: a catch-up may not see what such a commit changed (a sync brings rows whose modification times are before its `since`).
 - A transaction that fails as a whole (the D12 fault point, an I/O error) marks every ready component `ready` 0 and queues its rebuild; the stamp keeps its mark.
-- The stamp's mark becomes the last `col` row in the transaction.
+- The stamp's mark becomes the last `col` row in the transaction, and its `seq` the last commit of the batch, the dropped ones included.
 - Normal syncs need nothing else: a `SyncIncoming` commit reaches components like any other (R1489).
 
 ## D7. Rebuild and catch-up
 
 - At most one refresh runs at a time, on a builder thread. It waits while the collection is in an exclusive phase, takes the maintenance reader (KTD3) and one snapshot (`engine/op-model` O6) for the whole refresh, and runs the component's build or catch-up on it. Each batch it writes goes to the derived writer, which runs it in its own transaction and goes on with other components' commits between batches: a rebuild never holds back the count caches or anyone else's updates. A batch that fails or panics is rolled back and fails the refresh, even when the build goes on.
-- A rebuild writes into staging tables. When it ends, one transaction creates the indexes on the staging tables, drops the live tables, renames the staging tables to the live names, applies the deltas kept since the refresh started whose seq is after the snapshot's (those at or before it are in the snapshot), and sets `ready` 1. Readers see the old content or the new content, never a partial one.
-- A catch-up writes into the live tables; its last transaction applies the kept deltas after the snapshot and sets `ready` 1.
+- A rebuild writes into staging tables. When it ends, one transaction creates the indexes on the staging tables, drops the live tables, renames the staging tables to the live names, applies the deltas kept since the refresh started whose seq is after the snapshot's (those at or before it are in the snapshot), sets `ready` 1 and writes the stamp's `seq`. Readers see the old content or the new content, never a partial one.
+- A catch-up writes into the live tables; its last transaction applies the kept deltas after the snapshot, sets `ready` 1 and writes the stamp's `seq`.
 - Progress: completed and total rows as the component reports them, published at most every 100 ms (D8).
-- A refresh stops at its next batch when the collection enters an exclusive phase (it is retried from the start once the phase ends), when the collection closes or is replaced, when the store is invalidated, suspended or closed. Its staging tables are dropped. More than 100,000 kept deltas also restart it.
+- A refresh stops at its next batch when the collection enters an exclusive phase (it is retried from the start once the phase ends), when the collection closes or is replaced, when the store is invalidated, suspended or closed. Its staging tables are dropped. More than 100,000 kept deltas also restart it, and a "rebuild" capture restarts it as a rebuild (D6).
 - A refresh that fails (the component's build or catch-up returns an error or panics, one of its batches fails, or the last transaction fails, a kept delta's apply included) is retried once from the start; a second failure in a row leaves the component `Stale` until the next bind or invalidation.
 
 ## D8. Readiness
 
 - Each component is `Ready`, `Building{completed, total}` (a rebuild or catch-up runs) or `Stale` (its content is not current: waiting for a refresh, failed, or not yet bound), for one generation.
 - Every change, and progress at most every 100 ms, is published on the change stream as an `Extension` event (`engine/change-stream` S3) carrying the component name, the generation and the readiness. The envelope's `cause_seq` is the seq of the commit that made the component stale (its "rebuild" capture, its failed apply, or the last commit of a failed transaction), on that `Stale` and on every event of the refresh it queued, retries included. Events of a bind, a replacement or an invalidation carry none.
-- Consumers read derived tables only while the component is `Ready` for their generation, and keep a correct path without it (deck counts and the review queue never wait for the search index).
+- `Ready` says a component follows the commits, not that it holds the latest: a commit reaches the derived writer after it is published (D6). Before reading a component's tables, a consumer asks `is_current(component, snapshot)` with its collection snapshot. It is true when the component is `ready` in the store as the snapshot reads it, and the stamp's `seq` there is at or after the snapshot's seq, or every op up to the snapshot's has run the observers (`engine/change-stream` S2) and the store holds every commit it was sent (a commit it was not sent, an empty change set included, changes nothing in it). The check reads the store through the snapshot, whose view of the store SQLite fixes at its first read of `derived`, so the answer holds for every derived read of that snapshot, before or after the check.
+- After each transaction of commits, while a component is `Ready`, the derived writer publishes an `Extension` event `DerivedApplied` carrying the generation and the stamp's new `seq`, which is also its `cause_seq`. A consumer that found a component not current asks again with a later snapshot at the next `DerivedApplied` or `Ready`.
+- Consumers read derived tables only while the component is current for their snapshot, and keep a correct path without it (deck counts and the review queue never wait for the search index).
 
 ## D9. Readers
 
@@ -156,3 +159,6 @@ The stamp then takes the collection's mark with `clean` 0, and every component t
 | `suspend` during a build returns once the builder let go of its snapshot | `tests/derived_lag.rs` |
 | A panicking apply, build batch or kept delta is rolled back, its refresh runs again and the writer goes on; a build that goes on after a failed batch is not made ready | `tests/derived_lag.rs` |
 | Readiness changed by a commit carries that commit's seq as `cause_seq` | `tests/derived_lag.rs` |
+| A commit whose apply is held: the component stays `Ready` but is not current for a snapshot that sees the commit; once applied, `DerivedApplied` names its seq, a new snapshot is current and one that read the store before is not; an op the store is not sent leaves it current | `tests/derived_lag.rs` |
+| A snapshot reads the stamp's `seq` of a ready component from its own view of the store; writing the mark keeps the `seq` | `tests/derived_store.rs` |
+| A "rebuild" capture while a catch-up waits or runs makes it a rebuild that holds the commit | `tests/derived_lag.rs` |

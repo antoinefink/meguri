@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use common::{NOW_MS, copy_fixture, note, open_config, revlog};
 use meguri_engine::derived_host::{
-    BuildSink, Capture, CatchUp, ComponentSchema, ComponentTables, DerivedComponent, DerivedHost, DerivedReadiness,
-    IndexDef, Invalidation, Readiness, TableDef,
+    BuildSink, Capture, CatchUp, ComponentSchema, ComponentTables, DerivedApplied, DerivedComponent, DerivedHost,
+    DerivedHostBuilder, DerivedReadiness, IndexDef, Invalidation, Readiness, TableDef,
 };
 use meguri_engine::{
     Collection, Engine, EngineConfig, EngineError, Event, EventKind, Generation, LongOp, ObservedCommit, OpSpec, Ports,
@@ -87,20 +87,29 @@ impl Gate {
 
 /// A test component: one row per card. It catches up from card
 /// modification times (D4) and can be made to fail or panic in an apply, to
-/// panic in its first build's first batch, to build slowly, or to stop after
-/// its first batch until a gate opens.
+/// hold an apply, to ask for a rebuild, to panic in its first build's first
+/// batch, to build slowly, or to stop its builds or catch-ups until a gate
+/// opens.
 struct CardMirror {
     counters: Arc<Counters>,
     /// An apply of a row with this due fails.
     fail_on_due: Option<i64>,
     /// An apply of a row with this due panics.
     panic_on_due: Option<i64>,
+    /// An apply of a row with this due waits for the gate first, holding
+    /// the derived writer.
+    held_apply: Option<(i64, Arc<Gate>)>,
+    /// A commit that gives a card this due is too much to apply: its
+    /// capture asks for a rebuild (D4).
+    rebuild_on_due: Option<i64>,
     /// The first build's first batch panics on the derived writer.
     panic_in_first_batch: bool,
     /// The build goes on after a batch failed (against D4's contract).
     ignore_batch_errors: bool,
     /// Every build waits here after its first batch.
     gate: Option<Arc<Gate>>,
+    /// Every catch-up waits here before its write, its snapshot taken.
+    catch_up_gate: Option<Arc<Gate>>,
     /// Cards per build batch, and a pause before each batch.
     batch: usize,
     pause: Duration,
@@ -112,9 +121,12 @@ impl CardMirror {
             counters: Arc::clone(counters),
             fail_on_due: None,
             panic_on_due: None,
+            held_apply: None,
+            rebuild_on_due: None,
             panic_in_first_batch: false,
             ignore_batch_errors: false,
             gate: None,
+            catch_up_gate: None,
             batch: 5_000,
             pause: Duration::ZERO,
         }
@@ -178,16 +190,21 @@ impl DerivedComponent for CardMirror {
         if commit.cards.is_empty() {
             return Capture::Nothing;
         }
-        Capture::Delta(
-            commit
-                .cards
-                .iter()
-                .map(|delta| match delta.after_card().unwrap() {
-                    Some(card) => Change::Put(row_of(&card)),
-                    None => Change::Remove(delta.id.0),
-                })
-                .collect(),
-        )
+        let changes: Vec<Change> = commit
+            .cards
+            .iter()
+            .map(|delta| match delta.after_card().unwrap() {
+                Some(card) => Change::Put(row_of(&card)),
+                None => Change::Remove(delta.id.0),
+            })
+            .collect();
+        let too_much = changes
+            .iter()
+            .any(|change| matches!(change, Change::Put(row) if Some(row.4) == self.rebuild_on_due));
+        if too_much {
+            return Capture::Rebuild;
+        }
+        Capture::Delta(changes)
     }
 
     fn apply(&self, tables: &ComponentTables<'_>, delta: Vec<Change>) -> Result<(), EngineError> {
@@ -195,6 +212,11 @@ impl DerivedComponent for CardMirror {
         for change in delta {
             match change {
                 Change::Put(row) => {
+                    if let Some((due, gate)) = &self.held_apply
+                        && row.4 == *due
+                    {
+                        gate.pass();
+                    }
                     if Some(row.4) == self.fail_on_due {
                         return Err(EngineError::Internal {
                             message: "this due is refused".into(),
@@ -268,6 +290,9 @@ impl DerivedComponent for CardMirror {
             }
             Ok(())
         })?;
+        if let Some(gate) = &self.catch_up_gate {
+            gate.pass();
+        }
         sink.write(move |tables| {
             let table = tables.table("rows")?.to_owned();
             let stored: Vec<i64> = {
@@ -293,6 +318,35 @@ impl DerivedComponent for CardMirror {
     }
 }
 
+/// A component whose build holds the one refresh the store runs at a time
+/// until a gate opens, so the refreshes queued after it wait.
+struct Blocker {
+    gate: Arc<Gate>,
+    started: Arc<AtomicBool>,
+}
+
+impl DerivedComponent for Blocker {
+    type Delta = ();
+
+    fn schema(&self) -> ComponentSchema {
+        ComponentSchema::new("blocker", 1).table(TableDef::columns("rows", "(id INTEGER PRIMARY KEY)"))
+    }
+
+    fn capture(&self, _commit: &ObservedCommit<'_>) -> Capture<()> {
+        Capture::Nothing
+    }
+
+    fn apply(&self, _tables: &ComponentTables<'_>, _delta: ()) -> Result<(), EngineError> {
+        Ok(())
+    }
+
+    fn build(&self, _source: &Snapshot<'_>, _sink: &mut BuildSink) -> Result<(), EngineError> {
+        self.started.store(true, Ordering::SeqCst);
+        self.gate.pass();
+        Ok(())
+    }
+}
+
 /// An engine with one collection open and the derived store wired as U38
 /// wires it.
 struct Opened {
@@ -309,13 +363,18 @@ fn clock() -> Arc<StepClock> {
 }
 
 fn open_with(path: &Path, mirror: impl FnOnce(&Arc<Counters>) -> CardMirror) -> Opened {
+    open_components(path, |builder, counters| builder.component(mirror(counters)))
+}
+
+/// Opens with the components `register` adds, in its order.
+fn open_components(
+    path: &Path,
+    register: impl FnOnce(DerivedHostBuilder, &Arc<Counters>) -> DerivedHostBuilder,
+) -> Opened {
     let counters = Arc::new(Counters::default());
     let engine = Engine::new(EngineConfig::default()).unwrap();
     let events = engine.stream().subscribe();
-    let host = DerivedHost::builder(&engine)
-        .component(mirror(&counters))
-        .start()
-        .unwrap();
+    let host = register(DerivedHost::builder(&engine), &counters).start().unwrap();
     let ports = host.ports(Ports::default());
     let collection = engine
         .open_raw(path, open_config(&clock()).ports(ports.clone()))
@@ -385,6 +444,47 @@ fn readiness_of(event: &Event) -> Option<DerivedReadiness> {
         EventKind::Extension(payload) => payload.as_any().downcast_ref::<DerivedReadiness>().cloned(),
         _ => None,
     }
+}
+
+fn applied_of(event: &Event) -> Option<DerivedApplied> {
+    match &event.kind {
+        EventKind::Extension(payload) => payload.as_any().downcast_ref::<DerivedApplied>().cloned(),
+        _ => None,
+    }
+}
+
+/// Takes events until one matches, waiting at most [`WAIT`] in all.
+fn wait_for_event(events: &Subscription, mut wanted: impl FnMut(&Event) -> bool) -> Arc<Event> {
+    let deadline = monotonic::now() + WAIT;
+    loop {
+        let left = deadline.saturating_sub(monotonic::now());
+        let event = events.recv_timeout(left).expect("the event never came");
+        if wanted(&event) {
+            return event;
+        }
+    }
+}
+
+/// Polls until `done`, at most [`WAIT`].
+fn wait_until(what: &str, done: impl Fn() -> bool) {
+    let deadline = monotonic::now() + WAIT;
+    while !done() {
+        assert!(monotonic::now() < deadline, "{what} never happened");
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// The mirror's rows as `snapshot` reads them through `derived`.
+fn mirrored_in(snapshot: &Snapshot<'_>) -> Vec<Row> {
+    rows_of(
+        &snapshot
+            .execute_raw(
+                "SELECT cid, nid, did, queue, due FROM derived.card_mirror__rows ORDER BY cid",
+                &[],
+            )
+            .unwrap()
+            .rows,
+    )
 }
 
 /// The mirror's rows as a collection reader sees them through `derived`.
@@ -490,6 +590,22 @@ fn set_due(collection: &Collection, id: CardId, due: i64) -> Seq {
         .seq
 }
 
+/// A sync brings a change to a card made a day ago: its modification time
+/// is before the `since` of any catch-up. Returns the op's seq.
+fn sync_change(collection: &Collection, id: CardId, due: i64) -> Seq {
+    collection
+        .run(OpSpec::named("sync_incoming", OpSource::SyncIncoming), move |ctx| {
+            let mut card = ctx.scope().card(id)?.expect("the card exists");
+            card.due = i32::try_from(due).unwrap();
+            card.usn = Usn(7);
+            card.mtime = EpochSecs(NOW_MS / 1000 - 86_400);
+            ctx.scope().put(&card)?;
+            Ok(())
+        })
+        .unwrap()
+        .seq
+}
+
 fn remove_card(collection: &Collection, id: CardId) {
     collection
         .run(OpSpec::named("remove_cards", OpSource::UserUndoable), move |ctx| {
@@ -519,6 +635,13 @@ fn without_store_at<T>(path: &Path, now_ms: i64, work: impl FnOnce(&Collection) 
 
 fn derived_file(path: &Path) -> PathBuf {
     path.with_file_name("meguri-derived.db")
+}
+
+/// Leaves the closed store as a crash with nothing left to apply leaves it:
+/// `clean` 0, so the next bind catches up (D5.2).
+fn mark_unclean(path: &Path) {
+    let conn = rusqlite::Connection::open(derived_file(path)).unwrap();
+    assert_eq!(conn.execute("UPDATE meguri_stamp SET clean = 0", []).unwrap(), 1);
 }
 
 /// Every object of the collection's own schema.
@@ -773,6 +896,90 @@ fn a_sync_incoming_commit_is_applied_incrementally() {
     opened.close();
 }
 
+/// A store left unclean over a collection with two cards: the next bind
+/// catches the mirror up (D5.2).
+fn unclean_store_with_two_cards(path: &Path) -> Vec<CardId> {
+    let opened = open(path);
+    opened.settle();
+    let ids = add_cards(&opened.collection, &[1, 2]);
+    opened.close();
+    mark_unclean(path);
+    ids
+}
+
+#[test]
+fn a_rebuild_capture_during_a_running_catch_up_starts_it_again_as_a_rebuild() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let ids = unclean_store_with_two_cards(&path);
+    let gate = Arc::new(Gate::default());
+    let reopened = open_with(&path, |counters| CardMirror {
+        rebuild_on_due: Some(9_000),
+        catch_up_gate: Some(Arc::clone(&gate)),
+        ..CardMirror::new(counters)
+    });
+    // The catch-up has its snapshot and waits before its write.
+    wait_until("the catch-up", || reopened.catch_ups() == 1);
+    // A commit after that snapshot asks for a rebuild; a catch-up from
+    // modification times would not see it.
+    sync_change(&reopened.collection, ids[0], 9_000);
+    reopened.host.flush().unwrap();
+    gate.open();
+    reopened.settle();
+    assert_eq!(reopened.readiness(), Readiness::Ready);
+    let rows = mirrored(&reopened.collection);
+    assert!(
+        rows.iter().any(|r| r.0 == ids[0].0 && r.4 == 9_000),
+        "the synced change is there: {rows:?}"
+    );
+    assert_eq!(rows, expected(&reopened.collection));
+    assert_eq!(
+        (reopened.catch_ups(), reopened.builds()),
+        (1, 1),
+        "the catch-up started again as a rebuild"
+    );
+    reopened.close();
+}
+
+#[test]
+fn a_rebuild_capture_while_a_catch_up_waits_its_turn_makes_it_a_rebuild() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let ids = unclean_store_with_two_cards(&path);
+    let gate = Arc::new(Gate::default());
+    let started = Arc::new(AtomicBool::new(false));
+    // The new blocker's rebuild runs first and holds the store's one
+    // refresh; the mirror's catch-up waits behind it.
+    let reopened = open_components(&path, |builder, counters| {
+        builder
+            .component(Blocker {
+                gate: Arc::clone(&gate),
+                started: Arc::clone(&started),
+            })
+            .component(CardMirror {
+                rebuild_on_due: Some(9_000),
+                ..CardMirror::new(counters)
+            })
+    });
+    wait_until("the blocker's rebuild", || started.load(Ordering::SeqCst));
+    assert_eq!(reopened.readiness(), Readiness::Stale, "the catch-up waits");
+    sync_change(&reopened.collection, ids[0], 9_000);
+    reopened.host.flush().unwrap();
+    gate.open();
+    reopened.settle();
+    assert_eq!(reopened.readiness(), Readiness::Ready);
+    let rows = mirrored(&reopened.collection);
+    assert!(
+        rows.iter().any(|r| r.0 == ids[0].0 && r.4 == 9_000),
+        "the synced change is there: {rows:?}"
+    );
+    assert_eq!(rows, expected(&reopened.collection));
+    assert_eq!(
+        (reopened.catch_ups(), reopened.builds()),
+        (0, 1),
+        "the waiting catch-up became a rebuild"
+    );
+    reopened.close();
+}
+
 #[test]
 fn invalidation_rebuilds_through_staging_and_publishes_each_state() {
     let (_dir, path) = copy_fixture("schema-18.anki2");
@@ -848,6 +1055,80 @@ fn readiness_changed_by_a_commit_carries_that_commits_seq() {
         events.iter().all(|(cause, _)| *cause == Some(failed)),
         "every state of the rebuild names the commit whose apply failed ({failed:?}): {events:?}"
     );
+    opened.close();
+}
+
+#[test]
+fn a_commit_the_store_has_not_applied_is_not_current_and_its_application_is_published() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let gate = Arc::new(Gate::default());
+    let opened = open_with(&path, |counters| CardMirror {
+        held_apply: Some((888, Arc::clone(&gate))),
+        ..CardMirror::new(counters)
+    });
+    opened.settle();
+    let generation = opened.collection.generation();
+    let id = add_cards(&opened.collection, &[1])[0];
+    opened.host.flush().unwrap();
+    let lease = opened.collection.reader(ReaderRole::Query).unwrap();
+    {
+        let snapshot = lease.snapshot().unwrap();
+        assert!(opened.host.is_current(MIRROR, &snapshot), "every commit is applied");
+    }
+    // An op with an empty change set is never sent to the store: the store
+    // stays current for a snapshot that ends with it.
+    let empty = opened
+        .collection
+        .run(OpSpec::named("nothing", OpSource::UserUndoable), |_| Ok(()))
+        .unwrap();
+    assert!(empty.changes.is_empty());
+    {
+        let snapshot = lease.snapshot().unwrap();
+        assert_eq!(snapshot.seq(), empty.seq);
+        assert!(opened.host.is_current(MIRROR, &snapshot), "nothing to apply");
+    }
+
+    // The derived writer is held in this commit's apply.
+    let seq = set_due(&opened.collection, id, 888);
+    // A consumer reacts to the commit's change set.
+    wait_for_event(&opened.events, |e| {
+        e.seq == seq && matches!(e.kind, EventKind::Changes(_))
+    });
+    let early = lease.snapshot().unwrap();
+    assert_eq!(early.seq(), seq);
+    assert!(
+        opened.host.is_ready(MIRROR, generation),
+        "Ready alone says nothing of the lag"
+    );
+    assert!(
+        !opened.host.is_current(MIRROR, &early),
+        "the commit is not in the store yet"
+    );
+    assert!(
+        mirrored_in(&early).iter().any(|r| r.0 == id.0 && r.4 == 1),
+        "the snapshot's derived rows are behind"
+    );
+
+    gate.open();
+    let event = wait_for_event(&opened.events, |e| applied_of(e).is_some_and(|a| a.through >= seq));
+    assert_eq!(
+        applied_of(&event),
+        Some(DerivedApplied {
+            generation,
+            through: seq
+        })
+    );
+    assert_eq!(event.cause_seq, Some(seq));
+    assert!(
+        !opened.host.is_current(MIRROR, &early),
+        "a snapshot that read the store before the apply still reads it from before"
+    );
+    drop(early);
+    let late = lease.snapshot().unwrap();
+    assert!(opened.host.is_current(MIRROR, &late));
+    assert!(mirrored_in(&late).iter().any(|r| r.0 == id.0 && r.4 == 888));
+    drop(late);
+    drop(lease);
     opened.close();
 }
 
@@ -1326,7 +1607,7 @@ fn percentile(mut samples: Vec<Duration>, p: usize) -> Duration {
 }
 
 #[test]
-fn a_rebuild_over_150k_cards_leaves_answers_fast_and_reports_its_progress() {
+fn a_rebuild_over_150k_cards_leaves_answers_fast_and_reports_its_progress_at_150k() {
     let generated = fixtures::profile_collection("150k").expect("the 150k collection");
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("collection.anki2");

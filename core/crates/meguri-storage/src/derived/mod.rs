@@ -16,8 +16,11 @@ pub use file::{DerivedFile, DerivedTx, Found, TxSavepoint};
 pub use registry::{ComponentSchema, ComponentTables, IndexDef, Registry, Synced, TableDef, Target};
 pub use stamp::{CollectionMark, ComponentRecord, RebuildReason, Stamp, Verdict, assess};
 
+use rusqlite::OptionalExtension;
+
 use crate::connections::{Reader, file_uri};
 use crate::error::StorageError;
+use crate::snapshot::ReadSnapshot;
 
 /// The file's name, in the collection's directory (D1).
 pub const FILE_NAME: &str = "meguri-derived.db";
@@ -62,5 +65,29 @@ impl Reader {
     /// The epoch of the attached derived store.
     pub fn derived_epoch(&self) -> Option<u64> {
         self.derived
+    }
+}
+
+impl ReadSnapshot<'_> {
+    /// The stamp's `seq` as this snapshot reads the attached store, when
+    /// component `name` is ready there (D3, D8); `None` when no store is
+    /// attached or the component is not ready. The snapshot's view of the
+    /// store is fixed at its first read of `derived`, like its view of the
+    /// collection: the answer holds for every read of that view.
+    pub fn derived_seq(&self, name: &str) -> Result<Option<i64>, StorageError> {
+        if self.reader().derived.is_none() {
+            return Ok(None);
+        }
+        Ok(self
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT s.seq FROM {ATTACH_SCHEMA}.meguri_stamp AS s, {ATTACH_SCHEMA}.meguri_components AS c
+                     WHERE s.id = 1 AND c.name = ?1 AND c.ready = 1"
+                ),
+                [name],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 }

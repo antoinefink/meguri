@@ -15,3 +15,4 @@
 - `CollectionCore.derived` holds a `Weak` to the host: the host keeps a `Collection`, so a strong reference would be a cycle.
 - Component code that runs on the derived writer (apply, build batches) goes through `guarded`: a panic there would kill the one writer while readiness still says `Ready`. A running refresh's deltas are kept before the batch's transaction, so its failure cannot lose them.
 - The derived host's `suspend` returns only after every builder sent `Done` (its snapshot released); the writer keeps serving messages meanwhile. Never call it holding the lifecycle lock: builders take it at each batch.
+- `Ready` is not freshness: consumers ask `DerivedHost::is_current` with their snapshot, which reads the stamp's `seq` through it. Every derived transaction that lets a ready component hold more commits writes that `seq` (`set_seq`), and the observer raises `sent` before it sends.

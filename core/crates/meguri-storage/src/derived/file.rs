@@ -30,7 +30,8 @@ const STORE_TABLES: &str = "
         crt INTEGER NOT NULL,
         scm INTEGER NOT NULL,
         col_mod INTEGER NOT NULL,
-        clean INTEGER NOT NULL
+        clean INTEGER NOT NULL,
+        seq INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS meguri_components (
         name TEXT PRIMARY KEY,
@@ -265,10 +266,12 @@ pub struct DerivedTx<'f> {
 }
 
 impl<'f> DerivedTx<'f> {
-    /// Writes the stamp row.
+    /// Writes the stamp row's mark and `clean`; its `seq` stays.
     pub fn set_stamp(&self, stamp: &Stamp) -> Result<(), StorageError> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO meguri_stamp (id, crt, scm, col_mod, clean) VALUES (1, ?1, ?2, ?3, ?4)",
+            "INSERT INTO meguri_stamp (id, crt, scm, col_mod, clean) VALUES (1, ?1, ?2, ?3, ?4)
+             ON CONFLICT (id) DO UPDATE SET
+                 crt = excluded.crt, scm = excluded.scm, col_mod = excluded.col_mod, clean = excluded.clean",
             (
                 stamp.mark.crt,
                 stamp.mark.scm,
@@ -276,6 +279,14 @@ impl<'f> DerivedTx<'f> {
                 i64::from(stamp.clean),
             ),
         )?;
+        Ok(())
+    }
+
+    /// Writes the stamp row's `seq`: the last commit every ready component
+    /// holds, as the process that bound the store numbers it (D3).
+    pub fn set_seq(&self, seq: i64) -> Result<(), StorageError> {
+        self.conn
+            .execute("UPDATE meguri_stamp SET seq = ?1 WHERE id = 1", [seq])?;
         Ok(())
     }
 
