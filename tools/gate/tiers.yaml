@@ -211,6 +211,16 @@ runs:
     class: static
     triggers: [docs/design/, tools/scripts/design-screens.py, tools/mg.d/design.sh]
     budget_s: 300
+  # U240: the milestone manifest mirrors the plan's Delivery Milestones and
+  # names only runs that tools/mg milestone executes.
+  - id: milestones
+    job: milestone-gate
+    args: [--check]
+    tier: T0
+    placement: [host, docker:dev]
+    class: static
+    triggers: [docs/process/milestones.yaml, docs/plans/, tools/gate/tiers.yaml, tools/gate/gate.py, tools/scripts/gates/, tools/mg.d/milestone-gate.sh]
+    budget_s: 300
 
   # --- T0: Apple side ---------------------------------------------------------
   - id: lint-ui

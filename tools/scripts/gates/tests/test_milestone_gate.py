@@ -1,0 +1,775 @@
+"""Tests for tools/scripts/gates/milestone_gate.py (U240), through its command
+line: a throwaway git repository holds the units' commits and the user-step
+evidence, a results directory holds tools/mg job results, and the manifest and
+tiers config are the JSON that `milestone_gate.py load` and `gate.py load`
+produce. Expected outcomes come from the plan's U240 test scenarios.
+
+Run: python3 -m unittest discover -s tools/scripts/gates/tests
+"""
+
+import copy
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+GATE = os.path.join(os.path.dirname(HERE), "milestone_gate.py")
+TIERS_GATE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "gate", "gate.py")
+NOW = "2026-11-20T12:00:00Z"
+MS = ("M0", "M1", "M2", "M3", "M4", "M5")
+FOLDABLE = {"job": "sim-setup", "args": [], "detail": "foldable",
+            "equals": {"status": "unavailable", "reason": "toolchain"}}
+ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
+           GIT_COMMITTER_EMAIL="t@example.invalid", GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+
+
+def tiers_quarantine():
+    """gate.py's own quarantine loader, so invalid entries are judged as U19 judges them."""
+    spec = importlib.util.spec_from_file_location("tiers_gate", TIERS_GATE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.load_quarantine
+
+
+def run_def(rid, job=None, args=None, tier="T0", cls="unit", **extra):
+    r = {"id": rid, "job": job or rid, "args": list(args or []), "tier": tier, "class": cls, "require": [],
+         "pending": None, "disabled": None, "release_only": False, "user_step": None}
+    r.update(extra)
+    return r
+
+
+def manifest(**per_milestone):
+    """A valid manifest: every milestone empty but for what the caller gives
+    (a dict of milestone fields per milestone id)."""
+    out = {"version": 1, "plan": "plan.md", "evidence_paths": ["docs/process/milestone-records/"],
+           "budget_devices": {"R1822": ["ipad", "mac"]},
+           "global": [{"id": "quarantine", "kind": "quarantine"}], "milestones": []}
+    for m in MS:
+        entry = {"id": m, "name": "Milestone " + m, "plan": {"gate": "g", "user_steps": "u"}, "units": [],
+                 "suites": [], "user_steps": [], "deferred": []}
+        entry.update(per_milestone.get(m, {}))
+        out["milestones"].append(entry)
+    return out
+
+
+class Sandbox(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="milestone-gate-")
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.root = os.path.join(self.tmp, "repo")
+        self.results = os.path.join(self.tmp, "results")
+        os.makedirs(self.root)
+        self.git("init", "-q", "-b", "main")
+        self.base = self.commit("Base", {"README.md": "meguri\n"})
+        self.seq = 0
+        self.config = {"runs": [], "quarantine": {"entries": [], "invalid": []}}
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", self.root] + list(args), check=True, env=ENV,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.decode().strip()
+
+    def commit(self, message, files=None, trailers=""):
+        for path, content in (files or {}).items():
+            full = os.path.join(self.root, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w", encoding="utf-8") as f:
+                f.write(content if isinstance(content, str) else json.dumps(content))
+        self.git("add", "-A")
+        self.git("commit", "-q", "--allow-empty", "-m", message + ("\n\n" + trailers if trailers else ""))
+        return self.git("rev-parse", "HEAD")
+
+    def merge_units(self, *units, role="implementer"):
+        for u in units:
+            self.commit("Add %s" % u, trailers="Unit: %s\nRole: %s" % (u, role))
+        return self.git("rev-parse", "HEAD")
+
+    def run_(self, rid, **kw):
+        self.config["runs"].append(run_def(rid, **kw))
+
+    def result(self, job, args=(), status="pass", sha=None, dirty=False, details=None, summary=None,
+               failures=None, dry_run=False):
+        self.seq += 1
+        run_id = "20261120T1000%02dZ-%d" % (self.seq, 100 + self.seq)
+        path = os.path.join(self.results, job, run_id, "result.json")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"schema_version": 1, "job": job, "run_id": run_id, "status": status,
+                       "exit_code": {"pass": 0, "warn": 0, "fail": 1, "error": 2}[status], "placement": "host",
+                       "service": None, "dry_run": dry_run, "args": list(args), "root": self.root,
+                       "started_at": "2026-11-20T10:00:%02dZ" % self.seq, "finished_at": "2026-11-20T10:01:00Z",
+                       "duration_ms": 1000, "commit": {"sha": sha or self.git("rev-parse", "HEAD"), "dirty": dirty},
+                       "message": "%s %s" % (job, status),
+                       "summary": summary or {"total": 3, "passed": 3, "failed": 0, "skipped": 0},
+                       "failures": failures or [], "artifacts": [], "user_steps": [], "details": details or {}}, f)
+        return path
+
+    def evaluate(self, man, milestone, doctor=None):
+        paths = {}
+        for name, value in (("manifest", man), ("config", self.config)):
+            paths[name] = os.path.join(self.tmp, name + ".json")
+            with open(paths[name], "w", encoding="utf-8") as f:
+                json.dump(value, f)
+        out = os.path.join(self.tmp, "evaluation.json")
+        if os.path.exists(out):
+            os.remove(out)
+        self.record = os.path.join(self.root, "docs/process/milestone-records/%s.json" % milestone)
+        cmd = [sys.executable, "-B", GATE, "evaluate", "--manifest", paths["manifest"], "--config", paths["config"],
+               "--milestone", milestone, "--root", self.root, "--results", self.results, "--now", NOW,
+               "--record", self.record, "--out", out]
+        if doctor is not None:
+            dpath = os.path.join(self.tmp, "doctor.json")
+            with open(dpath, "w", encoding="utf-8") as f:
+                json.dump(doctor, f)
+            cmd += ["--doctor", dpath]
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=ENV)
+        if p.returncode == 2:
+            return 2, json.loads(p.stdout.decode() or "{}")
+        self.assertIn(p.returncode, (0, 1, 3), p.stderr.decode())
+        with open(out, encoding="utf-8") as f:
+            return p.returncode, json.load(f)
+
+    def check(self, man, plan_text):
+        with open(os.path.join(self.root, "plan.md"), "w", encoding="utf-8") as f:
+            f.write(plan_text)
+        paths = {}
+        for name, value in (("manifest", man), ("config", self.config)):
+            paths[name] = os.path.join(self.tmp, name + ".json")
+            with open(paths[name], "w", encoding="utf-8") as f:
+                json.dump(value, f)
+        p = subprocess.run([sys.executable, "-B", GATE, "check", "--manifest", paths["manifest"], "--config",
+                            paths["config"], "--root", self.root], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return p.returncode, json.loads(p.stdout.decode())
+
+    def failure_ids(self, ev):
+        return [f["id"] for f in ev["failures"]]
+
+    def failure(self, ev, fid):
+        hits = [f["message"] for f in ev["failures"] if f["id"] == fid]
+        self.assertTrue(hits, "no failure %s in %s" % (fid, json.dumps(ev["failures"], indent=1)))
+        return hits[0]
+
+
+def device_run(milestone, device, build, budgets, fail=()):
+    return {"milestone": milestone, "device": device, "build_commit": build,
+            "budgets": [{"id": b, "status": "fail" if b in fail else "pass", "p95_ms": 100} for b in budgets]}
+
+
+M1_BUDGETS = ["R1818", "R1822", "R1823"]
+
+
+class SuiteTests(Sandbox):
+    def test_missing_suite_result_reports_missing_and_exits_non_zero(self):
+        self.run_("u246-conformance", job="conformance-aggregate", tier="T3", cls="conformance")
+        man = manifest(M1={"suites": [{"id": "u246-conformance", "run": "u246-conformance"}]})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["outcome"], "fail")
+        suite = [s for s in ev["suites"] if s["id"] == "u246-conformance"][0]
+        self.assertEqual(suite["outcome"], "missing")
+        self.assertIn("missing", self.failure(ev, "suite:u246-conformance"))
+        self.assertFalse(os.path.exists(self.record))
+
+    def test_all_pass_writes_the_record(self):
+        self.run_("unit", job="core-test")
+        self.run_("static", job="static-checks", args=["--base", "{base}"], cls="static")
+        sha = self.git("rev-parse", "HEAD")
+        self.result("core-test")
+        self.result("static-checks", ["--base", sha])
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}, {"id": "static", "run": "static"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual((rc, ev["outcome"]), (0, "pass"), ev["failures"])
+        self.assertEqual(ev["gate_commit"], sha)
+        with open(self.record, encoding="utf-8") as f:
+            record = json.load(f)
+        self.assertEqual(record["gate_commit"], sha)
+        self.assertEqual(record["closed_at"], NOW)
+        self.assertEqual([s["id"] for s in record["suites"]], ["unit", "static"])
+        self.assertEqual(record["suites"][0]["summary"]["passed"], 3)
+
+    def test_placeholders_match_the_results_own_commit(self):
+        self.run_("static", job="static-checks", args=["--base", "{base}"], cls="static")
+        self.commit("Later")
+        # A merge gate's run measured from an older base, not the milestone's.
+        self.result("static-checks", ["--base", self.base])
+        man = manifest(M0={"suites": [{"id": "static", "run": "static"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["suites"][0]["outcome"], "missing")
+
+    def test_dry_runs_and_other_args_are_not_results(self):
+        self.run_("conf", job="conformance", args=["--lane", "all"], cls="conformance")
+        self.result("conformance", ["--lane", "all"], dry_run=True)
+        self.result("conformance", ["--lane", "all", "sched"])
+        man = manifest(M0={"suites": [{"id": "conf", "run": "conf"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(ev["suites"][0]["outcome"], "missing")
+
+    def test_latest_result_counts(self):
+        self.run_("unit", job="core-test")
+        self.result("core-test")
+        self.result("core-test", status="fail", failures=[{"id": "t1", "message": "boom", "repro": "x"}])
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertIn("t1", self.failure(ev, "suite:unit"))
+
+    def test_results_from_two_commits_fail(self):
+        self.run_("a", job="job-a")
+        self.run_("b", job="job-b")
+        a = self.git("rev-parse", "HEAD")
+        self.result("job-a")
+        b = self.commit("Change code", {"core/x.rs": "fn x() {}\n"})
+        self.result("job-b")
+        man = manifest(M0={"suites": [{"id": "a", "run": "a"}, {"id": "b", "run": "b"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        message = self.failure(ev, "results-commit")
+        self.assertIn("results not from one commit", message)
+        self.assertIn(a[:12], message)
+        self.assertIn(b[:12], message)
+
+    def test_dirty_result_fails(self):
+        self.run_("unit", job="core-test")
+        self.result("core-test", dirty=True)
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["suites"][0]["outcome"], "dirty")
+        self.assertIn("dirty", self.failure(ev, "suite:unit"))
+
+    def test_code_commit_after_the_gate_commit_fails(self):
+        self.run_("unit", job="core-test")
+        self.result("core-test")
+        self.commit("Change code", {"core/x.rs": "fn x() {}\n"})
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertIn("core/x.rs", self.failure(ev, "after-gate"))
+
+    def test_queued_result_fails(self):
+        self.run_("ui", job="xcode-check")
+        self.result("xcode-check", status="warn", details={"queued": True})
+        man = manifest(M0={"suites": [{"id": "ui", "run": "ui"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["suites"][0]["outcome"], "queued")
+
+    def test_suite_awaiting_user_counts_as_awaiting(self):
+        self.run_("release-gate", tier="T3", cls="static")
+        self.result("release-gate", status="warn", details={"outcome": "awaiting_user"})
+        man = manifest(M5={"suites": [{"id": "release-gate", "run": "release-gate"}]})
+        rc, ev = self.evaluate(man, "M5")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        self.assertEqual([a["id"] for a in ev["awaiting"]], ["suite:release-gate"])
+
+    def test_pending_suite_fails_and_says_who_lands_it(self):
+        man = manifest(M1={"suites": [{"id": "u243", "run": "u243-review-loop", "pending": "U243"}]})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 1)
+        self.assertEqual(ev["suites"][0]["outcome"], "pending")
+        self.assertIn("U243", self.failure(ev, "suite:u243"))
+
+    def test_pending_tiers_run_keeps_the_suite_pending(self):
+        self.run_("perf-gate", cls="perf", pending="U241")
+        man = manifest(M0={"suites": [{"id": "perf-gate", "run": "perf-gate"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(ev["suites"][0]["outcome"], "pending")
+        self.assertIn("U241", self.failure(ev, "suite:perf-gate"))
+
+    def test_scope_items_must_each_pass(self):
+        self.run_("agg", job="conformance-aggregate", tier="T3", cls="conformance")
+        man = manifest(M1={"suites": [{"id": "agg", "run": "agg",
+                                       "scope": {"detail": "areas", "items": ["storage", "sched"]}}]})
+        self.result("conformance-aggregate", details={"areas": {"storage": {"status": "pass"}, "sched": "fail"}})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 1)
+        self.assertIn("sched: fail", self.failure(ev, "suite:agg"))
+        self.result("conformance-aggregate", details={})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertIn("details.areas is missing", self.failure(ev, "suite:agg"))
+        self.result("conformance-aggregate", details={"areas": {"storage": "pass", "sched": {"status": "pass"},
+                                                                "search": "fail"}})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+
+    def test_require_rules_of_the_run_and_the_suite_apply(self):
+        self.run_("harvest", job="harvest-report", tier="T3", cls="conformance",
+                  require=[{"id": "R1880-unclassified", "summary": "unclassified", "max": 0},
+                           {"id": "R1880-in-scope", "detail": "harvest.in", "only_keys": ["pass"], "release": True}])
+        self.result("harvest-report", summary={"total": 1, "passed": 1, "failed": 0, "skipped": 0, "unclassified": 2})
+        man = manifest(M0={"suites": [{"id": "harvest", "run": "harvest"}]})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertIn("R1880-unclassified", self.failure(ev, "suite:harvest"))
+        # The release-only rule does not apply at a milestone; the M5 suite adds it.
+        self.result("harvest-report", summary={"total": 1, "passed": 1, "failed": 0, "skipped": 0, "unclassified": 0},
+                    details={"harvest": {"in": {"pass": 5, "fail": 1}}})
+        rc, ev = self.evaluate(man, "M4")
+        self.assertEqual(rc, 0, ev["failures"])
+        man["milestones"][5]["suites"] = [{"id": "harvest", "run": "harvest", "require": [
+            {"id": "R1880-in-scope", "detail": "harvest.in", "only_keys": ["pass"]}]}]
+        rc, ev = self.evaluate(man, "M5")
+        self.assertIn("1 fail", self.failure(ev, "suite:harvest"))
+
+    def test_gates_are_cumulative(self):
+        self.run_("a", job="job-a")
+        self.run_("b", job="job-b")
+        man = manifest(M1={"suites": [{"id": "a", "run": "a"}]}, M2={"suites": [{"id": "b", "run": "b"}]})
+        self.result("job-b")
+        rc, ev = self.evaluate(man, "M2")
+        self.assertEqual(rc, 1)
+        self.assertEqual([s["id"] for s in ev["suites"]], ["a", "b"])
+        self.assertEqual(ev["suites"][0]["since"], "M1")
+        self.assertIn("suite:a", self.failure_ids(ev))
+        self.result("job-a")
+        rc, ev = self.evaluate(man, "M2")
+        self.assertEqual(rc, 0, ev["failures"])
+
+    def test_a_later_milestone_widens_a_suites_scope(self):
+        self.run_("agg", job="aggregate", tier="T3")
+        man = manifest(M1={"suites": [{"id": "agg", "run": "agg", "scope": {"detail": "areas", "items": ["sync"]}}]},
+                       M2={"suites": [{"id": "agg", "run": "agg", "scope": {"detail": "areas", "items": ["search"]}}]})
+        self.result("aggregate", details={"areas": {"sync": "pass"}})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+        rc, ev = self.evaluate(man, "M2")
+        self.assertIn("search: not reported", self.failure(ev, "suite:agg"))
+
+
+class ManifestTests(Sandbox):
+    def test_a_suite_that_requires_its_own_gate_is_rejected(self):
+        self.run_("m5-gate", job="milestone-gate", args=["M5"], tier="T3", cls="static")
+        man = manifest(M5={"suites": [{"id": "m5-gate", "run": "m5-gate"}]})
+        rc, out = self.evaluate(man, "M5")
+        self.assertEqual(rc, 2)
+        self.assertTrue(any("requires the M5 gate" in e for e in out["errors"]), out)
+        self.config["runs"][0]["args"] = ["{milestone}"]
+        rc, out = self.evaluate(man, "M5")
+        self.assertEqual(rc, 2)
+        # An earlier milestone's gate is not this milestone's.
+        self.config["runs"][0]["args"] = ["M3"]
+        rc, out = self.evaluate(man, "M5")
+        self.assertNotEqual(rc, 2, out)
+
+    def test_suites_must_be_runs_tools_mg_milestone_executes(self):
+        self.run_("soak", tier="T2", cls="sync")
+        self.run_("audit", tier="T3", release_only=True, cls="static")
+        man = manifest(M1={"suites": [{"id": "soak", "run": "soak"}, {"id": "audit", "run": "audit"},
+                                      {"id": "nope", "run": "nope"}]})
+        rc, out = self.evaluate(man, "M1")
+        self.assertEqual(rc, 2)
+        text = "\n".join(out["errors"])
+        self.assertIn("T2 run", text)
+        self.assertIn("release runs", text)
+        self.assertIn("run nope is not in tools/gate/tiers.yaml", text)
+
+    def test_a_unit_in_two_milestones_is_rejected(self):
+        rc, out = self.evaluate(manifest(M0={"units": ["U1"]}, M1={"units": ["U1"]}), "M1")
+        self.assertEqual(rc, 2)
+        self.assertTrue(any("U1 is already in M0" in e for e in out["errors"]), out)
+
+    def test_check_compares_the_manifest_with_the_plan(self):
+        plan = "\n".join([
+            "### Delivery Milestones", "", "| Milestone | Units | Gate | User steps |", "|---|---|---|---|",
+        ] + ["| **%s Milestone %s** | %s | g | u |" % (m, m, "U1, U2" if m == "M0" else "U%d" % (i + 2))
+             for i, m in enumerate(MS)] + [
+            "", "### Unit Index", "", "| U-ID | Title |", "|---|---|",
+        ] + ["| U%d | t |" % i for i in range(1, 8)] + ["", "### U2b. A sub-unit", ""])
+        man = manifest(**{m: {"units": ["U1", "U2"] if m == "M0" else ["U%d" % (i + 2)]} for i, m in enumerate(MS)})
+        rc, out = self.check(man, plan)
+        self.assertEqual((rc, out["errors"]), (0, []))
+        man["milestones"][0]["units"] = ["U1"]
+        man["milestones"][2]["plan"]["gate"] = "changed"
+        man["milestones"][3]["name"] = "Other"
+        rc, out = self.check(man, plan)
+        self.assertEqual(rc, 1)
+        text = "\n".join(out["errors"])
+        self.assertIn("M0: units differ from the plan's table (missing U2", text)
+        self.assertIn("unit U2 of the Unit Index is in no milestone", text)
+        self.assertIn("M2: plan.gate is not the table's closing gate text", text)
+        self.assertIn("M3: name 'Other'", text)
+
+    def test_check_rejects_an_unapproved_deferral(self):
+        self.run_("snap", job="snapshots", cls="ui")
+        man = manifest(M5={"deferred": [{"id": "foldable", "dependency": "xcode-27.1-foldable-simulator",
+                                         "condition": FOLDABLE, "cells": {"run": "snap"}}]})
+        plan = "### Delivery Milestones\n" + "".join("| **%s Milestone %s** |  | g | u |\n" % (m, m) for m in MS)
+        rc, out = self.check(man, plan)
+        self.assertEqual(rc, 1)
+        self.assertTrue(any("approved_by: antoine" in e for e in out["errors"]), out)
+
+
+class UnitTests(Sandbox):
+    def test_an_escalated_unmerged_unit_fails_and_is_named(self):
+        self.merge_units("U30")
+        ledger = {"id": "E-20261101T000000Z-ab12", "kind": "blocked-red", "state": "open", "unit": "U31",
+                  "summary": "no green gate after six rounds", "created_at": "2026-11-01T00:00:00Z"}
+        self.commit("Record escalation", {"docs/process/provenance/escalations.jsonl": json.dumps(ledger) + "\n"})
+        man = manifest(M1={"units": ["U30", "U31"]})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 1)
+        self.assertIn("U31", self.failure(ev, "unit:U31"))
+        self.assertIn("E-20261101T000000Z-ab12", self.failure(ev, "escalation:U31:E-20261101T000000Z-ab12"))
+        self.assertNotIn("unit:U30", self.failure_ids(ev))
+
+    def test_a_resolved_escalation_does_not_block(self):
+        self.merge_units("U31")
+        lines = [{"id": "E-1", "kind": "approval", "state": "open", "unit": "U31", "summary": "s"},
+                 {"id": "E-1", "state": "resolved", "resolved_by": "antoine", "resolution": "ok"}]
+        self.commit("Ledger", {"docs/process/provenance/escalations.jsonl": "".join(json.dumps(x) + "\n" for x in lines)})
+        rc, ev = self.evaluate(manifest(M1={"units": ["U31"]}), "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+
+    def test_spec_writer_commits_do_not_merge_a_unit(self):
+        self.merge_units("U26", role="spec-writer")
+        rc, ev = self.evaluate(manifest(M1={"units": ["U26"]}), "M1")
+        self.assertIn("unit:U26", self.failure_ids(ev))
+
+    def test_units_are_checked_at_the_gate_commit(self):
+        self.run_("unit", job="core-test")
+        self.result("core-test")
+        self.merge_units("U27")  # after the gate commit
+        rc, ev = self.evaluate(manifest(M0={"suites": [{"id": "unit", "run": "unit"}]}, M1={"units": ["U27"]}), "M1")
+        self.assertIn("unit:U27", self.failure_ids(ev))
+
+    def test_earlier_milestones_units_count(self):
+        rc, ev = self.evaluate(manifest(M0={"units": ["U1"]}), "M1")
+        self.assertIn("unit:U1", self.failure_ids(ev))
+
+    def test_an_unreadable_ledger_fails(self):
+        self.commit("Ledger", {"docs/process/provenance/escalations.jsonl": "<<<<<<< conflict\n"})
+        rc, ev = self.evaluate(manifest(), "M0")
+        self.assertIn("escalations", self.failure_ids(ev))
+
+
+class QuarantineTests(Sandbox):
+    def test_a_quarantined_sync_test_fails_every_milestone_gate(self):
+        self.config["quarantine"]["entries"] = [{
+            "test": "sync::two_clients", "run": "sync-smoke", "class": "sync", "owner": "U107",
+            "reason": "flaky port", "deadline": "2026-12-31", "approved_by": "antoine",
+            "evidence": {"commit": "a" * 40, "failed": "20261101T000000Z-1", "passed": "20261101T000001Z-2"},
+            "escalation": None, "label": "sync-smoke:sync::two_clients"}]
+        rc, ev = self.evaluate(manifest(), "M0")
+        self.assertEqual(rc, 1)
+        self.assertIn("sync", self.failure(ev, "quarantine-protected:sync-smoke:sync::two_clients"))
+        self.assertEqual(ev["quarantine"][0]["owner"], "U107")
+
+    def test_a_quarantine_entry_without_owner_or_deadline_fails(self):
+        load_quarantine = tiers_quarantine()
+        runs = [{"id": "ui", "class": "ui"}]
+        self.config["quarantine"] = load_quarantine({"entries": [{
+            "test": "Snap/flaky", "run": "ui", "class": "ui", "reason": "timing", "approved_by": "antoine",
+            "evidence": {"commit": "a" * 40, "failed": "20261101T000000Z-1", "passed": "20261101T000001Z-2"}}]}, runs)
+        self.assertTrue(self.config["quarantine"]["invalid"])
+        rc, ev = self.evaluate(manifest(), "M0")
+        self.assertEqual(rc, 1)
+        message = self.failure(ev, "quarantine-invalid:ui:Snap/flaky")
+        self.assertIn("owner is required", message)
+        self.assertIn("deadline", message)
+
+    def test_an_open_flaky_ui_quarantine_is_recorded_not_failed(self):
+        self.config["quarantine"]["entries"] = [{
+            "test": "Snap/flaky", "run": "ui", "class": "ui", "owner": "U252", "reason": "timing",
+            "deadline": "2026-12-31", "approved_by": "antoine", "evidence": None, "escalation": None, "label": "x"}]
+        rc, ev = self.evaluate(manifest(), "M0")
+        self.assertEqual(rc, 0, ev["failures"])
+        with open(self.record, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["quarantine"][0], {"run": "ui", "test": "Snap/flaky", "class": "ui",
+                                                             "owner": "U252", "deadline": "2026-12-31"})
+
+    def test_an_expired_quarantine_fails(self):
+        self.config["quarantine"]["entries"] = [{
+            "test": "t", "run": "ui", "class": "ui", "owner": "U252", "reason": "r", "deadline": "2026-11-01",
+            "approved_by": "antoine", "evidence": None, "escalation": None, "label": "x"}]
+        rc, ev = self.evaluate(manifest(), "M0")
+        self.assertIn("quarantine-expired:ui:t", self.failure_ids(ev))
+
+
+class GlobalTests(Sandbox):
+    def test_native_oracle_applies_from_m1_and_is_attached(self):
+        self.run_("native-oracle", job="fp-probe", tier="T3", cls="conformance")
+        man = manifest()
+        man["global"].append({"id": "native-oracle", "kind": "suite", "run": "native-oracle", "from": "M1"})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 0, ev["failures"])
+        rc, ev = self.evaluate(man, "M1")
+        self.assertIn("global:native-oracle", self.failure_ids(ev))
+        path = self.result("fp-probe")
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+        with open(self.record, encoding="utf-8") as f:
+            attached = [g for g in json.load(f)["global"] if g["id"] == "native-oracle"][0]["attached"]
+        self.assertEqual(attached["result"], path)
+
+    def test_a_pending_global_condition_fails_once_it_applies(self):
+        man = manifest()
+        man["global"].append({"id": "nightly-divergences", "pending": "U247", "from": "M2"})
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+        rc, ev = self.evaluate(man, "M2")
+        self.assertIn("U247", self.failure(ev, "global:nightly-divergences"))
+
+
+class DeferralTests(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.run_("snap", job="snapshots", cls="ui")
+        self.run_("unit", job="core-test")
+
+    def man(self, **entry):
+        d = {"id": "foldable", "dependency": "xcode-27.1-foldable-simulator", "condition": FOLDABLE,
+             "cells": {"run": "snap", "scope": {"detail": "devices", "items": ["foldable"]}},
+             "approved_by": "antoine", "why": "no foldable simulator in Xcode 27.0"}
+        d.update(entry)
+        return manifest(M0={"suites": [{"id": "unit", "run": "unit"}]}, M5={"deferred": [d]})
+
+    def test_an_approved_deferral_whose_condition_holds_passes_and_is_recorded(self):
+        self.result("core-test")
+        self.result("sim-setup", details={"foldable": {"status": "unavailable", "reason": "toolchain"}})
+        rc, ev = self.evaluate(self.man(), "M5")
+        self.assertEqual(rc, 0, ev["failures"])
+        with open(self.record, encoding="utf-8") as f:
+            deferred = json.load(f)["deferred"]
+        self.assertEqual([(d["id"], d["outcome"], d["approved_by"]) for d in deferred],
+                         [("foldable", "deferred", "antoine")])
+
+    def test_an_unapproved_deferral_fails(self):
+        self.result("core-test")
+        self.result("sim-setup", details={"foldable": {"status": "unavailable", "reason": "toolchain"}})
+        rc, ev = self.evaluate(self.man(approved_by="agent"), "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("approved_by: antoine", self.failure(ev, "deferred:foldable"))
+
+    def test_a_deferral_outside_the_fixed_list_fails(self):
+        self.result("core-test")
+        rc, ev = self.evaluate(self.man(dependency="ankiweb-permission"), "M5")
+        self.assertIn("dependency must be one of", self.failure(ev, "deferred:foldable"))
+        rc, ev = self.evaluate(self.man(condition=dict(FOLDABLE, equals={})), "M5")
+        self.assertIn("the condition of", self.failure(ev, "deferred:foldable"))
+
+    def test_a_deferral_whose_condition_no_longer_holds_fails_until_its_cells_pass(self):
+        self.result("core-test")
+        self.result("sim-setup", details={"foldable": {"status": "available", "device_type": "iPhone Fold"}})
+        rc, ev = self.evaluate(self.man(), "M5")
+        self.assertEqual(rc, 1)
+        self.assertIn("no longer holds", self.failure(ev, "deferred:foldable"))
+        self.result("snapshots", details={"devices": {"foldable": "pass"}})
+        rc, ev = self.evaluate(self.man(), "M5")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(ev["deferred"][0]["outcome"], "resolved")
+
+    def test_a_deferral_needs_a_condition_result(self):
+        self.result("core-test")
+        rc, ev = self.evaluate(self.man(), "M5")
+        self.assertIn("sim-setup", self.failure(ev, "deferred:foldable"))
+
+
+class UserStepTests(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.run_("unit", job="core-test")
+        self.result("core-test")
+        self.gate = self.git("rev-parse", "HEAD")
+
+    def man(self, steps, milestone="M1"):
+        per = {"M0": {"suites": [{"id": "unit", "run": "unit"}]},
+               "M1": {"budgets": {"launch": ["R1818", "R1822"], "open": ["R1823"]}}}
+        per.setdefault(milestone, {})["user_steps"] = steps
+        return manifest(**per)
+
+    def device_steps(self, milestone="M1"):
+        return [{"id": "device-run-%s" % d, "description": "device run",
+                 "evidence": "docs/process/milestone-records/device-runs/%s/%s.json" % (milestone, d),
+                 "validator": {"type": "device-run", "device": d}} for d in ("iphone", "ipad")]
+
+    def test_a_missing_device_run_awaits_antoine(self):
+        rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        self.assertIn("user-step:device-run-iphone", [x["id"] for x in ev["awaiting"]])
+        self.assertIn("device-runs/M1/iphone.json", ev["awaiting"][0]["message"])
+        self.assertFalse(os.path.exists(self.record))
+
+    def test_a_device_run_that_records_a_budget_failure_fails(self):
+        self.commit("Record device runs", {
+            "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", self.gate, ["R1818", "R1823"]),
+            "docs/process/milestone-records/device-runs/M1/ipad.json":
+                device_run("M1", "ipad", self.gate, M1_BUDGETS, fail=("R1818",))})
+        rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
+        self.assertEqual(rc, 1)
+        message = self.failure(ev, "user-step:device-run-ipad")
+        self.assertIn("R1818", message)
+        self.assertIn("device-run-ipad", message)
+
+    def test_device_runs_committed_after_the_gate_commit_are_accepted(self):
+        build = self.gate
+        later = self.commit("Record device runs", {
+            "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", build, ["R1818", "R1823"]),
+            "docs/process/milestone-records/device-runs/M1/ipad.json": device_run("M1", "ipad", build, M1_BUDGETS)})
+        rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
+        self.assertEqual((rc, ev["outcome"]), (0, "pass"), ev["failures"])
+        self.assertEqual(ev["gate_commit"], self.gate)
+        self.assertEqual(ev["evidence_commits"], [later])
+        with open(self.record, encoding="utf-8") as f:
+            step = json.load(f)["user_steps"][0]
+        self.assertEqual(step["details"]["build_commit"], build)
+        self.assertEqual(step["details"]["budgets"], ["R1818", "R1823"])  # R1822 is iPad and Mac only
+
+    def test_a_device_run_copies_the_app_and_core_changes_since_its_build(self):
+        build = self.gate
+        self.commit("Change app", {"app/Meguri/A.swift": "// a\n", "docs/x.md": "x\n"})
+        self.result("core-test")
+        self.gate = self.git("rev-parse", "HEAD")
+        self.commit("Record device runs", {
+            "docs/process/milestone-records/device-runs/M1/iphone.json": device_run("M1", "iphone", build, ["R1818", "R1823"]),
+            "docs/process/milestone-records/device-runs/M1/ipad.json": device_run("M1", "ipad", build, M1_BUDGETS)})
+        rc, ev = self.evaluate(self.man(self.device_steps()), "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(ev["user_steps"][0]["details"]["changed_since_build"], ["app/Meguri/A.swift"])
+
+    def test_invalid_device_runs_fail(self):
+        cases = [
+            (device_run("M0", "iphone", self.gate, ["R1818", "R1823"]), "names milestone"),
+            (device_run("M1", "ipad", self.gate, ["R1818", "R1823"]), "names device"),
+            (device_run("M1", "iphone", self.gate, ["R1818"]), "no result for R1823"),
+            (device_run("M1", "iphone", "f" * 40, ["R1818", "R1823"]), "build_commit"),
+            ({"milestone": "M1"}, "expected"),
+        ]
+        for data, expected in cases:
+            self.commit("Device run", {"docs/process/milestone-records/device-runs/M1/iphone.json": data})
+            rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+            self.assertEqual(rc, 1, expected)
+            self.assertIn(expected, self.failure(ev, "user-step:device-run-iphone"))
+
+    def test_variant_pick_without_an_entry_for_a_screen_awaits_and_names_it(self):
+        decisions = "\n".join([
+            "# Design decisions", "", "| Date | Screen | Decision | Reason | Source |", "|---|---|---|---|---|",
+            "| 2026-11-10 | home.deckList | Picked B | calmer | gallery, reviews/2026-11-10.json |",
+            "| 2026-11-11 | review.question | Vetoed A | too loud | chat |",
+            "| 2026-09-01 | review.question | Picked C | old pick | chat |", ""])
+        self.commit("Picks", {"docs/design/decisions.md": decisions,
+                              "docs/process/milestone-records/M0.json": {"closed_at": "2026-10-01T00:00:00Z"}})
+        steps = [{"id": "variant-picks", "description": "picks", "evidence": "docs/design/decisions.md",
+                  "validator": {"type": "variant-pick", "screens": ["home.deckList", "home.deckPage", "review.question"]}}]
+        rc, ev = self.evaluate(self.man(steps), "M1")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        message = ev["awaiting"][0]["message"]
+        self.assertIn("home.deckPage", message)
+        self.assertIn("review.question", message)  # vetoed, and picked before M0 closed
+        self.assertNotIn("home.deckList", message)
+        self.assertEqual(ev["window_start"], "2026-10-01")
+
+    def trial(self, entries, days=7):
+        log = "".join(json.dumps(e) + "\n" for e in entries)
+        self.commit("Log", {"docs/process/daily-driver-log.jsonl": log})
+        steps = [{"id": "trial", "description": "trial", "evidence": "docs/process/daily-driver-log.jsonl",
+                  "validator": {"type": "trial", "days": days}}]
+        return self.evaluate(self.man(steps), "M1")
+
+    def day(self, n, fallback=None, incident=None):
+        return {"date": "2026-11-%02d" % n, "devices": ["iphone"], "fallback": fallback, "data_incident": incident}
+
+    def test_a_trial_log_with_a_data_incident_fails(self):
+        entries = [self.day(n) for n in range(10, 15)] + [self.day(15, incident="cards lost after sync")] + \
+                  [self.day(n) for n in range(16, 19)]
+        rc, ev = self.trial(entries)
+        self.assertEqual(rc, 1)
+        message = self.failure(ev, "user-step:trial")
+        self.assertIn("2026-11-15", message)
+        self.assertIn("cards lost after sync", message)
+
+    def test_a_complete_trial_passes(self):
+        out_of_scope = {"task": "added cards in desktop Anki", "in_scope": False}
+        rc, ev = self.trial([self.day(n, fallback=out_of_scope if n == 12 else "none") for n in range(10, 17)])
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(ev["user_steps"][0]["details"]["streak"], 7)
+
+    def test_a_short_or_gapped_trial_awaits(self):
+        rc, ev = self.trial([self.day(n) for n in (5, 6, 7, 8, 10, 11, 12)])
+        self.assertEqual(rc, 3)
+        self.assertIn("3 of 7", ev["awaiting"][0]["message"])
+
+    def test_an_in_scope_fallback_breaks_the_trial(self):
+        rc, ev = self.trial([self.day(n) for n in range(5, 12)] +
+                            [self.day(12, fallback={"task": "reviewed in AnkiMobile", "in_scope": True})])
+        self.assertEqual(rc, 1)
+        self.assertIn("reviewed in AnkiMobile", self.failure(ev, "user-step:trial"))
+
+    def test_device_session_within_45_days(self):
+        steps = [{"id": "device-session", "description": "session",
+                  "evidence": "docs/process/milestone-records/device-sessions/",
+                  "validator": {"type": "device-session", "days": 45}}]
+        self.commit("Old session", {"docs/process/milestone-records/device-sessions/2026-09.json":
+                                    {"date": "2026-09-20", "reported_by": "antoine", "findings": []}})
+        rc, ev = self.evaluate(self.man(steps, "M2"), "M2")
+        self.assertEqual(rc, 3)
+        self.assertIn("latest: 2026-09-20", ev["awaiting"][0]["message"])
+        self.commit("Session", {"docs/process/milestone-records/device-sessions/2026-11.json":
+                                {"date": "2026-11-03", "reported_by": "antoine", "findings": []}})
+        rc, ev = self.evaluate(self.man(steps, "M2"), "M2")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.commit("Agent's own session", {"docs/process/milestone-records/device-sessions/2026-10.json":
+                                            {"date": "2026-10-03"}})
+        rc, ev = self.evaluate(self.man(steps, "M2"), "M2")
+        self.assertIn("reported_by: antoine", self.failure(ev, "user-step:device-session"))
+
+    def test_capture_index_must_list_every_case(self):
+        steps = [{"id": "r1913-capture", "description": "capture", "evidence": "conformance/references/render/",
+                  "validator": {"type": "capture", "index": "conformance/references/render/index.json",
+                                "cases_file": "conformance/references/render/cases.json"}}]
+        rc, ev = self.evaluate(self.man(steps), "M1")
+        self.assertIn("case list", self.failure(ev, "user-step:r1913-capture"))
+        self.commit("Cases", {"conformance/references/render/cases.json": {"cases": [{"id": "U7"}, {"id": "S11"}]}})
+        rc, ev = self.evaluate(self.man(steps), "M1")
+        self.assertEqual(rc, 3)
+        self.commit("Index", {"conformance/references/render/index.json": {"cases": [{"id": "U7"}]}})
+        rc, ev = self.evaluate(self.man(steps), "M1")
+        self.assertEqual(rc, 3)
+        self.assertIn("lacks S11", ev["awaiting"][0]["message"])
+        self.commit("Index", {"conformance/references/render/index.json": {"cases": [{"id": "U7"}, {"id": "S11"}]}})
+        rc, ev = self.evaluate(self.man(steps), "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+
+    def test_report_records_antoines_result(self):
+        steps = [{"id": "firewall-check", "description": "firewall",
+                  "evidence": "docs/process/milestone-records/M4/firewall-check.json", "validator": {"type": "report"}}]
+        rc, ev = self.evaluate(self.man(steps, "M4"), "M4")
+        self.assertEqual(rc, 3)
+        self.commit("Report", {"docs/process/milestone-records/M4/firewall-check.json":
+                               {"date": "2026-11-12", "result": "fail", "reported_by": "antoine"}})
+        rc, ev = self.evaluate(self.man(steps, "M4"), "M4")
+        self.assertIn("reported a failure", self.failure(ev, "user-step:firewall-check"))
+
+    def test_setup_steps_read_doctor(self):
+        steps = [{"id": s, "description": s, "evidence": "build/mg/doctor/", "validator": {"type": "setup", "step": s}}
+                 for s in ("xcode-license", "ios-runtime", "xcode-external-agents")]
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}], "user_steps": steps})
+        doctor = {"status": "warn", "user_steps": [
+            {"id": "ios-runtime", "state": "missing", "required": True, "title": "Install the iOS 27 simulator runtime"},
+            {"id": "xcode-external-agents", "state": "unverified", "required": False, "title": "Allow agents"}]}
+        rc, ev = self.evaluate(man, "M0", doctor=doctor)
+        self.assertEqual(rc, 3)
+        self.assertEqual([a["id"] for a in ev["awaiting"]], ["user-step:ios-runtime"])
+        doctor["user_steps"] = doctor["user_steps"][1:]
+        rc, ev = self.evaluate(man, "M0", doctor=doctor)
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(ev["user_steps"][2]["details"]["state"], "unverified")
+        os.remove(self.record)
+        rc, ev = self.evaluate(man, "M0")
+        self.assertIn("doctor", self.failure(ev, "user-step:xcode-license"))
+
+    def test_uncommitted_evidence_does_not_count(self):
+        path = os.path.join(self.root, "docs/process/milestone-records/device-runs/M1/iphone.json")
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(device_run("M1", "iphone", self.gate, ["R1818", "R1823"]), f)
+        rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
+        self.assertEqual(rc, 3)
+        self.assertIn("uncommitted", ev["awaiting"][0]["message"])
+
+
+if __name__ == "__main__":
+    unittest.main()

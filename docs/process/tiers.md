@@ -47,7 +47,16 @@ There is no git remote, so nights run on this Mac. `tools/mg nightly --print-sch
 
 ## Milestones and release
 
-`tools/mg milestone <M0..M5|release>` runs in the main checkout on a clean tree. It runs every T0 and T1 run in full (no path triggers), then T3, and lists T4 as awaiting Antoine. It writes one summary result. It fails when a run fails, while a conformance, sync or data-safety test is quarantined, and on the R1880 rules of its harvest-coverage run: no unclassified harvest row at any milestone, and at release no in-scope or preservation-only scenario that does not pass. Harvest coverage takes the statuses of live chains from the full live-oracle run of the same milestone run; without that report (T1 did not run) it is `unresolved`. U240's `tools/mg milestone-gate` evaluates a milestone from these results and its manifest.
+`tools/mg milestone <M0..M5|release>` runs in the main checkout on a clean tree. It runs every T0 and T1 run in full (no path triggers), then T3, and lists T4 as awaiting Antoine. It writes one summary result. It fails when a run fails, while a conformance, sync or data-safety test is quarantined, and on the R1880 rules of its harvest-coverage run: no unclassified harvest row at any milestone, and at release no in-scope or preservation-only scenario that does not pass. Harvest coverage takes the statuses of live chains from the full live-oracle run of the same milestone run; without that report (T1 did not run) it is `unresolved`.
+
+`tools/mg milestone-gate <M0..M5>` (U240) then decides whether the milestone closes. `docs/process/milestones.yaml` lists, per milestone, its units, its suites (tiers runs of T0, T1 or T3, with scopes and pass rules), the budgets its device runs cover, Antoine's user steps with their evidence and validators, approved deferrals, and the conditions every gate checks. Gates are cumulative: a milestone's suites, units and deferrals include every earlier milestone's. The gate:
+
+- reads the latest result of each suite's run with the milestone's arguments from `build/mg`; every result must be from one clean commit, the gate commit, and a missing result fails;
+- accepts later commits that touch only evidence paths (`milestone-records/`, `conformance/private/`, the user steps' evidence) and reads the evidence from HEAD's commit, never the working tree;
+- needs every unit merged at or before the gate commit (a `Unit:` trailer from an implementing role) with no open escalation;
+- fails while a conformance, sync or data-safety test is quarantined or any quarantine entry is invalid or expired.
+
+The outcome is `pass`, `fail`, or `awaiting_user` (status warn) when only Antoine's evidence is missing. A pass writes `docs/process/milestone-records/<M>.json` (commit, per-suite counts, user-step results, open quarantine entries with owners, deferrals); commit it. `tools/mg milestone-gate --check`, a T0 run, keeps the manifest equal to the plan's Delivery Milestones table and Unit Index and its suites on runs that `tools/mg milestone` executes.
 
 ## Changing tiers.yaml
 
