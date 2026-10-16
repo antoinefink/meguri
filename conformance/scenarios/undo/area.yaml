@@ -1,0 +1,6 @@
+# specs/conformance/dsl.md D9.1. None active yet: the implementer marks the
+# undo scenarios active with Meguri's undo adapter (exec/undo.rs), once the
+# conformance session runs ops through the engine (U38's CoreHost::open) and
+# the adapters each scenario needs exist (specs/conformance/undo-ops.md V6).
+area: undo
+active: []
