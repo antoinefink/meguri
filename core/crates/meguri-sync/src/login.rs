@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::error::{InvalidInput, ProtocolError, SyncError};
 use crate::job::{HostKey, Job, JobOptions};
 use crate::transport::{Method, Payload, runtime};
+use crate::wire::read::{self, At};
 
 /// Asks the job's server for a host key. The user name loses white space at
 /// both ends; the password is sent as given. An empty user name or password
@@ -49,13 +50,19 @@ fn login_body(user_name: &str, password: &str) -> Result<Vec<u8>, SyncError> {
     Ok(body.into_bytes())
 }
 
-/// The `hostKey` answer (L5): the non-empty string `key` of a JSON object;
-/// other members are ignored.
+/// The `hostKey` answer (L5), read by wire-format.md W1.2: the non-empty
+/// string `key` of a JSON object; other members are ignored, and a repeated
+/// `key` makes the answer invalid.
 pub fn decode_login_answer(answer: &[u8]) -> Result<HostKey, SyncError> {
-    let bad = SyncError::Protocol(ProtocolError::BadLoginAnswer);
-    let value: Value = serde_json::from_slice(answer).map_err(|_| bad.clone())?;
-    match value.get("key") {
-        Some(Value::String(key)) if !key.is_empty() => Ok(HostKey::new(key.clone())),
-        _ => Err(bad),
+    let at = At::Root;
+    let key = read::body(answer)
+        .and_then(|body| read::object(body, at))
+        .and_then(|object| object.get("key", at))
+        .ok()
+        .flatten()
+        .and_then(|raw| read::string(raw, at.member("key")).ok());
+    match key {
+        Some(key) if !key.is_empty() => Ok(HostKey::new(key)),
+        _ => Err(SyncError::Protocol(ProtocolError::BadLoginAnswer)),
     }
 }

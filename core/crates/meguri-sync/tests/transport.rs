@@ -441,12 +441,17 @@ fn a_403_on_login_is_an_auth_failure_and_gives_no_key() {
 
 #[test]
 fn a_login_answer_without_a_non_empty_key_is_a_protocol_error() {
+    // L5, read by wire-format.md W1.2: a repeated `key` makes the object
+    // invalid, and so does nesting past 127 levels, the outermost counting.
+    let deep = format!(r#"{{"key":"k","x":{}{}}}"#, "[".repeat(127), "]".repeat(127));
     for answer in [
         &br#"{"nokey":"x"}"#[..],
         &br#"{"key":""}"#[..],
         &br#"{"key":5}"#[..],
         &br#"["key"]"#[..],
         &b"not json"[..],
+        &br#"{"key":"first","key":"second"}"#[..],
+        deep.as_bytes(),
     ] {
         let payload = answer.to_vec();
         let stub = SyncStub::serve(move |_| Reply::ok(&payload));
@@ -458,6 +463,13 @@ fn a_login_answer_without_a_non_empty_key_is_a_protocol_error() {
             String::from_utf8_lossy(answer)
         );
     }
+    // Exactly 127 levels read.
+    let deepest = format!(r#"{{"key":"k","x":{}{}}}"#, "[".repeat(126), "]".repeat(126));
+    let stub = SyncStub::serve(move |_| Reply::ok(deepest.as_bytes()));
+    assert_eq!(
+        login_blocking(threads(), &options(&stub.url()), &random(), "someone", "pw"),
+        Ok(HostKey::new("k"))
+    );
 }
 
 // --- Responses (T6) ---------------------------------------------------------
