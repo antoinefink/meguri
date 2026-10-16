@@ -3,7 +3,7 @@
 
 R-ID coverage map (unit → R ranges):
 - U60: R529, R953–R962, R964 (parse/marker), R965–R968; supports R930/R942 (analysis API) and R1907–R1909.
-- U61: R563 (math-aware parsing), R963, R969–R975, R977 (extraction); supports AE33.
+- U61: R563 (HTML stripped inside math in `cloze:` output; parsing ignores math, R973 as amended after U61's review), R963, R969–R975, R977 (extraction); supports AE33.
 - U62: R469–R470 (composition), R472 (data supply), R525–R528, R531, R559 (index), R564, R583, R960–R961 (values), R976; R1907/R1908 observation executor.
 - U63: R990, R1003–R1012, R1013 (data side), R1016 (data side); AE33 (c0), AE38 (data side).
 - U64: R530, R532, R533, R537, R545 (core), R941 (compare), R977 (compare), R1020 (core); AE16 (core), AE17 (compare).

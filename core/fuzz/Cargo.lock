@@ -229,6 +229,7 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "meguri-model",
+ "meguri-search",
  "meguri-template",
  "meguri-text",
 ]
@@ -244,11 +245,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "meguri-search"
+version = "0.0.0"
+dependencies = [
+ "meguri-model",
+ "regex",
+]
+
+[[package]]
 name = "meguri-template"
 version = "0.0.0"
 dependencies = [
  "blake3",
  "difflib",
+ "htmlescape",
  "meguri-text",
  "regex",
 ]

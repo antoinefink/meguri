@@ -294,14 +294,14 @@ h56ce4672d339,rust,tag,engine,unclassified,,,open
 h74b7d2e31f18,rust,tag,engine,unclassified,,,open
 h7b088f7049ca,rust,tag,engine,unclassified,,,open
 h85e031554808,rust,tag,engine,unclassified,,,open
-h876dbf5f6be7,rust,tag,engine,unclassified,,,open
-h8c7ca9736257,rust,tag,engine,unclassified,,,open
+h876dbf5f6be7,rust,tag,engine,in-scope,Undo and redo move steps between the two histories; a new op empties redo and an op without undo record empties both,undo/edit-note undo/redo-cleared,done
+h8c7ca9736257,rust,tag,engine,in-scope,Quick successive edits of one note merge into one Update Note step,undo/edit-note-merge,done
 h8e35ff39a69f,rust,tag,engine,unclassified,,,open
 h9a09160808bf,rust,tag,engine,unclassified,,,open
 h9a4da0026b9a,rust,tag,engine,in-scope,A config write that changes nothing leaves col.mod alone; a real change moves it,storage/config/rewrite-same-value storage/config/current-deck,done
 h9e254f805a25,rust,tag,engine,unclassified,,,open
 hbcc38ba4659c,rust,tag,engine,unclassified,,,open
-hc80955057f3f,rust,tag,engine,unclassified,,,open
+hc80955057f3f,rust,tag,engine,not-applicable,Custom undo steps and merging later operations into one step are the add-on interface; Meguri has no add-ons and runs a composite change as one op,,done
 hd962000e6d0c,rust,tag,engine,unclassified,,,open
 hea8cbd8d6720,rust,tag,engine,unclassified,,,open
 hfa50e8665fce,rust,tag,engine,unclassified,,,open
@@ -348,7 +348,7 @@ he051a468be4b,python,tag,model,not-applicable,Anki's Python API surface (copies 
 h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong type takes the default,model/card-data/lenient model/schema11/notetype-values model/schema11/deck-values model/schema11/preset-values,done
 h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
 had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",,deferred
-hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes restores the earlier row, removes an added key and restores a removed one; scenarios come with the undo op (U25)",,deferred
+hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes deletes an added key and writes a changed or removed row back exactly, stamps included; redo writes them again",undo/config-writes,done
 h00dd7a3ecf58,python,tag,notes,unclassified,,,open
 h086997a07e68,python,tag,notes,unclassified,,,open
 h093e8eefc4fb,python,tag,notes,unclassified,,,open
@@ -619,9 +619,9 @@ hb2bdcde89b3a,python,tag,render,unclassified,,,open
 hf42c35381599,python,tag,render,unclassified,,,open
 hf55fc72cd71b,python,tag,render,unclassified,,,open
 h012e392276c1,rust,tag,render,unclassified,,,open
-h03d7c32a8571,rust,supplementary,render,unclassified,,,open
+h03d7c32a8571,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h04f16e0d77d0,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
-h0714128d5513,rust,supplementary,render,unclassified,,,open
+h0714128d5513,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h0e52b45b7b7a,rust,tag,render,unclassified,,,open
 h1126a583e576,rust,tag,render,unclassified,,,open
 h12960db75e39,rust,tag,render,in-scope,"Template rendering: replacements, sections, card-number keys, unknown fields and filters",render/template/conditionals render/template/errors render/template/tags render/filters/chains,done
@@ -629,82 +629,82 @@ h163ba9c3036c,rust,tag,render,in-scope,Plain HTML stripping (text area),text/str
 h176cf97aef7a,rust,tag,render,unclassified,,,open
 h1a3728db5353,rust,tag,render,not-applicable,"A backend render mode without the reviewer's chain completion; Meguri reproduces the reviewer, where an unknown filter ends the chain",,done
 h1f36598666ed,rust,tag,render,in-scope,Preview render from a schema-11 template object,render/special-fields/new-note,done
-h1f6151e74934,rust,tag,render,unclassified,,,open
+h1f6151e74934,rust,tag,render,in-scope,Image-occlusion clozes with several numbers; U63/U64,,deferred
 h21a1ea45b18d,rust,tag,render,unclassified,,,open
 h22e00b0f1c78,rust,supplementary,render,unclassified,,,open
 h2d70fb39c79e,rust,tag,render,in-scope,TTS filter markup,render/filters/tts,done
-h3448f09e0c2c,rust,tag,render,unclassified,,,open
+h3448f09e0c2c,rust,tag,render,in-scope,Image-occlusion cloze element; shape attributes are U63/U64,,deferred
 h3a116c42ce7b,rust,tag,render,in-scope,Media name encoding and decoding (text area),text/refs/iri,done
 h3e9a29035981,rust,tag,render,in-scope,Field emptiness for sections and the blank check,render/template/conditionals render/template/blank text/fields/empty,done
-h3ea8cdc8e835,rust,supplementary,render,unclassified,,,open
+h3ea8cdc8e835,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h3f026c7e31bb,rust,tag,render,unclassified,,,open
 h429c8ae08c83,rust,tag,render,unclassified,,,open
-h450787d61876,rust,supplementary,render,unclassified,,,open
+h450787d61876,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h4726941374ef,rust,tag,render,in-scope,"Preview render of a note not yet added, both sides",render/special-fields/new-note render/template/blank,done
 h47dca159695d,rust,tag,render,unclassified,,,open
 h4820dda6cd77,rust,tag,render,unclassified,,,open
-h492c28d52d9d,rust,tag,render,unclassified,,,open
+h492c28d52d9d,rust,tag,render,in-scope,cloze-only: with number lists,render/cloze/only,done
 h4b173b76b6d5,rust,tag,render,unclassified,,,open
-h50201233953a,rust,tag,render,unclassified,,,open
+h50201233953a,rust,tag,render,in-scope,Nested cloze markup and the numbers of nested clozes,render/cloze/nesting render/cloze/numbers,done
 h5060a7cb5258,rust,tag,render,in-scope,Alternate tag delimiters,render/template/delimiters,done
-h5ab01c535673,rust,supplementary,render,unclassified,,,open
-h5cd95f995780,rust,tag,render,unclassified,,,open
+h5ab01c535673,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
+h5cd95f995780,rust,tag,render,in-scope,Image-occlusion shape text with escaped colons; U63,,deferred
 h5e0630507a22,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
 h6442084ed16c,rust,tag,render,in-scope,"Template tokenizing: tags, comments, white space, stray braces, structural errors",render/template/tags render/template/comments render/template/errors render/corpus/templates-01,done
-h67f6485701c2,rust,tag,render,unclassified,,,open
-h6954b568831d,rust,tag,render,unclassified,,,open
+h67f6485701c2,rust,tag,render,in-scope,cloze: output by card number and side; empty when no cloze is active,render/cloze/basic,done
+h6954b568831d,rust,tag,render,in-scope,Hints on clozes with number lists,render/cloze/multi-number render/cloze/hints,done
 h6a3197e57c5e,rust,tag,render,unclassified,,,open
 h6b5987957b1c,rust,tag,render,unclassified,,,open
-h6d969fd370f8,rust,tag,render,unclassified,,,open
+h6d969fd370f8,rust,tag,render,in-scope,Nested clozes and hints on both sides,render/cloze/nesting render/cloze/hints,done
 h71a7fc765fe3,rust,tag,render,in-scope,Type-in markers and the chain rewrite,render/filters/type,done
 h71ac67d3a8db,rust,tag,render,in-scope,Hint filter markup and ids,render/filters/hint,done
 h73a554417784,rust,tag,render,in-scope,Legacy per-template card rules stored when a note type is saved,render/template/legacy-req,done
-h74230fbcabe8,rust,tag,render,unclassified,,,open
+h74230fbcabe8,rust,tag,render,in-scope,cloze-only: output on the front and the back,render/cloze/only,done
 h7489852a175a,rust,tag,render,unclassified,,,open
-h79f7d4c21f4b,rust,tag,render,unclassified,,,open
+h79f7d4c21f4b,rust,tag,render,in-scope,Numbers of a cloze with a number list,render/cloze/numbers,done
 h7ff155030ad4,rust,tag,render,unclassified,,,open
 h82c4a097602a,rust,tag,render,unclassified,,,open
 h8459f3ce87b7,rust,tag,render,unclassified,,,open
-h883b6ddbca06,rust,tag,render,unclassified,,,open
-h88486ccb2459,rust,tag,render,unclassified,,,open
-h8aa9e4f267aa,rust,tag,render,unclassified,,,open
+h883b6ddbca06,rust,tag,render,in-scope,Nested clozes with the same number,render/cloze/nesting,done
+h88486ccb2459,rust,tag,render,in-scope,Cloze numbers of a text; its LaTeX expansion check serves LaTeX image generation which is out of scope (R565),render/cloze/numbers,done
+h8aa9e4f267aa,rust,tag,render,in-scope,Shared and separate clozes on each of their cards,render/cloze/multi-number,done
 h90e678492b7b,rust,tag,render,unclassified,,,open
 h9580bee2a34f,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
-h9ecf3ff97171,rust,supplementary,render,unclassified,,,open
-h9f15a141659a,rust,tag,render,unclassified,,,open
-ha390fa79d2c0,rust,tag,render,unclassified,,,open
+h9ecf3ff97171,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
+h9f15a141659a,rust,tag,render,in-scope,Type-in cloze extraction collapses answers only when all are identical,render/cloze/typing,done
+ha390fa79d2c0,rust,tag,render,in-scope,Cloze markers removed from field text for searching; specified with search text matching (U81),,deferred
 ha3f6f53e53e7,rust,tag,render,in-scope,"Both sides of a card, FrontSide and the blank question",render/template/blank render/special-fields/new-note,done
 haccda9311c93,rust,tag,render,unclassified,,,open
 hae0105ed752c,rust,tag,render,unclassified,,,open
 hafc40dbe3447,rust,tag,render,unclassified,,,open
-hb1cbcd219c60,rust,supplementary,render,unclassified,,,open
-hb6a47ef46c2d,rust,supplementary,render,unclassified,,,open
+hb1cbcd219c60,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
+hb6a47ef46c2d,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 hbf81ece4b03e,rust,tag,render,unclassified,,,open
 hc6cc252a0cb5,rust,tag,render,unclassified,,,open
 hc74368fae72d,rust,tag,render,in-scope,Stripping that keeps media names (text area),text/strip/keep-media,done
-hcafcd1e3bdc2,rust,supplementary,render,unclassified,,,open
-hcb43355dfe31,rust,tag,render,unclassified,,,open
+hcafcd1e3bdc2,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
+hcb43355dfe31,rust,tag,render,in-scope,data-ordinal lists every number of the cloze on each card,render/cloze/multi-number,done
 hcd3a8431fb29,rust,tag,render,in-scope,Text before a replacement that an unknown filter ends,render/filters/chains,done
 hd3092e9a68c4,rust,tag,render,in-scope,Built-in filter applied in a preview render,render/filters/text,done
 hd575b853e8bf,rust,tag,render,in-scope,One-line text of field HTML (text area),text/strip/text-line,done
 hdff9a98c5773,rust,tag,render,in-scope,Ruby filters,render/filters/furigana,done
-he0d5169d5e60,rust,tag,render,unclassified,,,open
-he406938dc7f7,rust,tag,render,unclassified,,,open
+he0d5169d5e60,rust,tag,render,in-scope,Card render of a cloze note through the render pipeline (U62),,deferred
+he406938dc7f7,rust,tag,render,in-scope,Nested clozes with number lists,render/cloze/multi-number render/cloze/nesting,done
 he505c5cfe56e,rust,tag,render,in-scope,Blank question in a preview render,render/template/blank,done
 he79db754bc77,rust,tag,render,unclassified,,,open
 he865b016fdd9,rust,tag,render,unclassified,,,open
 he8aa29c82e65,rust,tag,render,unclassified,,,open
 hea39d04c13ef,rust,tag,render,in-scope,Unknown filter ends the chain with the text so far,render/filters/chains,done
 heb300a3dbe24,rust,tag,render,unclassified,,,open
-heba27d0f9639,rust,tag,render,unclassified,,,open
+heba27d0f9639,rust,tag,render,in-scope,Type-in cloze extraction by card number,render/cloze/typing,done
 hebddab91941f,rust,tag,render,unclassified,,,open
 hee35c52dd8b3,rust,supplementary,render,unclassified,,,open
 heed8d3ae61bd,rust,tag,render,in-scope,Whether a template renders something for a set of non-empty fields,render/template/blank render/template/legacy-req,done
-hf064837658a8,rust,tag,render,unclassified,,,open
+hf064837658a8,rust,tag,render,in-scope,Markup inside MathJax removed from cloze output with entities kept,render/cloze/mathjax,done
 hf2d2c23247a1,rust,tag,render,in-scope,Rendering a stored card with its real values,render/special-fields/cards,done
-hf2f1c863cdca,rust,tag,render,unclassified,,,open
+hf2f1c863cdca,rust,tag,render,in-scope,Duplicate and zero and empty pieces in number lists,render/cloze/numbers render/cloze/markers,done
 hf6db24b439e4,rust,tag,render,unclassified,,,open
-hf8d1651d6b66,rust,tag,render,unclassified,,,open
+hf8d1651d6b66,rust,tag,render,in-scope,Non-ASCII text without clozes has no cloze numbers,render/cloze/numbers,done
 h0b343b3380e0,typescript,tag,review,unclassified,,,open
 h14162d344ef9,typescript,tag,review,unclassified,,,open
 h145698acc12f,typescript,tag,review,unclassified,,,open
@@ -896,7 +896,7 @@ h1e765459935f,rust,tag,search,unclassified,,,open
 h1f546a2494d6,rust,tag,search,unclassified,,,open
 h239bcdef1181,rust,tag,search,unclassified,,,open
 h2e49ab2ea87a,rust,tag,search,unclassified,,,open
-h3007a5ce27b9,rust,tag,search,unclassified,,,open
+h3007a5ce27b9,rust,tag,search,in-scope,"search text read into items, terms, keys and values: whitespace, quoting, escapes, negation and groups",search/lexing/whitespace search/lexing/terms search/lexing/escapes search/lexing/colons search/lexing/keys search/lexing/hyphens search/structure/groups search/structure/negation search/canonical/leaves,done
 h39a4ffc60079,rust,tag,search,unclassified,,,open
 h3b56f50b724c,rust,tag,search,unclassified,,,open
 h3cb2e631185c,rust,tag,search,unclassified,,,open
@@ -907,7 +907,7 @@ h555785228ea2,rust,tag,search,unclassified,,,open
 h565039430e2d,rust,tag,search,unclassified,,,open
 h5b05256eb14d,rust,tag,search,unclassified,,,open
 h5cdce206bbe1,rust,tag,search,unclassified,,,open
-h63a23874d7e3,rust,tag,search,unclassified,,,open
+h63a23874d7e3,rust,tag,search,in-scope,"canonical search text: redundant quotes and escapes dropped, needed ones added, OR in capitals, numbers normalized",search/canonical/quoting search/canonical/leaves search/canonical/numbers search/canonical/round-trips search/structure/operators,done
 h66aebcbc4027,rust,tag,search,unclassified,,,open
 h66d9a93ef6e9,rust,tag,search,unclassified,,,open
 h6b3ffb448b14,rust,tag,search,unclassified,,,open
@@ -917,7 +917,7 @@ h75a546f3b68f,rust,tag,search,unclassified,,,open
 h75c01d18f14a,rust,tag,search,unclassified,,,open
 h765dd9e980ae,rust,tag,search,unclassified,,,open
 h7669cd3519d0,rust,tag,search,unclassified,,,open
-h79e4ec8d2c86,rust,tag,search,unclassified,,,open
+h79e4ec8d2c86,rust,tag,search,in-scope,a committed search of several items keeps its items and loses only an outer group's brackets,search/canonical/top-level search/structure/groups,done
 h7c1c920002b6,rust,tag,search,unclassified,,,open
 h855ecd06d4e6,rust,tag,search,unclassified,,,open
 h88ad03350510,rust,tag,search,unclassified,,,open
@@ -925,31 +925,31 @@ h8b9aff97d516,rust,tag,search,unclassified,,,open
 h8f79a3f11361,rust,tag,search,unclassified,,,open
 h944eb618c913,rust,tag,search,unclassified,,,open
 h993a80697567,rust,tag,search,unclassified,,,open
-h9d1214dbd878,rust,tag,search,unclassified,,,open
+h9d1214dbd878,rust,tag,search,in-scope,a card search returns the matching card ids,search/structure/precedence-results search/structure/card-note-modes,done
 ha95e1702a2fa,rust,tag,search,unclassified,,,open
 haaeb313b212e,rust,tag,search,unclassified,,,open
 habf4018f4772,rust,tag,search,unclassified,,,open
 had58959b0fc6,rust,tag,search,unclassified,,,open
 hb32e7c6fa35a,rust,tag,search,unclassified,,,open
 hb42dc5c927d9,rust,tag,search,unclassified,,,open
-hba8e30116b92,rust,tag,search,unclassified,,,open
-hc2037626ba58,rust,tag,search,unclassified,,,open
+hba8e30116b92,rust,tag,search,in-scope,committing an invalid search text is a parse error,search/errors/kinds,done
+hc2037626ba58,rust,tag,search,in-scope,a committed search of one item is written without extra brackets,search/canonical/top-level,done
 hc3217305a1d5,rust,tag,search,unclassified,,,open
 hc518b95b631b,rust,tag,search,unclassified,,,open
 hc6331517314c,rust,tag,search,unclassified,,,open
-hc98944e6bdef,rust,tag,search,unclassified,,,open
+hc98944e6bdef,rust,tag,search,in-scope,"which rows a search tests in cards and notes mode, from the scopes of its terms",search/structure/damaged-rows search/structure/whole-collection search/structure/card-note-modes,done
 hcd65bea8e67f,rust,tag,search,unclassified,,,open
 hcf4fefe3e9ef,rust,tag,search,unclassified,,,open
 hd007ebca9ed4,rust,tag,search,unclassified,,,open
-hdff0242575ab,rust,tag,search,unclassified,,,open
+hdff0242575ab,rust,tag,search,in-scope,the empty search returns every card,search/structure/whole-collection,done
 he244355f799a,rust,tag,search,unclassified,,,open
 he2a0ba83d1b8,rust,tag,search,unclassified,,,open
 he56ed2a516b3,rust,tag,search,unclassified,,,open
 he8cfded7f1d7,rust,tag,search,unclassified,,,open
-he8f1b333539e,rust,tag,search,unclassified,,,open
+he8f1b333539e,rust,tag,search,in-scope,search parse error kinds and the texts each reports,search/errors/kinds search/errors/order search/errors/escapes search/errors/arguments,done
 he93785c73a0f,rust,tag,search,unclassified,,,open
 hfa4a20b50574,rust,tag,search,unclassified,,,open
-hfd43294d32a2,rust,tag,search,unclassified,,,open
+hfd43294d32a2,rust,tag,search,in-scope,a note search returns the notes with a matching card,search/structure/precedence-results search/structure/card-note-modes,done
 h36e914747858,python,tag,stats,unclassified,,,open
 ha2f22cc588c8,python,tag,stats,unclassified,,,open
 haf31e8129655,python,tag,stats,unclassified,,,open
@@ -1004,7 +1004,7 @@ heba033e5deec,rust,supplementary,storage,in-scope,closing without a downgrade ke
 hebd3170b0ca5,rust,tag,storage,in-scope,Check Database keeps review logs with repaired card ids; specified with Check Database (U128),,deferred
 hf00ddf9dbca8,rust,supplementary,storage,in-scope,"notes, cards, decks, presets and note types survive the downgrade to 11 and the upgrade back",storage/upgrade/from-11,done
 hf613c9b636bd,rust,supplementary,storage,unclassified,,,open
-hf7664c5a108b,rust,supplementary,storage,in-scope,A review-log row arriving with a taken id from sync or import or undo is not inserted; scenarios come with those ops,,deferred
+hf7664c5a108b,rust,supplementary,storage,in-scope,"A review-log row arriving with a taken id is not inserted; for undo, Meguri refuses the redo instead (deviation); sync and import scenarios come with those ops (U107, U122)",undo/revlog-taken-id,deferred
 hfb0061ec0b9b,rust,supplementary,storage,unclassified,,,open
 h39fa0055ea4c,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
 h51a52fc54a83,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
@@ -1047,44 +1047,44 @@ hdaef1892f535,rust,tag,sync,unclassified,,,open
 he0cb4f886c79,rust,supplementary,sync,unclassified,,,open
 hf0311a8adc67,rust,tag,sync,in-scope,"a server that stays silent past the stall timeout fails the request; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
 hfa9987445e9e,rust,tag,sync,unclassified,,,open
-h12a8b8c90d0b,python,tag,tags,unclassified,,,open
-h15bbd0ab00e1,python,tag,tags,unclassified,,,open
-h16d1d167d5e7,python,tag,tags,unclassified,,,open
-h22d21da07c9d,python,tag,tags,unclassified,,,open
-h24a44aea4cbd,python,tag,tags,unclassified,,,open
-h35c21a97404e,python,tag,tags,unclassified,,,open
-h407bcbbdc1cb,python,tag,tags,unclassified,,,open
-h7bab481264fc,python,tag,tags,unclassified,,,open
-h84b96a6b7b4b,python,tag,tags,unclassified,,,open
-h86fd2d43f4c8,python,tag,tags,unclassified,,,open
-ha4e6d06a529b,python,tag,tags,unclassified,,,open
-hae2d723b054e,python,tag,tags,unclassified,,,open
-hb84a3b9d0887,python,tag,tags,unclassified,,,open
-hd16c24f88495,python,tag,tags,unclassified,,,open
-hda41aef53f19,python,tag,tags,unclassified,,,open
-hf6d2b53b1903,python,tag,tags,unclassified,,,open
-h04e3f5f5228e,rust,tag,tags,unclassified,,,open
-h0b434e5e6376,rust,tag,tags,unclassified,,,open
-h0e99ed421e1d,rust,tag,tags,unclassified,,,open
-h102f0046f2fd,rust,tag,tags,unclassified,,,open
-h4068299df64b,rust,tag,tags,unclassified,,,open
-h423183febc3e,rust,tag,tags,unclassified,,,open
-h4bf8df530930,rust,tag,tags,unclassified,,,open
-h657d1b2b3255,rust,tag,tags,unclassified,,,open
-h6d9e5bc856c0,rust,tag,tags,unclassified,,,open
-h719a952d33d5,rust,tag,tags,unclassified,,,open
-h762285c157a4,rust,tag,tags,unclassified,,,open
-h8838c90310d2,rust,tag,tags,unclassified,,,open
-h8a531508a003,rust,tag,tags,unclassified,,,open
-h9f3686b61815,rust,tag,tags,unclassified,,,open
-h9f452a4faaf3,rust,tag,tags,unclassified,,,open
-hab1bc9fa2604,rust,tag,tags,unclassified,,,open
-hac48d18d7071,rust,tag,tags,unclassified,,,open
-hafc1cda6babf,rust,tag,tags,unclassified,,,open
-hca878bd8d66c,rust,tag,tags,unclassified,,,open
-hcd7b5a34f3ac,rust,tag,tags,unclassified,,,open
-hd8d86a3d37b3,rust,tag,tags,unclassified,,,open
-he58668dea421,rust,tag,tags,unclassified,,,open
+h12a8b8c90d0b,python,tag,tags,in-scope,unused registry rows removed,tags/clear-unused/parents,done
+h15bbd0ab00e1,python,tag,tags,not-applicable,legacy Python wrappers that forward to the bulk add and remove operations,,done
+h16d1d167d5e7,python,tag,tags,in-scope,every tag a note uses is registered and listed,tags/canon/spelling,done
+h22d21da07c9d,python,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h24a44aea4cbd,python,tag,tags,in-scope,moving a tag under another tag,tags/reparent/rules,done
+h35c21a97404e,python,tag,tags,not-applicable,a Python string helper with wildcard patterns; Meguri has no such interface,,done
+h407bcbbdc1cb,python,tag,tags,not-applicable,legacy Python wrapper that forwards to Clear Unused Tags,,done
+h7bab481264fc,python,tag,tags,in-scope,"stored tag text: single spaces with a leading and a trailing space, empty for no tags",tags/canon/normalize,done
+h84b96a6b7b4b,python,tag,tags,in-scope,renaming a tag on its notes,tags/rename/basic,done
+h86fd2d43f4c8,python,tag,tags,in-scope,flag in the low three bits with the other bits kept; flag searches belong to the search area,tags/flags/set,done
+ha4e6d06a529b,python,tag,tags,in-scope,collapsed state stored in the registry and shown in the tree,tags/collapse/set tags/tree/structure,done
+hae2d723b054e,python,tag,tags,not-applicable,a legacy helper that returns its input unchanged; tag canonicalization is covered by the canon scenarios,,done
+hb84a3b9d0887,python,tag,tags,in-scope,deleting a tag from every note and the registry,tags/delete/children,done
+hd16c24f88495,python,tag,tags,in-scope,"adding tags to selected notes, sorted and deduplicated",tags/bulk/add,done
+hda41aef53f19,python,tag,tags,in-scope,removing tags from selected notes,tags/bulk/remove,done
+hf6d2b53b1903,python,tag,tags,in-scope,tag tree built from the registry with implicit parents,tags/tree/structure,done
+h04e3f5f5228e,rust,tag,tags,in-scope,missing tags added case-insensitively and the result sorted,tags/bulk/add,done
+h0b434e5e6376,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h0e99ed421e1d,rust,tag,tags,in-scope,collapsed state reflected in the tag tree,tags/collapse/set tags/tree/structure,done
+h102f0046f2fd,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h4068299df64b,rust,tag,tags,in-scope,"matching a tag and its descendants case-insensitively, literal names",tags/rename/basic tags/rename/refused tags/bulk/remove,done
+h423183febc3e,rust,tag,tags,in-scope,"tag names normalized, existing spelling adopted, duplicates dropped and items split on save",tags/canon/normalize tags/canon/spelling,done
+h4bf8df530930,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
+h657d1b2b3255,rust,tag,tags,in-scope,deleting a tag from every note and the registry,tags/delete/children,done
+h6d9e5bc856c0,rust,tag,tags,in-scope,added tags take the registered spelling and are stored,tags/bulk/add,done
+h719a952d33d5,rust,tag,tags,in-scope,registered names listed,tags/canon/spelling,done
+h762285c157a4,rust,tag,tags,in-scope,clearing unused tags keeps their collapsed state; deleting a tag removes its descendants,tags/clear-unused/parents tags/delete/children,done
+h8838c90310d2,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+h8a531508a003,rust,tag,tags,in-scope,renaming a tag and its descendants,tags/rename/basic,done
+h9f3686b61815,rust,tag,tags,in-scope,tag completion belongs to the search-text services (U88),,deferred
+h9f452a4faaf3,rust,tag,tags,in-scope,"tag tree with implicit parents, case and order",tags/tree/structure tags/canon/spelling,done
+hab1bc9fa2604,rust,tag,tags,in-scope,"reparenting rules, merges and moves to the top level",tags/reparent/rules,done
+hac48d18d7071,rust,tag,tags,in-scope,a blank new name is refused and nothing changes,tags/rename/refused,done
+hafc1cda6babf,rust,tag,tags,in-scope,moving a tag to the top level,tags/reparent/rules,done
+hca878bd8d66c,rust,tag,tags,in-scope,tags still used by notes are kept,tags/clear-unused/parents,done
+hcd7b5a34f3ac,rust,tag,tags,in-scope,find and replace in tags belongs to the Find and Replace unit (U86),,deferred
+hd8d86a3d37b3,rust,tag,tags,in-scope,removal from listed notes leaves other notes alone,tags/bulk/remove,done
+he58668dea421,rust,tag,tags,in-scope,moving a tag under another tag,tags/reparent/rules,done
 h26e80efa4ec6,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
 ha04d63efb2f8,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done
 hf0908a412138,python,tag,text,not-applicable,version-number helper of the desktop Python library; Meguri reports its own version,,done

@@ -1,0 +1,29 @@
+# Clear Unused Tags (specs/tags/tags.md T11). Rows no note uses go: `a::b`,
+# `q`, `x` (its note now stores `STRASSE`, written by another client) and a
+# row another client inserted. `a` stays as the parent of a used tag, and
+# `Straße` stays because `STRASSE` equals it under full case folding. Kept
+# rows keep their columns; notes are untouched. A second run removes nothing
+# and leaves col.mod.
+id: tags/clear-unused/parents
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: ["a::c", z]}
+  - set_tag_collapsed: {tags: [a, q], collapsed: false}
+  - set_tag_collapsed: {tags: ["a::b"], collapsed: false}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: [x]}
+  - db_exec: {sql: "UPDATE notes SET tags = ' STRASSE ' WHERE id = (SELECT id FROM notes ORDER BY id LIMIT 1 OFFSET 1)"}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('Straße', 0, 0, X'01')"}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('zz', 7, 0, X'02')"}
+  - advance: 1h
+  - clear_unused_tags: {}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - clear_unused_tags: {}
+  - db_exec: {sql: "SELECT mod FROM col"}

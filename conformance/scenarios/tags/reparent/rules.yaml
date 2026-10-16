@@ -1,0 +1,58 @@
+# Moving tags under another tag or to the top level (specs/tags/tags.md T8),
+# one family of names per case: onto a tag (descendants follow), onto a
+# tag elsewhere, to the top level, onto itself or a descendant (nothing),
+# a child onto its own parent (nothing), a text prefix with the same first
+# component (nothing, Anki's rule), a text prefix with another first
+# component (moved), two sources with one last component (merged, in place),
+# the first listed source deciding a tag both match, a merge with an
+# existing top-level tag, a source no note uses (nothing), a result kept in
+# place before a later tag, and a change of letter case only.
+id: tags/reparent/rules
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [ra]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["ra::kid"]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: [rb]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: ["sb::bar"]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: [sbaz]}
+  - add_note: {notetype: Plain, fields: ["n6"], tags: ["tc::leaf"]}
+  - add_note: {notetype: Plain, fields: ["n7"], tags: [ud]}
+  - add_note: {notetype: Plain, fields: ["n8"], tags: ["ud::e"]}
+  - add_note: {notetype: Plain, fields: ["n9"], tags: ["va::b"]}
+  - add_note: {notetype: Plain, fields: ["n10"], tags: ["va::bc"]}
+  - add_note: {notetype: Plain, fields: ["n11"], tags: [wa]}
+  - add_note: {notetype: Plain, fields: ["n12"], tags: [wab]}
+  - add_note: {notetype: Plain, fields: ["n13"], tags: [xf]}
+  - add_note: {notetype: Plain, fields: ["n14"], tags: ["xo::xf"]}
+  - add_note: {notetype: Plain, fields: ["n15"], tags: [xp]}
+  - add_note: {notetype: Plain, fields: ["n16"], tags: [xf, "xo::xf"]}
+  - add_note: {notetype: Plain, fields: ["n17"], tags: ["yf::yb::x"]}
+  - add_note: {notetype: Plain, fields: ["n18"], tags: ["zf::zb::x"]}
+  - add_note: {notetype: Plain, fields: ["n19"], tags: ["ma::mx"]}
+  - add_note: {notetype: Plain, fields: ["n20"], tags: [mx]}
+  - add_note: {notetype: Plain, fields: ["n21"], tags: [oa, ozz]}
+  - add_note: {notetype: Plain, fields: ["n22"], tags: ["Pc::bar"]}
+  - set_tag_collapsed: {tags: [nq], collapsed: false}
+  - advance: 1h
+  - reparent_tags: {tags: [ra], parent: rb}
+  - reparent_tags: {tags: ["sb::bar"], parent: sbaz}
+  - reparent_tags: {tags: ["tc::leaf"], parent: ""}
+  - reparent_tags: {tags: [ud], parent: "ud::e"}
+  - reparent_tags: {tags: [ud], parent: ud}
+  - reparent_tags: {tags: ["ud::e"], parent: ud}
+  - reparent_tags: {tags: ["va::b"], parent: "va::bc"}
+  - reparent_tags: {tags: [wa], parent: wab}
+  - reparent_tags: {tags: [xf, "xo::xf"], parent: xp}
+  - reparent_tags: {tags: [yf, "yf::yb"], parent: yp}
+  - reparent_tags: {tags: ["zf::zb", zf], parent: zp}
+  - reparent_tags: {tags: ["ma::mx"], parent: ""}
+  - reparent_tags: {tags: [nq], parent: rb}
+  - reparent_tags: {tags: [oa], parent: ozz}
+  - reparent_tags: {tags: ["Pc::bar"], parent: pc}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

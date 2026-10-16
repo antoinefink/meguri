@@ -1,0 +1,25 @@
+# Setting the collapsed state (specs/tags/tags.md T12). The row gets the
+# state and usn -1 and keeps its spelling and config; other rows keep their
+# usn. A name with no row (an implicit parent, a new child) is registered
+# with T3's spelling first. Every step changes the state it sets.
+id: tags/collapse/set
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [a, "Bar::x"]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: [Foo]}
+  - db_exec: {sql: "UPDATE tags SET usn = 5"}
+  - db_exec: {sql: "UPDATE tags SET config = X'0102' WHERE tag = 'a'"}
+  - advance: 1h
+  - set_tag_collapsed: {tags: [a], collapsed: false}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - set_tag_collapsed: {tags: [bar], collapsed: false}
+  - set_tag_collapsed: {tags: ["A"], collapsed: true}
+  - set_tag_collapsed: {tags: ["foo::new", Foo], collapsed: false}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}

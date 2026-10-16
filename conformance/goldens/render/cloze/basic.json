@@ -1,0 +1,27 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "cloze": {
+          "back": ["<span class=\"cloze\" data-ordinal=\"1\">Paris</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>", "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is in <span class=\"cloze\" data-ordinal=\"2\">France</span>", "", "<span class=\"cloze\" data-ordinal=\"1\">Lisbon</span>", "", "<span class=\"cloze\" data-ordinal=\"2\">Berlin</span>", "", "", "", "<div><span class=\"cloze\" data-ordinal=\"1\">Madrid</span></div><br>Spain", "<span class=\"cloze\" data-ordinal=\"1\"></span>", "<span class=\"cloze-inactive\" data-ordinal=\"3\">Athens</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">Greece</span> <span class=\"cloze\" data-ordinal=\"2\">Europe</span>", "line one\n<span class=\"cloze\" data-ordinal=\"1\">two</span>\nline three", "<span class=\"cloze\" data-ordinal=\"1\"><b>Vienna</b></span> on the <i>Danube</i>"],
+          "front": ["<span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[capital]</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>", "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> is in <span class=\"cloze\" data-cloze=\"France\" data-ordinal=\"2\">[...]</span>", "", "<span class=\"cloze\" data-cloze=\"Lisbon\" data-ordinal=\"1\">[...]</span>", "", "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"2\">[...]</span>", "", "", "", "<div><span class=\"cloze\" data-cloze=\"Madrid\" data-ordinal=\"1\">[...]</span></div><br>Spain", "<span class=\"cloze\" data-cloze=\"\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze-inactive\" data-ordinal=\"3\">Athens</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">Greece</span> <span class=\"cloze\" data-cloze=\"Europe\" data-ordinal=\"2\">[...]</span>", "line one\n<span class=\"cloze\" data-cloze=\"two\" data-ordinal=\"1\">[...]</span>\nline three", "<span class=\"cloze\" data-cloze=\"&lt;b&gt;Vienna&lt;&#x2F;b&gt;\" data-ordinal=\"1\">[...]</span> on the <i>Danube</i>"],
+          "only_back": ["Paris", "France", "", "Lisbon", "", "Berlin", "", "", "", "Madrid", "", "Europe", "two", "<b>Vienna</b>"],
+          "only_front": ["capital", "...", "", "...", "", "...", "", "", "", "...", "...", "...", "...", "..."],
+          "typing": ["Paris", "France", "", "Lisbon", "", "Berlin", "", "", "", "Madrid", "", "Europe", "two", "<b>Vienna</b>"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "09cd906bf8cf0daa13a1dcb841fcc42e97f2d7f3c5c2e43585d32f2d457aa10f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/basic",
+  "scenario_sha256": "9bbcbe13d24dfcb612269aee11e71260f4e9a097067752ff6a4843a1345b6a13",
+  "tz": "UTC"
+}
