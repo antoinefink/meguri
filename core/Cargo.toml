@@ -70,6 +70,10 @@ rustls = { version = "0.23.45", default-features = false, features = ["std"] }
 tokio = { version = "1.53.2", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
 url = "2.5.4"
 zstd = { version = "0.14.2", default-features = false }
+# Media sync zips (specs/sync/wire-format.md W17), stored entries written,
+# stored or deflated ones read; later the package zips (rust-stack §3). The
+# exact minor: the crate has had frequent majors and yanks.
+zip = { version = "~9.0.2", default-features = false, features = ["deflate"] }
 # The sync stub's certificates (meguri-testkit sync_stub, transport.md T13),
 # on the aws-lc-rs provider reqwest already brings.
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"] }

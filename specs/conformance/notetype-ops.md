@@ -143,4 +143,16 @@ The oracle implements every edit and declares nothing.
 
 ### T10.2 Meguri's fresh collection
 
-Every note type scenario runs on the fresh collection of `dsl.md` D6 and relies on what a new collection holds: the stock kinds' names (`basic` gets `+`) and the Image Occlusion note type's id as the lower bound of the note types a scenario added. On Meguri that collection is a new collection as `notetypes/stock-kinds` K2 says, made at `clock.start`: U28's bootstrap once it exists. Until then, Meguri's executor makes it with the storage area's create path and adds the six stock kinds and `curModel` as K2 says, through U29's own stock-kind code. The default deck, the default preset and the other new-collection config keys come with U28; no scenario U29 makes active observes them.
+Every note type scenario runs on the fresh collection of `dsl.md` D6 and relies on what a new collection holds: the stock kinds' names (`basic` gets `+`), the Image Occlusion note type's id as the lower bound of the note types a scenario added, and, where the oracle adds notes to a collection Meguri made (`notetypes/records/stock-render-handoff`), the default deck. On Meguri that collection is a new collection made at `clock.start`: U28's bootstrap once it exists. Until then, Meguri's executor makes a stand-in with the storage area's create path. The stand-in is D8's new collection for every area until U28 (the browser, day and undo scenarios start from it too), and it holds exactly this:
+
+| Part | Content |
+|---|---|
+| `col` row | schema 18; `crt` of `sched/day-clock` D11 at `clock.start`; `mod` 0; `scm` `now_ms`; `ls`, `usn` and `dty` 0 |
+| config | `creationOffset` (D11), `schedVer` `2`, and the two keys of `browser/config-keys` K1 that a new collection holds, `sortType` `"noteFld"` and `sortBackwards` `false`; each with `usn` 0 and `mtime_secs` 0 |
+| default deck | one `decks` row: `id` 1, `name` `Default`, `mtime_secs` 0, `usn` 0, `common` the bytes `08 01 10 01` (collapsed in the deck list and in the browser, `model/protobuf-records` P6.4), `kind` the bytes `0a 02 08 01` (a normal deck using preset 1, P6.5) |
+| default preset | one `deck_config` row: `id` 1, `name` `Default`, `mtime_secs` 0, `usn` 0, `config` the bytes of `model/protobuf-records` P6.6's example, the built-in defaults (hex, one line: `0a080000803f00002041120400002041221c0000803f0000803f0000803f0000803f0000803f0000803f0000803f481450c8015d00002040656666a63f6d9a99993f7d0000803f8001949d02880101900101980104a80101b00108c0013cad026666663fc5026666663fe00201`) |
+| note types | the six stock kinds and `curModel` as `notetypes/stock-kinds` K2 says, through U29's own stock-kind code |
+
+- The default deck is what the oracle needs to add notes. Anki generates a new note's cards in the deck the add names and falls back to deck 1 when that deck is missing; with no deck 1 it refuses the add (`anki_error` on the oracle), so `stock-render-handoff` cannot run on a stand-in without it. The preset row keeps the deck's preset reference valid: Anki reads its built-in defaults when the preset is missing, but no client makes such a collection.
+- The other new-collection config keys (`activeDecks`, `curDeck`, `nextPos` and the rest) come with U28; no scenario U29 makes active observes them. `browser/config/new-collection` reads only K1's keys, passes on the stand-in, and is active (`conformance/scenarios/browser/area.yaml`).
+- U28's bootstrap replaces the stand-in and writes the same `col` values, keys and rows, plus the rest.

@@ -47,6 +47,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
 | `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
+| `render_status` | card references or none | `{"#cN": {ord, status} \| null}`: whether the card renders for review from its stored templates, `status` `ok`, `empty` (blank question) or `template_error`, with no text or length (`render-ops.md` Q4) |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
 | `search` | list of `{query, kind?: cards \| notes}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
 | `canonical_search` | list of search texts | `search-ops.md` S2: one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |

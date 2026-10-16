@@ -1096,6 +1096,8 @@ fn a_login_says_how_it_derives_its_credentials() {
             Credentials::WrongPassword,
         ),
         ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+        // S4.1: the sync status the client's indicator asks for (U106).
+        ("{kind: status}", SyncKind::Status, Credentials::Account),
     ] {
         let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
         let Step::Sync(spec) = &parsed.steps[1] else {
@@ -1105,6 +1107,7 @@ fn a_login_says_how_it_derives_its_credentials() {
     }
     for (args, why) in [
         ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: status, credentials: account}", "credentials"),
         ("{kind: full_upload, credentials: wrong_password}", "credentials"),
         ("{kind: login, credentials: other}", "other"),
         ("{kind: login, credentials: null}", "credentials"),
@@ -1122,6 +1125,10 @@ fn a_login_says_how_it_derives_its_credentials() {
         &loaded.scenario.steps[1],
         Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
     ));
+
+    // The committed status scenario parses, its fourth step a status.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/meta/status.yaml")).unwrap();
+    assert!(matches!(&loaded.scenario.steps[3], Step::Sync(s) if s.kind == SyncKind::Status));
 }
 
 #[test]
@@ -1692,4 +1699,51 @@ fn update_notetype_needs_a_capability_per_kind_of_edit() {
             .ops
             .contains("update_notetype.add_field")
     );
+}
+
+/// render-ops.md Q4.1: `render_status` takes card references or none, and
+/// reads the collection.
+#[test]
+fn render_status_requests_follow_the_schema() {
+    let parse = |request: &str| {
+        let text = format!(
+            "id: notetypes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    for good in [
+        "render_status",
+        "\"render_status(#c1, #c3)\"",
+        "{render_status: [\"#c2\"]}",
+        "\"render_status(#c1)\", {render_status: [\"#c2\"]}",
+    ] {
+        let parsed = parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+        assert!(parsed.needs().observations.contains("render_status"), "{good}");
+        assert!(parsed.starts_from_new_collection(), "{good}");
+    }
+    for (bad, why) in [
+        ("\"render_status(#n1)\"", "does not take these arguments"),
+        ("{render_status: [\"#n1\"]}", "does not take these arguments"),
+        ("{render_status: {cards: [\"#c1\"]}}", "does not take these arguments"),
+        ("{render_status: []}", "at least one reference"),
+        ("{render_status: null}", "cannot take null"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// records.md N12: in notetypes/records/stock-render-handoff Meguri only makes
+/// its new collection and hands it over; the oracle adds and renders.
+#[test]
+fn stock_render_handoff_needs_only_the_new_collection_and_handoff_on_meguri() {
+    let path = conformance_dir().join("scenarios/notetypes/records/stock-render-handoff.yaml");
+    let text = fs::read_to_string(path).unwrap();
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap();
+    let meguri = parsed.needs_on(scenario::Side::Meguri);
+    assert_eq!(meguri.setup.iter().collect::<Vec<_>>(), [scenario::NEW_COLLECTION]);
+    assert_eq!(meguri.ops.iter().collect::<Vec<_>>(), ["handoff"]);
+    assert!(meguri.observations.is_empty(), "{}", meguri.summary());
+    let oracle = parsed.needs_on(scenario::Side::Oracle);
+    assert!(oracle.observations.contains("render_status"), "{}", oracle.summary());
 }

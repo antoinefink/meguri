@@ -1,0 +1,53 @@
+# What the status check decides from the two `meta` records (specs/sync/
+# meta-status.md M3; R1517, R1518), with the `col` stamps read after each sync
+# to show which ones wrote anything:
+# - an empty server allows only an upload, and a collection without cards
+#   allows only a download;
+# - a downloaded collection carries the server's modification time, so the
+#   next status check finds equal times: no_changes, nothing written;
+# - a local change moves the local time, the schema times are equal, so a
+#   normal sync runs (no_changes, new stamps);
+# - equal modification times stop at the status check even after the local
+#   schema time moves past the server's;
+# - a server collection replaced by another device's upload, while both sides
+#   hold cards, asks for a choice.
+id: sync/meta/outcomes
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - sync: {kind: full_download}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - add_note: {notetype: Pair, deck: Words, fields: [moon, luna]}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - advance: 1m
+  - db_exec: {sql: "UPDATE col SET scm = scm + 3600000"}
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}

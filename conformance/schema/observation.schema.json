@@ -243,6 +243,25 @@
             "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
           }
         },
+        "render_status": {
+          "description": "specs/conformance/render-ops.md Q4.3: per card, its stored ordinal and whether it renders for review from its stored templates; null when the card no longer exists.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["ord", "status"],
+                "additionalProperties": false,
+                "properties": {
+                  "ord": { "type": "integer", "minimum": 0 },
+                  "status": { "enum": ["ok", "empty", "template_error"] }
+                }
+              },
+              { "type": "null" }
+            ]
+          }
+        },
         "template": {
           "description": "specs/conformance/render-ops.md Q1.5: one result per case, in case order.",
           "type": "array",
@@ -415,7 +434,7 @@
               "type": "object",
               "required": ["result"],
               "additionalProperties": false,
-              "properties": { "result": { "enum": ["ok", "no_changes", "full_sync", "full_upload", "full_download"] } }
+              "properties": { "result": { "enum": ["ok", "no_changes", "normal_sync", "full_sync", "full_upload", "full_download"] } }
             },
             {
               "allOf": [

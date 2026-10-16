@@ -1006,14 +1006,14 @@ hf00ddf9dbca8,rust,supplementary,storage,in-scope,"notes, cards, decks, presets 
 hf613c9b636bd,rust,supplementary,storage,unclassified,,,open
 hf7664c5a108b,rust,supplementary,storage,in-scope,"A review-log row arriving with a taken id is not inserted; for undo, Meguri refuses the redo instead (deviation); sync and import scenarios come with those ops (U107, U122)",undo/revlog-taken-id,deferred
 hfb0061ec0b9b,rust,supplementary,storage,unclassified,,,open
-h39fa0055ea4c,python,tag,sync,unclassified,,,open
-h51a52fc54a83,python,tag,sync,unclassified,,,open
-ha70ddf9862eb,python,tag,sync,unclassified,,,open
+h39fa0055ea4c,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
+h51a52fc54a83,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
+ha70ddf9862eb,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its switch to skip TLS verification; Meguri has no such switch,,done
 h054820efe6cf,rust,supplementary,sync,unclassified,,,open
 h08e20ff5f483,rust,supplementary,sync,unclassified,,,open
 h15bc3d0e4efd,rust,supplementary,sync,in-scope,a login refused by the server is an authentication failure,sync/transport/login-wrong-password,done
 h1774219ddefc,rust,tag,sync,in-scope,"the stall timeout fires even before any byte moves; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
-h18ff6947756c,rust,tag,sync,unclassified,,,open
+h18ff6947756c,rust,tag,sync,not-applicable,the sync server accepts graves in an old client format; Meguri is a client and sends its graves separately,,done
 h2129dd2678c2,rust,tag,sync,unclassified,,,open
 h241c4726e626,rust,supplementary,sync,unclassified,,,open
 h291349aa0c71,rust,tag,sync,in-scope,login returns the host key and a wrong password is refused as an authentication failure,sync/transport/login sync/transport/login-wrong-password,done
@@ -1022,21 +1022,21 @@ h389b8fd94c14,rust,tag,sync,unclassified,,,open
 h3f6a9ed898b8,rust,supplementary,sync,in-scope,a login whose connection is closed before the answer is a network error,sync/transport/login-reset,done
 h400e0628f27d,rust,supplementary,sync,unclassified,,,open
 h46c1ebf32143,rust,supplementary,sync,unclassified,,,open
-h54c23550e27f,rust,tag,sync,unclassified,,,open
+h54c23550e27f,rust,tag,sync,in-scope,"a sync the server cannot apply (a note whose note type it lacks) fails with the database-check kind and leaves both sides able to sync again; the scenario needs a driver kind that tells this failure from a failed sanity check (U107), meguri-sync stub tests cover the status mapping meanwhile",,deferred
 h55c7436ac179,rust,tag,sync,unclassified,,,open
 h59143f82a4f9,rust,tag,sync,in-scope,"a transfer that stops moving fails after the stall timeout while a steady one never times out; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
 h5c5b47431921,rust,tag,sync,unclassified,,,open
 h62b3f29862b5,rust,tag,sync,unclassified,,,open
 h65243b54e871,rust,tag,sync,unclassified,,,open
-h6b1ce6691f8e,rust,tag,sync,unclassified,,,open
+h6b1ce6691f8e,rust,tag,sync,in-scope,"a never-synced new collection against a new account finds no changes online, and a sync then writes nothing",sync/meta/status,done
 h7298208250f2,rust,supplementary,sync,in-scope,the login body carries the user name and password under their short member names,sync/transport/login,done
 h7709a37ac92a,rust,tag,sync,unclassified,,,open
-h7ffe4ba74f1f,rust,tag,sync,unclassified,,,open
+h7ffe4ba74f1f,rust,tag,sync,not-applicable,"the sync server ends an older sync session when another starts; Meguri is a client with one session key per job, and the resulting conflict answer is a sync error kind",,done
 h850281d2190d,rust,supplementary,sync,unclassified,,,open
 h862454dde0dd,rust,tag,sync,in-scope,"a request to an address that never answers fails within the timeouts; scenarios need U118's faults, meguri-sync's stub tests cover it meanwhile",,deferred
 h8f638568ddc0,rust,supplementary,sync,in-scope,a successful login returns the host key,sync/transport/login,done
 ha29e26f021f6,rust,tag,sync,unclassified,,,open
-haac4685e7e73,rust,tag,sync,unclassified,,,open
+haac4685e7e73,rust,tag,sync,not-applicable,"the sync server refuses a status check with an unsupported protocol version; Meguri is a client that always sends version 11, and its handling of that refusal is a sync error kind covered by meguri-sync stub tests",,done
 hacd6334f675a,rust,tag,sync,unclassified,,,open
 hacfb5a333b1c,rust,tag,sync,unclassified,,,open
 hadd60d2540c9,rust,tag,sync,in-scope,"the status check follows a permanent redirect once and reports the new endpoint; the scenario's server never redirects, so meguri-sync's stub tests cover it until a fault can inject redirects (U118)",,deferred

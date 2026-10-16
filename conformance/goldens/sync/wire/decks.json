@@ -1,0 +1,129 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Default": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1,
+              "lrnToday": [0, 0],
+              "mod": 0,
+              "name": "Default",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": 0
+            },
+            "Words": {
+              "browserCollapsed": false,
+              "collapsed": false,
+              "conf": 1894701600000,
+              "desc": "Daily <b>words</b>",
+              "desiredRetention": 85,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "md": true,
+              "mod": 1894701600,
+              "name": "Words",
+              "newLimit": 15,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": 120,
+              "reviewLimitToday": {
+                "limit": 30,
+                "today": 3
+              },
+              "timeToday": [0, 0],
+              "usn": -1,
+              "x_deck_color": "#3a7",
+              "x_deck_meta": {
+                "order": [3, 1],
+                "pinned": true
+              }
+            },
+            "Words::Cram": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "delays": null,
+              "desc": "",
+              "dyn": 1,
+              "id": 1894701600100,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Words::Cram",
+              "newToday": [0, 0],
+              "previewAgainSecs": 60,
+              "previewDelay": 0,
+              "previewGoodSecs": 0,
+              "previewHardSecs": 600,
+              "resched": true,
+              "revToday": [0, 0],
+              "separate": true,
+              "terms": [
+                ["is:due", 50, 6]
+              ],
+              "timeToday": [0, 0],
+              "usn": 0
+            },
+            "Words::Kanji": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Words::Kanji",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32ece948047d3a7da83048cf8c8316e05d4e76a549a4c0290c793248b756bb6f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/wire/decks",
+  "scenario_sha256": "33b51d8aa9e7bf56c20d1b807c0dd288105f545f64bc3cd424823c10e6182342",
+  "tz": "UTC"
+}
