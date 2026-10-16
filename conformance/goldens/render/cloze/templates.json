@@ -1,0 +1,106 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "template": [
+          {
+            "answer": "<span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[capital]</span> in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span><hr id=answer><span class=\"cloze\" data-ordinal=\"1\">Paris</span> in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[capital]</span> in <span class=\"cloze-inactive\" data-ordinal=\"2\">France</span>"
+          },
+          {
+            "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> in <span class=\"cloze\" data-cloze=\"France\" data-ordinal=\"2\">[...]</span><hr id=answer><span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> in <span class=\"cloze\" data-ordinal=\"2\">France</span>",
+            "empty": false,
+            "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Paris</span> in <span class=\"cloze\" data-cloze=\"France\" data-ordinal=\"2\">[...]</span>"
+          },
+          {
+            "answer": "a, b|[[type:cloze:Text]]",
+            "empty": false,
+            "question": "h, ...|[[type:cloze:Text]]"
+          },
+          {
+            "answer": "a & b",
+            "empty": false,
+            "question": "[h] & b"
+          },
+          {
+            "answer": "<span class=\"cloze\" data-ordinal=\"1\">a</span> & b",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span> & b"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": ""
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": ""
+          },
+          {
+            "answer": "{{c1::a}} b",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span> b"
+          },
+          {
+            "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> <span class=\"cloze\" data-ordinal=\"2\">b</span>|",
+            "empty": false,
+            "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> <span class=\"cloze\" data-cloze=\"b\" data-ordinal=\"2\">[...]</span>|"
+          },
+          {
+            "answer": "e",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span>|<span class=\"cloze\" data-cloze=\"e\" data-ordinal=\"1\">[eh]</span>"
+          },
+          {
+            "answer": "<span class=\"cloze\" data-ordinal=\"1\">t</span>|<span class=\"cloze\" data-ordinal=\"1\">n</span>",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span>|<span class=\"cloze\" data-cloze=\"t\" data-ordinal=\"1\">[...]</span>|<span class=\"cloze\" data-cloze=\"n\" data-ordinal=\"1\">[...]</span>"
+          },
+          {
+            "answer": "\\(x\\) <b><span class=\"cloze\" data-ordinal=\"3\">y</span></b>",
+            "empty": false,
+            "question": "\\([...]\\) <b><span class=\"cloze\" data-cloze=\"y\" data-ordinal=\"3\">[...]</span></b>"
+          }
+        ]
+      },
+      {
+        "template": [
+          {
+            "answer": "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"2\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">y</span>|<span class=\"cloze\" data-ordinal=\"2\">x</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">y</span>",
+            "empty": false,
+            "question": "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"2\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">y</span>"
+          },
+          {
+            "answer": "",
+            "empty": false,
+            "question": ""
+          },
+          {
+            "answer": null,
+            "empty": true,
+            "question": ""
+          },
+          {
+            "answer": "x",
+            "empty": false,
+            "question": "h"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d242c316ccc15adbecf1514c8b7cc469057e11fb38054dc00fb496b302f2b634",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/templates",
+  "scenario_sha256": "f8fd127f9dd40c410905f03f8e910d4cc9acc40c7a009fde902e1fdb9aac4c6e",
+  "tz": "UTC"
+}

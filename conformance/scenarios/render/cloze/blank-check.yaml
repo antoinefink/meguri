@@ -1,0 +1,41 @@
+# specs/render/cloze.md C15 (template-syntax.md T10, cloze note types): a card
+# of a cloze note type is blank when no value of its field map has the card
+# number among its cloze numbers (C5). The templates play no part; special
+# values count unless a note field of the same name hides them.
+id: render/cloze/blank-check
+description: "Blank check of cloze note types over every value of the field map"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - template:
+          notetype: {name: Gap Probe, kind: cloze, fields: [Text, Extra]}
+          cases:
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", fields: ["{{c1::a}} {{c2::b}}", x]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", ord: 1, fields: ["{{c1::a}} {{c2::b}}", x]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}", ord: 2, fields: ["{{c1::a}} {{c2::b}}", x]}
+            - {front: "{{cloze:Text}}", back: "{{Extra}}", ord: 1, fields: [plain, "{{c2::x}}"]}
+            - {front: "{{cloze:Text}}", back: "{{Extra}}", ord: 2, fields: [plain, "{{c2::x}}"]}
+            - {front: "{{Text}}", back: "{{Text}}", fields: ["{{c1::a}}", ""]}
+            - {front: "", back: "back", fields: ["{{c1::a}}", ""]}
+            - {front: "{{Extra}}", back: "{{Extra}}", fields: ["{{c1::a}}", ""]}
+            - {front: "{{Text}}", back: "{{Text}}", fields: ["no clozes", "x"]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", ord: 1, fields: ["{{c0::a {{c2::b}}}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", fields: ["{{c0::label}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", fields: ["{{c1::open", ""]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", ord: 2, fields: ["{{c1,3::x}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", ord: 499, fields: ["{{c500::x}}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", fields: ["{{C1::x}} {{c1:x}} {c1::x}", ""]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", ord: 2, fields: ["{{c1::a}}", ""], tags: ["{{c3::t}}"]}
+            - {front: "{{cloze:Text}}", back: "{{cloze:Text}}", ord: 3, name: "{{c4::card}}", fields: ["{{c1::a}}", ""]}
+  - observe:
+      - template:
+          notetype: {name: "Gap {{c5::type}}", kind: cloze, fields: [Text]}
+          cases:
+            - {front: "{{cloze:Text}}", back: "{{Type}}", ord: 4, fields: ["{{c1::a}}"]}
+            - {front: "{{cloze:Text}}", back: "{{Type}}", ord: 5, fields: ["{{c1::a}}"]}
+  - observe:
+      - template:
+          notetype: {name: Gap Shadow, kind: cloze, fields: [Text, Tags]}
+          cases:
+            - {front: "{{cloze:Text}}", back: "{{Tags}}", ord: 2, fields: ["{{c1::a}}", ""], tags: ["{{c3::t}}"]}
+            - {front: "{{cloze:Text}}", back: "{{Tags}}", ord: 2, fields: ["{{c1::a}}", "{{c3::f}}"], tags: [t]}
