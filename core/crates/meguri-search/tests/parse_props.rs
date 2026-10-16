@@ -499,43 +499,47 @@ fn error_ranges_follow_e5() {
     }
 }
 
-// E7: Meguri's wording, the E2 texts with backticks turned to apostrophes.
+// E7: Meguri's wording, the E2 texts with backticks turned to apostrophes,
+// and no prefix before them.
 #[test]
 fn messages_name_the_offending_text() {
     let cases = [
         (
             "a or",
-            "Invalid search: an `or` must stand between two search terms. To search for the word, put it in double quotes: `\"or\"`.",
+            "`or` has to sit between two search terms. To find the word itself, quote it: `\"or\"`.",
         ),
         (
             "()",
-            "Invalid search: there is nothing to search for between `(` and `)`. To search for brackets, put them in double quotes: `\"( )\"`.",
+            "The brackets `( )` hold nothing to look for. To find brackets themselves, quote them: `\"( )\"`.",
         ),
         (
             "\"\"",
-            "Invalid search: there is nothing to search for between the double quotes `\"\"`. To search for double quotes, write `\\\"\\\"`.",
+            "The quote marks `\"\"` hold nothing to look for. To find quote marks themselves, write `\\\"\\\"`.",
         ),
         (
             "a\\`b",
-            "Invalid search: the escape `\\'` does not exist. To search for a backslash, write `\\\\`.",
+            "`\\'` is not a valid escape. To find a backslash itself, write `\\\\`.",
         ),
-        ("is:a`b", "Invalid search: `is:` does not accept `a'b`."),
+        ("is:a`b", "`a'b` is not a card state that `is:` knows."),
         (
             "prop:ivl~1",
-            "Invalid search: `prop:ivl` needs one of the comparisons `=`, `!=`, `<`, `>`, `<=` or `>=`.",
+            "Follow `prop:ivl` with a comparison: `<`, `<=`, `=`, `!=`, `>=` or `>`.",
         ),
         (
             "added:`",
-            "Invalid search: expected a whole number of 0 or more in `added:`, found `'`.",
+            "`added:` needs a whole number of zero or more, and `'` is not one.",
         ),
         (
             "rated:1:5",
-            "Invalid search: expected an answer button from 1 to 4 in `1:5`, found `5`.",
+            "`1:5` needs an answer button from 1 to 4, and `5` is not one.",
         ),
-        ("NID:1,a", "Invalid search: `NID:` takes only ids separated by commas."),
+        (
+            "NID:1,a",
+            "`NID:` takes ids made of digits, with a single comma between two ids.",
+        ),
         (
             "flag:8",
-            "Invalid search: `flag:` needs a flag number: 1 red, 2 orange, 3 green, 4 blue, 5 pink, 6 turquoise, 7 purple or 0 for no flag.",
+            "`flag:` takes 0 for no flag, or 1 to 7 for red, orange, green, blue, pink, turquoise and purple.",
         ),
     ];
     for (text, message) in cases {
@@ -630,11 +634,9 @@ fn every_message_is_the_spec_text() {
     assert_eq!(labels, cases.iter().map(|case| case.0).collect::<Vec<_>>());
     for (label, error, provided, context) in cases {
         let (_, text) = spec.iter().find(|(l, _)| l == label).unwrap();
-        let expected = format!(
-            "Invalid search: {}",
-            text.replace("{provided}", &provided.replace('`', "'"))
-                .replace("{context}", &context.replace('`', "'"))
-        );
+        let expected = text
+            .replace("{provided}", &provided.replace('`', "'"))
+            .replace("{context}", &context.replace('`', "'"));
         assert_eq!(error.message(), expected, "{label}");
         assert_eq!(error.to_string(), expected, "{label}");
     }
@@ -648,11 +650,8 @@ fn every_message_is_the_spec_text() {
     let (_, text) = spec.iter().find(|(l, _)| l == "invalid_regex").unwrap();
     assert_eq!(
         regex.message(),
-        format!(
-            "Invalid search: {}",
-            text.replace("{pattern}", "a(")
-                .replace("{reason}", "the group is not closed")
-        )
+        text.replace("{pattern}", "a(")
+            .replace("{reason}", "the group is not closed")
     );
 }
 
@@ -752,6 +751,7 @@ const PIECES: [&str; 48] = [
 // part of it, and every parsed text has a canonical text.
 #[test]
 fn generated_texts_parse_or_fail_with_a_range_inside_the_text() {
+    let spec = spec_messages();
     let mut seq = Seq(0x5EA2_C0DE);
     for _ in 0..20_000 {
         let pieces = seq.below(16);
@@ -765,7 +765,12 @@ fn generated_texts_parse_or_fail_with_a_range_inside_the_text() {
             Err(e) => {
                 let range = e.range();
                 assert!(range.start < range.end && range.end <= length, "{text:?}: {e:?}");
-                assert!(e.kind().is_parse_error() && e.message().starts_with("Invalid search: "));
+                assert!(e.kind().is_parse_error(), "{text:?}: {e:?}");
+                let (_, spec_text) = spec.iter().find(|(label, _)| label == e.code()).unwrap();
+                let expected = spec_text
+                    .replace("{provided}", &e.kind().provided().unwrap_or("").replace('`', "'"))
+                    .replace("{context}", &e.kind().context().unwrap_or("").replace('`', "'"));
+                assert_eq!(e.message(), expected, "{text:?}");
                 if let Some(provided) = e.kind().provided()
                     && e.code() == "unknown_escape"
                 {
