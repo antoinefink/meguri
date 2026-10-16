@@ -1,0 +1,58 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>1 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>r</span><span class=typeBad>e</span><span class=typeGood>sum</span><span class=typeBad>e</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>r</span><span class=typeMissed>é</span><span class=typeGood>sum</span><span class=typeMissed>é</span></code></div>résumé",
+            "question": "<style></style>1 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>résumé</span></code></div>résumé",
+            "question": "<style></style>2 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>3 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>résumé</span></code></div>résumé",
+            "question": "<style></style>3 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>résumé</span></code></div>résumé",
+            "question": "<style></style>2 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 CV<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>resume</span><span class=typeBad>s</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>résumé</span></code></div>résumé",
+            "question": "<style></style>2 CV\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 book<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>ほん </span><span class=typeBad>か</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>ほん </span><span class=typeMissed>が</span></code></div>ほん<br>が",
+            "question": "<style></style>1 book\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 book<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>ほん が</span></code></div>ほん<br>が",
+            "question": "<style></style>2 book\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 station<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>d</span><span class=typeGood>onde esta la estacion de tre</span><span class=typeMissed>--</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>¿D</span><span class=typeGood>ónde está la estación de tre</span><span class=typeMissed>n?</span></code></div>¿Dónde está la estación de tren?",
+            "question": "<style></style>2 station\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 station<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>do</span><span class=typeGood>nde est</span><span class=typeBad>a</span><span class=typeGood> la estaci</span><span class=typeBad>o</span><span class=typeGood>n de tre</span><span class=typeMissed>--</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>¿Dó</span><span class=typeGood>nde est</span><span class=typeMissed>á</span><span class=typeGood> la estaci</span><span class=typeMissed>ó</span><span class=typeGood>n de tre</span><span class=typeMissed>n?</span></code></div>¿Dónde está la estación de tren?",
+            "question": "<style></style>1 station\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/modifiers",
+  "scenario_sha256": "4a5bef795d32f771930f3ce7b345fd088e8494490291d32a6ad0e084de159720",
+  "tz": "UTC"
+}

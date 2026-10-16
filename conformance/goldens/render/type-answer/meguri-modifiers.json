@@ -1,0 +1,50 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style>1 greeting<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Hola Amiga</span></code></div>Hola Amiga",
+            "question": "<style></style>1 greeting\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 greeting<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>h</span><span class=typeGood>ola </span><span class=typeBad>a</span><span class=typeGood>miga</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>H</span><span class=typeGood>ola </span><span class=typeMissed>A</span><span class=typeGood>miga</span></code></div>Hola Amiga",
+            "question": "<style></style>1 greeting\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>1 greeting<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>h</span><span class=typeGood>ola </span><span class=typeBad>a</span><span class=typeGood>mig</span><span class=typeBad>o</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>H</span><span class=typeGood>ola </span><span class=typeMissed>A</span><span class=typeGood>mig</span><span class=typeMissed>a</span></code></div>Hola Amiga",
+            "question": "<style></style>1 greeting\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 wood<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>EBENE</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>Ébène</span></code></div>Ébène",
+            "question": "<style></style>2 wood\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>3 wood<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>e</span><span class=typeGood>b</span><span class=typeBad>e</span><span class=typeGood>ne</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>É</span><span class=typeGood>b</span><span class=typeMissed>è</span><span class=typeGood>ne</span></code></div>Ébène",
+            "question": "<style></style>3 wood\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">café</span> y <span class=\"cloze\" data-ordinal=\"1\">té</span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeMissed>------</span><span class=typeGood>caf</span><span class=typeBad>e,</span><span class=typeGood> </span><span class=typeMissed>--------</span><span class=typeGood>t</span><span class=typeBad>e</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>{{c1::</span><span class=typeGood>caf</span><span class=typeMissed>é}}</span><span class=typeGood> </span><span class=typeMissed>y {{c1::</span><span class=typeGood>t</span><span class=typeMissed>é}}</span></code></div>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"caf&#xE9;\" data-ordinal=\"1\">[...]</span> y <span class=\"cloze\" data-cloze=\"t&#xE9;\" data-ordinal=\"1\">[...]</span>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">Paris</span> is big<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeBad>p</span><span class=typeGood>aris</span><span class=typeMissed>---------</span><br><span id=typearrow>&darr;</span><br><span class=typeMissed>{{c1::P</span><span class=typeGood>aris</span><span class=typeMissed>}} is big</span></code></div>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"Paris\" data-ordinal=\"1\">[...]</span> is big\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/meguri-modifiers",
+  "scenario_sha256": "6e4281fba42a5dbaaab647af8cfbf403b74fd2d5df7a0e7988664c02f8298baf",
+  "tz": "UTC"
+}

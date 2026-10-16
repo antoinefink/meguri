@@ -1,0 +1,83 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style>.card { text-align: center; }</style>cat<br><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans>neko</code></div>neko",
+            "question": "<style>.card { text-align: center; }</style>cat<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      },
+      {},
+      {
+        "review_html": [
+          {
+            "answer": "<style>.card { text-align: center; }</style>cat<br><hr id=answer>\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans><span class=typeGood>neko</span></code></div>neko",
+            "question": "<style>.card { text-align: center; }</style>cat<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>cat|\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans><span class=typeGood>neko</span></code></div>|\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans><span class=typeGood>neko</span></code></div>|",
+            "question": "<style>.card { text-align: center; }</style>cat|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n|"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>cat",
+            "question": "<style>.card { text-align: center; }</style>cat[[warning:unknown_field:Tags]]"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>cat",
+            "question": "<style>.card { text-align: center; }</style>cat[[warning:unknown_field:Missing]]"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>x\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans><span class=typeGood>neko</span></code></div>",
+            "question": "<style>.card { text-align: center; }</style>x\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>dog<br><hr id=answer>",
+            "question": "<style>.card { text-align: center; }</style>dog<br>"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>dog|||",
+            "question": "<style>.card { text-align: center; }</style>dog|||"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>dog",
+            "question": "<style>.card { text-align: center; }</style>dog[[warning:unknown_field:Tags]]"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>bird<br><hr id=answer>\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans><span class=typeBad>tori</span><br><span id=typearrow>&darr;</span><br></code></div><br>",
+            "question": "<style>.card { text-align: center; }</style>bird<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>bird<br><hr id=answer>\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans></code></div><br>",
+            "question": "<style>.card { text-align: center; }</style>bird<br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>bird|\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans></code></div>|\n<div style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px\"><code id=typeans></code></div>|",
+            "question": "<style>.card { text-align: center; }</style>bird|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n|\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Hiragino Mincho ProN'; font-size: 28px;\">\n</center>\n|"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeGood>fish</span></code></div>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeGood>fish</span></code></div>",
+            "question": "<style>.card { text-align: center; }</style>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style>.card { text-align: center; }</style>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeGood>f</span><span class=typeMissed>-</span><span class=typeGood>sh</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>f</span><span class=typeMissed>i</span><span class=typeGood>sh</span></code></div>\n<div style=\"font-family: 'Noto Sans'; font-size: 16px\"><code id=typeans><span class=typeGood>f</span><span class=typeMissed>-</span><span class=typeGood>sh</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>f</span><span class=typeMissed>i</span><span class=typeGood>sh</span></code></div>",
+            "question": "<style>.card { text-align: center; }</style>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Noto Sans'; font-size: 16px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/question",
+  "scenario_sha256": "38809ca0454f8594a38a29daeaab7c3600732d184884fd0dadf8aba4973a669a",
+  "tz": "UTC"
+}

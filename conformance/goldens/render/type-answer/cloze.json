@@ -1,0 +1,62 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "review_html": [
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">a</span> <span class=\"cloze\" data-ordinal=\"1\">b</span> <span class=\"cloze-inactive\" data-ordinal=\"2\"><i>c</i></span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>a, b</span></code></div><br>note",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"b\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\"><i>c</i></span><br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">a</span> <span class=\"cloze\" data-ordinal=\"1\">b</span> <span class=\"cloze-inactive\" data-ordinal=\"2\"><i>c</i></span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>a</span><span class=typeMissed>-</span><span class=typeGood> b</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>a</span><span class=typeMissed>,</span><span class=typeGood> b</span></code></div><br>note",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"a\" data-ordinal=\"1\">[...]</span> <span class=\"cloze\" data-cloze=\"b\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\"><i>c</i></span><br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">b</span> <span class=\"cloze\" data-ordinal=\"2\"><i>c</i></span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>c</span></code></div><br>note",
+            "question": "<style></style><span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">b</span> <span class=\"cloze\" data-cloze=\"&lt;i&gt;c&lt;&#x2F;i&gt;\" data-ordinal=\"2\">[...]</span><br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">b</span> <span class=\"cloze\" data-ordinal=\"2\"><i>c</i></span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans>c</code></div><br>note",
+            "question": "<style></style><span class=\"cloze-inactive\" data-ordinal=\"1\">a</span> <span class=\"cloze-inactive\" data-ordinal=\"1\">b</span> <span class=\"cloze\" data-cloze=\"&lt;i&gt;c&lt;&#x2F;i&gt;\" data-ordinal=\"2\">[...]</span><br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">Rhône</span> and <span class=\"cloze\" data-ordinal=\"1\">Rhône</span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Rh</span><span class=typeBad>o</span><span class=typeGood>ne</span><br><span id=typearrow>&darr;</span><br><span class=typeGood>Rh</span><span class=typeMissed>ô</span><span class=typeGood>ne</span></code></div><br>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"Rh&#xF4;ne\" data-ordinal=\"1\">[...]</span> and <span class=\"cloze\" data-cloze=\"Rh&#xF4;ne\" data-ordinal=\"1\">[...]</span><br>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">x</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">y</span><hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>ex</span></code></div>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">y</span>\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze-inactive\" data-ordinal=\"1\">x</span> <span class=\"cloze\" data-ordinal=\"2\">y</span><hr id=answer>",
+            "question": "<style></style><span class=\"cloze-inactive\" data-ordinal=\"1\">x</span> <span class=\"cloze\" data-cloze=\"y\" data-ordinal=\"2\">[...]</span>[[warning:empty_cards]]"
+          },
+          {
+            "answer": "<style></style><span class=\"cloze\" data-ordinal=\"1\">z</span>",
+            "question": "<style></style><span class=\"cloze\" data-cloze=\"z\" data-ordinal=\"1\">[...]</span>[[warning:empty_cards]]"
+          },
+          {
+            "answer": "<style></style>1 Seine<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Paris</span></code></div>{{c1::Paris}} {{c2::Rouen::city}}",
+            "question": "<style></style>1 Seine\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          },
+          {
+            "answer": "<style></style>2 Seine<hr id=answer>\n<div style=\"font-family: 'Arial'; font-size: 20px\"><code id=typeans><span class=typeGood>Rouen</span></code></div>{{c1::Paris}} {{c2::Rouen::city}}",
+            "question": "<style></style>2 Seine\n<center>\n<input type=text id=typeans onkeypress=\"_typeAnsPress();\"\n   style=\"font-family: 'Arial'; font-size: 20px;\">\n</center>\n"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "264f247b173391197d43b610110ff13d928321605d96770b57a5ad87494d0d40",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/type-answer/cloze",
+  "scenario_sha256": "c995bbec9e49a1526a2fdd07576b632a3027bcb5002517c10e0146b92518cab4",
+  "tz": "UTC"
+}

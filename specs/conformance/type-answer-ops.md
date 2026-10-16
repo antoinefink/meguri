@@ -42,6 +42,6 @@ Two observation kinds for U64: `type_answer` evaluates the type-in comparison on
 
 ## K4. Status
 
-- Neither kind is in the oracle driver yet. The oracle maintainer adds both (with `conformance/schema/protocol.json`) and records the goldens of `render/type-answer/*` (the corpus included), `render/media-escape/cards`, `render/image-occlusion/render/cards` and `render/image-occlusion/render/audio`. `render/image-occlusion/render/audio-tags` uses U62's `render` kind and is recorded once the driver has it.
+- Both kinds are in the oracle driver and listed in `conformance/schema/protocol.json`. The goldens of `render/type-answer/*` (the corpus included), `render/media-escape/cards`, `render/image-occlusion/render/cards` and `render/image-occlusion/render/audio` are recorded. `render/image-occlusion/render/audio-tags` uses U62's `render` kind and is recorded once the driver has it.
 - `render/image-occlusion/render/divs` (the `cloze` kind) and `render/media-escape/strings` (the `text` kind) have goldens now.
 - U64 teaches meguri-testkit both kinds and marks the scenarios active in `conformance/scenarios/render/area.yaml` in the change that lands them; until then T0 reports them invalid (unknown kind) or pending.
