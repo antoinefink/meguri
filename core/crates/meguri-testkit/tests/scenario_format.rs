@@ -549,6 +549,54 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
     assert!(needs.ops.contains("export") && needs.observations.contains("package_col"));
 }
 
+/// undo-ops.md V1-V3: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn undo_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: undo/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{undo: {}}, {redo: {}}, {remove_config: {key: k}}, {set_config: {key: k, value: 1, undoable: true}}, \
+         {set_config: {key: k, value: 1, undoable: false}}, {set_config: {key: k, value: 1}}, \
+         {observe: [undo_status, {undo_status: null}]}]",
+    )
+    .unwrap();
+    let undoable: Vec<bool> = parsed
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::SetConfig(args) => Some(args.undoable),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(undoable, [true, false, false]);
+    assert!(matches!(&parsed.steps[2], Step::RemoveConfig(args) if args.key == "k"));
+    let needs = parsed.needs();
+    for op in ["undo", "redo", "remove_config", "set_config"] {
+        assert!(needs.ops.contains(op), "{op}");
+    }
+    assert!(needs.observations.contains("undo_status"));
+    for (bad, why) in [
+        ("[{undo: {steps: 1}}]", "unknown key"),
+        ("[{undo: null}]", "takes a mapping"),
+        ("[{redo: []}]", "takes a mapping"),
+        ("[{remove_config: {}}]", "key"),
+        ("[{remove_config: {key: \"\"}}]", "non-empty key"),
+        ("[{remove_config: {key: k, undoable: true}}]", "unknown field"),
+        ("[{remove_config: k}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: null}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: 1}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: \"true\"}}]", "invalid type"),
+        ("[{observe: [\"undo_status(#c1)\"]}]", "does not take"),
+        ("[{observe: [{undo_status: {}}]}]", "undo_status"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
 #[test]
 fn text_requests_follow_the_schema() {
     let parse = |request: &str| {

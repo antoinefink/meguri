@@ -604,8 +604,14 @@ pub enum Step {
     EditNote(EditNoteArgs),
     /// record-ops.md W3.
     DeleteNotes(DeleteNotesArgs),
-    /// record-ops.md W4.
+    /// record-ops.md W4; `undoable`: undo-ops.md V3.1.
     SetConfig(SetConfigArgs),
+    /// undo-ops.md V3.2.
+    RemoveConfig(RemoveConfigArgs),
+    /// undo-ops.md V1: the top step of the undo history.
+    Undo(NoArgs),
+    /// undo-ops.md V1: the top step of the redo history.
+    Redo(NoArgs),
     Bury(DraftArgs),
     Suspend(DraftArgs),
     Forget(DraftArgs),
@@ -640,7 +646,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 27] = [
+    pub const NAMES: [&'static str; 30] = [
         "advance",
         "set_clock",
         "add_note",
@@ -649,6 +655,9 @@ impl Step {
         "edit_note",
         "delete_notes",
         "set_config",
+        "remove_config",
+        "undo",
+        "redo",
         "bury",
         "suspend",
         "forget",
@@ -684,6 +693,9 @@ impl Step {
             Step::EditNote(_) => "edit_note",
             Step::DeleteNotes(_) => "delete_notes",
             Step::SetConfig(_) => "set_config",
+            Step::RemoveConfig(_) => "remove_config",
+            Step::Undo(_) => "undo",
+            Step::Redo(_) => "redo",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
             Step::Forget(_) => "forget",
@@ -860,13 +872,25 @@ pub struct DeleteNotesArgs {
     pub notes: Vec<NoteRef>,
 }
 
-/// `set_config: {key, value}` (record-ops.md W4): `key` not empty (checked
-/// on load), `value` any JSON value, null included.
+/// `set_config: {key, value, undoable?}` (record-ops.md W4): `key` not
+/// empty (checked on load), `value` any JSON value, null included.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetConfigArgs {
     pub key: String,
     pub value: Value,
+    /// undo-ops.md V3.1: true makes the write an "Update Config" undo step;
+    /// false when missing (an explicit null is invalid).
+    #[serde(default)]
+    pub undoable: bool,
+}
+
+/// `remove_config: {key}` (undo-ops.md V3.2): `key` not empty (checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveConfigArgs {
+    pub key: String,
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes
@@ -1115,6 +1139,8 @@ pub enum ObservationKind {
     BlobDecode,
     PackageCol,
     Text,
+    /// undo-ops.md V2.
+    UndoStatus,
 }
 
 /// How a kind takes arguments.
@@ -1133,7 +1159,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 20] = [
+    pub const ALL: [ObservationKind; 21] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1154,6 +1180,7 @@ impl ObservationKind {
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
         ObservationKind::Text,
+        ObservationKind::UndoStatus,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1178,6 +1205,7 @@ impl ObservationKind {
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
+            ObservationKind::UndoStatus => "undo_status",
         }
     }
 
@@ -1191,7 +1219,8 @@ impl ObservationKind {
             ObservationKind::Timing
             | ObservationKind::DeckTree
             | ObservationKind::Digest
-            | ObservationKind::SchemaObjects => ArgShape::None,
+            | ObservationKind::SchemaObjects
+            | ObservationKind::UndoStatus => ArgShape::None,
             ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
                 ArgShape::CardRefs
             }

@@ -223,16 +223,16 @@ Every row a step changed, in any table, comes back as A4 to A6 describe for note
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `undo/edit-note` | A1, A4 and A7 for one edit, the note's server `usn` restored; refusals at both ends | pending (oracle maintainer) |
-| `undo/edit-note-merge` | A3: edits at 0, 30 and 59 s merge, one at 60 s and an edit of another note do not; undo and redo of the merged step | pending |
-| `undo/edit-note-new-card` | A3, A4: an edit that registers a tag and generates a card, and a later edit that is not merged into it; the undo deletes the card without a grave and the tag row | pending |
-| `undo/delete-notes` | A5: cards and notes back with their stamps, graves gone; redone and undone again | pending |
-| `undo/delete-note-existing-grave` | A5 with G6: graves that existed before the deletion are removed by the undo and come back pending with the redo | pending |
-| `undo/config-writes` | A6: an added, a changed and a removed key, undone and redone; a same-value write and a missing-key removal; harvest `hde5c73b93e34` | pending |
-| `undo/col-mod` | A7 with a config write without an undo entry between an edit and its undo | pending |
-| `undo/redo-cleared` | A2: which ops empty the redo history, which keep the undo steps, and the refusals | pending |
-| `undo/thirty-steps` | A2: the 30-step limit | pending |
-| `undo/revlog-taken-id` | A8; harvest `hf7664c5a108b`; deviations `undo-revlog-taken-id-*` | pending |
+| `undo/edit-note` | A1, A4 and A7 for one edit, the note's server `usn` restored; refusals at both ends | recorded |
+| `undo/edit-note-merge` | A3: edits at 0, 30 and 59 s merge, one at 60 s and an edit of another note do not; undo and redo of the merged step | recorded |
+| `undo/edit-note-new-card` | A3, A4: an edit that registers a tag and generates a card, and a later edit that is not merged into it; the undo deletes the card without a grave and the tag row | recorded |
+| `undo/delete-notes` | A5: cards and notes back with their stamps, graves gone; redone and undone again | recorded |
+| `undo/delete-note-existing-grave` | A5 with G6: graves that existed before the deletion are removed by the undo and come back pending with the redo | recorded |
+| `undo/config-writes` | A6: an added, a changed and a removed key, undone and redone; a same-value write and a missing-key removal; harvest `hde5c73b93e34` | recorded |
+| `undo/col-mod` | A7 with a config write without an undo entry between an edit and its undo | recorded |
+| `undo/redo-cleared` | A2: which ops empty the redo history, which keep the undo steps, and the refusals | recorded |
+| `undo/thirty-steps` | A2: the 30-step limit | recorded |
+| `undo/revlog-taken-id` | A8; harvest `hf7664c5a108b`; deviations `undo-revlog-taken-id-*` | recorded |
 
 `conformance/scenarios/undo/area.yaml` lists none as active yet: the implementer marks them active with the undo adapter (`undo-ops.md` V6).
 
