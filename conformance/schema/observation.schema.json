@@ -168,6 +168,28 @@
             "tags": { "type": "object", "additionalProperties": { "type": "integer" } }
           }
         },
+        "fsrs_next": {
+          "description": "float-determinism.md F3.3, F5.2: one row per input, in input order: days, stability and difficulty for again, hard, good and easy.",
+          "type": "object",
+          "required": ["rows"],
+          "additionalProperties": false,
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "prefixItems": [
+                  { "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/f32" }, { "$ref": "#/$defs/f32" },
+                  { "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/f32" }, { "$ref": "#/$defs/f32" },
+                  { "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/f32" }, { "$ref": "#/$defs/f32" },
+                  { "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/f32" }, { "$ref": "#/$defs/f32" }
+                ],
+                "minItems": 12,
+                "maxItems": 12
+              }
+            }
+          }
+        },
         "text": {
           "description": "O4 text: one array per requested function, one output per input in input order.",
           "type": "object",
@@ -186,6 +208,50 @@
             "checksum": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
             "field_empty": { "type": "array", "items": { "type": "boolean" } },
             "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
+          }
+        },
+        "template": {
+          "description": "specs/conformance/render-ops.md Q1.5: one result per case, in case order.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["question", "answer", "empty"],
+                "additionalProperties": false,
+                "properties": {
+                  "question": { "type": "string" },
+                  "answer": { "type": "string" },
+                  "empty": { "const": false }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["question", "answer", "empty"],
+                "additionalProperties": false,
+                "properties": {
+                  "question": { "type": "string" },
+                  "answer": { "type": "null" },
+                  "empty": { "const": true }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["error"],
+                "additionalProperties": false,
+                "properties": {
+                  "error": {
+                    "type": "object",
+                    "required": ["kind", "side"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": { "enum": ["unclosed_conditional", "unopened_conditional", "mismatched_conditional", "unknown_field", "unknown_conditional"] },
+                      "side": { "enum": ["question", "answer"] }
+                    }
+                  }
+                }
+              }
+            ]
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://meguri.local/conformance/schema/deviations.schema.json",
-  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D13. File: conformance/deviations.yaml.",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/dsl.md D13 and float-determinism.md F8.6. File: conformance/deviations.yaml.",
   "title": "Known deviations from the oracle (R1889)",
   "type": "object",
   "required": ["deviations"],
@@ -26,7 +26,11 @@
             "maxProperties": 1,
             "additionalProperties": false,
             "properties": {
-              "replace": { "description": "The expected value becomes this value." }
+              "replace": { "description": "The expected value becomes this value." },
+              "apple_overlay": {
+                "const": true,
+                "description": "Only the entry fp-libm-boundary (R1889): on macOS, the scenario's overlay entries (conformance/goldens-apple/, float-determinism.md F7, F9) under a matching pointer put their apple values; nothing on Linux. Applied before every other entry (dsl.md D13)."
+              }
             }
           }
         }

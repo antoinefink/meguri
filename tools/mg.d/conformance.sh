@@ -275,6 +275,20 @@ mg_conf__oracle_file() {
   return 0
 }
 
+# mg_conf__oracle_is_ours <file under an oracle/>: whether that oracle/ is
+# this branch's: this checkout's own, or the main worktree's when this branch
+# changed nothing under oracle/ that the main worktree's HEAD lacks (the rule
+# of mg_oracle__tree).
+mg_conf__oracle_is_ours() {
+  local main head base
+  case "$1" in "$MG_ROOT"/oracle/*) return 0 ;; esac
+  main="$(git -C "$MG_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+  head="$(git -C "$main" rev-parse -q --verify HEAD 2>/dev/null)"
+  base="$(git -C "$MG_ROOT" merge-base "${head:-HEAD}" HEAD 2>/dev/null)"
+  [ -n "$head" ] && [ -n "$base" ] || return 1
+  git -C "$MG_ROOT" diff --quiet "$base" HEAD -- oracle/ || git -C "$MG_ROOT" diff --quiet "$head" HEAD -- oracle/
+}
+
 mg_conf__sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum <"$1" | cut -d' ' -f1; else shasum -a 256 <"$1" | cut -d' ' -f1; fi
 }
@@ -294,7 +308,7 @@ mg_goldens_check() {
   fi
   mg_conf__docker_ok || return 0
   trap 'mg_conf__cleanup; exit 143' TERM
-  local base="$MG_RUN_DIR/base" report="$MG_RUN_DIR/goldens-check.json" lock lock_args="" rc schema_rc
+  local base="$MG_RUN_DIR/base" report="$MG_RUN_DIR/goldens-check.json" lock lock_args="" rc schema_rc macos_lock
   mkdir -p "$base"
   if git -C "$MG_ROOT" cat-file -e "$rev:conformance/goldens" 2>/dev/null; then
     git -C "$MG_ROOT" archive "$rev" conformance/goldens | tar -xf - -C "$base"
@@ -303,6 +317,16 @@ mg_goldens_check() {
   lock="$(mg_conf__oracle_file requirements.lock)"
   if [ -n "$lock" ]; then
     lock_args="--oracle-lock-sha256 $(mg_conf__sha256 "$lock")"
+    # float-determinism.md F7.4: macos_lock_sha256 exactly when the macOS
+    # lock exists, and its hash.
+    macos_lock="$(dirname "$lock")/macos/requirements-macos.lock"
+    if ! mg_conf__oracle_is_ours "$lock"; then
+      echo "goldens-check: the main worktree's oracle/ lacks this branch's oracle/ changes; macos_lock_sha256 is not compared with it" >&2
+    elif [ -f "$macos_lock" ]; then
+      lock_args="$lock_args --oracle-macos-lock-sha256 $(mg_conf__sha256 "$macos_lock")"
+    else
+      lock_args="$lock_args --oracle-macos-lock-absent"
+    fi
   else
     echo "goldens-check: no oracle/requirements.lock found; the pin is not compared with it" >&2
   fi
@@ -327,6 +351,8 @@ mg_goldens_check() {
   elif [ "$schema_rc" -ne 0 ]; then
     mg_failure schema-check "the schema check exited with code $schema_rc without a report; see log.txt"
   fi
+  mg_detail overlays "$(jq -c '{count: (.overlays // [] | length), entries: ([.overlays // [] | .[].entries] | add // 0),
+    day_entries: ([.overlays // [] | .[].day_entries] | add // 0), memory_entries: ([.overlays // [] | .[].memory_entries] | add // 0)}' "$report")"
   mg_detail changed "$(jq -c '{base: $rev, by_area_and_kind: (.changed | map(.values |= .[:20])),
     goldens: .changed_goldens, added: .added_goldens, removed: .removed_goldens}' --arg rev "$rev" "$report")"
   local problems scenarios changed

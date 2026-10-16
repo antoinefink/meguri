@@ -8,6 +8,7 @@ use rusqlite::{Connection, params_from_iter};
 
 use crate::connections::{Reader, Writer};
 use crate::error::StorageError;
+use crate::snapshot::ReadSnapshot;
 
 /// A value by its SQLite storage class.
 #[derive(Clone, Debug, PartialEq)]
@@ -40,6 +41,13 @@ impl Reader {
     /// Runs exactly one statement on this reader and returns its rows.
     pub fn execute_raw(&self, sql: &str, params: &[SqlValue]) -> Result<RawRows, StorageError> {
         run(&self.conn, sql, params)
+    }
+}
+
+impl ReadSnapshot<'_> {
+    /// Runs exactly one statement inside the snapshot and returns its rows.
+    pub fn execute_raw(&self, sql: &str, params: &[SqlValue]) -> Result<RawRows, StorageError> {
+        run(self.conn(), sql, params)
     }
 }
 

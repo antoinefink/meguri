@@ -1,17 +1,18 @@
-//! Job progress (KTD9, R1858). Progress is the only throttled channel: Rust
-//! delivers at most one update per [`MIN_INTERVAL`] to the job's listener, and
-//! Swift keeps only the newest (`bufferingNewest(1)`). Updates reported
-//! before Swift attaches a listener, or inside the interval, are dropped: the
-//! next report carries the newer state.
+//! Job progress (KTD9, R1858): the engine's progress sink exported to Swift.
+//! The sink throttles (at most one update per [`MIN_INTERVAL`], phase changes
+//! at once); Swift keeps only the newest (`bufferingNewest(1)`). Reports made
+//! before Swift attaches a listener are dropped: the next one carries the
+//! newer state. U37 adds the phase and the ETA to [`ProgressUpdate`].
 
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::Arc;
+
+use meguri_engine::{Progress, ProgressSink};
 
 use crate::callback;
 use crate::error::CoreError;
 
 /// At most ten updates a second reach Swift (R1858).
-pub const MIN_INTERVAL: Duration = Duration::from_millis(100);
+pub const MIN_INTERVAL: std::time::Duration = meguri_engine::progress::MIN_INTERVAL;
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct ProgressUpdate {
@@ -29,24 +30,10 @@ pub trait ProgressListener: Send + Sync {
 }
 
 /// The progress channel of one job, handed to Swift in its `JobHandle`.
-#[derive(uniffi::Object)]
+#[derive(Debug, uniffi::Object)]
 pub struct JobProgress {
     job_id: u64,
-    clock: fn() -> Duration,
-    state: Mutex<State>,
-}
-
-struct State {
-    listener: Option<Arc<dyn ProgressListener>>,
-    throttle: Throttle,
-}
-
-impl std::fmt::Debug for JobProgress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JobProgress")
-            .field("job_id", &self.job_id)
-            .finish_non_exhaustive()
-    }
+    sink: ProgressSink,
 }
 
 #[uniffi::export]
@@ -55,25 +42,22 @@ impl JobProgress {
     /// replacing any earlier one.
     pub fn set_listener(&self, listener: Arc<dyn ProgressListener>) -> Result<(), CoreError> {
         callback::enter("JobProgress::set_listener");
-        self.lock().listener = Some(listener);
+        self.sink.set_listener(Arc::new(Relay {
+            job_id: self.job_id,
+            listener,
+        }));
         Ok(())
     }
 }
 
 impl JobProgress {
     pub fn new(job_id: u64) -> Arc<JobProgress> {
-        JobProgress::with_clock(job_id, clock::monotonic)
+        JobProgress::wrap(job_id, ProgressSink::new())
     }
 
-    fn with_clock(job_id: u64, clock: fn() -> Duration) -> Arc<JobProgress> {
-        Arc::new(JobProgress {
-            job_id,
-            clock,
-            state: Mutex::new(State {
-                listener: None,
-                throttle: Throttle::new(MIN_INTERVAL),
-            }),
-        })
+    /// The exported face of a job's engine sink.
+    pub fn wrap(job_id: u64, sink: ProgressSink) -> Arc<JobProgress> {
+        Arc::new(JobProgress { job_id, sink })
     }
 
     pub fn job_id(&self) -> u64 {
@@ -83,65 +67,24 @@ impl JobProgress {
     /// Reports progress from the job. Cheap when throttled; the listener is
     /// called without any lock held.
     pub fn report(&self, completed: u64, total: Option<u64>) {
-        let listener = {
-            let mut state = self.lock();
-            let Some(listener) = state.listener.clone() else {
-                return;
-            };
-            if !state.throttle.admit((self.clock)()) {
-                return;
-            }
-            listener
-        };
+        self.sink.report(completed, total);
+    }
+}
+
+/// Hands the engine sink's updates to the Swift listener.
+struct Relay {
+    job_id: u64,
+    listener: Arc<dyn ProgressListener>,
+}
+
+impl meguri_engine::ProgressListener for Relay {
+    fn on_progress(&self, progress: &Progress) {
         let update = ProgressUpdate {
             job_id: self.job_id,
-            completed,
-            total,
+            completed: progress.completed,
+            total: progress.total,
         };
-        callback::invoke("ProgressListener::on_progress", || listener.on_progress(update));
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// Leading-edge throttle: admits a report when at least `interval` has passed
-/// since the last admitted one, so any one-second window holds at most
-/// `1s / interval + 1` admitted reports.
-#[derive(Debug)]
-struct Throttle {
-    interval: Duration,
-    last: Option<Duration>,
-}
-
-impl Throttle {
-    fn new(interval: Duration) -> Throttle {
-        Throttle { interval, last: None }
-    }
-
-    fn admit(&mut self, now: Duration) -> bool {
-        match self.last {
-            Some(last) if now.saturating_sub(last) < self.interval => false,
-            _ => {
-                self.last = Some(now);
-                true
-            }
-        }
-    }
-}
-
-/// The monotonic time progress pacing uses. It is never collection time, so
-/// it does not go through `meguri_model::clock` (R1875 covers the instants the
-/// core stores or schedules with).
-mod clock {
-    use std::sync::OnceLock;
-    use std::time::{Duration, Instant};
-
-    #[allow(clippy::disallowed_methods)]
-    pub(super) fn monotonic() -> Duration {
-        static START: OnceLock<Instant> = OnceLock::new();
-        START.get_or_init(Instant::now).elapsed()
+        callback::invoke("ProgressListener::on_progress", || self.listener.on_progress(update));
     }
 }
 
@@ -149,6 +92,8 @@ mod clock {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::sync::Mutex;
+    use std::time::Duration;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<ProgressUpdate>>);
@@ -167,7 +112,8 @@ mod tests {
 
     #[test]
     fn a_thousand_reports_a_second_reach_the_listener_at_most_eleven_times_in_any_second() {
-        let progress = JobProgress::with_clock(7, fake_clock);
+        NOW_MS.set(0);
+        let progress = JobProgress::wrap(7, ProgressSink::with_clock(fake_clock));
         let recorder = Arc::new(Recorder::default());
         progress.set_listener(recorder.clone()).unwrap();
         let mut delivered_at = Vec::new();
@@ -205,8 +151,8 @@ mod tests {
 
     #[test]
     fn reports_before_a_listener_is_attached_are_dropped() {
-        let progress = JobProgress::with_clock(1, fake_clock);
         NOW_MS.set(0);
+        let progress = JobProgress::wrap(1, ProgressSink::with_clock(fake_clock));
         progress.report(1, None);
         let recorder = Arc::new(Recorder::default());
         progress.set_listener(recorder.clone()).unwrap();
@@ -227,22 +173,16 @@ mod tests {
         struct Reentrant(Arc<JobProgress>, Mutex<u32>);
         impl ProgressListener for Reentrant {
             fn on_progress(&self, _update: ProgressUpdate) {
-                // Would deadlock if report() still held the state lock.
-                drop(self.0.lock());
+                // Would deadlock if report() still held the sink's lock.
+                self.0.report(99, None);
                 *self.1.lock().unwrap() += 1;
             }
         }
-        let progress = JobProgress::with_clock(1, fake_clock);
+        NOW_MS.set(0);
+        let progress = JobProgress::wrap(1, ProgressSink::with_clock(fake_clock));
         let listener = Arc::new(Reentrant(Arc::clone(&progress), Mutex::new(0)));
         progress.set_listener(listener.clone()).unwrap();
         progress.report(1, None);
         assert_eq!(*listener.1.lock().unwrap(), 1);
-    }
-
-    #[test]
-    fn the_system_clock_is_monotonic() {
-        let a = clock::monotonic();
-        let b = clock::monotonic();
-        assert!(b >= a);
     }
 }
