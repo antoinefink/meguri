@@ -199,6 +199,59 @@ fn a_saved_search_is_an_undo_step_on_top_of_an_earlier_one() {
     assert_eq!(stored(c, "savedFilters").as_deref(), Some(r#"{"Leeches":"tag:leech"}"#));
 }
 
+/// A write that changes nothing, after an undo. K10.2 takes its undo classes
+/// from U25 (`engine/undo` M2, A2): a non-undoable action leaves both
+/// histories, while a saved-search action is an undoable op, so it records
+/// no step and keeps the undo steps but empties the redo history.
+#[test]
+fn a_saved_search_write_of_nothing_keeps_the_undo_steps_and_empties_redo() {
+    type Action = fn(&Collection) -> Result<meguri_engine::OpResult<bool>, EngineError>;
+    let nothing_to_write: [(&str, Action); 4] = [
+        ("save the same search", |c| {
+            browser_config::save_search(c, "A", "is:new")
+        }),
+        ("update to the same search", |c| {
+            browser_config::update_saved_search(c, "A", "is:new")
+        }),
+        ("rename a missing name", |c| {
+            browser_config::rename_saved_search(c, "missing", "R")
+        }),
+        ("delete a missing name", |c| {
+            browser_config::delete_saved_searches(c, &["missing"])
+        }),
+    ];
+    let h = bare();
+    let c = &h.collection;
+    put(c, "savedFilters", r#"{"A":"is:new"}"#);
+    undoable_op(c);
+    h.clock.step_ms(3_600_000);
+    let redo = |c: &Collection| c.peek_redo(UndoScope::Global).unwrap().name();
+    for (action, write) in nothing_to_write {
+        browser_config::save_search(c, "Leeches", "tag:leech").unwrap();
+        c.undo(UndoScope::Global).unwrap();
+        assert_eq!(redo(c), Some(SAVE_SEARCH), "{action}");
+        assert_eq!(top(c), Some(TEST_STEP), "{action}");
+        let before = (config_rows(c), common::col_mod(c));
+
+        // Cards mode shows the sort field by default: nothing to write.
+        assert!(!browser_config::show_column(c, Cards, Column::SortField).unwrap().value);
+        assert_eq!(redo(c), Some(SAVE_SEARCH), "{action}: a non-undoable op keeps redo");
+
+        let result = write(c).unwrap();
+        assert!(!result.value, "{action}");
+        assert_eq!(result.undo, None, "{action}: no entry");
+        assert_eq!(
+            (config_rows(c), common::col_mod(c)),
+            before,
+            "{action}: nothing written"
+        );
+        assert_eq!(redo(c), None, "{action}: an undoable op empties redo, changed or not");
+        assert_eq!(top(c), Some(TEST_STEP), "{action}: the undo steps are kept");
+    }
+    c.undo(UndoScope::Global).unwrap();
+    assert_eq!(stored(c, "testKey"), None, "the earlier step still undoes");
+}
+
 #[test]
 fn each_saved_search_write_names_its_step_and_writing_nothing_records_none() {
     let h = bare();

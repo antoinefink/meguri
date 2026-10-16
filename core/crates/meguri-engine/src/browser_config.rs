@@ -5,10 +5,12 @@
 //! the same value). meguri-search's `config` reads the keys and computes
 //! what each action writes; this module only applies it.
 //!
-//! Undo (K10.2): the saved-search writes are undoable steps named after
-//! their action (R2020); every other write is `UserNonUndoable`, so one that
-//! changes its key clears the undo and redo history and one that writes
-//! nothing leaves it alone. `flagLabels` is `flags`' "Rename Flag".
+//! Undo (K10.2, with U25's classes of `engine/undo` M2): the saved-search
+//! writes are undoable steps named after their action (R2020), and one that
+//! writes nothing records no step but empties redo, as every undoable op
+//! does; every other write is `UserNonUndoable`, so one that changes its key
+//! clears the undo and redo history and one that writes nothing leaves both.
+//! `flagLabels` is `flags`' "Rename Flag".
 //!
 //! Each write has an `_in` form for a scope the caller holds (the scenario
 //! adapters, and Set Due Date and Reset, which remember their input inside
