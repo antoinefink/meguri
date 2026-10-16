@@ -795,6 +795,39 @@ fn a_self_hosted_server_may_move_to_another_port() {
 }
 
 #[test]
+fn a_redirect_refused_after_a_followed_one_leaves_no_new_endpoint() {
+    // The job moved and meta was answered there; a later refused redirect
+    // stops the job, and its result has no newEndpoint (T7).
+    let elsewhere = untouched();
+    let away = elsewhere.url();
+    for (method, refusal) in [
+        (Method::Start, RedirectRefusal::NotMeta),
+        (Method::Meta, RedirectRefusal::Repeated),
+    ] {
+        let away = away.clone();
+        // The target answers its first meta, then redirects everything.
+        let metas = AtomicU64::new(0);
+        let moved = SyncStub::serve(move |head| {
+            if head.path() == "/sync/meta" && metas.fetch_add(1, Ordering::SeqCst) == 0 {
+                ok_meta()
+            } else {
+                Reply::redirect(308, Some(away.as_str()))
+            }
+        });
+        let target = moved.url();
+        let location = target.clone();
+        let stub = SyncStub::serve(move |_| Reply::redirect(308, Some(location.as_str())));
+        let mut job = new_job(&options(&stub.url()));
+        request(&mut job, Method::Meta, Payload::empty()).unwrap();
+        assert_eq!(job.new_endpoint().map(Endpoint::as_str), Some(target.as_str()));
+        refused(request(&mut job, method, Payload::empty()), 308, refusal);
+        assert_eq!(moved.requests().len(), 2, "the later {method:?} went to the target");
+        assert_eq!(job.new_endpoint(), None, "after a refused {method:?}");
+    }
+    assert!(elsewhere.requests().is_empty());
+}
+
+#[test]
 fn no_redirect_is_ever_followed_automatically() {
     // Only meta, only a 308, only once (T7, R1511).
     let target = untouched();

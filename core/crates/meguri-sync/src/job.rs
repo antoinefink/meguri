@@ -169,7 +169,8 @@ pub struct Job {
     /// A redirect moved `base` (T7 allows one per job).
     followed: bool,
     /// The redirect target once `meta` answered there: until then the move
-    /// is not the job's result, and a refused second redirect leaves none.
+    /// is not the job's result. Any refused redirect, before or after, leaves
+    /// none.
     new_endpoint: Option<Endpoint>,
 }
 
@@ -225,8 +226,8 @@ impl Job {
 
     /// The redirect target this job moved to, as normalised, once the
     /// repeated `meta` was answered there (T7): the job's result carries it as
-    /// `newEndpoint` and the app stores it (AE70). `None` after a refused
-    /// redirect, a second one included.
+    /// `newEndpoint` and the app stores it (AE70). `None` once any redirect
+    /// of the job was refused, one on a later request included.
     pub fn new_endpoint(&self) -> Option<&Endpoint> {
         self.new_endpoint.as_ref()
     }
@@ -281,7 +282,15 @@ impl Job {
                     let location = response.header_values("location").first().map(|v| v.to_vec());
                     // The redirect's body is never read.
                     drop(response);
-                    source = Source::Bytes(self.follow(method, code, location.as_deref(), resend.as_ref())?);
+                    match self.follow(method, code, location.as_deref(), resend.as_ref()) {
+                        Ok(body) => source = Source::Bytes(body),
+                        Err(err) => {
+                            // A refused redirect stops the job, and its result
+                            // has no newEndpoint, even after one was followed.
+                            self.new_endpoint = None;
+                            return Err(err);
+                        }
+                    }
                 }
                 _ => return Err(status_error(response).await),
             }
