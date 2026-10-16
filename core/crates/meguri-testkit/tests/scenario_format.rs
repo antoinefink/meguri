@@ -273,7 +273,16 @@ steps:
     let needs = parsed.needs();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["cards", "config", "decks", "notes", "notetypes", "presets", "revlog"]
+        [
+            "cards",
+            "config",
+            "decks",
+            "new_collection",
+            "notes",
+            "notetypes",
+            "presets",
+            "revlog"
+        ]
     );
     assert!(needs.ops.contains("build_filtered") && needs.ops.contains("reopen"));
     assert!(!needs.ops.contains("observe"));
@@ -893,7 +902,8 @@ fn actor_scenarios_are_checked_when_they_load() {
 fn meguri_actors_need_what_they_run_and_nothing_else() {
     let path = conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml");
     let loaded = scenario::load(&path).unwrap();
-    // sync-ops.md S10.2: `actor`; no setup (client_a runs it); the ops and
+    // sync-ops.md S10.2: `actor`; the new collection it starts from (S2.2,
+    // dsl.md D8) but no setup section (client_a runs the setup); the ops and
     // observations of meguri's steps; advance (the scenario uses it); db_dump
     // for converge. client_a's full_upload is the oracle's business.
     let needs = loaded.scenario.needs_of_meguri_actors();
@@ -905,7 +915,10 @@ fn meguri_actors_need_what_they_run_and_nothing_else() {
         needs.observations.iter().map(String::as_str).collect::<Vec<_>>(),
         ["card", "db_dump"]
     );
-    assert!(needs.setup.is_empty());
+    assert_eq!(
+        needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["new_collection"]
+    );
 
     // Without a Meguri actor, nothing.
     let two = scenario::load(&conformance_dir().join("scenarios/smoke/sync/two-party.yaml")).unwrap();
@@ -931,13 +944,88 @@ steps:
     let needs = actor_scenario(text).unwrap().needs_of_meguri_actors();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["decks", "notetypes"]
+        ["decks", "new_collection", "notetypes"]
     );
     assert_eq!(
         needs.ops.iter().map(String::as_str).collect::<Vec<_>>(),
         ["actor", "reopen", "set_clock", "sync"]
     );
     assert!(needs.observations.is_empty());
+}
+
+#[test]
+fn a_scenario_starts_from_the_new_collection_unless_it_opens_a_fixture_or_reads_none() {
+    // dsl.md D8: the new collection is the setup capability `new_collection`.
+    let load = |setup: &str, steps: &str| {
+        let text = format!("id: smoke/d8\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{setup}steps:\n{steps}");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap()
+    };
+    let needs_it = |setup: &str, steps: &str| {
+        let parsed = load(setup, steps);
+        let needs = parsed.needs().setup.contains(scenario::NEW_COLLECTION);
+        assert_eq!(needs, parsed.starts_from_new_collection(), "{steps}");
+        needs
+    };
+    let template = |case: &str| {
+        format!(
+            "  - observe:\n      - template:\n          notetype: {{name: P, fields: [Front, Back]}}\n          cases: [{case}]\n"
+        )
+    };
+    let new_note = r#"{front: "{{Front}}", back: "{{Back}}", fields: [a, b]}"#;
+    // No setup and only steps that touch no collection: nothing.
+    for steps in [
+        " []\n".to_owned(),
+        "  - advance: 1d\n  - set_clock: \"2030-03-31T03:00:00\"\n".to_owned(),
+        "  - observe: [{text: {fns: [strip_markup], inputs: [\"<b>a</b>\"]}}]\n".to_owned(),
+        "  - observe: [{cloze: {fns: [numbers], inputs: [\"{{c1::a}}\"]}}]\n".to_owned(),
+        "  - observe: [{fsrs_next: {param_sets: {default: []}, inputs: [{id: 0, card_id: 1, reps: 1, s: 1.0, d: 5.0, elapsed_days: 1, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}]}}]\n".to_owned(),
+        template(new_note),
+    ] {
+        assert!(!needs_it("", &steps), "{steps}");
+    }
+    // A step that reads or writes a collection, or any setup section.
+    for steps in [
+        "  - observe: [timing]\n".to_owned(),
+        "  - db_exec: {sql: \"SELECT 1\"}\n".to_owned(),
+        "  - set_config: {key: k, value: 1}\n".to_owned(),
+        "  - advance: 1d\n  - observe: [undo_status]\n".to_owned(),
+        template(&format!(
+            r##"{new_note}, {{card: "#c1", front: "{{{{Front}}}}", back: "x"}}"##
+        )),
+    ] {
+        assert!(needs_it("", &steps), "{steps}");
+    }
+    assert!(needs_it("setup: {decks: [A]}\n", " []\n"));
+    // A scenario that opens a fixture first starts from that fixture.
+    assert!(!needs_it(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - db_exec: {sql: \"SELECT 1\"}\n"
+    ));
+
+    // A live scenario: the side that runs the first segment (D9.2).
+    let chain = load("", "  - advance: 1d\n  - handoff: oracle\n  - observe: [timing]\n");
+    assert!(
+        chain
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    assert!(
+        !chain
+            .needs_on(scenario::Side::Oracle)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    let opened = load(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - handoff: oracle\n  - observe: [timing]\n",
+    );
+    assert!(
+        !opened
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
 }
 
 #[test]

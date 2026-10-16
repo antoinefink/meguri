@@ -25,8 +25,8 @@ use serde_json::Value;
 use crate::scenario::LoadedScenario;
 pub use crate::scenario::Needs;
 pub use meguri::{
-    FinishFn, HandoffFn, MeguriExecutor, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat, Session,
-    SetupFn, SyncAccount, actor_seed,
+    FinishFn, HandoffFn, MeguriExecutor, NewCollectionFn, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat,
+    Session, SetupFn, SyncAccount, actor_seed,
 };
 pub use oracle::{Hello, OracleExecutor};
 pub use storage::{Storage, normalize_sql};
