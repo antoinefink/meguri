@@ -59,7 +59,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `add_deck` | Add Deck | |
 | `add_note` | Add Note | `add_note`, `setup.notes` |
 | `add_note_type` | Add Note Type | |
-| `answer_card` | Answer Card | `answer` |
+| `answer_card` | Answer Card | `answer` (`sched/answering` A7) |
 | `build_deck` | Build Deck | (building or rebuilding a filtered deck) |
 | `bury` | Bury | |
 | `change_deck` | Change Deck | |

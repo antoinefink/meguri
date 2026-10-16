@@ -137,7 +137,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `advance` | duration | none | stable |
 | `set_clock` | date-time | none | stable |
 | `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
-| `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing | none | stable |
+| `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing; the card gets the state `next_states` reports for the rating at the current instant, written as `specs/sched/answering.md` says | none | stable (`sched/answering`) |
 | `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
 | `observe` | list of observation requests (`observations.md` O2); the pure kinds `text` and `fsrs_next` (`float-determinism.md` F5) never touch the collection | `{<kind>: <value>, ...}` | stable |
 | `edit_note` | `{note: #nN, fields?, tags?}`; `fields` as in `add_note` (a list replaces from the first field, later fields keep their text), `tags` replaces all tags | none | stable (`record-ops.md` W2) |

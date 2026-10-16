@@ -3,13 +3,14 @@
 # Anki then inserts nothing and keeps the other writer's row, and applies the
 # rest of the redo: the card is answered again (specs/engine/undo.md A8,
 # specs/storage/ids-usn-mtime.md I4). Meguri's undo check refuses that redo
-# instead: deviations undo-revlog-taken-id-redo, -status and -card. Needs
+# instead: deviations undo-revlog-taken-id-redo, -status and -card. FSRS is
+# on, as Meguri always answers (specs/sched/answering.md A1, A7). Needs
 # db_exec, answer, undo, redo and undo_status
 # (specs/conformance/record-ops.md W1, specs/conformance/undo-ops.md).
 id: undo/revlog-taken-id
 clock: {tz: UTC, start: "2030-01-15T10:00:00"}
 setup:
-  config: {fsrs: false, loadBalancerEnabled: false}
+  config: {fsrs: true, loadBalancerEnabled: false}
   notetypes:
     - name: Single
       fields: [Front, Back]
