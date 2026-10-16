@@ -42,6 +42,7 @@ Read at tag 26.09.3 for `tools/mg oracle check --schedule`
 | `rslib/src/scheduler/queue/builder/mod.rs`, `gathering.rs`, `rslib/src/storage/deck/mod.rs` (`update_active_decks`) | the queue is built for the current deck and its children, burying siblings as it gathers; the load balancer, when on, is built over every deck's preset; active decks go to a temporary table, not the file |
 | `rslib/src/scheduler/answering/mod.rs` (`get_scheduling_states`) | next states use the load balancer of the queues cached at that moment, so they are read after the last queue is built |
 | `rslib/src/decks/tree.rs` (`deck_tree`, `hide_default_deck`) | the root node's numbers; an empty default deck without children is left out of the tree when other decks exist |
+| `pylib/anki/scheduler/base.py` (`get_or_create_filtered_deck`, `add_or_update_filtered_deck`), `proto/anki/decks.proto` (`Filtered.SearchTerm.Order`), `rslib/src/scheduler/filtered/mod.rs`, `card.rs`, `rslib/src/storage/card/filtered.rs`, `rslib/src/scheduler/queue/builder/mod.rs` (`sort_options`) | for the driver test of a filtered deck: saving one builds it; latest-added-first takes notes by descending id; moved new cards take consecutive positions as their due, and a filtered deck's queue keeps that order (no sibling spacing) |
 
 Probed in the oracle image: on the 10k generated collection a deck's queue
 counts can be lower than its deck-list numbers, because building the queue
