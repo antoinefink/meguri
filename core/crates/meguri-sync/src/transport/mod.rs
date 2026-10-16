@@ -8,14 +8,9 @@ pub(crate) mod framing;
 pub mod http;
 pub mod runtime;
 
-use std::future::Future;
-use std::io;
-use std::pin::Pin;
-use std::time::Duration;
+use std::{future::Future, io, pin::Pin, time::Duration};
 
 use bytes::Bytes;
-use futures_core::Stream;
-use serde::Serialize;
 
 use crate::error::SyncError;
 
@@ -23,10 +18,10 @@ use crate::error::SyncError;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A stream of body bytes.
-pub type RawStream = Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send>>;
+pub type RawStream = Pin<Box<dyn futures_core::Stream<Item = io::Result<Bytes>> + Send>>;
 
-/// One protocol v11 method (specs/sync/transport.md T1). Names are
-/// case-sensitive and spelled exactly.
+/// One protocol v11 method (specs/sync/transport.md T1): the collection
+/// methods, then, from [`Method::MediaBegin`] on, the media methods.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Method {
     /// Login (login-endpoints.md L5).
@@ -43,7 +38,7 @@ pub enum Method {
     Abort,
     Upload,
     Download,
-    /// Media `begin`.
+    /// Media `begin`, the first media method.
     MediaBegin,
     MediaChanges,
     UploadChanges,
@@ -51,28 +46,37 @@ pub enum Method {
     MediaSanity,
 }
 
+/// T1's method names, case-sensitive, one per [`Method`] variant in its
+/// order.
+const NAMES: [&str; 17] = [
+    "hostKey",
+    "meta",
+    "start",
+    "applyGraves",
+    "applyChanges",
+    "chunk",
+    "applyChunk",
+    "sanityCheck2",
+    "finish",
+    "abort",
+    "upload",
+    "download",
+    "begin",
+    "mediaChanges",
+    "uploadChanges",
+    "downloadFiles",
+    "mediaSanity",
+];
+
 impl Method {
-    /// The path after the base: `sync/<name>` or `msync/<name>` (L2).
-    pub fn path(self) -> &'static str {
-        match self {
-            Method::HostKey => "sync/hostKey",
-            Method::Meta => "sync/meta",
-            Method::Start => "sync/start",
-            Method::ApplyGraves => "sync/applyGraves",
-            Method::ApplyChanges => "sync/applyChanges",
-            Method::Chunk => "sync/chunk",
-            Method::ApplyChunk => "sync/applyChunk",
-            Method::SanityCheck2 => "sync/sanityCheck2",
-            Method::Finish => "sync/finish",
-            Method::Abort => "sync/abort",
-            Method::Upload => "sync/upload",
-            Method::Download => "sync/download",
-            Method::MediaBegin => "msync/begin",
-            Method::MediaChanges => "msync/mediaChanges",
-            Method::UploadChanges => "msync/uploadChanges",
-            Method::DownloadFiles => "msync/downloadFiles",
-            Method::MediaSanity => "msync/mediaSanity",
-        }
+    /// The method's name, spelled as the server expects it.
+    pub fn name(self) -> &'static str {
+        NAMES[self as usize]
+    }
+
+    /// Media methods sit under `msync/`, the others under `sync/` (T1, L2).
+    pub fn is_media(self) -> bool {
+        self as usize >= Method::MediaBegin as usize
     }
 }
 
@@ -93,7 +97,7 @@ impl Payload {
     }
 
     /// A method's arguments as compact JSON.
-    pub fn json<T: Serialize + ?Sized>(arguments: &T) -> serde_json::Result<Payload> {
+    pub fn json<T: serde::Serialize + ?Sized>(arguments: &T) -> serde_json::Result<Payload> {
         serde_json::to_vec(arguments).map(Payload::Json)
     }
 }

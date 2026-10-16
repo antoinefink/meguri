@@ -54,9 +54,11 @@ impl Endpoint {
         self.0.scheme() == "https"
     }
 
-    /// The base followed by `sync/<method>` or `msync/<method>` (L2).
+    /// The base followed by `sync/<method>` or `msync/<method>` (L2): plain
+    /// concatenation, since the base ends with `/`.
     pub fn method_url(&self, method: Method) -> String {
-        format!("{}{}", self.0.as_str(), method.path())
+        let area = if method.is_media() { "msync" } else { "sync" };
+        format!("{}{area}/{}", self.0.as_str(), method.name())
     }
 
     fn host(&self) -> Option<Host<&str>> {
