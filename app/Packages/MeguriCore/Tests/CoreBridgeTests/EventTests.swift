@@ -66,6 +66,20 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
     }
 }
 
+/// The day clock's events (U40, `sched/day-clock` D8) keep their values
+/// across the bridge.
+@Test func dayClockEventsKeepTheirValues() {
+    let bridged = { (kind: MeguriCoreBindings.CoreEventKind) in
+        CoreBridge.CoreEvent(MeguriCoreBindings.CoreEvent(seq: 7, generation: 1, causeSeq: 6, kind: kind))
+    }
+    let rolled = bridged(.rolledOver(oldDay: 5, newDay: 6))
+    #expect(rolled.kind == .rolledOver(oldDay: 5, newDay: 6))
+    #expect(rolled.causeSeq == 6)
+    #expect(bridged(.timeZoneChanged(zoneId: "Africa/Ceuta")).kind == .timeZoneChanged(zoneID: "Africa/Ceuta"))
+    #expect(
+        bridged(.nextDayAtChanged(nextDayAt: 1_895_194_800)).kind == .nextDayAtChanged(nextDayAt: 1_895_194_800))
+}
+
 /// Everything here shares the process-wide event listener, so it runs serially.
 @Suite(.serialized) struct EventTests {
     @Test func tenThousandEventsFromFourProducersArriveInSeqOrderOnTheDispatcherThread() async throws {

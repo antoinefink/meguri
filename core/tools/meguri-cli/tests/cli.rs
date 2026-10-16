@@ -28,7 +28,15 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
         json["supports"]["ops"],
-        serde_json::json!(["advance", "db_exec", "handoff", "open", "set_clock", "set_config"])
+        serde_json::json!([
+            "advance",
+            "db_exec",
+            "handoff",
+            "open",
+            "reopen",
+            "set_clock",
+            "set_config"
+        ])
     );
     assert_eq!(
         json["supports"]["observations"],
@@ -40,13 +48,15 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "schema_objects",
             "search",
             "template",
-            "text"
+            "text",
+            "timing"
         ])
     );
-    // dsl.md D7.2: 31 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 34 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
-    // set_config and the note type ops of notetype-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 31);
+    // set_config, undo-ops.md's undo, redo and remove_config and the note
+    // type ops of notetype-ops.md among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 34);
     for op in [
         "actor",
         "sync",
@@ -57,6 +67,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "set_config",
         "add_notetype",
         "update_notetype",
+        "undo",
+        "redo",
+        "remove_config",
     ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
@@ -90,6 +103,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .unwrap()
             .iter()
             .any(|k| k == "legacy_json")
+    );
+    // undo-ops.md V2.
+    assert!(
+        json["language"]["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "undo_status")
     );
     // observations.md O4: blob_decode and package_col (model-ops.md L5) and
     // notetype_structure (notetype-ops.md T8) are kinds of the language,

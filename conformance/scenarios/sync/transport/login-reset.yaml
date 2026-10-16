@@ -1,0 +1,12 @@
+# The server's answer to a login is reset before its headers arrive: the
+# login fails with the network kind; once the fault is cleared it succeeds
+# (specs/sync/transport.md T11; specs/conformance/sync-ops.md S4.4, S5).
+id: sync/transport/login-reset
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [meguri]
+steps:
+  - advance: 1m
+  - net_fault: {kind: reset, direction: to_client}
+  - sync: {kind: login}
+  - net_fault: {kind: clear}
+  - sync: {kind: login}

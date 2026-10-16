@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 
 use super::clock::ScenarioClock;
 use super::{ExecError, Executor, Handoff, Needs, SegmentExecutor, SegmentOutput, SegmentRequest};
-use crate::scenario::{ActorName, LoadedScenario, ObservationRequest, Setup, Step};
+use crate::scenario::{ActorName, LoadedScenario, NEW_COLLECTION, ObservationRequest, Setup, Step};
 
 /// What an op adapter reports (dsl.md D7.2, D7.3).
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +48,9 @@ pub type FinishFn = for<'a> fn(&mut Session<'a>) -> Result<(), ExecError>;
 /// `db_dump` value of all twelve tables without O8's normalization of random
 /// values.
 pub type RawDumpFn = for<'a> fn(&mut Session<'a>) -> Result<Value, ExecError>;
+/// Makes the session's new collection at the session clock's instant, which
+/// is `clock.start` (dsl.md D6, D8), before the setup runs.
+pub type NewCollectionFn = for<'a> fn(&mut Session<'a>) -> Result<(), ExecError>;
 
 #[derive(Debug, Clone, Copy)]
 struct OpAdapter {
@@ -59,6 +62,7 @@ struct OpAdapter {
 /// capabilities.
 #[derive(Debug, Default)]
 pub struct Registry {
+    new_collection: Option<NewCollectionFn>,
     setup: BTreeMap<&'static str, SetupFn>,
     ops: BTreeMap<&'static str, OpAdapter>,
     observations: BTreeMap<&'static str, ObserveFn>,
@@ -68,6 +72,14 @@ pub struct Registry {
 }
 
 impl Registry {
+    /// What makes the new collection a scenario starts from (dsl.md D8):
+    /// U28's bootstrap, or before it an area's stand-in. It counts as the
+    /// setup capability `new_collection`.
+    pub fn new_collection(&mut self, f: NewCollectionFn) {
+        assert!(self.new_collection.is_none(), "new_collection registered twice");
+        self.new_collection = Some(f);
+    }
+
     pub fn setup(&mut self, section: &'static str, f: SetupFn) {
         assert!(
             Setup::ORDER.contains(&section),
@@ -127,8 +139,9 @@ impl Registry {
         self.actor = Some(raw_dump);
     }
 
-    /// Everything registered; the handoff adapters count as the `handoff` op
-    /// and the actor adapter as the `actor` op.
+    /// Everything registered; the handoff adapters count as the `handoff` op,
+    /// the actor adapter as the `actor` op and the new collection as the
+    /// setup capability `new_collection`.
     pub fn capabilities(&self) -> Needs {
         let mut ops: BTreeSet<String> = self.ops.keys().map(|s| (*s).to_owned()).collect();
         if self.handoff.is_some() {
@@ -137,8 +150,12 @@ impl Registry {
         if self.actor.is_some() {
             ops.insert("actor".to_owned());
         }
+        let mut setup: BTreeSet<String> = self.setup.keys().map(|s| (*s).to_owned()).collect();
+        if self.new_collection.is_some() {
+            setup.insert(NEW_COLLECTION.to_owned());
+        }
         Needs {
-            setup: self.setup.keys().map(|s| (*s).to_owned()).collect(),
+            setup,
             ops,
             observations: self.observations.keys().map(|s| (*s).to_owned()).collect(),
         }
@@ -160,6 +177,8 @@ pub struct Session<'a> {
     pub actor: Option<Seat>,
     /// The session directory and the open collection (`exec/storage.rs`).
     pub storage: super::storage::Storage,
+    /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
+    pub day: meguri_engine::DayCache,
 }
 
 /// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
@@ -267,7 +286,17 @@ impl MeguriExecutor {
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
             actor: None,
             storage: Default::default(),
+            day: Default::default(),
         })
+    }
+
+    /// D8: the new collection, when the scenario starts from one and an
+    /// adapter makes it.
+    fn new_collection(&self, session: &mut Session<'_>) -> Result<(), ExecError> {
+        match self.registry.new_collection {
+            Some(f) => f(session),
+            None => Ok(()),
+        }
     }
 
     fn run_setup(&self, session: &mut Session<'_>) -> Result<(), ExecError> {
@@ -386,7 +415,8 @@ pub(super) struct Actors<'a> {
 }
 
 impl MeguriExecutor {
-    /// Sessions for these actors of an actor scenario, at `clock.start`;
+    /// Sessions for these actors of an actor scenario, each with its new
+    /// collection made at `clock.start` (sync-ops.md S2.2, dsl.md D8);
     /// `unsupported_op` when Meguri cannot play actors.
     pub(super) fn actors<'a>(
         &'a self,
@@ -399,21 +429,21 @@ impl MeguriExecutor {
             .ok_or_else(|| ExecError::new("unsupported_op", "no adapter for op actor"))?;
         let first = self.session(loaded, None)?;
         let clock = Arc::clone(&first.clock);
-        let sessions = names
-            .iter()
-            .map(|name| {
-                let session = Session {
-                    scenario: loaded,
-                    clock: Arc::clone(&clock),
-                    random: Arc::new(SeededRandom::new(actor_seed(loaded, name.as_str()))),
-                    notes: Vec::new(),
-                    cards: Vec::new(),
-                    actor: None,
-                    storage: Default::default(),
-                };
-                (name.clone(), session)
-            })
-            .collect();
+        let mut sessions = BTreeMap::new();
+        for name in names {
+            let mut session = Session {
+                scenario: loaded,
+                clock: Arc::clone(&clock),
+                random: Arc::new(SeededRandom::new(actor_seed(loaded, name.as_str()))),
+                notes: Vec::new(),
+                cards: Vec::new(),
+                actor: None,
+                storage: Default::default(),
+                day: Default::default(),
+            };
+            self.new_collection(&mut session)?;
+            sessions.insert(name.clone(), session);
+        }
         Ok(Actors {
             executor: self,
             raw_dump,
@@ -520,6 +550,9 @@ impl Executor for MeguriExecutor {
             ));
         }
         let mut session = self.session(loaded, None)?;
+        if loaded.scenario.starts_from_new_collection() {
+            self.new_collection(&mut session)?;
+        }
         self.run_setup(&mut session)?;
         let outputs = self.run_steps(&mut session, 0..loaded.scenario.steps.len())?;
         self.finish(&mut session)?;
@@ -535,7 +568,14 @@ impl SegmentExecutor for MeguriExecutor {
             .ok_or_else(|| ExecError::new("unsupported_op", "no adapter for op handoff"))?;
         let mut session = self.session(loaded, request.resume.as_ref())?;
         match &request.resume {
-            None => self.run_setup(&mut session)?,
+            None => {
+                // D9.2: the first segment starts from a new collection unless
+                // it opens a fixture.
+                if !loaded.scenario.starts_with_open() {
+                    self.new_collection(&mut session)?;
+                }
+                self.run_setup(&mut session)?;
+            }
             Some(handoff) => into(&mut session, &request.root.join(&handoff.dir))?,
         }
         let steps = self.run_steps(&mut session, request.steps.clone())?;

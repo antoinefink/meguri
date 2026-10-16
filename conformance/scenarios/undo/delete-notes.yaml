@@ -1,0 +1,37 @@
+# Undoing a note removal inserts the note and its cards again exactly as they
+# were, with their own mod and server usn, and removes the graves the removal
+# added; the other note is untouched. Redo removes them again and adds the
+# graves back with usn -1; a second undo restores them again. col.mod follows
+# each step (specs/engine/undo.md A5, A7). Needs db_exec, delete_notes, undo,
+# redo and undo_status (specs/conformance/record-ops.md W1, W3;
+# specs/conformance/undo-ops.md).
+id: undo/delete-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [river, rio]}
+    - {notetype: Pair, deck: Inbox, fields: [lake, lago]}
+steps:
+  # Server usns, as after a sync.
+  - db_exec: {sql: "UPDATE cards SET usn = 3"}
+  - db_exec: {sql: "UPDATE notes SET usn = 3"}
+  - observe: [{db_dump: {tables: [col, notes, cards, graves]}}]
+  - advance: 1h
+  - delete_notes: {notes: ["#n1"]}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}]
+  - advance: 1h
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}, "card(#c1, #c2)"]
+  - advance: 1h
+  - redo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}, "card(#c1, #c2)"]
+  - advance: 1h
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves]}}]

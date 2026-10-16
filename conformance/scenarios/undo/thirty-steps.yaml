@@ -1,0 +1,114 @@
+# After 31 undoable steps only the newest 30 are kept: 30 undos succeed,
+# the 31st is refused, and the note keeps the first edit's text. Edits 1 m
+# apart never merge (specs/engine/undo.md A2, A3; R719). Needs db_exec,
+# edit_note, undo, redo and undo_status (specs/conformance/undo-ops.md).
+id: undo/thirty-steps
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [cat, v0]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v1}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v2}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v3}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v4}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v5}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v6}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v7}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v8}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v9}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v10}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v11}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v12}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v13}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v14}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v15}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v16}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v17}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v18}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v19}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v20}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v21}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v22}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v23}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v24}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v25}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v26}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v27}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v28}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v29}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v30}}
+  - advance: 1m
+  - edit_note: {note: "#n1", fields: {Back: v31}}
+  - db_exec: {sql: "SELECT flds FROM notes"}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - undo: {}
+  - db_exec: {sql: "SELECT flds, mod FROM notes"}
+  - observe: [undo_status]
+  - undo: {}
+  - redo: {}
+  - db_exec: {sql: "SELECT flds FROM notes"}

@@ -273,7 +273,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest|undo_status|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -283,6 +283,7 @@
             "ids": { "type": "array", "items": { "type": "string", "pattern": "^#[nc][1-9][0-9]*$" } },
             "timing": { "type": "null" },
             "schema_objects": { "description": "storage-ops.md P3.", "type": "null" },
+            "undo_status": { "description": "undo-ops.md V2.", "type": "null" },
             "card": { "$ref": "#/$defs/card_refs" },
             "revlog": { "$ref": "#/$defs/card_refs" },
             "next_states": { "$ref": "#/$defs/card_refs" },
@@ -624,11 +625,28 @@
           "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } }
         },
         "set_config": {
-          "description": "Stable, with its final shape (record-ops.md W4): one collection config key and its JSON value (null included).",
+          "description": "Stable (record-ops.md W4): one collection config key and its JSON value (null included); undoable true records an Update Config undo step (undo-ops.md V3.1).",
           "type": "object",
           "required": ["key", "value"],
           "additionalProperties": false,
-          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true }
+          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true, "undoable": { "type": "boolean" } }
+        },
+        "remove_config": {
+          "description": "Stable (undo-ops.md V3.2): remove one collection config key as an undoable Update Config step; a missing key changes nothing.",
+          "type": "object",
+          "required": ["key"],
+          "additionalProperties": false,
+          "properties": { "key": { "type": "string", "minLength": 1 } }
+        },
+        "undo": {
+          "description": "Stable (undo-ops.md V1): apply the top step of the undo history.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "redo": {
+          "description": "Stable (undo-ops.md V1): apply the top step of the redo history.",
+          "type": "object",
+          "maxProperties": 0
         },
         "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
         "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
@@ -712,11 +730,16 @@
           "$ref": "#/$defs/actor_name"
         },
         "sync": {
-          "description": "sync-ops.md S4.",
+          "description": "sync-ops.md S4; credentials only with kind login (S4.5).",
           "type": "object",
           "required": ["kind"],
           "additionalProperties": false,
-          "properties": { "kind": { "enum": ["login", "normal", "full_upload", "full_download"] } }
+          "properties": {
+            "kind": { "enum": ["login", "normal", "full_upload", "full_download"] },
+            "credentials": { "enum": ["account", "wrong_password"] }
+          },
+          "if": { "required": ["credentials"] },
+          "then": { "properties": { "kind": { "const": "login" } } }
         },
         "net_fault": {
           "description": "sync-ops.md S5.",
