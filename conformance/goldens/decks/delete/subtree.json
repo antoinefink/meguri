@@ -1,0 +1,152 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_"],
+            ["_deck_1894701600000_lastNotetype"],
+            ["_deck_1894701600001_lastNotetype"],
+            ["_deck_1894701600002_lastNotetype"]
+          ]
+        }
+      },
+      {},
+      {
+        "delete_decks": {
+          "count": 4
+        }
+      },
+      {
+        "card": {
+          "#c1": null,
+          "#c2": null,
+          "#c3": null,
+          "#c4": null,
+          "#c5": {
+            "data": {},
+            "did": "Filt",
+            "due": -99999,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n5",
+            "odid": "Other",
+            "odue": 5,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {},
+            "did": "Other",
+            "due": 6,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "Filt": {
+            "browser_collapsed": true,
+            "config_id": null,
+            "filtered": true,
+            "id": 100,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "Other": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600002,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 4, -1, -1],
+            [1, 4, -1, -1],
+            [2, 2, -1, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_"],
+            ["_deck_1894701600002_lastNotetype"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["1894701600001", 2, 1894701660000]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/delete/subtree",
+  "scenario_sha256": "5ceeb32ebee9c8e25bb73a2032622ddddf3f36ad31744391bcb63795da1a58e0",
+  "tz": "UTC"
+}

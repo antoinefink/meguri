@@ -1,0 +1,34 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "reparent_decks": {
+          "count": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0],
+            ["a", 1894701600],
+            ["a::b", 1894701600],
+            ["a::bc", 1894701600]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/move/prefix-sibling",
+  "scenario_sha256": "cdfc93240bd8bb117e978c378e1b2268f7834abe6c7e0c9c199decc6b9fb7815",
+  "tz": "UTC"
+}

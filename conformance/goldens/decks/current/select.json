@@ -1,0 +1,51 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0, "1", 1894701600000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894705200, "1894701600001", 1894705200000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894705200, "1894701600001", 1894705200000]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [-1, 1894705260, "1", 1894705260000]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/current/select",
+  "scenario_sha256": "930465f47058d757fb48d1d0ddf309c249df64f8f52826fdf93c5cf1d449bd51",
+  "tz": "UTC"
+}

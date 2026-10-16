@@ -1,0 +1,212 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "reparent_decks": {
+          "count": 2
+        }
+      },
+      {
+        "reparent_decks": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_decks": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_decks": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_decks": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_decks": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_decks": {
+          "error": "filtered_parent"
+        }
+      },
+      {
+        "reparent_decks": {
+          "count": 1
+        }
+      },
+      {
+        "deck_tree": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "name": "x"
+                  },
+                  {
+                    "children": [],
+                    "name": "y"
+                  }
+                ],
+                "name": "a"
+              }
+            ],
+            "name": "ab"
+          },
+          {
+            "children": [],
+            "name": "b"
+          },
+          {
+            "children": [],
+            "name": "b+"
+          },
+          {
+            "children": [
+              {
+                "children": [],
+                "name": "Filt"
+              },
+              {
+                "children": [],
+                "name": "n"
+              }
+            ],
+            "name": "m"
+          },
+          {
+            "children": [],
+            "name": "q"
+          }
+        ],
+        "decks": {
+          "Default": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1,
+            "mtime_secs": 0,
+            "study_collapsed": true,
+            "usn": 0
+          },
+          "ab": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600003,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "ab::a": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600000,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "ab::a::x": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600001,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "ab::a::y": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600002,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "b": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600004,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "b+": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600006,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "m": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600007,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "m::Filt": {
+            "browser_collapsed": true,
+            "config_id": null,
+            "filtered": true,
+            "id": 100,
+            "mtime_secs": 1894701660,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "m::n": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600008,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          },
+          "q": {
+            "browser_collapsed": true,
+            "config_id": 1,
+            "filtered": false,
+            "id": 1894701600005,
+            "mtime_secs": 1894701600,
+            "study_collapsed": true,
+            "usn": -1
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/move/rules",
+  "scenario_sha256": "cefdc2a6de10ea2f1a9c0d4d349f96be840ba1b99ad791f79e570a882747b338",
+  "tz": "UTC"
+}

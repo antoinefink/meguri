@@ -1,0 +1,72 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["080118032004280938E0D403FA0F3C7B2273686172656446726F6D223A313839343030303030302C227A7A4164646F6E4B6579223A7B2261223A5B312C322E355D2C2262223A2278227D7D", "0A23080110051807221B46726F6D20746865203C623E7368617265643C2F623E206465636B", 1894701600, -1]
+          ]
+        }
+      },
+      {},
+      {
+        "rename_deck": {
+          "name": "Library::Shared"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["080118032004280938E0D403FA0F3C7B2273686172656446726F6D223A313839343030303030302C227A7A4164646F6E4B6579223A7B2261223A5B312C322E355D2C2262223A2278227D7D", "0A23080110051807221B46726F6D20746865203C623E7368617265643C2F623E206465636B", 1894701660, -1]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Library::Shared": {
+              "browserCollapsed": false,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "From the <b>shared</b> deck",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 5,
+              "extendRev": 7,
+              "id": 1894701600000,
+              "lrnToday": [3, 0],
+              "mod": 1894701660,
+              "name": "Library::Shared",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [3, 4],
+              "revToday": [3, 9],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "sharedFrom": 1894000000,
+              "timeToday": [3, 60000],
+              "usn": -1,
+              "zzAddonKey": {
+                "a": [1, 2.5],
+                "b": "x"
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "d3d41dad6e7541f21252ed38d15adc18f36fa9187cb31cb56d67cd76a545e867",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "decks/rename/preserve",
+  "scenario_sha256": "c9bee899f2864714fab623daf1c01a88accb41917c630763d347f83952055c1e",
+  "tz": "UTC"
+}

@@ -103,5 +103,5 @@ The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) th
 
 ## K14. Status
 
-- The oracle driver implements none of these ops and kinds yet: U28's oracle-maintainer work adds them, records the goldens of `conformance/scenarios/decks/`, and extends `add_note`'s `deck` as K1 says.
+- The oracle driver implements every op and kind of this file, and `add_note`'s `deck` as K1 says. Every scenario under `conformance/scenarios/decks/` has its golden, recorded with `tools/mg oracle record decks/`. `decks/rename/preserve` is not stable yet: Anki writes the two `other` members of its deck in a random order, so the common bytes that steps 1 and 4 read change from one recording to the next, until the scenario keeps one member where it reads blob bytes (`conformance/AGENTS.md`).
 - Meguri's executor implements them with U28's deck and preset operations; until then the scenarios are `pending` (`dsl.md` D10). Until the testkit model (`core/crates/meguri-testkit/src/scenario/`) reads these ops and kinds, T0 reports the scenarios that use them as `invalid`; U28's implementer adds the typed arguments with the adapters.
