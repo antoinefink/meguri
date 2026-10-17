@@ -29,10 +29,10 @@ The scenario op and the observation kind that the memory-state scenarios need (U
 
 - **Request** `{ignored_before_count: {preset, dates}}`: `preset` is `Default` or a preset from `setup.presets`; `dates` is a non-empty list of strings, each a date text as the screen would hold it. At most one request per observe step.
 - **Value** a list with one entry per date, in order: `{included, total}` (non-negative integers), or `{error: "invalid_date"}` when the text is not a date Anki reads (`sched/fsrs-items#I1.3`).
-- **Meaning.** `sched/memory-state#M5`: `total` is the number of cards that the preset's search finds and that are not new; `included` the number of those with a review-log row of stored `type` 0 after the date's cutoff. Reading it changes nothing.
+- **Meaning.** `sched/memory-state#M5`: `total` is the number of cards that the preset's search finds and that are not new; `included` the number of those with a review-log row of stored `type` 0 after the date's cutoff. Reading it changes nothing. The oracle builds the default search as the screen does (name escaped), so a preset whose name holds `\` or `"` counts 0 of 0 there; scenarios do not use such names (M5, M10).
 - **Meguri.** The adapter calls U46's count query with the preset and each date.
 
 ## E3. Driver and executor status
 
-- The oracle driver implements `save_deck_options` and `ignored_before_count` with U46's oracle-maintainer work, together with `protocol.json` and the testkit's scenario model; until then `sched/memory/recompute` and `sched/memory/ignore-before-count` have no goldens.
+- The oracle driver implements `save_deck_options` and `ignored_before_count`; `protocol.json` and the testkit's scenario model describe both, and the goldens of `sched/memory/recompute` and `sched/memory/ignore-before-count` are recorded on the Linux and Apple oracles.
 - Meguri's executor implements `ignored_before_count` with U46's adapter, and `save_deck_options` with U49's.

@@ -82,13 +82,14 @@ Nothing else changes: not `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `laps
 
 ### M4.4 Example
 
-Scenario `sched/memory/recompute` (its golden comes with the oracle op `save_deck_options`, `conformance/deck-options-ops#E1`): after Lang's desired retention goes from 0.9 to 0.85, c1 (H, no memory state before) should hold `{"s":39.4516,"d":7.64,"dr":0.85,"decay":0.154}` (the state of `sched/fsrs-items#I5`'s first example, rounded), c4 (a set-due-date row only, a stale state) only `dr` 0.85 and `decay` 0.154, while c3 (no review log) and c5 (new) keep their stale values and the review-log digest stays the same. The golden is the authority once recorded.
+Golden `sched/memory/recompute` (recorded with the oracle op `save_deck_options`, `conformance/deck-options-ops#E1`): after Lang's desired retention goes from 0.9 to 0.85, c1 (H, no memory state before) holds `{"s":39.4516,"d":7.64,"dr":0.85,"decay":0.154}` (the state of `sched/fsrs-items#I5`'s first example, rounded), c4 (a set-due-date row only, a stale state) only `dr` 0.85 and `decay` 0.154, while c3 (no review log) and c5 (new) keep their stale values, `mod` and `usn`, and the review-log digest stays the same.
 
 ## M5. "N of M cards included" (R690)
 
 A read query for the deck options screen (U49, U232), given a preset and the date text being edited (not necessarily the stored one):
 
-- **Card set:** the cards the preset's search finds, its `param_search` (schema-11 `weightSearch`) when not empty, otherwise `preset:"<name>" -is:suspended`; then without new cards.
+- **Card set:** the cards the preset's search finds, its `param_search` (schema-11 `weightSearch`) when not empty (white space alone is not empty), otherwise the cards whose home deck uses the preset and that are not suspended; then without new cards.
+- Anki builds that default search as the text `preset:"<name>" -is:suspended` with `\` and `"` in the name escaped, and its `preset:` search compares the name with those escapes still in it. So for a preset whose name holds `\` or `"`, Anki finds no card and shows 0 of 0 (found on the oracle). Meguri counts that preset's cards (M10); no scenario uses such a name.
 - **M** (`total`): the number of cards in the set.
 - **N** (`included`): the number of those cards with at least one review-log row whose stored `type` is 0 and whose `id` is after the cutoff of the given text (`sched/fsrs-items#I1.3`; the empty text gives 0, so every such row counts). The button does not matter, and the stored `type` is compared: a row of an unknown type does not count here.
 - **Warning** (R690): when M is above 0 and 10 × N is below M.
@@ -169,8 +170,8 @@ Check Database runs M6 on every card; it runs no M4 recompute.
 | `sched/memory/ignore-before` | `sched/fsrs-items#I1.3`, `#I3` (cutoff) | recorded |
 | `sched/memory/ignore-before-boundary` | rows at exactly the cutoff | recorded |
 | `sched/memory/lrt-repair` | M6 | recorded |
-| `sched/memory/recompute` | M4, M7.1 | awaiting the oracle op `save_deck_options` |
-| `sched/memory/ignore-before-count` | M5, `sched/fsrs-items#I1.3` | awaiting the oracle observation `ignored_before_count` |
+| `sched/memory/recompute` | M4, M7.1 | recorded (op `save_deck_options`) |
+| `sched/memory/ignore-before-count` | M5, `sched/fsrs-items#I1.3` | recorded (observation `ignored_before_count`) |
 
 - The scenarios observe through `next_states` (memory states compare with the 1e-5 tolerance of `conformance/observations#O7`), `card`, `db_exec` and `check_db`. Meguri runs them once its executor has U45's next states, U44's answer, U128's `check_db` and U49's `save_deck_options`; until then they are `pending`, and U46's tests read their goldens directly: the stored rows and review logs as input, the memory states, card rows and counts as expected output.
 - Many cards come in pairs whose memory states must be equal (the scenario comments say which); the pairs pin down the start rules without depending on the crate's numbers.
@@ -181,4 +182,5 @@ Check Database runs M6 on every card; it runs no M4 recompute.
 
 - M4.2: unchanged cards keep `mod` and `usn` (R687); deviations `memory-recompute-unchanged-mod` and `memory-recompute-unchanged-usn`.
 - M4.3: cards of presets with parameters the crate cannot build are skipped (R704); Anki cannot have such presets after its own save.
+- M5: for a preset whose name holds `\` or `"` and whose `param_search` is empty, Meguri counts the preset's cards; Anki's count finds none (0 of 0).
 - Meguri never turns FSRS off (R702), so Anki's clearing of `s`, `d`, `dr` and `decay` when a save turns FSRS off is not reproduced.
