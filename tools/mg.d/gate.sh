@@ -282,16 +282,19 @@ mg_gate__record() {
   mg_count failed "$(jq .failed <<<"$summary")"
   mg_count skipped "$(jq '[.runs[] | select(.result == null and (.outcome | IN("fail", "error", "unresolved", "needs-oracle-tree") | not))] | length' "$receipt")"
   mg_detail receipt "$(jq -c '{mode, commit, dirty, base, values, pass, merge_ready, incomplete,
+      queued: [.queued[]? | {id, user_steps, parts: [.parts[].part]}],
       runs: [.runs[] | {id, tier, outcome, result, duration_ms, over_budget}],
       quarantine: {active: [.quarantine.active[] | {run, test, class, owner, deadline, failed_here}],
                    expired: [.quarantine.expired[] | {run, test, owner, deadline}],
                    invalid: [.quarantine.invalid[] | .label]}}' "$receipt")"
-  local outcomes
+  local outcomes queued
   outcomes="$(jq -r '.outcomes | to_entries | map("\(.value) \(.key)") | join(", ")' <<<"$summary")"
+  # Runs the machine's state queued, with the user steps they wait for.
+  queued="$(jq -r '[.queued[]? | "\(.id) (\(.user_steps | join(", ")))"] | join(", ") | if . == "" then "" else "; queued: " + . end' "$receipt")"
   if jq -e '.pass' "$receipt" >/dev/null; then
     if jq -e '[.runs[] | select(.over_budget or (.outcome | IN("queued", "quarantined", "warn")))] | length > 0' "$receipt" >/dev/null ||
       { [ "$mode" != local ] && jq -e '.incomplete | length > 0' "$receipt" >/dev/null; }; then
-      mg_message "$MG_JOB: pass with notes ($outcomes)"
+      mg_message "$MG_JOB: pass with notes ($outcomes)$queued"
       mg_status warn
     else
       mg_message "$MG_JOB: pass ($outcomes)"

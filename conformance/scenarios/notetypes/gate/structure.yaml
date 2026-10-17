@@ -1,0 +1,60 @@
+# Which note type saves set col.scm (specs/notetypes/schema-changes.md G2,
+# G3, G5). After a sync (ls = scm), each structural change sets scm to now,
+# again when the schema is already modified: the sort field, a field move, a
+# field removal and a field add, a template add, a template removal and a
+# template move. A field rename, a template rename, a template text change and
+# a move to the position a field already has do not. Every save runs
+# confirmed (specs/conformance/notetype-ops.md T9) and the field editor's saves
+# skip the template checks as Anki's does.
+id: notetypes/gate/structure
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Trio, fields: [sun, sol, hot]}
+steps:
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{rename_field: {from: Extra, to: Note}}], skip_checks: true}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{move_field: {field: Back, to: 1}}], skip_checks: true}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{rename_template: {from: Backward, to: Reverse}}]}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{template: {name: Forward, front: "{{Front}}!"}}]}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{sort_field: Back}], skip_checks: true}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{move_field: {field: Note, to: 0}}], skip_checks: true}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{remove_field: Note}], skip_checks: true}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{add_field: Hint}], skip_checks: true}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{add_template: {name: Third, front: "{{Hint}}", back: "{{Front}}"}}]}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{move_template: {template: Third, to: 0}}]}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Trio, edits: [{remove_template: Third}]}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Trio' ORDER BY f.ord
+  - observe:
+      - {notetype_structure: {notetypes: [Trio]}}

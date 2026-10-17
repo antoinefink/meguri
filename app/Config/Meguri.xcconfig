@@ -6,13 +6,15 @@ PRODUCT_BUNDLE_IDENTIFIER = $(MEGURI_BUNDLE_ID)
 SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor
 
 // Info.plist: the generated keys merged into the per-platform file, which
-// holds the keys other areas rely on (R499, R1629, KTD12).
+// holds the keys other areas rely on (R499, R1629, KTD12), the `meguri` URL
+// scheme (R319; never `anki`, R321) and, on iOS, the one-scene manifest (R7).
+// Every orientation, and no UIRequiresFullScreen: windows resize on iPad and
+// iPhone (R7, R8).
 GENERATE_INFOPLIST_FILE = YES
 INFOPLIST_FILE[sdk=iphone*] = Meguri/Info-iOS.plist
 INFOPLIST_FILE[sdk=macosx*] = Meguri/Info-macOS.plist
 INFOPLIST_KEY_CFBundleDisplayName = Meguri
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
-INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphone*] = YES
 INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight

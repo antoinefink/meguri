@@ -96,6 +96,12 @@ case "$name $*" in
   "uname -m") echo arm64 ;;
   "uname -sm") echo "Darwin arm64" ;;
   "sw_vers -productVersion") echo 27.0 ;;
+  "sw_vers -buildVersion") echo "${STUB_MACOS_BUILD:-26A434}" ;;
+  "ioreg -n Root -d1")
+    echo "+-o Root  <class IORegistryEntry>"
+    echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes${STUB_LOCKED:+,\"CGSSessionScreenIsLocked\"=Yes})" ;;
+  "system_profiler SPDisplaysDataType -json")
+    echo "{\"SPDisplaysDataType\": [{\"spdisplays_ndrvs\": [{\"_name\": \"Display\"${STUB_ASLEEP:+, \"spdisplays_asleep\": \"spdisplays_yes\"}}]}]}" ;;
   "xcode-select -p") echo /Applications/Xcode.app/Contents/Developer ;;
   "xcodebuild -version") printf 'Xcode 27.0\nBuild version 27A266a\n' ;;
   "xcodebuild -license check") exit "${STUB_LICENSE_RC:-0}" ;;
@@ -130,6 +136,9 @@ case "$name $*" in
   "vm-ssh xcodebuild -version")
     [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
     printf 'Xcode %s\nBuild version %s\n' "${STUB_VM_XCODE:-27.0}" 27A266a ;;
+  "vm-ssh sw_vers -buildVersion")
+    [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
+    echo "${STUB_VM_MACOS_BUILD:-26A434}" ;;
   "vm-ssh xcrun simctl list runtimes --json")
     if [ "${STUB_VM_RUNTIME:-1}" = 1 ]; then
       echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","buildversion":"24A434","isAvailable":true,"platform":"iOS"}]}'
@@ -148,7 +157,7 @@ esac
 EOF
   chmod +x "$STUBS/_stub"
   local c
-  for c in uname sw_vers xcode-select xcodebuild xcrun defaults docker rustup df \
+  for c in uname sw_vers ioreg system_profiler xcode-select xcodebuild xcrun defaults docker rustup df \
     sudo launchctl open softwareupdate security tccutil systemsetup networksetup spctl pmset devicectl; do
     ln -s _stub "$STUBS/$c"
   done
@@ -168,7 +177,9 @@ assert_read_only_calls() {
   local bad
   bad="$(grep -Ev \
     -e '^uname -[a-z]+$' \
-    -e '^sw_vers -productVersion$' \
+    -e '^sw_vers -(productVersion|buildVersion)$' \
+    -e '^ioreg -n Root -d1$' \
+    -e '^system_profiler SPDisplaysDataType -json$' \
     -e '^xcode-select -p$' \
     -e '^xcodebuild -(version|license check)$' \
     -e '^xcrun simctl list runtimes --json$' \
@@ -179,6 +190,7 @@ assert_read_only_calls() {
     -e '^df -Pk /' \
     -e '^tart list --format json$' \
     -e '^vm-ssh xcodebuild -version$' \
+    -e '^vm-ssh sw_vers -buildVersion$' \
     -e '^vm-ssh xcrun simctl list runtimes --json$' \
     "$STUB_LOG" || true)"
   if [ -n "$bad" ]; then
@@ -526,6 +538,63 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   jq -e '.details.checks[] | select(.id == "mac-vm/meguri-mac" and .status == "warn" and (.message | contains("connect the drive that holds the VM")))' "$result"
   [ "$(field '.details.mac_vm.vms[0].drive_connected')" = false ]
   [ "$(field '.user_steps[] | select(.id == "mac-vm") | .state')" = missing ]
+  assert_read_only_calls
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "doctor lists host-session while the Mac is locked or its display sleeps (U19b)" {
+  make_stubs
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "host-session" and .status == "pass")' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "host-session")] | length')" = 0 ]
+  STUB_LOCKED=1 mg doctor
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "host-session" and .status == "warn" and (.message | contains("locked")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "host-session") | "\(.state) \(.required)"')" = "missing true" ]
+  STUB_ASLEEP=1 mg doctor
+  jq -e '.details.checks[] | select(.id == "host-session" and .status == "warn" and (.message | contains("display-asleep")))' "$result"
+  assert_read_only_calls
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "doctor lists mac-input while the Mac UI runner still has the macOS and Xcode builds that dropped input (U19b)" {
+  make_stubs
+  local seen="$SB/build/mg/mac-input.json"
+  # Never seen: nothing to wait for.
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "mac-input" and .status == "pass")' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "mac-input")] | length')" = 0 ]
+
+  # Seen in the VM on the builds it still has: missing.
+  mkdir -p "$(dirname "$seen")"
+  jq -n '{at: "2026-10-17T01:58:00Z", job: "mac-ui", run_id: "20261017T020325Z-18762", runner: "vm", vm: "meguri-mac",
+    macos: "27.0.1", macos_build: "26A434", xcode: "27.0 (27A266a)"}' >"$seen"
+  mg doctor
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-input" and .status == "warn" and (.message | contains("26A434")) and (.message | contains("meguri-mac")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | "\(.state) \(.required)"')" = "missing true" ]
+  [ "$(field '.details.mac_vm.vms[0].macos_build')" = 26A434 ]
+
+  # macOS updated in the VM, or Xcode: clear, the next Mac UI run tells.
+  STUB_VM_MACOS_BUILD=26B5 mg doctor
+  jq -e '.details.checks[] | select(.id == "mac-input" and .status == "pass" and (.message | contains("26B5")))' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "mac-input")] | length')" = 0 ]
+
+  # A VM doctor cannot reach cannot show it changed: still missing.
+  STUB_VM_STATE=stopped STUB_VM_MACOS_BUILD=26B5 mg doctor
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+
+  # Seen on this Mac (a host run): this Mac's builds decide.
+  jq '.runner = "host" | .vm = null' "$seen" >"$seen.tmp" && mv "$seen.tmp" "$seen"
+  mg doctor
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+  STUB_MACOS_BUILD=26B5 mg doctor
+  [ "$(field '[.user_steps[] | select(.id == "mac-input")] | length')" = 0 ]
   assert_read_only_calls
   validate "$result"
 }

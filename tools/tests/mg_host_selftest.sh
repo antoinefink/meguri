@@ -800,12 +800,12 @@ EOF
   expect "second lease exit" "$RC" 0 &&
     expect "leases in turn" "$(tr '\n' ' ' <"$FX_LOG")" "start a end a start b end b " &&
     expect "lease released" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free || return 1
-  # A locked session blocks the job after it takes the lease, and frees it.
+  # A locked session queues the job after it takes the lease, and frees it.
   : >"$FX_LOG"
   FAKE_SESSION_LOCKED=1 mg fx-lease c
-  expect "locked session exit" "$RC" 2 &&
-    expect "locked session result" "$(field .status) $(field '.failures[0].id') $(field .details.host_session)" \
-      "error blocked-host locked" &&
+  expect "locked session exit" "$RC" 0 &&
+    expect "locked session result" "$(field .status) $(field .details.queued) $(field '.details.queued_parts[0].user_step') $(field .details.host_session)" \
+      "warn true host-session locked" &&
     expect "locked session user step" "$(field '[.user_steps[] | select(.id == "host-session")] | length')" 1 &&
     expect "the job did not run" "$(cat "$FX_LOG")" "" &&
     expect "lease released after the block" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free || return 1

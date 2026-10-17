@@ -139,6 +139,22 @@
           "description": "model-ops.md L2: the op has no output, so only a rejection appears.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
         },
+        "add_notetype": { "description": "notetype-ops.md T2.", "$ref": "#/$defs/notetype_save" },
+        "add_stock_notetype": { "description": "notetype-ops.md T3.", "$ref": "#/$defs/notetype_save" },
+        "clone_notetype": { "description": "notetype-ops.md T4.", "$ref": "#/$defs/notetype_save" },
+        "update_notetype": { "description": "notetype-ops.md T5.", "$ref": "#/$defs/notetype_save" },
+        "ensure_io_notetype": {
+          "description": "notetype-ops.md T6: the Image Occlusion note type's stored name.",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" } }
+        },
+        "notetype_structure": {
+          "description": "notetype-ops.md T8: note types by stored name, without template text, CSS or ids.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/notetype_structure" }
+        },
         "blob_decode": {
           "description": "model-ops.md L4: per record, ok or invalid_blob.",
           "type": "object",
@@ -225,6 +241,25 @@
             "checksum": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
             "field_empty": { "type": "array", "items": { "type": "boolean" } },
             "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
+          }
+        },
+        "render_status": {
+          "description": "specs/conformance/render-ops.md Q4.3: per card, its stored ordinal and whether it renders for review from its stored templates; null when the card no longer exists.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["ord", "status"],
+                "additionalProperties": false,
+                "properties": {
+                  "ord": { "type": "integer", "minimum": 0 },
+                  "status": { "enum": ["ok", "empty", "template_error"] }
+                }
+              },
+              { "type": "null" }
+            ]
           }
         },
         "template": {
@@ -539,6 +574,91 @@
           "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
         }
       ]
+    },
+    "notetype_save": {
+      "description": "notetype-ops.md T2-T5: the stored name, or a rejection of T7.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" } }
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/rejection" },
+            {
+              "properties": {
+                "error": {
+                  "enum": ["invalid_notetype", "template_parse_error", "duplicate_front", "no_front_field", "unknown_field", "missing_cloze"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "notetype_structure": {
+      "description": "notetype-ops.md T8.",
+      "type": "object",
+      "required": ["kind", "original_stock_kind", "original_id", "sort_field", "fields", "templates"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["standard", "cloze"] },
+        "original_stock_kind": { "type": "integer" },
+        "original_id": { "type": ["integer", "null"] },
+        "sort_field": { "type": "integer", "minimum": 0 },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name", "sticky", "rtl", "font_name", "font_size", "description", "plain_text", "collapsed",
+              "exclude_from_search", "tag", "prevent_deletion"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "sticky": { "type": "boolean" },
+              "rtl": { "type": "boolean" },
+              "font_name": { "type": "string" },
+              "font_size": { "type": "integer", "minimum": 0 },
+              "description": { "type": "string" },
+              "plain_text": { "type": "boolean" },
+              "collapsed": { "type": "boolean" },
+              "exclude_from_search": { "type": "boolean" },
+              "tag": { "type": ["integer", "null"] },
+              "prevent_deletion": { "type": "boolean" }
+            }
+          }
+        },
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "deck", "requirement"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "deck": { "type": ["string", "integer", "null"] },
+              "requirement": {
+                "anyOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "required": ["kind", "fields"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": { "enum": ["none", "any", "all"] },
+                      "fields": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     },
     "rejection": {
       "description": "An op Anki refused (dsl.md D7.3). An op whose D7.2 row lists rejection kinds takes anyOf [its output, this with error restricted to those kinds]; the others record none.",

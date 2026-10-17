@@ -130,6 +130,18 @@ fn mapping<'de, D: Deserializer<'de>>(deserializer: D, what: &str) -> Result<Map
     }
 }
 
+/// An op argument read through its mapping, for a variant's or a member's
+/// `deserialize_with`: serde's derived struct alone would also read the list
+/// of its values, which the schema forbids.
+fn op_mapping<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: de::DeserializeOwned,
+{
+    let map = mapping(deserializer, "an op argument")?;
+    serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)
+}
+
 /// The argument `{}` of `reopen`, `converge` and `check_db`: a mapping with
 /// no keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -498,7 +510,7 @@ pub struct NotetypeSpec {
     pub css: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemplateSpec {
     pub name: String,
@@ -591,6 +603,186 @@ pub struct LegacyUpdate {
     #[serde(default, deserialize_with = "present")]
     pub preset: Option<String>,
     pub patch: Map<String, Value>,
+}
+
+/// The six stock kinds of `add_stock_notetype` (notetype-ops.md T3;
+/// `notetypes/stock-kinds` K1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StockKind {
+    Basic,
+    BasicAndReversed,
+    BasicOptionalReversed,
+    BasicTyping,
+    Cloze,
+    ImageOcclusion,
+}
+
+/// `add_stock_notetype: {kind, name?}` (notetype-ops.md T3): `name` not
+/// empty (checked on load), the kind's name when missing.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddStockNotetypeArgs {
+    pub kind: StockKind,
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+}
+
+/// `clone_notetype: {notetype, name?}` (notetype-ops.md T4): both not empty
+/// (checked on load); `<notetype> copy` when `name` is missing.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloneNotetypeArgs {
+    pub notetype: String,
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+}
+
+/// `update_notetype: {notetype, edits, skip_checks?}` (notetype-ops.md T5):
+/// `notetype` not empty (checked on load); the edits apply in order to one
+/// draft, saved once.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateNotetypeArgs {
+    pub notetype: String,
+    pub edits: Vec<NotetypeEdit>,
+    #[serde(default)]
+    pub skip_checks: bool,
+}
+
+/// One edit of `update_notetype` (notetype-ops.md T5): a mapping with exactly
+/// one key. Field and template names refer to the draft as the earlier edits
+/// left it; they are resolved when the step runs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotetypeEdit {
+    Rename(String),
+    Css(String),
+    SortField(String),
+    AddField(String),
+    RemoveField(String),
+    #[serde(deserialize_with = "op_mapping")]
+    RenameField(RenamePair),
+    #[serde(deserialize_with = "op_mapping")]
+    MoveField(MoveFieldEdit),
+    #[serde(deserialize_with = "op_mapping")]
+    FieldOptions(FieldOptionsEdit),
+    /// `{name, front?, back?}`, texts empty when missing.
+    #[serde(deserialize_with = "op_mapping")]
+    AddTemplate(TemplateSpec),
+    RemoveTemplate(String),
+    #[serde(deserialize_with = "op_mapping")]
+    RenameTemplate(RenamePair),
+    #[serde(deserialize_with = "op_mapping")]
+    MoveTemplate(MoveTemplateEdit),
+    #[serde(deserialize_with = "op_mapping")]
+    Template(TemplateEdit),
+}
+
+impl NotetypeEdit {
+    /// The edit's key as written in scenarios.
+    pub fn key(&self) -> &'static str {
+        match self {
+            NotetypeEdit::Rename(_) => "rename",
+            NotetypeEdit::Css(_) => "css",
+            NotetypeEdit::SortField(_) => "sort_field",
+            NotetypeEdit::AddField(_) => "add_field",
+            NotetypeEdit::RemoveField(_) => "remove_field",
+            NotetypeEdit::RenameField(_) => "rename_field",
+            NotetypeEdit::MoveField(_) => "move_field",
+            NotetypeEdit::FieldOptions(_) => "field_options",
+            NotetypeEdit::AddTemplate(_) => "add_template",
+            NotetypeEdit::RemoveTemplate(_) => "remove_template",
+            NotetypeEdit::RenameTemplate(_) => "rename_template",
+            NotetypeEdit::MoveTemplate(_) => "move_template",
+            NotetypeEdit::Template(_) => "template",
+        }
+    }
+
+    /// The capability the edit needs (notetype-ops.md T10.1):
+    /// `update_notetype.<key>`, and `update_notetype.template_text` for a
+    /// `template` edit that sets `front` or `back`.
+    pub fn capability(&self) -> String {
+        match self {
+            NotetypeEdit::Template(t) if t.front.is_some() || t.back.is_some() => {
+                "update_notetype.template_text".to_owned()
+            }
+            other => format!("update_notetype.{}", other.key()),
+        }
+    }
+}
+
+/// `{from, to}` of `rename_field` and `rename_template`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenamePair {
+    pub from: String,
+    pub to: String,
+}
+
+/// `move_field: {field, to}`: `to` a 0-based position of the draft's
+/// fields, checked when the step runs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveFieldEdit {
+    pub field: String,
+    pub to: u64,
+}
+
+/// `move_template: {template, to}`: `to` a 0-based position.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveTemplateEdit {
+    pub template: String,
+    pub to: u64,
+}
+
+/// `field_options: {field, ...}`: the options given (`model/protobuf-records`
+/// P6.2 names); missing ones stay as they are.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldOptionsEdit {
+    pub field: String,
+    #[serde(default, deserialize_with = "present")]
+    pub sticky: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub rtl: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub font_name: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub font_size: Option<u64>,
+    #[serde(default, deserialize_with = "present")]
+    pub description: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub plain_text: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub collapsed: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub exclude_from_search: Option<bool>,
+}
+
+/// `template: {name, ...}`: the values given for the named template; missing
+/// ones stay as they are.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateEdit {
+    pub name: String,
+    #[serde(default, deserialize_with = "present")]
+    pub front: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub back: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_front: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_back: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_font_name: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_font_size: Option<u64>,
+    /// The deck override: `None` when missing (kept), `Some(None)` for null
+    /// (cleared), `Some(Some(name))` to set it.
+    #[serde(default, deserialize_with = "present")]
+    pub deck: Option<Option<String>>,
 }
 
 /// `open: {fixture}` (storage-ops.md P1.1).
@@ -705,6 +897,20 @@ pub enum Step {
     UpdatePreset(DraftArgs),
     /// model-ops.md L2.
     LegacyUpdate(LegacyUpdate),
+    /// notetype-ops.md T2: shaped as a `setup.notetypes` entry.
+    #[serde(deserialize_with = "op_mapping")]
+    AddNotetype(NotetypeSpec),
+    /// notetype-ops.md T3.
+    #[serde(deserialize_with = "op_mapping")]
+    AddStockNotetype(AddStockNotetypeArgs),
+    /// notetype-ops.md T4.
+    #[serde(deserialize_with = "op_mapping")]
+    CloneNotetype(CloneNotetypeArgs),
+    /// notetype-ops.md T5.
+    #[serde(deserialize_with = "op_mapping")]
+    UpdateNotetype(UpdateNotetypeArgs),
+    /// notetype-ops.md T6.
+    EnsureIoNotetype(NoArgs),
     BuildFiltered(DraftArgs),
     Import(DraftArgs),
     Export(DraftArgs),
@@ -731,7 +937,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 39] = [
+    pub const NAMES: [&'static str; 44] = [
         "advance",
         "set_clock",
         "add_note",
@@ -759,6 +965,11 @@ impl Step {
         "reposition",
         "update_preset",
         "legacy_update",
+        "add_notetype",
+        "add_stock_notetype",
+        "clone_notetype",
+        "update_notetype",
+        "ensure_io_notetype",
         "build_filtered",
         "import",
         "export",
@@ -806,6 +1017,11 @@ impl Step {
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
             Step::LegacyUpdate(_) => "legacy_update",
+            Step::AddNotetype(_) => "add_notetype",
+            Step::AddStockNotetype(_) => "add_stock_notetype",
+            Step::CloneNotetype(_) => "clone_notetype",
+            Step::UpdateNotetype(_) => "update_notetype",
+            Step::EnsureIoNotetype(_) => "ensure_io_notetype",
             Step::BuildFiltered(_) => "build_filtered",
             Step::Import(_) => "import",
             Step::Export(_) => "export",
@@ -1296,6 +1512,8 @@ pub enum ObservationKind {
     Queue,
     DeckTree,
     Render,
+    /// render-ops.md Q4.
+    RenderStatus,
     /// render-ops.md Q1.
     Template,
     /// search-ops.md S1.
@@ -1321,6 +1539,8 @@ pub enum ObservationKind {
     TagTree,
     /// browser-config-ops.md B2.
     BrowserConfig,
+    /// notetype-ops.md T8.
+    NotetypeStructure,
 }
 
 /// How a kind takes arguments.
@@ -1341,7 +1561,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 26] = [
+    pub const ALL: [ObservationKind; 28] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1352,6 +1572,7 @@ impl ObservationKind {
         ObservationKind::Queue,
         ObservationKind::DeckTree,
         ObservationKind::Render,
+        ObservationKind::RenderStatus,
         ObservationKind::Template,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
@@ -1368,6 +1589,7 @@ impl ObservationKind {
         ObservationKind::FsrsNext,
         ObservationKind::TagTree,
         ObservationKind::BrowserConfig,
+        ObservationKind::NotetypeStructure,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1382,6 +1604,7 @@ impl ObservationKind {
             ObservationKind::Queue => "queue",
             ObservationKind::DeckTree => "deck_tree",
             ObservationKind::Render => "render",
+            ObservationKind::RenderStatus => "render_status",
             ObservationKind::Template => "template",
             ObservationKind::Search => "search",
             ObservationKind::CanonicalSearch => "canonical_search",
@@ -1398,6 +1621,7 @@ impl ObservationKind {
             ObservationKind::FsrsNext => "fsrs_next",
             ObservationKind::TagTree => "tag_tree",
             ObservationKind::BrowserConfig => "browser_config",
+            ObservationKind::NotetypeStructure => "notetype_structure",
         }
     }
 
@@ -1415,9 +1639,11 @@ impl ObservationKind {
             | ObservationKind::UndoStatus
             | ObservationKind::TagTree
             | ObservationKind::BrowserConfig => ArgShape::None,
-            ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
-                ArgShape::CardRefs
-            }
+            ObservationKind::Card
+            | ObservationKind::Revlog
+            | ObservationKind::NextStates
+            | ObservationKind::Render
+            | ObservationKind::RenderStatus => ArgShape::CardRefs,
             ObservationKind::FuzzTable
             | ObservationKind::NetProbe
             | ObservationKind::LegacyJson
@@ -1427,7 +1653,10 @@ impl ObservationKind {
             | ObservationKind::Text
             | ObservationKind::Cloze
             | ObservationKind::FsrsNext => ArgShape::Mapping,
-            ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
+            ObservationKind::Queue
+            | ObservationKind::DbDump
+            | ObservationKind::Stats
+            | ObservationKind::NotetypeStructure => ArgShape::OptionalMapping,
             ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }
@@ -2485,6 +2714,11 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
                 needs
                     .observations
                     .extend(requests.iter().map(|r| r.kind.name().to_owned()));
+            }
+            // notetype-ops.md T10.1: the op and a capability per kind of edit.
+            Step::UpdateNotetype(args) => {
+                needs.ops.insert(step.name().to_owned());
+                needs.ops.extend(args.edits.iter().map(NotetypeEdit::capability));
             }
             other => {
                 needs.ops.insert(other.name().to_owned());

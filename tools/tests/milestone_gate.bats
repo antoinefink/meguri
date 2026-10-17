@@ -30,6 +30,7 @@ tiers:
   T4: {when: milestones, on devices}
 runs:
   - {id: unit, job: t-job, args: [unit], tier: T0, placement: host, class: unit, budget_s: 60}
+  - {id: review, job: t-job, args: [review], tier: T0, placement: host, class: unit, budget_s: 60}
   - {id: milestones, job: milestone-gate, args: [--check], tier: T0, placement: host, class: static, budget_s: 60}
 utilities:
   - {job: gate, why: runs the tiers}
@@ -63,22 +64,25 @@ EOF
     # claim it with their plan excerpts.
     printf '| **M0 Stage M0** | U1 | Gate of M0. | Steps of M0 (R1969) |\n'
     i=2
-    for m in M1 M2 M3 M4 M5; do
+    for m in M1R M1 M2 M3 M4 M5; do
       printf '| **%s Stage %s** | U%d |  |  |\n' "$m" "$m" "$i"
       i=$((i + 1))
     done
     printf '\n### Unit Index\n\n| U-ID | Title |\n|---|---|\n'
-    for i in 1 2 3 4 5 6; do printf '| U%d | unit %d |\n' "$i" "$i"; done
+    for i in 1 2 3 4 5 6 7; do printf '| U%d | unit %d |\n' "$i" "$i"; done
   } >"$t/docs/plan.md"
   {
     printf 'version: 1\nplan: docs/plan.md\nevidence_paths: [docs/process/milestone-records/]\n'
     printf 'global:\n  - {id: quarantine, kind: quarantine}\nmilestones:\n'
     i=1
-    for m in M0 M1 M2 M3 M4 M5; do
+    for m in M0 M1R M1 M2 M3 M4 M5; do
       if [ "$m" = M0 ]; then
         printf '  - id: M0\n    name: Stage M0\n    plan: {gate: "Gate of M0.", user_steps: "Steps of M0 (R1969)"}\n    units: [U1]\n'
         printf '    suites:\n      - {id: unit, run: unit, plan: [Gate of M0]}\n      - {id: milestones, run: milestones}\n'
         printf '    user_steps:\n      - {id: xcode-license, description: Accept the license, evidence: build/mg/doctor/, validator: {type: setup, step: xcode-license}, plan: ["Steps of M0 (R1969)"]}\n'
+      elif [ "$m" = M1R ]; then
+        printf '  - id: M1R\n    name: Stage M1R\n    plan: {gate: "", user_steps: ""}\n    units: [U%d]\n' "$i"
+        printf '    suites:\n      - {id: review, run: review}\n'
       else
         printf '  - id: %s\n    name: Stage %s\n    plan: {gate: "", user_steps: ""}\n    units: [U%d]\n' "$m" "$m" "$i"
       fi
@@ -133,6 +137,8 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
     --manifest "$d/manifest.json" --config "$d/config.json" --root "$REPO_ROOT"
   [ "$status" -eq 0 ] || { printf '%s\n' "$output" | jq .; return 1; }
   [ "$(jq -c .errors <<<"$output")" = "[]" ]
+  # Reviews first (U240r): M1R sits between M0 and M1, as in the plan's table.
+  [ "$(jq -r '[.milestones[].id] | join(" ")' "$d/manifest.json")" = "M0 M1R M1 M2 M3 M4 M5" ]
   # Every unit of the plan's Unit Index is in exactly one milestone.
   [ "$(jq '[.milestones[].units[]] | length' "$d/manifest.json")" -eq \
     "$(jq '[.milestones[].units[]] | unique | length' "$d/manifest.json")" ]
@@ -142,6 +148,7 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 
 @test "the real manifest fails the check when an entry the plan requires is removed or weakened" {
   local d="$BATS_TEST_TMPDIR" line edit expected m1='.milestones[] | select(.id == "M1")'
+  local m1r='.milestones[] | select(.id == "M1R")'
   "$REPO_ROOT/tools/mg" --list >"$d/registry.tsv"
   python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
     --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$d/registry.tsv" \
@@ -170,6 +177,16 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 (.milestones[] | select(.id == "M3")).suites |= map(select(.id != "u253-a11y"));;M3: the closing gate text names U253
 (.milestones[] | select(.id == "M5")).user_steps |= map(select(.id != "device-run-mac"));;no device-run user step on mac
 (.global[] | select(.id == "native-oracle")) |= del(.plan);;the macOS-native oracle check (KTD24)
+(.global[] | select(.id == "native-oracle") | .from) = "M1";;M1R: the closing gate text 'plus the macOS-native oracle check (KTD24)'
+($m1r).user_steps |= map(select(.id != "first-sync"));;The first real sync with AnkiWeb
+($m1r).user_steps |= map(select(.id != "device-run-mac"));;M1R: the plan asks for device runs on iPhone, iPad, Mac; there is no device-run user step on mac
+($m1r | .user_steps[] | select(.id == "first-sync") | .validator) = {"type": "report"};;which asks for a first-sync step
+($m1r | .user_steps[] | select(.id == "first-sync") | .validator.results) -= ["u248-soak"];;binds u248-soak, which its results lacks
+($m1r | .suites[] | select(.id == "u251-safety-app") | .scope.items) -= ["background-suspend"];;binds background-suspend, which its scope lacks
+($m1r).suites |= map(select(.id != "perf-gate"));;gated by U241 against the review-loop budgets (R1807–R1817)
+($m1) |= del(.cumulative);;Cumulative over M1R: the full daily-driver gate
+.milestones |= map(select(.id != "M1R"));;the plan's table has a row M1R that the manifest lacks
+.milestones |= [.[0], .[2], .[1]] + .[3:];;the plan's table orders them M0, M1R, M1, M2, M3, M4, M5
 EOF
 }
 
@@ -259,14 +276,32 @@ EOF
 }
 
 @test "milestone-gate rejects an invalid manifest and bad arguments" {
-  printf '  - {id: M6, name: x}\n' >>"$SB/docs/process/milestones.yaml"
+  printf '  - {id: M1R, name: x}\n' >>"$SB/docs/process/milestones.yaml"
   mg milestone-gate M0
   [ "$status" -eq 2 ]
   [ "$(field .status)" = error ]
-  [[ "$(field '.failures[0].message')" == *"M0, M1, M2, M3, M4 and M5"* ]]
+  [[ "$(field '.failures[0].message')" == *"each with its own id"* ]]
+  git -C "$SB" checkout -q docs/process/milestones.yaml
   mg milestone-gate M9
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = usage ]
   mg milestone-gate
   [ "$status" -eq 2 ]
+}
+
+@test "milestone-gate takes the milestones and their order from the manifest (U240r)" {
+  mg milestone-gate M1X
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  [[ "$(field '.failures[0].message')" == *"unknown milestone 'M1X'; the milestones of docs/process/milestones.yaml are M0, M1R, M1, M2, M3, M4, M5"* ]]
+  # M1R with no results: each of its suites, M0's included, is missing.
+  mg milestone-gate M1R
+  [ "$status" -eq 1 ]
+  [ "$(field '[.details.suites[] | "\(.id):\(.outcome)"] | join(" ")')" = "unit:missing milestones:missing review:missing" ]
+  [ "$(field '.summary.missing')" -eq 3 ]
+  # M1 is cumulative over M1R.
+  mg milestone-gate M1
+  [ "$status" -eq 1 ]
+  [ "$(field '[.details.suites[].id] | join(" ")')" = "unit milestones review" ]
+  validate "$result"
 }
