@@ -153,6 +153,7 @@ A shared function used by D1 and by other units (Empty Cards U35, template remov
 | `notes/fields/count-repair` | F1 through Check Database | recorded |
 | `storage/noop/identical-note-rewrite` | U2, U3 stamps | recorded (U23) |
 | `storage/graves/delete-note` | D1 graves | recorded (U23) |
-| `undo/delete-notes`, `undo/edit-note`, `undo/edit-note-new-card` | A5, U3 and D1 undo | U25 |
+| `notes/records/undo-add` | A5: undo and redo of an add, config writes included | recorded |
+| `undo/delete-notes`, `undo/edit-note`, `undo/edit-note-new-card` | U3 and D1 undo | recorded (U25) |
 
 Meguri's tests cover what no scenario shows: the refusals of A1 and U1, A4 with `update_add_defaults` false (no key written, config `mtime_secs` unchanged), bulk adds, a caller-supplied GUID, D2, and the log (`notes/deleted-notes-log` L6).

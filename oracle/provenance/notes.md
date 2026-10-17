@@ -35,3 +35,16 @@ tests, `pylib/tests/test_models.py` `test_cloze_ordinals`, and
 here as done with the `cardgen/` and `notes/records/add` scenarios. U29's
 spec writer marked the same eleven rows deferred to U27 on `spec/U29`; when
 the two branches meet, U27's classification is the one to keep.
+
+Completion pass (2026-10-17, after U25's undo ops reached the oracle):
+`rslib/src/notes/mod.rs` test `undo` is now done with the new scenario
+`notes/records/undo-add` (add, undo, redo, undo; its golden confirms
+note-records A5: the note, its cards, the tag it registered and the three
+Add-screen keys go back, `nextPos` included, with no grave and `col.mod` set
+back) and U25's `undo/delete-notes`. The three
+`rslib/src/notetype/service.rs` tests
+`get_aux_template_config_key_*` (the per-template form `_nt_<id>_<key>_<ord>`,
+read in `rslib/src/config/notetype.rs`) are classified not-applicable: only
+`pylib/anki/collection.py` (`get_aux_template_config`,
+`set_aux_template_config`) reaches them, for add-ons; nothing in `qt/` or
+`ts/` at 26.09.3 calls them.

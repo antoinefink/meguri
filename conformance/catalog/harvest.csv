@@ -378,7 +378,7 @@ h29a2723c264d,rust,tag,notes,in-scope,Change Deck moves the cards to the target 
 h2ed53ea93d68,rust,tag,notes,in-scope,Change Deck leaves scheduling alone (U87),,deferred
 h346f0091fba0,rust,tag,notes,in-scope,Change Deck to the same deck recomputes nothing (U87),,deferred
 h3bc595fa00b0,rust,tag,notes,in-scope,The field names of the selected notes for Find and Replace (U86),,deferred
-h4907663a10e2,rust,tag,notes,in-scope,Undo and redo of adding and deleting notes; scenarios come with the undo op (U25),,deferred
+h4907663a10e2,rust,tag,notes,in-scope,"Undo and redo of adding and deleting notes: an add's undo removes its rows, tags and config writes with no grave (notes/note-records A5)",notes/records/undo-add undo/delete-notes,done
 h4ee2959fd8e8,rust,tag,notes,in-scope,Saving an unchanged note keeps its stamps; a change stamps it,storage/noop/identical-note-rewrite notes/save/untouched-fields,done
 h55e8477eea21,rust,tag,notes,in-scope,Change Deck gives new cards no memory state (U87 with U49's hook),,deferred
 h57651ff721da,rust,tag,notes,in-scope,A note type's default deck for the Add screen (U191),,deferred
@@ -464,11 +464,11 @@ h9032dd80f5a7,rust,tag,notetypes,in-scope,A new collection lists the stock note 
 h919a58a1a82a,rust,tag,notetypes,in-scope,One cloze number gives one card (notes/card-generation G4),cardgen/cloze/numbers,done
 h91e61b0cbd90,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h95ef12a29223,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
-h9836b2bac499,rust,tag,notetypes,unclassified,,,open
+h9836b2bac499,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 h9c3d56d899d8,rust,tag,notetypes,in-scope,"A Tags section on the front requires no card for an untagged note, which still gets ordinal 0 (notes/card-generation G3, G6)",cardgen/normal/conditionals,done
 h9e510243ea25,rust,tag,notetypes,in-scope,Random insertion positions are a seeded draw from the counter value (notes/deck-placement-and-position P4),cardgen/position/random,done
 ha1bb31fa12da,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
-ha2b5da04d17c,rust,tag,notetypes,unclassified,,,open
+ha2b5da04d17c,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 ha5a622e9741a,rust,tag,notetypes,in-scope,Saving a note type without an id adds it,notetypes/records/names,done
 ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
 haa4b9cb7903d,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
@@ -481,7 +481,7 @@ hc08963e31ad1,rust,tag,notetypes,in-scope,"Note type structure changes: fields, 
 hc107f1d1cc3e,rust,tag,notetypes,in-scope,A note type's legacy JSON object carries its stored name,model/schema11/notetype-values,done
 hd276a7ef2889,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
 hd70ff7b8b5c8,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
-hdaeb4b410d26,rust,tag,notetypes,unclassified,,,open
+hdaeb4b410d26,rust,tag,notetypes,not-applicable,"The backend's key name for per-template add-on settings in the config table (ordinal 0 on cloze note types); Anki's own screens write no such key, and Meguri keeps such keys untouched and removes them with their note type (storage/config-table C7, C10)",,done
 hdeaee1c610b2,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 hdf581e6e5983,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 he9ab9d659d6c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done

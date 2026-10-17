@@ -93,5 +93,5 @@ A duplicate never blocks adding (R808): the Add flow shows the state and adds th
 
 | Scenario | Covers | Golden |
 |---|---|---|
-| `notes/fields-check/states` | K2, K3 | needs the `fields_check` observation (`specs/conformance/note-ops.md` N4) |
-| `notes/fields-check/duplicates` | K2, K4, AE34 | needs the `fields_check` observation |
+| `notes/fields-check/states` | K2, K3 | recorded, with the `fields_check` observation (`specs/conformance/note-ops.md` N4) |
+| `notes/fields-check/duplicates` | K2, K4, AE34 | recorded |
