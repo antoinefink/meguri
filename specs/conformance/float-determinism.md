@@ -416,19 +416,19 @@ The status is `fail` when a gate pair has any difference, when the fuzz table di
 
 ## F11. Decision record
 
-Each side of the probe ran on the committed corpus on 2026-10-15, and the numbers below come from those runs. The single `tools/mg fp-probe` job could not run yet: it needs U14 integrated, so that one checkout has both `oracle/` and Meguri's probe. The decision applies from now on. The first green `tools/mg fp-probe` on `feat/meguri-v1` after U14 merges must give every number below; its run id and commit then replace "pending" in the first two rows. If it gives any other number, the decision is pending again until this section is revised, and no overlay may be adopted on a scheduler area's goldens in the meantime.
+Each side of the probe first ran on its own on the committed corpus on 2026-10-15, because the single `tools/mg fp-probe` job needs one checkout with both `oracle/` and Meguri's probe, which only U14's integration gives. The first green `tools/mg fp-probe` on `feat/meguri-v1` after U14 merged ran all four sides in one job on 2026-10-16 and gave every number below, so the decision stands as first recorded.
 
 | Item | Value |
 |---|---|
-| Probe run | Sides run one at a time. Oracle sides: the committed goldens and overlays of `fp-probe/corpus`. The Apple side is reproduced by `tools/mg oracle compare --platform apple fp-probe/corpus`: 101 of 101 scenarios pass, with 5,549 overlay entries applied. Meguri sides: `meguri-cli fp-probe` on macOS and in the dev container, in the U14 implementer's probe run `20261015T221715Z-93715`. The integrated run: pending. |
-| Date, commit | 2026-10-15. The Apple compare ran at `spec/U14` 329234e; the Meguri sides at `unit/U14` 3d5af28 with uncommitted changes. The integrated run: pending. |
+| Probe run | First, sides run one at a time. Oracle sides: the committed goldens and overlays of `fp-probe/corpus`. The Apple side is reproduced by `tools/mg oracle compare --platform apple fp-probe/corpus`: 101 of 101 scenarios pass, with 5,549 overlay entries applied. Meguri sides: `meguri-cli fp-probe` on macOS and in the dev container, in the U14 implementer's probe run `20261015T221715Z-93715`. The integrated run: `tools/mg fp-probe` run `20261016T003103Z-71186`, status `pass`. Its Apple side, `tools/mg oracle compare --platform apple fp-probe/corpus` run `20261016T003103Z-71354`, passed 101 of 101 scenarios with 5,549 overlay entries applied, under time control `faketime`. |
+| Date, commit | 2026-10-15. The Apple compare ran at `spec/U14` 329234e; the Meguri sides at `unit/U14` 3d5af28 with uncommitted changes. The integrated run: 2026-10-16, at `feat/meguri-v1` e41ecaf (U14's merge) with a clean tree; Meguri-macOS natively on an arm64 Mac (`macos-arm64`), Meguri-Linux in the dev container (`linux-arm64`). |
 | Corpus `sha256` | `c1daa0fcd5dc5a6a8230acd609c8f40de70edb00955e74d9ec79c27f80c14306` (100,000 inputs) |
 | Linux vs Apple oracle | 3,288 of 100,000 inputs differ. 0 of 400,000 days differ (rate 0.0). 5,549 memory values differ: 4,915 stabilities and 634 difficulties. 12 entries were outside the class as first written (every memory value within relative 1e-5). None is outside it under F8.3 as revised (F11.1). |
 | Apple oracle vs Meguri-macOS | 0 differences |
 | Linux oracle vs Meguri-Linux | 0 differences |
 | Fuzz table | 0 mismatches: 10,000 pairs × 20 intervals are equal on all four sides. `fp-probe/corpus/fuzz-table` has no overlay. |
 | Decision | Overlays adopted. Meguri keeps the platform math library (KTD24), and F8.3 is widened for stability. The KTD24 fallback (a patched fsrs with a vendored glibc-equivalent math port) is not started. O7 is unchanged (F11.3). |
-| Recorded by | spec writer, session `s-20261015T223556Z-c74bba35` (U14) |
+| Recorded by | spec writer, session `s-20261015T223556Z-c74bba35` (U14); the integrated run by spec writer session `s-20261016T050935Z-079ecba2` (U14) |
 
 ### F11.1 The entries outside the first class
 

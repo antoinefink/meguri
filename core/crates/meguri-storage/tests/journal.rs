@@ -645,3 +645,91 @@ fn marking_a_large_batch_with_a_usn_holds_no_more_than_a_page_of_rows() {
         "peak heap growth {peak} bytes over a budget of {JOURNALLED_MARK_BUDGET}"
     );
 }
+
+#[test]
+fn two_journals_compose_into_the_journal_of_both_operations() {
+    // engine/undo A3: merged note edits keep the first edit's before-images
+    // and take the second's after-images.
+    let (_dir, path) = empty_collection();
+    let collection = open(&path).unwrap();
+    let writer = collection.writer();
+    let clock = StepClock::new(NOW_MS, UtcOffset::UTC, "UTC");
+    let mut scope = writer.begin_write(StampMode::Local, &clock, None).unwrap();
+    let id = scope.add_note(&note(1, &["a", "b"])).unwrap();
+    let card_id = scope.add_card(&card(id, 0)).unwrap();
+    scope.commit().unwrap();
+    let original = writer.note(id).unwrap().unwrap();
+    let original_card = writer.card(card_id).unwrap().unwrap();
+
+    let edit = |fields: &str, tagged: Option<&str>| {
+        clock.step_ms(10_000);
+        let mut scope = writer
+            .begin_write(StampMode::Local, &clock, Some(JournalOptions::in_memory()))
+            .unwrap();
+        let mut edited = scope.note(id).unwrap().unwrap();
+        edited.fields = fields.to_owned();
+        scope.put(&edited).unwrap();
+        if let Some(name) = tagged {
+            scope.put(&tag(name)).unwrap();
+        }
+        scope.commit().unwrap().journal.unwrap()
+    };
+    let first = edit("a\u{1f}c", None);
+    let mut scope = writer
+        .begin_write(StampMode::Local, &clock, Some(JournalOptions::in_memory()))
+        .unwrap();
+    let mut suspended = original_card.clone();
+    suspended.queue = CardQueue::Suspended;
+    scope.put(&suspended).unwrap();
+    let card_journal = scope.commit().unwrap().journal.unwrap();
+    let second = edit("x\u{1f}c", Some("later"));
+    let col_before = first.before(first.entry(Table::Col, &RowKey::Id(1)).unwrap()).unwrap();
+
+    let both = first.then(&second).unwrap();
+    let keys: Vec<(Table, RowKey)> = both.entries().map(|e| (e.table(), e.key().clone())).collect();
+    assert_eq!(
+        keys,
+        [
+            (Table::Notes, RowKey::Id(id.0)),
+            (Table::Col, RowKey::Id(1)),
+            (Table::Tags, RowKey::Text(b"later".to_vec())),
+        ],
+        "the first journal's keys, then the keys only the second changed"
+    );
+    let note_entry = both.entry(Table::Notes, &RowKey::Id(id.0)).unwrap();
+    assert_eq!(both.before(note_entry).unwrap(), Some(original.to_cells()));
+    let After::Note(digest) = note_entry.after() else {
+        panic!("not a digest");
+    };
+    assert_eq!(digest.sha256, note_after(&second, id.0).sha256);
+    assert!(
+        ["mod", "flds"]
+            .iter()
+            .all(|c| digest.changed.names(Table::Notes).contains(c)),
+        "at least the columns either edit changed"
+    );
+    let col = both.entry(Table::Col, &RowKey::Id(1)).unwrap();
+    assert_eq!(both.before(col).unwrap(), col_before, "col as before the first");
+    assert_eq!(col.after(), second.entry(Table::Col, &RowKey::Id(1)).unwrap().after());
+    let tag_entry = both.entry(Table::Tags, &RowKey::Text(b"later".to_vec())).unwrap();
+    assert!(!tag_entry.existed_before() && tag_entry.exists_after());
+
+    // A key only the first changed keeps its own after-image.
+    let with_card = card_journal.then(&second).unwrap();
+    let card_entry = with_card.entry(Table::Cards, &RowKey::Id(card_id.0)).unwrap();
+    assert_eq!(with_card.before(card_entry).unwrap(), Some(original_card.to_cells()));
+    assert_eq!(
+        card_entry.after(),
+        card_journal
+            .entry(Table::Cards, &RowKey::Id(card_id.0))
+            .unwrap()
+            .after()
+    );
+    let note_only_later = with_card.entry(Table::Notes, &RowKey::Id(id.0)).unwrap();
+    assert_eq!(
+        with_card.before(note_only_later).unwrap(),
+        second
+            .before(second.entry(Table::Notes, &RowKey::Id(id.0)).unwrap())
+            .unwrap()
+    );
+}

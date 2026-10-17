@@ -54,6 +54,12 @@ let package = Package(
             swiftSettings: settings
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"], swiftSettings: settings),
+        .testTarget(
+            name: "CardRenderingTests",
+            dependencies: ["CardRendering", .product(name: "Instrumentation", package: "MeguriCore")],
+            exclude: ["AGENTS.md"],
+            swiftSettings: settings
+        ),
     ] + features.map { name in
         .target(
             name: name,

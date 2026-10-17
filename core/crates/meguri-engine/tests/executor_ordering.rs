@@ -36,6 +36,8 @@ impl ChangeObserver for SeqRecorder {
 fn a_thousand_ops_from_four_threads_reach_the_observer_and_the_stream_once_in_seq_order() {
     let recorder = Arc::new(SeqRecorder::default());
     let h = Harness::open_with(Ports::default().observer(recorder.clone()));
+    // The day clock's first check at open (`sched/day-clock` D8) wrote.
+    recorder.0.lock().unwrap().clear();
     let subscription = h.engine.stream().subscribe();
 
     let threads: Vec<_> = (0..4)
@@ -468,8 +470,8 @@ fn an_answer_submitted_while_a_background_op_plans_for_three_seconds_commits_fir
     let committed = monotonic::now() - submitted;
     assert!(committed < Duration::from_secs(1), "the answer waited {committed:?}");
     // Committed: another connection to the file sees it. The sync that makes
-    // it durable on the disk within 1 s is U32's flush
-    // (`storage/open-and-connections` C9.2).
+    // it durable on the disk within 1 s is the writer's flush
+    // (`storage/open-and-connections` C9.2, `tests/wal_durability.rs`).
     let seen = common::query_int(
         &h.collection,
         "SELECT count(*) FROM notes WHERE flds LIKE 'answer while planning%'",

@@ -1,0 +1,195 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "browser_config": {
+          "activeCols": ["question", "answer", "noteFld", "addonX", "cardDue"],
+          "activeNoteCols": ["noteTags", "", "noteFld"],
+          "browserNoteSortBackwards": true,
+          "browserTableShowNotesMode": true,
+          "collapseCardState": true,
+          "collapseDecks": true,
+          "collapseFlags": true,
+          "collapseNotetypes": true,
+          "collapseSavedSearches": true,
+          "collapseTags": true,
+          "collapseToday": true,
+          "defaultSearchText": "deck:Inbox is:due",
+          "flagLabels": {
+            "1": "Wrong ✓",
+            "3": "Important",
+            "7": "\"Quoted\""
+          },
+          "ignoreAccentsInSearch": true,
+          "normalize_note_text": false,
+          "noteSortType": "noteMod",
+          "previewBothSides": true,
+          "resetCountsBrowser": true,
+          "restorePositionBrowser": false,
+          "savedFilters": {
+            "Apple": "flag:1",
+            "Tab\there": "a/b \\ c",
+            "Zed": "tag:leech",
+            "apple": "is:due",
+            "Ünï": "deck:\"A B\""
+          },
+          "setDueBrowser": "1-7!",
+          "sortBackwards": true,
+          "sortType": "cardDue"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["activeCols", -1, 1894701600, "[\"question\",\"answer\",\"noteFld\",\"addonX\",\"cardDue\"]", "blob"],
+            ["activeNoteCols", -1, 1894701600, "[\"noteTags\",\"\",\"noteFld\"]", "blob"],
+            ["browserNoteSortBackwards", -1, 1894701600, "true", "blob"],
+            ["browserTableShowNotesMode", -1, 1894701600, "true", "blob"],
+            ["collapseCardState", -1, 1894701600, "true", "blob"],
+            ["collapseDecks", -1, 1894701600, "true", "blob"],
+            ["collapseFlags", -1, 1894701600, "true", "blob"],
+            ["collapseNotetypes", -1, 1894701600, "true", "blob"],
+            ["collapseSavedSearches", -1, 1894701600, "true", "blob"],
+            ["collapseTags", -1, 1894701600, "true", "blob"],
+            ["collapseToday", -1, 1894701600, "true", "blob"],
+            ["defaultSearchText", -1, 1894701600, "\"deck:Inbox is:due\"", "blob"],
+            ["flagLabels", -1, 1894701600, "{\"1\":\"Wrong ✓\",\"3\":\"Important\",\"7\":\"\\\"Quoted\\\"\"}", "blob"],
+            ["ignoreAccentsInSearch", -1, 1894701600, "true", "blob"],
+            ["normalize_note_text", -1, 1894701600, "false", "blob"],
+            ["noteSortType", -1, 1894701600, "\"noteMod\"", "blob"],
+            ["previewBothSides", -1, 1894701600, "true", "blob"],
+            ["resetCountsBrowser", -1, 1894701600, "true", "blob"],
+            ["restorePositionBrowser", -1, 1894701600, "false", "blob"],
+            ["savedFilters", -1, 1894701600, "{\"Apple\":\"flag:1\",\"Tab\\there\":\"a/b \\\\ c\",\"Zed\":\"tag:leech\",\"apple\":\"is:due\",\"Ünï\":\"deck:\\\"A B\\\"\"}", "blob"],
+            ["setDueBrowser", -1, 1894701600, "\"1-7!\"", "blob"],
+            ["sortBackwards", -1, 1894701600, "true", "blob"],
+            ["sortType", -1, 1894701600, "\"cardDue\"", "blob"]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "browser_config": {
+          "activeCols": ["cardDue", "addonX", "noteFld", "deck"],
+          "activeNoteCols": ["noteFld", "note", "template", "noteTags", "addonY"],
+          "browserNoteSortBackwards": false,
+          "browserTableShowNotesMode": false,
+          "collapseCardState": false,
+          "collapseDecks": false,
+          "collapseFlags": false,
+          "collapseNotetypes": false,
+          "collapseSavedSearches": false,
+          "collapseTags": false,
+          "collapseToday": false,
+          "defaultSearchText": "",
+          "flagLabels": {
+            "1": "Again?",
+            "2": ""
+          },
+          "ignoreAccentsInSearch": false,
+          "normalize_note_text": false,
+          "noteSortType": "noteCrt",
+          "previewBothSides": false,
+          "resetCountsBrowser": false,
+          "restorePositionBrowser": true,
+          "savedFilters": {
+            "Due soon": "prop:due<=3",
+            "Leeches": "tag:leech",
+            "ß": "deck:Straße"
+          },
+          "setDueBrowser": "0",
+          "sortBackwards": false,
+          "sortType": "noteFld"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["activeCols", -1, 1894701660, "[\"cardDue\",\"addonX\",\"noteFld\",\"deck\"]", "blob"],
+            ["activeNoteCols", -1, 1894701660, "[\"noteFld\",\"note\",\"template\",\"noteTags\",\"addonY\"]", "blob"],
+            ["browserNoteSortBackwards", -1, 1894701660, "false", "blob"],
+            ["browserTableShowNotesMode", -1, 1894701660, "false", "blob"],
+            ["collapseCardState", -1, 1894701660, "false", "blob"],
+            ["collapseDecks", -1, 1894701660, "false", "blob"],
+            ["collapseFlags", -1, 1894701660, "false", "blob"],
+            ["collapseNotetypes", -1, 1894701660, "false", "blob"],
+            ["collapseSavedSearches", -1, 1894701660, "false", "blob"],
+            ["collapseTags", -1, 1894701660, "false", "blob"],
+            ["collapseToday", -1, 1894701660, "false", "blob"],
+            ["defaultSearchText", -1, 1894701660, "\"\"", "blob"],
+            ["flagLabels", -1, 1894701660, "{\"1\":\"Again?\",\"2\":\"\"}", "blob"],
+            ["ignoreAccentsInSearch", -1, 1894701660, "false", "blob"],
+            ["normalize_note_text", -1, 1894701600, "false", "blob"],
+            ["noteSortType", -1, 1894701660, "\"noteCrt\"", "blob"],
+            ["previewBothSides", -1, 1894701660, "false", "blob"],
+            ["resetCountsBrowser", -1, 1894701660, "false", "blob"],
+            ["restorePositionBrowser", -1, 1894701660, "true", "blob"],
+            ["savedFilters", -1, 1894701660, "{\"Due soon\":\"prop:due<=3\",\"Leeches\":\"tag:leech\",\"ß\":\"deck:Straße\"}", "blob"],
+            ["setDueBrowser", -1, 1894701660, "\"0\"", "blob"],
+            ["sortBackwards", -1, 1894701660, "false", "blob"],
+            ["sortType", -1, 1894701660, "\"noteFld\"", "blob"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "0c564359de72f4dd507414a66cf201603c8259f152cc16d631bd4f78b7841060",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/config/live-roundtrip",
+  "scenario_sha256": "52db2b4710031b8fd35cc22cf086bc7a4c5dcf0d4b601f0eb07a89d73b9e32c0",
+  "tz": "UTC"
+}

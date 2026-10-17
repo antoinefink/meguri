@@ -10,6 +10,8 @@ uniffi::setup_scaffolding!("meguri_ffi");
 
 mod callback;
 pub mod cancel;
+pub mod changes;
+pub mod day_clock;
 pub mod error;
 pub mod events;
 pub mod jobs;
@@ -19,6 +21,8 @@ mod runtime;
 mod test_hooks;
 
 pub use cancel::CancelToken;
+pub use changes::{CardChange, ChangeKind, ChangeSet, IdChange, NameChange, NotetypeChange, OpSource};
+pub use day_clock::DayClockReport;
 pub use error::CoreError;
 pub use events::{CoreEvent, CoreEventKind, CoreEventListener};
 pub use jobs::{JobHandle, JobOutcome};

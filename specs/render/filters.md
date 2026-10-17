@@ -109,7 +109,7 @@ What review does with this markup (R967: show the text, do not speak it) is the 
 
 ## F8. `cloze` and `cloze-only`
 
-Built in (they never end a chain). What they output depends on the card ordinal and on the side, and is specified with cloze syntax in `specs/render/cloze.md` (U61). This unit's scenarios do not use them.
+Built in (they never end a chain). What they output depends on the card ordinal and on the side, and is specified with cloze syntax in `specs/render/cloze.md` (U61). This unit's scenarios do not use them; `render/cloze/templates` runs them in chains and templates.
 
 ## F9. Differences from the Product Contract's wording
 

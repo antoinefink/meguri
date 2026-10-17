@@ -273,7 +273,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|db_dump|schema_objects|stats|digest)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|queue|deck_tree|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "type": "object",
@@ -283,10 +283,12 @@
             "ids": { "type": "array", "items": { "type": "string", "pattern": "^#[nc][1-9][0-9]*$" } },
             "timing": { "type": "null" },
             "schema_objects": { "description": "storage-ops.md P3.", "type": "null" },
+            "undo_status": { "description": "undo-ops.md V2.", "type": "null" },
             "card": { "$ref": "#/$defs/card_refs" },
             "revlog": { "$ref": "#/$defs/card_refs" },
             "next_states": { "$ref": "#/$defs/card_refs" },
             "render": { "$ref": "#/$defs/card_refs" },
+            "render_status": { "description": "render-ops.md Q4: review render status of these cards.", "$ref": "#/$defs/card_refs" },
             "fuzz_table": {
               "type": "object",
               "required": ["card", "pairs", "intervals"],
@@ -316,15 +318,27 @@
               "properties": { "deck": { "type": "string" } }
             },
             "deck_tree": { "type": "null" },
+            "tag_tree": { "description": "tag-ops.md G9.", "type": "null" },
+            "browser_config": { "description": "browser-config-ops.md B2.", "type": "null" },
             "search": {
-              "description": "Draft.",
-              "type": "object",
-              "required": ["query"],
-              "properties": {
-                "query": { "type": "string" },
-                "kind": { "enum": ["cards", "notes"] },
-                "order": {}
+              "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["query"],
+                "additionalProperties": false,
+                "properties": {
+                  "query": { "type": "string" },
+                  "kind": { "enum": ["cards", "notes"] }
+                }
               }
+            },
+            "canonical_search": {
+              "description": "search-ops.md S2: canonical texts of search texts; never reads the collection.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
             },
             "db_dump": {
               "description": "observations.md O8: all twelve tables, or the listed ones.",
@@ -346,6 +360,18 @@
                 "decks": { "$ref": "#/$defs/names" },
                 "presets": { "$ref": "#/$defs/names" }
               }
+            },
+            "notetype_structure": {
+              "description": "notetype-ops.md T8: every note type (null), or the named ones.",
+              "anyOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "required": ["notetypes"],
+                  "additionalProperties": false,
+                  "properties": { "notetypes": { "$ref": "#/$defs/names" } }
+                }
+              ]
             },
             "blob_decode": {
               "description": "model-ops.md L4: whether the named records' protobuf blobs decode.",
@@ -372,6 +398,37 @@
                   "items": { "enum": ["ver", "conf", "models", "decks", "dconf", "tags"] }
                 }
               }
+            },
+            "cloze": {
+              "description": "specs/conformance/cloze-ops.md Z1: pure cloze functions over a list of inputs; [text, card] pairs (card 1-65535), or strings for numbers, which shares a request with no other function.",
+              "type": "object",
+              "required": ["fns", "inputs"],
+              "additionalProperties": false,
+              "properties": {
+                "fns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["numbers", "front", "back", "only_front", "only_back", "typing"] }
+                },
+                "inputs": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      { "type": "string" },
+                      {
+                        "type": "array",
+                        "prefixItems": [{ "type": "string" }, { "type": "integer", "minimum": 1, "maximum": 65535 }],
+                        "minItems": 2,
+                        "maxItems": 2
+                      }
+                    ]
+                  }
+                }
+              },
+              "if": { "properties": { "fns": { "contains": { "const": "numbers" } } } },
+              "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "string" } } } },
+              "else": { "properties": { "inputs": { "items": { "type": "array" } } } }
             },
             "fsrs_next": {
               "description": "float-determinism.md F5.1: FSRS next states of a stored review card per input; never touches the scenario's collection. At most one per observe step, params must name a member of param_sets, and f32 members are read per model/json-numbers N2 (checked when the scenario loads).",
@@ -601,11 +658,135 @@
           "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 } }
         },
         "set_config": {
-          "description": "Stable, with its final shape (record-ops.md W4): one collection config key and its JSON value (null included).",
+          "description": "Stable (record-ops.md W4): one collection config key and its JSON value (null included); undoable true records an Update Config undo step (undo-ops.md V3.1).",
           "type": "object",
           "required": ["key", "value"],
           "additionalProperties": false,
-          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true }
+          "properties": { "key": { "type": "string", "minLength": 1 }, "value": true, "undoable": { "type": "boolean" } }
+        },
+        "remove_config": {
+          "description": "Stable (undo-ops.md V3.2): remove one collection config key as an undoable Update Config step; a missing key changes nothing.",
+          "type": "object",
+          "required": ["key"],
+          "additionalProperties": false,
+          "properties": { "key": { "type": "string", "minLength": 1 } }
+        },
+        "undo": {
+          "description": "Stable (undo-ops.md V1): apply the top step of the undo history.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "redo": {
+          "description": "Stable (undo-ops.md V1): apply the top step of the redo history.",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "add_note_tags": {
+          "description": "tag-ops.md G1: add the tags of the text (split at U+0020 and U+3000) to the notes (tags/tags.md T10).",
+          "type": "object",
+          "required": ["notes", "tags"],
+          "additionalProperties": false,
+          "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 }, "tags": { "type": "string" } }
+        },
+        "remove_note_tags": {
+          "description": "tag-ops.md G2: remove the matching tags from the notes (tags/tags.md T10).",
+          "type": "object",
+          "required": ["notes", "tags"],
+          "additionalProperties": false,
+          "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1 }, "tags": { "type": "string" } }
+        },
+        "delete_tags": {
+          "description": "tag-ops.md G3: remove the tags and their descendants from every note and from the registry (tags/tags.md T9).",
+          "type": "object",
+          "required": ["tags"],
+          "additionalProperties": false,
+          "properties": { "tags": { "type": "string" } }
+        },
+        "rename_tag": {
+          "description": "tag-ops.md G4: rename a tag and its descendants (tags/tags.md T7); rejection invalid_name.",
+          "type": "object",
+          "required": ["from", "to"],
+          "additionalProperties": false,
+          "properties": { "from": { "type": "string", "minLength": 1, "pattern": "^[^ \u3000]+$" }, "to": { "type": "string" } }
+        },
+        "reparent_tags": {
+          "description": "tag-ops.md G5: move tags under parent, or to the top level when parent is empty (tags/tags.md T8).",
+          "type": "object",
+          "required": ["tags", "parent"],
+          "additionalProperties": false,
+          "properties": {
+            "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+            "parent": { "type": "string" }
+          }
+        },
+        "clear_unused_tags": {
+          "description": "tag-ops.md G6: remove registry rows no note uses (tags/tags.md T11).",
+          "type": "object",
+          "maxProperties": 0
+        },
+        "set_tag_collapsed": {
+          "description": "tag-ops.md G7: set the collapsed state of the named tags, registering missing ones (tags/tags.md T12).",
+          "type": "object",
+          "required": ["tags", "collapsed"],
+          "additionalProperties": false,
+          "properties": {
+            "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+            "collapsed": { "type": "boolean" }
+          }
+        },
+        "set_flag": {
+          "description": "tag-ops.md G8: write a flag to the cards (tags/flags-and-marked.md F2); rejection invalid_flag above 7.",
+          "type": "object",
+          "required": ["cards", "flag"],
+          "additionalProperties": false,
+          "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "flag": { "$ref": "#/$defs/uint" } }
+        },
+        "browser_config_set": {
+          "description": "browser-config-ops.md B1: set one browser config key to a whole value of its shape, without an undo entry.",
+          "type": "object",
+          "required": ["key", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "enum": [
+                "activeCols", "activeNoteCols", "sortType", "noteSortType", "sortBackwards", "browserNoteSortBackwards",
+                "browserTableShowNotesMode", "savedFilters", "flagLabels", "collapseSavedSearches", "collapseToday",
+                "collapseFlags", "collapseCardState", "collapseDecks", "collapseNotetypes", "collapseTags",
+                "previewBothSides", "setDueBrowser", "defaultSearchText", "ignoreAccentsInSearch",
+                "restorePositionBrowser", "resetCountsBrowser"
+              ]
+            },
+            "value": true
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "key": {
+                    "enum": [
+                      "sortBackwards", "browserNoteSortBackwards", "browserTableShowNotesMode", "collapseSavedSearches",
+                      "collapseToday", "collapseFlags", "collapseCardState", "collapseDecks", "collapseNotetypes",
+                      "collapseTags", "previewBothSides", "ignoreAccentsInSearch", "restorePositionBrowser",
+                      "resetCountsBrowser"
+                    ]
+                  }
+                }
+              },
+              "then": { "properties": { "value": { "type": "boolean" } } }
+            },
+            {
+              "if": { "properties": { "key": { "enum": ["sortType", "noteSortType", "setDueBrowser", "defaultSearchText"] } } },
+              "then": { "properties": { "value": { "type": "string" } } }
+            },
+            {
+              "if": { "properties": { "key": { "enum": ["activeCols", "activeNoteCols"] } } },
+              "then": { "properties": { "value": { "type": "array", "items": { "type": "string" } } } }
+            },
+            {
+              "if": { "properties": { "key": { "enum": ["savedFilters", "flagLabels"] } } },
+              "then": { "properties": { "value": { "type": "object", "additionalProperties": { "type": "string" } } } }
+            }
+          ]
         },
         "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
         "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
@@ -689,11 +870,16 @@
           "$ref": "#/$defs/actor_name"
         },
         "sync": {
-          "description": "sync-ops.md S4.",
+          "description": "sync-ops.md S4; credentials only with kind login (S4.5); status is the sync status of specs/sync/meta-status.md M6.",
           "type": "object",
           "required": ["kind"],
           "additionalProperties": false,
-          "properties": { "kind": { "enum": ["login", "normal", "full_upload", "full_download"] } }
+          "properties": {
+            "kind": { "enum": ["login", "normal", "status", "full_upload", "full_download"] },
+            "credentials": { "enum": ["account", "wrong_password"] }
+          },
+          "if": { "required": ["credentials"] },
+          "then": { "properties": { "kind": { "const": "login" } } }
         },
         "net_fault": {
           "description": "sync-ops.md S5.",
@@ -720,8 +906,122 @@
         "handoff": {
           "description": "Live scenarios (dsl.md D9.2): the side that runs the next steps; handoffs alternate.",
           "enum": ["meguri", "oracle"]
+        },
+        "add_notetype": {
+          "description": "notetype-ops.md T2: a note type from scratch, shaped as a setup.notetypes entry.",
+          "$ref": "#/$defs/notetype"
+        },
+        "add_stock_notetype": {
+          "description": "notetype-ops.md T3: one of the six stock kinds, under its name or the given one.",
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": ["basic", "basic_and_reversed", "basic_optional_reversed", "basic_typing", "cloze", "image_occlusion"]
+            },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
+        "clone_notetype": {
+          "description": "notetype-ops.md T4: a copy of the named note type; name defaults to '<name> copy'.",
+          "type": "object",
+          "required": ["notetype"],
+          "additionalProperties": false,
+          "properties": {
+            "notetype": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
+        "update_notetype": {
+          "description": "notetype-ops.md T5: edits applied in order to a draft of the named note type, saved once.",
+          "type": "object",
+          "required": ["notetype", "edits"],
+          "additionalProperties": false,
+          "properties": {
+            "notetype": { "type": "string", "minLength": 1 },
+            "edits": { "type": "array", "items": { "$ref": "#/$defs/notetype_edit" } },
+            "skip_checks": { "type": "boolean" }
+          }
+        },
+        "ensure_io_notetype": {
+          "description": "notetype-ops.md T6: the on-demand Image Occlusion note type.",
+          "type": "object",
+          "maxProperties": 0
         }
       }
+    },
+    "notetype_edit": {
+      "description": "notetype-ops.md T5: one edit, a mapping with exactly one key; names refer to the draft as earlier edits left it.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "rename": { "type": "string" },
+        "css": { "type": "string" },
+        "sort_field": { "type": "string" },
+        "add_field": { "type": "string" },
+        "remove_field": { "type": "string" },
+        "rename_field": { "$ref": "#/$defs/rename_pair" },
+        "move_field": {
+          "type": "object",
+          "required": ["field", "to"],
+          "additionalProperties": false,
+          "properties": { "field": { "type": "string" }, "to": { "$ref": "#/$defs/uint" } }
+        },
+        "field_options": {
+          "type": "object",
+          "required": ["field"],
+          "additionalProperties": false,
+          "properties": {
+            "field": { "type": "string" },
+            "sticky": { "type": "boolean" },
+            "rtl": { "type": "boolean" },
+            "font_name": { "type": "string" },
+            "font_size": { "$ref": "#/$defs/uint" },
+            "description": { "type": "string" },
+            "plain_text": { "type": "boolean" },
+            "collapsed": { "type": "boolean" },
+            "exclude_from_search": { "type": "boolean" }
+          }
+        },
+        "add_template": {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" }, "front": { "type": "string" }, "back": { "type": "string" } }
+        },
+        "remove_template": { "type": "string" },
+        "rename_template": { "$ref": "#/$defs/rename_pair" },
+        "move_template": {
+          "type": "object",
+          "required": ["template", "to"],
+          "additionalProperties": false,
+          "properties": { "template": { "type": "string" }, "to": { "$ref": "#/$defs/uint" } }
+        },
+        "template": {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "front": { "type": "string" },
+            "back": { "type": "string" },
+            "browser_front": { "type": "string" },
+            "browser_back": { "type": "string" },
+            "browser_font_name": { "type": "string" },
+            "browser_font_size": { "$ref": "#/$defs/uint" },
+            "deck": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+    "rename_pair": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": { "from": { "type": "string" }, "to": { "type": "string" } }
     }
   }
 }

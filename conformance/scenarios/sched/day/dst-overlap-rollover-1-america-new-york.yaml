@@ -1,0 +1,26 @@
+# R592, R593 (D3): rollover 1 in America/New_York, where 01:00 happens twice
+# on 3 November 2030 (EDT, then EST an hour later). The day rolls at the first
+# 01:00 and the following day starts at 01:00 EST on 4 November: a 25-hour
+# day. No observation falls between the second 01:00 and the next day, where
+# the oracle keeps a boundary computed with EDT (D6, D12.1).
+id: sched/day/dst-overlap-rollover-1-america-new-york
+clock: {tz: America/New_York, start: "2030-10-28T10:00:00", mode: step}
+setup:
+  config: {rollover: 1}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-11-02T12:00:00"
+  - observe: [timing]
+  - set_clock: "2030-11-03T00:59:59-04:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - set_clock: "2030-11-04T00:59:59-05:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}

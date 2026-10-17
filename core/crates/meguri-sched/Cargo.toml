@@ -8,4 +8,6 @@ publish.workspace = true
 
 [dependencies]
 fsrs.workspace = true
+# The clock seam's offsets (UtcOffset, Clock) for the day clock (timing/).
+meguri-model.workspace = true
 rand.workspace = true

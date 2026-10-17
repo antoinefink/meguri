@@ -81,7 +81,48 @@ private struct ChromeButton: ViewModifier {
     }
 }
 
+/// A split view's column under flat chrome: an opaque surface where the
+/// system draws its sidebar material or window background, which the Mac's
+/// off-screen renders cannot draw.
+private struct SplitColumnChrome: ViewModifier {
+    @Environment(\.chromeGlass) private var chromeGlass
+    let sidebar: Bool
+
+    func body(content: Content) -> some View {
+        switch chromeGlass {
+        case .liquid:
+            content
+        case .flat where sidebar:
+            // The sidebar list style draws its selection through a material
+            // (black off-screen) and its text vibrant (dark off-screen, also
+            // in dark mode): an inset list in text tokens draws both
+            // plainly.
+            content
+                .listStyle(.inset)
+                .scrollContentBackground(.hidden)
+                .foregroundStyle(.token(.textPrimary))
+                .background(.token(.backgroundSecondary))
+        case .flat:
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.token(.backgroundPrimary))
+        }
+    }
+}
+
 extension View {
+    /// A split view's sidebar column: the system's sidebar material, or an
+    /// opaque surface under flat chrome.
+    public func sidebarColumnChrome() -> some View {
+        modifier(SplitColumnChrome(sidebar: true))
+    }
+
+    /// A split view's detail column: the system's background, or an opaque
+    /// one under flat chrome.
+    public func detailColumnChrome() -> some View {
+        modifier(SplitColumnChrome(sidebar: false))
+    }
+
     /// A floating control or message over content (toast, floating button):
     /// glass in a capsule.
     public func floatingChrome() -> some View {

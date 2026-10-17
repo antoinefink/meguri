@@ -1,0 +1,6 @@
+#!/bin/bash
+# pre-merge-commit hook: `git merge` runs this hook, not pre-commit, before it
+# records a merge it made without conflicts. The private-token scan applies
+# to those merges too (U15, R1940); see tools/hooks/pre-commit. A merge that
+# stopped on conflicts is committed with `git commit`, which runs pre-commit.
+exec "$(dirname "$0")/pre-commit" "$@"

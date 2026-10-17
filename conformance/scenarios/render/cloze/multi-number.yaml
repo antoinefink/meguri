@@ -1,0 +1,25 @@
+# specs/render/cloze.md C2 and C6: one cloze with several numbers is active on
+# each of its cards, numbers deduplicated and sorted numerically (R970).
+id: render/cloze/multi-number
+description: "clozes with number lists"
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - cloze:
+          fns: [front, back, only_front, only_back, typing]
+          inputs:
+            - ["{{c1,3,3,2::Danube}}", 1]
+            - ["{{c1,3,3,2::Danube}}", 2]
+            - ["{{c1,3,3,2::Danube}}", 3]
+            - ["{{c1,3,3,2::Danube}}", 4]
+            - ["{{c1,2::Seine}} and {{c1::Loire}} or {{c2::Rhône}}", 1]
+            - ["{{c1,2::Seine}} and {{c1::Loire}} or {{c2::Rhône}}", 2]
+            - ["{{c1,2::Seine}} and {{c1::Loire}} or {{c2::Rhône}}", 3]
+            - ["{{c2,1::Rhine::river}}", 1]
+            - ["{{c2,1::Rhine::river}}", 2]
+            - ["{{c1,0::Elbe}}", 1]
+            - ["{{c0,2::Oder}} {{c2::Vistula}}", 2]
+            - ["{{c10,2::Po}}", 2]
+            - ["{{c10,2::Po}}", 10]
+            - ["{{c1,2::wide {{c3::narrow}}}}", 2]
+            - ["{{c1,2::wide {{c3::narrow}}}}", 3]

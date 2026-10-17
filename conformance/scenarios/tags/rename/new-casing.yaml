@@ -1,0 +1,18 @@
+# Renaming a tag to a name below a new spelling of itself (specs/tags/tags.md
+# T7, R1176). Meguri removes the old rows before spelling the new name, so
+# the notes and the registry store `Verbs::regular`; Anki spells it from the
+# old row and stores `verbs::regular` (deviation tags-rename-new-casing, two
+# entries: the notes, then the registry).
+id: tags/rename/new-casing
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [verbs, "verbs::x"]}
+  - advance: 1h
+  - rename_tag: {from: verbs, to: "Verbs::regular"}
+  - db_exec: {sql: "SELECT tags FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

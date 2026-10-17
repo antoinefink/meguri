@@ -56,7 +56,13 @@ mg_a11y() {
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" Debug "${only[@]}"
     result=$?
-    ! mg_app_mac_input_refused "$since" || result=2
+    # Suites whose input macOS dropped are queued (mac-input), unless they
+    # could not run at all or a test failed where the drop does not explain
+    # it (mg_app_mac_input_result records those tests).
+    if [ "$result" -ne 2 ] && mg_app_mac_input_refused "$since" "$(printf '%s' "${suites# }" | tr ' ' ',')"; then
+      mg_app_mac_input_result "$MG_RUN_DIR/mac.xcresult" "$result" test
+      result=$?
+    fi
     mg_a11y__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
@@ -80,8 +86,10 @@ mg_a11y() {
   mg_a11y__report "$MG_RUN_DIR/$platform" "$result"
 }
 
-# mg_a11y__report <prefix> <test result 0|1|2>: failing tests, per-screen
-# reports from the attachments, the status.
+# mg_a11y__report <prefix> <test result 0|1|2|3>: failing tests, per-screen
+# reports from the attachments, the status. 3: macOS dropped the input (the
+# run is queued; its failures are not the app's). Under dropped input the
+# failing tests the drop does not explain are already recorded.
 mg_a11y__report() {
   local prefix="$1" result="$2" summary attachments="$1-attachments" f
   summary="$(xcrun xcresulttool get test-results summary --path "$prefix.xcresult" 2>/dev/null |
@@ -91,7 +99,7 @@ mg_a11y__report() {
     mg_count failed "$(jq .failed <<<"$summary")"
     mg_count skipped "$(jq .skipped <<<"$summary")"
     mg_count total "$(jq '.passed + .failed + .skipped' <<<"$summary")"
-    xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null | jq -c '
+    [ "$result" -eq 3 ] || [ -n "${MG_MAC_INPUT_REFUSED:-}" ] || xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null | jq -c '
       [.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed")
         | {id: .nodeIdentifier, message: ([.children[]? | select(.nodeType == "Failure Message") | .name] | join("; ") | .[0:800])}] | .[]' |
       while IFS= read -r f; do mg_failure "test/$(jq -r .id <<<"$f")" "$(jq -r .message <<<"$f")"; done
@@ -116,8 +124,18 @@ mg_a11y__report() {
       mg_status pass
       ;;
     1)
-      mg_message "a11y: $(jq -r '.failed' <<<"$summary") test(s) failed"
+      if [ -n "${MG_MAC_INPUT_REFUSED:-}" ]; then
+        mg_message "a11y: $(jq -r '.failed' <<<"$summary") test(s) failed, not all of them where the input macOS dropped explains it (user step mac-input); see the failures"
+      else
+        mg_message "a11y: $(jq -r '.failed' <<<"$summary") test(s) failed"
+      fi
       mg_status fail
+      mg_queued_settle
+      ;;
+    3)
+      mg_message "a11y: queued: macOS dropped the input XCUITest synthesized in $(mg_queued_parts_text); the suites did not test the app"
+      mg_status pass
+      mg_queued_settle
       ;;
     *)
       mg_message "a11y: the suites could not run; see log.txt"

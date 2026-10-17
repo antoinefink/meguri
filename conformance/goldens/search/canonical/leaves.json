@@ -1,0 +1,382 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "deck:a"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:current"
+          },
+          {
+            "text": "deck:filtered"
+          },
+          {
+            "text": "deck:a::b"
+          },
+          {
+            "text": "deck:a*"
+          },
+          {
+            "text": "note:Vocab"
+          },
+          {
+            "text": "\"note:my type\""
+          },
+          {
+            "text": "note:a*"
+          },
+          {
+            "text": "preset:Daily"
+          },
+          {
+            "text": "\"preset:my preset\""
+          },
+          {
+            "text": "tag:x"
+          },
+          {
+            "text": "tag:none"
+          },
+          {
+            "text": "tag:*"
+          },
+          {
+            "text": "tag:a::b"
+          },
+          {
+            "text": "tag:re:^x$"
+          },
+          {
+            "text": "tag:nc:x"
+          },
+          {
+            "text": "tag:x*"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "card:2"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "card:1"
+          },
+          {
+            "text": "card:65535"
+          },
+          {
+            "text": "card:65536"
+          },
+          {
+            "text": "card:-1"
+          },
+          {
+            "text": "card:Forward"
+          },
+          {
+            "text": "\"card:Side two\""
+          },
+          {
+            "text": "card:-1"
+          },
+          {
+            "text": "card:F*"
+          },
+          {
+            "text": "flag:0"
+          },
+          {
+            "text": "flag:7"
+          },
+          {
+            "text": "flag:1"
+          },
+          {
+            "text": "flag:7"
+          },
+          {
+            "text": "is:new"
+          },
+          {
+            "text": "is:review"
+          },
+          {
+            "text": "is:learn"
+          },
+          {
+            "text": "is:due"
+          },
+          {
+            "text": "is:buried"
+          },
+          {
+            "text": "is:buried-manually"
+          },
+          {
+            "text": "is:buried-sibling"
+          },
+          {
+            "text": "is:suspended"
+          },
+          {
+            "text": "added:1"
+          },
+          {
+            "text": "added:1"
+          },
+          {
+            "text": "added:3"
+          },
+          {
+            "text": "added:4294967295"
+          },
+          {
+            "text": "edited:1"
+          },
+          {
+            "text": "edited:5"
+          },
+          {
+            "text": "introduced:1"
+          },
+          {
+            "text": "introduced:5"
+          },
+          {
+            "text": "rated:1"
+          },
+          {
+            "text": "rated:1"
+          },
+          {
+            "text": "rated:2:3"
+          },
+          {
+            "text": "rated:2:4"
+          },
+          {
+            "text": "rated:7:1"
+          },
+          {
+            "text": "rated:1:4"
+          },
+          {
+            "text": "resched:0"
+          },
+          {
+            "text": "resched:5"
+          },
+          {
+            "text": "resched:2"
+          },
+          {
+            "text": "did:1"
+          },
+          {
+            "text": "did:1,2"
+          },
+          {
+            "text": "nid:007"
+          },
+          {
+            "text": "nid:1,2,3"
+          },
+          {
+            "text": "cid:12345678901234567890"
+          },
+          {
+            "text": "nid:١٢"
+          },
+          {
+            "text": "mid:5"
+          },
+          {
+            "text": "mid:-5"
+          },
+          {
+            "text": "mid:7"
+          },
+          {
+            "text": "mid:9223372036854775807"
+          },
+          {
+            "text": "mid:-9223372036854775808"
+          },
+          {
+            "text": "a"
+          },
+          {
+            "text": "re:\\d"
+          },
+          {
+            "text": "re:a\\\"b"
+          },
+          {
+            "text": "\"re:a b\""
+          },
+          {
+            "text": "\"re:\\(\""
+          },
+          {
+            "text": "\"re:(\""
+          },
+          {
+            "text": "nc:x"
+          },
+          {
+            "text": "sc:x"
+          },
+          {
+            "text": "w:x"
+          },
+          {
+            "text": "\"w:a b\""
+          },
+          {
+            "text": "has-cd:pq"
+          },
+          {
+            "text": "f:x"
+          },
+          {
+            "text": "f:re:x"
+          },
+          {
+            "text": "f:nc:x"
+          },
+          {
+            "text": "f*:x"
+          },
+          {
+            "text": "*:x"
+          },
+          {
+            "text": "\"my field:x y\""
+          },
+          {
+            "text": "f:"
+          },
+          {
+            "text": "dupe:1,a"
+          },
+          {
+            "text": "dupe:1,a"
+          },
+          {
+            "text": "dupe:1,"
+          },
+          {
+            "text": "dupe:-5,x"
+          },
+          {
+            "text": "dupe:1,a,b"
+          },
+          {
+            "text": "prop:ivl>4"
+          },
+          {
+            "text": "prop:ivl>=6"
+          },
+          {
+            "text": "prop:due=-1"
+          },
+          {
+            "text": "prop:due>-3"
+          },
+          {
+            "text": "prop:due=0"
+          },
+          {
+            "text": "prop:reps<10"
+          },
+          {
+            "text": "prop:lapses!=2"
+          },
+          {
+            "text": "prop:pos<=3"
+          },
+          {
+            "text": "prop:pos=3"
+          },
+          {
+            "text": "prop:ease<=2.7"
+          },
+          {
+            "text": "prop:ease>3"
+          },
+          {
+            "text": "prop:s>1"
+          },
+          {
+            "text": "prop:d<=1"
+          },
+          {
+            "text": "prop:d>0.5"
+          },
+          {
+            "text": "prop:r<0.9"
+          },
+          {
+            "text": "prop:rated=0:1"
+          },
+          {
+            "text": "prop:rated=-1"
+          },
+          {
+            "text": "prop:rated=0"
+          },
+          {
+            "text": "prop:rated<=-1:1"
+          },
+          {
+            "text": "prop:resched=-2"
+          },
+          {
+            "text": "prop:cdn:xyz<=2"
+          },
+          {
+            "text": "prop:cdn:xyz>1.5"
+          },
+          {
+            "text": "prop:cdn:k!=1000"
+          },
+          {
+            "text": "prop:cds:mood=calm"
+          },
+          {
+            "text": "prop:cds:k="
+          },
+          {
+            "text": "prop:cds:k>=x"
+          },
+          {
+            "text": "prop:cds:k=a\\\\\"b"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/canonical/leaves",
+  "scenario_sha256": "88bdd1c9e4187b8c028ee1698330c2e57c97f889a60d6b47b1294d945fcca980",
+  "tz": "UTC"
+}

@@ -141,3 +141,34 @@ fn a_name_equal_under_folding_to_a_stored_one_is_refused_and_nothing_is_stored()
     );
     opened.close().unwrap();
 }
+
+#[test]
+fn tag_rows_from_a_name_follow_the_key_order_from_that_name() {
+    use meguri_storage::ReadRows;
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open(&path).unwrap();
+    let w = opened.writer();
+    exec(w, "DELETE FROM tags");
+    exec(
+        w,
+        "INSERT INTO tags (tag, usn, collapsed) VALUES ('Mast::x', 0, 0), ('mast!', 0, 0), ('MAST', 0, 0), \
+         ('mast::Y', 0, 1), ('masu', 0, 0), ('Straße::k', 0, 0), ('a', 0, 0)",
+    );
+    let names = |from: &str, limit: usize| -> Vec<String> {
+        w.tag_rows_from(from, limit)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.name)
+            .collect()
+    };
+    // Folded: a, mast, mast!, mast::x, mast::y, masu, strasse::k (`!` sorts
+    // before `:`).
+    assert_eq!(names("mast::", 10), ["Mast::x", "mast::Y", "masu", "Straße::k"]);
+    assert_eq!(names("MAST::", 2), ["Mast::x", "mast::Y"]);
+    assert_eq!(names("mast", 1), ["MAST"], "the name itself is included");
+    assert_eq!(names("STRASSE::", 5), ["Straße::k"], "by full folding");
+    assert!(names("z", 5).is_empty());
+    let row = &w.tag_rows_from("mast::y", 1).unwrap()[0];
+    assert_eq!((row.name.as_str(), row.collapsed), ("mast::Y", true));
+    opened.close().unwrap();
+}

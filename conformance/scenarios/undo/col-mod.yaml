@@ -1,0 +1,38 @@
+# col.mod through an undo and a redo with a config write between the edit
+# and its undo. The config write keeps no undo entry but moves col.mod and
+# keeps the edit undoable. The undo puts col.mod back to its value before the
+# edit and leaves the config row alone; the redo puts back the value col.mod
+# had when the undo ran (the config write's), not the edit's; the next undo
+# puts back the value it had when the redo ran. Neither uses now
+# (specs/engine/undo.md A2, A6, A7; specs/storage/ids-usn-mtime.md S5).
+# Needs db_exec, edit_note, set_config, undo, redo and undo_status
+# (specs/conformance/record-ops.md, specs/conformance/undo-ops.md).
+id: undo/col-mod
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [cat, gato]}
+steps:
+  # An earlier col.mod, as another client may have left it.
+  - db_exec: {sql: "UPDATE col SET mod = 1800000000000"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: gata}}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - set_config: {key: undoProbe, value: 1}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - observe: [undo_status]
+  - advance: 1h
+  - undo: {}
+  - db_exec: {sql: "SELECT (SELECT mod FROM col), (SELECT flds FROM notes), usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'undoProbe'"}
+  - advance: 1h
+  - redo: {}
+  - db_exec: {sql: "SELECT (SELECT mod FROM col), (SELECT flds FROM notes), usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'undoProbe'"}
+  - advance: 1h
+  - undo: {}
+  - db_exec: {sql: "SELECT (SELECT mod FROM col), (SELECT flds FROM notes), usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'undoProbe'"}

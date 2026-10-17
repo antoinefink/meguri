@@ -14,7 +14,7 @@ use meguri_model::rng::RandomSource;
 use meguri_testkit::exec::sync_guard::ANKIWEB_HOST;
 use meguri_testkit::exec::{ExecError, MeguriExecutor, OpResult, OracleExecutor, Registry, Session};
 use meguri_testkit::report::Report;
-use meguri_testkit::scenario::{ObservationRequest, Setup, Step, SyncKind};
+use meguri_testkit::scenario::{ObservationRequest, Setup, Step, SyncKind, SyncSpec};
 use meguri_testkit::suite::{LiveRun, OraclePin, Outcome, Status, Suite};
 use serde_json::{Value, json};
 
@@ -324,6 +324,13 @@ fn setup_notes(session: &mut Session<'_>, setup: &Setup) -> Result<(), ExecError
     Ok(())
 }
 
+/// A stand-in for the new collection each Meguri actor starts from
+/// (sync-ops.md S2.2, dsl.md D8).
+fn new_collection(session: &mut Session<'_>) -> Result<(), ExecError> {
+    seen(format!("new collection at {}", session.clock.now_secs()));
+    Ok(())
+}
+
 fn dump(session: &mut Session<'_>) -> Result<Value, ExecError> {
     seen(format!("dump {}", seat_of(session)));
     Ok(json!({"col": "converged"}))
@@ -338,7 +345,8 @@ fn dump_diverged(_: &mut Session<'_>) -> Result<Value, ExecError> {
 fn meguri_actor(sync_op: meguri_testkit::exec::OpFn, raw_dump: meguri_testkit::exec::RawDumpFn) -> MeguriExecutor {
     let mut registry: Registry = MeguriExecutor::area_registry(&["clock", "text"]);
     registry.actor(raw_dump);
-    registry.op_rejecting("sync", &["clock_incorrect", "network"], sync_op);
+    registry.new_collection(new_collection);
+    registry.op_rejecting("sync", &SyncSpec::REJECTIONS, sync_op);
     registry.op("add_note", add_note);
     registry.observation("timing", timing);
     registry.observation("db_dump", |_, _| Ok(json!({})));
@@ -393,12 +401,14 @@ fn a_mixed_run_plays_the_meguri_actor_on_meguris_executor() {
         json!({"cmd": "step", "dumps": {"meguri": {"col": "converged"}}})
     );
 
-    // Meguri's actor logged in at its seat (the reported account, the
-    // edge), on the clock the global advance moved, and added its note
-    // after client_a's, with the ids of the setup and of client_a's note.
+    // Meguri's actor started from a new collection at clock.start, logged
+    // in at its seat (the reported account, the edge), on the clock the
+    // global advance moved, and added its note after client_a's, with the
+    // ids of the setup and of client_a's note.
     assert_eq!(
         take_seen(),
         [
+            format!("new collection at {START}"),
             format!("login meguri as user1 via Some({edge:?}) at {}", START + 60),
             "add_note after notes [1001, 1002] cards [2001, 2002]".to_owned(),
             format!("timing at {}", START + 60),
@@ -433,13 +443,15 @@ steps:
     assert_eq!(only(&report).status, Status::Pass, "{}", report.render_text());
     let begins: Vec<Value> = requests(&log).into_iter().filter(|r| r["cmd"] == "begin").collect();
     assert_eq!(begins[1]["ids"], json!({"notes": [5001], "cards": [6001]}));
-    // The setup ran on the Meguri actor's session, seeded for that actor
-    // (sync-ops.md S2.5), and the actor synced with no edge configured.
+    // The setup ran on the Meguri actor's new collection, seeded for that
+    // actor (sync-ops.md S2.5), and the actor synced with no edge
+    // configured.
     let loaded = meguri_testkit::scenario::load(&dir.path().join("scenarios/sync/meguri-first.yaml")).unwrap();
     let first = meguri_model::rng::SeededRandom::new(meguri_testkit::exec::actor_seed(&loaded, "meguri")).next_u64();
     let seen = take_seen();
-    assert_eq!(seen[0], format!("setup on {first}"));
-    assert_eq!(seen[1], format!("login meguri as user1 via None at {START}"));
+    assert_eq!(seen[0], format!("new collection at {START}"));
+    assert_eq!(seen[1], format!("setup on {first}"));
+    assert_eq!(seen[2], format!("login meguri as user1 via None at {START}"));
 }
 
 #[test]
@@ -494,8 +506,8 @@ fn a_refused_meguri_edge_stops_the_mixed_run_before_its_first_step() {
         "only the replay's steps ran"
     );
     assert_eq!(cmds.last(), Some(&json!("end")));
-    // Meguri's actor did nothing.
-    assert!(take_seen().is_empty());
+    // Meguri's actor got its new collection and ran nothing.
+    assert_eq!(take_seen(), [format!("new collection at {START}")]);
 }
 
 #[test]
