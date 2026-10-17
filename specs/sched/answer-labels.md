@@ -85,7 +85,7 @@ Meguri takes these strings only from this table (role: `docs/process/roles/spec-
 
 ## A7. Examples
 
-Values checked against the oracle as a black box (the `answer_labels` goldens follow once the driver has the observation, A8). Day conversions at 10:00 UTC with the next day at 04:00 (`T` = 64,800 s) unless noted.
+Values from the oracle (the `sched/labels` goldens, A8). Day conversions at 10:00 UTC with the next day at 04:00 (`T` = 64,800 s) unless noted.
 
 | Delay or state | `s` | Learn-ahead limit | Label |
 |---|---|---|---|
@@ -136,4 +136,4 @@ The `answer_labels` observation (`specs/conformance/observations.md` O10) report
 | `sched/labels/rollover` | A1 near the start of the next day (AE30) |
 | `sched/labels/review` | review and relearning states, months and years |
 
-Goldens wait for the `answer_labels` observation in the oracle driver (oracle maintainer). Until Meguri's testkit knows the kind, these scenarios load as invalid. Meguri's unit tests add the boundaries no scenario reaches: 3,570 s (`60m`), 86,399 s (`24h`), and `s` stopping at 4,294,967,295 (`136.2y`).
+All goldens are recorded. Meguri's testkit must know the `answer_labels` kind (O10) before these scenarios load; until then they are invalid. Meguri's unit tests add the boundaries no scenario reaches: 3,570 s (`60m`), 86,399 s (`24h`), and `s` stopping at 4,294,967,295 (`136.2y`).

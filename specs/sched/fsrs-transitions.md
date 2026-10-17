@@ -5,7 +5,7 @@ Requirements: R587, R601, R646, R647, R648, R649, R651, R652, R654, R655, R657, 
 Anki: 26.09.3
 Scenarios: conformance/scenarios/sched/fsrs/, conformance/scenarios/sched/steps/, conformance/scenarios/fp-probe/
 
-How the current state and the four answer states of a card are computed. Meguri always schedules with FSRS (R702), so every state below has a memory state. T1 to T6 were written for the floating-point probe (U14, `conformance/float-determinism`) and cover review cards; T7 to T14 add new, learning and relearning cards, short-term scheduling, the ease factor, leeches, parameters Meguri cannot use and the engine's interface (U45). The steps themselves are `sched/steps`, fuzz is `sched/fuzz` and the button labels are `sched/answer-labels`; the load balancer (U44) plugs into `sched/fuzz#Z8`.
+How the current state and the four answer states of a card are computed. Meguri always schedules with FSRS (R702), so every state below has a memory state. T1 to T6 were written for the floating-point probe (U14, `conformance/float-determinism`) and cover review cards; T7 to T14 add new, learning and relearning cards, short-term scheduling, the ease factor, leeches, parameters Meguri cannot use and the engine's interface (U45); T16 lists where the plan's wording differs from Anki. The steps themselves are `sched/steps`, fuzz is `sched/fuzz` and the button labels are `sched/answer-labels`; the load balancer (U44) plugs into `sched/fuzz#Z8`.
 
 ## T1. The FSRS model
 
@@ -222,3 +222,11 @@ Again on a review card carries the leech flag (T12).
 | `fp-probe/*` | T1 to T5 on many inputs (`conformance/float-determinism`) |
 
 All goldens are recorded. T13 and the `InFilteredDeck` refusal are unit tests only.
+
+## T16. Where the plan's wording differs from Anki
+
+This file describes Anki 26.09.3. Where a requirement's wording or one of the plan's test scenarios says otherwise, this file wins; the oracle settles each case:
+
+- R654, and the plan's test scenario "Lapse with Minimum interval 3 and an FSRS Again interval of 1 gives 3 days post-relearning": under FSRS the minimum lapse interval plays no part (T2.5, T9). A card leaving relearning gets FSRS's interval for the rating that leaves, fuzzed with minimum 1 and maximum `M`, so that example gives 1 day (golden `sched/steps/relearning` c3, c4 and c6, all under a minimum of 3). Without relearning steps, Again's interval is only rounded: not fuzzed, not raised to the minimum and not capped by the maximum (T4; `sched/fsrs/review-again` c12 gives 1 day under a minimum of 3, c13 gives 4 days under a maximum of 2).
+- R671's "a stored threshold of 0 disables leech detection": a stored 0 reads as 8 (T12; `sched/fsrs/review-again` c11 is a leech at 8 lapses). Only a direct call of the predicate can pass 0, and the plan's "threshold 0 → never" test is that call.
+- The plan's label examples that differ from Anki are listed in `sched/answer-labels#A7`.
