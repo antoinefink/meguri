@@ -189,3 +189,17 @@ and added two C10.7 details.
   `constructor`). The spec keeps Meguri's stricter behavior (throw, `false`),
   pins it with case GS4c, and lists it with the non-function callback in
   C15's paragraph of edge cases.
+
+## Completion pass, third check (s-20261017T192022Z-13eb7919, 2026-10-17)
+
+Read the same places again at `refs/anki-26.09.3` (HEAD 29bb700b):
+`_create_bridge_script` parses the reply and calls a truthy callback with it,
+`Bridge.cmd` returns `json.dumps` of the handler's result, `_linkHandler`
+returns nothing on every branch, and the only reference to
+`webview_did_receive_js_message` under `qt/` besides `webview.py` is its
+definition in `qt/tools/genhooks_gui.py`. `bridgecommand.ts` calls the global
+with `(command, callback)` and returns nothing; `runtime-require.ts` tests
+membership with `in`. C19 item 1 (`null`), GS4b and GS4c stand. U66-E1 was
+already marked resolved in unit/U66's review log (a8b3fefb). C4.2's element
+bullet now says the runtime puts `isMac` only on `<body>`, which no longer
+reads as contradicting the card-element sentence after it.

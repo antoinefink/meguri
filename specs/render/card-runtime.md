@@ -174,7 +174,7 @@ Set on `:root`, the same in both appearances:
 
 `--focus-color` has a second value for the Mac. The base stylesheet declares it, on every platform, for every element with class `isMac` except the document element:
 
-- Elements: only `<body>` carries `isMac`, and only on the Mac (C3.1). So in practice the Mac `<body>` gets the value, and everything inside inherits it unless a rule sets the property on that element itself. `<html>` never gets it, even when a script gives it class `isMac`: it keeps `#6366f1`. A card element that carries class `isMac` itself gets the value on any platform.
+- Elements: the runtime gives class `isMac` only to `<body>`, and only on the Mac (C3.1). So in practice the Mac `<body>` gets the value, and everything inside inherits it unless a rule sets the property on that element itself. `<html>` never gets it, even when a script gives it class `isMac`: it keeps `#6366f1`. A card element that carries class `isMac` itself gets the value on any platform.
 - Value: the exact text `rgba(0 103 244 / 0.247)`. Templates read it as written (C4.1), so do not normalize it.
 - Cascade: the declaration has specificity 0,2,0 and comes after the `:root` tokens. Card styles come later in the page than the base stylesheet. So a card rule that sets `--focus-color` on such an element replaces the value at specificity 0,2,0 or higher (for example `.card.isMac`), and loses below it (for example `.isMac`, `body.isMac`, `html body.isMac`).
 
