@@ -1,0 +1,26 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "cloze": {
+          "back": ["<span class=\"cloze\" data-ordinal=\"1\">\\(ab\\)}}", "<span class=\"cloze\" data-ordinal=\"2\">\\(\\frac{1}{x^{2\\)}}", "<span class=\"cloze\" data-ordinal=\"1\">\\(x\\)</span>", "<span class=\"cloze\" data-ordinal=\"1\">\\(x\\)</span> \\[y\\]", "\\(a b c\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(<b>open only", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(y\\] \\[z\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\\\(y\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(y\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(a < b\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(a &amp; b &lt;\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(one\\) and \\(two\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(\\)", "<span class=\"cloze\" data-ordinal=\"1\">x</span> \\(multi\nline\\)", ""],
+          "front": ["<span class=\"cloze\" data-cloze=\"&#x5C;&#x28;a\" data-ordinal=\"1\">[...]</span>b\\)}}", "<span class=\"cloze\" data-cloze=\"&#x5C;&#x28;&#x5C;frac&#x7B;1&#x7D;&#x7B;x&#x5E;&#x7B;2\" data-ordinal=\"2\">[...]</span>\\)}}", "<span class=\"cloze\" data-cloze=\"&#x5C;&#x28;x&#x5C;&#x29;\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&#x5C;&#x28;&lt;b&gt;x&lt;&#x2F;b&gt;&#x5C;&#x29;\" data-ordinal=\"1\">[...]</span> \\[y\\]", "\\(a [...] c\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(<b>open only", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(y\\] \\[z\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\\\(y\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(y\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(a < b\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(a &amp; b &lt;\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(one\\) and \\(two\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(\\)", "<span class=\"cloze\" data-cloze=\"x\" data-ordinal=\"1\">[...]</span> \\(multi\nline\\)", ""],
+          "only_back": ["\\(a", "\\(\\frac{1}{x^{2", "\\(x\\)", "\\(<b>x</b>\\)", "b", "x", "x", "x", "x", "x", "x", "x", "x", "x", ""],
+          "typing": ["\\(a", "\\(\\frac{1}{x^{2", "\\(x\\)", "\\(<b>x</b>\\)", "b", "x", "x", "x", "x", "x", "x", "x", "x", "x", ""]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "09cd906bf8cf0daa13a1dcb841fcc42e97f2d7f3c5c2e43585d32f2d457aa10f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/mathjax",
+  "scenario_sha256": "f7e491d4108914e5814ee59581fa7d323f6603d857b9755d65fd82639e274c6f",
+  "tz": "UTC"
+}

@@ -1,0 +1,172 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a"
+          },
+          {
+            "text": "a"
+          },
+          {
+            "text": "m2 n"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "\"a b\""
+          },
+          {
+            "text": "\"a b\""
+          },
+          {
+            "text": "\"a b\""
+          },
+          {
+            "text": "\"deck:a b\""
+          },
+          {
+            "text": "re:a b"
+          },
+          {
+            "text": "re:a b"
+          },
+          {
+            "text": "prop:cds:k=a b"
+          },
+          {
+            "text": "a​b"
+          },
+          {
+            "text": "a﻿b"
+          },
+          {
+            "text": "a᠎b"
+          },
+          {
+            "text": "a\u001fb"
+          },
+          {
+            "text": "a\u001cb"
+          },
+          {
+            "text": "a\u0000b"
+          },
+          {
+            "text": "a­b"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/lexing/whitespace",
+  "scenario_sha256": "e688b833e2fe6b1ac39b77ed464511a380bdfa2bc87d2044fa5c03a69153c30c",
+  "tz": "UTC"
+}

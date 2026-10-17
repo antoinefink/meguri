@@ -1,0 +1,99 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "dog cat OR fish"
+          }
+        ],
+        "search": [
+          {
+            "ids": ["#c1", "#c4", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#c1", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n5"]
+          },
+          {
+            "ids": ["#c1", "#c4", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n4", "#n5"]
+          },
+          {
+            "ids": ["#c1", "#c3", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n3", "#n5"]
+          },
+          {
+            "ids": ["#c1", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n5"]
+          },
+          {
+            "ids": ["#c3", "#c4"]
+          },
+          {
+            "ids": ["#n3", "#n4"]
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#c2", "#c5"]
+          },
+          {
+            "ids": ["#n2", "#n5"]
+          },
+          {
+            "ids": ["#c4"]
+          },
+          {
+            "ids": ["#n4"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n5"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n5"]
+          },
+          {
+            "ids": ["#c1", "#c2", "#c5"]
+          },
+          {
+            "ids": ["#n1", "#n2", "#n5"]
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/structure/precedence-results",
+  "scenario_sha256": "66cd346f6c6ebb3810891927f7a82fd42d662bceb8e46e4b6b1feb36cc27c275",
+  "tz": "UTC"
+}

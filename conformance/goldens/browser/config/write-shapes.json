@@ -1,0 +1,136 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["activeCols", -1, 1894701600, "[\"question\",\"answer\",\"noteFld\",\"addonX\",\"cardDue\"]", "blob"],
+            ["activeNoteCols", -1, 1894701600, "[\"noteTags\",\"\",\"noteFld\"]", "blob"],
+            ["browserNoteSortBackwards", -1, 1894701600, "true", "blob"],
+            ["browserTableShowNotesMode", -1, 1894701600, "true", "blob"],
+            ["collapseCardState", -1, 1894701600, "true", "blob"],
+            ["collapseDecks", -1, 1894701600, "true", "blob"],
+            ["collapseFlags", -1, 1894701600, "true", "blob"],
+            ["collapseNotetypes", -1, 1894701600, "true", "blob"],
+            ["collapseSavedSearches", -1, 1894701600, "true", "blob"],
+            ["collapseTags", -1, 1894701600, "true", "blob"],
+            ["collapseToday", -1, 1894701600, "true", "blob"],
+            ["defaultSearchText", -1, 1894701600, "\"deck:Inbox is:due\"", "blob"],
+            ["flagLabels", -1, 1894701600, "{\"1\":\"Wrong ✓\",\"3\":\"Important\",\"7\":\"\\\"Quoted\\\"\"}", "blob"],
+            ["ignoreAccentsInSearch", -1, 1894701600, "true", "blob"],
+            ["noteSortType", -1, 1894701600, "\"noteMod\"", "blob"],
+            ["previewBothSides", -1, 1894701600, "true", "blob"],
+            ["resetCountsBrowser", -1, 1894701600, "true", "blob"],
+            ["restorePositionBrowser", -1, 1894701600, "false", "blob"],
+            ["savedFilters", -1, 1894701600, "{\"Apple\":\"flag:1\",\"Tab\\there\":\"a/b \\\\ c\",\"Zed\":\"tag:leech\",\"apple\":\"is:due\",\"Ünï\":\"deck:\\\"A B\\\"\"}", "blob"],
+            ["setDueBrowser", -1, 1894701600, "\"1-7!\"", "blob"],
+            ["sortBackwards", -1, 1894701600, "true", "blob"],
+            ["sortType", -1, 1894701600, "\"cardDue\"", "blob"]
+          ]
+        }
+      },
+      {
+        "browser_config": {
+          "activeCols": ["question", "answer", "noteFld", "addonX", "cardDue"],
+          "activeNoteCols": ["noteTags", "", "noteFld"],
+          "browserNoteSortBackwards": true,
+          "browserTableShowNotesMode": true,
+          "collapseCardState": true,
+          "collapseDecks": true,
+          "collapseFlags": true,
+          "collapseNotetypes": true,
+          "collapseSavedSearches": true,
+          "collapseTags": true,
+          "collapseToday": true,
+          "defaultSearchText": "deck:Inbox is:due",
+          "flagLabels": {
+            "1": "Wrong ✓",
+            "3": "Important",
+            "7": "\"Quoted\""
+          },
+          "ignoreAccentsInSearch": true,
+          "normalize_note_text": true,
+          "noteSortType": "noteMod",
+          "previewBothSides": true,
+          "resetCountsBrowser": true,
+          "restorePositionBrowser": false,
+          "savedFilters": {
+            "Apple": "flag:1",
+            "Tab\there": "a/b \\ c",
+            "Zed": "tag:leech",
+            "apple": "is:due",
+            "Ünï": "deck:\"A B\""
+          },
+          "setDueBrowser": "1-7!",
+          "sortBackwards": true,
+          "sortType": "cardDue"
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc3d7c77948b10a4b8cd3032fc442684b36d8812e1a70ebdc054d37387c41e6e",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "browser/config/write-shapes",
+  "scenario_sha256": "e88a2cd1356f72d4fe240b428772b656e10bc5ae10e4835a028cd0c79a3b4428",
+  "tz": "UTC"
+}

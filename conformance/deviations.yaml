@@ -76,6 +76,200 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/notetypes/records.md N3.1: saving a note type that did not change
+  # writes nothing; Anki stamps it (mtime_secs now, usn -1) and moves col.mod.
+  - id: notetype-unchanged-save
+    requirement: R906
+    summary: Saving the note type Pair with no edit keeps its synced stamps (mtime_secs 1700000000, usn 5) and col.mod.
+    test: notetypes/records/stamps
+    scenarios: [notetypes/records/stamps]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [[1700000000, 5, 1700000000000, 1600000000000, 1700000000000]]}
+  # specs/notetypes/records.md N1, N3.2 and specs/model/protobuf-records.md P4:
+  # unknown protobuf fields of a note type, its fields and its templates
+  # survive a save; Anki drops them from every row of the saved note type.
+  - id: notetype-unknown-fields-kept
+    requirement: R1485
+    summary: After a styling change, the note type's, its first field's and its first template's config still end with the unknown fields the scenario appended.
+    test: notetypes/records/preserve-on-edit
+    scenarios: [notetypes/records/preserve-on-edit]
+    pointer: /steps/7/db_exec/rows
+    transform: {replace: [[1, 1, 1]]}
+  # specs/engine/undo.md A8: a redo whose rows changed outside the undo
+  # history (here a trigger took the answer's review-log id) is refused by
+  # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row
+  # and answers the card again.
+  - id: undo-revlog-taken-id-redo
+    requirement: R1796
+    summary: Meguri refuses the redo of an answer whose review-log id another writer took after the undo, with changed_externally; Anki redoes it.
+    test: undo/revlog-taken-id
+    scenarios: [undo/revlog-taken-id]
+    pointer: /steps/9
+    transform: {replace: {redo: {error: changed_externally}}}
+  - id: undo-revlog-taken-id-status
+    requirement: R1796
+    summary: After the refused redo Meguri has nothing to undo or redo; Anki can undo the redone answer.
+    test: undo/revlog-taken-id
+    scenarios: [undo/revlog-taken-id]
+    pointer: /steps/10/undo_status
+    transform: {replace: {undo: null, redo: null}}
+  - id: undo-revlog-taken-id-card
+    requirement: R1796
+    summary: After the refused redo the card is still new on Meguri; Anki answered it again.
+    test: undo/revlog-taken-id
+    scenarios: [undo/revlog-taken-id]
+    pointer: /steps/11/db_exec/rows
+    transform: {replace: [[0, 0, 0]]}
+  # specs/tags/tags.md T7, T8: after a rename or a reparent, Meguri writes into
+  # the notes the spelling it gives every new tag (T3, after removing the old
+  # rows); Anki writes the text it built, spelled from the old rows or as
+  # typed, and only its registry rows take T3's spelling.
+  - id: tags-rename-new-casing
+    requirement: R1176
+    summary: Renaming verbs to Verbs::regular stores Verbs::regular in the note; Anki spells the new name from the old row and stores verbs::regular.
+    test: tags/rename/new-casing
+    scenarios: [tags/rename/new-casing]
+    pointer: /steps/3/db_exec/rows
+    transform: {replace: [[" Verbs::regular Verbs::regular::x "]]}
+  - id: tags-rename-new-casing-registry
+    requirement: R1176
+    summary: Renaming verbs to Verbs::regular registers Verbs::regular and Verbs::regular::x; Anki registers verbs::regular and verbs::regular::x.
+    test: tags/rename/new-casing
+    scenarios: [tags/rename/new-casing]
+    pointer: /steps/4/db_dump/tags
+    transform:
+      replace:
+        "Verbs::regular": {collapsed: 1, config: null, tag: "Verbs::regular", usn: -1}
+        "Verbs::regular::x": {collapsed: 1, config: null, tag: "Verbs::regular::x", usn: -1}
+  - id: tags-rename-existing-spelling
+    requirement: R892
+    summary: Renaming foo to bar while Bar is registered stores Bar and Bar::c in the note, as the registry spells them; Anki's note keeps bar and bar::c.
+    test: tags/rename/existing-spelling
+    scenarios: [tags/rename/existing-spelling]
+    pointer: /steps/5/db_exec/rows
+    transform: {replace: [[" Bar Bar::c "], [" Bar::x "], [" Bar "]]}
+  - id: tags-reparent-existing-spelling
+    requirement: R892
+    summary: Moving foo onto bar while bar::FOO is registered stores bar::FOO in the note, as the registry spells it; Anki's note keeps bar::foo.
+    test: tags/reparent/existing-spelling
+    scenarios: [tags/reparent/existing-spelling]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [[" bar::FOO "], [" bar::FOO "]]}
+  # specs/tags/tags.md T7 step 5, T14 (R1467): the row Meguri registers for a
+  # renamed or moved tag takes the collapsed state and config of the row the
+  # tag came from, with usn -1; Anki's is a new row, collapsed with config
+  # NULL.
+  - id: tags-rename-carries-columns
+    requirement: R1467
+    summary: Renaming foo to bar gives the new row bar::a the expanded state of foo::a; Anki's bar::a is collapsed. The merged row bar keeps its own columns on both.
+    test: tags/rename/rows
+    scenarios: [tags/rename/rows]
+    pointer: /steps/7/db_dump/tags
+    transform:
+      replace:
+        "bar": {collapsed: 0, config: {sha256: "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"}, tag: "bar", usn: -1}
+        "bar::a": {collapsed: 0, config: null, tag: "bar::a", usn: -1}
+  - id: tags-rename-carries-columns-case-only
+    requirement: R1467
+    summary: Renaming Verbs to VERBS keeps each row's collapsed state and config (Verbs and Verbs::x expanded, Verbs and Verbs::y with a config) and stamps usn -1; Anki's VERBS rows are collapsed with config NULL.
+    test: tags/rename/case-only
+    scenarios: [tags/rename/case-only]
+    pointer: /steps/12/db_dump/tags
+    transform:
+      replace:
+        "VERBS": {collapsed: 0, config: {sha256: "fb8da7eb5b1b399e7321179dac9e9f65773d7331e1e30554e3911e4325e1ef19"}, tag: "VERBS", usn: -1}
+        "VERBS::x": {collapsed: 0, config: null, tag: "VERBS::x", usn: -1}
+        "VERBS::y": {collapsed: 1, config: {sha256: "fb8da7eb5b1b399e7321179dac9e9f65773d7331e1e30554e3911e4325e1ef19"}, tag: "VERBS::y", usn: -1}
+  # specs/tags/tags.md T1, T3 (R892): a new tag takes the tree spelling of
+  # the longest leading part of it that the tag tree shows, implicit parents
+  # included; Anki spells only from rows equal to the tag or to an ancestor.
+  - id: tags-implicit-parent-spelling
+    requirement: R892
+    summary: Saved tags take the spelling of implicit parents (Bar::y beside Bar::x, zz after zz::Q, X::Y::z below X::Y::q, German::noun beside German::Verb, Bar alone, GEO::eu::it after rows GEO::eu::de and geo::EU::fr); Anki keeps the typed bar::y, ZZ, X::y::z, german::noun, BAR and Geo::Eu::it.
+    test: tags/canon/spelling
+    scenarios: [tags/canon/spelling]
+    pointer: /steps/20/db_exec/rows
+    transform:
+      replace:
+        - [""]
+        - [" German::Verb::modal "]
+        - [" German::Verb "]
+        - [" Bar::x "]
+        - [" Bar::x Bar::y "]
+        - [" A b "]
+        - [" Straße "]
+        - [" [ _x Y z "]
+        - [" LANG LANG::DE LANG::DE::noun "]
+        - [" zz zz::Q "]
+        - [" X "]
+        - [" X::Y::q "]
+        - [" X::Y::z "]
+        - [" German::noun "]
+        - [" Bar "]
+        - [" GEO::eu::it "]
+  - id: tags-implicit-parent-spelling-registry
+    requirement: R892
+    summary: The rows registered for those tags have the implicit parents' spellings (Bar::y, zz, X::Y::z, German::noun, Bar, GEO::eu::it); Anki registers bar::y, ZZ, X::y::z, german::noun, BAR and Geo::Eu::it.
+    test: tags/canon/spelling
+    scenarios: [tags/canon/spelling]
+    pointer: /steps/21/db_dump/tags
+    transform:
+      replace:
+        "A": {collapsed: 1, config: null, tag: "A", usn: -1}
+        "Bar": {collapsed: 1, config: null, tag: "Bar", usn: -1}
+        "Bar::x": {collapsed: 1, config: null, tag: "Bar::x", usn: -1}
+        "Bar::y": {collapsed: 1, config: null, tag: "Bar::y", usn: -1}
+        "GEO::eu::de": {collapsed: 1, config: null, tag: "GEO::eu::de", usn: 0}
+        "GEO::eu::it": {collapsed: 1, config: null, tag: "GEO::eu::it", usn: -1}
+        "German::Verb": {collapsed: 0, config: {sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222"}, tag: "German::Verb", usn: -1}
+        "German::Verb::modal": {collapsed: 1, config: null, tag: "German::Verb::modal", usn: -1}
+        "German::noun": {collapsed: 1, config: null, tag: "German::noun", usn: -1}
+        "LANG": {collapsed: 1, config: null, tag: "LANG", usn: -1}
+        "LANG::DE": {collapsed: 1, config: null, tag: "LANG::DE", usn: -1}
+        "LANG::DE::noun": {collapsed: 1, config: null, tag: "LANG::DE::noun", usn: -1}
+        "Straße": {collapsed: 1, config: null, tag: "Straße", usn: -1}
+        "X": {collapsed: 1, config: null, tag: "X", usn: -1}
+        "X::Y::q": {collapsed: 1, config: null, tag: "X::Y::q", usn: -1}
+        "X::Y::z": {collapsed: 1, config: null, tag: "X::Y::z", usn: -1}
+        "Y": {collapsed: 1, config: null, tag: "Y", usn: -1}
+        "[": {collapsed: 1, config: null, tag: "[", usn: -1}
+        "_x": {collapsed: 1, config: null, tag: "_x", usn: -1}
+        "b": {collapsed: 1, config: null, tag: "b", usn: -1}
+        "geo::EU::fr": {collapsed: 1, config: null, tag: "geo::EU::fr", usn: 0}
+        "z": {collapsed: 1, config: null, tag: "z", usn: -1}
+        "zz": {collapsed: 1, config: null, tag: "zz", usn: -1}
+        "zz::Q": {collapsed: 1, config: null, tag: "zz::Q", usn: -1}
+  - id: tags-implicit-parent-collapse
+    requirement: R892
+    summary: Expanding bar while only Bar::x is registered registers the implicit parent as Bar, its tree spelling; Anki registers bar as given.
+    test: tags/collapse/set
+    scenarios: [tags/collapse/set]
+    pointer: /steps/11/db_dump/tags
+    transform:
+      replace:
+        "Bar": {collapsed: 0, config: null, tag: "Bar", usn: -1}
+        "Bar::x": {collapsed: 1, config: null, tag: "Bar::x", usn: 5}
+        "Foo": {collapsed: 0, config: null, tag: "Foo", usn: -1}
+        "Foo::new": {collapsed: 0, config: null, tag: "Foo::new", usn: -1}
+        "a": {collapsed: 1, config: {sha256: "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222"}, tag: "a", usn: -1}
+  - id: tags-implicit-parent-rename
+    requirement: R892
+    summary: Renaming foo to bar while only Bar::x is registered stores Bar and Bar::c in the note, spelled from the implicit parent Bar; Anki stores bar and bar::c.
+    test: tags/rename/implicit-parent
+    scenarios: [tags/rename/implicit-parent]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [[" Bar Bar::c ", 1894705200, -1], [" Bar::x ", 1894701600, -1]]}
+  - id: tags-implicit-parent-rename-registry
+    requirement: R892
+    summary: Renaming foo to bar while only Bar::x is registered registers Bar and Bar::c; Anki registers bar and bar::c.
+    test: tags/rename/implicit-parent
+    scenarios: [tags/rename/implicit-parent]
+    pointer: /steps/5/db_dump/tags
+    transform:
+      replace:
+        "Bar": {collapsed: 1, config: null, tag: "Bar", usn: -1}
+        "Bar::c": {collapsed: 1, config: null, tag: "Bar::c", usn: -1}
+        "Bar::x": {collapsed: 1, config: null, tag: "Bar::x", usn: -1}
   # specs/conformance/float-determinism.md F8, F9 (KTD24): Meguri uses the
   # platform math library, as Anki does. On macOS the expected FSRS next-state
   # values come from the Apple oracle's overlay (conformance/goldens-apple/)
@@ -191,3 +385,61 @@ deviations:
       replace:
         a.jpg: "fa048a40dc97077f6ac1356629394ff2e566207c"
         "a-6d6efa518bdaba281c68518bd20ab7d447555bbd.jpg": "6d6efa518bdaba281c68518bd20ab7d447555bbd"
+  # specs/sched/day-clock.md D6, D12: Meguri computes the day afresh when the
+  # UTC offset, rollover, creationOffset or crt changed since it computed it;
+  # Anki keeps the computed day until its boundary passes.
+  - id: day-clock-offset-change-before-boundary
+    requirement: R464
+    summary: One second before 04:00 CEST on the day Paris moves its clocks forward, Meguri's next boundary is 04:00 CEST (02:00Z); Anki keeps the boundary it computed with +01:00 (03:00Z).
+    test: sched/day/offset-change-recompute
+    scenarios: [sched/day/offset-change-recompute]
+    pointer: /steps/4/timing
+    transform: {replace: {days_elapsed: 1, next_day_at: 1901152800, now: 1901152799, utc_offset_secs: 7200}}
+  - id: day-clock-offset-change-at-boundary
+    requirement: R464
+    summary: At 04:00:00 CEST Meguri starts day 2; Anki stays on day 1 until 05:00 CEST.
+    test: sched/day/offset-change-recompute
+    scenarios: [sched/day/offset-change-recompute]
+    pointer: /steps/6/timing
+    transform: {replace: {days_elapsed: 2, next_day_at: 1901239200, now: 1901152800, utc_offset_secs: 7200}}
+  - id: day-clock-offset-change-after-boundary
+    requirement: R464
+    summary: At 04:00:01 CEST Meguri is on day 2; Anki stays on day 1 until 05:00 CEST.
+    test: sched/day/offset-change-recompute
+    scenarios: [sched/day/offset-change-recompute]
+    pointer: /steps/8/timing
+    transform: {replace: {days_elapsed: 2, next_day_at: 1901239200, now: 1901152801, utc_offset_secs: 7200}}
+  - id: day-clock-config-change-rollover-later
+    requirement: R597
+    summary: Right after rollover moves from 4 to 12 at 10:00, Meguri is back on day 4 until 12:00; Anki keeps day 5 and its 04:00 boundary until that boundary passes.
+    test: sched/day/rollover-change-recompute
+    scenarios: [sched/day/rollover-change-recompute]
+    pointer: /steps/4/timing
+    transform: {replace: {days_elapsed: 4, next_day_at: 1895137200, now: 1895130000, utc_offset_secs: 3600}}
+  - id: day-clock-config-change-new-boundary
+    requirement: R597
+    summary: At 12:00 Meguri starts day 5 again with its next boundary at 12:00 the next day; Anki still reports the 04:00 boundary it computed before the change.
+    test: sched/day/rollover-change-recompute
+    scenarios: [sched/day/rollover-change-recompute]
+    pointer: /steps/6/timing
+    transform: {replace: {days_elapsed: 5, next_day_at: 1895223600, now: 1895137200, utc_offset_secs: 3600}}
+  # specs/sched/day-clock.md D4, D12.3: Meguri never adds creationOffset to a
+  # legacy collection; Anki's desktop layer adds it when it opens one.
+  - id: legacy-timing-kept-on-reopen-day
+    requirement: R595
+    summary: After a reopen the legacy collection keeps legacy timing (day 138) in Meguri; Anki switches it to new timing (day 139).
+    test: sched/day/legacy-timing-kept-on-reopen
+    scenarios: [sched/day/legacy-timing-kept-on-reopen]
+    pointer: /steps/7/timing
+    transform: {replace: {days_elapsed: 138, next_day_at: 1906682400, now: 1906617600, utc_offset_secs: 7200}}
+  - id: legacy-timing-kept-on-reopen-config
+    requirement: R595
+    summary: After the reopen Meguri's config has no creationOffset and lastUnburied stays 138; Anki adds creationOffset -60 and records day 139.
+    test: sched/day/legacy-timing-kept-on-reopen
+    scenarios: [sched/day/legacy-timing-kept-on-reopen]
+    pointer: /steps/8/db_exec/rows
+    transform:
+      replace:
+        - [lastUnburied, -1, 1906617600, "138"]
+        - [localOffset, -1, 1906531200, "-120"]
+        - [rollover, -1, 1906531200, "4"]

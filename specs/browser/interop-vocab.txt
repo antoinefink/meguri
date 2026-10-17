@@ -1,0 +1,46 @@
+# Interface names the browser specs use that are not ordinary words: the
+# collection config keys of Browse, its sidebar, the previewer and search,
+# the reviewer keys named as distinct from them, and the column keys those
+# keys store. Column keys that are ordinary words (deck, note, template,
+# question, answer, stability, difficulty, retrievability) stay unmasked.
+# Config keys (browser/config-keys K1, K6.6, K9)
+activeCols
+activeNoteCols
+sortType
+noteSortType
+sortBackwards
+browserNoteSortBackwards
+browserTableShowNotesMode
+savedFilters
+flagLabels
+collapseSavedSearches
+collapseToday
+collapseFlags
+collapseCardState
+collapseDecks
+collapseNotetypes
+collapseTags
+previewBothSides
+setDueBrowser
+defaultSearchText
+ignoreAccentsInSearch
+restorePositionBrowser
+resetCountsBrowser
+normalize_note_text
+randomOrderReposition
+shiftPositionOfExistingCards
+setDueReviewer
+restorePositionReviewer
+resetCountsReviewer
+# Column keys (browser/config-keys K3)
+noteFld
+cardDue
+cardEase
+cardIvl
+cardReps
+cardLapses
+noteCrt
+cardMod
+noteMod
+noteTags
+originalPosition

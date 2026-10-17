@@ -1,0 +1,12 @@
+# R596 (D11): created at 10:00 local, crt is the same day's 04:00; day 0 and a
+# boundary in the future right after creation.
+id: sched/day/creation-after-rollover-tokyo
+clock: {tz: Asia/Tokyo, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "SELECT crt FROM col"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]

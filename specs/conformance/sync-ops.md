@@ -1,9 +1,9 @@
 # Multi-party sync scenarios
 
 Spec: conformance/sync-ops
-Requirements: R1876, R1883, R1884, R1926, R1927, R1932, R1933
+Requirements: R1876, R1883, R1884, R1926, R1927, R1932, R1933; R1499 (`auth_failed`), R1559 (`status`)
 Anki: 26.09.3
-Scenarios: conformance/scenarios/smoke/sync/
+Scenarios: conformance/scenarios/smoke/sync/, conformance/scenarios/sync/
 
 This file defines the part of the scenario language in which several clients sync with one Anki sync server: actors, the scenario's sync server, the ops `actor`, `sync`, `net_fault`, `reopen` and `converge`, the fault proxy and the recorder in front of the server, and how the oracle and the runner run such scenarios. The rest of the language is `dsl.md`. Observation values, `db_dump` among them, are in `observations.md`. The machine-checkable forms are `conformance/schema/scenario.schema.json`, `observation.schema.json` and `protocol.json`; when this text and a schema disagree, fix both in one change.
 
@@ -86,7 +86,7 @@ server: {clock_offset_secs: 301}
 
 ### S4.1 Kinds and results
 
-`sync: {kind: <kind>}`, `kind` required. Each kind does what an Anki client does at that point, on the current actor:
+`sync: {kind: <kind>}`, `kind` required; `login` also takes `credentials` (S4.5). Each kind does what an Anki client does at that point, on the current actor:
 
 | `kind` | What the actor does | Output on success |
 |---|---|---|
@@ -94,6 +94,7 @@ server: {clock_offset_secs: 301}
 | `normal` | A collection sync as a client starts it: the status check (the `meta` request), then the whole incremental sync when the status check allows one. Media are never synced. | `{sync: {result: <outcome>}}`, below |
 | `full_upload` | A one-way upload: its collection replaces the server's, as after the user chose upload. | `{sync: {result: ok}}` |
 | `full_download` | A one-way download: the server's collection replaces its own. | `{sync: {result: ok}}` |
+| `status` | The sync status as the client's indicator asks for it (`specs/sync/meta-status.md` M6): answered from the actor's own stamps when they decide, from the answer it remembers for 300 s, or from the server's `meta`. It syncs nothing and changes nothing. | `{sync: {result: <status>}}`, below |
 
 Outcomes of `normal`:
 
@@ -104,13 +105,23 @@ Outcomes of `normal`:
 | `full_upload` | A one-way sync is needed, and only an upload is possible: the server's collection has no cards. |
 | `full_download` | A one-way sync is needed, and only a download is possible: the actor's collection has no cards. |
 
+Results of `status`:
+
+| `result` | Meaning |
+|---|---|
+| `no_changes` | Nothing to sync, as far as the actor knows: nothing pending locally, and the server's record (asked now or remembered) shows no change. |
+| `normal_sync` | A normal sync is needed: the actor has local changes (answered without a request), or the server's record shows changes. |
+| `full_sync` | A one-way sync is needed, whichever directions are possible: the actor's schema time is past its last sync (answered without a request), or the server's record has another schema time. |
+
+- `status` makes a request only when its answer needs the server; a scenario shows that it made none by running it while a `net_fault` resets every connection (`sync/meta/status`).
+- The answer an actor remembers is forgotten when its collection is opened again. The oracle opens the collection again for `reopen` and also before each `legacy_json`, `legacy_update` and `blob_decode` (`model-ops.md` L5), and Meguri's executor does not for those three, so a scenario that relies on the remembered answer runs none of these ops between the steps concerned. A one-way sync keeps it: it remembers its own outcome (`specs/sync/meta-status.md` M6.1).
 - `full_upload` and `full_download` make no status check and do not ask whether a one-way sync is needed: like the client after the user's choice, they transfer. A scenario that wants the outcome on record runs `normal` first, as the smoke scenarios do.
 - `full_upload` and `full_download` close the actor's collection and open it again. Logical ids stay valid.
 
 ### S4.2 Preconditions
 
 - An actor's first `sync` step, in step order, has kind `login`. This is checked when the scenario loads.
-- A `normal`, `full_upload` or `full_download` of an actor that holds no host key, because its `login` was rejected, is a run error: `invalid_scenario`.
+- A `normal`, `status`, `full_upload` or `full_download` of an actor that holds no host key, because no `login` of it succeeded or an `auth_failed` cleared its key (S4.4), is a run error: `invalid_scenario`.
 
 ### S4.3 Equal instants
 
@@ -122,12 +133,24 @@ A sync that fails records `{sync: {error: <kind>}}` (dsl.md D7.3). The list of k
 
 | `error` | When |
 |---|---|
-| `clock_incorrect` | The status check found the server's clock more than 300 s from the actor's, ahead or behind. Only `normal` makes the status check, so only `normal` gets this kind. The actor's collection does not change. |
+| `auth_failed` | The server refused the credentials of a `login`, or the host key of any later request, with HTTP 403 (R1499). After it the actor holds no host key, whatever an earlier `login` gave it, so its next `sync` step must be a `login` (S4.2). The actor's collection does not change. |
+| `clock_incorrect` | The status check found the server's clock more than 300 s from the actor's, ahead or behind. Only `normal` and `status` make the status check, so only they get this kind (`status` only when it asks the server). The actor's collection does not change. |
 | `network` | The request did not complete at the network level: the connection was refused, reset or closed before the response's headers arrived, or no data moved for the client's stall timeout. |
 
-- Any other failure is a run error (`anki_error` on the oracle) until the sync area adds its kind with the driver (U106, U118). Among these: a wrong password, a server error, a conflict, a failed sanity check, and a connection reset after the response's headers arrived (Anki reports that as a sync error, not a network error).
+- Any other failure is a run error (`anki_error` on the oracle) until the sync area adds its kind with the driver (U106, U118). Among these: a server error, a conflict, a failed sanity check, and a connection reset after the response's headers arrived (Anki reports that as a sync error, not a network error).
 - A failed sync leaves the actor's collection as Anki's client leaves it on that failure. The scenario observes it, and the golden records it.
 - Kinds come from the error's class and kind, never from its message text (R1887).
+
+### S4.5 Login credentials
+
+```yaml
+- sync: {kind: login, credentials: wrong_password}
+```
+
+- `credentials` is allowed only with `kind: login`. Its values:
+  - `account` (the default): the scenario's account, as the worker reports it (S10.4).
+  - `wrong_password`: the account's user name with the account's password followed by `-wrong`. Every executor derives it from the account the same way, so no other credential exists. The server refuses it: `{sync: {error: auth_failed}}`.
+- A scenario still never names a credential (S8.1): `credentials` only says how the executor derives one from the account.
 
 ## S5. Network faults: `net_fault`
 
@@ -271,6 +294,7 @@ An endpoint is the base URL a client syncs with. The worker derives every endpoi
 When an actor scenario has at least one Meguri actor, Meguri needs (dsl.md D8):
 
 - the op `actor`: Meguri's executor can play an actor, with a collection of its own, driven by the parties executor;
+- the new collection (dsl.md D8), from which every actor starts (S2.2);
 - the setup sections, when the first actor is a Meguri actor;
 - every op and observation kind of the steps that Meguri actors run;
 - `advance` and `set_clock`, when the scenario uses them;
@@ -295,7 +319,7 @@ The parties executor drives one worker per actor scenario through `begin`, `step
 
 - `begin` takes `caller_actors`: the Meguri actors the caller plays (none in the replay). When the caller plays the first actor, it runs the setup on Meguri first and passes the real note and card ids the setup created, in creation order, as `ids`. The worker creates collections only for the actors it plays, runs the setup when it plays the first actor, starts the server, and creates the fault proxy when the run needs one. It answers with:
   - `ids`: the real ids its setup created, when it ran the setup;
-  - `sync`: `{endpoints: {actors, converge, upstream, recorder}, account: {username, password}}`. `upstream` and `recorder` are `null` when the run has no fault proxy or no recorder. The caller's Meguri actors log in with `account`.
+  - `sync`: `{endpoints: {actors, converge, upstream, recorder}, account: {username, password}}`. `upstream` and `recorder` are `null` when the run has no fault proxy or no recorder. The caller's Meguri actors log in with `account` (and S4.5's derived password for `credentials: wrong_password`).
 - The caller checks every endpoint (S8.3), then sends one `step` request for each scenario step, in order:
   - A step the worker runs (a global step, or any step while an oracle actor is current): `{"cmd": "step"}`. The response's `ids` lists the real ids the step created; the caller adds them to the id table of its Meguri actors.
   - A step of a caller-played actor: the caller runs it on Meguri's executor, then sends `{"cmd": "step", "done": {"output": <the step's output>, "notes": [<real ids>], "cards": [<real ids>]}}` with the real ids the step created, in creation order. The worker records the output as that step's and adds the ids to the scenario's table.
@@ -327,4 +351,5 @@ The parties executor drives one worker per actor scenario through `begin`, `step
 - BLOB digests compare bytes: an actor's dump matches only when Meguri encodes each record's protobuf bytes as Anki does.
 - FSRS memory states inside `cards.data` compare as text, exactly; O7's tolerances do not apply to dumps.
 - `converge` does not check the history fields of S7.3, so it cannot show that a Meguri actor sets the `col` row's `mod`, `usn` and `ls`, or the `usn` and `mtime_secs` of config entries, as Anki does. The sync area pins those per party with `db_dump` observations (`{db_dump: {tables: [col, config]}}`) after each kind of round, in its own scenarios.
-- Media sync, wrong credentials, server errors and the other faults of R1932: their kinds and arguments come with U106, U111 and U118.
+- Media sync, server errors and the other faults of R1932: their kinds and arguments come with U111 and U118, and with the units whose scenarios first reach them (a failed sanity check: U107). Wrong credentials came with U105 (S4.5, `auth_failed`); the `status` kind with U106. `specs/sync/errors.md` E10 maps Meguri's error kinds to this list.
+- Graves and tags a client receives are stamped with the update sequence number of its own round, while the sender and the server hold the earlier round's (oracle, `sync/wire/records-down`). `converge` would report those `usn` columns of a receiver as differences, so scenarios in which deletions or new tags cross a sync observe the parties with `db_dump` instead of `converge`, as `sync/wire/records-down` and `records-up` do. Whether S7.3 should exclude them is open (U107).

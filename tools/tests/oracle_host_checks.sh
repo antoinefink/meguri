@@ -170,8 +170,9 @@ EOF
 
 # tools/mg oracle check (specs/conformance/collection-check.md) on a copy of a
 # committed fixture: a clean report with the zone and clock from the manifest,
-# a planted problem (fail), and the K7 errors. Nested tools/mg runs of this
-# checkout; the outer run rewrites build/mg/oracle/latest when it ends.
+# the same with --schedule (K11), a planted problem (fail), and the K7 errors.
+# Nested tools/mg runs of this checkout; the outer run rewrites
+# build/mg/oracle/latest when it ends.
 CHECK_DIR="$WORK/check"
 
 check_run() { # <out var> <args...>: the result.json path of one run
@@ -206,6 +207,10 @@ t_check_job_reports_problems_and_errors() {
     expect "artifact equals details.check" \
       "$(jq -S . "$(dirname "$r")/check.json" | mg_oracle__sha256)" "$(jq -S .details.check "$r" | mg_oracle__sha256)" || return 1
   cp "$(dirname "$r")/check.json" "$CHECK_DIR/clean-report.json"
+  check_run r "$col" --schedule || return 1
+  expect "schedule status" "$(jq -r .status "$r")" pass &&
+    expect "schedule cards" "$(jq -r '.details.check.schedule.cards == .details.check.counts.cards' "$r")" true || return 1
+  cp "$(dirname "$r")/check.json" "$CHECK_DIR/schedule-report.json"
   check_run r "$bad" || return 1
   # The repaired row also changes the revlog table.
   expect "planted problem" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["fail",["revlog_properties","changed_revlog"]]' || return 1
@@ -222,13 +227,14 @@ t_check_job_reports_problems_and_errors() {
     expect "nothing added beside it" "$(ls "$col" | tr '\n' ' ')" "collection.anki2 manifest.json "
 }
 
-# The check's worker transcript against protocol.json and the report of the
-# previous check against collection-check.schema.json, with jsonschema in the
-# dev image.
+# The check's worker transcript against protocol.json and the reports of the
+# previous test's checks (without and with --schedule) against
+# collection-check.schema.json, with jsonschema in the dev image.
 t_check_transcript_and_report_match_the_schemas() {
   local req="$WORK/check-requests.jsonl" resp="$WORK/check-responses.jsonl" report="$CHECK_DIR/clean-report.json"
-  [ -s "$report" ] || {
-    echo "no report from t_check_job_reports_problems_and_errors"
+  local schedule_report="$CHECK_DIR/schedule-report.json"
+  [ -s "$report" ] && [ -s "$schedule_report" ] || {
+    echo "no reports from t_check_job_reports_problems_and_errors"
     return 1
   }
   cat >"$req" <<'EOF'
@@ -236,18 +242,22 @@ t_check_transcript_and_report_match_the_schemas() {
 {"cmd":"check","id":1,"dir":"/in/collection","now":1894701600,"decks":["Lang","Nope"],"render_notes":[1788249600238,1]}
 {"cmd":"check","id":2,"dir":"/in/nothing","now":1894701600}
 {"cmd":"check","id":3,"dir":"/in/collection"}
+{"cmd":"check","id":4,"dir":"/in/collection","now":1894701600,"schedule":true}
 EOF
   mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" -e TZ=Asia/Kathmandu -v "$CHECK_DIR/col:/in/collection:ro" oracle <"$req" >"$resp" || return 1
-  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 4 &&
-    expect "error kinds" "$(jq -sc '[.[] | .error.kind // "ok"]' "$resp")" '["ok","ok","no_collection","protocol_error"]' &&
+  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 5 &&
+    expect "error kinds" "$(jq -sc '[.[] | .error.kind // "ok"]' "$resp")" '["ok","ok","no_collection","protocol_error","ok"]' &&
     expect "rendered cards" "$(jq -sc '.[1].check.render | [keys, (.["1788249600238"] | length > 0), .["1"]]' "$resp")" \
-      '[["1","1788249600238"],true,null]' || return 1
+      '[["1","1788249600238"],true,null]' &&
+    expect "schedule only when asked" "$(jq -sc '[(.[1].check | has("schedule")), (.[4].check | has("schedule"))]' "$resp")" \
+      '[false,true]' || return 1
   local rel_req="${req#"$REPO"/}" rel_resp="${resp#"$REPO"/}" rel_report="${report#"$REPO"/}"
+  local rel_schedule="${schedule_report#"$REPO"/}"
   mg_compose build dev >"$WORK/dev-build.log" 2>&1 || {
     tail -20 "$WORK/dev-build.log"
     return 1
   }
-  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel_req" "$rel_resp" "$rel_report" <<'EOF'
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel_req" "$rel_resp" "$rel_report" "$rel_schedule" <<'EOF'
 import json, sys
 from jsonschema import Draft202012Validator
 protocol = json.load(open("conformance/schema/protocol.json"))
@@ -266,14 +276,153 @@ for name, v, path in (("request", validator("request"), sys.argv[1]), ("response
         for err in v.iter_errors(msg):
             print(f"{name} {n}: {err.json_path}: {err.message}"); bad += 1
 report = Draft202012Validator(report_schema)
-for err in report.iter_errors(json.load(open(sys.argv[3]))):
-    print(f"report: {err.json_path}: {err.message}"); bad += 1
-check = json.loads(open(sys.argv[2]).readlines()[1])["check"]
-full = {"report_version": 1, "oracle": {"anki_version": "26.9.3", "lock_sha256": "0" * 64, "driver_sha256": "0" * 64}, "dir": "x", **check}
-for err in report.iter_errors(full):
-    print(f"worker check as a report: {err.json_path}: {err.message}"); bad += 1
+for path in sys.argv[3:5]:
+    for err in report.iter_errors(json.load(open(path))):
+        print(f"report {path}: {err.json_path}: {err.message}"); bad += 1
+if "schedule" not in json.load(open(sys.argv[4])):
+    print("the --schedule report has no schedule"); bad += 1
+lines = open(sys.argv[2]).readlines()
+for n in (1, 4):
+    check = json.loads(lines[n])["check"]
+    full = {"report_version": 1, "oracle": {"anki_version": "26.9.3", "lock_sha256": "0" * 64, "driver_sha256": "0" * 64}, "dir": "x", **check}
+    for err in report.iter_errors(full):
+        print(f"worker check {n + 1} as a report: {err.json_path}: {err.message}"); bad += 1
 sys.exit(1 if bad else 0)
 EOF
+}
+
+# tools/mg oracle time (specs/conformance/timed-operations.md) on a copy of a
+# committed fixture: every operation ok with the zone and clock from the
+# manifest, an operation error (fail), and the T8 errors. Nested tools/mg
+# runs of this checkout, as for check.
+TIME_DIR="$WORK/time"
+
+time_run() { # <out var> [env...] -- <args...>: the result.json path of one run
+  local var="$1" out
+  shift
+  local envs=()
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
+    envs[${#envs[@]}]="$1"
+    shift
+  done
+  shift
+  out="$(env ${envs[0]+"${envs[@]}"} /bin/bash "$REPO/tools/mg" oracle time "$@" 2>>"$WORK/time.log" | tail -n 1)"
+  [ -f "$out" ] || {
+    echo "tools/mg oracle time $* wrote no result:"
+    tail -n 20 "$WORK/time.log"
+    return 1
+  }
+  printf -v "$var" '%s' "$out"
+}
+
+time_fixture() { # <dir>: schema-18.anki2 with a manifest at 2030-01-15T10:00:00Z, UTC+1
+  mkdir -p "$1" && cp "$REPO/conformance/fixtures/storage/schema-18.anki2" "$1/collection.anki2" &&
+    printf '{"now_ms": 1894701600999, "utc_offset_secs": 3600}\n' >"$1/manifest.json"
+}
+
+t_time_job_reports_operations_and_errors() {
+  local col="$TIME_DIR/col" nocards="$TIME_DIR/nocards" garbage="$TIME_DIR/garbage" bare="$TIME_DIR/bare" r args
+  rm -rf "$TIME_DIR" && mkdir -p "$garbage" "$bare" || return 1
+  time_fixture "$col" && time_fixture "$nocards" && cp "$col/collection.anki2" "$bare/collection.anki2" || return 1
+  head -c 8192 /dev/zero | tr '\0' x >"$garbage/collection.anki2"
+  sqlite3 "$nocards/collection.anki2" "delete from cards" || return 1
+  time_run r -- "$col" --repeat 1 || return 1
+  expect "status" "$(jq -r .status "$r")" pass &&
+    expect "every operation ok" "$(jq -c '[.details.timing.operations[] | select(.status == "ok")] | length' "$r")" 22 &&
+    expect "summary" "$(jq -c '[.summary.total, .summary.passed, .summary.failed]' "$r")" '[22,22,0]' &&
+    expect "zone and clock from the manifest" "$(jq -c '.details.timing | [.tz, .now]' "$r")" '["Etc/GMT-1",1894701600]' &&
+    expect "side, platform, protocol" "$(jq -c '.details.timing | [.side, (.platform | startswith("linux-")), .protocol]' "$r")" \
+      '["anki",true,{"repeat":1,"warmup":1}]' &&
+    expect "the Docker lane's lock" "$(jq -r .details.timing.oracle.lock_sha256 "$r")" "$(mg_oracle__sha256 <"$ORACLE/requirements.lock")" &&
+    expect "report artifact" "$(jq -r '[.artifacts[] | select(.kind == "report") | .path | endswith("/timing.json")] == [true]' "$r")" true &&
+    expect "artifact equals details.timing" \
+      "$(jq -S . "$(dirname "$r")/timing.json" | mg_oracle__sha256)" "$(jq -S .details.timing "$r" | mg_oracle__sha256)" || return 1
+  cp "$(dirname "$r")/timing.json" "$TIME_DIR/report.json"
+  time_run r -- "$nocards" --repeat 1 --op review.answer --op queue.build || return 1
+  expect "an operation error fails the job" "$(jq -c '[.status, [.failures[] | [.id, .message]]]' "$r")" \
+    '["fail",[["review.answer","error (no_input at setup)"]]]' &&
+    expect "operations in catalogue order" "$(jq -c '[.details.timing.operations[].name]' "$r")" '["queue.build","review.answer"]' || return 1
+  cp "$(dirname "$r")/timing.json" "$TIME_DIR/error-report.json"
+  time_run r -- "$TIME_DIR/none" || return 1
+  expect "missing directory" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["no_collection"]]' || return 1
+  time_run r -- "$garbage" --tz UTC --now 2030-01-15T10:00:00Z || return 1
+  expect "not a collection" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["open_failed"]]' || return 1
+  time_run r -- "$bare" || return 1
+  expect "no manifest" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["usage"]]' || return 1
+  for args in "--bogus" "--op collection.close" "--repeat 0" "--platform windows"; do
+    # shellcheck disable=SC2086 # one option and its value per word
+    time_run r -- "$col" $args || return 1
+    expect "usage: $args" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["usage"]]' || return 1
+  done
+  expect "source left as it was" "$(mg_oracle__sha256 <"$col/collection.anki2")" \
+    "$(mg_oracle__sha256 <"$REPO/conformance/fixtures/storage/schema-18.anki2")" &&
+    expect "nothing added beside it" "$(ls "$col" | tr '\n' ' ')" "collection.anki2 manifest.json "
+}
+
+# A timing worker's transcript against protocol.json (a worker started with
+# ORACLE_CLOCK_CACHE=1 and no clock file is frozen at the entrypoint's
+# 2000-01-01), and the previous test's reports against timing.schema.json,
+# with jsonschema in the dev image.
+t_time_transcript_and_reports_match_the_schemas() {
+  local req="$WORK/time-requests.jsonl" resp="$WORK/time-responses.jsonl" report="$TIME_DIR/report.json"
+  local error_report="$TIME_DIR/error-report.json"
+  [ -s "$report" ] && [ -s "$error_report" ] || {
+    echo "no reports from t_time_job_reports_operations_and_errors"
+    return 1
+  }
+  cat >"$req" <<'JSONL'
+{"cmd":"hello"}
+{"cmd":"time","id":1,"dir":"/in/collection","now":946684800,"ops":["sync.full_upload","collection.open"],"repeat":2}
+{"cmd":"time","id":2,"dir":"/in/collection","now":1894701600,"ops":["collection.open"],"repeat":1}
+{"cmd":"time","id":3,"dir":"/in/nothing","now":946684800,"ops":["collection.open"],"repeat":1}
+{"cmd":"time","id":4,"dir":"/in/collection","now":946684800,"ops":["collection.open"],"repeat":0}
+JSONL
+  mg_oracle__run "$MG_ORACLE_TAG" "$ORACLE" -e TZ=Asia/Kathmandu -e ORACLE_CLOCK_CACHE=1 \
+    -v "$TIME_DIR/col:/in/collection:ro" oracle <"$req" >"$resp" || return 1
+  expect "response lines" "$(wc -l <"$resp" | tr -d ' ')" 5 &&
+    expect "error kinds" "$(jq -sc '[.[] | .error.kind // "ok"]' "$resp")" '["ok","ok","protocol_error","no_collection","protocol_error"]' &&
+    expect "hello of a timing worker" "$(jq -sc '.[0].time_control' "$resp")" '"faketime"' &&
+    expect "ops in catalogue order" "$(jq -sc '[.[1].timing.operations[] | [.name, .status, (.samples_ms | length)]]' "$resp")" \
+      '[["collection.open","ok",2],["sync.full_upload","ok",2]]' || return 1
+  local rel_req="${req#"$REPO"/}" rel_resp="${resp#"$REPO"/}" rel_report="${report#"$REPO"/}" rel_error="${error_report#"$REPO"/}"
+  mg_compose build dev >"$WORK/dev-build.log" 2>&1 || {
+    tail -20 "$WORK/dev-build.log"
+    return 1
+  }
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "$rel_req" "$rel_resp" "$rel_report" "$rel_error" <<'PY'
+import json, sys
+from jsonschema import Draft202012Validator
+protocol = json.load(open("conformance/schema/protocol.json"))
+timing = json.load(open("conformance/schema/timing.schema.json"))
+Draft202012Validator.check_schema(protocol)
+Draft202012Validator.check_schema(timing)
+def validator(ref):
+    return Draft202012Validator({"$ref": f"#/$defs/{ref}", "$defs": protocol["$defs"]})
+bad = 0
+for name, v, path in (("request", validator("request"), sys.argv[1]), ("response", validator("response"), sys.argv[2])):
+    for n, line in enumerate(open(path), 1):
+        msg = json.loads(line)
+        if name == "request" and msg.get("repeat") == 0:
+            if v.is_valid(msg):
+                print(f"request {n}: repeat 0 passed the schema"); bad += 1
+            continue
+        for err in v.iter_errors(msg):
+            print(f"{name} {n}: {err.json_path}: {err.message}"); bad += 1
+report = Draft202012Validator(timing)
+for path in sys.argv[3:5]:
+    for err in report.iter_errors(json.load(open(path))):
+        print(f"report {path}: {err.json_path}: {err.message}"); bad += 1
+member = json.loads(open(sys.argv[2]).readlines()[1])["timing"]
+full = {"report_version": 1, "side": "anki", "platform": "linux-arm64",
+        "oracle": {"anki_version": "26.9.3", "lock_sha256": "0" * 64, "driver_sha256": "0" * 64}, **member}
+for err in report.iter_errors(full):
+    print(f"worker timing as a report: {err.json_path}: {err.message}"); bad += 1
+broken = json.load(open(sys.argv[3]))
+broken["operations"][0]["check"] = {"cards": 1}
+if report.is_valid(broken):
+    print("a collection.open check without notes and revlog passed the schema"); bad += 1
+sys.exit(1 if bad else 0)
+PY
 }
 
 t_the_oracle_service_has_no_route_out() {
@@ -573,6 +722,43 @@ PY
     expect "scratch left behind" "$(find "$dir/scratch" -mindepth 1 | head -n 3)" ""
 }
 
+# tools/mg oracle time --platform apple (timed-operations.md T1, T2.3): the
+# primary series' lane times operations with its own lock, and a worker
+# without libfaketime ends the run with clock_unsupported. Its scratch is
+# gone afterwards.
+t_the_native_lane_times_operations() {
+  native_or_skip || return $?
+  local col="$TIME_DIR/native-col" r mode report
+  mode="$(native_time_control)" || {
+    echo "$mode"
+    return 1
+  }
+  rm -rf "$col" && time_fixture "$col" || return 1
+  time_run r -- "$col" --platform apple --repeat 1 --op collection.open --op sync.full_download --op sync.full_upload || return 1
+  if [ "$mode" = none ]; then
+    expect "a real-clock worker cannot time" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["clock_unsupported"]]'
+    return
+  fi
+  report="$(dirname "$r")/timing.json"
+  expect "status" "$(jq -r .status "$r")" pass &&
+    expect "operations" "$(jq -c '[.details.timing.operations[] | [.name, .status]]' "$r")" \
+      '[["collection.open","ok"],["sync.full_upload","ok"],["sync.full_download","ok"]]' &&
+    expect "platform" "$(jq -r .details.timing.platform "$r")" macos-arm64 &&
+    expect "the native lane's lock" "$(jq -r .details.timing.oracle.lock_sha256 "$r")" \
+      "$(mg_oracle__sha256 <"$ORACLE/macos/requirements-macos.lock")" &&
+    expect "scratch left behind" "$(find "$(dirname "$r")" -mindepth 1 -type d | head -n 3)" "" || return 1
+  mg_compose run --rm -T --no-deps --label "meguri.mg.run-id=$MG_RUN_ID" dev python3 - "${report#"$REPO"/}" <<'PY' || return 1
+import json, sys
+from jsonschema import Draft202012Validator
+errors = list(Draft202012Validator(json.load(open("conformance/schema/timing.schema.json"))).iter_errors(json.load(open(sys.argv[1]))))
+for e in errors:
+    print(f"timing.json: {e.json_path}: {e.message}")
+sys.exit(1 if errors else 0)
+PY
+  time_run r ORACLE_NATIVE_FAKETIME=0 -- "$col" --platform apple --repeat 1 --op collection.open || return 1
+  expect "without faketime" "$(jq -c '[.status, [.failures[].id]]' "$r")" '["error",["clock_unsupported"]]'
+}
+
 # Runs last. The checks above copy oracle/ into the run directory, under this
 # checkout's build/, where U2's deny rules for oracle/ do not reach.
 t_no_copy_of_oracle_files_is_left_behind() {
@@ -588,10 +774,12 @@ t_no_copy_of_oracle_files_is_left_behind() {
 TESTS="t_tag_is_content_addressed_and_stable t_rebuilding_an_unchanged_tree_keeps_tag_and_image
 t_editing_a_driver_file_changes_tag_and_driver_hash t_a_compose_worker_says_hello_in_its_zone
 t_protocol_transcript_matches_the_schema t_check_job_reports_problems_and_errors
-t_check_transcript_and_report_match_the_schemas t_the_oracle_service_has_no_route_out
+t_check_transcript_and_report_match_the_schemas t_time_job_reports_operations_and_errors
+t_time_transcript_and_reports_match_the_schemas t_the_oracle_service_has_no_route_out
 t_the_network_probe_connects_when_a_route_exists t_no_meguri_code_refers_to_oracle
 t_compare_runs_in_a_worktree_without_oracle t_the_native_lane_says_hello_with_its_platform_lock_and_time_control
-t_the_native_harness_records_compares_and_refuses_overlays t_no_copy_of_oracle_files_is_left_behind"
+t_the_native_harness_records_compares_and_refuses_overlays t_the_native_lane_times_operations
+t_no_copy_of_oracle_files_is_left_behind"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 n=0

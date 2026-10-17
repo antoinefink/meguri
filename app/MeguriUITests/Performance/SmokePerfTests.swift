@@ -44,11 +44,61 @@ final class PerfTestCaseTests: XCTestCase {
 
     func testAnyConfigurationButProfileIsRefused() {
         for configuration in [BuildUnderTest.Configuration.debug, .release, .appStore] {
-            XCTAssertThrowsError(try PerfTestCase.requireProfile(configuration)) { error in
+            XCTAssertThrowsError(try PerfPreconditions.requireProfile(configuration)) { error in
                 XCTAssert("\(error)".contains("performance tests require Profile"), "\(error)")
             }
         }
-        XCTAssertNoThrow(try PerfTestCase.requireProfile(.profile))
+        XCTAssertNoThrow(try PerfPreconditions.requireProfile(.profile))
+    }
+
+    func testAnAttachedDebuggerIsRefused() {
+        XCTAssertThrowsError(try PerfPreconditions.requireNoDebugger(traced: true)) { error in
+            XCTAssert("\(error)".contains("without a debugger"), "\(error)")
+        }
+        XCTAssertNoThrow(try PerfPreconditions.requireNoDebugger(traced: false))
+    }
+
+    func testCoverageAndSanitizerRuntimesInTheAppAreRefused() {
+        let plain = Data("__TEXT __text _main".utf8)
+        XCTAssertNoThrow(try PerfPreconditions.requireUninstrumented([("Meguri", plain)]))
+        for (marker, expected) in [("__llvm_prf_cnts", "code coverage"), ("___llvm_profile_runtime", "code coverage"),
+                                   ("@rpath/libclang_rt.asan_iossim_dynamic.dylib", "sanitizer"),
+                                   ("@rpath/libclang_rt.tsan_osx_dynamic.dylib", "sanitizer"),
+                                   ("@rpath/libclang_rt.ubsan_iossim_dynamic.dylib", "sanitizer")] {
+            let binary = plain + Data(marker.utf8) + plain
+            XCTAssertThrowsError(try PerfPreconditions.requireUninstrumented([("Meguri", binary)]), marker) { error in
+                XCTAssert("\(error)".contains(expected) && "\(error)".contains("R1866"), "\(error)")
+            }
+        }
+    }
+
+    func testAnInstrumentedRunnerIsRefused() {
+        XCTAssertNoThrow(try PerfPreconditions.requireUninstrumented(environment: ["HOME": "/tmp"]))
+        XCTAssertThrowsError(try PerfPreconditions.requireUninstrumented(
+            environment: ["DYLD_INSERT_LIBRARIES": "/x/libclang_rt.asan_iossim_dynamic.dylib"]))
+        // Xcode sets it for every test run, coverage or not: not evidence.
+        XCTAssertNoThrow(try PerfPreconditions.requireUninstrumented(environment: ["LLVM_PROFILE_FILE": "/x/%p.profraw"]))
+    }
+
+    func testAParallelTestingCloneIsRefused() {
+        XCTAssertNoThrow(try PerfPreconditions.requireSerialTesting(["SIMULATOR_DEVICE_NAME": "Meguri-Pool-iphone-1"]))
+        XCTAssertNoThrow(try PerfPreconditions.requireSerialTesting([:]))
+        XCTAssertThrowsError(try PerfPreconditions.requireSerialTesting(
+            ["SIMULATOR_DEVICE_NAME": "Clone 1 of Meguri-Pool-iphone-1"])) { error in
+            XCTAssert("\(error)".contains("parallel"), "\(error)")
+        }
+    }
+
+    /// The app this run tests carries no coverage or sanitizer runtime, and
+    /// the runner runs serially and uninstrumented, whatever the
+    /// configuration (the checks performance tests make at setup, Profile
+    /// aside): the checks do not refuse a clean run.
+    func testTheBuildUnderTestIsUninstrumented() throws {
+        let binaries = try PerfPreconditions.binaries(try BuildUnderTest.current())
+        XCTAssertFalse(binaries.isEmpty, "no executable in the app under test")
+        XCTAssertNoThrow(try PerfPreconditions.requireUninstrumented(binaries))
+        XCTAssertNoThrow(try PerfPreconditions.requireUninstrumented(environment: ProcessInfo.processInfo.environment))
+        XCTAssertNoThrow(try PerfPreconditions.requireSerialTesting(ProcessInfo.processInfo.environment))
     }
 
     func testRegisteredNamesResolve() throws {
@@ -60,6 +110,11 @@ final class PerfTestCaseTests: XCTestCase {
             PerfTestCase.declaration(try PerfTestCase.registered(["probe.syntheticDelay", "review.answerToNextVisible"])),
             "meguri.perf.intervals: probe.syntheticDelay review.answerToNextVisible")
         XCTAssertEqual(PerfTestCase.declaration([]), "meguri.perf.intervals:")
+    }
+
+    func testTheFixtureDeclarationNamesTheFixture() {
+        XCTAssertEqual(PerfTestCase.fixtureDeclaration("150k"), "meguri.perf.fixture: 150k")
+        XCTAssertNil(SmokePerfTests.fixture)
     }
 }
 

@@ -5,3 +5,29 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[features]
+# Test-only (KTD18): the AsciiCompat fold mode (search/query-model Q8), for
+# the differential runs against the oracle (U91), and Plan::build_with, which
+# runs plans with stand-in term compilers. Never on by default or in Release.
+test-hooks = []
+
+[dependencies]
+meguri-model.workspace = true
+# The browser and search config keys (U83, `src/config.rs`) read config
+# values per `storage/config-table` C3.
+meguri-storage.workspace = true
+# Unicode decimal digits (category Nd) in id lists (search/grammar G8), with
+# the pinned regex-syntax tables.
+regex.workspace = true
+
+[dev-dependencies]
+# Turns test-hooks on for the tests (testkit depends on this crate with it):
+# tests/canonical_roundtrip.rs runs plans through Plan::build_with.
+meguri-testkit.workspace = true
+# The plan's tests (src/plan, tests/canonical_roundtrip.rs) run statements on
+# in-memory card and note tables; collections are only ever read through
+# meguri-storage.
+rusqlite.workspace = true
+# tests/config_keys.rs reads the config keys of a fixture copy.
+tempfile.workspace = true

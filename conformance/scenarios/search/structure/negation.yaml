@@ -1,0 +1,23 @@
+# specs/search/grammar.md G4: negation of a term, a quoted term, a key term and
+# a group; negated operator words parse and are written `- ` and `- OR `.
+id: search/structure/negation
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          - '-(a or b)'
+          - '-"x y"'
+          - '-deck:a'
+          - '-a'
+          - '-a -b'
+          - '-(-a)'
+          - '--a'
+          - '-and'
+          - '-or'
+          - '-AND'
+          - '-Or'
+          - 'a -and b'
+          - 'a -or b'
+          - '-"and"'
+          - '-and a'
+          - 'a -and'

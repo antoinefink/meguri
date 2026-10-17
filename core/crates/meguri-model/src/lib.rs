@@ -31,3 +31,22 @@ pub mod time;
 pub mod usn;
 
 pub use error::{BlobColumn, BlobError, ModelError, Schema11Item};
+
+/// The text rules of `model/json-numbers` for JSON that other crates read and
+/// write outside the records above: the sync bodies (`sync/wire-format` W1).
+pub mod json_text {
+    use serde_json::value::RawValue;
+
+    /// JSON text read per N9 and N10: `None` when it is not valid JSON, holds
+    /// an unpaired surrogate escape, or holds a number beyond the 64-bit
+    /// float range anywhere. No nesting limit: callers that need one check
+    /// it first.
+    pub fn parse(text: &str) -> Option<&RawValue> {
+        crate::json::parse_value(text)
+    }
+
+    /// N8: `text` as a JSON string, with only the escapes JSON requires.
+    pub fn push_string(out: &mut String, text: &str) {
+        crate::json::push_string(out, text);
+    }
+}

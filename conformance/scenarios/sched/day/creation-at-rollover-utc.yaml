@@ -1,0 +1,14 @@
+# R596 (D11): created at exactly 04:00:00, crt is that instant. In UTC the
+# first day query writes rollover but no localOffset: a missing localOffset
+# reads as UTC, which equals the device's offset (D5).
+id: sched/day/creation-at-rollover-utc
+clock: {tz: UTC, start: "2030-01-15T04:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "SELECT crt FROM col"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - set_clock: "2030-01-16T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
