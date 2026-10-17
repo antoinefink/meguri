@@ -1,0 +1,59 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["63616665CC811F41CC8A", "63616665CC81", 922075179],
+            ["636166C3A91FC385", "636166C3A9", 4096017706]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["63616665CC811F41CC8A20616761696E", "63616665CC81", 922075179, 1894705200],
+            ["636166C3A91FC385", "636166C3A9", 4096017706, 1894701600]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["636166C3A91FC385206F6E6365206D6F7265", "636166C3A9", 4096017706, 1894708800],
+            ["636166C3A91FC385", "636166C3A9", 4096017706, 1894701600]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/save/normalize-off",
+  "scenario_sha256": "1a94786512a705ef5d1bbea4d2f6b8ea7aeadcc7aa7dd6d304bef8682bfe57ef",
+  "tz": "UTC"
+}
