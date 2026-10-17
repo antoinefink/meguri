@@ -96,3 +96,8 @@ The six stock note types of `notetypes/stock-kinds` K1, in K1's order, as K2 say
 | `storage/new-collection/handoff` | live: Anki works in a Meguri-created collection (golden recorded) |
 
 Meguri's tests (`core/crates/meguri-engine/tests/bootstrap.rs`) also cover B1 (never over an existing file), B2's interrupted bootstrap, and B3's `crt` and `creationOffset` across a DST change (`sched/day-clock` D11's table).
+
+## B11. The scenarios' new collection
+
+- Meguri's conformance executor makes the new collection of `conformance/dsl` D8 with this bootstrap, at `clock.start` in the scenario's `clock.tz`, then opens it through the normal open (B8). It replaces the stand-in of `conformance/notetype-ops` T10.2, which writes a subset of these rows with the same values; the stand-in goes once the bootstrap exists.
+- Every scenario that starts from the new collection then starts from the rows Anki's oracle starts from. Besides this area's and the decks area's, these include the undo scenarios, the day and unbury scenarios (`sched/day/`, `sched/unbury-on-rollover/`), which read `crt` and `creationOffset` (B3, B4), and `browser/config/new-collection`, which reads `sortType` and `sortBackwards` (B4).

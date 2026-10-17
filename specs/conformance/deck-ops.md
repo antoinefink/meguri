@@ -103,5 +103,15 @@ The scenario ops (`dsl.md` D7.2) and observation kinds (`observations.md` O4) th
 
 ## K14. Status
 
-- The oracle driver implements every op and kind of this file, and `add_note`'s `deck` as K1 says. Every scenario under `conformance/scenarios/decks/` has its golden, recorded with `tools/mg oracle record decks/`. `decks/rename/preserve` keeps one top-level `other` member while it reads the deck's common bytes and adds the second one after that, because Anki writes those members in no set order (`conformance/AGENTS.md`).
-- The testkit model (`core/crates/meguri-testkit/src/scenario/`) reads these ops and kinds with the shapes of `scenario.schema.json` and the load-time rules of K4 to K10 (non-empty deck names, at least one deck in a list, two different presets in `remove_preset`). Meguri's executor implements them with U28's deck and preset operations; until then the scenarios are `pending` (`dsl.md` D10).
+- The oracle driver implements every op and kind of this file, `add_note`'s `deck` as K1 says, and `setup.decks` as K15 says. Every scenario under `conformance/scenarios/decks/` has its golden, recorded with `tools/mg oracle record decks/`. `decks/rename/preserve` keeps one top-level `other` member while it reads the deck's common bytes and adds the second one after that, because Anki writes those members in no set order (`conformance/AGENTS.md`).
+- The testkit model (`core/crates/meguri-testkit/src/scenario/`) reads these ops and kinds with the shapes of `scenario.schema.json` and the load-time rules of K4 to K10 (non-empty deck names, at least one deck in a list, two different presets in `remove_preset`). Meguri's executor implements them, and `setup.decks` (K15), with U28's deck and preset operations; until then the scenarios are `pending` (`dsl.md` D10).
+
+## K15. The `decks` setup section (`dsl.md` D6.3)
+
+Both executors build `setup.decks` the same way, so the ids, names, blobs and stamps of setup decks match the goldens:
+
+- The section runs after `presets` and before `notetypes` (`dsl.md` D6), on the new collection, with the clock frozen at `clock.start`.
+- Each entry, in list order, is a typed name (a string, or the `name` of `{name, preset}`) that the section creates as `add_deck` does (K2, `decks/decks#D5`). It is converted (D1). When a deck with the same name exists (D2), the default deck or one that an earlier entry created (a parent included), that deck is the entry's deck and nothing is written. Otherwise case adoption applies, then the missing ancestors are created nearest first and the deck last, each a new deck of D4 (both collapse flags set, preset 1), with ids from `storage/ids-usn-mtime` I2 and the stamps of `clock.start`. Example (oracle): `["P::C"]` at 2030-01-15 10:00 UTC gives `P` id 1894701600000 and `P::C` id 1894701600001, both with `mtime_secs` 1894701600 and `usn` -1. A name that D3 refuses is a run error; scenarios give none.
+- `preset`, when given, names `Default` or a preset of `setup.presets`. The entry's deck then gets that preset as `decks/deck-presets#P9` assigns one to a single deck (no subtree). The clock is frozen, so a deck written again keeps the stamps it got when it was created.
+- What the undo history holds afterwards is not part of the language (`undo-ops.md`: an undo scenario empties it before its first undo).
+- Later steps name these decks by their stored human names (K1). `add_note`'s `deck`, in `setup.notes` and in steps, also accepts a name exactly as an entry of `setup.decks` wrote it when no stored name matches, and then means that entry's deck.

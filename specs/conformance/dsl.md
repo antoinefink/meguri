@@ -99,7 +99,7 @@ A list of deck option presets: `{name, <option>: <value>, ...}`. A preset named 
 
 ### D6.3 decks
 
-A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset uses `Default`. The preset must be `Default` or defined in `presets`.
+A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset uses `Default`. The preset must be `Default` or defined in `presets`. Each entry is created, in list order, as `add_deck` creates a deck (`deck-ops.md` K15; `specs/decks/decks.md` D5).
 
 ### D6.4 notetypes
 
