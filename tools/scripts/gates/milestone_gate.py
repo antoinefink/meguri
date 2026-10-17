@@ -12,6 +12,9 @@ whose results it reads. Commands:
             result.json), git history, the escalation ledger, the quarantine
             and the user-step evidence at HEAD -> an evaluation, and on a pass
             the milestone record.
+  runs      the tiers runs `tools/mg milestone <M>` runs: what M's gate
+            reads and the runs those take files from, nothing of a later
+            milestone (milestone_runs).
 
 Everything but `load` is stdlib only, for macOS's /usr/bin/python3 (3.9).
 
@@ -20,7 +23,8 @@ check keeps equal to the plan's table); nothing here knows their names.
 
 Exit status: load and check: 0 valid, 1 invalid (errors as JSON on stdout),
 2 usage. evaluate: 0 pass, 1 fail, 3 awaiting_user, 2 an invalid manifest or
-input, an unknown milestone (errors as JSON on stdout) or usage.
+input, an unknown milestone (errors as JSON on stdout) or usage. runs: 0, or
+2 as evaluate.
 """
 
 import argparse
@@ -975,6 +979,54 @@ def cmd_check(a):
 
 
 # ---------------------------------------------------------------------------
+# runs: what `tools/mg milestone <M>` runs
+
+
+def milestone_runs(model, config, milestone):
+    """The tiers run ids `tools/mg milestone <milestone>` plans, sorted: the
+    runs its gate reads (its cumulative suites, the global suite conditions
+    from their `from` milestone, the deferrals' cells), every run whose file
+    one of them takes as an {artifact:<run>:<file>} argument, and the T4 runs
+    whose `user_step` is the kind of one of its user steps (listed as awaiting
+    Antoine, never run). No later milestone's suite: M1R never runs M1's."""
+    order = model["order"]
+    mi = order.index(milestone)
+    runs = {r["id"]: r for r in config.get("runs", [])}
+    want = [s["run"] for s in cumulative(model, mi)]
+    want += [g["suite"]["run"] for g in model["global"] if g["kind"] == "suite" and order.index(g["from"]) <= mi]
+    want += [d["cells"]["run"] for m in model["milestones"][:mi + 1] for d in m["deferred"] if d["cells"]]
+    selected = set()
+    while want:
+        rid = want.pop()
+        if rid in selected or rid not in runs:
+            continue  # a pending suite's run that tiers.yaml does not list yet: the gate reports it pending
+        selected.add(rid)
+        want += [m.group(1) for m in (ARTIFACT.match(x) for x in runs[rid]["args"]) if m]
+    kinds = {st["validator"]["type"] for st in model["milestones"][mi]["user_steps"]}
+    selected.update(r["id"] for r in runs.values() if r["tier"] == "T4" and r.get("user_step") in kinds)
+    return sorted(selected)
+
+
+def cmd_runs(a):
+    try:
+        manifest = read_json(a.manifest)
+        config = read_json(a.config)
+    except (OSError, ValueError) as e:
+        print(json.dumps({"errors": ["cannot read the input: %s" % e]}))
+        return 2
+    model, errors, _ = build_model(manifest, config)
+    if errors:
+        print(json.dumps({"errors": errors}, ensure_ascii=False))
+        return 2
+    if a.milestone not in model["order"]:
+        print(json.dumps({"errors": ["unknown milestone %r; the milestones of the manifest are %s"
+                                     % (a.milestone, ", ".join(model["order"]))]}, ensure_ascii=False))
+        return 2
+    print(json.dumps({"milestone": a.milestone, "runs": milestone_runs(model, config, a.milestone)}))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # git
 
 
@@ -1904,8 +1956,12 @@ def main(argv):
     s.add_argument("--outside-main", action="store_true",
                    help="the checkout is not the main checkout: evaluate, but the gate fails")
     s.add_argument("--out", required=True)
+    s = sub.add_parser("runs")
+    s.add_argument("--manifest", required=True, help="the manifest as JSON (load's output)")
+    s.add_argument("--config", required=True, help="gate.py load's output: the tiers runs")
+    s.add_argument("--milestone", required=True)
     a = p.parse_args(argv)
-    return {"load": cmd_load, "check": cmd_check, "evaluate": cmd_evaluate}[a.command](a)
+    return {"load": cmd_load, "check": cmd_check, "evaluate": cmd_evaluate, "runs": cmd_runs}[a.command](a)
 
 
 if __name__ == "__main__":

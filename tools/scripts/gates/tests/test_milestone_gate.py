@@ -1421,5 +1421,81 @@ class FirstSyncTests(Sandbox):
         self.assertIn("device-runs/M1R/iphone.json", ev["awaiting"][0]["message"])
 
 
+class MilestoneRunsTests(Sandbox):
+    """`runs`: what `tools/mg milestone <M>` plans (U240's "runs exactly the
+    M1R suites"): the runs M's gate reads and the runs they take files from,
+    never a later milestone's suite."""
+
+    def runs(self, man, milestone):
+        paths = {}
+        for name, value in (("manifest", man), ("config", self.config)):
+            paths[name] = os.path.join(self.tmp, name + ".json")
+            with open(paths[name], "w", encoding="utf-8") as f:
+                json.dump(value, f)
+        p = subprocess.run([sys.executable, "-B", GATE, "runs", "--manifest", paths["manifest"], "--config",
+                            paths["config"], "--milestone", milestone], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return p.returncode, json.loads(p.stdout.decode() or "{}")
+
+    def reviews_first(self):
+        self.run_("unit", job="core-test")
+        self.run_("live", job="conformance", args=["--live"], tier="T1", cls="conformance")
+        self.run_("harvest", job="harvest-report", args=["--live-report", "{artifact:live:t1-live.json}"], tier="T3",
+                  cls="conformance")
+        self.run_("review-loop", job="u243", cls="perf")
+        self.run_("snap", job="snapshots", cls="ui")
+        self.run_("native", job="fp-probe", tier="T3", cls="conformance")
+        self.run_("bench", job="bench-mac", tier="T3", cls="perf")
+        self.run_("audit", job="release-audit", tier="T3", cls="static", release_only=True)
+        self.run_("device", job="device-run", tier="T4", cls="perf", user_step="device-run")
+        self.run_("fuzz", job="fuzz", tier="T2", cls="unit")
+        man = manifest(
+            M0={"suites": [{"id": "unit", "run": "unit"}, {"id": "harvest", "run": "harvest"}]},
+            M1R={"suites": [{"id": "review-loop", "run": "review-loop"},
+                            {"id": "soak", "run": "u248-soak", "pending": "U248"}],
+                 "user_steps": [{"id": "device-run-mac", "description": "run",
+                                 "evidence": "docs/process/milestone-records/device-runs/M1R/mac.json",
+                                 "validator": {"type": "device-run", "device": "mac"}}],
+                 "deferred": [{"id": "foldable", "dependency": "xcode-27.1-foldable-simulator",
+                               "condition": FOLDABLE,
+                               "cells": {"run": "snap", "scope": {"detail": "devices", "items": ["foldable"]}},
+                               "approved_by": "antoine"}]},
+            M1={"suites": [{"id": "bench-mac", "run": "bench"}]})
+        man["global"].append({"id": "native-oracle", "kind": "suite", "run": "native", "from": "M1R"})
+        return man
+
+    def test_m1r_runs_its_gates_runs_and_never_a_later_milestones(self):
+        rc, out = self.runs(self.reviews_first(), "M1R")
+        self.assertEqual(rc, 0, out)
+        # M0's suites (cumulative), M1R's own, the live run whose report
+        # harvest takes, the native oracle (global from M1R), the deferred
+        # cells' run, and the device run its user step names (listed as
+        # awaiting Antoine). Not M1's bench-mac, the release-only audit, T2,
+        # or the pending soak, which has no tiers run yet.
+        self.assertEqual(out["runs"], ["device", "harvest", "live", "native", "review-loop", "snap", "unit"])
+
+    def test_m0_leaves_out_what_applies_from_m1r(self):
+        rc, out = self.runs(self.reviews_first(), "M0")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(out["runs"], ["harvest", "live", "unit"])
+
+    def test_m1_adds_its_own_suites(self):
+        rc, out = self.runs(self.reviews_first(), "M1")
+        self.assertEqual(rc, 0, out)
+        # M1 has no device-run step in this manifest: no T4 run is listed.
+        self.assertEqual(out["runs"], ["bench", "harvest", "live", "native", "review-loop", "snap", "unit"])
+
+    def test_an_unknown_milestone_or_an_invalid_manifest_selects_nothing(self):
+        man = self.reviews_first()
+        rc, out = self.runs(man, "M1X")
+        self.assertEqual(rc, 2)
+        self.assertNotIn("runs", out)
+        self.assertIn("M0, M1R, M1, M2, M3, M4, M5", out["errors"][0])
+        milestone(man, "M1")["suites"].append({"id": "nowhere", "run": "nowhere"})
+        rc, out = self.runs(man, "M1R")
+        self.assertEqual(rc, 2)
+        self.assertNotIn("runs", out)
+        self.assertTrue(any("run nowhere is not in tools/gate/tiers.yaml" in e for e in out["errors"]), out)
+
+
 if __name__ == "__main__":
     unittest.main()

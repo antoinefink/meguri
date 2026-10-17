@@ -615,7 +615,8 @@ def cmd_plan(a):
         k, _, val = v.partition("=")
         if val:
             values[k] = val
-    only = set(a.only.split(",")) if a.only else None
+    # --only "" selects no run (a milestone with none); without --only, all.
+    only = {x for x in a.only.split(",") if x} if a.only is not None else None
     if only:
         unknown = only - {r["id"] for r in config["runs"]}
         if unknown:
@@ -930,7 +931,7 @@ def main(argv):
     s.add_argument("--oracle-tree", choices=ORACLE_TREES, default="own")
     s.add_argument("--var", action="append")
     s.add_argument("--all", action="store_true")
-    s.add_argument("--only", default="")
+    s.add_argument("--only", default=None)
     s.add_argument("--out", required=True)
     s = sub.add_parser("evaluate")
     s.add_argument("--config", required=True)

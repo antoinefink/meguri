@@ -3,7 +3,9 @@
 # Each run is one `tools/mg <job> <args>` call with its tier, the paths that
 # trigger it, where its work happens (R1952) and a time budget. `tools/mg gate`
 # runs T0 and, when core/ changed, T1; `tools/mg nightly` runs T2; `tools/mg
-# milestone` runs T0, T1, T3 and T4 in full. Every registered tools/mg job is a
+# milestone <M>` runs in full the T0, T1 and T3 runs M's gate reads
+# (docs/process/milestones.yaml) and lists its T4 runs; `tools/mg milestone
+# release` runs every T0, T1, T3 and T4 run. Every registered tools/mg job is a
 # run here or a utility below: `tools/mg gate` refuses this file otherwise.
 #
 # Run fields:
@@ -51,7 +53,9 @@
 #                 release runs
 #   release_only  T3 runs that only `tools/mg milestone release` runs
 #   user_step     T4: performed by Antoine (U256); the run reports it as
-#                 awaiting him, and its job need not be a tools/mg job
+#                 awaiting him, and its job need not be a tools/mg job. A
+#                 milestone run lists it when the milestone has a user step
+#                 whose validator type is this value (device-run)
 #   pending       the unit that lands the job; the run is listed and reported,
 #                 never run. Once the job is registered this file is refused
 #                 until the run is wired (pending removed).
@@ -621,7 +625,7 @@ utilities:
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
   - {job: nightly, why: "runs T2"}
-  - {job: milestone, why: "runs T0, T1, T3 and T4"}
+  - {job: milestone, why: "runs a milestone's T0, T1, T3 and T4 runs, or all of them at release"}
   - {job: quarantine, why: "edits and checks tools/gate/quarantine.yaml"}
   - {job: escalation, why: "records escalations for Antoine"}
   - {job: doctor, why: "reads host state and lists user steps"}

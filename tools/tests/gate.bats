@@ -32,10 +32,46 @@ setup_file() {
       *) rm -f "$f" ;;
     esac
   done
-  # The milestones `tools/mg milestone` accepts, in order (U240r): the ids of
-  # the manifest's list are all it reads.
+  # The milestones `tools/mg milestone` accepts, in order (U240r), and the
+  # runs each one's gate reads (U240): M0's suites, M1R's conf and the oracle
+  # check that applies from M1R, M1's ui. harvest takes live's report, and
+  # the device-run steps list the T4 device run. The plan texts are empty, so
+  # nothing needs a plan excerpt.
   mkdir -p "$t/docs/process"
-  { printf 'version: 1\nmilestones:\n'; printf '  - {id: %s}\n' M0 M1R M1 M2 M3 M4 M5; } >"$t/docs/process/milestones.yaml"
+  {
+    cat <<'EOF'
+version: 1
+plan: docs/plan.md
+global:
+  - {id: oracle-check, kind: suite, run: otest, from: M1R}
+milestones:
+  - id: M0
+    name: Foundations
+    plan: {gate: "", user_steps: ""}
+    units: []
+    suites:
+      - {id: static, run: static}
+      - {id: unit, run: unit}
+      - {id: harvest, run: harvest}
+  - id: M1R
+    name: Reviews first
+    plan: {gate: "", user_steps: ""}
+    units: []
+    suites:
+      - {id: conf, run: conf}
+    user_steps:
+      - {id: device-run-mac, description: Device run on the Mac, evidence: docs/process/milestone-records/device-runs/M1R/mac.json, validator: {type: device-run, device: mac}}
+  - id: M1
+    name: Daily driver
+    plan: {gate: "", user_steps: ""}
+    units: []
+    suites:
+      - {id: ui, run: ui}
+    user_steps:
+      - {id: device-run-mac, description: Device run on the Mac, evidence: docs/process/milestone-records/device-runs/M1/mac.json, validator: {type: device-run, device: mac}}
+EOF
+    printf '  - {id: %s, name: Later, plan: {gate: "", user_steps: ""}, units: []}\n' M2 M3 M4 M5
+  } >"$t/docs/process/milestones.yaml"
   printf 'id: smoke/a\n' >"$t/conformance/scenarios/smoke/a.yaml"
   printf 'id: sched/b\n' >"$t/conformance/scenarios/sched/b.yaml"
   printf '# notes\n' >"$t/docs/notes.md"
@@ -1003,7 +1039,7 @@ PY
   mg milestone M1
   [ "$status" -eq 1 ]
   jq -e '.failures[] | select(.id == "t-job:R1880-unclassified")' "$result"
-  # Every per-change run runs in full at a milestone.
+  # A milestone's runs run in full (no path triggers): live with every area.
   [ "$(called '^t-job unit @main$')" = 1 ]
   [ "$(called '^t-job live smoke @main$')" = 0 ]
   [ "$(called '^t-job live @main$')" = 1 ]
@@ -1094,6 +1130,55 @@ $TRAILERS"
   [ "$(field '.failures[0].id')" = usage ]
   [[ "$(field '.failures[0].message')" == *"unknown milestone 'M1X'"*"are M0, M1R, M1, M2, M3, M4, M5"* ]]
   [ "$(called '^t-job unit @main$')" = 1 ]
+}
+
+@test "a milestone run runs only the runs its gate reads, never a later milestone's suite (U240)" {
+  printf 'unclassified 0\n' >"$FX/harvest.counts"
+  # ui is first a suite of M1: any run that started it would fail.
+  printf 'fail\n' >"$FX/ui.status"
+  mg milestone M1R
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  [ "$(field .status)" = warn ]
+  [ "$(called 't-job ui')" = 0 ]
+  [ "$(outcome ui)" = not-triggered ]
+  # M0's suites and M1R's own, the live run whose report harvest takes, the
+  # oracle check that applies from M1R, and M1R's device run (awaiting).
+  [ "$(field '.details.runs | join(" ")')" = "conf device harvest live otest static unit" ]
+  [ "$(called '^t-job unit @main$')" = 1 ]
+  [ "$(called '^t-job conf @main$')" = 1 ]
+  [ "$(called '^t-job live @main$')" = 1 ]
+  [ "$(called '^t-oracle-own otest @main$')" = 1 ]
+  [ "$(field '.details.awaiting_user | map(.id) | join(" ")')" = device ]
+  # A run no milestone lists runs at none.
+  [ "$(called '^similarity ')" = 0 ]
+  [ "$(outcome sim)" = not-triggered ]
+
+  # M0 has neither M1R's suites, nor the check from M1R, nor a device run.
+  : >"$STUB_LOG"
+  mg milestone M0
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field '.details.runs | join(" ")')" = "harvest live static unit" ]
+  [ "$(called 't-job conf')" = 0 ]
+  [ "$(called 't-oracle-own')" = 0 ]
+  [ "$(field '.details.awaiting_user')" = "[]" ]
+
+  # M1 runs ui, and fails on it.
+  mg milestone M1
+  [ "$status" -eq 1 ]
+  [ "$(called '^t-job ui @main$')" = 1 ]
+  jq -e '.failures[] | select(.id == "t-job:ui-fail")' "$result"
+}
+
+@test "a milestone run refuses an invalid manifest and runs nothing" {
+  printf '  - {id: M6, name: Later, plan: {gate: "", user_steps: ""}, units: [], suites: [{id: gone, run: gone}]}\n' \
+    >>"$SB/docs/process/milestones.yaml"
+  git -C "$SB" commit -qam "List a suite that is not a tiers run"
+  mg milestone M0
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = manifest ]
+  [[ "$(field '.failures[0].message')" == *"run gone is not in tools/gate/tiers.yaml"* ]]
+  [ ! -s "$STUB_LOG" ]
 }
 
 @test "a milestone run refuses a dirty tree or a worktree" {
