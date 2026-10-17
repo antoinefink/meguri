@@ -414,17 +414,31 @@ mg_perf_ui() {
   since="$(mg_app_log_now)"
   mg_app_xcodebuild_test "$prefix" "$platform" "$dest" Profile "${only[@]}"
   rc=$?
-  # A Mac run whose synthesized input macOS dropped tested nothing it tapped.
-  if [ "$platform" = mac ] && [ "$rc" -ne 2 ] && mg_app_mac_input_refused "$since"; then
-    rc=2
+  # A Mac run whose synthesized input macOS dropped tested nothing it tapped:
+  # it is queued (mac-input), unless a test failed where the drop does not
+  # explain it (mg_app_mac_input_result records those tests). Its numbers
+  # measured taps that did not happen: no perf result either way.
+  local refused=""
+  if [ "$platform" = mac ] && [ "$rc" -ne 2 ] && mg_app_mac_input_refused "$since" "$(printf '%s,' "${suites[@]}" | sed 's/,$//')"; then
+    refused=1
+    mg_app_mac_input_result "$prefix.xcresult" "$rc" test
+    rc=$?
   fi
   [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "Performance plan result bundle"
+  if [ "$rc" -eq 3 ]; then
+    mg_message "perf-ui: queued: macOS dropped the input XCUITest synthesized (user step mac-input); the taps did not reach the app"
+    mg_status pass
+    mg_queued_settle
+    return 0
+  fi
+  if [ -n "$refused" ]; then
+    mg_message "perf-ui: performance tests failed before or without the input macOS dropped (user step mac-input); see the failures and $prefix.log"
+    mg_status fail
+    mg_queued_settle
+    return 0
+  fi
   if [ "$rc" -eq 2 ]; then
-    if [ -n "${MG_MAC_INPUT_REFUSED:-}" ]; then
-      mg_message "perf-ui: blocked: macOS dropped the input XCUITest synthesized (user step mac-input); the taps did not reach the app"
-    else
-      mg_message "perf-ui: the performance tests could not run; see log.txt"
-    fi
+    mg_message "perf-ui: the performance tests could not run; see log.txt"
     mg_status error
     return 0
   fi

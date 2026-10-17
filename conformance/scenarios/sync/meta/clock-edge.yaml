@@ -1,0 +1,28 @@
+# The clock check refuses only a difference of more than 300 s (R1515;
+# specs/sync/meta-status.md M2): with the server exactly 300 s ahead, every
+# status check goes on and the syncs run. smoke/sync/server-clock-ahead shows
+# 301 s refused.
+id: sync/meta/clock-edge
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+server: {clock_offset_secs: 300}
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - advance: 1m
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}

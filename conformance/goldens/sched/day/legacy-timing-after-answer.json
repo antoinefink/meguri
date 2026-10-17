@@ -1,0 +1,72 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-06-01T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1906596000,
+          "now": 1906531200,
+          "utc_offset_secs": 7200
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 138,
+          "next_day_at": 1906682400,
+          "now": 1906617600,
+          "utc_offset_secs": 7200
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 138,
+          "next_day_at": 1906682400,
+          "now": 1906617600,
+          "utc_offset_secs": 7200
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["lastUnburied", -1, 1906617600, "138"],
+            ["localOffset", -1, 1906531200, "-120"],
+            ["rollover", -1, 1906531200, "4"]
+          ]
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 139,
+          "next_day_at": 1906768800,
+          "now": 1906704000,
+          "utc_offset_secs": 7200
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "42673b66d36a95ebe3e7e6b7a586aa876d2478a1710b602d8bdaad7b4db37e8f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/day/legacy-timing-after-answer",
+  "scenario_sha256": "df430cc2a5e999b847cb5f3711fc0130feb22293be6a12e5ef061cc8d5f69273",
+  "tz": "Europe/Paris"
+}

@@ -5,21 +5,32 @@ Reads the JSON that AgentDriverTests writes before and after every drive step
 (app/MeguriUITests/AgentDriver/HierarchyExport.swift) and reports:
 
 - missing-identifier: an interactive control or a list row with no
-  accessibility identifier (R1964);
+  accessibility identifier (R1964). A row counts as identified when an
+  element inside it has one: SwiftUI's List puts a row's modifiers on its
+  content, inside the row and cell views AppKit and UIKit wrap it in, and no
+  API names those;
 - bad-identifier: an identifier that is not area.screen.element[.id], each of
   area, screen and element lowerCamel (R1964);
 - duplicate-identifier: one identifier on several elements;
-- text-overlap: two text elements of one window whose frames overlap (R1965);
+- text-overlap: two text elements of one window whose visible frames overlap
+  (R1965); a text inside a scrolling container shows only where that
+  container does, so a row scrolled past its edge overlaps nothing there;
 - text-outside-window: a text element that is not wholly inside its window or
   sheet and not inside a scrolling container (R1965).
 
-Ignored: system UI (keyboard, status bar, menu bar, Touch Bar), the buttons of
+Ignored: system UI (keyboard, status bar, menu bar, Touch Bar, and a Mac
+scroll bar with its knob, arrows and page regions), the buttons of
 system alerts (which drop identifiers, or on the Mac carry action-button-<n>;
 app/AGENTS.md; a Mac alert sheet is told by AppKit's id on the sheet or an
-action-button-<n>, never by a lack of identifiers), identifiers the system
-sets (a leading '_', BackButton, Toolbar, PopoverDismissRegion, the Mac back
-button's chevron.backward in a toolbar, a window's SwiftUI scene id),
-elements with an empty frame, and transient elements (activity and progress
+action-button-<n>, never by a lack of identifiers), the sidebar toggle a
+split view puts in the toolbar or navigation bar (no identifier; labelled
+Show or Hide Sidebar, so only in English, the driver's usual locale),
+identifiers the system sets (a leading '_', BackButton, Toolbar,
+PopoverDismissRegion, the Mac back button's chevron.backward in a toolbar, a
+window's SwiftUI scene id, a navigation bar named after its title, an SF
+Symbol's name on its image, and on the Mac a SwiftUI List's ListColumn and a
+NavigationSplitView's '<scene id>, SidebarNavigationSplitView'), elements
+with an empty frame, and transient elements (activity and progress
 indicators) with everything inside them. Wrong colors, broken alignment and
 unreadable text are judgments for the critic (U10), not checks here.
 
@@ -41,12 +52,21 @@ INTERACTIVE = {
 ROWS = {"cell", "tableRow", "outlineRow"}
 TEXT = {"staticText", "textField", "secureTextField", "searchField", "textView"}
 TRANSIENT = {"activityIndicator", "progressIndicator"}
-SYSTEM_UI = {"keyboard", "statusBar", "menuBar", "touchBar"}
+# A Mac scroll view's AppKit scroller reports its parts (the page regions
+# as unlabelled buttons), none of which can take an identifier.
+SYSTEM_UI = {"keyboard", "statusBar", "menuBar", "touchBar", "scrollBar"}
 SCROLLING = {"scrollView", "table", "collectionView", "outline", "browser", "webView"}
 WINDOWS = {"window", "sheet", "popover", "alert"}
 SYSTEM_IDENTIFIERS = {"BackButton", "Toolbar", "PopoverDismissRegion"}
 # The Mac's alert buttons, inside a sheet or alert.
 ALERT_BUTTON = re.compile(r"^action-button-[0-9]+$")
+# The name iOS gives the image of an SF Symbol: lowercase words and digits
+# joined by dots (house, gearshape.fill, chart.bar.xaxis).
+SYMBOL_NAME = re.compile(r"^[a-z0-9]+(\.[a-z0-9]+)*$")
+# SwiftUI's NavigationSplitView on the Mac, after the window's scene id.
+SPLIT_VIEW = re.compile(r"^(?:.+, )?SidebarNavigationSplitView$")
+SIDEBAR_TOGGLE_LABELS = {"Show Sidebar", "Hide Sidebar"}
+BARS = {"toolbar", "navigationBar"}
 
 IDENTIFIER = re.compile(r"^[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*\.[a-z][a-zA-Z0-9]*(\.[A-Za-z0-9_-]+)?$")
 # Frames that overlap by at most this much (points) in either direction only
@@ -93,6 +113,17 @@ class Element:
     def visible(self):
         return self.w > 0 and self.h > 0
 
+    def shown(self):
+        """The part of the frame its scrolling containers show, as (x, y, w,
+        h), or None when they show none of it."""
+        x0, y0, x1, y1 = self.x, self.y, self.x + self.w, self.y + self.h
+        for a in self.ancestors:
+            if a.type in SCROLLING:
+                x0, y0, x1, y1 = max(x0, a.x), max(y0, a.y), min(x1, a.x + a.w), min(y1, a.y + a.h)
+        if x1 <= x0 or y1 <= y0:
+            return None
+        return x0, y0, x1 - x0, y1 - y0
+
     def under(self, types):
         return self.type in types or any(a.type in types for a in self.ancestors)
 
@@ -106,6 +137,16 @@ class Element:
     def in_system_alert(self):
         """Inside a system alert: an alert, or (Mac) an alert sheet."""
         return any(a.type == "alert" or (a.type == "sheet" and is_alert_sheet(a)) for a in self.ancestors)
+
+    def identified_inside(self):
+        """An element inside this one carries an identifier the app set."""
+        return any(d.identifier and not is_system_identifier(d) for c in self.children for d in c.walk())
+
+    def is_sidebar_toggle(self):
+        """The toggle a split view adds to its bar (a Mac toolbar, an iPad
+        navigation bar), which has no identifier and none can be set."""
+        return (self.type == "button" and not self.identifier and self.label in SIDEBAR_TOGGLE_LABELS
+                and self.parent is not None and self.parent.type in BARS)
 
 
 def is_alert_sheet(sheet):
@@ -129,6 +170,15 @@ def is_system_identifier(e):
         return e.type == "button" and any(a.type in ("sheet", "alert") for a in e.ancestors)
     if ident == "chevron.backward":
         return e.type == "button" and e.parent is not None and e.parent.type == "toolbar"
+    if e.type == "navigationBar":
+        # UIKit names a navigation bar after its title.
+        return any(c.type == "staticText" and c.label == ident for c in e.children)
+    if e.type == "image":
+        return bool(SYMBOL_NAME.match(ident))
+    if e.type == "tableColumn":
+        return ident == "ListColumn"
+    if e.type == "splitGroup":
+        return bool(SPLIT_VIEW.match(ident))
     return False
 
 
@@ -145,7 +195,8 @@ def check(document):
     issues = []
 
     for e in elements:
-        if (e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e.visible and not e.in_system_alert():
+        if ((e.type in INTERACTIVE or e.type in ROWS) and not e.identifier and e.visible and not e.in_system_alert()
+                and not e.is_sidebar_toggle() and not (e.type in ROWS and e.identified_inside())):
             issues.append(dict(kind="missing-identifier", message="%s '%s' has no accessibility identifier" % (e.type, e.label),
                                **describe(e)))
 
@@ -169,12 +220,14 @@ def check(document):
             })
 
     texts = [e for e in elements if e.type in TEXT and e.visible]
-    for i, a in enumerate(texts):
-        for b in texts[i + 1:]:
+    shown = [(e, e.shown()) for e in texts]
+    shown = [(e, r) for e, r in shown if r]
+    for i, (a, (ax, ay, aw, ah)) in enumerate(shown):
+        for b, (bx, by, bw, bh) in shown[i + 1:]:
             if a in b.ancestors or b in a.ancestors or a.window() is not b.window():
                 continue
-            dx = min(a.x + a.w, b.x + b.w) - max(a.x, b.x)
-            dy = min(a.y + a.h, b.y + b.h) - max(a.y, b.y)
+            dx = min(ax + aw, bx + bw) - max(ax, bx)
+            dy = min(ay + ah, by + bh) - max(ay, by)
             if dx > OVERLAP_TOLERANCE and dy > OVERLAP_TOLERANCE:
                 issues.append({
                     "kind": "text-overlap",

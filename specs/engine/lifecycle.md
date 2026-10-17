@@ -24,8 +24,9 @@ Transitions: `NoCollection`/`Failed` → `Opening` (open) → `Upgrading` (only 
 
 1. The state becomes `Opening`; the gate's upgrade progress moves it to `Upgrading` and back to `Opening`.
 2. Once the gate succeeds, the generation increases by one and the writer thread starts, owning the gate's writer connection. Readers open lazily (L11).
-3. The open steps registered at open (U43's pending-answer replay, U40's rollover check) run in order, each with a privileged handle (L4) of the new generation: their ops are the only ones admitted.
-4. The state becomes `Ready{generation}`.
+3. The open steps registered at open (U43's pending-answer replay) run in order, each with a privileged handle (L4) of the new generation: their ops are the only ones admitted. The derived store's step comes first, before any op of the open commits (`storage/derived-store` D5).
+4. The engine's own last open step: the day clock's first check (`sched/day-clock` D8), through the same privileged handle. It writes and unburies before anything can read counts, and publishes no day clock event.
+5. The state becomes `Ready{generation}`.
 
 A gate refusal or error, or an open step's error, leaves `Failed{reason}` with nothing open.
 
@@ -82,7 +83,7 @@ Every swap of the collection file goes through this procedure; U124's verified-r
 1. The phase becomes `Replacing`. Every reader is closed (waiting for readers in use), then the writer: checkpoint and close (`storage/open-and-connections` C10).
 2. The swap runs with the collection path and nothing open. The engine notes which file the path names, its size, its modification and change times and its WAL's size before the swap, and compares them after it.
 3. The file is opened through the open gate, whether the swap succeeded or not. If that fails the state becomes `Failed{reason}`.
-4. If the swap succeeded, or failed after it changed the file (any of the noted values differ): the undo history is cleared with `ClearedByOneWay` on the writer, before any op of the new generation (`engine/undo` M6). The generation increases by one; readers open lazily on the new file; `CollectionReplaced{generation}` is published once; every `GenerationListener` is told (U26 invalidates derived data, R1489). A failed swap still returns its error, and the exclusive phase's handle is the new generation's. A swap that failed before changing the file leaves the generation, and every handle, as they were.
+4. If the swap succeeded, or failed after it changed the file (any of the noted values differ): the undo history is cleared with `ClearedByOneWay` on the writer, before any op of the new generation (`engine/undo` M6). The generation increases by one, and `CollectionReplaced{generation}` takes the next seq, so it precedes every event of the new generation. Still on the writer, the day clock starts again as at an open (`sched/day-clock` D8): it forgets its cached day and what it reported, and its first check on the new file commits (writes, unbury, its change set after `CollectionReplaced`); if it fails, the replace fails as a failed reopen does: the writer closes the new file, no reader opens, `CollectionReplaced` is not published, no `GenerationListener` is told, the generation number stays used, and the state becomes `Failed{reason}` with the check's error (the swap's, when the swap failed too). Only then do readers open, lazily, on the new file, `CollectionReplaced` is delivered, once, and every `GenerationListener` is told (U26 invalidates derived data, R1489). So whoever hears of the new generation, or reads it, finds its day computed and its cards unburied, never the old collection's cached day. A failed swap still returns its error, and the exclusive phase's handle is the new generation's. A swap that failed before changing the file leaves the generation, and every handle, as they were.
 5. Handles of older generations now fail with `StaleGeneration` (L3).
 
 ## L9. Which job takes which tier
@@ -105,3 +106,4 @@ Admission stops (queued ops still commit), parked ops fail with `CollectionUnava
 
 - The engine hands out read-only connections by role (KTD3, `storage/open-and-connections` C6): interactive, query, one per search worker, sync, maintenance, two server readers. Each is opened when first asked for and kept until the collection closes or is replaced; one user holds it at a time.
 - Long-lived snapshots go to the sync reader (normal and one-way sync) or the shared maintenance reader (backups, `VACUUM INTO`, stats cache builds, derived rebuilds, planning heavy ops), never to the interactive, query or server readers. A sync holding the sync reader therefore never delays a backup, a stats build, a search or an interactive read.
+- When a reader is leased, the derived store's attachment is checked for the lease's generation: the store's file is attached as schema `derived` when the store is bound to that generation, and detached otherwise (`storage/derived-store` D9).

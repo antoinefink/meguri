@@ -8,6 +8,7 @@
 
 use std::collections::BTreeSet;
 
+use meguri_search::config::{Key, Shape};
 use serde_json::{Map, Value};
 
 use super::FormatError;
@@ -81,15 +82,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
     }
     for notetype in s.setup.notetypes.iter().flatten() {
-        if notetype.name.is_empty() {
-            return Err(empty("a note type name"));
-        }
-        if notetype.fields.is_empty() {
-            return Err(empty(&format!("note type {:?}'s field list", notetype.name)));
-        }
-        if notetype.templates.is_empty() {
-            return Err(empty(&format!("note type {:?}'s template list", notetype.name)));
-        }
+        notetype_spec(notetype)?;
     }
     actors(s)?;
     opens(s)?;
@@ -102,8 +95,10 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Step::LegacyUpdate(update) = step {
             legacy_update(update).map_err(at)?;
         }
+        notetype_op(step).map_err(at)?;
         record_op(step).map_err(at)?;
         tag_op(step).map_err(at)?;
+        browser_config_op(step).map_err(at)?;
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
@@ -294,6 +289,42 @@ fn tag_op(step: &Step) -> Result<(), FormatError> {
     }
 }
 
+/// browser-config-ops.md B1: one of the 22 browser config keys (every
+/// browser key but `normalize_note_text`) and a value of its shape.
+fn browser_config_op(step: &Step) -> Result<(), FormatError> {
+    let Step::BrowserConfigSet(args) = step else {
+        return Ok(());
+    };
+    let Some(key) = Key::from_name(&args.key).filter(|key| key.writable()) else {
+        return Err(FormatError::new(format!(
+            "browser_config_set: {:?} is not one of the 22 browser config keys",
+            args.key
+        )));
+    };
+    let fits = match (key.shape(), &args.value) {
+        (Shape::Boolean(_), Value::Bool(_)) => true,
+        (Shape::Text(_) | Shape::SortColumn, Value::String(_)) => true,
+        (Shape::Columns, Value::Array(items)) => items.iter().all(Value::is_string),
+        (Shape::Names, Value::Object(members)) => members.values().all(Value::is_string),
+        _ => false,
+    };
+    if fits {
+        Ok(())
+    } else {
+        Err(FormatError::new(format!(
+            "browser_config_set: {} takes {}, found {}",
+            args.key,
+            match key.shape() {
+                Shape::Boolean(_) => "a boolean",
+                Shape::Text(_) | Shape::SortColumn => "a string",
+                Shape::Columns => "an array of strings",
+                Shape::Names => "an object of strings",
+            },
+            args.value
+        )))
+    }
+}
+
 /// model-ops.md L2: exactly one non-empty record name.
 fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
     let names = [&update.notetype, &update.deck, &update.preset];
@@ -307,6 +338,43 @@ fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
         return Err(FormatError::new("legacy_update needs a non-empty name"));
     }
     Ok(())
+}
+
+/// A `setup.notetypes` entry or `add_notetype` (dsl.md D6.4,
+/// notetype-ops.md T2): a non-empty name, field list and template list.
+fn notetype_spec(notetype: &super::model::NotetypeSpec) -> Result<(), FormatError> {
+    let empty = |what: &str| Err(FormatError::new(format!("{what} must not be empty")));
+    if notetype.name.is_empty() {
+        return empty("a note type name");
+    }
+    if notetype.fields.is_empty() {
+        return empty(&format!("note type {:?}'s field list", notetype.name));
+    }
+    if notetype.templates.is_empty() {
+        return empty(&format!("note type {:?}'s template list", notetype.name));
+    }
+    Ok(())
+}
+
+/// notetype-ops.md T2-T5: what the schema requires beyond the types (note
+/// types named by non-empty names).
+fn notetype_op(step: &Step) -> Result<(), FormatError> {
+    let named = |names: &[Option<&String>]| {
+        if names.iter().flatten().any(|name| name.is_empty()) {
+            return Err(FormatError::new(format!(
+                "{}: a note type name must not be empty",
+                step.name()
+            )));
+        }
+        Ok(())
+    };
+    match step {
+        Step::AddNotetype(spec) => notetype_spec(spec),
+        Step::AddStockNotetype(args) => named(&[args.name.as_ref()]),
+        Step::CloneNotetype(args) => named(&[Some(&args.notetype), args.name.as_ref()]),
+        Step::UpdateNotetype(args) => named(&[Some(&args.notetype)]),
+        _ => Ok(()),
+    }
 }
 
 /// model-ops.md L6: an export with `legacy` is exactly
@@ -489,6 +557,15 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                         return bad(&format!("table {name} is listed twice"));
                     }
                 }
+            }
+        }
+        // notetype-ops.md T8.
+        ObservationKind::NotetypeStructure => {
+            let names_ok = map.get("notetypes").and_then(Value::as_array).is_some_and(|names| {
+                !names.is_empty() && names.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty()))
+            });
+            if map.len() != 1 || !names_ok {
+                return bad("takes {notetypes}, a non-empty list of note type names");
             }
         }
         _ => {}

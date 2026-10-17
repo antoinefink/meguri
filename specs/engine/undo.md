@@ -27,7 +27,7 @@ Each op source has one undo effect, applied on the writer right after the op com
 | `LocalApi` | never recorded; truncates at the deepest intersecting step (M7, R1795, R1796) |
 | `SyncIncoming` | the merge rule of M9.4 (KTD7) |
 | `Optimizer`, `Maintenance` | clear all, reason `ClearedByNonUndoableOp` |
-| `Rollover` | clear all, reason `ClearedByRollover` (R462) |
+| `Rollover` | none: the day clock's writes keep both histories (`sched/day-clock` D10); its rollover op clears them when the day changes (M6) |
 
 - Clear all drops every step and every redo step, and sets the reason peek reports once the history is empty (M3).
 - Skip-undo: an op of source `UserNonUndoable` may be marked skip-undo. It is never recorded and keeps every step, and it clears redo, changed or not, as every op but undo and redo does (A2, A11.1): selecting a deck (`curDeck`, `activeDecks`; U28's op and U43's session start) keeps the answer before it undoable (R42), and so does a config write without an undo entry (`record-ops.md` W4). Any other source marked skip-undo is refused with `InvalidArgument` at submit.
@@ -72,7 +72,7 @@ Redo is an op (catalog `redo`, or `redo_long_write`) like undo, on the top redo 
 
 ## M6. Clearing without an op
 
-- `clear(cause)` drops every step and redo step at once: `Rollover` (U40, when the day changes even if it writes nothing; `ClearedByRollover`), `CheckDatabase` (U128; `ClearedByNonUndoableOp`), `ExternalChange` (U32, when another process changed the file; `ChangedExternally`).
+- `clear(cause)` drops every step and redo step at once: `Rollover` (U40, when the day changes even if it writes nothing; `ClearedByRollover`), `CheckDatabase` (U128; `ClearedByNonUndoableOp`), `ExternalChange` (U32, when another process changed the file; `ChangedExternally`). The day clock's rollover op asks for the `Rollover` clear inside its transaction, and the writer applies it with the op's other effects when the op commits (R462, `sched/day-clock` D9); a rolled-back rollover op clears nothing.
 - A collection replacement (`engine/lifecycle` L8) clears everything with `ClearedByOneWay`, on the writer, right after the swap reopened the file and before any op of the new generation runs.
 - Close drops everything.
 

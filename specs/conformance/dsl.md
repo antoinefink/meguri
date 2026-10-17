@@ -103,7 +103,7 @@ A list of deck names (`::` nests) or `{name, preset}`. A deck without a preset u
 
 ### D6.4 notetypes
 
-A list of `{name, kind, fields, templates, css}`: `kind` is `standard` (default) or `cloze`; `fields` a non-empty list of field names; `templates` a non-empty list of `{name, front, back}` (template texts, empty when missing); `css` a string (empty when missing). Scenarios define their own note types and CSS; stock note types appear only in scenarios about interop with them (R1959).
+A list of `{name, kind, fields, templates, css}`: `kind` is `standard` (default) or `cloze`; `fields` a non-empty list of field names; `templates` a non-empty list of `{name, front, back}` (template texts, empty when missing); `css` a string (empty when missing). Scenarios define their own note types and CSS; stock note types appear only in scenarios about interop with them (R1959). Each entry is added, in list order, as `add_notetype` adds a note type (`notetype-ops.md` T2; `specs/notetypes/records.md` N5.1): `original_stock_kind` 1, the default LaTeX header and footer, Anki's new-field and new-template defaults with fresh random ids, `curModel` set to the last one added.
 
 ### D6.5 notes
 
@@ -136,7 +136,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 |---|---|---|---|
 | `advance` | duration | none | stable |
 | `set_clock` | date-time | none | stable |
-| `add_note` | `{notetype, deck?, fields, tags?}`: `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
+| `add_note` | `{notetype, deck?, fields, tags?}`: `notetype` a note type the collection holds, by its stored name (`notetype-ops.md` T1); `fields` is a list of strings in field order (missing trailing fields stay empty) or a mapping of field name to string; `tags` a list of strings; `deck` a deck from `setup.decks` (default deck when missing). Field values and tags must be strings: quote numbers, booleans and null. | `{note: #nN, cards: [#cN, ...]}` | stable |
 | `answer` | `{card: #cN, rating, time_ms?}`: `time_ms` is a non-negative integer, 0 when missing; the card gets the state `next_states` reports for the rating at the current instant, written as `specs/sched/answering.md` says | none | stable (`sched/answering`) |
 | `open` | `{fixture: <path under conformance/fixtures/>}`: replace the collection with a copy of a fixture file and open it, upgrade included (`storage-ops.md` P1); only in scenarios with no `setup` whose first step is `open` | none; rejections `file_too_old`, `file_too_new`, `v1_scheduler` | stable |
 | `observe` | list of observation requests (`observations.md` O2); the pure kinds `text` and `fsrs_next` (`float-determinism.md` F5) never touch the collection | `{<kind>: <value>, ...}` | stable |
@@ -153,6 +153,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `clear_unused_tags` | `{}` | `{count}` | stable (`tag-ops.md` G6) |
 | `set_tag_collapsed` | `{tags: [<name>, ...], collapsed: <boolean>}` | none | stable (`tag-ops.md` G7) |
 | `set_flag` | `{cards: [#cN, ...], flag: <integer>}` | `{count}`; rejection `invalid_flag` | stable (`tag-ops.md` G8) |
+| `browser_config_set` | `{key, value}`: one of the 22 browser config keys and a value of its shape, written whole | none | stable (`browser-config-ops.md` B1) |
 | `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
 | `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
 | `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
@@ -166,10 +167,15 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |
-| `sync` | `{kind: login \| normal \| full_upload \| full_download, credentials?: account \| wrong_password}`; `credentials` only with `login` | `{result: <result>}`: `ok`, or for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`; rejections `auth_failed`, `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
+| `sync` | `{kind: login \| normal \| status \| full_upload \| full_download, credentials?: account \| wrong_password}`; `credentials` only with `login` | `{result: <result>}`: `ok`, for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`, for `status` one of `no_changes`, `normal_sync`, `full_sync`; rejections `auth_failed`, `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
 | `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |
 | `converge` | `{}` | `{differences, dump}` (`sync-ops.md` S7.5) | stable (actor scenarios, `sync-ops.md` S7) |
 | `handoff` | `meguri` or `oracle`: the side that runs the next steps | none | stable (live scenarios, D9.2) |
+| `add_notetype` | `{name, kind?, fields, templates, css?}` as a `setup.notetypes` entry: a note type from scratch, with the template checks | `{name}`: the stored name; rejections `notetype-ops.md` T7 | stable (`notetype-ops.md` T2) |
+| `add_stock_notetype` | `{kind, name?}`: one of the six stock kinds | `{name}`; rejections T7 | stable (`notetype-ops.md` T3) |
+| `clone_notetype` | `{notetype, name?}` | `{name}`; rejections T7 | stable (`notetype-ops.md` T4) |
+| `update_notetype` | `{notetype, edits, skip_checks?}`: edits applied to a draft, saved once | `{name}`; rejections T7 | stable (`notetype-ops.md` T5) |
+| `ensure_io_notetype` | `{}` | `{name}` of the Image Occlusion note type | stable (`notetype-ops.md` T6) |
 
 An op with no output records `{}`; an op with output records `{<op>: <output>}`. An op's output never has a member named `error`.
 
@@ -183,6 +189,7 @@ An op with no output records `{}`; an op with output records `{<op>: <output>}`.
 
 - An executor runs a scenario and returns its observations or an error. The oracle executor is a pool of oracle workers (`conformance/schema/protocol.json`), keyed by time zone. Meguri's executor runs the core in-process, with a scenario clock (D5) and the seeded random source, through the time and randomness seams (R1875).
 - Each executor declares capabilities: the setup sections, ops and observation kinds it implements. Before running, the runner compares the scenario's needs with them. A scenario that needs anything missing is `pending` (D10) and is not run.
+- An op's spec may split the op into finer capabilities, needed by the steps that use the part they name (`update_notetype`: `notetype-ops.md` T10.1). They count as ops.
 - Meguri's executor implements a part of the language through per-area adapters (`core/crates/meguri-testkit/src/exec/<area>.rs`). `meguri-cli conformance capabilities` lists them. The adapters that write and open a collection in a handoff directory count as the `handoff` op. The ability to play an actor of an actor scenario, through the parties executor, counts as the `actor` op (`sync-ops.md` S10.2).
 - **The new collection** (D6) is a capability of its own, `new_collection`, listed with the setup sections. Meguri declares it once its executor starts every scenario that needs it from a new collection made at `clock.start`: U28's bootstrap (`storage/new-collection`), or before it a stand-in that an area's spec defines (the note type area's, U29). A scenario needs it unless its first step is `open` (`storage-ops.md` P1) or it has no `setup` and touches no collection: every step is `advance`, `set_clock` or an `observe` of kinds that never read a collection (`text`, `cloze`, `fsrs_next`, `canonical_search` (`search-ops.md` S2), and `template` when every case is a new-note case). So `smoke/runner-empty` (no steps) needs nothing, while a scenario with no setup that runs `set_config` or `db_exec`, or observes `timing`, needs it: without it the scenario is `pending`, not an `error` for want of an open collection. A live scenario needs it when Meguri runs its first segment (D9.2); an actor scenario needs it for each Meguri actor, which starts from a new collection (`sync-ops.md` S2.2, S10.2).
 
@@ -205,7 +212,7 @@ active: [runner-empty]   # Meguri must pass these
 
 A scenario with `handoff` steps is live: Meguri's output is the oracle's input (export then import, Check Database on a Meguri-written collection, KTD23 T1). Sync between Meguri and Anki clients uses actors instead (D9.3).
 
-- **Segments.** Handoff steps split the steps into segments. Each `handoff: <side>` ends a segment and names the side that runs the next one; handoffs alternate, so the first segment runs on the side the first handoff leaves (`handoff: meguri` first means the oracle runs the setup and the first steps). Handing over to the side that already has the collection is invalid.
+- **Segments.** Handoff steps split the steps into segments. Each `handoff: <side>` ends a segment and names the side that runs the next one; handoffs alternate, so the first segment runs on the side the first handoff leaves (`handoff: meguri` first means the oracle runs the setup and the first steps). Handing over to the side that already has the collection is invalid. A segment may be empty: with `handoff: oracle` as step 0, Meguri makes its new collection (D8), runs the setup if any, and hands it over at once, so the oracle works on a collection only Meguri wrote (`notetypes/records/stock-render-handoff`).
 - **What crosses.** At a handoff the side closes its collection and copies its session directory (the collection file `collection.anki2`, its media and every file an op wrote, such as an `export`'s package) to `<handoff dir>/<scenario id>@<handoff step index>/` (`@` is outside the id alphabet, so one scenario's handoff directories never lie inside another's, such as `smoke/rt` and `smoke/rt/1`, which T1 runs at the same time), together with the clock (epoch seconds) and the real ids behind `#nN` and `#cN` (protocol.json `handoff_state`). The next side copies that directory, opens the collection at the same clock and keeps numbering logical ids after the handed ones. It runs no setup. The handoff directory is one directory both see: the runner's on the host, mounted into oracle workers (`ORACLE_HANDOFF`). Areas add files to the session directory with the driver. Clients that sync with each other are actors (D9.3), not handoffs.
 - **Golden.** A live scenario has a golden like any other, recorded by `tools/mg oracle record`: the oracle runs every segment itself, and each handoff only closes and reopens its collection. So the golden is what the oracle observes of its own output.
 - **Pass.** T1 runs the segments on their sides (the chain) and compares the chain's observations, the oracle's observations of Meguri's output included, with the golden by the usual rules and deviations (`observations.md` O7). A handoff step records `{}`.

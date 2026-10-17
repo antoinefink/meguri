@@ -4,9 +4,11 @@
 //! scenarios run as a chain of segments on both (dsl.md D9, `live`), actor
 //! scenarios through the parties executor (sync-ops.md S10, `parties`).
 
+mod browser;
 pub mod clock;
 pub mod live;
 mod meguri;
+mod notetypes;
 mod oracle;
 pub mod parties;
 mod render;

@@ -14,7 +14,14 @@ test-hooks = ["meguri-model/test-hooks", "meguri-storage/test-hooks"]
 
 [dependencies]
 meguri-model.workspace = true
+# The browser and search config keys (U83): their reading and the values
+# each user action writes (`browser_config.rs`).
+meguri-search.workspace = true
+# The day clock's math (sched/day-clock, timing/).
+meguri-sched.workspace = true
 meguri-storage.workspace = true
+# Note type validation and card requirements parse templates (U60).
+meguri-template.workspace = true
 # The touch index compares tag keys with the collection's `unicase` folding.
 meguri-text.workspace = true
 # Tag matching (`specs/tags/tags.md` T5): Unicode 16.0 simple case folding

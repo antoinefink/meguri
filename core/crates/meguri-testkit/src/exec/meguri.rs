@@ -65,6 +65,9 @@ pub struct Registry {
     new_collection: Option<NewCollectionFn>,
     setup: BTreeMap<&'static str, SetupFn>,
     ops: BTreeMap<&'static str, OpAdapter>,
+    /// Finer capabilities an op's spec splits it into (D8:
+    /// `update_notetype.<edit>`, notetype-ops.md T10.1).
+    op_parts: BTreeSet<&'static str>,
     observations: BTreeMap<&'static str, ObserveFn>,
     handoff: Option<(HandoffFn, HandoffFn)>,
     actor: Option<RawDumpFn>,
@@ -112,6 +115,18 @@ impl Registry {
         assert!(self.ops.insert(name, adapter).is_none(), "op {name} registered twice");
     }
 
+    /// A finer capability of a registered op (dsl.md D8), `<op>.<part>`:
+    /// it counts with the ops, and scenarios whose steps use that part need
+    /// it (`update_notetype.css`, notetype-ops.md T10.1).
+    pub fn op_part(&mut self, name: &'static str) {
+        let op = name.split_once('.').map(|(op, _)| op);
+        assert!(
+            op.is_some_and(|op| self.ops.contains_key(op)),
+            "op part {name} of an op that is not registered"
+        );
+        assert!(self.op_parts.insert(name), "op part {name} registered twice");
+    }
+
     pub fn observation(&mut self, kind: &'static str, f: ObserveFn) {
         assert!(
             self.observations.insert(kind, f).is_none(),
@@ -143,7 +158,7 @@ impl Registry {
     /// the actor adapter as the `actor` op and the new collection as the
     /// setup capability `new_collection`.
     pub fn capabilities(&self) -> Needs {
-        let mut ops: BTreeSet<String> = self.ops.keys().map(|s| (*s).to_owned()).collect();
+        let mut ops: BTreeSet<String> = self.ops.keys().chain(&self.op_parts).map(|s| (*s).to_owned()).collect();
         if self.handoff.is_some() {
             ops.insert("handoff".to_owned());
         }
@@ -177,6 +192,8 @@ pub struct Session<'a> {
     pub actor: Option<Seat>,
     /// The session directory and the open collection (`exec/storage.rs`).
     pub storage: super::storage::Storage,
+    /// The day clock's cached day (`sched/day-clock` D6; `exec/sched.rs`).
+    pub day: meguri_engine::DayCache,
 }
 
 /// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
@@ -230,7 +247,17 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 7] = ["clock", "render", "sched", "search", "storage", "tags", "text"];
+    pub const AREAS: [&'static str; 9] = [
+        "browser",
+        "clock",
+        "notetypes",
+        "render",
+        "sched",
+        "search",
+        "storage",
+        "tags",
+        "text",
+    ];
 
     /// Every area adapter that exists.
     pub fn core_registry() -> Registry {
@@ -247,7 +274,9 @@ impl MeguriExecutor {
         let mut registry = Registry::default();
         for area in areas {
             match *area {
+                "browser" => super::browser::register(&mut registry),
                 "clock" => super::clock::register(&mut registry),
+                "notetypes" => super::notetypes::register(&mut registry),
                 "render" => super::render::register(&mut registry),
                 "sched" => super::sched::register(&mut registry),
                 "search" => super::search::register(&mut registry),
@@ -285,6 +314,7 @@ impl MeguriExecutor {
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
             actor: None,
             storage: Default::default(),
+            day: Default::default(),
         })
     }
 
@@ -437,6 +467,7 @@ impl MeguriExecutor {
                 cards: Vec::new(),
                 actor: None,
                 storage: Default::default(),
+                day: Default::default(),
             };
             self.new_collection(&mut session)?;
             sessions.insert(name.clone(), session);

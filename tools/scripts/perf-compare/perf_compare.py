@@ -14,7 +14,11 @@ reads, and validates perf results.
       declares must have measurements in that test (PerfTestCase's activity
       `meguri.perf.intervals: <name> ...`, read from a JSON list of the
       tests' `get test-results activities` outputs); otherwise nothing is
-      written.
+      written. A test may declare its fixture (`meguri.perf.fixture: 150k`):
+      its rows carry it, so U241's gate applies R1803's size rules. The
+      result counts the attachments (screenshots included) the suite's tests
+      kept, which R1866 forbids; when a measured test has no activities the
+      count is left out, and the gate refuses the result.
   perf_compare.py gungraun <summaries.jsonl> --suite <bench target> --out <result.json>
       gungraun's JSON lines (--output-format=json, summary schema v7): one
       `instructions` row (callgrind Ir) per benchmark, named
@@ -106,8 +110,10 @@ def xctest_metric(metric):
     return "xctest." + (kebab(kind) or "metric"), kebab(display) or "value"
 
 
-# PerfTestCase's activity declaring the intervals a test measures.
+# PerfTestCase's activities declaring the intervals a test measures and the
+# fixture it measures on.
 DECLARATION = "meguri.perf.intervals:"
+FIXTURE_DECLARATION = "meguri.perf.fixture:"
 
 
 def declared_intervals(activities_docs, suite):
@@ -134,11 +140,52 @@ def declared_intervals(activities_docs, suite):
     return {identifier: names for identifier, names in declared.items() if names}
 
 
+def suite_activities(activities_docs, suite):
+    """{test identifier: [activities of its runs]} of the suite's tests."""
+    out = {}
+    for doc in activities_docs if isinstance(activities_docs, list) else []:
+        identifier = doc.get("testIdentifier", "")
+        if identifier.split("/", 1)[0] == suite:
+            out.setdefault(identifier, [])
+            for run in doc.get("testRuns", []):
+                out[identifier] += run.get("activities") or []
+    return out
+
+
+def walk_activities(activities):
+    for activity in activities or []:
+        yield activity
+        for child in walk_activities(activity.get("childActivities")):
+            yield child
+
+
+def declared_fixtures(activities_docs, suite):
+    """{test identifier: fixture} the suite's tests declare."""
+    out = {}
+    for identifier, activities in suite_activities(activities_docs, suite).items():
+        for activity in walk_activities(activities):
+            title = activity.get("title", "")
+            if title.startswith(FIXTURE_DECLARATION) and title[len(FIXTURE_DECLARATION):].strip():
+                out[identifier] = title[len(FIXTURE_DECLARATION):].strip()
+    return out
+
+
+def attachment_count(activities_docs, suite, measured):
+    """How many attachments the suite's tests kept, or None when one of the
+    `measured` tests has no activities to tell."""
+    tests = suite_activities(activities_docs, suite)
+    if any(identifier not in tests for identifier in measured):
+        return None
+    return sum(len(activity.get("attachments") or [])
+               for activities in tests.values() for activity in walk_activities(activities))
+
+
 def from_xcresult(metrics_doc, suite, configuration, runner, activities_docs):
     if not isinstance(metrics_doc, list):
         raise InputError("xcresulttool metrics output is a list of tests")
     rows = []
     measured_names = {}
+    fixtures = declared_fixtures(activities_docs, suite)
     for test in metrics_doc:
         identifier = test.get("testIdentifier", "")
         if identifier.split("/", 1)[0] != suite:
@@ -156,7 +203,7 @@ def from_xcresult(metrics_doc, suite, configuration, runner, activities_docs):
                 name, kind = xctest_metric(metric)
                 measured_names.setdefault(identifier, set()).add(name)
                 for label, per_hundred in PERCENTILES:
-                    rows.append({
+                    row = {
                         "name": name,
                         "test": identifier,
                         "metric": kind,
@@ -165,14 +212,17 @@ def from_xcresult(metrics_doc, suite, configuration, runner, activities_docs):
                         "value": percentile(measured, per_hundred),
                         "samples": len(measured),
                         "measurements": measured,
-                    })
+                    }
+                    if identifier in fixtures:
+                        row["fixture"] = fixtures[identifier]
+                    rows.append(row)
     problems = [] if rows else [f"suite {suite} has no metrics"]
     for identifier, names in sorted(declared_intervals(activities_docs, suite).items()):
         problems += [f"{identifier} declares {name} but has no measurements of it"
                      for name in names if name not in measured_names.get(identifier, set())]
     if problems:
         raise InputError("; ".join(problems))
-    return {
+    doc = {
         "schema_version": 1,
         "suite": suite,
         "kind": "ui",
@@ -180,6 +230,10 @@ def from_xcresult(metrics_doc, suite, configuration, runner, activities_docs):
         "runner": runner,
         "results": rows,
     }
+    attachments = attachment_count(activities_docs, suite, measured_names)
+    if attachments is not None:
+        doc["attachments"] = attachments
+    return doc
 
 
 # ---------------------------------------------------------------------------

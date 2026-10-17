@@ -2,6 +2,7 @@
 """Ops and setup sections, one module per area. Importing registers them."""
 
 from . import (  # noqa: F401
+    browser,
     clock,
     collection,
     decks,

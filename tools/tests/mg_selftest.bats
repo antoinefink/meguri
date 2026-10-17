@@ -96,6 +96,12 @@ case "$name $*" in
   "uname -m") echo arm64 ;;
   "uname -sm") echo "Darwin arm64" ;;
   "sw_vers -productVersion") echo 27.0 ;;
+  "sw_vers -buildVersion") echo "${STUB_MACOS_BUILD:-26A434}" ;;
+  "ioreg -n Root -d1")
+    echo "+-o Root  <class IORegistryEntry>"
+    echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes${STUB_LOCKED:+,\"CGSSessionScreenIsLocked\"=Yes})" ;;
+  "system_profiler SPDisplaysDataType -json")
+    echo "{\"SPDisplaysDataType\": [{\"spdisplays_ndrvs\": [{\"_name\": \"Display\"${STUB_ASLEEP:+, \"spdisplays_asleep\": \"spdisplays_yes\"}}]}]}" ;;
   "xcode-select -p") echo /Applications/Xcode.app/Contents/Developer ;;
   "xcodebuild -version") printf 'Xcode 27.0\nBuild version 27A266a\n' ;;
   "xcodebuild -license check") exit "${STUB_LICENSE_RC:-0}" ;;
@@ -130,6 +136,9 @@ case "$name $*" in
   "vm-ssh xcodebuild -version")
     [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
     printf 'Xcode %s\nBuild version %s\n' "${STUB_VM_XCODE:-27.0}" 27A266a ;;
+  "vm-ssh sw_vers -buildVersion")
+    [ "${STUB_VM_SSH:-1}" = 1 ] || exit 255
+    echo "${STUB_VM_MACOS_BUILD:-26A434}" ;;
   "vm-ssh xcrun simctl list runtimes --json")
     if [ "${STUB_VM_RUNTIME:-1}" = 1 ]; then
       echo '{"runtimes":[{"identifier":"com.apple.CoreSimulator.SimRuntime.iOS-27-0","version":"27.0","buildversion":"24A434","isAvailable":true,"platform":"iOS"}]}'
@@ -148,7 +157,7 @@ esac
 EOF
   chmod +x "$STUBS/_stub"
   local c
-  for c in uname sw_vers xcode-select xcodebuild xcrun defaults docker rustup df \
+  for c in uname sw_vers ioreg system_profiler xcode-select xcodebuild xcrun defaults docker rustup df \
     sudo launchctl open softwareupdate security tccutil systemsetup networksetup spctl pmset devicectl; do
     ln -s _stub "$STUBS/$c"
   done
@@ -168,7 +177,9 @@ assert_read_only_calls() {
   local bad
   bad="$(grep -Ev \
     -e '^uname -[a-z]+$' \
-    -e '^sw_vers -productVersion$' \
+    -e '^sw_vers -(productVersion|buildVersion)$' \
+    -e '^ioreg -n Root -d1$' \
+    -e '^system_profiler SPDisplaysDataType -json$' \
     -e '^xcode-select -p$' \
     -e '^xcodebuild -(version|license check)$' \
     -e '^xcrun simctl list runtimes --json$' \
@@ -179,6 +190,7 @@ assert_read_only_calls() {
     -e '^df -Pk /' \
     -e '^tart list --format json$' \
     -e '^vm-ssh xcodebuild -version$' \
+    -e '^vm-ssh sw_vers -buildVersion$' \
     -e '^vm-ssh xcrun simctl list runtimes --json$' \
     "$STUB_LOG" || true)"
   if [ -n "$bad" ]; then
@@ -530,6 +542,63 @@ failure_ids() { jq -r '[.failures[].id] | sort | join("\n")' "$result"; }
   validate "$result"
 }
 
+# bats test_tags=gate
+@test "doctor lists host-session while the Mac is locked or its display sleeps (U19b)" {
+  make_stubs
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "host-session" and .status == "pass")' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "host-session")] | length')" = 0 ]
+  STUB_LOCKED=1 mg doctor
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "host-session" and .status == "warn" and (.message | contains("locked")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "host-session") | "\(.state) \(.required)"')" = "missing true" ]
+  STUB_ASLEEP=1 mg doctor
+  jq -e '.details.checks[] | select(.id == "host-session" and .status == "warn" and (.message | contains("display-asleep")))' "$result"
+  assert_read_only_calls
+  validate "$result"
+}
+
+# bats test_tags=gate
+@test "doctor lists mac-input while the Mac UI runner still has the macOS and Xcode builds that dropped input (U19b)" {
+  make_stubs
+  local seen="$SB/build/mg/mac-input.json"
+  # Never seen: nothing to wait for.
+  mg doctor
+  [ "$(field .status)" = pass ]
+  jq -e '.details.checks[] | select(.id == "mac-input" and .status == "pass")' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "mac-input")] | length')" = 0 ]
+
+  # Seen in the VM on the builds it still has: missing.
+  mkdir -p "$(dirname "$seen")"
+  jq -n '{at: "2026-10-17T01:58:00Z", job: "mac-ui", run_id: "20261017T020325Z-18762", runner: "vm", vm: "meguri-mac",
+    macos: "27.0.1", macos_build: "26A434", xcode: "27.0 (27A266a)"}' >"$seen"
+  mg doctor
+  [ "$(field .status)" = warn ]
+  jq -e '.details.checks[] | select(.id == "mac-input" and .status == "warn" and (.message | contains("26A434")) and (.message | contains("meguri-mac")))' "$result"
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | "\(.state) \(.required)"')" = "missing true" ]
+  [ "$(field '.details.mac_vm.vms[0].macos_build')" = 26A434 ]
+
+  # macOS updated in the VM, or Xcode: clear, the next Mac UI run tells.
+  STUB_VM_MACOS_BUILD=26B5 mg doctor
+  jq -e '.details.checks[] | select(.id == "mac-input" and .status == "pass" and (.message | contains("26B5")))' "$result"
+  [ "$(field '[.user_steps[] | select(.id == "mac-input")] | length')" = 0 ]
+
+  # A VM doctor cannot reach cannot show it changed: still missing.
+  STUB_VM_STATE=stopped STUB_VM_MACOS_BUILD=26B5 mg doctor
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+
+  # Seen on this Mac (a host run): this Mac's builds decide.
+  jq '.runner = "host" | .vm = null' "$seen" >"$seen.tmp" && mv "$seen.tmp" "$seen"
+  mg doctor
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+  STUB_MACOS_BUILD=26B5 mg doctor
+  [ "$(field '[.user_steps[] | select(.id == "mac-input")] | length')" = 0 ]
+  assert_read_only_calls
+  validate "$result"
+}
+
 @test "doctor fails and lists the step when the Xcode license is not accepted" {
   make_stubs
   export STUB_LICENSE_RC=1
@@ -739,6 +808,39 @@ mod tests {
   validate "$result"
 }
 
+@test "core-test --canaries runs the canary binaries alone and passes when they pass (the gate's canary stage)" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn unit_breaks() { panic!("unit test ran"); } }'
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_held() {}'
+  write_file core/crates/fx/tests/other.rs '#[test] fn other_breaks() { panic!("other test ran"); }'
+  write_crate broken 'pub fn f() -> u32 { "not a number" }'
+  mg core-test --canaries
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field -c .summary)" = '{"total":1,"passed":1,"failed":0,"skipped":0}' ]
+  [[ "$(field .message)" == *canar* ]]
+  validate "$result"
+
+  write_file core/crates/fx/tests/canary_pins.rs '#[test] fn pin_drifted() { panic!("pin drifted"); }'
+  mg core-test --canaries
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = 'fx::canary_pins$pin_drifted' ]
+  validate "$result"
+}
+
+@test "core-test --canaries fails when the workspace has no canary" {
+  [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
+  write_workspace
+  write_crate fx '#[cfg(test)] mod tests { #[test] fn unit() {} }'
+  mg core-test --canaries
+  [ "$status" -eq 1 ]
+  [ "$(failure_ids)" = no-canaries ]
+  mg core-test --canaries -- -E 'all()'
+  [ "$status" -eq 2 ]
+  [ "$(failure_ids)" = usage ]
+}
+
 @test "core-test runs the other tests once the canaries pass, each test once" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   write_workspace
@@ -766,24 +868,27 @@ mod tests {
   validate "$result"
 }
 
-@test "core-lint fails naming the forbidden edges: tokio in sched, engine in sched, stats in package" {
+@test "core-lint fails naming the forbidden edges: tokio in sched, sched in search, stats in package" {
   [ "${MG_CONTAINER:-}" = dev ] || skip "needs the dev container"
   copy_core
   vendor_crate tokio MIT
   add_dep crates/meguri-sched 'tokio = { path = "../../../vendor/tokio" }'
-  add_dep crates/meguri-sched 'meguri-engine.workspace = true'
+  # An upward edge to a crate that does not depend on the source: since U40
+  # meguri-engine depends on meguri-sched, so sched -> engine is a cycle that
+  # cargo refuses before layering-check runs.
+  add_dep crates/meguri-search 'meguri-sched.workspace = true'
   add_dep crates/meguri-package 'meguri-stats.workspace = true'
   mg core-lint
   [ "$status" -eq 1 ]
   [ "$(field .status)" = fail ]
   [ "$(failure_ids)" = "layering/edge/meguri-package -> meguri-stats
-layering/edge/meguri-sched -> meguri-engine
+layering/edge/meguri-search -> meguri-sched
 layering/restricted/meguri-sched -> tokio" ]
   local m
   m="$(jq -r '.failures[] | select(.id == "layering/restricted/meguri-sched -> tokio") | .message' "$result")"
   [[ "$m" == *"meguri-sched depends on tokio"* ]]
-  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-sched -> meguri-engine") | .message' "$result")"
-  [[ "$m" == *"edges.toml row 6"*"(row 7)"* ]]
+  m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-search -> meguri-sched") | .message' "$result")"
+  [[ "$m" == *"edges.toml row 5"*"(row 6)"* ]]
   m="$(jq -r '.failures[] | select(.id == "layering/edge/meguri-package -> meguri-stats") | .message' "$result")"
   [[ "$m" == *"edges.toml row 8"*"(row 8)"*siblings* ]]
   [ "$(field '.failures[0].repro')" = "tools/mg core-lint" ]
@@ -949,6 +1054,28 @@ EOF
   [ "$(field .summary.total)" -eq 1 ]
   grep -q -- '-max_total_time=600 ' "$STUB_LOG"
   ! grep -q ' alpha ' "$STUB_LOG"
+}
+
+@test "core-fuzz --seed passes the seed to every target, logs it and puts it in the repro (R1937)" {
+  fuzz_sandbox
+  mg core-fuzz --seconds 5 --seed 4242
+  [ "$status" -eq 0 ] || { jq . "$result"; return 1; }
+  [ "$(grep -c '^+nightly-stub fuzz run .* -seed=4242 ' "$STUB_LOG")" -eq 2 ]
+  [ "$(field .details.seed)" = 4242 ]
+  [[ "$(field .message)" == *"seed 4242"* ]]
+  validate "$result"
+
+  export STUB_CRASH=alpha
+  mg core-fuzz --seconds 5 --seed 4242
+  [ "$status" -eq 1 ]
+  [ "$(field '.failures[0].repro')" = "tools/mg core-fuzz --seconds 5 --seed 4242 alpha" ]
+
+  for args in "--seed" "--seed x1" "--seed -3" "--seed 99999999999"; do
+    # shellcheck disable=SC2086 # each case is a word list
+    mg core-fuzz $args
+    [ "$status" -eq 2 ] || { echo "$args"; return 1; }
+    [ "$(field '.failures[0].id')" = usage ]
+  done
 }
 
 @test "core-fuzz fails a target that finds an input, keeping the input, and on a failed run or build" {

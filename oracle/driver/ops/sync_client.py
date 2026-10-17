@@ -3,7 +3,7 @@
 (specs/conformance/sync-ops.md S2, S4-S7).
 
 actor: <name>               the declared actor that runs the next steps (global)
-sync: {kind: login | normal | full_upload | full_download,
+sync: {kind: login | normal | status | full_upload | full_download,
        credentials?: account | wrong_password (login only)}
                             on the current actor -> {result}; rejections
                             auth_failed, clock_incorrect and network
@@ -18,6 +18,11 @@ shape, and each actor's first sync, in step order, is a login.
 
 A login with credentials wrong_password sends the account's user name and its
 password followed by -wrong (S4.5).
+
+status is the backend's sync status (specs/sync/meta-status.md M6) with the
+same host key and endpoint as normal. It runs on the actor's open collection:
+the answer remembered for 300 s lives in that collection's backend, which a
+sync job also updates, so the op never opens the collection again.
 
 Rejections come from the exception's class and kind, never its text (R1887):
 Anki's NetworkError is `network`; a sync error of the auth kind (Anki's
@@ -39,14 +44,14 @@ from typing import Any
 
 from anki.collection import Collection
 from anki.errors import NetworkError, SyncError, SyncErrorKind
-from anki.sync import SyncAuth, SyncOutput
+from anki.sync import SyncAuth, SyncOutput, SyncStatus
 
 from ..errors import DriverError, Rejected, invalid
 from ..observe.db_dump import dump
 from ..registry import op, scenario_check
 from . import sync_server
 
-KINDS = ("login", "normal", "full_upload", "full_download")
+KINDS = ("login", "normal", "status", "full_upload", "full_download")
 CREDENTIALS = ("account", "wrong_password")
 WRONG_PASSWORD_SUFFIX = "-wrong"
 OUTCOMES = {
@@ -54,6 +59,11 @@ OUTCOMES = {
     SyncOutput.FULL_SYNC: "full_sync",
     SyncOutput.FULL_UPLOAD: "full_upload",
     SyncOutput.FULL_DOWNLOAD: "full_download",
+}
+STATUSES = {
+    SyncStatus.NO_CHANGES: "no_changes",
+    SyncStatus.NORMAL_SYNC: "normal_sync",
+    SyncStatus.FULL_SYNC: "full_sync",
 }
 # Columns that record a party's sync history, not its content (S7.3): those of
 # the col row, and those of every config entry (config travels whole, and each
@@ -64,7 +74,7 @@ EXCLUDED_COLUMNS = {"col": ("mod", "usn", "ls"), "config": ("usn", "mtime_secs")
 def sync_args(args) -> tuple[str, str]:
     """A sync step's (kind, credentials), or invalid_scenario (S4.1, S4.5)."""
     if not isinstance(args, dict) or not set(args) <= {"kind", "credentials"} or args.get("kind") not in KINDS:
-        raise invalid("sync takes {kind: login | normal | full_upload | full_download, credentials?}")
+        raise invalid("sync takes {kind: login | normal | status | full_upload | full_download, credentials?}")
     if "credentials" in args and args["kind"] != "login":
         raise invalid("credentials go only with kind login")
     credentials = args.get("credentials", "account")
@@ -148,6 +158,11 @@ def sync(session, args):
             if out.required not in OUTCOMES:
                 raise RuntimeError("a collection sync asked for another normal sync")
             return {"result": OUTCOMES[out.required]}
+        if kind == "status":
+            status = col.sync_status(auth)
+            if status.required not in STATUSES:
+                raise RuntimeError("the sync status is none of the three the protocol names")
+            return {"result": STATUSES[status.required]}
         _full_sync(col, auth, upload=kind == "full_upload")
         return {"result": "ok"}
     except (NetworkError, SyncError) as exc:

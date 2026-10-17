@@ -1,0 +1,422 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2", "#c3"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4", "#c5"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c7"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c8", "#c9"],
+          "note": "#n6"
+        }
+      },
+      {},
+      {
+        "notetype_structure": {
+          "Basic": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Card 1",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          },
+          "Basic (and reversed card)": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 2,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Card 1",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Card 2",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          },
+          "Basic (optional reversed card)": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Add Reverse",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 3,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Card 1",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Card 2",
+                "requirement": {
+                  "fields": [1, 2],
+                  "kind": "all"
+                }
+              }
+            ]
+          },
+          "Basic (type in the answer)": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 4,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Card 1",
+                "requirement": {
+                  "fields": [0, 1],
+                  "kind": "any"
+                }
+              }
+            ]
+          },
+          "Cloze": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Text",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 0
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back Extra",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": 1
+              }
+            ],
+            "kind": "cloze",
+            "original_id": null,
+            "original_stock_kind": 5,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Cloze",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          },
+          "Image Occlusion": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Occlusion",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 0
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Image",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 1
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Header",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 2
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back Extra",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 3
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Comments",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": 4
+              }
+            ],
+            "kind": "cloze",
+            "original_id": null,
+            "original_stock_kind": 6,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Image Occlusion",
+                "requirement": {
+                  "fields": [0, 1, 2],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Basic", 0],
+            ["Basic (and reversed card)", 0],
+            ["Basic (and reversed card)", 1],
+            ["Basic (optional reversed card)", 0],
+            ["Basic (optional reversed card)", 1],
+            ["Basic (optional reversed card)", 0],
+            ["Basic (type in the answer)", 0],
+            ["Cloze", 0],
+            ["Cloze", 1]
+          ]
+        }
+      },
+      {
+        "check_db": {
+          "card_last_review_time": 0,
+          "card_properties": 0,
+          "cards_without_note": 0,
+          "cards_without_template": 0,
+          "decks_missing": 0,
+          "duplicate_card_ords": 0,
+          "field_counts": 0,
+          "future_ids": 0,
+          "new_positions_too_high": 0,
+          "notes_invalid_utf8": 0,
+          "notetypes_recovered": 0,
+          "revlog_properties": 0
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/stock-handoff",
+  "scenario_sha256": "ec01e62e5a0e3cc2c5095bd0d6f2405b5813ec28017cb77e73991272b8418ef9",
+  "tz": "UTC"
+}

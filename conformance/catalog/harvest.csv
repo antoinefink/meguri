@@ -335,7 +335,7 @@ hec37a4cc2d38,rust,tag,media,unclassified,,,open
 hfc5d2785b867,rust,tag,media,unclassified,,,open
 hfe84eb8e5a8e,rust,tag,media,unclassified,,,open
 h1617b31103f7,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
-h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,,deferred
+h259a80791fb5,python,tag,model,in-scope,A missing config key reads as the reader's default; each key's reader and default are specified and tested with the area that reads it,browser/config/absent-defaults,done
 h32c56ad2dd75,python,tag,model,in-scope,"Config values keep their JSON kind through a write: integers, floats, booleans, null, strings, lists and objects",storage/config/rewrite-same-value,done
 h41cb2879dea9,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h7f33038d26bd,python,tag,model,in-scope,"Removing a config key deletes its row; scenarios come with deck and note type removal, which remove key families (U28, U29)",,deferred
@@ -347,7 +347,7 @@ hdadc818e52d7,python,tag,model,in-scope,A config value written through the confi
 he051a468be4b,python,tag,model,not-applicable,Anki's Python API surface (copies and the legacy dictionary view of the config); Meguri has no Python API,,done
 h09c785fd688d,rust,tag,model,in-scope,lenient JSON reading: a value of the wrong type takes the default,model/card-data/lenient model/schema11/notetype-values model/schema11/deck-values model/schema11/preset-values,done
 h6719d2739159,rust,tag,model,in-scope,A new collection's current deck is the default deck (id 1),storage/config/current-deck,done
-had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",,deferred
+had3c7e0753e9,rust,tag,model,in-scope,"Typed config reads give nothing for a missing key, another JSON type or bytes that are not JSON; each key's reader is specified and tested with the area that reads it",browser/config/absent-defaults browser/config/wrong-shapes,done
 hde5c73b93e34,rust,tag,model,in-scope,"Undoing config writes deletes an added key and writes a changed or removed row back exactly, stamps included; redo writes them again",undo/config-writes,done
 h00dd7a3ecf58,python,tag,notes,unclassified,,,open
 h086997a07e68,python,tag,notes,unclassified,,,open
@@ -406,97 +406,97 @@ he3c37320b8ea,rust,tag,notes,unclassified,,,open
 hf306bec628a4,rust,tag,notes,unclassified,,,open
 hf580907ab941,rust,tag,notes,unclassified,,,open
 hfc559c975ab6,rust,tag,notes,unclassified,,,open
-h14ea0a8ef304,python,tag,notetypes,unclassified,,,open
-h1d25e53134b6,python,tag,notetypes,unclassified,,,open
-h29e9a6801163,python,tag,notetypes,unclassified,,,open
-h29fa8d30a069,python,tag,notetypes,unclassified,,,open
-h2ef9d9aa9a2d,python,tag,notetypes,unclassified,,,open
-h38373cc87211,python,tag,notetypes,unclassified,,,open
-h3db0bf46358b,python,tag,notetypes,unclassified,,,open
-h51425d9fe4e8,python,tag,notetypes,unclassified,,,open
-h6ace0b701063,python,tag,notetypes,unclassified,,,open
-h6ebbfe4093c4,python,tag,notetypes,unclassified,,,open
-h76dd5ce91b19,python,tag,notetypes,unclassified,,,open
-h7cd15bfd9337,python,tag,notetypes,unclassified,,,open
-h8057000b72f1,python,tag,notetypes,unclassified,,,open
-h93567ad3543f,python,tag,notetypes,unclassified,,,open
-haa6096a01726,python,tag,notetypes,unclassified,,,open
-haff749b319ca,python,tag,notetypes,unclassified,,,open
-hd3484a3787d3,python,tag,notetypes,unclassified,,,open
-he8993d36dc09,python,tag,notetypes,unclassified,,,open
-heb9c41d43b4a,python,tag,notetypes,unclassified,,,open
-h0477377c20e5,rust,tag,notetypes,unclassified,,,open
-h147c5a8d09f4,rust,tag,notetypes,unclassified,,,open
-h16006d8f10dd,rust,tag,notetypes,unclassified,,,open
-h166c2f8e68af,rust,tag,notetypes,unclassified,,,open
-h1bd8d77a66bd,rust,tag,notetypes,unclassified,,,open
-h1dcc09aa4435,rust,tag,notetypes,unclassified,,,open
-h1eb30503b690,rust,tag,notetypes,unclassified,,,open
-h1fa35be82523,rust,tag,notetypes,unclassified,,,open
-h224d46dc7428,rust,tag,notetypes,unclassified,,,open
-h2443a4d809ec,rust,tag,notetypes,unclassified,,,open
-h28dfe5355334,rust,tag,notetypes,unclassified,,,open
-h2a20e219bd99,rust,tag,notetypes,unclassified,,,open
-h41a12a3b4594,rust,tag,notetypes,unclassified,,,open
-h4503178aea0c,rust,tag,notetypes,unclassified,,,open
-h4a0f14238e91,rust,tag,notetypes,unclassified,,,open
-h4a6d6847cdd7,rust,tag,notetypes,unclassified,,,open
-h4bc311c17611,rust,tag,notetypes,unclassified,,,open
-h538b6bc82ab1,rust,tag,notetypes,unclassified,,,open
-h5c2b22e2f617,rust,tag,notetypes,unclassified,,,open
-h5d402c6f2c03,rust,tag,notetypes,unclassified,,,open
-h5dab017523ab,rust,tag,notetypes,unclassified,,,open
-h5f775d295960,rust,tag,notetypes,unclassified,,,open
-h5fa3b00a8f49,rust,tag,notetypes,unclassified,,,open
-h6288de9d6fb5,rust,tag,notetypes,unclassified,,,open
-h675f93f3e234,rust,tag,notetypes,unclassified,,,open
-h68d09bf06f67,rust,tag,notetypes,unclassified,,,open
-h6ac9613310a8,rust,tag,notetypes,unclassified,,,open
-h6df8b626e405,rust,tag,notetypes,unclassified,,,open
-h706cf39b03b8,rust,tag,notetypes,unclassified,,,open
-h74bea2ac61c6,rust,tag,notetypes,unclassified,,,open
-h82e783a37a13,rust,tag,notetypes,unclassified,,,open
+h14ea0a8ef304,python,tag,notetypes,in-scope,Stock note types are offered and created in a fixed order,notetypes/records/stock-new-collection notetypes/records/stock-structure,done
+h1d25e53134b6,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h29e9a6801163,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
+h29fa8d30a069,python,tag,notetypes,in-scope,Each template's stored list of fields its card needs,notetypes/records/stock-structure,done
+h2ef9d9aa9a2d,python,tag,notetypes,in-scope,A copied note type keeps its fields and templates under a new id and name,notetypes/records/clone,done
+h38373cc87211,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h3db0bf46358b,python,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h51425d9fe4e8,python,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h6ace0b701063,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
+h6ebbfe4093c4,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+h76dd5ce91b19,python,tag,notetypes,in-scope,Type-in answers on cloze cards (U64),,deferred
+h7cd15bfd9337,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+h8057000b72f1,python,tag,notetypes,in-scope,Template filters when rendering (U60),,deferred
+h93567ad3543f,python,tag,notetypes,not-applicable,Add-on entries in Anki's own stock note type list,,done
+haa6096a01726,python,tag,notetypes,in-scope,The typing stock kind asks for the Back field's answer on its front,notetypes/records/stock-structure,done
+haff749b319ca,python,tag,notetypes,in-scope,"Each stock kind's fields, templates and kind",notetypes/records/stock-new-collection notetypes/records/stock-structure,done
+hd3484a3787d3,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's Python add-on API,,done
+he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
+heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h0477377c20e5,rust,tag,notetypes,in-scope,A note type's field names in order,notetypes/records/stock-new-collection,done
+h147c5a8d09f4,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h16006d8f10dd,rust,tag,notetypes,in-scope,Per-note-type config keys such as the last deck used (U27),,deferred
+h166c2f8e68af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h1bd8d77a66bd,rust,tag,notetypes,in-scope,Renaming a note type is saved,notetypes/records/names,done
+h1dcc09aa4435,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h1eb30503b690,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h1fa35be82523,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h224d46dc7428,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
+h2443a4d809ec,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
+h28dfe5355334,rust,tag,notetypes,in-scope,Check Media's report of templates that reference media fields (U130),,deferred
+h2a20e219bd99,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+h41a12a3b4594,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+h4503178aea0c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
+h4a0f14238e91,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h4a6d6847cdd7,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+h4bc311c17611,rust,tag,notetypes,in-scope,Every stock kind can be added to a collection,notetypes/records/stock-structure,done
+h538b6bc82ab1,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h5c2b22e2f617,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h5d402c6f2c03,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
+h5dab017523ab,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
+h5f775d295960,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h6288de9d6fb5,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
+h675f93f3e234,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h68d09bf06f67,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
+h6ac9613310a8,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+h706cf39b03b8,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
+h74bea2ac61c6,rust,tag,notetypes,in-scope,"Saving a note type that arrives with its id and stamps, as sync and import do (U107, U120)",,deferred
+h82e783a37a13,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 h862557d9421e,rust,supplementary,notetypes,unclassified,,,open
-h87642d5d640c,rust,tag,notetypes,unclassified,,,open
-h8c43ce71aafa,rust,tag,notetypes,unclassified,,,open
-h8fe1bf6272d1,rust,tag,notetypes,unclassified,,,open
-h9032dd80f5a7,rust,tag,notetypes,unclassified,,,open
-h919a58a1a82a,rust,tag,notetypes,unclassified,,,open
-h91e61b0cbd90,rust,tag,notetypes,unclassified,,,open
-h95ef12a29223,rust,tag,notetypes,unclassified,,,open
+h87642d5d640c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h8c43ce71aafa,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
+h8fe1bf6272d1,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+h9032dd80f5a7,rust,tag,notetypes,in-scope,A new collection lists the stock note types,notetypes/records/stock-new-collection,done
+h919a58a1a82a,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h91e61b0cbd90,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+h95ef12a29223,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 h9836b2bac499,rust,tag,notetypes,unclassified,,,open
-h9c3d56d899d8,rust,tag,notetypes,unclassified,,,open
-h9e510243ea25,rust,tag,notetypes,unclassified,,,open
-ha1bb31fa12da,rust,tag,notetypes,unclassified,,,open
+h9c3d56d899d8,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+h9e510243ea25,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+ha1bb31fa12da,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 ha2b5da04d17c,rust,tag,notetypes,unclassified,,,open
-ha5a622e9741a,rust,tag,notetypes,unclassified,,,open
+ha5a622e9741a,rust,tag,notetypes,in-scope,Saving a note type without an id adds it,notetypes/records/names,done
 ha8d3154d3f27,rust,tag,notetypes,in-scope,reserved keys in a note type's other bytes never reach the legacy JSON object,model/schema11/notetype-other-reserved,done
-haa4b9cb7903d,rust,tag,notetypes,unclassified,,,open
-haf0842771063,rust,tag,notetypes,unclassified,,,open
-hb543398f1a4c,rust,tag,notetypes,unclassified,,,open
-hb560a619968b,rust,tag,notetypes,unclassified,,,open
-hb8d4e91cec36,rust,tag,notetypes,unclassified,,,open
-hbf1cae9dbfec,rust,tag,notetypes,unclassified,,,open
-hc08963e31ad1,rust,tag,notetypes,unclassified,,,open
-hc107f1d1cc3e,rust,tag,notetypes,unclassified,,,open
-hd276a7ef2889,rust,tag,notetypes,unclassified,,,open
-hd70ff7b8b5c8,rust,tag,notetypes,unclassified,,,open
+haa4b9cb7903d,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+haf0842771063,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+hb543398f1a4c,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hb560a619968b,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hb8d4e91cec36,rust,tag,notetypes,in-scope,Restore to Default (U34),,deferred
+hbf1cae9dbfec,rust,tag,notetypes,in-scope,Field names lose forbidden characters and leading markers when saved,notetypes/records/names,done
+hc08963e31ad1,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hc107f1d1cc3e,rust,tag,notetypes,in-scope,A note type's legacy JSON object carries its stored name,model/schema11/notetype-values,done
+hd276a7ef2889,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
+hd70ff7b8b5c8,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 hdaeb4b410d26,rust,tag,notetypes,unclassified,,,open
-hdeaee1c610b2,rust,tag,notetypes,unclassified,,,open
-hdf581e6e5983,rust,tag,notetypes,unclassified,,,open
-he9ab9d659d6c,rust,tag,notetypes,unclassified,,,open
-hebcc44832da5,rust,tag,notetypes,unclassified,,,open
-heee51bc192e5,rust,tag,notetypes,unclassified,,,open
-hf0e8584063a7,rust,tag,notetypes,unclassified,,,open
-hf53f4d36434a,rust,tag,notetypes,unclassified,,,open
-hf6670629d7af,rust,tag,notetypes,unclassified,,,open
-hf8bc5a7dc25e,rust,tag,notetypes,unclassified,,,open
-hf96cb48a0ba8,rust,tag,notetypes,unclassified,,,open
-hfa6f221eb91d,rust,tag,notetypes,unclassified,,,open
-h12f7b83a0cdb,typescript,tag,notetypes,unclassified,,,open
-hcd2cb9d07eec,typescript,tag,notetypes,unclassified,,,open
-he3cfa1e1e429,typescript,tag,notetypes,unclassified,,,open
-hfe06705a799b,typescript,tag,notetypes,unclassified,,,open
+hdeaee1c610b2,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hdf581e6e5983,rust,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+he9ab9d659d6c,rust,tag,notetypes,in-scope,An added note type gets an id and can be found by it,notetypes/records/names,done
+hebcc44832da5,rust,tag,notetypes,in-scope,An added note type can be found by its name,notetypes/records/names,done
+heee51bc192e5,rust,tag,notetypes,not-applicable,Encoding of Anki's Change Note Type request message,,done
+hf0e8584063a7,rust,tag,notetypes,in-scope,Card generation from templates and clozes (U27),,deferred
+hf53f4d36434a,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hf6670629d7af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
+hf8bc5a7dc25e,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
+hf96cb48a0ba8,rust,tag,notetypes,not-applicable,Conversions between Anki's internal id types,,done
+hfa6f221eb91d,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups by unknown name or id; Meguri has its own errors,,done
+h12f7b83a0cdb,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+hcd2cb9d07eec,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+he3cfa1e1e429,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
+hfe06705a799b,typescript,tag,notetypes,in-scope,Change Note Type: field and template mapping (U35),,deferred
 h543bc62a3163,python,tag,package,unclassified,,,open
 h686eb06786f4,python,tag,package,unclassified,,,open
 h6bd4a40af394,python,tag,package,unclassified,,,open
@@ -752,7 +752,7 @@ hf44d25b35e71,python,tag,sched,unclassified,,,open
 hf76a58bb5a76,python,tag,sched,unclassified,,,open
 h00a233a3c403,rust,tag,sched,unclassified,,,open
 h010d3289404d,rust,tag,sched,unclassified,,,open
-h0348591aa08e,rust,tag,sched,unclassified,,,open
+h0348591aa08e,rust,tag,sched,in-scope,A new collection is on day 0 with its next boundary in the future.,sched/day/creation-after-rollover-tokyo,done
 h04ac07a21de7,rust,tag,sched,unclassified,,,open
 h05a411d3dbbc,rust,tag,sched,unclassified,,,open
 h0875e3e791c6,rust,tag,sched,unclassified,,,open
@@ -786,14 +786,14 @@ h3f11a775e29c,rust,tag,sched,unclassified,,,open
 h4037ce91c431,rust,tag,sched,unclassified,,,open
 h40a4438f58cc,rust,tag,sched,unclassified,,,open
 h40e3819d7877,rust,tag,sched,unclassified,,,open
-h419067ffeea3,rust,tag,sched,unclassified,,,open
+h419067ffeea3,rust,tag,sched,in-scope,Day count from the creation date and offset and the current offset and rollover hour.,sched/day/matrix/europe-paris sched/day/dst-america-new-york sched/day/created-tokyo-studied-los-angeles,done
 h431af1c97841,rust,tag,sched,unclassified,,,open
 h4705ef5c9c23,rust,tag,sched,unclassified,,,open
 h4833ddf59228,rust,tag,sched,unclassified,,,open
 h49565ba9b7dc,rust,tag,sched,unclassified,,,open
 h4ad2bd959137,rust,tag,sched,unclassified,,,open
 h4d0c7354dfcd,rust,tag,sched,unclassified,,,open
-h4dcd915bda8e,rust,tag,sched,unclassified,,,open
+h4dcd915bda8e,rust,tag,sched,in-scope,Next day boundary before and after the rollover hour.,sched/day/matrix/utc sched/day/ae84-kathmandu,done
 h4eb04b88ea52,rust,tag,sched,unclassified,,,open
 h53acbb05c3fb,rust,tag,sched,unclassified,,,open
 h53ef76bc5048,rust,tag,sched,unclassified,,,open
@@ -834,13 +834,13 @@ h9a5ca7ceecd6,rust,tag,sched,unclassified,,,open
 h9f3550e3fa5f,rust,tag,sched,unclassified,,,open
 ha2425ed999f7,rust,tag,sched,unclassified,,,open
 ha258d562e101,rust,tag,sched,unclassified,,,open
-ha338afcecf02,rust,tag,sched,unclassified,,,open
+ha338afcecf02,rust,tag,sched,in-scope,Buried cards return to their queues at the first day query of a later day.,sched/unbury-on-rollover/both-kinds sched/unbury-on-rollover/last-unburied-window,done
 ha8aa8d31b248,rust,tag,sched,unclassified,,,open
 hab96efc6f164,rust,tag,sched,unclassified,,,open
 habaf407e202f,rust,tag,sched,unclassified,,,open
 habc95d948b8b,rust,tag,sched,unclassified,,,open
 had8092d884ac,rust,tag,sched,unclassified,,,open
-hb4123149e0de,rust,tag,sched,unclassified,,,open
+hb4123149e0de,rust,tag,sched,in-scope,Legacy day count of collections without a creation offset; the v1 count it also checks is out of scope because v1 collections are refused.,sched/day/legacy-timing,done
 hb46e7a2d004c,rust,tag,sched,unclassified,,,open
 hb643b497ade7,rust,tag,sched,unclassified,,,open
 hb7be1ced7f3a,rust,tag,sched,unclassified,,,open
@@ -856,13 +856,13 @@ hccc87afa9021,rust,tag,sched,unclassified,,,open
 hceea58e626d5,rust,tag,sched,unclassified,,,open
 hcf4081192234,rust,tag,sched,unclassified,,,open
 hd5745d5de78c,rust,tag,sched,unclassified,,,open
-hd79744504c35,rust,tag,sched,unclassified,,,open
+hd79744504c35,rust,tag,sched,in-scope,Offsets stored as minutes west of UTC in the timing config keys.,sched/day/creation-after-rollover-tokyo sched/day/config-values,done
 hda7aa551feeb,rust,tag,sched,unclassified,,,open
 hda9e7531d7db,rust,tag,sched,unclassified,,,open
 hdb3d8a73ac7b,rust,tag,sched,unclassified,,,open
 hdbe181187e8a,rust,tag,sched,unclassified,,,open
 hdd2d2f703388,rust,tag,sched,unclassified,,,open
-hdeb239c0cf40,rust,tag,sched,unclassified,,,open
+hdeb239c0cf40,rust,tag,sched,in-scope,A new collection starts its day 0 at the 04:00 boundary at or before its creation.,sched/day/creation-before-rollover sched/day/creation-at-rollover-utc sched/day/creation-after-rollover-tokyo,done
 hdf5b05a2842f,rust,tag,sched,unclassified,,,open
 he2dcd7bd5b1c,rust,tag,sched,unclassified,,,open
 he31eded34d00,rust,tag,sched,unclassified,,,open
@@ -1006,14 +1006,14 @@ hf00ddf9dbca8,rust,supplementary,storage,in-scope,"notes, cards, decks, presets 
 hf613c9b636bd,rust,supplementary,storage,unclassified,,,open
 hf7664c5a108b,rust,supplementary,storage,in-scope,"A review-log row arriving with a taken id is not inserted; for undo, Meguri refuses the redo instead (deviation); sync and import scenarios come with those ops (U107, U122)",undo/revlog-taken-id,deferred
 hfb0061ec0b9b,rust,supplementary,storage,unclassified,,,open
-h39fa0055ea4c,python,tag,sync,unclassified,,,open
-h51a52fc54a83,python,tag,sync,unclassified,,,open
-ha70ddf9862eb,python,tag,sync,unclassified,,,open
+h39fa0055ea4c,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
+h51a52fc54a83,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its certificate store; Meguri has no such helper and verifies TLS with the platform,,done
+ha70ddf9862eb,python,tag,sync,not-applicable,the desktop app's Python HTTP helper and its switch to skip TLS verification; Meguri has no such switch,,done
 h054820efe6cf,rust,supplementary,sync,unclassified,,,open
 h08e20ff5f483,rust,supplementary,sync,unclassified,,,open
 h15bc3d0e4efd,rust,supplementary,sync,in-scope,a login refused by the server is an authentication failure,sync/transport/login-wrong-password,done
 h1774219ddefc,rust,tag,sync,in-scope,"the stall timeout fires even before any byte moves; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
-h18ff6947756c,rust,tag,sync,unclassified,,,open
+h18ff6947756c,rust,tag,sync,not-applicable,the sync server accepts graves in an old client format; Meguri is a client and sends its graves separately,,done
 h2129dd2678c2,rust,tag,sync,unclassified,,,open
 h241c4726e626,rust,supplementary,sync,unclassified,,,open
 h291349aa0c71,rust,tag,sync,in-scope,login returns the host key and a wrong password is refused as an authentication failure,sync/transport/login sync/transport/login-wrong-password,done
@@ -1022,21 +1022,21 @@ h389b8fd94c14,rust,tag,sync,unclassified,,,open
 h3f6a9ed898b8,rust,supplementary,sync,in-scope,a login whose connection is closed before the answer is a network error,sync/transport/login-reset,done
 h400e0628f27d,rust,supplementary,sync,unclassified,,,open
 h46c1ebf32143,rust,supplementary,sync,unclassified,,,open
-h54c23550e27f,rust,tag,sync,unclassified,,,open
+h54c23550e27f,rust,tag,sync,in-scope,"a sync the server cannot apply (a note whose note type it lacks) fails with the database-check kind and leaves both sides able to sync again; the scenario needs a driver kind that tells this failure from a failed sanity check (U107), meguri-sync stub tests cover the status mapping meanwhile",,deferred
 h55c7436ac179,rust,tag,sync,unclassified,,,open
 h59143f82a4f9,rust,tag,sync,in-scope,"a transfer that stops moving fails after the stall timeout while a steady one never times out; scenarios need U118's stall faults, meguri-sync's stub tests cover it meanwhile",,deferred
 h5c5b47431921,rust,tag,sync,unclassified,,,open
 h62b3f29862b5,rust,tag,sync,unclassified,,,open
 h65243b54e871,rust,tag,sync,unclassified,,,open
-h6b1ce6691f8e,rust,tag,sync,unclassified,,,open
+h6b1ce6691f8e,rust,tag,sync,in-scope,"a never-synced new collection against a new account finds no changes online, and a sync then writes nothing",sync/meta/status,done
 h7298208250f2,rust,supplementary,sync,in-scope,the login body carries the user name and password under their short member names,sync/transport/login,done
 h7709a37ac92a,rust,tag,sync,unclassified,,,open
-h7ffe4ba74f1f,rust,tag,sync,unclassified,,,open
+h7ffe4ba74f1f,rust,tag,sync,not-applicable,"the sync server ends an older sync session when another starts; Meguri is a client with one session key per job, and the resulting conflict answer is a sync error kind",,done
 h850281d2190d,rust,supplementary,sync,unclassified,,,open
 h862454dde0dd,rust,tag,sync,in-scope,"a request to an address that never answers fails within the timeouts; scenarios need U118's faults, meguri-sync's stub tests cover it meanwhile",,deferred
 h8f638568ddc0,rust,supplementary,sync,in-scope,a successful login returns the host key,sync/transport/login,done
 ha29e26f021f6,rust,tag,sync,unclassified,,,open
-haac4685e7e73,rust,tag,sync,unclassified,,,open
+haac4685e7e73,rust,tag,sync,not-applicable,"the sync server refuses a status check with an unsupported protocol version; Meguri is a client that always sends version 11, and its handling of that refusal is a sync error kind covered by meguri-sync stub tests",,done
 hacd6334f675a,rust,tag,sync,unclassified,,,open
 hacfb5a333b1c,rust,tag,sync,unclassified,,,open
 hadd60d2540c9,rust,tag,sync,in-scope,"the status check follows a permanent redirect once and reports the new endpoint; the scenario's server never redirects, so meguri-sync's stub tests cover it until a fault can inject redirects (U118)",,deferred

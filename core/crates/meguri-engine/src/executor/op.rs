@@ -8,6 +8,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::time::Duration;
 
 use meguri_model::changes::{ChangeSet, OpSource};
+use meguri_model::rng::RandomSource;
 use meguri_model::time::EpochMillis;
 use meguri_storage::{StampMode, WriteScope};
 
@@ -162,7 +163,25 @@ pub struct OpContext<'s, 'c> {
     pub(crate) restore: Option<Restore>,
     /// The seq of the last committed op: what a snapshot begun now sees.
     pub(crate) last_seq: Seq,
+    /// Work for the writer once the op committed and published its change
+    /// set (`OpContext::on_commit`); dropped when the op rolls back.
+    pub(crate) on_commit: Vec<CommitHook>,
+    /// The collection's random source (R1875): new field and template ids.
+    pub(crate) random: Arc<dyn RandomSource>,
 }
+
+/// What an op's commit hook learns: the op's seq and generation, and
+/// whether its change set was published (it was not empty).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CommitNotice {
+    pub seq: Seq,
+    pub generation: Generation,
+    pub published: bool,
+}
+
+/// Work an op leaves for after its commit, on the writer: the day clock's
+/// events (`sched/day-clock` D8), which follow the rollover op's change set.
+pub(crate) type CommitHook = Box<dyn FnOnce(CommitNotice) + Send>;
 
 impl fmt::Debug for OpContext<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -192,6 +211,17 @@ impl<'c> OpContext<'_, 'c> {
         self.scope.now()
     }
 
+    /// The collection's random source (R1875), which the open config gave.
+    pub fn random(&self) -> &dyn RandomSource {
+        self.random.as_ref()
+    }
+
+    /// The write scope and the random source together, for writes that draw
+    /// ids (new note type fields and templates).
+    pub fn scope_and_random(&mut self) -> (&mut WriteScope<'c>, &dyn RandomSource) {
+        (self.scope, self.random.as_ref())
+    }
+
     pub fn progress(&self) -> Option<&ProgressSink> {
         self.progress.as_ref()
     }
@@ -204,6 +234,7 @@ impl<'c> OpContext<'_, 'c> {
     pub fn step<T>(&mut self, step: impl FnOnce(&mut Self) -> Result<T, EngineError>) -> Result<T, EngineError> {
         let savepoint = self.scope.savepoint()?;
         let media = (self.media_added.len(), self.media_removed.len());
+        let hooks = self.on_commit.len();
         // The step notes into an empty set, kept only when it commits.
         let before = std::mem::take(&mut self.undo_notes);
         let outcome = step(self);
@@ -218,9 +249,16 @@ impl<'c> OpContext<'_, 'c> {
                 self.scope.rollback_to_savepoint(savepoint)?;
                 self.media_added.truncate(media.0);
                 self.media_removed.truncate(media.1);
+                self.on_commit.truncate(hooks);
                 Err(error)
             }
         }
+    }
+
+    /// Runs `hook` on the writer once the op has committed and its change
+    /// set is published; never when the op rolls back.
+    pub(crate) fn on_commit(&mut self, hook: impl FnOnce(CommitNotice) + Send + 'static) {
+        self.on_commit.push(Box::new(hook));
     }
 
     /// Reports a media file the op added (U31 stages media inside the op).

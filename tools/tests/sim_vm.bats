@@ -479,6 +479,30 @@ assert_host_untouched() {
   not_called '^fake build'
 }
 
+@test "ui-test --platform iphone runs the named suites in the VM under its lease and refuses a run with no suite" {
+  mg ui-test --platform iphone --suite NavigationLayoutTests --suite TestHooksTests/testSampleScreenRoute
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.sim_runner)" = vm ]
+  [ "$(field .details.host_lease)" = null ]
+  [ "$(field '.details.suites | join(",")')" = NavigationLayoutTests,TestHooksTests/testSampleScreenRoute ]
+  [ "$(field '.summary | "\(.passed) \(.failed)"')" = "12 0" ]
+  local u dir
+  u="$(field .details.device.udid)"
+  called "^vm-xcodebuild test-without-building -xctestrun $SB/build/app/DerivedData/Build/Products/Meguri_UI_iphonesimulator27.0-arm64.xctestrun -destination id=$u -resultBundlePath $SB/build/mg/ui-test/[^ ]+/iphone.xcresult -collect-test-diagnostics never -only-testing:MeguriUITests/NavigationLayoutTests -only-testing:MeguriUITests/TestHooksTests/testSampleScreenRoute\$"
+  dir="$(dirname "$result")"
+  [ "$(jq -r .passedTests "$dir/iphone.xcresult/summary.json")" = 12 ]
+  [ ! -e "$(vm_lease "$u")" ]
+  assert_host_untouched
+  validate "$result"
+
+  mg ui-test --platform iphone
+  [ "$(field .status)" = error ]
+  [ "$(field '.failures[0].id')" = usage ]
+  mg ui-test --platform iphone --suite 'Bad Suite'
+  [ "$(field .status)" = error ]
+}
+
 @test "a locked Mac with its display asleep does not hold up simulator jobs in the VM" {
   export STUB_LOCKED=1
   mg a11y --platform ipad

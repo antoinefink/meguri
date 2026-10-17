@@ -173,6 +173,10 @@ struct MatrixCell: Hashable, Codable, Sendable {
     var glassLook: GlassLook = .clear
     var transparency: Transparency = .standard
     var device: DeviceClass
+    /// Why the screen's cell set defers this cell although it could render
+    /// here: system chrome that does not render the same twice
+    /// (`MatrixSet.unstableGlassKeyVariants`). Not part of the name.
+    var unstableReason: String?
 
     /// The file name stem: appearance, text size and device always, then
     /// each value that differs from the default, e.g.
@@ -203,7 +207,7 @@ struct MatrixCell: Hashable, Codable, Sendable {
             let place = device.platform == .mac ? "in the Mac's off-screen renders (its own settings are never changed)" : "on a simulator"
             return "\(axis.rawValue) \(value(of: axis)) cannot be set \(place) (spike S5); captured at the device session"
         }
-        return nil
+        return unstableReason
     }
 
     func value(of axis: MatrixAxis) -> String {
@@ -226,6 +230,16 @@ enum MatrixSet: String, Codable, Sendable {
     /// one text size) on the platform's reference device class: the T0
     /// subset (U252).
     case keyVariants
+    /// The key variants of a screen whose system Liquid Glass renders
+    /// differently from run to run (the iPad sidebar's grain), each with
+    /// Reduce Transparency on (`+rt`) and off. Only the light `+rt` cells
+    /// render: Reduce Transparency makes the glass opaque, and the noise it
+    /// keeps (the sidebar toggle's, one level) fails the perceptual
+    /// comparison on near-black pixels, so in dark cells. The others stay
+    /// in the set, deferred with their reason (`MatrixCell.unstableReason`),
+    /// so every run lists the gap until U252 compares them. The Mac cannot
+    /// set Reduce Transparency: its `+rt` cells are deferred for that.
+    case unstableGlassKeyVariants
     /// A pairwise covering set (R1972, non-signature screens).
     case pairwise
     /// Every combination (signature screens use U252's counted covering set
@@ -291,6 +305,20 @@ enum SnapshotMatrix {
                 (platform == .mac ? [TextSize.standard] : [.standard, .ax5]).map {
                     MatrixCell(appearance: appearance, textSize: $0, device: referenceDevice(platform))
                 }
+            }
+        case .unstableGlassKeyVariants:
+            cells(.keyVariants, on: platform).map {
+                var cell = $0
+                cell.reduceTransparency = true
+                if cell.appearance == .dark {
+                    cell.unstableReason = "with Reduce Transparency on, the sidebar toggle's glass still differs by one level "
+                        + "from run to run, which the perceptual comparison fails on near-black pixels (U252)"
+                }
+                return cell
+            } + cells(.keyVariants, on: platform).map {
+                var cell = $0
+                cell.unstableReason = "system Liquid Glass (the sidebar's grain) differs from run to run beyond the tolerance (U252)"
+                return cell
             }
         case .pairwise:
             pairwiseCells(on: platform)

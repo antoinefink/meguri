@@ -123,6 +123,9 @@ impl ReaderRole {
 pub struct Reader {
     pub(crate) conn: Connection,
     role: ReaderRole,
+    /// The epoch of the derived store attached as `derived`
+    /// (`storage/derived-store` D9).
+    pub(crate) derived: Option<u64>,
 }
 
 /// Opens readers of an open collection from any thread (C6): the engine's
@@ -161,7 +164,11 @@ impl Reader {
         let conn = Connection::open_with_flags(file_uri(path, Some("mode=ro")), READ_ONLY)?;
         conn_init::full(&conn, initializers).map_err(|detail| StorageError::ConnectionInit { detail })?;
         pragmas::reader(&conn, role.query_only())?;
-        Ok(Reader { conn, role })
+        Ok(Reader {
+            conn,
+            role,
+            derived: None,
+        })
     }
 
     pub fn role(&self) -> ReaderRole {

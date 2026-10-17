@@ -85,7 +85,7 @@ impl UndoAction {
         }
     }
 
-    fn direction(self) -> Direction {
+    pub(crate) fn direction(self) -> Direction {
         match self {
             UndoAction::Undo(_) => Direction::Undo,
             UndoAction::Redo(_) => Direction::Redo,
@@ -141,6 +141,9 @@ pub(crate) struct UndoNotes {
     pub restored: Option<EntryId>,
     /// `col.mod` when that undo or redo ran (A7).
     pub col_mod: Option<i64>,
+    /// Clear the whole history when the op commits (M6): the day clock's
+    /// rollover op (`sched/day-clock` D9).
+    pub clear: Option<ClearCause>,
 }
 
 impl UndoNotes {
@@ -152,11 +155,13 @@ impl UndoNotes {
             merge,
             restored,
             col_mod,
+            clear,
         } = step;
         self.state = state.or(self.state.take());
         self.merge = merge.or(self.merge.take());
         self.restored = restored.or(self.restored);
         self.col_mod = col_mod.or(self.col_mod);
+        self.clear = clear.or(self.clear);
     }
 }
 
@@ -235,6 +240,10 @@ impl UndoManager {
     pub(crate) fn after_commit(&self, commit: CommitInfo<'_>) -> Applied {
         let changed = commit.journal.as_ref().is_some_and(|journal| !journal.is_empty());
         let mut stack = self.lock();
+        if let Some(cause) = commit.notes.clear {
+            // M6, whether or not the op changed anything.
+            stack.clear_all(cause.reason());
+        }
         if let Some(action) = commit.spec.action {
             let (Some(target), Some(journal)) = (commit.notes.restored, commit.journal) else {
                 return Applied::Nothing;
@@ -290,6 +299,7 @@ impl UndoManager {
                 }
                 Applied::Nothing
             }
+            SourceEffect::Kept => Applied::Nothing,
             SourceEffect::TruncateIntersecting => {
                 if let Some(journal) = commit.journal.as_deref() {
                     stack.truncate_intersecting(&journal_targets(journal));
@@ -336,6 +346,13 @@ impl<'c> OpContext<'_, 'c> {
     /// its undo and redo hand it back.
     pub fn set_undo_state(&mut self, state: RestorerState) {
         self.undo_notes.state = Some(state);
+    }
+
+    /// Clears the whole history with `cause` when this op commits, whether
+    /// or not it changed anything (M6): the day clock's rollover op
+    /// (`sched/day-clock` D9).
+    pub(crate) fn clear_undo_on_commit(&mut self, cause: ClearCause) {
+        self.undo_notes.clear = Some(cause);
     }
 
     /// Reports a `SyncIncoming` merge (M9.4). Refused for other sources.

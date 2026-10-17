@@ -30,40 +30,62 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         json["supports"]["ops"],
         serde_json::json!([
             "add_note_tags",
+            "add_notetype",
+            "add_stock_notetype",
             "advance",
+            "browser_config_set",
             "clear_unused_tags",
+            "clone_notetype",
             "db_exec",
             "delete_tags",
+            "ensure_io_notetype",
             "handoff",
             "open",
             "remove_note_tags",
             "rename_tag",
+            "reopen",
             "reparent_tags",
             "set_clock",
             "set_config",
             "set_flag",
-            "set_tag_collapsed"
+            "set_tag_collapsed",
+            "update_notetype",
+            "update_notetype.css",
+            "update_notetype.field_options",
+            "update_notetype.rename",
+            "update_notetype.rename_template",
+            "update_notetype.template"
         ])
+    );
+    // dsl.md D8: the new collection is a setup capability; U29's stand-in
+    // (notetype-ops.md T10.2) declares it.
+    assert_eq!(
+        json["supports"]["setup"],
+        serde_json::json!(["config", "new_collection", "notetypes"])
     );
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!([
+            "browser_config",
             "canonical_search",
             "cloze",
             "db_dump",
             "fsrs_next",
+            "notetype_structure",
             "schema_objects",
             "search",
             "tag_tree",
             "template",
-            "text"
+            "text",
+            "timing"
         ])
     );
-    // dsl.md D7.2: 37 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 43 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
-    // set_config, undo-ops.md's undo, redo and remove_config and the eight
-    // ops of tag-ops.md among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 37);
+    // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
+    // of tag-ops.md, browser-config-ops.md's browser_config_set and the note
+    // type ops of notetype-ops.md among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 43);
     for op in [
         "actor",
         "sync",
@@ -72,11 +94,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "reopen",
         "open",
         "set_config",
+        "add_notetype",
+        "update_notetype",
         "undo",
         "redo",
         "remove_config",
         "rename_tag",
         "set_flag",
+        "browser_config_set",
     ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),

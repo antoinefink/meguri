@@ -1,0 +1,64 @@
+# Live round trip of every browser and search config key (T1;
+# specs/browser/config-keys.md K1, K10.1; R1265). The oracle writes a first
+# set of values, normalize_note_text included; Meguri opens that collection,
+# reads every key as Anki does (browser_config) and leaves the bytes as they
+# are, then writes a second set of values; the oracle opens Meguri's
+# collection and reads them back: same values, same compact bytes, usn -1 and
+# mtime_secs of Meguri's write. Needs browser_config_set, set_config, db_exec
+# and the browser_config observation (specs/conformance/browser-config-ops.md
+# B1, B2; record-ops.md W1, W4).
+id: browser/config/live-roundtrip
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - browser_config_set: {key: activeCols, value: [question, answer, noteFld, addonX, cardDue]}
+  - browser_config_set: {key: activeNoteCols, value: [noteTags, "", noteFld]}
+  - browser_config_set: {key: sortType, value: cardDue}
+  - browser_config_set: {key: noteSortType, value: noteMod}
+  - browser_config_set: {key: sortBackwards, value: true}
+  - browser_config_set: {key: browserNoteSortBackwards, value: true}
+  - browser_config_set: {key: browserTableShowNotesMode, value: true}
+  - browser_config_set: {key: savedFilters, value: {Zed: "tag:leech", "Ünï": 'deck:"A B"', apple: "is:due", Apple: "flag:1", "Tab\there": "a/b \\ c"}}
+  - browser_config_set: {key: flagLabels, value: {"3": Important, "1": "Wrong ✓", "7": '"Quoted"'}}
+  - browser_config_set: {key: collapseSavedSearches, value: true}
+  - browser_config_set: {key: collapseToday, value: true}
+  - browser_config_set: {key: collapseFlags, value: true}
+  - browser_config_set: {key: collapseCardState, value: true}
+  - browser_config_set: {key: collapseDecks, value: true}
+  - browser_config_set: {key: collapseNotetypes, value: true}
+  - browser_config_set: {key: collapseTags, value: true}
+  - browser_config_set: {key: previewBothSides, value: true}
+  - browser_config_set: {key: setDueBrowser, value: "1-7!"}
+  - browser_config_set: {key: defaultSearchText, value: "deck:Inbox is:due"}
+  - browser_config_set: {key: ignoreAccentsInSearch, value: true}
+  - browser_config_set: {key: restorePositionBrowser, value: false}
+  - browser_config_set: {key: resetCountsBrowser, value: true}
+  - set_config: {key: normalize_note_text, value: false}
+  - handoff: meguri
+  - observe: [browser_config]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), typeof(val) FROM config WHERE KEY IN ('activeCols', 'activeNoteCols', 'sortType', 'noteSortType', 'sortBackwards', 'browserNoteSortBackwards', 'browserTableShowNotesMode', 'savedFilters', 'flagLabels', 'collapseSavedSearches', 'collapseToday', 'collapseFlags', 'collapseCardState', 'collapseDecks', 'collapseNotetypes', 'collapseTags', 'previewBothSides', 'setDueBrowser', 'defaultSearchText', 'ignoreAccentsInSearch', 'restorePositionBrowser', 'resetCountsBrowser', 'normalize_note_text') ORDER BY KEY"}
+  - advance: 1m
+  - browser_config_set: {key: activeCols, value: [cardDue, addonX, noteFld, deck]}
+  - browser_config_set: {key: activeNoteCols, value: [noteFld, note, template, noteTags, addonY]}
+  - browser_config_set: {key: sortType, value: noteFld}
+  - browser_config_set: {key: noteSortType, value: noteCrt}
+  - browser_config_set: {key: sortBackwards, value: false}
+  - browser_config_set: {key: browserNoteSortBackwards, value: false}
+  - browser_config_set: {key: browserTableShowNotesMode, value: false}
+  - browser_config_set: {key: savedFilters, value: {Leeches: "tag:leech", "Due soon": "prop:due<=3", "ß": "deck:Straße"}}
+  - browser_config_set: {key: flagLabels, value: {"1": "Again?", "2": ""}}
+  - browser_config_set: {key: collapseSavedSearches, value: false}
+  - browser_config_set: {key: collapseToday, value: false}
+  - browser_config_set: {key: collapseFlags, value: false}
+  - browser_config_set: {key: collapseCardState, value: false}
+  - browser_config_set: {key: collapseDecks, value: false}
+  - browser_config_set: {key: collapseNotetypes, value: false}
+  - browser_config_set: {key: collapseTags, value: false}
+  - browser_config_set: {key: previewBothSides, value: false}
+  - browser_config_set: {key: setDueBrowser, value: "0"}
+  - browser_config_set: {key: defaultSearchText, value: ""}
+  - browser_config_set: {key: ignoreAccentsInSearch, value: false}
+  - browser_config_set: {key: restorePositionBrowser, value: true}
+  - browser_config_set: {key: resetCountsBrowser, value: false}
+  - handoff: oracle
+  - observe: [browser_config]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), typeof(val) FROM config WHERE KEY IN ('activeCols', 'activeNoteCols', 'sortType', 'noteSortType', 'sortBackwards', 'browserNoteSortBackwards', 'browserTableShowNotesMode', 'savedFilters', 'flagLabels', 'collapseSavedSearches', 'collapseToday', 'collapseFlags', 'collapseCardState', 'collapseDecks', 'collapseNotetypes', 'collapseTags', 'previewBothSides', 'setDueBrowser', 'defaultSearchText', 'ignoreAccentsInSearch', 'restorePositionBrowser', 'resetCountsBrowser', 'normalize_note_text') ORDER BY KEY"}

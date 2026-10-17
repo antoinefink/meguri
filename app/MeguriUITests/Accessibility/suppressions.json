@@ -5,6 +5,66 @@
       "identifier": "sample.deckOverview.counts",
       "auditType": "contrast",
       "reason": "At the largest text sizes in the overflow state the counts line runs on under the Study Now bar, where the scroll edge effect fades it until the screen is scrolled, and the audit measures the counts' whole frame, faded part included (sample/deck-overview/overflow, 2026-10-14). The count colours are token pairings ContrastTests checks (R1979)."
+    },
+    {
+      "identifier": "shell.root.sidebar.home",
+      "auditType": "contrast",
+      "reason": "The selected sidebar row (Home in every shell/root/<state> route): the system's sidebar selection draws white text on the accent-coloured capsule, about 4:1 with the system blue in light mode and lower with Increase Contrast in dark mode (an iPad snapshot render, 2026-10-16), and the audit measures the row's whole frame, symbol included. This is a real shortfall of the system accent, not of the label: U167 settles the app's accent colour (R176-R182, R190), which the selection follows; remove this entry then."
+    },
+    {
+      "identifier": "shell.root.sidebar.browse",
+      "auditType": "contrast",
+      "reason": "A row of the system sidebar (List, sidebar style, on the iPad's and the Mac's Liquid Glass sidebar) with the system's label colour and an accent-coloured SF Symbol. The audit measures the label's element, whose frame is the whole row, symbol included, against the glass, and reports 'Contrast nearly passed': on the iPad in dark mode for every row and for the selected row's white text on the accent capsule, on the Mac for the Stats row and its filled chart symbol (ShellAccessibilityTests, shell/root/<state>, 2026-10-16). Meguri does not restyle the system sidebar here; U167 settles the shell's sidebar and accent colours (R176-R182, R190)."
+    },
+    {
+      "identifier": "shell.root.sidebar.stats",
+      "auditType": "contrast",
+      "reason": "A row of the system sidebar (List, sidebar style, on the iPad's and the Mac's Liquid Glass sidebar) with the system's label colour and an accent-coloured SF Symbol. The audit measures the label's element, whose frame is the whole row, symbol included, against the glass, and reports 'Contrast nearly passed': on the iPad in dark mode for every row and for the selected row's white text on the accent capsule, on the Mac for the Stats row and its filled chart symbol (ShellAccessibilityTests, shell/root/<state>, 2026-10-16). Meguri does not restyle the system sidebar here; U167 settles the shell's sidebar and accent colours (R176-R182, R190)."
+    },
+    {
+      "identifier": "shell.root.sidebar.noteTypes",
+      "auditType": "contrast",
+      "reason": "A row of the system sidebar (List, sidebar style, on the iPad's and the Mac's Liquid Glass sidebar) with the system's label colour and an accent-coloured SF Symbol. The audit measures the label's element, whose frame is the whole row, symbol included, against the glass, and reports 'Contrast nearly passed': on the iPad in dark mode for every row and for the selected row's white text on the accent capsule, on the Mac for the Stats row and its filled chart symbol (ShellAccessibilityTests, shell/root/<state>, 2026-10-16). Meguri does not restyle the system sidebar here; U167 settles the shell's sidebar and accent colours (R176-R182, R190)."
+    },
+    {
+      "identifier": "shell.root.sidebar.settings",
+      "auditType": "contrast",
+      "reason": "A row of the system sidebar (List, sidebar style, on the iPad's and the Mac's Liquid Glass sidebar) with the system's label colour and an accent-coloured SF Symbol. The audit measures the label's element, whose frame is the whole row, symbol included, against the glass, and reports 'Contrast nearly passed': on the iPad in dark mode for every row and for the selected row's white text on the accent capsule, on the Mac for the Stats row and its filled chart symbol (ShellAccessibilityTests, shell/root/<state>, 2026-10-16). Meguri does not restyle the system sidebar here; U167 settles the shell's sidebar and accent colours (R176-R182, R190)."
+    },
+    {
+      "identifier": "shell.root.sidebar.home",
+      "auditType": "textClipped",
+      "reason": "Reported for the system sidebar's Home row at the default text size too, where its label shows in full; the label may wrap (fixedSize vertically) and the row is a system List row (ShellAccessibilityTests, iPad, 2026-10-16). U167 owns the shell's Dynamic Type conformance (R190)."
+    },
+    {
+      "identifier": "shell.root.sidebar.stats",
+      "auditType": "textClipped",
+      "reason": "Reported for the system sidebar's Stats row at the default text size too, where its label shows in full; the label may wrap (fixedSize vertically) and the row is a system List row (ShellAccessibilityTests, iPad, 2026-10-16). U167 owns the shell's Dynamic Type conformance (R190)."
+    },
+    {
+      "identifier": "shell.root.sidebarDecks",
+      "auditType": "contrast",
+      "reason": "The sidebar's Decks header, in the textSecondary token (ContrastTests pairs it at 4.5:1 with the content backgrounds), drawn on the iPad's dark Liquid Glass sidebar, whose material those pairings do not cover; the audit reports 'Contrast nearly passed' in dark mode (ShellAccessibilityTests, 2026-10-16). U167 settles the shell's sidebar colours (R176-R182, R190)."
+    },
+    {
+      "identifier": "testhooks.shell.deck.1",
+      "auditType": "contrast",
+      "reason": "A sample deck row of the shell's test routes (TestHooks/ShellRoutes.swift), built as a system sidebar row: the audit reports 'Contrast nearly passed' for it as for the section rows (shell.root.sidebar.*), on the iPad's Liquid Glass sidebar (2026-10-16). U152 builds the real deck rows and U167 the shell's colours."
+    },
+    {
+      "identifier": "testhooks.shell.deck.1700000000001",
+      "auditType": "contrast",
+      "reason": "A sample deck row of the shell's test routes (TestHooks/ShellRoutes.swift), built as a system sidebar row: the audit reports 'Contrast nearly passed' for it as for the section rows (shell.root.sidebar.*), on the iPad's Liquid Glass sidebar (2026-10-16). U152 builds the real deck rows and U167 the shell's colours."
+    },
+    {
+      "identifier": "testhooks.shell.deck.1700000000002",
+      "auditType": "contrast",
+      "reason": "A sample deck row of the shell's test routes (TestHooks/ShellRoutes.swift), built as a system sidebar row: the audit reports 'Contrast nearly passed' for it as for the section rows (shell.root.sidebar.*), on the iPad's Liquid Glass sidebar (2026-10-16). U152 builds the real deck rows and U167 the shell's colours."
+    },
+    {
+      "identifier": "testhooks.shell.deck.1700000000010",
+      "auditType": "contrast",
+      "reason": "A sample deck row of the shell's test routes (TestHooks/ShellRoutes.swift), built as a system sidebar row: the audit reports 'Contrast nearly passed' for it as for the section rows (shell.root.sidebar.*), on the iPad's Liquid Glass sidebar (2026-10-16). U152 builds the real deck rows and U167 the shell's colours."
     }
   ]
 }
