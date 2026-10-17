@@ -521,7 +521,7 @@ pub struct TemplateSpec {
 }
 
 /// Field values in field order, or by field name.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum Fields {
     List(Vec<String>),
@@ -1516,6 +1516,8 @@ pub enum ObservationKind {
     RenderStatus,
     /// render-ops.md Q1.
     Template,
+    /// note-ops.md N4.
+    FieldsCheck,
     /// search-ops.md S1.
     Search,
     /// search-ops.md S2.
@@ -1576,6 +1578,7 @@ impl ObservationKind {
         ObservationKind::Render,
         ObservationKind::RenderStatus,
         ObservationKind::Template,
+        ObservationKind::FieldsCheck,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
         ObservationKind::DbDump,
@@ -1609,6 +1612,7 @@ impl ObservationKind {
             ObservationKind::Render => "render",
             ObservationKind::RenderStatus => "render_status",
             ObservationKind::Template => "template",
+            ObservationKind::FieldsCheck => "fields_check",
             ObservationKind::Search => "search",
             ObservationKind::CanonicalSearch => "canonical_search",
             ObservationKind::DbDump => "db_dump",
@@ -1654,6 +1658,7 @@ impl ObservationKind {
             | ObservationKind::BlobDecode
             | ObservationKind::PackageCol
             | ObservationKind::Template
+            | ObservationKind::FieldsCheck
             | ObservationKind::Text
             | ObservationKind::Cloze
             | ObservationKind::ImageOcclusion
@@ -2489,6 +2494,98 @@ impl TemplateCase {
             fields,
             tags,
         }))
+    }
+}
+
+/// A `fields_check` observation request (note-ops.md N4): the drafts to
+/// check, in case order. Note types, notes, field names and counts are
+/// checked when the step runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldsCheckRequest {
+    pub cases: Vec<FieldsCheckCase>,
+}
+
+/// One draft of a `fields_check` request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldsCheckCase {
+    /// A new, unsaved note of the note type stored under `notetype`, with
+    /// `fields` as `add_note` takes them (dsl.md D7.2).
+    NewNote { notetype: String, fields: Fields },
+    /// The stored note `note`, with `fields` replacing as in `edit_note`
+    /// (record-ops.md W2); unsaved.
+    StoredNote { note: NoteRef, fields: Option<Fields> },
+}
+
+impl FieldsCheckRequest {
+    /// Reads the request with scenario.schema.json's rules: exactly `cases`,
+    /// at least one; a case is `{notetype, fields}` with a non-empty name or
+    /// `{note: #nN, fields?}`; field values are strings.
+    pub fn from_mapping(map: &Map<String, Value>) -> Result<FieldsCheckRequest, FormatError> {
+        let bad = |why: String| FormatError::new(format!("observation fields_check: {why}"));
+        if let Some(key) = map.keys().find(|k| k.as_str() != "cases") {
+            return Err(bad(format!("takes {{cases}}, not {key:?}")));
+        }
+        let cases = map
+            .get("cases")
+            .and_then(Value::as_array)
+            .filter(|cases| !cases.is_empty())
+            .ok_or_else(|| bad("cases is a non-empty list".to_owned()))?;
+        let cases = cases
+            .iter()
+            .enumerate()
+            .map(|(i, case)| FieldsCheckCase::from_value(case).map_err(|e| bad(format!("case {i}: {e}"))))
+            .collect::<Result<_, _>>()?;
+        Ok(FieldsCheckRequest { cases })
+    }
+}
+
+impl FieldsCheckCase {
+    fn from_value(value: &Value) -> Result<FieldsCheckCase, String> {
+        let map = value.as_object().ok_or("must be a mapping")?;
+        let fields = map.get("fields").map(fields_value).transpose()?;
+        if let Some(note) = map.get("note") {
+            if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "note" | "fields")) {
+                return Err(format!("a stored-note case takes {{note, fields?}}, not {key:?}"));
+            }
+            let note: LogicalRef = note
+                .as_str()
+                .ok_or("note is a #nN reference")?
+                .parse()
+                .map_err(|e: FormatError| e.to_string())?;
+            if note.kind != RefKind::Note {
+                return Err(format!("{note} is not a note reference"));
+            }
+            return Ok(FieldsCheckCase::StoredNote {
+                note: NoteRef(note),
+                fields,
+            });
+        }
+        if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "notetype" | "fields")) {
+            return Err(format!("a new-note case takes {{notetype, fields}}, not {key:?}"));
+        }
+        let notetype = match map.get("notetype") {
+            Some(Value::String(name)) if !name.is_empty() => name.clone(),
+            Some(_) => return Err("notetype is a non-empty note type name".to_owned()),
+            None => return Err("a case names a notetype or a note".to_owned()),
+        };
+        let fields = fields.ok_or("a new-note case needs fields")?;
+        Ok(FieldsCheckCase::NewNote { notetype, fields })
+    }
+}
+
+/// dsl.md D7.2's field values: a list from the first field or a mapping of
+/// field names, values strings.
+fn fields_value(value: &Value) -> Result<Fields, String> {
+    let text = |v: &Value| v.as_str().map(str::to_owned).ok_or("field values are strings");
+    match value {
+        Value::Array(values) => Ok(Fields::List(values.iter().map(text).collect::<Result<_, _>>()?)),
+        Value::Object(values) => Ok(Fields::Map(
+            values
+                .iter()
+                .map(|(name, v)| Ok((name.clone(), text(v)?)))
+                .collect::<Result<_, &str>>()?,
+        )),
+        _ => Err("fields is a list of values or a mapping of field name to value".to_owned()),
     }
 }
 

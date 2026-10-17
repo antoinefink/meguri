@@ -113,8 +113,9 @@ fn a_preservation_only_row_is_counted_with_its_scenario_status() {
     assert!(report.problems.is_empty(), "{:?}", report.problems);
     let preservation = &report.by_classification["preservation-only"];
     assert_eq!(preservation.rows, 1);
-    // T0 cannot run the chain, and Meguri has no handoff adapters yet.
-    assert_eq!(preservation.statuses.get("pending"), Some(&1));
+    // T0 cannot run the chain; its Meguri segment now has edit_note and
+    // handoff, so T1 can run it.
+    assert_eq!(preservation.statuses.get("live"), Some(&1));
     assert_eq!(report.by_classification["not-applicable"].rows, 2);
     assert_eq!(report.by_classification["unclassified"].rows, 2);
     assert_eq!(
@@ -132,7 +133,7 @@ fn a_preservation_only_row_is_counted_with_its_scenario_status() {
     assert_eq!(json["rows_at_tag"], 4);
     assert_eq!(
         json["rows"][0]["scenario_statuses"]["preservation/filtered-deck-sync"],
-        "pending"
+        "live"
     );
     let markdown = report.render_markdown();
     assert!(markdown.contains("| preservation-only | 1 |"), "{markdown}");
@@ -187,7 +188,7 @@ fn a_t1_status_counts_only_for_the_scenario_golden_and_pin_it_ran() {
     // Re-recorded: the golden is fresh again, but the old report ran the old
     // text, so the row keeps its T0 status until T1 runs the new one.
     golden(root, LOCK);
-    assert_eq!(row_status(&passed), "pending");
+    assert_eq!(row_status(&passed), "live");
     assert_eq!(row_status(&t1_report(LOCK, &[(ID, "pass", &after)])), "pass");
 
     // No golden: missing.

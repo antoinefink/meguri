@@ -1,0 +1,35 @@
+# A note whose field count differs from its note type's (R780; specs/notes/
+# note-records.md F1). Check Database repairs it: missing fields are added
+# empty, extra fields are merged into the last field, each joined with "; "
+# (also when empty), and the note gets the tag db-check; Check Database
+# writes it without stamping mod or usn (the usn is set to a server value
+# first, as after a sync). The rows are made with db_exec, as another
+# client or an old file could leave them.
+id: notes/fields/count-repair
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+    - name: Single
+      fields: [Only]
+      templates:
+        - {name: One, front: "{{Only}}", back: ""}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: [three, b]}
+    - {notetype: Pair, deck: Inbox, fields: [one, b]}
+    - {notetype: Pair, deck: Inbox, fields: [four, b]}
+    - {notetype: Single, deck: Inbox, fields: [single]}
+    - {notetype: Pair, deck: Inbox, fields: [right, b]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET flds = 'three' || char(31) || 'b' || char(31) || 'c' WHERE sfld = 'three'"}
+  - db_exec: {sql: "UPDATE notes SET flds = 'one' WHERE sfld = 'one'"}
+  - db_exec: {sql: "UPDATE notes SET flds = 'four' || char(31) || 'b' || char(31) || char(31) || 'd' WHERE sfld = 'four'"}
+  - db_exec: {sql: "UPDATE notes SET flds = 'single' || char(31) || 'x' || char(31) || 'y' WHERE sfld = 'single'"}
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  - check_db: {}
+  - db_exec: {sql: "SELECT flds, tags, mod, usn FROM notes ORDER BY id"}

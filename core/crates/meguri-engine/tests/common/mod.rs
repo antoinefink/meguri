@@ -6,6 +6,8 @@
 #![allow(dead_code)]
 
 pub mod day;
+pub mod note_scenarios;
+pub mod notes;
 pub mod steps;
 pub mod tagging;
 
