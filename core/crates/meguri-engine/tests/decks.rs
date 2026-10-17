@@ -189,6 +189,74 @@ fn collapse_scope_selection_and_not_found() {
 }
 
 #[test]
+fn bulk_deck_edits_at_2000_decks_are_bounded() {
+    use meguri_engine::deck_config;
+    use meguri_model::{ids::DeckConfigId, proto::deck::DeckKind};
+    use meguri_testkit::wallclock::Stopwatch;
+    use std::time::Duration;
+
+    let h = common::fresh();
+    let (ids, preset) = h
+        .collection
+        .run(common::tagging::setup_spec(), |ctx| {
+            let preset = deck_config::add_in(ctx.scope(), "Bulk")?;
+            let mut ids = vec![ctx.scope().add_deck(&decks::new_deck("Root".into()))?];
+            // Default + Root + 1,998 descendants: R1805's 2,000 decks.
+            for i in 0..1998 {
+                ids.push(ctx.scope().add_deck(&decks::new_deck(format!("Root\u{1f}{i}")))?);
+            }
+            Ok((ids, preset))
+        })
+        .unwrap()
+        .value;
+    let before = h.collection.reader(ReaderRole::Query).unwrap().deck_rows().unwrap();
+    h.clock.step_ms(60_000);
+
+    let timer = Stopwatch::start();
+    let collapsed = decks::collapse(&h.collection, ids.clone(), CollapseScope::Study, false).unwrap();
+    let collapse_time = timer.elapsed();
+    assert_eq!(collapsed.changes.decks.len(), 1999);
+
+    let timer = Stopwatch::start();
+    let assigned = deck_config::assign(&h.collection, ids[0], preset, true).unwrap();
+    let assign_time = timer.elapsed();
+    assert_eq!(assigned.changes.decks.len(), 1999);
+
+    let timer = Stopwatch::start();
+    let removed = deck_config::remove(&h.collection, preset, DeckConfigId(1), true).unwrap();
+    let remove_time = timer.elapsed();
+    assert_eq!(removed.changes.decks.len(), 1999);
+    let rows = h.collection.reader(ReaderRole::Query).unwrap().deck_rows().unwrap();
+    assert_eq!(rows.len(), 2000);
+    for row in rows.iter().filter(|d| ids.contains(&d.id)) {
+        assert!(!row.common.study_collapsed);
+        assert!(row.common.browser_collapsed);
+        assert!(matches!(&row.kind.kind, DeckKind::Normal(n) if n.config_id == 1));
+        assert_eq!(row.mtime.0, (NOW_MS + 60_000) / 1000);
+        assert_eq!(row.usn.0, -1);
+    }
+    // Each bulk edit remains one undo step; the original rows are restored.
+    for _ in 0..3 {
+        h.collection.undo(UndoScope::Global).unwrap();
+    }
+    let restored = h.collection.reader(ReaderRole::Query).unwrap().deck_rows().unwrap();
+    let cells =
+        |rows: &[meguri_model::deck::Deck]| rows.iter().map(meguri_storage::Record::to_cells).collect::<Vec<_>>();
+    assert_eq!(cells(&restored), cells(&before));
+
+    eprintln!("2,000 decks: collapse={collapse_time:?}, assign={assign_time:?}, remove={remove_time:?}");
+    // A loose test-build regression bound for table rescans, not the
+    // device/frame budget of R1822. nextest runs this test alone.
+    for (op, elapsed) in [
+        ("collapse", collapse_time),
+        ("assign", assign_time),
+        ("remove", remove_time),
+    ] {
+        assert!(elapsed < Duration::from_secs(2), "{op}: {elapsed:?}");
+    }
+}
+
+#[test]
 fn backup_failure_aborts_and_concurrent_card_addition_replans() {
     struct BackupWithWrite {
         collection: meguri_engine::Collection,

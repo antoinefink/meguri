@@ -4,6 +4,10 @@
 # compete for the same cores and can push a near-linear case past its bound.
 # Each bound stays as the test sets it.
 [[profile.default.overrides]]
+filter = 'package(meguri-engine) and test(=bulk_deck_edits_at_2000_decks_are_bounded)'
+threads-required = "num-test-threads"
+
+[[profile.default.overrides]]
 filter = 'package(meguri-template) and test(=five_megabyte_templates_parse_and_render_in_bounded_time)'
 threads-required = "num-test-threads"
 

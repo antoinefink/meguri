@@ -155,7 +155,11 @@ fn setup_presets(s: &mut Session<'_>, setup: &Setup) -> Result<(), ExecError> {
         let id = if entry.name == "Default" {
             DeckConfigId(1)
         } else {
-            deck_config::add_in(&mut scope, &entry.name).map_err(core)?
+            // Setup starts from built-in defaults, without P4's FSRS-6
+            // list; only the add_preset operation uses the menu defaults.
+            let mut p = deck_config::defaults();
+            p.name = entry.name.clone();
+            scope.add_deck_config(&p).map_err(core)?
         };
         let mut p = scope
             .deck_config(id)

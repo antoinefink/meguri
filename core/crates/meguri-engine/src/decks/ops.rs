@@ -37,6 +37,13 @@ pub fn add_in(scope: &mut WriteScope<'_>, human: &str) -> Result<Deck, EngineErr
 /// D6 with the caller's other field edits preserved (D13).
 fn rename_record(scope: &mut WriteScope<'_>, mut deck: Deck, name: String) -> Result<Deck, EngineError> {
     let old = require(scope, deck.id)?;
+    // The unique unicase index already protects a stored name. Ordinary
+    // field edits need only this row, even when applied to a whole subtree.
+    if name == old.name {
+        deck.name = name;
+        scope.put(&deck)?;
+        return require(scope, deck.id);
+    }
     let rows = scope.deck_rows()?;
     let name = names::unique(&rows, deck.id, name);
     if name == old.name {
