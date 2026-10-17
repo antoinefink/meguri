@@ -1,0 +1,71 @@
+# Interface names the package specs use that are not ordinary words: package
+# file kinds and entry names, the protobuf field the media map names, the
+# tables, columns, indexes and config keys of the schema-11 placeholder, and
+# the zip, zstd and SQLite terms of the container rules. Short ordinary words
+# (meta, media, col, notes, cards, ...) stay unmasked.
+# Package files and entries
+colpkg
+apkg
+anki21b
+anki21
+anki2
+collection.anki21b
+collection.anki21
+collection.anki2
+# Media map field
+sha1
+# Placeholder tables, columns and indexes (schema 11)
+revlog
+graves
+crt
+scm
+ver
+dty
+usn
+dconf
+guid
+mid
+flds
+sfld
+csum
+oid
+nid
+did
+odid
+odue
+ivl
+lapses
+lastIvl
+ix_notes_usn
+ix_cards_usn
+ix_revlog_usn
+ix_cards_nid
+ix_cards_sched
+ix_revlog_cid
+ix_notes_csum
+# Placeholder config keys and values
+activeDecks
+addToCur
+collapseTime
+curDeck
+curModel
+dueCounts
+estTimes
+newSpread
+nextPos
+schedVer
+sortBackwards
+sortType
+timeLim
+noteFld
+# Zip, zstd and SQLite terms
+zip64
+zstd
+crc
+sqlite_master
+journal_mode
+wal_checkpoint
+integrity_check
+unicase
+VACUUM
+F_FULLFSYNC

@@ -1,0 +1,19 @@
+# specs/conformance/package-ops.md E2; specs/package/container.md P12;
+# specs/engine/collection-replace.md R3-R5, R7; R1626 (stamps), R2005, R2010.
+# After edits, Anki's backup of the standard collection is restored: every row
+# is the backup's again, col.scm and col.mod carry the restore instant, and the
+# day check that follows unburies at the same instant on both sides
+# (specs/sched/day-clock.md D14.2).
+id: package/collection-package/restore-backup
+description: Restoring Anki's backup brings back its rows, with scm and mod stamped at the restore instant.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET flags = 3"}
+  - db_exec: {sql: "DELETE FROM revlog"}
+  - advance: 1h
+  - import: {format: colpkg, fixture: package/backup/standard.colpkg}
+  - observe: [timing]
+  - observe: [db_dump, schema_objects]
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}

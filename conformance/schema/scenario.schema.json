@@ -543,6 +543,16 @@
                 }
               }
             },
+            "package_listing": {
+              "description": "package-ops.md E3: the layout of a package in the session directory (name) or of a fixture package (fixture).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "$ref": "#/$defs/any_package_name" },
+                "fixture": { "$ref": "#/$defs/package_fixture" }
+              },
+              "oneOf": [{ "required": ["name"] }, { "required": ["fixture"] }]
+            },
             "cloze": {
               "description": "specs/conformance/cloze-ops.md Z1: pure cloze functions over a list of inputs; [text, card] pairs (card 1-65535), or strings for numbers, which shares a request with no other function.",
               "type": "object",
@@ -864,6 +874,21 @@
       "description": "model-ops.md L6: a package file in the session directory.",
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.apkg$"
+    },
+    "colpkg_name": {
+      "description": "package-ops.md E1, E2.1: a collection package file in the session directory.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.colpkg$"
+    },
+    "any_package_name": {
+      "description": "package-ops.md E3: a package file in the session directory.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.(colpkg|apkg)$"
+    },
+    "package_fixture": {
+      "description": "package-ops.md E2.1, E3: a package under conformance/fixtures/, lower-case segments as open's.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*\\.(colpkg|apkg)$"
     },
     "step": {
       "description": "One op per step (dsl.md D7).",
@@ -1205,9 +1230,24 @@
             { "required": ["name", "search"], "properties": { "name": { "type": "string" }, "search": { "type": "string" } } }
           ]
         },
-        "import": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] },
+        "import": {
+          "description": "The collection package forms are exactly {format: colpkg, fixture} or {format: colpkg, name} (package-ops.md E2); other forms are draft (package).",
+          "if": { "type": "object", "required": ["format"], "properties": { "format": { "const": "colpkg" } } },
+          "then": {
+            "type": "object",
+            "required": ["format"],
+            "additionalProperties": false,
+            "properties": {
+              "format": { "const": "colpkg" },
+              "fixture": { "allOf": [{ "$ref": "#/$defs/package_fixture" }, { "pattern": "\\.colpkg$" }] },
+              "name": { "$ref": "#/$defs/colpkg_name" }
+            },
+            "oneOf": [{ "required": ["fixture"] }, { "required": ["name"] }]
+          },
+          "else": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["fixture"], "properties": { "fixture": { "type": "string" } } }] }
+        },
         "export": {
-          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6).",
+          "description": "Draft (package), except the legacy package form {format: apkg, name, legacy: true} (model-ops.md L6) and the collection package form {format: colpkg, name} (package-ops.md E1).",
           "allOf": [
             { "$ref": "#/$defs/draft_args" },
             { "required": ["format", "name"], "properties": { "format": { "enum": ["apkg", "colpkg"] }, "name": { "type": "string" } } },
@@ -1220,6 +1260,17 @@
                   "format": { "const": "apkg" },
                   "name": { "$ref": "#/$defs/package_name" },
                   "legacy": { "const": true }
+                }
+              }
+            },
+            {
+              "if": { "required": ["format"], "properties": { "format": { "const": "colpkg" } } },
+              "then": {
+                "required": ["format", "name"],
+                "additionalProperties": false,
+                "properties": {
+                  "format": { "const": "colpkg" },
+                  "name": { "$ref": "#/$defs/colpkg_name" }
                 }
               }
             }

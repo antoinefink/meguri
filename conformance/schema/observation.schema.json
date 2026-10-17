@@ -306,9 +306,55 @@
           }
         },
         "export": {
-          "description": "dsl.md D7.2: the legacy package form outputs {notes} (model-ops.md L6); the other forms are draft (package).",
+          "description": "dsl.md D7.2: the legacy package form outputs {notes} (model-ops.md L6); the collection package form outputs nothing (package-ops.md E1); the other forms are draft (package).",
           "type": "object",
           "properties": { "notes": { "type": "integer", "minimum": 0 } }
+        },
+        "import": {
+          "description": "package-ops.md E2.3: the collection package forms output nothing, so this member holds only their rejection; the other forms are draft (package).",
+          "anyOf": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/rejection" },
+                { "properties": { "error": { "enum": ["too_new", "corrupt"] } } }
+              ]
+            },
+            { "type": "object", "not": { "required": ["error"] } }
+          ]
+        },
+        "package_listing": {
+          "description": "package-ops.md E3: the archive's entries in order with their compression methods, the meta version (null without a meta entry, invalid when it does not decode), and the facts of each raw SQLite entry.",
+          "type": "object",
+          "required": ["entries", "meta_version", "sqlite"],
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "method"],
+                "additionalProperties": false,
+                "properties": { "name": { "type": "string" }, "method": { "type": "integer", "minimum": 0 } }
+              }
+            },
+            "meta_version": { "anyOf": [{ "type": "integer" }, { "type": "null" }, { "const": "invalid" }] },
+            "sqlite": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["ver", "notes", "cards", "revlog", "journal", "opens"],
+                "additionalProperties": false,
+                "properties": {
+                  "ver": { "type": "integer" },
+                  "notes": { "type": "integer", "minimum": 0 },
+                  "cards": { "type": "integer", "minimum": 0 },
+                  "revlog": { "type": "integer", "minimum": 0 },
+                  "journal": { "enum": ["rollback", "wal", "other"] },
+                  "opens": { "type": "boolean" }
+                }
+              }
+            }
+          }
         },
         "package_col": {
           "description": "model-ops.md L7: the requested col columns of a legacy package's collection; ver an integer, the JSON columns parsed.",

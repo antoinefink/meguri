@@ -1,0 +1,25 @@
+# A live chain (T1; specs/conformance/package-ops.md E1-E3, E5;
+# specs/package/container.md P7, P11; specs/engine/collection-replace.md R7;
+# R1619, R2009 format half). Meguri opens the standard collection and writes it
+# as a collection-only package. Anki then lists that package (its entries,
+# methods, meta version and placeholder must equal those of Anki's own export,
+# and Anki must open Meguri's placeholder) and imports it: the rows equal the
+# source's, except col.scm and col.mod, stamped with the import instant, and
+# Anki's integrity check and Check Database find nothing to report.
+id: package/collection-package/export-import-roundtrip
+description: A collection-only package written by Meguri has Anki's layout and imports in Anki to the same rows.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - observe: [db_dump]
+  - export: {format: colpkg, name: collection.colpkg}
+  - handoff: oracle
+  - observe: [timing]
+  - observe: [{package_listing: {name: collection.colpkg}}]
+  - advance: 1m
+  - import: {format: colpkg, name: collection.colpkg}
+  - observe: [timing]
+  - observe: [db_dump, schema_objects]
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - check_db: {}

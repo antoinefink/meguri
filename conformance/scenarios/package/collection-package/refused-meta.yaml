@@ -1,0 +1,14 @@
+# specs/package/container.md P3, P13; specs/conformance/package-ops.md E2.3;
+# R1597, R1628. A meta version of 4, and an empty meta entry (version 0), are
+# refused as made by a newer version; a meta entry that is not a protobuf
+# message is corrupt. Nothing changes.
+id: package/collection-package/refused-meta
+description: Unknown meta versions are refused as too new, a malformed meta as corrupt, and the collection is unchanged.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - import: {format: colpkg, fixture: package/variants/meta-version-4.colpkg}
+  - import: {format: colpkg, fixture: package/variants/meta-version-0.colpkg}
+  - import: {format: colpkg, fixture: package/variants/meta-not-protobuf.colpkg}
+  - observe: [db_dump]

@@ -1,0 +1,15 @@
+# specs/package/container.md P4, P12; specs/engine/collection-replace.md R3;
+# specs/storage/schema-upgrade.md; R1478 (on the staging copy). A latest-format
+# package whose collection entry holds a schema-11 collection is upgraded to
+# 18 before it replaces the collection, as Anki upgrades it on import.
+id: package/collection-package/upgrade-on-import
+description: A schema-11 collection inside a latest-format package is upgraded and imported.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - import: {format: colpkg, fixture: package/variants/schema-11-inside.colpkg}
+  - observe: [timing]
+  - observe: [db_dump, schema_objects]
+  - db_exec: {sql: "SELECT ver FROM col"}
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}

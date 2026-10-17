@@ -1,0 +1,14 @@
+# specs/package/container.md P2, P4, P13; specs/conformance/package-ops.md
+# E2.3; R1599, R1628. A package without its collection entry, one whose
+# collection entry is not zstd, and a file that is not a zip archive are
+# refused as corrupt. Nothing changes.
+id: package/collection-package/refused-entries
+description: A missing or undecodable collection entry and a non-zip file are refused as corrupt, and the collection is unchanged.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - import: {format: colpkg, fixture: package/variants/no-collection-entry.colpkg}
+  - import: {format: colpkg, fixture: package/variants/collection-not-zstd.colpkg}
+  - import: {format: colpkg, fixture: package/variants/not-a-zip.colpkg}
+  - observe: [db_dump]

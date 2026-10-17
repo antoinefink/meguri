@@ -1,0 +1,14 @@
+# specs/package/container.md P5, P6, P13; specs/conformance/package-ops.md
+# E2.3; R1598. Media maps naming ../x.jpg (a separator) and con.jpg (a name
+# the media file name transform changes), and one with a 19-byte SHA-1, make
+# the package corrupt; no media file is written and nothing changes.
+id: package/collection-package/refused-media-map
+description: Unsafe media names and a short SHA-1 in the media map are refused as corrupt, and the collection is unchanged.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - import: {format: colpkg, fixture: package/variants/media-traversal.colpkg}
+  - import: {format: colpkg, fixture: package/variants/media-unnormalized.colpkg}
+  - import: {format: colpkg, fixture: package/variants/media-sha1-short.colpkg}
+  - observe: [db_dump]

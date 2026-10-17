@@ -688,3 +688,13 @@ deviations:
     scenarios: [sched/data/deck-counters]
     pointer: /steps/19/legacy_json/decks/Parent::Child/lrnToday/1
     transform: {replace: 5}
+  # specs/package/container.md P5: a latest-format package without a media
+  # map imports with no media in Meguri (R1598); Anki 26.9.3 substitutes the
+  # legacy empty map text, fails to decode it as protobuf and refuses.
+  - id: package-latest-missing-media-map
+    requirement: R1598
+    summary: A latest-format collection package with no media entry imports in Meguri with no media; Anki refuses it as corrupt.
+    test: core/crates/meguri-package/tests/collection_package.rs missing_media_map_reads_as_empty
+    scenarios: [package/collection-package/missing-media-map]
+    pointer: /steps/2
+    transform: {replace: {}}

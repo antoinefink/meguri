@@ -512,8 +512,8 @@ h07f221b07463,rust,tag,package,out-of-scope,CSV/text import is excluded; this ca
 h0dfab78112de,rust,tag,package,out-of-scope,"CSV/text export is excluded; this case aligns metadata column numbers with identifier, type, deck, fields and tags.",,done
 h13bd2beaffe5,rust,tag,package,in-scope,U122/U246: package gathering must include valid selected notes with their original record content.,,deferred
 h189770d86c7a,rust,tag,package,out-of-scope,CSV/text export is excluded; this case strips markup when exporting rendered card text without HTML.,,done
-h1b462ab5b1f6,rust,tag,package,in-scope,U124/U246: latest and legacy collection packages must restore notes and identical media bytes into a fresh destination.,,deferred
-h1f2f223fd59f,rust,tag,package,in-scope,"U120/U122/U246: normalize unsafe legacy media names on import, but reject noncanonical names in the newer manifest rather than trusting them.",,deferred
+h1b462ab5b1f6,rust,tag,package,in-scope,U124/U246: latest and legacy collection packages must restore notes and identical media bytes into a fresh destination.,package/collection-package/export-import-roundtrip,deferred
+h1f2f223fd59f,rust,tag,package,in-scope,"U120/U122/U246: normalize unsafe legacy media names on import, but reject noncanonical names in the newer manifest rather than trusting them.",package/collection-package/refused-media-map,deferred
 h2071dec13b10,rust,tag,package,in-scope,U122/U246: exporting a note package to an invalid destination must return an error rather than report success.,,deferred
 h210a9935737d,rust,tag,package,out-of-scope,CSV/text import is excluded; this case builds preview rows from initial data lines and strips preview markup.,,done
 h21c395ca34ed,rust,tag,package,out-of-scope,"CSV/text import is excluded; this case chooses a separator from headers, data, fallback or an explicit override.",,done

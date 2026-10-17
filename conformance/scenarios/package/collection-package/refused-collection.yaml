@@ -1,0 +1,14 @@
+# specs/package/container.md P12, P13; specs/engine/collection-replace.md R3;
+# specs/conformance/package-ops.md E2.3; R1638 (data side), R1479, R2005. A
+# collection that fails the integrity check, and one at schema 12, are refused
+# (Anki reports both as not a valid file; Meguri's SchemaUnsupported is
+# recorded as corrupt). Nothing changes.
+id: package/collection-package/refused-collection
+description: A collection failing the integrity check and a schema-12 collection are refused, and the collection is unchanged.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - import: {format: colpkg, fixture: package/variants/corrupt-page.colpkg}
+  - import: {format: colpkg, fixture: package/variants/schema-12.colpkg}
+  - observe: [db_dump]

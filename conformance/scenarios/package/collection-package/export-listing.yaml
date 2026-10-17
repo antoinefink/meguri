@@ -1,0 +1,14 @@
+# specs/conformance/package-ops.md E1, E3; specs/package/container.md P7, P11.
+# The layout of a collection-only package: four stored entries in Anki's
+# order, meta version 3, and a placeholder at schema 11 in rollback mode with
+# one note and one card that the executor's own open accepts. T0 compares
+# Meguri's package, read by Meguri, with Anki's export read by Anki;
+# export-import-roundtrip has Anki read Meguri's package.
+id: package/collection-package/export-listing
+description: Meguri's collection-only package has the entries, methods, meta version and placeholder of Anki's export.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - export: {format: colpkg, name: collection.colpkg}
+  - observe: [{package_listing: {name: collection.colpkg}}]

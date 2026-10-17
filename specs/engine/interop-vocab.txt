@@ -1,0 +1,12 @@
+# Interface names the engine specs use that are not ordinary words: the
+# collection file and the columns a replacement stamps or checks, and the
+# SQLite pragmas, URI parameter and collation the swap names.
+collection.anki2
+scm
+usn
+journal_mode
+wal_checkpoint
+integrity_check
+immutable
+unicase
+F_FULLFSYNC

@@ -1,0 +1,11 @@
+# specs/conformance/package-ops.md E3, E4; specs/package/container.md P1-P5.
+# The layout of Anki's backup fixture as the executor reads it. Its
+# placeholder is the storage fixture schema-11.anki2 (E4), so its counts are
+# that file's. The collection is opened only because a scenario that reads no
+# collection still needs one unless it starts with open (dsl.md D8).
+id: package/collection-package/backup-listing
+description: The entries, methods, meta version and placeholder of Anki's backup fixture.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [{package_listing: {fixture: package/backup/standard.colpkg}}]

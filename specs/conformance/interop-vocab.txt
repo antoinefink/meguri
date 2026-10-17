@@ -252,3 +252,10 @@ new_cards_ignore_review_limit
 apply_all_parent_limits
 new_today
 review_today
+# package-ops.md (U124a): ops, the observation, its members and the
+# rejection kinds and the package entry names scenarios carry.
+package_listing
+meta_version
+too_new
+apkg_legacy
+anki21b

@@ -1,0 +1,13 @@
+# specs/package/container.md P5; R1598. A latest-format package without a
+# media entry: Anki 26.9.3 refuses it (it decodes the legacy empty map text as
+# protobuf and fails), Meguri imports it with no media. Deviation
+# package-latest-missing-media-map replaces the oracle's rejection; nothing
+# after the import is observed, since the two sides then hold different
+# collections.
+id: package/collection-package/missing-media-map
+description: A latest-format package without a media map is refused by Anki and imported by Meguri.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - import: {format: colpkg, fixture: package/variants/no-media-map.colpkg}
