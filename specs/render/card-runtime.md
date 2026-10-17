@@ -172,7 +172,13 @@ Set on `:root`, the same in both appearances:
 | `--blur` | `20px` |
 | `--focus-color` | `#6366f1` |
 
-One more rule overrides `--focus-color` for elements with class `isMac` that are descendants of the root (in practice `<body>` on Mac, and so everything inside it): selector `:root .isMac`, value `rgba(0 103 244 / 0.247)`.
+`--focus-color` has a second value for the Mac. The base stylesheet declares it, on every platform, for every element with class `isMac` except the document element:
+
+- Elements: only `<body>` carries `isMac`, and only on the Mac (C3.1). So in practice the Mac `<body>` gets the value, and everything inside inherits it unless a rule sets the property on that element itself. `<html>` never gets it, even when a script gives it class `isMac`: it keeps `#6366f1`. A card element that carries class `isMac` itself gets the value on any platform.
+- Value: the exact text `rgba(0 103 244 / 0.247)`. Templates read it as written (C4.1), so do not normalize it.
+- Cascade: the declaration has specificity 0,2,0 and comes after the `:root` tokens. Card styles come later in the page than the base stylesheet. So a card rule that sets `--focus-color` on such an element replaces the value at specificity 0,2,0 or higher (for example `.card.isMac`), and loses below it (for example `.isMac`, `body.isMac`, `html body.isMac`).
+
+This spec does not prescribe the selector. Any selector that matches exactly these elements at this specificity is correct.
 
 `--font-size` is a token only. No rule applies it to the root (C4.5, C15 D2).
 
@@ -522,7 +528,7 @@ The runtime's own tracking listeners do not count as card listeners (C13).
 
 - `command` is converted to a string. It goes to native through the internal channel, with the identity of the page's current side.
 - It returns `false` synchronously, so that `onclick="return pycmd(…)"` cancels the click's default action.
-- When `callback` is a function, it is called exactly once, in a later task, never synchronously, with the single argument `null`. That is the value Anki desktop's bridge delivers for reviewer commands (C19 item 1: R507 says `undefined`). A non-function callback is ignored.
+- When `callback` is a function, it is called exactly once, in a later task, never synchronously, with the single argument `null`, for every command. That is the value Anki desktop's bridge delivers for every reviewer command (C19 item 1, settled: `null`, not R507's `undefined`). A non-function callback is ignored.
 - Native's handling (U67 allowlist, R2038):
 
   | Command | Effect |
@@ -746,6 +752,7 @@ Computed values, light appearance unless stated:
 | BC6 | template `#_flag { right: 50px }`; template `[dir] #_flag { right: 50px }` | 10px; 50px |
 | BC7 | every C4.1 and C4.2 token on `:root`, light and dark | the table text |
 | BC8 | `--focus-color` on `<body>` on Mac, on `<html>` | `rgba(0 103 244 / 0.247)`; `#6366f1` |
+| BC8b | `--focus-color` (C4.2). iPhone: a side `<div class="isMac"><span>x</span></div><p>y</p>`, read on the `div`, the `span` and the `p`; then `<html>` given class `isMac` by script, read on `<html>` and the `p`. Mac, body class `card card1 isMac`: a card rule `{ --focus-color: red }` with selector `.isMac`, `body.isMac`, `html body.isMac` (below 0,2,0), then `.card.isMac`, `html .card.isMac` (0,2,0 and 0,2,1), read on `<body>` | `rgba(0 103 244 / 0.247)` twice, `#6366f1`; `#6366f1` twice. `rgba(0 103 244 / 0.247)` for the first three selectors, `red` for the last two |
 | BC9 | `html` `-webkit-text-size-adjust`; `html` font-family | `100%`; begins with `system-ui` |
 | BC10 | `html` and `body` font-size; an element at `1rem` | 16px |
 | BC11 | `hr` | height 1px, background `rgb(115, 115, 115)` |
@@ -821,9 +828,9 @@ These are the traps the implementer writes into `CardRuntime/AGENTS.md`:
 
 ## C19. Open points
 
-Defaults this spec takes until the owner decides otherwise:
+Defaults this spec takes until the owner decides otherwise, and points the owner has settled:
 
-1. **`pycmd` callback value.** R507 and the U66 test list say the callback gets `undefined`. Anki desktop's bridge delivers `null`, the JSON null of the reviewer's empty reply, and C10.5 follows Anki. If Antoine prefers `undefined`, only C10.5 and case GS5 change.
+1. **`pycmd` callback value: settled, `null`** (Antoine, 2026-10-17). R507 and the U66 test list say the callback gets `undefined`. Antoine chose `undefined` unless the pinned 26.09.3 tag shows that Anki passes `null`. It does. Desktop's bridge sends the command handler's return value back to the page as JSON and parses it before it calls the callback. The reviewer's handler returns no value for any command. The bridge's own paths return none either: `domDone`, `close`, and a command that arrives after the web view or the collection is gone. So the callback always receives `null` (JSON null). The only exception is an add-on that answers the command itself, and Meguri has no add-ons. C10.5 and case GS5 keep `null`, and R507's `undefined` does not apply. The source references are in the spec-side provenance under `oracle/`.
 2. **Root font size.** R486 keeps 16 px "so rem-sized templates render as in Anki", but Anki desktop's reviewer sets the root to 15 px (C15 D2). This spec follows R486's explicit 16 px. If Antoine wants desktop parity, C4.3 adds `html { font-size: var(--font-size) }` and D2 goes away.
 3. **No `window.webkit` in the Mac page world** (C9.3). U67 plans one message handler per world. Under this spec, Meguri's handler is registered only in isolated worlds, plus `cb` in the iOS page world, and page-world traffic goes through the isolated world (C14). U65's S1 record agrees: its confirmation handler is added for Meguri's isolated world only, and the page world cannot reach it.
 4. **Things a hidden page still does** (C8.2, C15 D7): Web Audio, speech synthesis, timers and dialogs (`alert`, `confirm`, `prompt`, U70) started by a pre-rendered question happen before the card is shown. A dialog requested by an unpresented page must not block its settling, or the prepare would never settle. U70 decides how such dialogs are deferred or refused. U175 may decide not to pre-render such cards.
