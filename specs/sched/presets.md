@@ -77,6 +77,7 @@ Some Anki versions let the deck options screen store 0 or NaN. So every read of 
 - Fields without bounds are used as stored: an empty step list, a negative or NaN Auto Advance time, any parameter list.
 - "Every read for use" means scheduling, queue building, counts, the deck options screen, the optimizer, and the schema-11 output that sync and legacy export send to other clients (`model/schema11-json#S13`). Only the schema upgrade reads presets without bounds (`storage/schema-upgrade`).
 - A read never writes. The stored blob keeps its out-of-range values until the preset is written (V8).
+- Only `f32` fields can hold NaN. The integer fields (`new_per_day`, `maximum_review_interval` and the others typed `uint32` in `model/protobuf-records#P6.6`) cannot, and JSON has no NaN. A legacy JSON preset whose `maxIvl` is not a `u32` (`1.5`, `-1`, `"x"`) makes its whole `rev` part invalid, so the part reads as its defaults, `maxIvl` 36500 included (`model/schema11-json#S10.2`), before V3 applies. A stored `new_per_day` of 0 is in range and reads as 0.
 
 Examples (golden `sched/data/preset-bounds`, each preset written as a raw blob first):
 
@@ -129,6 +130,7 @@ An answer then uses the read values: the card data's `dr` is 0.9, 0.7, 0.99 and 
 - **The decay.** 0.1542 when the list is empty (the FSRS-6 default); 0.5 when it has fewer than 21 values; otherwise its 21st value as stored, without the clamp the crate applies inside its model (`sched/fsrs-transitions#T2.1`). Answers write this value into the card data's `decay` (`sched/card-data#K5`), where the format rounds it to 3 places.
 - **Short-term parameters.** U45 needs whether the list allows short-term scheduling: true for an empty list; for a list of 19 or more values, true exactly when its 18th and 19th values are both above 0; false otherwise (a 17-value list).
 - Writes: only `fsrs_params_6` is ever written, by the optimizer (`decks/deck-presets#P10`, U47). The other lists are read-only and survive every write (R1486).
+- **Later lists.** Anki 26.09.3 reads no list after `fsrs_params_6`. A later release may store one as an unknown field 7 or 8 of the blob (the numbers Anki reserves for it, `model/protobuf-records#P6.6`) or as an `fsrsParams7`-style member of `other`. The view keeps both as read (V8, V9) and gives read access to them, so that the next-state engine can refuse such a preset (`sched/fsrs-transitions#T13`, U45, R704). The list used and the decay above ignore them.
 
 | Lists stored | List used | Decay written |
 |---|---|---|

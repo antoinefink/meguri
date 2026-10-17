@@ -18,6 +18,7 @@ scenario under `conformance/scenarios/sched/data/`, recorded with
 | presets V2, V3 | `rslib/src/deckconfig/mod.rs`, `rslib/src/storage/deckconfig/mod.rs`, `rslib/src/sync/collection/changes.rs` | built-in defaults, the read-time bounds and where they apply (every storage read but the schema-16 upgrade, sync included) |
 | presets V4 | `rslib/src/scheduler/answering/mod.rs`, `rslib/src/deckconfig/mod.rs` (enum reads go through the generated getters, which give the 0 variant for an unknown number) | unknown enum numbers acting as 0; values from `model/protobuf-records` P6.6 |
 | presets V6 | `rslib/src/deckconfig/mod.rs`, `rslib/src/scheduler/fsrs/memory_state.rs`, `rslib/src/scheduler/answering/mod.rs` | list precedence, decay by length, short-term parameters check |
+| presets V3 (integer fields), V6 (later lists) | `proto/anki/deck_config.proto`, `rslib/src/deckconfig/schema11.rs` | uint32 field types; numbers 7 and 8 reserved for later parameter lists; an invalid `rev` part falling back to its defaults |
 | presets V7 | `rslib/src/decks/mod.rs`, `rslib/src/scheduler/answering/mod.rs` | deck value over preset value, no bounds on the deck value |
 | presets V8 | `rslib/src/deckconfig/mod.rs`, `rslib/src/deckconfig/update.rs` | writes start from the bounded read; equal configs are not written |
 | presets D2, D3 | `rslib/src/decks/limits.rs`, `rslib/src/deckconfig/update.rs` | today-only, deck and preset limits; clearing a today-only limit |
