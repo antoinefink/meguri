@@ -1,0 +1,64 @@
+# specs/search/grammar.md G1: every White_Space character becomes a space
+# everywhere (inside quotes and raw values too), then the text is trimmed; an
+# empty result is the whole collection (canonical-form.md F2: deck:*).
+# Characters outside White_Space are term characters.
+id: search/lexing/whitespace
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # empty and blank searches
+          - ''
+          - ' '
+          - '   '
+          - "\u0009\u000a"
+          - "\u3000"
+          - "\u00a0 \u0009\u000d\u000a\u2028"
+          # each of the 25 White_Space characters between two terms
+          - "a\u0009b"
+          - "a\u000ab"
+          - "a\u000bb"
+          - "a\u000cb"
+          - "a\u000db"
+          - 'a b'
+          - "a\u0085b"
+          - "a\u00a0b"
+          - "a\u1680b"
+          - "a\u2000b"
+          - "a\u2001b"
+          - "a\u2002b"
+          - "a\u2003b"
+          - "a\u2004b"
+          - "a\u2005b"
+          - "a\u2006b"
+          - "a\u2007b"
+          - "a\u2008b"
+          - "a\u2009b"
+          - "a\u200ab"
+          - "a\u2028b"
+          - "a\u2029b"
+          - "a\u202fb"
+          - "a\u205fb"
+          - "a\u3000b"
+          # runs, leading and trailing whitespace
+          - "a \u00a0\u0009 b"
+          - "\u0009 a\u3000"
+          - "\u3000a\u3000"
+          - '   m2  n   '
+          - "(\u0009a\u000ab\u00a0)"
+          # whitespace inside quotes and raw values
+          - "\"a\u0009b\""
+          - "\"a\u00a0b\""
+          - "\"a\u3000b\""
+          - "\"deck:a\u2028b\""
+          - "re:a\u00a0b"
+          - "re:a\u0009b"
+          - "prop:cds:k=a\u00a0b"
+          # not White_Space: ordinary term characters
+          - "a\u200bb"
+          - "a\ufeffb"
+          - "a\u180eb"
+          - "a\u001fb"
+          - "a\u001cb"
+          - "a\u0000b"
+          - "a\u00adb"

@@ -102,11 +102,12 @@ mkdir -p "$b" && echo "{\"result\": \"Passed\", \"passedTests\": 1, \"failedTest
 echo "xcrun $*" >>"$STUB_LOG"
 a=("$@")
 for ((i = 0; i < ${#a[@]}; i++)); do
-  case "${a[$i]}" in --path) path="${a[$((i + 1))]}" ;; --output-path) out="${a[$((i + 1))]}" ;; esac
+  case "${a[$i]}" in --path) path="${a[$((i + 1))]}" ;; --output-path) out="${a[$((i + 1))]}" ;; --test-id) tid="${a[$((i + 1))]}" ;; esac
 done
 case "$*" in
   "xcresulttool get test-results summary "*) cat "$path/summary.json" ;;
-  "xcresulttool get test-results tests "*) echo "{\"testNodes\": []}" ;;
+  "xcresulttool get test-results tests "*) if [ -f "$path/tests.json" ]; then cat "$path/tests.json"; else echo "{\"testNodes\": []}"; fi ;;
+  "xcresulttool get test-results activities "*) jq -e -c --arg id "$tid" "first(.[] | select(.testIdentifier == \$id))" "$path/activities.json" ;;
   "xcresulttool export attachments "*)
     mkdir -p "$out"
     if [ -d "$path/attachments" ]; then cp -R "$path/attachments/." "$out/"; else echo "[]" >"$out/manifest.json"; fi ;;
@@ -129,8 +130,10 @@ esac'
 # runs ignore every signal; FAKE_VM_IGNORE_TERM=1: they ignore SIGTERM, as a
 # real VM's run never gets the SIGTERM that tools/mg sends the job's process
 # tree when it cancels the job (the fake VM's processes are in that tree).
-# Paths are logged as the VM sees them (without the fake file system's
-# prefix).
+# FAKE_VM_RESULTS=<dir>: a failed run's bundle also has that directory's
+# tests.json and activities.json, which the host's xcrun answers xcresulttool's
+# test list and per-test activities from. Paths are logged as the VM sees
+# them (without the fake file system's prefix).
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
   # pgrep -f and pkill [-9] -f, among this VM's test runs only: never the
@@ -150,10 +153,17 @@ sig=TERM
 pids="$(pgrep -f "${!#}")" || exit 1
 kill -s "$sig" $pids 2>/dev/null
 exit 0'
+  # FAKE_VM_INPUT_DROPPED=1: macOS dropped the input of every run;
+  # FAKE_VM_INPUT_DROPPED_RE: of the runs whose arguments (with the drive
+  # script) match the ERE, as xcodebuild noted them in $FAKE_VM/last-run.
   stub "$FAKE_VM_BIN/log" '
 s="$*"
 echo "vm-log ${s//"$FAKE_VM_FS"/}" >>"$STUB_LOG"
-[ "${FAKE_VM_INPUT_DROPPED:-}" != 1 ] || echo "2026-10-15 12:21:19.336 E  testmanagerd[2194:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."'
+if [ "${FAKE_VM_INPUT_DROPPED:-}" = 1 ] ||
+  { [ -n "${FAKE_VM_INPUT_DROPPED_RE:-}" ] && grep -Eq -- "$FAKE_VM_INPUT_DROPPED_RE" "$FAKE_VM/last-run" 2>/dev/null; }; then
+  echo "2026-10-15 12:21:19.336 E  testmanagerd[2194:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."
+fi'
+  stub "$FAKE_VM_BIN/sw_vers" 'case "$1" in -productVersion) echo "${FAKE_VM_MACOS:-27.0.1}" ;; -buildVersion) echo "${FAKE_VM_MACOS_BUILD:-26A434}" ;; *) exit 1 ;; esac'
   stub "$FAKE_VM_BIN/stat" '
 if [ "$*" = "-f %Su /dev/console" ]; then
   n=$(($(cat "$FAKE_VM/console.calls" 2>/dev/null || echo 0) + 1))
@@ -166,6 +176,8 @@ exec '"$(command -v stat)"' "$@"'
 unmap() { local s="$*"; printf "%s" "${s//"$FAKE_VM_FS"/}"; }
 if [ "${1:-}" = -version ]; then printf "Xcode 27.0\nBuild version 27A266a\n"; exit 0; fi
 echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
+what="$(unmap "$@") ${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}"
+printf "%s\n" "$what" >"$FAKE_VM/last-run"
 other="$(pgrep -f "xcodebuild[ ]test-without-building")" && echo "vm-overlap with $other" >>"$STUB_LOG"
 echo "$$" >>"$FAKE_VM/tests.pids"
 [ "${FAKE_VM_IGNORE_TERM:-}" != 1 ] || trap "" TERM
@@ -175,7 +187,7 @@ while [ $# -gt 0 ]; do
   case "$1" in -xctestrun) run="$2" && shift 2 ;; -resultBundlePath) bundle="$2" && shift 2 ;; *) shift ;; esac
 done
 products="$(dirname "$run")"
-app="$products/Debug/Meguri.app/Contents/Info.plist"
+app="$products/$(sed -n "s|.*__TESTROOT__/\([^/]*\)/.*|\1|p" "$run" 2>/dev/null | head -n 1)/Meguri.app/Contents/Info.plist"
 [ -f "$run" ] && [ -f "$app" ] || { echo "xcodebuild: error: no test products at $(unmap "$products")"; exit 70; }
 echo "vm-products $(unmap "$products") $(cat "$app")" >>"$STUB_LOG"
 if [ -n "${FAKE_VM_XCODEBUILD_UNTIL:-}" ]; then
@@ -193,10 +205,13 @@ if [ -n "${FAKE_VM_SSH_DROP:-}" ] && [ ! -e "$FAKE_VM/ssh-dropped" ]; then
   exit 0
 fi
 rc="${FAKE_VM_XCODEBUILD_RC:-0}"
+# FAKE_VM_FAIL_RE: the runs whose arguments (with the drive script) match fail.
+[ -z "${FAKE_VM_FAIL_RE:-}" ] || ! printf "%s\n" "$what" | grep -Eq -- "$FAKE_VM_FAIL_RE" || rc=65
 [ "${FAKE_VM_NO_BUNDLE:-}" != 1 ] || { echo "** TEST SUCCEEDED **"; exit 0; }
 mkdir -p "$bundle"
 jq -n --argjson f "$([ "$rc" = 0 ] && echo 0 || echo 1)" \
   "{result: (if \$f == 0 then \"Passed\" else \"Failed\" end), passedTests: 11, failedTests: \$f, skippedTests: 1}" >"$bundle/summary.json"
+[ "$rc" = 0 ] || [ -z "${FAKE_VM_RESULTS:-}" ] || cp "$FAKE_VM_RESULTS/tests.json" "$FAKE_VM_RESULTS/activities.json" "$bundle/"
 if [ -n "${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}" ]; then
   [ -f "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT" ] || { echo "AgentDriverTests: no drive script at $(unmap "$TEST_RUNNER_MEGURI_DRIVE_SCRIPT")"; exit 65; }
   att="$bundle/attachments"
@@ -234,7 +249,7 @@ mg_app_build() {
   local p="$MG_ROOT/build/app/DerivedData/Build/Products"
   mkdir -p "$p/$2/Meguri.app/Contents" "$p/$2/MeguriUITests-Runner.app"
   printf 'built from %s\n' "$MG_ROOT" >"$p/$2/Meguri.app/Contents/Info.plist"
-  printf '<plist><string>__TESTROOT__/%s/MeguriUITests-Runner.app</string></plist>\n' "$2" >"$p/Meguri_UI_macosx27.0-arm64.xctestrun"
+  printf '<plist><string>__TESTROOT__/%s/MeguriUITests-Runner.app</string></plist>\n' "$2" >"$p/${4:-Meguri}_${3:-UI}_macosx27.0-arm64.xctestrun"
 }
 fx_host() { case "$1" in /work/*) printf '%s\n' "$MG_ROOT/${1#/work/}" ;; *) printf '%s\n' "$1" ;; esac; }
 mg_image_tools() {
@@ -341,6 +356,17 @@ vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebui
   [ "$(field '.summary | "\(.passed) \(.skipped)"')" = "11 1" ]
   [ "$(field .details.platform)" = mac ]
   called "^vm-xcodebuild test-without-building .* -only-testing:MeguriUITests/AccessibilityHelperTests\$"
+  not_called "^host-xcodebuild"
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
+}
+
+@test "ui-test --platform mac runs the named suites in the VM" {
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.mac_runner)" = vm ]
+  [ "$(field .details.platform)" = mac ]
+  called "^vm-xcodebuild test-without-building .* -only-testing:MeguriUITests/NavigationLayoutTests\$"
   not_called "^host-xcodebuild"
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
@@ -482,19 +508,144 @@ vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebui
   [ -f "$(vm_fs meguri-mac "$SB/tools/drive-scripts/examples/sample-routes.json")" ]
 }
 
-@test "the VM's log showing the Recap playback timeout makes the run blocked (mac-input), not failed" {
+# bats test_tags=gate
+@test "the VM's log showing the Recap playback timeout queues the run (mac-input) and records the VM's macOS and Xcode" {
   FAKE_VM_INPUT_DROPPED=1 mg mac-ui --suite test-hooks
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "blocked-mac-input suite/test-hooks" ]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-input test-hooks" ]
   [ "$(field .details.blocked)" = mac-input ]
   [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
   called "^vm-log show --style compact --start [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} --predicate process == \"testmanagerd\" AND eventMessage CONTAINS \"Recap playback\"\$"
   not_called "^host-log"
+  # Where it was seen, for doctor: the runner and its macOS and Xcode builds,
+  # beside the leases that every checkout shares.
+  local seen
+  seen="$(dirname "$MEGURI_HOST_LEASE_DIR")/mac-input.json"
+  [ "$(jq -r '"\(.runner) \(.vm) \(.macos) \(.macos_build) \(.xcode) \(.job)"' "$seen")" = "vm meguri-mac 27.0.1 26A434 27.0 (27A266a) mac-ui" ]
+  [ "$(jq -r .run_id "$seen")" = "$(field .run_id)" ]
 
   # The same run with the input delivered passes.
   mg mac-ui --suite test-hooks
   [ "$(field .status)" = pass ]
+}
+
+# bats test_tags=gate
+@test "mac-ui with 4 suites passed and 3 blocked by mac-input is queued naming the 3; with 1 failed and 2 blocked it fails (U19b)" {
+  FAKE_VM_INPUT_DROPPED_RE='TestHooksTests|open-sample-sheet|sample-transition' mg mac-ui
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "7 4 0 3 0" ]
+  [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "test-hooks drive-open-sample-sheet drive-sample-transition" ]
+  [ "$(field '[.details.queued_parts[] | .user_step] | unique | join(" ")')" = mac-input ]
+  [ "$(field '.failures | length')" = 0 ]
+  [[ "$(field .message)" == *"4 passed"*"3 of 7 suite(s) queued"*"test-hooks, drive-open-sample-sheet, drive-sample-transition"* ]]
+
+  FAKE_VM_INPUT_DROPPED_RE='open-sample-sheet|sample-transition' FAKE_VM_FAIL_RE='TestHooksTests' mg mac-ui
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued)"')" = "7 4 1 2" ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "suite/test-hooks" ]
+  [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "drive-open-sample-sheet drive-sample-transition" ]
+}
+
+# test_results <dir> <class> <case>...: what a failed run of <class> holds,
+# for FAKE_VM_RESULTS: xcresulttool's test list and each failing test's
+# activities, shaped as xcresulttool gives them (a failure record with an
+# untimed child). free: <class>/testChecksWithoutInput() fails without
+# synthesizing input; tap: <class>/testTapsCancel() fails after its tap's
+# synthesized event; early: the same test fails before its tap.
+test_results() {
+  local dir="$1" class="$2" c id nodes='[]' acts='[]'
+  shift 2
+  mkdir -p "$dir"
+  for c in "$@"; do
+    case "$c" in
+      free) id="$class/testChecksWithoutInput()" ;;
+      *) id="$class/testTapsCancel()" ;;
+    esac
+    nodes="$(jq -c --arg id "$id" --arg m "made-up $c failure" \
+      '. + [{nodeType: "Test Case", nodeIdentifier: $id, result: "Failed", children: [{nodeType: "Failure Message", name: $m}]}]' <<<"$nodes")"
+    acts="$(jq -c --arg id "$id" --arg c "$c" --arg m "made-up $c failure" '
+      def act($t; $s): {title: $t, startTime: $s, isAssociatedWithFailure: false, activityType: "com.apple.dt.xctest.activity-type.internal"};
+      def failure($s): {title: $m, startTime: $s, isAssociatedWithFailure: true, childActivities: [{title: "", isAssociatedWithFailure: false}]};
+      def tap: act("Tap \"Cancel\" Button"; 200) + {childActivities: [act("Find the \"Cancel\" Button"; 200.1), act("Synthesize event"; 200.5)]};
+      . + [{testIdentifier: $id, testRuns: [{activities: ([act("Start Test"; 100), act("Open com.antoinefink.meguri.dev"; 100.2)]
+        + (if $c == "free" then [failure(101)] elif $c == "tap" then [tap, act("Waiting 5.0s for Sheet to not exist"; 205.6), failure(210)]
+           else [failure(150), tap] end))}]}]' <<<"$acts")"
+  done
+  jq -n --arg class "$class" --argjson n "$nodes" '{testNodes: [{nodeType: "Unit test bundle", name: "MeguriUITests", children: [
+    {nodeType: "Test Suite", name: $class, children: ($n + [{nodeType: "Test Case", nodeIdentifier: "\($class)/testPasses()", result: "Passed"}])}]}]}' \
+    >"$dir/tests.json"
+  printf '%s\n' "$acts" >"$dir/activities.json"
+}
+
+# bats test_tags=gate
+@test "a suite whose input macOS dropped still fails on a test the drop does not explain; one the drop explains entirely is queued (U19b)" {
+  local r="$BATS_TEST_TMPDIR/results"
+  export FAKE_VM_INPUT_DROPPED=1 FAKE_VM_FAIL_RE=TestHooksTests FAKE_VM_RESULTS="$r"
+
+  # A check without input failed, and another test's tap timed out: the
+  # check's failure is the app's; the tap's is not recorded.
+  test_results "$r" TestHooksTests free tap
+  mg mac-ui --suite test-hooks
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-hooks/TestHooksTests/testChecksWithoutInput() suite/test-hooks" ]
+  [ "$(field '.failures[0].message')" = "made-up free failure (failed before or without the input macOS dropped)" ]
+  [ "$(field '.summary | "\(.failed) \(.queued)"')" = "1 0" ]
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+
+  # Only the tap's test failed, after its dropped input: queued.
+  test_results "$r" TestHooksTests tap
+  mg mac-ui --suite test-hooks
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.summary | "\(.failed) \(.queued)"')" = "0 1" ]
+
+  # The same test failing before its first synthesized event: the app's.
+  test_results "$r" TestHooksTests early
+  mg mac-ui --suite test-hooks
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-hooks/TestHooksTests/testTapsCancel() suite/test-hooks" ]
+
+  # A failed run whose bundle lists no failing test.
+  FAKE_VM_RESULTS="" mg mac-ui --suite test-hooks
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test-hooks/xcresult suite/test-hooks" ]
+
+  # The Mac's accessibility suites and performance tests judge their failing
+  # tests the same way.
+  export FAKE_VM_FAIL_RE='AccessibilityHelperTests|SmokePerfTests'
+  test_results "$r" AccessibilityHelperTests free tap
+  mg a11y --platform mac
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/AccessibilityHelperTests/testChecksWithoutInput()" ]
+  [ "$(field .details.queued)" = false ]
+  test_results "$r" AccessibilityHelperTests tap
+  mg a11y --platform mac
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field '.failures | length')" = 0 ]
+
+  test_results "$r" SmokePerfTests free tap
+  mg perf-ui --platform mac --suite SmokePerfTests
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/SmokePerfTests/testChecksWithoutInput()" ]
+  test_results "$r" SmokePerfTests tap
+  mg perf-ui --platform mac --suite SmokePerfTests
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
 }
 
 @test "a failing suite in the VM is a test failure, not an error" {

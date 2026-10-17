@@ -47,18 +47,25 @@ enum TouchTargets {
 
     /// Interactive elements of the hierarchy, in hierarchy order, that lie
     /// in `visible` (elements scrolled away are measured when on screen).
-    /// The Mac window's own close, minimize and full-screen buttons
-    /// (`_XCUI:` identifiers) are the system's, not the app's.
+    /// Left out as the system's, not the app's: the Mac window's own close,
+    /// minimize and full-screen buttons (`_XCUI:` identifiers), and buttons
+    /// without an identifier in a navigation bar, which the system adds and
+    /// sizes (the split view's sidebar toggle, back buttons: their frame is
+    /// the glass circle, not their hit region). Every control the app adds
+    /// carries an identifier (R1964), so the app's own bar buttons are
+    /// measured.
     static func elements(of snapshot: any XCUIElementSnapshot, visible: CGRect) -> [Element] {
         var result: [Element] = []
-        func walk(_ node: any XCUIElementSnapshot) {
+        func walk(_ node: any XCUIElementSnapshot, inNavigationBar: Bool) {
+            let systemBarButton = inNavigationBar && node.identifier.isEmpty
             if interactiveTypes.contains(node.elementType), node.frame.intersects(visible), !node.frame.isEmpty,
-               !node.identifier.hasPrefix("_XCUI:") {
+               !node.identifier.hasPrefix("_XCUI:"), !systemBarButton {
                 result.append(Element(identifier: node.identifier, label: node.label, type: node.elementType, frame: node.frame))
             }
-            node.children.forEach(walk)
+            let inBar = inNavigationBar || node.elementType == .navigationBar
+            node.children.forEach { walk($0, inNavigationBar: inBar) }
         }
-        walk(snapshot)
+        walk(snapshot, inNavigationBar: false)
         return result
     }
 

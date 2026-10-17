@@ -51,6 +51,31 @@ services:
       CARGO_TARGET_DIR: /cargo-target
       TMPDIR: /tmp
 
+  # The private collection vault (U15, R1938, R1939): `tools/mg private`
+  # runs meguri-cli here, as the dev service built it (the target volume,
+  # read-only), with the user's collection added for the run as a read-only
+  # mount at /vault. No network, so nothing in it can send the collection
+  # anywhere, and local-data/ of the checkout is hidden behind an empty
+  # tmpfs: /vault is the only way to it. Copies go to build/private/.
+  private:
+    build:
+      context: ..
+      dockerfile: docker/dev.Dockerfile
+      target: dev
+    pull_policy: build
+    init: true
+    network_mode: none
+    working_dir: /work
+    volumes:
+      - ..:/work
+      - cargo-target:/cargo-target:ro
+    tmpfs:
+      - /tmp:exec,mode=1777
+      - /work/local-data:mode=0700
+    environment:
+      CARGO_TARGET_DIR: /cargo-target
+      TMPDIR: /tmp
+
   # The Anki oracle (oracle/, AGPL quarantine). `tools/mg oracle build` sets
   # MEGURI_ORACLE_TAG (<anki version>-<hash of the image inputs>) and builds it;
   # `tools/mg oracle bump` points MEGURI_ORACLE_CONTEXT at a staging copy.

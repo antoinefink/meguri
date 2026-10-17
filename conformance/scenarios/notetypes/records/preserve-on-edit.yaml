@@ -1,0 +1,53 @@
+# A styling change keeps every value of the note type Meguri does not show
+# (specs/notetypes/records.md N1, N3.2; specs/model/protobuf-records.md P4,
+# P8): LaTeX header, footer and SVG option, original id, an add-on key in
+# `other`, field and template options and browser formats. Unknown protobuf
+# fields, appended here to the note type's, its first field's and its first
+# template's config, survive in Meguri and are dropped by Anki (deviation
+# notetype-unknown-fields-kept): step 7 asks whether each blob still ends with
+# its unknown field (field numbers 300, 50 and 40 are the highest of their
+# message, so P4 writes them last).
+id: notetypes/records/preserve-on-edit
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Keep
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - legacy_update:
+      notetype: Keep
+      patch:
+        latexPre: "% keep pre\n"
+        latexPost: "% keep post"
+        latexsvg: true
+        originalId: 4242
+        addonKey: kept
+        flds:
+          - {name: Front, ord: 0, sticky: true, rtl: false, font: Arial, size: 22, description: "the word", plainText: false, collapsed: true, excludeFromSearch: false, id: 7001}
+          - {name: Back, ord: 1, sticky: false, rtl: true, font: Georgia, size: 18, description: "", plainText: true, collapsed: false, excludeFromSearch: true, id: 7002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", bqfmt: "{{Front}} (b)", bafmt: "{{Back}} (b)", bfont: Arial, bsize: 12, id: 8001}
+  - db_exec: {sql: "UPDATE notetypes SET config = CAST(config || X'E01201' AS BLOB) WHERE name = 'Keep'"}
+  - db_exec:
+      sql: >-
+        UPDATE fields SET config = CAST(config || X'9203017A' AS BLOB)
+        WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Keep') AND ord = 0
+  - db_exec:
+      sql: >-
+        UPDATE templates SET config = CAST(config || X'C00205' AS BLOB)
+        WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Keep') AND ord = 0
+  - observe:
+      - {blob_decode: {notetypes: [Keep]}}
+  - advance: 1h
+  - update_notetype: {notetype: Keep, edits: [{css: ".card { color: teal; }"}]}
+  # step 7: deviation notetype-unknown-fields-kept
+  - db_exec:
+      sql: >-
+        SELECT hex(n.config) LIKE '%E01201', hex(f.config) LIKE '%9203017A', hex(t.config) LIKE '%C00205'
+        FROM notetypes n JOIN fields f ON f.ntid = n.id AND f.ord = 0
+        JOIN templates t ON t.ntid = n.id AND t.ord = 0 WHERE n.name = 'Keep'
+  - db_exec: {sql: "SELECT mtime_secs, usn FROM notetypes WHERE name = 'Keep'"}
+  - observe:
+      - {legacy_json: {notetypes: [Keep]}}

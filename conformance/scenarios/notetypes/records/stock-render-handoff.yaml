@@ -1,0 +1,35 @@
+# Live (T1): Anki renders notes of every stock kind on the note types Meguri
+# wrote (specs/notetypes/stock-kinds.md K5, K7, K9; plan U29 T1). Meguri's
+# segment is empty: it makes its own new collection with the six stock kinds
+# (K2; specs/conformance/notetype-ops.md T10.2) and hands it over at once.
+# The oracle adds one note of each kind by its stored name, reports each
+# card's review render status (specs/conformance/render-ops.md Q4: status
+# only, since Meguri's template text differs from Anki's by design, R908),
+# the cards each kind generated, and runs Check Database. The golden is the
+# oracle running both segments on its own stock kinds, so the chain passes
+# only when Anki renders Meguri's templates as it renders its own.
+# notetypes/records/stock-handoff is the variant where Meguri adds the notes.
+id: notetypes/records/stock-render-handoff
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - handoff: oracle
+  - add_note: {notetype: Basic, fields: [sun, sol]}
+  - add_note: {notetype: Basic (and reversed card), fields: [moon, luna]}
+  - add_note: {notetype: Basic (optional reversed card), fields: [star, stella, "y"]}
+  - add_note: {notetype: Basic (type in the answer), fields: [tree, arbor]}
+  - add_note: {notetype: Cloze, fields: ["{{c1::Paris}} is in {{c2::France}}", capital]}
+  - add_note:
+      notetype: Image Occlusion
+      fields:
+        - >-
+          {{c1::image-occlusion:rect:left=.1:top=.2:width=.3:height=.1:oi=1}}<br>{{c2::image-occlusion:ellipse:left=.5:top=.5:width=.2:height=.2:oi=1}}
+        - '<img src="stock-render-map.png">'
+        - Rivers
+        - delta
+        - drawn by hand
+  - observe: [render_status]
+  - db_exec:
+      sql: >-
+        SELECT nt.name, c.ord FROM cards c JOIN notes n ON n.id = c.nid
+        JOIN notetypes nt ON nt.id = n.mid ORDER BY n.id, c.ord
+  - check_db: {}

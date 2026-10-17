@@ -6,7 +6,8 @@
   python -m driver.harness diff-report --old DIR --new DIR --report FILE [--markdown FILE]
   python -m driver.harness hash FILE...
   python -m driver.harness check --dir DIR --label TEXT --out DIR [--now INSTANT] [--tz ZONE]
-                                 [--deck NAME]... [--render-note ID]...
+                                 [--deck NAME]... [--render-note ID]... [--schedule]
+  python -m driver.harness time --dir DIR --out DIR [--now INSTANT] [--tz ZONE] [--op NAME]... [--repeat N]
   python -m driver.harness record-apple  --scenarios DIR --goldens DIR --overlays DIR --pin FILE
                                          [--filter F]... [--jobs N] [--report FILE]
   python -m driver.harness compare-apple --scenarios DIR --goldens DIR --overlays DIR --pin FILE
@@ -35,10 +36,16 @@ deletes an overlay that no longer differs, and lists entries outside the
 fp-libm-boundary class (F8), which fail the scenario. compare-apple compares a
 native run with the golden plus its overlay, exactly.
 
-`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9)
+`check` (tools/mg oracle check, specs/conformance/collection-check.md K1-K9, K11)
 derives the clock and zone from the directory's manifest when they are not
 given, starts one worker in that zone and writes the report to <out>/check.json
 (exit 0), or {kind, detail} to <out>/check-error.json (exit 1) with a K7 kind.
+
+`time` (tools/mg oracle time, specs/conformance/timed-operations.md T1, T7-T9)
+derives the clock and zone as `check` does, starts one timing worker (its
+clock file written at that instant before it starts, ORACLE_CLOCK_CACHE=1)
+and writes the report to <out>/timing.json (exit 0), or {kind, detail} to
+<out>/timing-error.json (exit 1) with a T8 kind.
 """
 
 from __future__ import annotations
@@ -63,7 +70,9 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from . import overlay as ov
+from . import timed_catalogue
 from .canon import SCENARIO_SUFFIXES, ScenarioFormatError, golden_text, load_scenario_file, scenario_sha256
+from .clock import write_epoch
 from .errors import install_excepthook
 
 ORACLE_HOME = Path(os.environ.get("ORACLE_HOME", Path(__file__).resolve().parent.parent))
@@ -87,12 +96,18 @@ class WorkerProcess:
     _seq = 0
     _lock = threading.Lock()
 
-    def __init__(self, tz: str, scratch_root: str | None = None, extra_env: dict | None = None) -> None:
+    def __init__(
+        self, tz: str, scratch_root: str | None = None, extra_env: dict | None = None, clock: int | None = None
+    ) -> None:
+        """clock: epoch seconds written to the worker's clock file before it
+        starts (a timing worker reads it once, timed-operations.md T2.3)."""
         with WorkerProcess._lock:
             WorkerProcess._seq += 1
             n = WorkerProcess._seq
         root = scratch_root or os.environ.get("ORACLE_SCRATCH_ROOT") or tempfile.gettempdir()
         self.scratch = tempfile.mkdtemp(prefix=f"w{n}-", dir=root)
+        if clock is not None:
+            write_epoch(os.path.join(self.scratch, "clock"), clock)
         env = dict(os.environ, TZ=tz, ORACLE_SCRATCH=self.scratch, **(extra_env or {}))
         self.tz = tz
         self.proc = subprocess.Popen(
@@ -798,7 +813,10 @@ def cmd_check(args) -> int:
         notes = [parse_note_id(text) for text in args.render_note or []]
     except CheckUsage as exc:
         return _check_error(out, "usage", str(exc))
-    request = {"cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes}
+    request = {
+        "cmd": "check", "dir": str(directory), "now": now, "decks": args.deck or [], "render_notes": notes,
+        "schedule": args.schedule,
+    }
     try:
         with WorkerProcess(tz) as worker:
             resp = worker.request(request)
@@ -812,6 +830,69 @@ def cmd_check(args) -> int:
     report = {"report_version": 1, "oracle": {k: hello[k] for k in ORACLE_KEYS}, "dir": args.label, **resp["check"]}
     _write_atomic(out / "check.json", golden_text(report))
     print(f"harness: check done in {resp.get('elapsed_ms')} ms in the worker", file=sys.stderr)
+    return 0
+
+
+# --- time (specs/conformance/timed-operations.md) --------------------------------
+
+TIME_ERROR_KINDS = ("usage", "no_collection", "open_failed", "clock_unsupported", "oracle_error")
+
+
+def time_operations(names: list[str] | None) -> list[str]:
+    """T1: --op names in catalogue order, every operation by default."""
+    unknown = sorted(set(names or []) - set(timed_catalogue.OPERATIONS))
+    if unknown:
+        raise CheckUsage(f"--op {unknown[0]!r} is not an operation of timed-operations.md T6")
+    return timed_catalogue.in_catalogue_order(names) if names else list(timed_catalogue.OPERATIONS)
+
+
+def time_repeat(text: str | None) -> int:
+    low, high = timed_catalogue.REPEAT_MIN, timed_catalogue.REPEAT_MAX
+    if text is None:
+        return timed_catalogue.REPEAT_DEFAULT
+    if not re.fullmatch(r"[0-9]+", text) or not low <= int(text) <= high:
+        raise CheckUsage(f"--repeat {text!r} is not an integer from {low} to {high}")
+    return int(text)
+
+
+def _time_error(out: Path, kind: str, detail: str) -> int:
+    _write_atomic(out / "timing-error.json", json.dumps({"detail": detail, "kind": kind}, sort_keys=True) + "\n")
+    print(f"harness: time {kind}: {detail}", file=sys.stderr)
+    return 1
+
+
+def cmd_time(args) -> int:
+    out, directory = Path(args.out), Path(args.dir)
+    if not (directory / "collection.anki2").is_file():
+        return _time_error(out, "no_collection", "the directory holds no collection.anki2")
+    try:
+        now, tz = check_defaults(directory, args.now, args.tz)
+        ops = time_operations(args.op)
+        repeat = time_repeat(args.repeat)
+    except CheckUsage as exc:
+        return _time_error(out, "usage", str(exc))
+    request = {"cmd": "time", "dir": str(directory), "now": now, "ops": ops, "repeat": repeat}
+    try:
+        with WorkerProcess(tz, extra_env={"ORACLE_CLOCK_CACHE": "1"}, clock=now) as worker:
+            hello = worker.hello
+            if hello.get("time_control") != "faketime":
+                return _time_error(out, "clock_unsupported", "the worker runs on the real clock (time_control none)")
+            resp = worker.request(request)
+    except WorkerDied as exc:
+        return _time_error(out, "oracle_error", str(exc))
+    if not resp.get("ok"):
+        error = resp.get("error") or {}
+        kind = error.get("kind") if error.get("kind") in ("no_collection", "open_failed") else "oracle_error"
+        return _time_error(out, kind, json.dumps(error, sort_keys=True))
+    report = {
+        "report_version": 1,
+        "side": "anki",
+        "platform": hello["platform"],
+        "oracle": {k: hello[k] for k in ORACLE_KEYS},
+        **resp["timing"],
+    }
+    _write_atomic(out / "timing.json", golden_text(report))
+    print(f"harness: time done in {resp.get('elapsed_ms')} ms in the worker", file=sys.stderr)
     return 0
 
 
@@ -849,12 +930,20 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--tz")
     c.add_argument("--deck", action="append")
     c.add_argument("--render-note", action="append")
+    c.add_argument("--schedule", action="store_true")
+    t = sub.add_parser("time")
+    t.add_argument("--dir", required=True)
+    t.add_argument("--out", required=True)
+    t.add_argument("--now")
+    t.add_argument("--tz")
+    t.add_argument("--op", action="append")
+    t.add_argument("--repeat")
     args = p.parse_args(argv)
     if getattr(args, "jobs", 1) < 1:
         p.error("--jobs must be at least 1")
     return {
         "record": cmd_record, "compare": cmd_compare, "diff-report": cmd_diff_report, "hash": cmd_hash,
-        "check": cmd_check, "record-apple": cmd_record_apple, "compare-apple": cmd_compare_apple,
+        "check": cmd_check, "record-apple": cmd_record_apple, "compare-apple": cmd_compare_apple, "time": cmd_time,
     }[args.command](args)
 
 

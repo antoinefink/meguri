@@ -1,0 +1,142 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "w:3:30"
+          },
+          {
+            "text": "a:b:c"
+          },
+          {
+            "text": "a::"
+          },
+          {
+            "text": "rid:1:2"
+          },
+          {
+            "text": "leaf:ve:in"
+          },
+          {
+            "text": "leaf:ve:in"
+          },
+          {
+            "text": "leaf:ve:in"
+          },
+          {
+            "text": "tag:a::b"
+          },
+          {
+            "text": "deck:a::b"
+          },
+          {
+            "text": "\\::x"
+          },
+          {
+            "text": "de\\:ck:x"
+          },
+          {
+            "text": "a\\:b:c"
+          },
+          {
+            "text": "deck\\:x"
+          },
+          {
+            "text": "3\\:30"
+          },
+          {
+            "text": "f:re:x"
+          },
+          {
+            "text": "f:nc:x"
+          },
+          {
+            "text": "f:re\\:x"
+          },
+          {
+            "text": "f:nc\\:x"
+          },
+          {
+            "text": "f:RE:x"
+          },
+          {
+            "text": "tag:re:x"
+          },
+          {
+            "text": "tag:nc:x"
+          },
+          {
+            "text": "tag:re\\:x"
+          },
+          {
+            "text": "tag:NC:x"
+          },
+          {
+            "text": "\"-f:x\""
+          },
+          {
+            "text": "f*:x"
+          },
+          {
+            "text": "*:x"
+          },
+          {
+            "text": "_*:x"
+          },
+          {
+            "text": "or:x"
+          },
+          {
+            "text": "AND:x"
+          },
+          {
+            "text": "not:x"
+          },
+          {
+            "text": "has-cd:x"
+          },
+          {
+            "text": "has-cd:x"
+          },
+          {
+            "text": "\"f(x):y\""
+          },
+          {
+            "text": "f\\\"x:y"
+          },
+          {
+            "text": "f:"
+          },
+          {
+            "text": "f:"
+          },
+          {
+            "text": "f:re:"
+          },
+          {
+            "text": "f:nc:"
+          },
+          {
+            "text": "tag:re:"
+          },
+          {
+            "text": "tag:nc:"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/lexing/colons",
+  "scenario_sha256": "b160ce217585aa0f97f3dbf252862e36abb258d23a419ace1532239b9449fb5f",
+  "tz": "UTC"
+}

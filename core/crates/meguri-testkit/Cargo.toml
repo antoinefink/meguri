@@ -11,6 +11,10 @@ publish.workspace = true
 # histories, and its seeded ChaCha streams (both parity pins).
 fsrs.workspace = true
 granit-parser.workspace = true
+# The anonymizer (U15, specs/fixtures/anonymizer.md): H3's entity grammar,
+# judged at one position (A5.3), and A5.1's character classes (both parity
+# pins, as meguri-text uses them).
+htmlescape.workspace = true
 # Benchmarks (U12): per-operation samples (bench::timing).
 hdrhistogram.workspace = true
 jiff.workspace = true
@@ -21,15 +25,32 @@ meguri-engine = { workspace = true, features = ["test-hooks"] }
 meguri-model = { workspace = true, features = ["test-hooks"] }
 # The scheduler area's adapters (exec/sched.rs): fsrs_next and the fuzz table.
 meguri-sched.workspace = true
+# The search area's `search` and `canonical_search` observations (exec/search.rs).
+# test-hooks: Plan::build_with for meguri-search's own tests, which get it
+# through this crate in a plain workspace run.
+meguri-search = { workspace = true, features = ["test-hooks"] }
 # test-hooks: the raw SQL of db_exec and db_dump, and the storage fault points.
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 # The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
-meguri-sync = { workspace = true, features = ["test-hooks"] }
+# ankiweb: every test build has the AnkiWeb rules, with the stand-in names of
+# specs/sync/transport.md T12 (core-lint's scan build checks the build
+# without them).
+meguri-sync = { workspace = true, features = ["ankiweb", "test-hooks"] }
 # The render area's `template` observation (exec/render.rs).
 meguri-template.workspace = true
 meguri-text.workspace = true
+# statvfs: the private vault refuses a source that is not on a read-only
+# mount (U15, R1938); on Apple hosts also the process footprint
+# (phys_footprint) that bench::memory samples (R1864).
+libc.workspace = true
 rand.workspace = true
+# The sync stub's certificates: a test root and leaves for `.test` names
+# (sync_stub, transport.md T13).
+rcgen.workspace = true
+regex.workspace = true
+# The sync stub's TLS server side, on the provider reqwest uses.
+rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:
@@ -40,11 +61,8 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 # The session directory of a scenario that opens a collection.
 tempfile.workspace = true
-
-# The process footprint (phys_footprint) that bench::memory samples on Apple
-# hosts (R1864).
-[target.'cfg(target_vendor = "apple")'.dependencies]
-libc.workspace = true
+# The sync stub's bodies (zstd, transport.md T5, T6).
+zstd.workspace = true
 
 [dev-dependencies]
 # Wall-clock suites (benches/*.rs) and the harness tests that drive them.

@@ -1,0 +1,37 @@
+
+/* Image Occlusion: the masks' colours, which the occlusion runtime reads
+   from the canvas's computed style, for light and dark appearance. */
+#image-occlusion-canvas {
+  --inactive-shape-color: #f6c86b;
+  --active-shape-color: #ef7a5d;
+  --highlight-shape-color: rgba(239, 122, 93, 0.35);
+  --inactive-shape-border: 1px #8a5a00;
+  --active-shape-border: 1px #8f2b14;
+  --highlight-shape-border: 1px #8f2b14;
+}
+
+.nightMode #image-occlusion-canvas {
+  --inactive-shape-color: #a8781c;
+  --active-shape-color: #c4553b;
+  --highlight-shape-color: rgba(196, 85, 59, 0.4);
+  --inactive-shape-border: 1px #f6d79a;
+  --active-shape-border: 1px #ffc2b0;
+  --highlight-shape-border: 1px #ffc2b0;
+}
+
+.card .occlusion-title {
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+
+.card .occlusion-trouble {
+  color: #b3261e;
+}
+
+.nightMode .occlusion-trouble {
+  color: #f2b8b5;
+}
+
+.card .occlusion-controls {
+  margin: 0.6em 0;
+}
