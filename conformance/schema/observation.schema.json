@@ -717,6 +717,30 @@
             "flagLabels": true
           }
         },
+        "force_backup": {
+          "description": "specs/conformance/backup-ops.md F3: the file name of the new backup.",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string", "pattern": "^backup-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}\\.[0-9]{2}\\.[0-9]{2}\\.colpkg$" } }
+        },
+        "backup_files": {
+          "description": "backup-ops.md F5: the regular files of the backups folder, sorted by their UTF-8 bytes.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "backup_settings": {
+          "description": "backup-ops.md F6: the backup limits as read now, defaults included.",
+          "type": "object",
+          "required": ["daily", "weekly", "monthly", "minimum_interval_mins"],
+          "additionalProperties": false,
+          "properties": {
+            "daily": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            "weekly": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            "monthly": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            "minimum_interval_mins": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+          }
+        },
         "add_note_tags": { "description": "specs/conformance/tag-ops.md G1: notes written.", "$ref": "#/$defs/op_count" },
         "remove_note_tags": { "description": "tag-ops.md G2: notes written.", "$ref": "#/$defs/op_count" },
         "delete_tags": { "description": "tag-ops.md G3: notes written.", "$ref": "#/$defs/op_count" },

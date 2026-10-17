@@ -69,3 +69,6 @@ integrity_check
 unicase
 VACUUM
 F_FULLFSYNC
+# Backups (backups.md, U126): the member of the synced backups config key
+# that is not an ordinary word.
+minimum_interval_mins

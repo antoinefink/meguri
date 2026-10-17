@@ -1,0 +1,20 @@
+# specs/package/backups.md B5.1, B5.2 (fewer backups than the limits, on
+# distinct days, all stay), B6.1 (defaults when the key is missing).
+# Eight backups on eight different days, from the first second of today back
+# to 2027, with the default limits 12, 10 and 9: retention deletes nothing.
+id: package/backups/fewer-than-limits
+description: Fewer backups than the default limits, each on its own day, all stay.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2030-01-15-00.00.00.colpkg
+        - backup-2030-01-14-23.59.59.colpkg
+        - backup-2030-01-13-12.00.00.colpkg
+        - backup-2030-01-08-08.00.00.colpkg
+        - backup-2029-12-25-18.30.00.colpkg
+        - backup-2029-11-01-07.15.00.colpkg
+        - backup-2029-03-03-21.45.00.colpkg
+        - backup-2027-05-05-05.05.05.colpkg
+  - force_backup: {}
+  - observe: [backup_files]

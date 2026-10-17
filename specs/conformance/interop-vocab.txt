@@ -259,3 +259,5 @@ meta_version
 too_new
 apkg_legacy
 anki21b
+# Backup ops (backup-ops.md, U126): the backups config key's member.
+minimum_interval_mins

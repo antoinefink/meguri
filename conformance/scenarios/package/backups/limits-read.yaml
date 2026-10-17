@@ -1,0 +1,49 @@
+# specs/package/backups.md B6.1; specs/conformance/backup-ops.md F6.
+# The limits as read from the backups key: the defaults when the key is
+# missing; the four values when an object holds each once as an integer from
+# 0 to 4294967295 (other members ignored) or an array holds exactly four; the
+# four defaults together for every other shape, a repeated member and a value
+# stored as TEXT.
+id: package/backups/limits-read
+description: The backups key is read whole or not at all.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: 5, weekly: 4, monthly: 3, minimum_interval_mins: 60, extra: [1, {a: 2}]}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: 4294967295, weekly: 0, monthly: 0, minimum_interval_mins: 0}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: [6, 5, 4, 15]}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: 5}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: [6, 5, 4]}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: [6, 5, 4, 15, 1]}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: 5.0, weekly: 4, monthly: 3, minimum_interval_mins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: -1, weekly: 4, monthly: 3, minimum_interval_mins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: 4294967296, weekly: 4, monthly: 3, minimum_interval_mins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: "5", weekly: 4, monthly: 3, minimum_interval_mins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: null, weekly: 4, monthly: 3, minimum_interval_mins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {Daily: 5, weekly: 4, monthly: 3, minimum_interval_mins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: {daily: 5, weekly: 4, monthly: 3, minimumIntervalMins: 60}}
+  - observe: [backup_settings]
+  - set_config: {key: backups, value: null}
+  - observe: [backup_settings]
+  - db_exec: {sql: "UPDATE config SET val = CAST(? AS BLOB) WHERE KEY = 'backups'", params: ['{"daily":1,"daily":2,"weekly":4,"monthly":3,"minimum_interval_mins":60}']}
+  - observe: [backup_settings]
+  - db_exec: {sql: "UPDATE config SET val = CAST(? AS BLOB) WHERE KEY = 'backups'", params: [' { "minimum_interval_mins" : 60 , "monthly":3,"weekly":4,"daily":7 } ']}
+  - observe: [backup_settings]
+  - db_exec: {sql: "UPDATE config SET val = ? WHERE KEY = 'backups'", params: ['{"daily":5,"weekly":4,"monthly":3,"minimum_interval_mins":60}']}
+  - observe: [backup_settings]
+  - db_exec: {sql: "UPDATE config SET val = CAST(? AS BLOB) WHERE KEY = 'backups'", params: ['not json']}
+  - observe: [backup_settings]

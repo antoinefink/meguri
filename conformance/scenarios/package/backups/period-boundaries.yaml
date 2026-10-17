@@ -1,0 +1,26 @@
+# specs/package/backups.md B5.1, B5.3 (the table is this scenario), B6.1.
+# Limits 1, 1, 1 on Tuesday 2030-01-15: the daily backup is the newest of
+# Saturday 2030-01-12; the weekly stage skips that week and keeps Sunday
+# 2030-01-06 (week of Monday 2029-12-31); the monthly stage skips January and
+# keeps 2029-12-20; the rest goes.
+id: package/backups/period-boundaries
+description: Each stage starts after the period of the backup kept before it.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 1, weekly: 1, monthly: 1, minimum_interval_mins: 30}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2030-01-14-09.00.00.colpkg
+        - backup-2030-01-12-20.00.00.colpkg
+        - backup-2030-01-12-08.00.00.colpkg
+        - backup-2030-01-08-12.00.00.colpkg
+        - backup-2030-01-07-12.00.00.colpkg
+        - backup-2030-01-06-12.00.00.colpkg
+        - backup-2030-01-02-12.00.00.colpkg
+        - backup-2029-12-20-12.00.00.colpkg
+        - backup-2029-12-02-12.00.00.colpkg
+        - backup-2029-06-01-12.00.00.colpkg
+  - force_backup: {}
+  - observe: [backup_files]

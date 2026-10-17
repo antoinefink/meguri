@@ -1,0 +1,31 @@
+# specs/package/backups.md B1, B2.2, B2.3 (names both apps read alike), B5.1
+# (backups dated later than today count as recent), R1540 (server copies
+# stay). All limits are 0, so every backup older than yesterday goes; foreign
+# files and both kinds of server copy stay.
+id: package/backups/foreign-files
+description: With all limits zero, only old backup names are deleted; foreign files and server copies stay.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 0, weekly: 0, monthly: 0, minimum_interval_mins: 30}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2029-06-01-12.00.00.colpkg
+        - backup-2030-01-13-23.59.59.colpkg
+        - backup-2030-01-14-00.00.00.colpkg
+        - backup-2030-01-16-08.00.00.colpkg
+        - notes.txt
+        - backup-2029-06-01.colpkg
+        - Backup-2029-06-01-12.00.00.colpkg
+        - backup-2029-06-01-12.00.00.colpkg.bak
+        - backup-2029-06-01-12.00.00.apkg
+        - backup-2029-02-29-12.00.00.colpkg
+        - backup-2029-06-01-24.00.00.colpkg
+        - backup-02029-06-01-12.00.00.colpkg
+        - backup-2029-06-01T12.00.00.colpkg
+        - x-backup-2029-06-01-12.00.00.colpkg
+        - server-copy-2029-06-01-12.00.00.colpkg
+        - server-copy-2029-06-01-12.00.00.unverified.anki2
+  - force_backup: {}
+  - observe: [backup_files]

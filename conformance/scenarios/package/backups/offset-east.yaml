@@ -1,0 +1,14 @@
+# specs/package/backups.md B3 (name and today from the offset), B5.1.
+# The instant 2030-01-15T20:00:00Z is 05:00 on 2030-01-16 in Tokyo (+09:00):
+# 3, 0, 0 the noon backups of the 12th to the 14th are the daily ones.
+# offset-west.yaml runs the same steps at the same instant in New York.
+id: package/backups/offset-east
+description: East of UTC, the backup name and today follow the local offset.
+clock: {tz: Asia/Tokyo, start: "2030-01-15T20:00:00Z"}
+setup:
+  config:
+    backups: {daily: 3, weekly: 0, monthly: 0, minimum_interval_mins: 30}
+steps:
+  - add_backup_files: {series: {from: "2030-01-05T12:00:00", until: "2030-01-15T12:00:00", every: 1d}}
+  - force_backup: {}
+  - observe: [backup_files]

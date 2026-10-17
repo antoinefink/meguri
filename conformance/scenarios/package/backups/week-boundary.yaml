@@ -1,0 +1,24 @@
+# specs/package/backups.md B5.1 (weeks start on Monday).
+# Limits 0, 3, 0 on Tuesday 2030-01-15, yesterday Monday 2030-01-14. Sunday
+# 2030-01-13 is in the week before yesterday's, so it is the first weekly
+# backup, and Monday 2030-01-07 shares its week and goes. Sunday 2030-01-06
+# starts nothing new for Monday 2029-12-31, which goes; Sunday 2029-12-30 is
+# the third week. Weeks starting on Sunday would keep and delete other files.
+id: package/backups/week-boundary
+description: Sunday and the following Monday are in different weeks.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 0, weekly: 3, monthly: 0, minimum_interval_mins: 30}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2030-01-14-09.00.00.colpkg
+        - backup-2030-01-13-22.00.00.colpkg
+        - backup-2030-01-07-08.00.00.colpkg
+        - backup-2030-01-06-20.00.00.colpkg
+        - backup-2029-12-31-08.00.00.colpkg
+        - backup-2029-12-30-20.00.00.colpkg
+        - backup-2029-12-29-20.00.00.colpkg
+  - force_backup: {}
+  - observe: [backup_files]

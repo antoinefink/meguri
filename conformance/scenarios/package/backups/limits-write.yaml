@@ -1,0 +1,28 @@
+# specs/package/backups.md B6.2; specs/conformance/backup-ops.md F4.
+# The limits write gives Anki's text, member order included; writing the same
+# values again writes nothing (mtime_secs stays); a stored value in another
+# order or shape, or with a wrong value, is replaced by the four members.
+id: package/backups/limits-write
+description: The limits write stores Anki's text and skips a write of the same values.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - save_backup_settings: {daily: 3, weekly: 2, monthly: 1, minimum_interval_mins: 45}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), typeof(val), usn, mtime_secs FROM config WHERE KEY = 'backups'"}
+  - observe: [backup_settings]
+  - advance: 1m
+  - save_backup_settings: {daily: 3, weekly: 2, monthly: 1, minimum_interval_mins: 45}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'backups'"}
+  - advance: 1m
+  - save_backup_settings: {daily: 0, weekly: 0, monthly: 0, minimum_interval_mins: 0}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'backups'"}
+  - set_config: {key: backups, value: {daily: 7, weekly: 6, monthly: 5, minimum_interval_mins: 20}}
+  - advance: 1m
+  - save_backup_settings: {daily: 8, weekly: 6, monthly: 5, minimum_interval_mins: 20}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY = 'backups'"}
+  - set_config: {key: backups, value: [6, 5, 4, 15]}
+  - save_backup_settings: {daily: 1, weekly: 1, monthly: 1, minimum_interval_mins: 10}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'backups'"}
+  - set_config: {key: backups, value: {daily: x}}
+  - save_backup_settings: {daily: 2, weekly: 2, monthly: 2, minimum_interval_mins: 5}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'backups'"}
+  - observe: [backup_settings]

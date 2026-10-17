@@ -292,7 +292,7 @@ h46a2e2a48929,rust,tag,engine,in-scope,U250/U246: cover atomic replacement to a 
 h55b5f8508781,rust,tag,engine,not-applicable,Deriving a human label from an internal Rust type name is not an interoperability contract; Meguri defines its own typed errors (R1879).,,done
 h56ce4672d339,rust,tag,engine,in-scope,U106/U246: a nonempty transport diagnostic must remain available beside its summary without losing the detail text.,,deferred
 h74b7d2e31f18,rust,tag,engine,in-scope,U167/U246: verify that decimal numbers use the user's locale rather than a fixed separator (R192).,,deferred
-h7b088f7049ca,rust,tag,engine,in-scope,"U126/U246: verify per-day, per-week and per-month retention selections plus exemptions for recent dates (R1633).",,deferred
+h7b088f7049ca,rust,tag,engine,in-scope,"U126/U246: verify per-day, per-week and per-month retention selections plus exemptions for recent dates (R1633).",package/backups/period-boundaries package/backups/week-boundary,deferred
 h85e031554808,rust,tag,engine,not-applicable,An Android JNI bridge estimating serialized database row bytes is absent from the Apple architecture (R1879).,,done
 h876dbf5f6be7,rust,tag,engine,in-scope,Undo and redo move steps between the two histories; a new op empties redo and an op without undo record empties both,undo/edit-note undo/redo-cleared,done
 h8c7ca9736257,rust,tag,engine,in-scope,Quick successive edits of one note merge into one Update Note step,undo/edit-note-merge,done
@@ -304,7 +304,7 @@ hbcc38ba4659c,rust,tag,engine,in-scope,U167/U246: plural selection for rounded d
 hc80955057f3f,rust,tag,engine,not-applicable,Custom undo steps and merging later operations into one step are the add-on interface; Meguri has no add-ons and runs a composite change as one op,,done
 hd962000e6d0c,rust,tag,engine,not-applicable,Returning an oversized first row through an Android JNI page is specific to an unshipped bridge (R1879).,,done
 hea8cbd8d6720,rust,tag,engine,in-scope,U106/U246: a generic network failure without diagnostic text must not show an empty detail section.,,deferred
-hfa50e8665fce,rust,tag,engine,in-scope,"U126/U246: verify a full year's backups thin into the configured daily/weekly/monthly buckets, including default retention (R2009).",,deferred
+hfa50e8665fce,rust,tag,engine,in-scope,"U126/U246: verify a full year's backups thin into the configured daily/weekly/monthly buckets, including default retention (R2009).",package/backups/retention-hourly-400-days,deferred
 h19a3e91fc826,rust,tag,maintenance,in-scope,"U129/U246: Check Database must join excess note fields into the last field and pad missing fields, with accurate repair counts.",,deferred
 h45394f1a8123,rust,tag,maintenance,in-scope,"U129/U246: Check Database must remove duplicate card ordinals and cards whose template no longer exists, without removing valid siblings.",,deferred
 h5b5bc3629af2,rust,tag,maintenance,in-scope,"U128/U246: Check Database must turn fractional revlog ivl/lastIvl values into integers, with accurate repair totals.",,deferred

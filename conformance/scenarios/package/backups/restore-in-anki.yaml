@@ -1,0 +1,27 @@
+# A live chain (T1; R2009; specs/package/backups.md B4;
+# specs/conformance/backup-ops.md F3; specs/conformance/package-ops.md E2, E3;
+# specs/package/container.md P7, P11). Meguri opens the standard collection
+# and makes a backup, named after the clock, and copies it into the session
+# directory. Anki then lists that package (entries, methods, meta version and
+# placeholder must equal those of Anki's own backup, and Anki must open the
+# placeholder) and restores it: the rows equal the source's, except col.scm
+# and col.mod, stamped with the restore instant, and Anki's integrity check
+# and Check Database find nothing to report.
+id: package/backups/restore-in-anki
+description: A backup written by Meguri has Anki's layout and restores in Anki to the same rows.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - observe: [timing]
+  - observe: [db_dump]
+  - force_backup: {copy_as: backup.colpkg}
+  - observe: [backup_files]
+  - handoff: oracle
+  - observe: [timing]
+  - observe: [backup_files, {package_listing: {name: backup.colpkg}}]
+  - advance: 1m
+  - import: {format: colpkg, name: backup.colpkg}
+  - observe: [timing]
+  - observe: [db_dump, schema_objects]
+  - db_exec: {sql: "SELECT * FROM pragma_integrity_check"}
+  - check_db: {}

@@ -1,0 +1,20 @@
+# specs/package/backups.md B3 (wall times that do not exist); deviation
+# backups-dst-gap-name-thinned. In New York, 02:30 on 2029-03-11 falls in the
+# hour skipped when daylight-saving time starts: Anki does not read that name
+# as a backup and keeps it, Meguri does and, with all limits 0, deletes it.
+# 01:30 on 2029-11-04 occurs twice; both apps delete it like the other names.
+id: package/backups/dst-gap-name
+description: A backup name in the skipped daylight-saving hour is kept by Anki and thinned by Meguri.
+clock: {tz: America/New_York, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 0, weekly: 0, monthly: 0, minimum_interval_mins: 30}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2029-03-11-01.30.00.colpkg
+        - backup-2029-03-11-02.30.00.colpkg
+        - backup-2029-03-11-03.30.00.colpkg
+        - backup-2029-11-04-01.30.00.colpkg
+  - force_backup: {}
+  - observe: [backup_files]

@@ -1,0 +1,13 @@
+# specs/package/backups.md B6.2; deviation backups-limits-unknown-members-kept
+# (R2017). A backups value with two members of another client: Anki's
+# preferences save writes only its four members, Meguri keeps the others after
+# them in sorted order. Both read the new limits.
+id: package/backups/limits-write-unknown-member
+description: The limits write keeps other members of the backups value in Meguri and drops them in Anki.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - set_config: {key: backups, value: {daily: 5, weekly: 4, monthly: 3, minimum_interval_mins: 60, zzz: {b: [1, 2.5]}, aaa: true}}
+  - advance: 1m
+  - save_backup_settings: {daily: 3, weekly: 2, monthly: 1, minimum_interval_mins: 45}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'backups'"}
+  - observe: [backup_settings]

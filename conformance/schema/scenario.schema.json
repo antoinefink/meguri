@@ -313,7 +313,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^\\s*(ids|timing|card|revlog|next_states|answer_labels|queue|deck_counts|congrats|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
+          "pattern": "^\\s*(ids|timing|card|revlog|next_states|answer_labels|queue|deck_counts|congrats|deck_tree|decks|render|render_status|db_dump|schema_objects|stats|digest|undo_status|tag_tree|browser_config|notetype_structure|backup_files|backup_settings)(\\(\\s*(#[nc][1-9][0-9]*(\\s*,\\s*#[nc][1-9][0-9]*)*)?\\s*\\))?\\s*$"
         },
         {
           "description": "media-ops.md F9-F11: media kinds take no references.",
@@ -381,6 +381,8 @@
               "description": "card-excerpt-ops.md E1: the cards' Question and Deck cells, one entry per reference in request order; repeats allowed; at most one request per step.",
               "$ref": "#/$defs/card_refs"
             },
+            "backup_files": { "description": "backup-ops.md F5: the files of the backups folder.", "type": "null" },
+            "backup_settings": { "description": "backup-ops.md F6: the backup limits as read now.", "type": "null" },
             "search": {
               "description": "search-ops.md S1: searches run in order, each in cards mode (default) or notes mode.",
               "type": "array",
@@ -885,6 +887,19 @@
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.(colpkg|apkg)$"
     },
+    "backup_file_name": {
+      "description": "backup-ops.md F2: one file name in the backups folder; any characters but / and NUL.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\u0000]+$",
+      "not": { "anyOf": [{ "enum": [".", ".."] }, { "pattern": "^\\.meguri-" }] }
+    },
+    "wall_time": {
+      "description": "backup-ops.md F2: a wall date and time with no offset.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$"
+    },
+    "u32": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
     "package_fixture": {
       "description": "package-ops.md E2.1, E3: a package under conformance/fixtures/, lower-case segments as open's.",
       "type": "string",
@@ -1275,6 +1290,49 @@
               }
             }
           ]
+        },
+        "add_backup_files": {
+          "description": "backup-ops.md F2: empty files in the scenario's backups folder, named in a list or as a series of backup names from one wall time to another (inclusive) every duration. Name rules beyond this pattern (no ., .., NUL or .meguri- prefix, at most 255 bytes, at most 20,000 files, until not before from) are checked when the scenario loads.",
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "names": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/backup_file_name" }
+            },
+            "series": {
+              "type": "object",
+              "required": ["from", "until", "every"],
+              "additionalProperties": false,
+              "properties": {
+                "from": { "$ref": "#/$defs/wall_time" },
+                "until": { "$ref": "#/$defs/wall_time" },
+                "every": { "$ref": "#/$defs/duration" }
+              }
+            }
+          }
+        },
+        "force_backup": {
+          "description": "backup-ops.md F3: a forced backup into the backups folder, retention included; copy_as also copies it into the session directory. At most one per opening of the collection (F7, checked when the scenario loads).",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "copy_as": { "$ref": "#/$defs/colpkg_name" } }
+        },
+        "save_backup_settings": {
+          "description": "backup-ops.md F4: the four backup limits, written as the settings save writes them.",
+          "type": "object",
+          "required": ["daily", "weekly", "monthly", "minimum_interval_mins"],
+          "additionalProperties": false,
+          "properties": {
+            "daily": { "$ref": "#/$defs/u32" },
+            "weekly": { "$ref": "#/$defs/u32" },
+            "monthly": { "$ref": "#/$defs/u32" },
+            "minimum_interval_mins": { "$ref": "#/$defs/u32" }
+          }
         },
         "check_db": {
           "description": "Stable (collection-check.md K10): Anki's Check Database on the scenario's collection.",

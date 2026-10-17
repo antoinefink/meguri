@@ -41,3 +41,35 @@ the colpkg round-trip test (latest-format collection part covered by
 `export-import-roundtrip`; media and the legacy option wait for U124) and the
 media-map normalization test (latest-format half covered by
 `refused-media-map`; the legacy half waits for U120).
+
+# Backups: names, writer, retention, limits, listing (U126)
+
+Read at tag 26.09.3 to write `specs/package/backups.md` and
+`specs/conformance/backup-ops.md`. No code was copied; the rules were
+re-derived in the spec writer's words, then checked by black-box probes of the
+pinned `anki` wheel in the oracle image (2026-10-17, image
+`meguri-oracle:26.9.3-7c3e7da2abdbcd8b`, network off, libfaketime frozen
+clock, `TZ` set per probe): the forced backup's name at a frozen instant in
+UTC, Asia/Tokyo and America/New_York; the remaining files of every
+`package/backups` retention scenario (AE69's 66 files, period boundaries, Monday
+weeks, both offsets, foreign files, the loose spellings Anki deletes, the
+skipped-hour name it keeps); a second forced backup with no change in between
+skipped (false) even after the clock moved; the limits read for every B6.1
+row (array of four read, all-or-nothing defaults, duplicates, TEXT storage
+class); and the preferences save of the backup group alone (member order
+daily, weekly, monthly, minimum_interval_mins; other members dropped; same
+values not rewritten; no other key written).
+
+| Spec section | Anki file | Read for |
+|---|---|---|
+| backups B2.1, B2.3, B3 | `rslib/src/collection/backup.rs` (name format string, name parsing with the local zone and its latest mapping) | the name, local time, which names count; chrono 0.4.41 (`Cargo.lock`) parses numeric fields with variable widths, signs and leading spaces, and rejects wall times in a DST gap |
+| backups B4 | `rslib/src/collection/backup.rs`, `rslib/src/import_export/package/colpkg/export.rs` (export from in-memory data, output created directly at the final path), `rslib/src/backend/collection.rs` (one backup task at a time, awaited before the next) | Anki's writer: checkpoint, whole file read, background thread, then thinning; no temp file |
+| backups B5 | `rslib/src/collection/backup.rs` (thinning) | newest-first walk, recent = yesterday or later, stage order day/week/month, period comparison against the last kept backup, Monday weeks via day number, month as year*12+month, removal errors logged and skipped |
+| backups B6 | `proto/anki/config.proto` (backup limits message, fields 1-4), `rslib/proto/rust.rs` (serde derive on that message, no rename, no default), `rslib/src/config/mod.rs` (key `backups`, defaults 12/10/9/30, any read error gives the defaults), `rslib/src/preferences.rs` (preferences save writes the whole message), `qt/aqt/forms/preferences.ui` (spin box ranges 0-9999 and 5-9999) | the JSON shape, read and write rules, UI ranges |
+| backup-ops F3, F7 | `pylib/anki/collection.py` (backup call: force, wait), `rslib/src/collection/timestamps.rs` (changed since the last backup, kept in memory per open collection) | the driver call; one forced backup per opening |
+| backup-ops F4, F6 | `pylib/anki/collection.py` (preferences get and set) | the driver calls |
+
+Harvest rows classified with this unit (`conformance/catalog/harvest.csv`):
+the two thinning tests (a hand-built set with small limits, covered by
+`period-boundaries` and `week-boundary`; a year of daily backups with the default
+limits, covered by `retention-hourly-400-days`).

@@ -79,6 +79,8 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `media_pending` | none | `{<name>: <sha1> \| null}`: after a full registration of the folder, the entries pending for the next media sync, `null` for a deletion (`media-ops.md` F11) |
 | `browser_config` | none | `{<key>: <value>, ...}`: the 23 browser and search config keys as Anki's own reads give them, defaults included (`browser-config-ops.md` B2) |
 | `card_excerpts` | a list of card references, repeats allowed; at most once per observe step | `[{question, deck} \| {error: missing \| damaged}, ...]`, one entry per reference in request order: the cards' Question and Deck cells from the card excerpts call of `specs/browser/columns.md` C16 (`card-excerpt-ops.md` E1, E2); never changes the collection |
+| `backup_files` | none | `[<file name>, ...]`: the regular files of the scenario's backups folder, sorted by their UTF-8 bytes (`backup-ops.md` F5); never changes the folder |
+| `backup_settings` | none | `{daily, weekly, monthly, minimum_interval_mins}`: the backup limits as read now, defaults included (`backup-ops.md` F6); never writes |
 
 ## O5. Scheduling states
 

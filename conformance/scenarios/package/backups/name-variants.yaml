@@ -1,0 +1,22 @@
+# specs/package/backups.md B2.3; deviation backups-noncanonical-names-ignored.
+# Spellings of a 2029 date that no writer produces: Anki reads them as backups
+# and, with all limits 0, deletes them; Meguri reads only exact names, so they
+# are foreign and stay.
+id: package/backups/name-variants
+description: Meguri retains files with names outside its exact backup format.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 0, weekly: 0, monthly: 0, minimum_interval_mins: 30}
+steps:
+  - add_backup_files:
+      names:
+        - backup-2029-6-1-12.00.00.colpkg
+        - backup-2029-06-01-12.0.0.colpkg
+        - backup-29-06-01-12.00.00.colpkg
+        - backup-+2029-06-01-12.00.00.colpkg
+        - backup--2029-06-01-12.00.00.colpkg
+        - backup-2029-06-01- 12.00.00.colpkg
+        - backup-2029-06-01-12.00.60.colpkg
+  - force_backup: {}
+  - observe: [backup_files]

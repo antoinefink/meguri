@@ -1,0 +1,14 @@
+# AE69 (R1633, R2009 retention); specs/package/backups.md B5.1, B5.3, B2.1,
+# B3; specs/conformance/backup-ops.md F2, F3, F5.
+# Hourly backups for 400 days before a forced backup at 10:00 on Tuesday
+# 2030-01-15 (UTC), default limits (no backups key): every backup of today and
+# yesterday stays, then the newest of each of 12 older days, of 10 Monday-start
+# weeks before the week of the last daily one, and of 9 months before the month
+# of the last weekly one. The new backup's name comes from the clock.
+id: package/backups/retention-hourly-400-days
+description: Default retention over 400 days of hourly backups keeps today, yesterday, 12 days, 10 weeks and 9 months.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_backup_files: {series: {from: "2028-12-11T09:00:00", until: "2030-01-15T09:00:00", every: 1h}}
+  - force_backup: {}
+  - observe: [backup_files]

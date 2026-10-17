@@ -698,3 +698,44 @@ deviations:
     scenarios: [package/collection-package/missing-media-map]
     pointer: /steps/2
     transform: {replace: {}}
+  # fields, a year of any length or sign, a space before a number, second 60)
+  # and thins such files; Meguri recognises only the exact names a writer
+  # produces, so they are foreign files and stay.
+  - id: backups-noncanonical-names-ignored
+    requirement: R1633
+    summary: Meguri preserves foreign backup-name spellings. The reference retention removes them.
+    test: core/crates/meguri-package/tests/backup_retention.rs noncanonical_names_are_foreign
+    scenarios: [package/backups/name-variants]
+    pointer: /steps/2/backup_files
+    transform:
+      replace:
+        - "backup-+2029-06-01-12.00.00.colpkg"
+        - "backup--2029-06-01-12.00.00.colpkg"
+        - "backup-2029-06-01- 12.00.00.colpkg"
+        - "backup-2029-06-01-12.0.0.colpkg"
+        - "backup-2029-06-01-12.00.60.colpkg"
+        - "backup-2029-6-1-12.00.00.colpkg"
+        - "backup-2030-01-15-10.00.00.colpkg"
+        - "backup-29-06-01-12.00.00.colpkg"
+  # specs/package/backups.md B3: a backup name whose wall time falls in the
+  # hour skipped when daylight-saving time starts is not a backup for Anki
+  # (its time-zone rules reject the time) and stays; Meguri has only the
+  # current UTC offset, reads it as a backup and thins it like any other.
+  - id: backups-dst-gap-name-thinned
+    requirement: R1633
+    summary: A backup name in the skipped daylight-saving hour is thinned by Meguri; Anki keeps it.
+    test: core/crates/meguri-package/tests/backup_retention.rs dst_gap_name_is_a_backup
+    scenarios: [package/backups/dst-gap-name]
+    pointer: /steps/2/backup_files
+    transform: {replace: ["backup-2030-01-15-10.00.00.colpkg"]}
+  # specs/package/backups.md B6.2: Anki's preferences save writes the four
+  # backup limits alone and drops any other member of the backups value;
+  # Meguri keeps the other members after the four (R2017).
+  - id: backups-limits-unknown-members-kept
+    requirement: R2017
+    summary: The backup limits write keeps other members of the backups value; Anki drops them.
+    test: core/crates/meguri-package/tests/backup_retention.rs limits_write_keeps_other_members
+    scenarios: [package/backups/limits-write-unknown-member]
+    pointer: /steps/3/db_exec/rows
+    transform:
+      replace: [['{"daily":3,"weekly":2,"monthly":1,"minimum_interval_mins":45,"aaa":true,"zzz":{"b":[1,2.5]}}']]
