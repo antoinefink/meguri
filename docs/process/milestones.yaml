@@ -305,7 +305,7 @@ milestones:
       - {id: anonymize-check, run: anonymize-check, why: "the anonymized clone (U15)"}
       - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: ["U243 on the Mac host and simulators"], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
       - id: perf-gate
-        run: perf-gate
+        run: perf-gate-milestone
         scope: {detail: groups, items: [review]}
         plan:
           - {text: "gated by U241 against the review-loop budgets (R1807–R1817)", items: [review]}
