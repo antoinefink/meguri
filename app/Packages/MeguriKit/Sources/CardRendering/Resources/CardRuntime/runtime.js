@@ -105,6 +105,7 @@
   const mediaPause = HTMLMediaElement.prototype.pause;
   const mediaPlay = HTMLMediaElement.prototype.play;
   const mediaLoad = HTMLMediaElement.prototype.load;
+  const mediaSourceObject = describeProperty(HTMLMediaElement.prototype, "srcObject");
   const replaceSheet = CSSStyleSheet.prototype.replaceSync;
   const sheetRules = getter(CSSStyleSheet.prototype, "cssRules");
   const fontFaceStyle = getter(CSSFontFaceRule.prototype, "style");
@@ -932,6 +933,8 @@
   }
 
   // Step 4: videos let go of their media before they are removed (R471).
+  // The reload finds nothing to select only once every source is gone: the
+  // child elements, the element's own src and an assigned media object.
   function releaseVideos(qa) {
     const videos = call(elementQueryAll, qa, "video");
     for (let i = 0; i < videos.length; i++) {
@@ -941,6 +944,8 @@
         for (let child = call(firstChildOf, video); child; child = call(firstChildOf, video)) {
           call(removeChild, video, child);
         }
+        call(removeAttribute, video, "src");
+        if (call(mediaSourceObject.get, video) !== null) call(mediaSourceObject.set, video, null);
         call(mediaLoad, video);
       } catch (error) {
         // A video that cannot be released is removed anyway.

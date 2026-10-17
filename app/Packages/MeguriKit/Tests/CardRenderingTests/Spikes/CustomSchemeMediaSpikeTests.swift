@@ -111,7 +111,7 @@ extension RenderingSpikes {
 
         @Test func aVideoSeeksToNinetyPercentAndPlaysThroughRangeRequests() async throws {
             let handler = SpikeMediaHandler()
-            let mp4 = try await Spike.deadline("making the MP4", timeout: .seconds(30)) { try await SpikeAssets.mp4() }
+            let mp4 = try await Spike.deadline("making the MP4", timeout: .seconds(30)) { try await TestMedia.mp4() }
             handler.add("/_clip.mp4", mp4, "video/mp4")
             let html = Self.page(body: #"<video id="media" src="_clip.mp4" preload="auto" muted playsinline width="320" height="240"></video>"#)
             let result = try await Self.withPage(handler, html: html) { page in

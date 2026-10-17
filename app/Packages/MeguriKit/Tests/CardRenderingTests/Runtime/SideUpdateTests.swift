@@ -197,6 +197,36 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        /// SU5 for videos whose media is not a `<source>` child: one with its
+        /// own `src` (a real clip) and one with a `srcObject`. Telling either
+        /// to reload as it is would select the same media again; released,
+        /// both are back to no network activity and no data (R471).
+        @Test func videosWithTheirOwnMediaAreUnloaded() async throws {
+            let clip = try await TestMedia.mp4(seconds: 2, fps: 5, size: CGSize(width: 64, height: 48))
+            try await WebTestHarness.withPage { harness, page async throws in
+                harness.media.add("/_d.mp4", clip, "video/mp4")
+                let first = """
+                    <video id="d" src="_d.mp4" muted preload="auto"></video>
+                    <video id="o" muted></video>
+                    <script>
+                    window.__d = document.getElementById("d");
+                    window.__o = document.getElementById("o");
+                    __o.srcObject = document.createElement("canvas").captureStream();
+                    </script>
+                    """
+                try await page.showPresentedQuestion(first)
+                try await harness.until("both videos have media") {
+                    try await page.bool("__d.readyState >= 1 && __o.networkState !== 0")
+                }
+                try await page.showPresentedAnswer("<p>next</p>")
+                // Long enough for a reload to select its media again.
+                try await Task.sleep(for: .milliseconds(300))
+                let state = try await page.string(
+                    "[__d.paused, __d.networkState, __d.readyState, __o.paused, __o.networkState, __o.readyState].join()")
+                #expect(state == "true,0,0,true,0,0")
+            }
+        }
+
         // MARK: SU6, R472
 
         @Test func reviewExtraRunsOncePerPageAfterQA() async throws {
