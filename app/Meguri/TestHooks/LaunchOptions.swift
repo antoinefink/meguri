@@ -19,6 +19,8 @@ extension TestHooks {
     /// | `-MeguriWindowSize` | Mac only: `minimum`, `default`, `large` or `<width>x<height>`; a launch with any other hook option and without this one gets `default` |
     /// | `-MeguriAppearance` | Mac only: `light` or `dark`, the app's appearance whatever the system's (NSApp.appearance; launched with `-AppleInterfaceStyle Light` on a Mac in dark mode, the app showed its dark background); iOS takes the device's |
     /// | `-MeguriAnkiConnectPort`, `-MeguriMigakuPort` | 1–65535 |
+    /// | `-MeguriSizeClass` | iOS only: `compact` or `regular`, the window's horizontal size class whatever its width (R2–R5 on any simulator); `<bundle id>.testhooks.toggleSizeClass` flips it at run time |
+    /// | `-MeguriIntegrations` | Mac only: `on` or `off`, the integrations flag U144 publishes (R11): on, closing the window keeps the app running; starts no server |
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
@@ -28,6 +30,10 @@ extension TestHooks {
 
         enum Appearance: String, Equatable {
             case light, dark
+        }
+
+        enum SizeClass: String, Equatable {
+            case compact, regular
         }
 
         var fixture: URL?
@@ -41,12 +47,15 @@ extension TestHooks {
         var appearance: Appearance?
         var ankiConnectPort: UInt16?
         var migakuPort: UInt16?
+        var sizeClass: SizeClass?
+        var integrations: Bool?
         var route: Route?
 
         static let prefix = "-Meguri"
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
-            "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "Route",
+            "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
+            "Integrations", "Route",
         ]
 
         init() {}
@@ -110,24 +119,40 @@ extension TestHooks {
             }
             ankiConnectPort = try values["AnkiConnectPort"].map { value throws(TestHookError) in try Self.port(value, "AnkiConnectPort") }
             migakuPort = try values["MigakuPort"].map { value throws(TestHookError) in try Self.port(value, "MigakuPort") }
+            if let value = values["SizeClass"] {
+                guard let named = SizeClass(rawValue: value) else {
+                    throw TestHookError("-MeguriSizeClass takes compact or regular, got '\(value)'")
+                }
+                sizeClass = named
+            }
+            integrations = try values["Integrations"].map { value throws(TestHookError) in try Self.onOff(value, "Integrations") }
             if let value = values["Route"] {
                 route = try Route(value)
             }
         }
 
         /// Installs the fixture and overrides the configuration. The route is
-        /// resolved last, so its view sees every other override.
+        /// resolved last, so its view sees every other override; a shell
+        /// route's launch is returned (the app sets its navigation up).
+        @discardableResult
         func apply(
             to configuration: inout LaunchConfiguration,
             installer: FixtureInstaller,
             routes: RouteRegistry
-        ) throws(TestHookError) {
-            #if !os(macOS)
+        ) throws(TestHookError) -> ShellLaunch? {
+            #if os(macOS)
+            if sizeClass != nil {
+                throw TestHookError("-MeguriSizeClass applies to iOS only: the Mac has no size class")
+            }
+            #else
             if windowSize != nil {
                 throw TestHookError("-MeguriWindowSize applies to the Mac only")
             }
             if appearance != nil {
                 throw TestHookError("-MeguriAppearance applies to the Mac only")
+            }
+            if integrations != nil {
+                throw TestHookError("-MeguriIntegrations applies to the Mac only")
             }
             #endif
             if let fixture {
@@ -154,8 +179,13 @@ extension TestHooks {
             if let migakuPort {
                 configuration.migakuPort = migakuPort
             }
-            if let route {
-                configuration.initialPresentation = try routes.presentation(for: route, configuration: configuration)
+            guard let route else { return nil }
+            switch try routes.resolve(route, configuration: configuration) {
+            case let .presentation(presentation):
+                configuration.initialPresentation = presentation
+                return nil
+            case let .shell(launch):
+                return launch
             }
         }
 

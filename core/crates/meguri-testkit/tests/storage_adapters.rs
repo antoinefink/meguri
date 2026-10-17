@@ -148,6 +148,26 @@ fn set_config_writes_only_changed_values_in_compact_form() {
     assert_eq!(out["steps"][9]["db_exec"]["rows"], json!([[-1, "null"]]));
 }
 
+/// undo-ops.md V3.1: a write with `undoable: true` records an "Update
+/// Config" step, which needs the engine's undo history. Until the session
+/// runs ops through the engine (U38), Meguri refuses it rather than write
+/// it as W4 does and record nothing.
+#[test]
+fn set_config_with_an_undo_step_is_refused_until_the_session_runs_through_the_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let loaded = load(
+        dir.path(),
+        "storage/set-config-undoable",
+        concat!(
+            "steps:\n  - open: {fixture: storage/schema-18.anki2}\n",
+            "  - set_config: {key: probe, value: 1, undoable: true}\n",
+        ),
+        &["schema-18.anki2"],
+    );
+    let error = MeguriExecutor::new().run(&loaded).unwrap_err();
+    assert_eq!((error.kind.as_str(), error.step), ("unsupported_op", Some(1)));
+}
+
 #[test]
 fn record_ops_take_exactly_their_arguments() {
     let base =

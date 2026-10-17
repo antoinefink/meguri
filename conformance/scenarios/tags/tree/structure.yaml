@@ -1,0 +1,22 @@
+# The tag tree (specs/tags/tags.md T13): rows and implicit parents, the
+# spelling an implicit parent takes from the first row below it in
+# case-folded order (`GEO` and `eu` from `GEO::eu::de`, not from
+# `geo::EU::fr`), collapsed states, and the order of children
+# (`lesson::extra` under `lesson`, before `lesson9`). Rows that another
+# client wrote, spelled unlike each other, join the tree like any row; the
+# implicit parent is expanded under the spelling the tree shows.
+id: tags/tree/structure
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - observe: [tag_tree]
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [lesson, lesson9, "lesson::extra"]}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('geo::EU::fr', 0, 1, NULL), ('GEO::eu::de', 0, 1, NULL), ('Bar::x', 0, 1, NULL), ('bar::y', 0, 1, NULL)"}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('a!', 0, 1, NULL), ('B2', 0, 0, NULL), ('b2::c', 0, 0, NULL)"}
+  - set_tag_collapsed: {tags: ["GEO::eu"], collapsed: false}
+  - observe: [tag_tree]
+  - observe: [{db_dump: {tables: [tags]}}]

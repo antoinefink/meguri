@@ -50,6 +50,7 @@ Long work in the core runs as jobs (KTD9): a short call starts one and returns i
   | job pool workers | `meguri-job-<n>` | user-initiated |
   | event dispatcher (U6) | `meguri-events` | user-initiated |
   | search workers (U85) | | user-initiated |
-  | derived writer (U26), stats cache builds, optimizer pool (U47) | | utility |
+  | derived writer and builder (U26, `storage/derived-store` D12) | `meguri-derived-writer`, `meguri-derived-builder` | utility |
+  | stats cache builds, optimizer pool (U47) | | utility |
 
 - The registry lists the live threads with their name, the QoS they asked for, the QoS the OS reports for them (Apple) and whether they are busy. U32 checks after `suspend` that every registered thread is idle.

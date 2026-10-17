@@ -1,0 +1,50 @@
+# Name normalization when note types are added and renamed
+# (specs/notetypes/records.md N4, N5, N8): note type names lose '"', go to NFC
+# and get '+' until no other note type has an equal name under unicase; field
+# names lose ':{}"', are trimmed and lose leading '#/^'; field and template
+# names are made unique within the note type the same way; names that end up
+# empty refuse the save (invalid_notetype). 'basic' collides with the stock
+# Basic of the new collection. Adding and renaming note types are
+# not schema changes (specs/notetypes/schema-changes.md G2), and every add
+# makes the new note type the current one (curModel).
+id: notetypes/records/names
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+steps:
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - add_notetype: {name: basic, fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: pair, fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: PAIR, fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: "Pa\"ir", fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: "Cafe\u0301", fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: "  spaced  ", fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: "\"\"", fields: [Front], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype:
+      name: Names
+      fields: ["  # /^ Fr:o{n}t\"", "a #", front, FRONT, "\tTab\t", Straße, STRASSE]
+      templates:
+        - {name: Card, front: "{{Front}}"}
+        - {name: card, front: "{{a #}}"}
+        - {name: "\"Q\"", front: "{{Tab}}"}
+        - {name: "  ", front: "{{Straße}}"}
+  - add_notetype: {name: Colons, fields: ["::"], templates: [{name: One, front: "{{Front}}"}]}
+  - add_notetype: {name: Quotes, fields: [Front], templates: [{name: "\"\"", front: "{{Front}}"}]}
+  - update_notetype: {notetype: pair+, edits: [{rename: Pair}]}
+  - update_notetype: {notetype: Pair, edits: [{rename: PAIR}]}
+  - update_notetype: {notetype: PAIR, edits: [{rename: "Cafe\u0301"}]}
+  - db_exec: {sql: "SELECT name, hex(name) FROM notetypes WHERE id > (SELECT id FROM notetypes WHERE name = 'Image Occlusion') ORDER BY id"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Names' ORDER BY f.ord
+  - db_exec:
+      sql: >-
+        SELECT t.ord, t.name FROM templates t JOIN notetypes n ON n.id = t.ntid
+        WHERE n.name = 'Names' ORDER BY t.ord
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec: {sql: "SELECT CAST(c.val AS TEXT) = CAST(n.id AS TEXT) FROM config c, notetypes n WHERE c.KEY = 'curModel' AND n.name = 'Names'"}

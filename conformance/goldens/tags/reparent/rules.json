@@ -1,0 +1,387 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n6"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c7"],
+          "note": "#n7"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c8"],
+          "note": "#n8"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c9"],
+          "note": "#n9"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c10"],
+          "note": "#n10"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c11"],
+          "note": "#n11"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c12"],
+          "note": "#n12"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c13"],
+          "note": "#n13"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c14"],
+          "note": "#n14"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c15"],
+          "note": "#n15"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c16"],
+          "note": "#n16"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c17"],
+          "note": "#n17"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c18"],
+          "note": "#n18"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c19"],
+          "note": "#n19"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c20"],
+          "note": "#n20"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c21"],
+          "note": "#n21"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c22"],
+          "note": "#n22"
+        }
+      },
+      {},
+      {},
+      {
+        "reparent_tags": {
+          "count": 2
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 3
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 0
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "reparent_tags": {
+          "count": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" rb::ra ", 1894705200, -1],
+            [" rb::ra::kid ", 1894705200, -1],
+            [" rb ", 1894701600, -1],
+            [" sbaz::bar ", 1894705200, -1],
+            [" sbaz ", 1894701600, -1],
+            [" leaf ", 1894705200, -1],
+            [" ud ", 1894701600, -1],
+            [" ud::e ", 1894701600, -1],
+            [" va::b ", 1894701600, -1],
+            [" va::bc ", 1894701600, -1],
+            [" wab::wa ", 1894705200, -1],
+            [" wab ", 1894701600, -1],
+            [" xp::xf ", 1894705200, -1],
+            [" xp::xf ", 1894705200, -1],
+            [" xp ", 1894701600, -1],
+            [" xp::xf xp::xf ", 1894705200, -1],
+            [" yp::yf::yb::x ", 1894705200, -1],
+            [" zp::zb::x ", 1894705200, -1],
+            [" mx ", 1894705200, -1],
+            [" mx ", 1894701600, -1],
+            [" ozz::oa ozz ", 1894705200, -1],
+            [" pc::bar ", 1894705200, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "leaf": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "leaf",
+              "usn": -1
+            },
+            "mx": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "mx",
+              "usn": -1
+            },
+            "nq": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "nq",
+              "usn": -1
+            },
+            "ozz": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "ozz",
+              "usn": -1
+            },
+            "ozz::oa": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "ozz::oa",
+              "usn": -1
+            },
+            "pc::bar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "pc::bar",
+              "usn": -1
+            },
+            "rb": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "rb",
+              "usn": -1
+            },
+            "rb::ra": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "rb::ra",
+              "usn": -1
+            },
+            "rb::ra::kid": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "rb::ra::kid",
+              "usn": -1
+            },
+            "sbaz": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "sbaz",
+              "usn": -1
+            },
+            "sbaz::bar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "sbaz::bar",
+              "usn": -1
+            },
+            "ud": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "ud",
+              "usn": -1
+            },
+            "ud::e": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "ud::e",
+              "usn": -1
+            },
+            "va::b": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "va::b",
+              "usn": -1
+            },
+            "va::bc": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "va::bc",
+              "usn": -1
+            },
+            "wab": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "wab",
+              "usn": -1
+            },
+            "wab::wa": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "wab::wa",
+              "usn": -1
+            },
+            "xp": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "xp",
+              "usn": -1
+            },
+            "xp::xf": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "xp::xf",
+              "usn": -1
+            },
+            "yp::yf::yb::x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "yp::yf::yb::x",
+              "usn": -1
+            },
+            "zp::zb::x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zp::zb::x",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/reparent/rules",
+  "scenario_sha256": "7efb7cb59e3fda54a624b11d049e2f3175b5802673414fee148086f0ebee8f92",
+  "tz": "UTC"
+}

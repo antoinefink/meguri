@@ -1,0 +1,39 @@
+# Refused renames and how the new name and the old name are read (specs/tags/
+# tags.md T5, T7). A new name with a separator, or made only of white space,
+# is refused and nothing changes (col.mod included). Other controls are
+# removed and empty components become `blank`. The old name matches by
+# simple case folding (`été` matches `ÉTÉ`, `STRASSE` does not match
+# `Straße`) and literally (`c++` is no pattern). A tag no note uses is not
+# renamed and its row stays.
+id: tags/rename/refused
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [foo]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["c++", "c+"]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: ["c++::x"]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: ["ÉTÉ::k"]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: ["Straße"]}
+  - advance: 1h
+  - rename_tag: {from: foo, to: "has space"}
+  - rename_tag: {from: foo, to: ""}
+  - rename_tag: {from: foo, to: "   "}
+  - rename_tag: {from: foo, to: "a　b"}
+  - rename_tag: {from: foo, to: "\t"}
+  - rename_tag: {from: foo, to: "  "}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - rename_tag: {from: foo, to: "x\ty"}
+  - rename_tag: {from: xy, to: "b::"}
+  - rename_tag: {from: "b::blank", to: "\u0001"}
+  - rename_tag: {from: "C++", to: cpp}
+  - rename_tag: {from: "été", to: ete}
+  - rename_tag: {from: STRASSE, to: street}
+  - set_tag_collapsed: {tags: [lonely], collapsed: false}
+  - rename_tag: {from: lonely, to: other}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

@@ -1,0 +1,64 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "a b"
+          },
+          {
+            "text": "(a b)"
+          },
+          {
+            "text": "a"
+          },
+          {
+            "text": "(a)"
+          },
+          {
+            "text": "(a) (b)"
+          },
+          {
+            "text": "-(a b)"
+          },
+          {
+            "text": "(a) b"
+          },
+          {
+            "text": "a (b)"
+          },
+          {
+            "text": "a OR b"
+          },
+          {
+            "text": "-a"
+          },
+          {
+            "text": "deck:*"
+          },
+          {
+            "text": "\"a b\""
+          },
+          {
+            "text": "(is:learn OR is:review) flag:3"
+          },
+          {
+            "text": "(is:learn OR is:review) (flag:3 OR flag:5)"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/canonical/top-level",
+  "scenario_sha256": "be6c5e5b2aeb567f9abdec2c25c37df4a3b70e8114cf50ac081c0ede57603de5",
+  "tz": "UTC"
+}

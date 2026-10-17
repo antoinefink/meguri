@@ -1,0 +1,36 @@
+# Deleting tags from every note and from the registry (specs/tags/tags.md
+# T9, T14). The name matches in any case and takes its descendants, a
+# registered descendant no note uses included, never a longer name (`inky`).
+# A note left with no tags stores the empty string. Deleting a name only the
+# registry has counts 0 notes yet removes the row, so col.mod moves; deleting
+# an unknown name changes nothing.
+id: tags/delete/children
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: [ink, keep]}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["ink::pen", "INK::pen::nib"]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: [inky]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: [b, c]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: ["B::x"]}
+  - set_tag_collapsed: {tags: ["ink::zz"], collapsed: false}
+  - advance: 1h
+  - delete_tags: {tags: "Ink"}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]
+  - advance: 1h
+  - delete_tags: {tags: "b c"}
+  - set_tag_collapsed: {tags: [lone], collapsed: false}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - delete_tags: {tags: lone}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - delete_tags: {tags: nothing}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - db_exec: {sql: "SELECT tags, mod, usn FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

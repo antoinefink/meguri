@@ -1,0 +1,71 @@
+# Starts from the schema-18 storage fixture (specs/conformance/storage-ops.md
+# P1). Stored values of other shapes, written by another client or an add-on
+# (specs/browser/config-keys.md K2.1, K2.2; storage/config-table C3). Anki's
+# typed reads give the key's default for anything but a JSON boolean (or a
+# JSON string for setDueBrowser and defaultSearchText): an integer, a quoted
+# word, null, an array, an object, bytes that are not JSON, a TEXT storage
+# class. Spaces around a literal do not matter. For the column, sort,
+# savedFilters and flagLabels keys the kind reports the stored value whatever
+# its shape, or the default when it is unreadable (browser-config-ops.md B2).
+# A string read keeps an empty string and surrounding spaces. Reading writes
+# nothing: every row keeps its bytes and stamps. Needs open (storage-ops.md
+# P1), db_exec (record-ops.md W1) and the browser_config observation.
+id: browser/config/wrong-shapes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec:
+      sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, ?), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, ?), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, ?), (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB))"
+      params:
+        - browserTableShowNotesMode
+        - '1'
+        - collapseSavedSearches
+        - '"true"'
+        - collapseToday
+        - 'null'
+        - collapseFlags
+        - '{'
+        - collapseCardState
+        - 'true'
+        - collapseDecks
+        - ' true '
+        - collapseNotetypes
+        - '[true]'
+        - collapseTags
+        - '1.0'
+        - previewBothSides
+        - 'true'
+        - ignoreAccentsInSearch
+        - '"yes"'
+        - restorePositionBrowser
+        - '0'
+        - resetCountsBrowser
+        - '{}'
+        - normalize_note_text
+        - '"false"'
+        - setDueBrowser
+        - '5'
+        - defaultSearchText
+        - 'null'
+        - activeCols
+        - '["question"]'
+        - activeNoteCols
+        - '[ "note" , 5, null ]'
+        - sortType
+        - '"question"'
+        - noteSortType
+        - '"noteCrt'
+        - sortBackwards
+        - '1'
+        - browserNoteSortBackwards
+        - 'true'
+        - savedFilters
+        - '{"a":"x","a":"y","b":3}'
+        - flagLabels
+        - '[]'
+  - observe: [browser_config]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), typeof(val) FROM config WHERE mtime_secs = 1700000000 ORDER BY KEY"}
+  - db_exec:
+      sql: "INSERT OR REPLACE INTO config (KEY, usn, mtime_secs, val) VALUES (?, 0, 1700000000, CAST(? AS BLOB)), (?, 0, 1700000000, CAST(? AS BLOB))"
+      params: [setDueBrowser, '""', defaultSearchText, '"  deck:x "']
+  - observe: [browser_config]

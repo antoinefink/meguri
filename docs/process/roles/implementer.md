@@ -28,7 +28,8 @@ You build Meguri from specs. Anki's source never enters your environment (KTD1, 
 - Meguri authors its own stock note types, base card CSS, UI strings and documentation (R1959). Anki's exact wording is used only where a spec lists it (for example `specs/review/reviewer-strings.md`).
 - No Anki web assets (reviewer scripts, image occlusion runtime, editor, MathJax configuration) in the app or in tests (R1960).
 - UI work: at most three render-and-fix rounds per screen, then hand it to the critic and the gates (R1987).
-- A similarity flag reaches you as the implementer view: file, lines, channel, score. Rewrite that region from the spec. Do not ask for the reviewer view.
+- A similarity flag reaches you as the implementer view: file, lines, channel, score. Rewrite that region from the spec. Do not ask for the reviewer view. `tools/mg merge` copies it to `build/mg/merge-feedback/<run>/` in your worktree.
+- Before you hand back a round, commit and run `tools/mg gate --local`: every run your change triggers but the similarity scan and the oracle-image runs, which `tools/mg merge` adds (docs/process/tiers.md). Nothing retries; a flaky test is fixed or quarantined, never rerun until green.
 
 ## Commits
 

@@ -28,17 +28,85 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     let json: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
         json["supports"]["ops"],
-        serde_json::json!(["advance", "db_exec", "handoff", "open", "set_clock", "set_config"])
+        serde_json::json!([
+            "add_note",
+            "add_note_tags",
+            "add_notetype",
+            "add_stock_notetype",
+            "advance",
+            "browser_config_set",
+            "clear_unused_tags",
+            "clone_notetype",
+            "db_exec",
+            "delete_notes",
+            "delete_tags",
+            "edit_note",
+            "ensure_io_notetype",
+            "handoff",
+            "open",
+            "remove_note_tags",
+            "rename_tag",
+            "reopen",
+            "reparent_tags",
+            "set_clock",
+            "set_config",
+            "set_flag",
+            "set_tag_collapsed",
+            "update_notetype",
+            "update_notetype.css",
+            "update_notetype.field_options",
+            "update_notetype.rename",
+            "update_notetype.rename_template",
+            "update_notetype.template"
+        ])
+    );
+    // dsl.md D8: the new collection is a setup capability; U29's stand-in
+    // (notetype-ops.md T10.2) declares it.
+    assert_eq!(
+        json["supports"]["setup"],
+        serde_json::json!(["config", "new_collection", "notes", "notetypes"])
     );
     assert_eq!(
         json["supports"]["observations"],
-        serde_json::json!(["cloze", "db_dump", "fsrs_next", "schema_objects", "template", "text"])
+        serde_json::json!([
+            "browser_config",
+            "canonical_search",
+            "cloze",
+            "db_dump",
+            "fields_check",
+            "fsrs_next",
+            "notetype_structure",
+            "schema_objects",
+            "search",
+            "tag_tree",
+            "template",
+            "text",
+            "timing"
+        ])
     );
-    // dsl.md D7.2: 26 ops besides observe, the actor ops of sync-ops.md, the
-    // model ops of model-ops.md, storage-ops.md's open and record-ops.md's
-    // set_config among them.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 26);
-    for op in ["actor", "sync", "net_fault", "converge", "reopen", "open", "set_config"] {
+    // dsl.md D7.2: 43 ops besides observe, the actor ops of sync-ops.md, the
+    // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
+    // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
+    // of tag-ops.md, browser-config-ops.md's browser_config_set and the note
+    // type ops of notetype-ops.md among them.
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 43);
+    for op in [
+        "actor",
+        "sync",
+        "net_fault",
+        "converge",
+        "reopen",
+        "open",
+        "set_config",
+        "add_notetype",
+        "update_notetype",
+        "undo",
+        "redo",
+        "remove_config",
+        "rename_tag",
+        "set_flag",
+        "browser_config_set",
+    ] {
         assert!(
             json["language"]["ops"].as_array().unwrap().iter().any(|o| o == op),
             "{op}"
@@ -71,6 +139,14 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .unwrap()
             .iter()
             .any(|k| k == "legacy_json")
+    );
+    // undo-ops.md V2.
+    assert!(
+        json["language"]["observations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "undo_status")
     );
     // observations.md O4: blob_decode and package_col are kinds of the
     // language, which Meguri's executor does not run yet (model-ops.md L5).

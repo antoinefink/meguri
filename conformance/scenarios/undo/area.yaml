@@ -1,0 +1,16 @@
+# specs/conformance/dsl.md D9.1. None active yet. Every undo scenario starts
+# from the new collection (dsl.md D8: U28's bootstrap) and needs Meguri's undo
+# adapter (exec/undo.rs), which U38 builds once the conformance session runs
+# ops through CoreHost::open (specs/conformance/undo-ops.md V6). Nine also need
+# the notetypes, decks and notes setup sections (U27-U29), eight of them
+# edit_note or delete_notes (U27), and undo/revlog-taken-id needs answer
+# (U44). The unit that lands the last thing a scenario uses activates it here
+# (plan, U25 Verification as amended 2026-10-16, docs/process/review-log/U25.md
+# A1). Meanwhile core/crates/meguri-engine/tests/undo_conformance.rs plays
+# every undo scenario on the engine's undo against its golden, with stand-ins
+# for the new collection, deck setup and answer. U27 replaces its note
+# add/edit/delete stand-ins with real engine operations and also plays
+# notes/records/undo-add. No scenario is completed on the production
+# executor by U27 alone: U28 and U38 remain missing, so none is active here.
+area: undo
+active: []

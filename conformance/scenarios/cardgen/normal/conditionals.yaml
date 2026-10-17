@@ -1,0 +1,41 @@
+# Which templates of a standard note type make cards (specs/notes/card-
+# generation.md G2, G3): the strict analysis of the front with the note's
+# non-empty fields plus the special names. Tags counts only when the note
+# has a tag, unless a note field is named Tags; the back is never read. A
+# note that would get no card gets the card of ordinal 0 (G6). Edits that
+# change tags or fields add the cards that become required and remove none
+# (G7). The cards an edit adds have no logical id, so cards are read with
+# db_exec; notes are named by their first field (the sort field).
+id: cardgen/normal/conditionals
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: TagGate
+      fields: [Label, Front, Back]
+      templates:
+        - {name: Tagged, front: "{{#Tags}}{{Front}}{{/Tags}}", back: "{{Tags}}"}
+        - {name: Plain, front: "{{Back}}", back: "{{Front}}"}
+        - {name: Untagged, front: "{{^Tags}}{{Front}}{{/Tags}}", back: "{{Back}}"}
+    - name: Shadow
+      fields: [Label, Front, Tags]
+      templates:
+        - {name: Gate, front: "{{#Tags}}{{Front}}{{/Tags}}", back: "x"}
+        - {name: Open, front: "{{Front}}", back: "y"}
+  decks: [Inbox]
+steps:
+  - add_note: {notetype: TagGate, deck: Inbox, fields: [untagged, x, y]}
+  - add_note: {notetype: TagGate, deck: Inbox, fields: [tagged, x, y], tags: [t]}
+  - add_note: {notetype: TagGate, deck: Inbox, fields: [untagged-empty, "", ""]}
+  - add_note: {notetype: TagGate, deck: Inbox, fields: [tagged-empty, "", ""], tags: [t]}
+  - add_note: {notetype: TagGate, deck: Inbox, fields: [back-only, "", y], tags: [t]}
+  # A note field named Tags replaces the special name.
+  - add_note: {notetype: Shadow, deck: Inbox, fields: [field-empty, x, ""], tags: [t]}
+  - add_note: {notetype: Shadow, deck: Inbox, fields: [field-set, x, v]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
+  - advance: 1h
+  - edit_note: {note: "#n1", tags: [t]}
+  - edit_note: {note: "#n2", tags: []}
+  - edit_note: {note: "#n3", fields: {Front: x}}
+  - edit_note: {note: "#n6", fields: {Tags: v}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due, c.mod FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}

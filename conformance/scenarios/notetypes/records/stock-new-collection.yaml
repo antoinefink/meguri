@@ -1,0 +1,18 @@
+# What a new collection holds of the stock note types (specs/notetypes/
+# stock-kinds.md K2): the six kinds in their order, with their ids from the
+# frozen clock, their stamps, field and template names in ordinal order, and
+# the current note type. Template texts and CSS are not observed (R1959).
+# Interop with the stock kinds is the point of this scenario.
+id: notetypes/records/stock-new-collection
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - db_exec: {sql: "SELECT id, name, mtime_secs, usn FROM notetypes ORDER BY id"}
+  - db_exec:
+      sql: >-
+        SELECT n.name, f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        ORDER BY n.id, f.ord
+  - db_exec:
+      sql: >-
+        SELECT n.name, t.ord, t.name, t.mtime_secs, t.usn FROM templates t
+        JOIN notetypes n ON n.id = t.ntid ORDER BY n.id, t.ord
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY = 'curModel'"}
