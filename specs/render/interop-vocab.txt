@@ -1,6 +1,8 @@
 # Interface names the render specs use: template tag syntax (special field
 # names, filter names, type-in and TTS markers), the markup the hint and ruby
-# filters write, and the note type keys of the legacy card requirements.
+# filters write, the note type keys of the legacy card requirements, and the
+# image-occlusion field prefix and the element, class and attribute names
+# Anki writes into cloze HTML (note type CSS and card scripts depend on them).
 FrontSide
 Tags
 Type
@@ -171,3 +173,10 @@ transition-medium
 transition-slow
 focus-color
 QWebChannel
+# render/cloze
+cloze-inactive
+cloze-highlight
+data-cloze
+data-ordinal
+image-occlusion
+span

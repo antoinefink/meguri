@@ -1,0 +1,24 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "cloze": {
+          "back": ["<span class=\"cloze\" data-ordinal=\"1\">\"quoted\" & 'single' <tag></span>", "<span class=\"cloze\" data-ordinal=\"1\">a b\tc\nd\re</span>", "<span class=\"cloze\" data-ordinal=\"1\">!#$%()*+,-./:;=?@[\\]^_`{|}~</span>", "<span class=\"cloze\" data-ordinal=\"1\">café naïve ß ÿ end</span>", "<span class=\"cloze\" data-ordinal=\"1\">¡¿</span>", "<span class=\"cloze\" data-ordinal=\"1\">Ā ł € 日本 😀   end</span>", "<span class=\"cloze\" data-ordinal=\"1\">\u0000nul\u0001</span>", "<span class=\"cloze\" data-ordinal=\"1\">[sound:river.mp3]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">[sound:sea.mp3]</span>", "<span class=\"cloze\" data-ordinal=\"1\"><img src=\"map.png\"></span>", "<span class=\"cloze\" data-ordinal=\"1\">&amp;&nbsp;&#x41;</span>"],
+          "front": ["<span class=\"cloze\" data-cloze=\"&quot;quoted&quot;&#x20;&amp;&#x20;&#x27;single&#x27;&#x20;&lt;tag&gt;\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"a&#x20;b&#x09;c&#x0A;d&#x0D;e\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&#x21;&#x23;&#x24;&#x25;&#x28;&#x29;&#x2A;&#x2B;&#x2C;&#x2D;&#x2E;&#x2F;&#x3A;&#x3B;&#x3D;&#x3F;&#x40;&#x5B;&#x5C;&#x5D;&#x5E;&#x5F;&#x60;&#x7B;&#x7C;&#x7D;&#x7E;\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"caf&#xE9;&#x20;na&#xEF;ve&#x20;&#xDF;&#x20;&#xFF;&#xA0;end\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&#x80;&#x9F;&#xA1;&#xBF;\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"Ā&#x20;ł&#x20;€&#x20;日本&#x20;😀&#x20; &#x20;end\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&#x00;nul&#x01;\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&#x5B;sound&#x3A;river&#x2E;mp3&#x5D;\" data-ordinal=\"1\">[...]</span> <span class=\"cloze-inactive\" data-ordinal=\"2\">[sound:sea.mp3]</span>", "<span class=\"cloze\" data-cloze=\"&lt;img&#x20;src&#x3D;&quot;map&#x2E;png&quot;&gt;\" data-ordinal=\"1\">[...]</span>", "<span class=\"cloze\" data-cloze=\"&amp;amp&#x3B;&amp;nbsp&#x3B;&amp;&#x23;x41&#x3B;\" data-ordinal=\"1\">[...]</span>"]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "09cd906bf8cf0daa13a1dcb841fcc42e97f2d7f3c5c2e43585d32f2d457aa10f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/cloze/encoding",
+  "scenario_sha256": "27ff21d382fc409735a51936287d2e3d53a287dc7ed1a22fb7505c7da3a33120",
+  "tz": "UTC"
+}

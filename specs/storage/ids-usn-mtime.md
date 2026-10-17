@@ -57,7 +57,7 @@ Anki has no cap, so its ids follow I2 even two days ahead. This difference is a 
 
 ## I4. Rows that arrive with an id
 
-Rows that a sync, an import, an undo restore or a raw copy brings keep their given ids: no allocation, and no cap, applies to them. A review-log row whose given id already exists is not inserted, and the existing row stays as it is; that is Anki's rule for review-log rows from a sync, an import and an undo restore. The owning areas define the other tables' rules for given ids (U107 sync, U122 import, U25 undo).
+Rows that a sync, an import, an undo restore or a raw copy brings keep their given ids: no allocation, and no cap, applies to them. A review-log row whose given id already exists is not inserted, and the existing row stays as it is; that is Anki's rule for review-log rows from a sync, an import and an undo restore. The owning areas define the other tables' rules for given ids (U107 sync, U122 import). For undo (`engine/undo` A8): only a writer outside the undo history can take the id of a row an undo or redo puts back, and Meguri's check refuses that undo or redo before it writes (deviation `undo-revlog-taken-id-redo`).
 
 ## S1. Stamp columns
 
@@ -90,11 +90,12 @@ A row that a local action creates or changes gets `usn` -1 and, where S1 lists a
 | Incoming sync row or grave | the server's value | as received | not by the row; the sync's end sets it (R1531) |
 | Marking sent rows as synced | the USN the server reported when the sync began | unchanged | unchanged |
 | `.apkg` update of an existing note (R1602) | -1 | the incoming note's | set to `now_ms` |
-| Undo or redo | the restored row's | the restored row's | restored (S5) |
+| Undo or redo | the restored row's (`engine/undo` A4 to A6; a grave a redo adds back: -1, A5) | the restored row's | restored (S5) |
 | Raw write: staging copies (U33, U122, U123), the unbury at day rollover (U40), scenario `db_exec` | as written | as written | unchanged |
+| Day clock config writes: `rollover`, `localOffset`, `lastUnburied` (`sched/day-clock#D5`, `#D7`) | -1 | `now_s` | unchanged |
 | Schema upgrade on open (`storage/schema-upgrade`, not an operation) | as that spec gives: -1 only for the decks and cards it changes (U9.1) | as that spec gives | unchanged |
 
-Day rollover's unbury rewrites `cards.queue` without touching `mod` or `usn`, and records the day in the `lastUnburied` config key with a local change.
+Day rollover's unbury rewrites `cards.queue` without touching `mod` or `usn`, and records the day in the `lastUnburied` config key. That config write, like the day clock's writes of `rollover` and `localOffset`, stamps the row as a local change but leaves `col.mod` alone, as Anki does: Anki makes these writes outside any operation (`sched/day-clock#D5`).
 
 ## S4. Writes that change nothing
 
@@ -115,8 +116,8 @@ Meguri applies S4 everywhere. Where an Anki operation stamps an unchanged row an
 ## S5. `col.mod`
 
 - An operation that makes at least one real change sets `col.mod` to `now_ms` once, when it commits, however many rows it changed (R1471). An operation that changes nothing leaves `col.mod` alone (R1472).
-- A change to any config key counts, `curDeck` included, so it marks the collection changed for sync (R1474).
-- Undo sets `col.mod` back to the value it had before the undone operation; redo sets it back to the value that operation set. Neither sets it to `now_ms`.
+- A change to any config key counts, `curDeck` included, so it marks the collection changed for sync (R1474). The day clock's writes are the exception (S3).
+- Undo sets `col.mod` back to the value it had before the undone operation; redo sets it to the value it had when that undo ran, which is the value the operation set unless something moved `col.mod` in between without emptying the undo history (a config write without an undo entry). Neither sets it to `now_ms` (`engine/undo` A7).
 - Raw writes and the marking of sent rows leave it unchanged; a sync sets it at its end (R1531).
 - Some Anki maintenance paths that keep no undo record set `col.mod` even when they change nothing. Meguri does not; the owning area records the deviation if a scenario shows it.
 

@@ -66,6 +66,20 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
     }
 }
 
+/// The day clock's events (U40, `sched/day-clock` D8) keep their values
+/// across the bridge.
+@Test func dayClockEventsKeepTheirValues() {
+    let bridged = { (kind: MeguriCoreBindings.CoreEventKind) in
+        CoreBridge.CoreEvent(MeguriCoreBindings.CoreEvent(seq: 7, generation: 1, causeSeq: 6, kind: kind))
+    }
+    let rolled = bridged(.rolledOver(oldDay: 5, newDay: 6))
+    #expect(rolled.kind == .rolledOver(oldDay: 5, newDay: 6))
+    #expect(rolled.causeSeq == 6)
+    #expect(bridged(.timeZoneChanged(zoneId: "Africa/Ceuta")).kind == .timeZoneChanged(zoneID: "Africa/Ceuta"))
+    #expect(
+        bridged(.nextDayAtChanged(nextDayAt: 1_895_194_800)).kind == .nextDayAtChanged(nextDayAt: 1_895_194_800))
+}
+
 /// Everything here shares the process-wide event listener, so it runs serially.
 @Suite(.serialized) struct EventTests {
     @Test func tenThousandEventsFromFourProducersArriveInSeqOrderOnTheDispatcherThread() async throws {
@@ -116,6 +130,37 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
             if seqs.count == 200 { break }
         }
         #expect(zip(seqs, seqs.dropFirst()).allSatisfy { $0 < $1 })
+    }
+
+    @Test func aChangesEventArrivesWithEveryListOfItsChangeSet() async throws {
+        try await CoreEventStream.shared.install()
+        let events = CoreEventStream.shared.events
+        let seq = try await MaintenanceLane.shared.call("test.emitChanges") { try testEmitChanges() }
+
+        var received: CoreBridge.CoreEvent.Kind?
+        for await event in events where event.seq == seq {
+            received = event.kind
+            break
+        }
+        // The sample the hook publishes (Rust `changes::sample`).
+        let expected = CoreBridge.ChangeSet(
+            source: .localApi,
+            cards: [
+                .init(id: 11, noteID: 21, change: .updated, memoryStateOnly: true),
+                .init(id: 12, noteID: 21, change: .added, memoryStateOnly: false),
+            ],
+            notes: [.init(id: 21, change: .added)],
+            notetypes: [.init(id: 31, change: .updated, schemaChanged: true)],
+            decks: [.init(id: 41, change: .removed)],
+            deckConfigs: [.init(id: 51, change: .added)],
+            configKeys: [.init(name: "curDeck", change: .updated)],
+            tags: [.init(name: "leech", change: .added)],
+            revlogAdded: [61],
+            revlogRemoved: [62],
+            mediaAdded: ["a.jpg"],
+            mediaRemoved: ["b.mp3"],
+            collectionRow: true)
+        #expect(received == .changes(expected))
     }
 
     @Test func progressFiredAThousandTimesASecondReachesSwiftAtMostElevenTimesInAnySecond() async throws {

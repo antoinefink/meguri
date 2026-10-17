@@ -68,13 +68,34 @@ pub fn plan_and_commit<P, T, PF, CF>(
     collection: &Collection,
     role: ReaderRole,
     spec: OpSpec,
-    mut plan: PF,
+    plan: PF,
     commit: CF,
 ) -> Result<OpResult<T>, EngineError>
 where
     P: Send + 'static,
     T: Send + 'static,
     PF: FnMut(&PlanContext<'_>) -> Result<Plan<P>, EngineError>,
+    CF: Fn(&mut OpContext<'_, '_>, P) -> Result<T, EngineError> + Send + Sync + 'static,
+{
+    plan_and_commit_with(collection, role, spec, plan, |spec, _| spec.clone(), commit)
+}
+
+/// [`plan_and_commit`] with the write phase's spec chosen from each plan's
+/// value: `choose(&spec, &value)`, so an op declares a long write (O8) only
+/// when its plan is large. `spec` serves the planning.
+pub fn plan_and_commit_with<P, T, PF, SF, CF>(
+    collection: &Collection,
+    role: ReaderRole,
+    spec: OpSpec,
+    mut plan: PF,
+    choose: SF,
+    commit: CF,
+) -> Result<OpResult<T>, EngineError>
+where
+    P: Send + 'static,
+    T: Send + 'static,
+    PF: FnMut(&PlanContext<'_>) -> Result<Plan<P>, EngineError>,
+    SF: Fn(&OpSpec, &P) -> OpSpec,
     CF: Fn(&mut OpContext<'_, '_>, P) -> Result<T, EngineError> + Send + Sync + 'static,
 {
     let commit = Arc::new(commit);
@@ -102,7 +123,7 @@ where
         if let Some(token) = &spec.cancel {
             token.check()?;
         }
-        let mut attempt_spec = spec.clone().preconditions(planned.preconditions);
+        let mut attempt_spec = choose(&spec, &planned.value).preconditions(planned.preconditions);
         attempt_spec.plan_time = Some(plan_time);
         let commit = Arc::clone(&commit);
         let value = planned.value;

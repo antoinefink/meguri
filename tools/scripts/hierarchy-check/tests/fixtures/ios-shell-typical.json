@@ -1,0 +1,1297 @@
+{
+  "captured_at" : 1792165717.1405702,
+  "platform" : "ios",
+  "root" : {
+    "children" : [
+      {
+        "children" : [
+          {
+            "children" : [
+
+            ],
+            "enabled" : true,
+            "focused" : false,
+            "frame" : {
+              "height" : 874,
+              "width" : 402,
+              "x" : 0,
+              "y" : 0
+            },
+            "hit_point" : {
+              "x" : 201,
+              "y" : 437
+            },
+            "identifier" : "",
+            "label" : "",
+            "selected" : false,
+            "type" : "other",
+            "value" : null
+          },
+          {
+            "children" : [
+              {
+                "children" : [
+                  {
+                    "children" : [
+                      {
+                        "children" : [
+                          {
+                            "children" : [
+                              {
+                                "children" : [
+                                  {
+                                    "children" : [
+                                      {
+                                        "children" : [
+                                          {
+                                            "children" : [
+                                              {
+                                                "children" : [
+                                                  {
+                                                    "children" : [
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 40.67,
+                                                              "width" : 94.33,
+                                                              "x" : 16,
+                                                              "y" : 119.67
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 63.17,
+                                                              "y" : 140
+                                                            },
+                                                            "identifier" : "",
+                                                            "label" : "Home",
+                                                            "selected" : false,
+                                                            "type" : "staticText",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 106,
+                                                          "width" : 402,
+                                                          "x" : 0,
+                                                          "y" : 62
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 201,
+                                                          "y" : 115
+                                                        },
+                                                        "identifier" : "Home",
+                                                        "label" : "",
+                                                        "selected" : false,
+                                                        "type" : "navigationBar",
+                                                        "value" : null
+                                                      },
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+                                                              {
+                                                                "children" : [
+                                                                  {
+                                                                    "children" : [
+                                                                      {
+                                                                        "children" : [
+                                                                          {
+                                                                            "children" : [
+
+                                                                            ],
+                                                                            "enabled" : true,
+                                                                            "focused" : false,
+                                                                            "frame" : {
+                                                                              "height" : 88.67,
+                                                                              "width" : 56,
+                                                                              "x" : 173,
+                                                                              "y" : 408.33
+                                                                            },
+                                                                            "hit_point" : {
+                                                                              "x" : 201,
+                                                                              "y" : 452.67
+                                                                            },
+                                                                            "identifier" : "",
+                                                                            "label" : "Home",
+                                                                            "selected" : false,
+                                                                            "type" : "staticText",
+                                                                            "value" : null
+                                                                          },
+                                                                          {
+                                                                            "children" : [
+
+                                                                            ],
+                                                                            "enabled" : true,
+                                                                            "focused" : false,
+                                                                            "frame" : {
+                                                                              "height" : 41.33,
+                                                                              "width" : 46.67,
+                                                                              "x" : 177.67,
+                                                                              "y" : 408.33
+                                                                            },
+                                                                            "hit_point" : {
+                                                                              "x" : 201,
+                                                                              "y" : 429
+                                                                            },
+                                                                            "identifier" : "house",
+                                                                            "label" : "Home",
+                                                                            "selected" : false,
+                                                                            "type" : "image",
+                                                                            "value" : null
+                                                                          },
+                                                                          {
+                                                                            "children" : [
+
+                                                                            ],
+                                                                            "enabled" : true,
+                                                                            "focused" : false,
+                                                                            "frame" : {
+                                                                              "height" : 24,
+                                                                              "width" : 111.33,
+                                                                              "x" : 145.33,
+                                                                              "y" : 500
+                                                                            },
+                                                                            "hit_point" : {
+                                                                              "x" : 201,
+                                                                              "y" : 512
+                                                                            },
+                                                                            "identifier" : "",
+                                                                            "label" : "Not built yet.",
+                                                                            "selected" : false,
+                                                                            "type" : "staticText",
+                                                                            "value" : null
+                                                                          }
+                                                                        ],
+                                                                        "enabled" : true,
+                                                                        "focused" : false,
+                                                                        "frame" : {
+                                                                          "height" : 115.67,
+                                                                          "width" : 111.33,
+                                                                          "x" : 145.33,
+                                                                          "y" : 408.33
+                                                                        },
+                                                                        "hit_point" : {
+                                                                          "x" : 201,
+                                                                          "y" : 466.17
+                                                                        },
+                                                                        "identifier" : "testhooks.shell.root.home",
+                                                                        "label" : "",
+                                                                        "selected" : false,
+                                                                        "type" : "other",
+                                                                        "value" : null
+                                                                      }
+                                                                    ],
+                                                                    "enabled" : true,
+                                                                    "focused" : false,
+                                                                    "frame" : {
+                                                                      "height" : 874,
+                                                                      "width" : 402,
+                                                                      "x" : 0,
+                                                                      "y" : 0
+                                                                    },
+                                                                    "hit_point" : {
+                                                                      "x" : 201,
+                                                                      "y" : 437
+                                                                    },
+                                                                    "identifier" : "",
+                                                                    "label" : "",
+                                                                    "selected" : false,
+                                                                    "type" : "other",
+                                                                    "value" : null
+                                                                  }
+                                                                ],
+                                                                "enabled" : true,
+                                                                "focused" : false,
+                                                                "frame" : {
+                                                                  "height" : 874,
+                                                                  "width" : 402,
+                                                                  "x" : 0,
+                                                                  "y" : 0
+                                                                },
+                                                                "hit_point" : {
+                                                                  "x" : 201,
+                                                                  "y" : 437
+                                                                },
+                                                                "identifier" : "",
+                                                                "label" : "",
+                                                                "selected" : false,
+                                                                "type" : "other",
+                                                                "value" : null
+                                                              }
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 874,
+                                                              "width" : 402,
+                                                              "x" : 0,
+                                                              "y" : 0
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 201,
+                                                              "y" : 437
+                                                            },
+                                                            "identifier" : "",
+                                                            "label" : "",
+                                                            "selected" : false,
+                                                            "type" : "other",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 874,
+                                                          "width" : 402,
+                                                          "x" : 0,
+                                                          "y" : 0
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 201,
+                                                          "y" : 437
+                                                        },
+                                                        "identifier" : "",
+                                                        "label" : "",
+                                                        "selected" : false,
+                                                        "type" : "other",
+                                                        "value" : null
+                                                      },
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 874,
+                                                              "width" : 402,
+                                                              "x" : 0,
+                                                              "y" : 0
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 201,
+                                                              "y" : 437
+                                                            },
+                                                            "identifier" : "",
+                                                            "label" : "",
+                                                            "selected" : false,
+                                                            "type" : "other",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 874,
+                                                          "width" : 402,
+                                                          "x" : 0,
+                                                          "y" : 0
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 201,
+                                                          "y" : 437
+                                                        },
+                                                        "identifier" : "Toolbar",
+                                                        "label" : "Toolbar",
+                                                        "selected" : false,
+                                                        "type" : "toolbar",
+                                                        "value" : null
+                                                      }
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 874,
+                                                      "width" : 402,
+                                                      "x" : 0,
+                                                      "y" : 0
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 201,
+                                                      "y" : 437
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  }
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 874,
+                                                  "width" : 402,
+                                                  "x" : 0,
+                                                  "y" : 0
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 201,
+                                                  "y" : 437
+                                                },
+                                                "identifier" : "",
+                                                "label" : "",
+                                                "selected" : false,
+                                                "type" : "other",
+                                                "value" : null
+                                              }
+                                            ],
+                                            "enabled" : true,
+                                            "focused" : false,
+                                            "frame" : {
+                                              "height" : 874,
+                                              "width" : 402,
+                                              "x" : 0,
+                                              "y" : 0
+                                            },
+                                            "hit_point" : {
+                                              "x" : 201,
+                                              "y" : 437
+                                            },
+                                            "identifier" : "",
+                                            "label" : "",
+                                            "selected" : false,
+                                            "type" : "other",
+                                            "value" : null
+                                          }
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 874,
+                                          "width" : 402,
+                                          "x" : 0,
+                                          "y" : 0
+                                        },
+                                        "hit_point" : {
+                                          "x" : 201,
+                                          "y" : 437
+                                        },
+                                        "identifier" : "",
+                                        "label" : "",
+                                        "selected" : false,
+                                        "type" : "other",
+                                        "value" : null
+                                      }
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 874,
+                                      "width" : 402,
+                                      "x" : 0,
+                                      "y" : 0
+                                    },
+                                    "hit_point" : {
+                                      "x" : 201,
+                                      "y" : 437
+                                    },
+                                    "identifier" : "",
+                                    "label" : "",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : null
+                                  }
+                                ],
+                                "enabled" : true,
+                                "focused" : false,
+                                "frame" : {
+                                  "height" : 874,
+                                  "width" : 402,
+                                  "x" : 0,
+                                  "y" : 0
+                                },
+                                "hit_point" : {
+                                  "x" : 201,
+                                  "y" : 437
+                                },
+                                "identifier" : "",
+                                "label" : "",
+                                "selected" : false,
+                                "type" : "other",
+                                "value" : null
+                              },
+                              {
+                                "children" : [
+                                  {
+                                    "children" : [
+                                      {
+                                        "children" : [
+                                          {
+                                            "children" : [
+                                              {
+                                                "children" : [
+                                                  {
+                                                    "children" : [
+
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 54,
+                                                      "width" : 98,
+                                                      "x" : 21,
+                                                      "y" : 791
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 70,
+                                                      "y" : 818
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  },
+                                                  {
+                                                    "children" : [
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 31.33,
+                                                              "width" : 30,
+                                                              "x" : 59,
+                                                              "y" : 800
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 74,
+                                                              "y" : 815.67
+                                                            },
+                                                            "identifier" : "rectangle.stack.fill",
+                                                            "label" : "Album",
+                                                            "selected" : false,
+                                                            "type" : "image",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 54,
+                                                          "width" : 98,
+                                                          "x" : 25,
+                                                          "y" : 795
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 74,
+                                                          "y" : 822
+                                                        },
+                                                        "identifier" : "shell.root.tab.decks",
+                                                        "label" : "Decks",
+                                                        "selected" : true,
+                                                        "type" : "button",
+                                                        "value" : null
+                                                      },
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 26.67,
+                                                              "width" : 27.67,
+                                                              "x" : 145,
+                                                              "y" : 801.67
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 158.83,
+                                                              "y" : 815
+                                                            },
+                                                            "identifier" : "magnifyingglass",
+                                                            "label" : "Search",
+                                                            "selected" : false,
+                                                            "type" : "image",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 54,
+                                                          "width" : 98,
+                                                          "x" : 109.67,
+                                                          "y" : 795
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 158.67,
+                                                          "y" : 822
+                                                        },
+                                                        "identifier" : "shell.root.tab.browse",
+                                                        "label" : "Browse",
+                                                        "selected" : false,
+                                                        "type" : "button",
+                                                        "value" : null
+                                                      },
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 25.33,
+                                                              "width" : 31.67,
+                                                              "x" : 227.67,
+                                                              "y" : 802.33
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 243.5,
+                                                              "y" : 815
+                                                            },
+                                                            "identifier" : "chart.bar.xaxis",
+                                                            "label" : "Bar chart with an X axis",
+                                                            "selected" : false,
+                                                            "type" : "image",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 54,
+                                                          "width" : 98,
+                                                          "x" : 194.33,
+                                                          "y" : 795
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 243.33,
+                                                          "y" : 822
+                                                        },
+                                                        "identifier" : "shell.root.tab.stats",
+                                                        "label" : "Stats",
+                                                        "selected" : false,
+                                                        "type" : "button",
+                                                        "value" : null
+                                                      },
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 28,
+                                                              "width" : 28,
+                                                              "x" : 314,
+                                                              "y" : 801
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 328,
+                                                              "y" : 815
+                                                            },
+                                                            "identifier" : "gearshape.fill",
+                                                            "label" : "Gear shape, filled",
+                                                            "selected" : false,
+                                                            "type" : "image",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 54,
+                                                          "width" : 98,
+                                                          "x" : 279,
+                                                          "y" : 795
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 328,
+                                                          "y" : 822
+                                                        },
+                                                        "identifier" : "shell.root.tab.settings",
+                                                        "label" : "Settings",
+                                                        "selected" : false,
+                                                        "type" : "button",
+                                                        "value" : null
+                                                      }
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 62,
+                                                      "width" : 360,
+                                                      "x" : 21,
+                                                      "y" : 791
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 201,
+                                                      "y" : 822
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  },
+                                                  {
+                                                    "children" : [
+
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 62,
+                                                      "width" : 360,
+                                                      "x" : 21,
+                                                      "y" : 791
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 201,
+                                                      "y" : 822
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  },
+                                                  {
+                                                    "children" : [
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 54,
+                                                              "width" : 98,
+                                                              "x" : 25,
+                                                              "y" : 795
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 74,
+                                                              "y" : 822
+                                                            },
+                                                            "identifier" : "",
+                                                            "label" : "",
+                                                            "selected" : false,
+                                                            "type" : "other",
+                                                            "value" : null
+                                                          },
+                                                          {
+                                                            "children" : [
+                                                              {
+                                                                "children" : [
+                                                                  {
+                                                                    "children" : [
+                                                                      {
+                                                                        "children" : [
+
+                                                                        ],
+                                                                        "enabled" : true,
+                                                                        "focused" : false,
+                                                                        "frame" : {
+                                                                          "height" : 54,
+                                                                          "width" : 98,
+                                                                          "x" : 25,
+                                                                          "y" : 795
+                                                                        },
+                                                                        "hit_point" : {
+                                                                          "x" : 74,
+                                                                          "y" : 822
+                                                                        },
+                                                                        "identifier" : "",
+                                                                        "label" : "",
+                                                                        "selected" : false,
+                                                                        "type" : "other",
+                                                                        "value" : null
+                                                                      }
+                                                                    ],
+                                                                    "enabled" : true,
+                                                                    "focused" : false,
+                                                                    "frame" : {
+                                                                      "height" : 54,
+                                                                      "width" : 98,
+                                                                      "x" : 25,
+                                                                      "y" : 795
+                                                                    },
+                                                                    "hit_point" : {
+                                                                      "x" : 74,
+                                                                      "y" : 822
+                                                                    },
+                                                                    "identifier" : "",
+                                                                    "label" : "",
+                                                                    "selected" : false,
+                                                                    "type" : "other",
+                                                                    "value" : null
+                                                                  },
+                                                                  {
+                                                                    "children" : [
+
+                                                                    ],
+                                                                    "enabled" : true,
+                                                                    "focused" : false,
+                                                                    "frame" : {
+                                                                      "height" : 54,
+                                                                      "width" : 98,
+                                                                      "x" : 25,
+                                                                      "y" : 795
+                                                                    },
+                                                                    "hit_point" : {
+                                                                      "x" : 74,
+                                                                      "y" : 822
+                                                                    },
+                                                                    "identifier" : "",
+                                                                    "label" : "",
+                                                                    "selected" : false,
+                                                                    "type" : "other",
+                                                                    "value" : null
+                                                                  }
+                                                                ],
+                                                                "enabled" : true,
+                                                                "focused" : false,
+                                                                "frame" : {
+                                                                  "height" : 54,
+                                                                  "width" : 98,
+                                                                  "x" : 25,
+                                                                  "y" : 795
+                                                                },
+                                                                "hit_point" : {
+                                                                  "x" : 74,
+                                                                  "y" : 822
+                                                                },
+                                                                "identifier" : "",
+                                                                "label" : "",
+                                                                "selected" : false,
+                                                                "type" : "other",
+                                                                "value" : null
+                                                              },
+                                                              {
+                                                                "children" : [
+
+                                                                ],
+                                                                "enabled" : true,
+                                                                "focused" : false,
+                                                                "frame" : {
+                                                                  "height" : 54,
+                                                                  "width" : 98,
+                                                                  "x" : 25,
+                                                                  "y" : 795
+                                                                },
+                                                                "hit_point" : {
+                                                                  "x" : 74,
+                                                                  "y" : 822
+                                                                },
+                                                                "identifier" : "",
+                                                                "label" : "",
+                                                                "selected" : false,
+                                                                "type" : "other",
+                                                                "value" : null
+                                                              }
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 54,
+                                                              "width" : 98,
+                                                              "x" : 25,
+                                                              "y" : 795
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 74,
+                                                              "y" : 822
+                                                            },
+                                                            "identifier" : "",
+                                                            "label" : "",
+                                                            "selected" : false,
+                                                            "type" : "other",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 54,
+                                                          "width" : 98,
+                                                          "x" : 25,
+                                                          "y" : 795
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 74,
+                                                          "y" : 822
+                                                        },
+                                                        "identifier" : "",
+                                                        "label" : "",
+                                                        "selected" : false,
+                                                        "type" : "other",
+                                                        "value" : null
+                                                      }
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 54,
+                                                      "width" : 98,
+                                                      "x" : 25,
+                                                      "y" : 795
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 74,
+                                                      "y" : 822
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  }
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 62,
+                                                  "width" : 360,
+                                                  "x" : 21,
+                                                  "y" : 791
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 201,
+                                                  "y" : 822
+                                                },
+                                                "identifier" : "",
+                                                "label" : "",
+                                                "selected" : false,
+                                                "type" : "other",
+                                                "value" : null
+                                              }
+                                            ],
+                                            "enabled" : true,
+                                            "focused" : false,
+                                            "frame" : {
+                                              "height" : 83,
+                                              "width" : 402,
+                                              "x" : 0,
+                                              "y" : 791
+                                            },
+                                            "hit_point" : {
+                                              "x" : 201,
+                                              "y" : 832.5
+                                            },
+                                            "identifier" : "",
+                                            "label" : "Tab Bar",
+                                            "selected" : false,
+                                            "type" : "tabBar",
+                                            "value" : null
+                                          }
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 874,
+                                          "width" : 402,
+                                          "x" : 0,
+                                          "y" : 0
+                                        },
+                                        "hit_point" : {
+                                          "x" : 201,
+                                          "y" : 437
+                                        },
+                                        "identifier" : "",
+                                        "label" : "",
+                                        "selected" : false,
+                                        "type" : "other",
+                                        "value" : null
+                                      },
+                                      {
+                                        "children" : [
+                                          {
+                                            "children" : [
+                                              {
+                                                "children" : [
+                                                  {
+                                                    "children" : [
+                                                      {
+                                                        "children" : [
+                                                          {
+                                                            "children" : [
+
+                                                            ],
+                                                            "enabled" : true,
+                                                            "focused" : false,
+                                                            "frame" : {
+                                                              "height" : 83,
+                                                              "width" : 402,
+                                                              "x" : 0,
+                                                              "y" : 791
+                                                            },
+                                                            "hit_point" : {
+                                                              "x" : 201,
+                                                              "y" : 832.5
+                                                            },
+                                                            "identifier" : "",
+                                                            "label" : "",
+                                                            "selected" : false,
+                                                            "type" : "other",
+                                                            "value" : null
+                                                          }
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 83,
+                                                          "width" : 402,
+                                                          "x" : 0,
+                                                          "y" : 791
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 201,
+                                                          "y" : 832.5
+                                                        },
+                                                        "identifier" : "",
+                                                        "label" : "",
+                                                        "selected" : false,
+                                                        "type" : "other",
+                                                        "value" : null
+                                                      }
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 83,
+                                                      "width" : 402,
+                                                      "x" : 0,
+                                                      "y" : 791
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 201,
+                                                      "y" : 832.5
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  },
+                                                  {
+                                                    "children" : [
+                                                      {
+                                                        "children" : [
+
+                                                        ],
+                                                        "enabled" : true,
+                                                        "focused" : false,
+                                                        "frame" : {
+                                                          "height" : 83,
+                                                          "width" : 402,
+                                                          "x" : 0,
+                                                          "y" : 791
+                                                        },
+                                                        "hit_point" : {
+                                                          "x" : 201,
+                                                          "y" : 832.5
+                                                        },
+                                                        "identifier" : "",
+                                                        "label" : "",
+                                                        "selected" : false,
+                                                        "type" : "other",
+                                                        "value" : null
+                                                      }
+                                                    ],
+                                                    "enabled" : true,
+                                                    "focused" : false,
+                                                    "frame" : {
+                                                      "height" : 83,
+                                                      "width" : 402,
+                                                      "x" : 0,
+                                                      "y" : 791
+                                                    },
+                                                    "hit_point" : {
+                                                      "x" : 201,
+                                                      "y" : 832.5
+                                                    },
+                                                    "identifier" : "",
+                                                    "label" : "",
+                                                    "selected" : false,
+                                                    "type" : "other",
+                                                    "value" : null
+                                                  }
+                                                ],
+                                                "enabled" : true,
+                                                "focused" : false,
+                                                "frame" : {
+                                                  "height" : 83,
+                                                  "width" : 402,
+                                                  "x" : 0,
+                                                  "y" : 791
+                                                },
+                                                "hit_point" : {
+                                                  "x" : 201,
+                                                  "y" : 832.5
+                                                },
+                                                "identifier" : "",
+                                                "label" : "",
+                                                "selected" : false,
+                                                "type" : "other",
+                                                "value" : null
+                                              }
+                                            ],
+                                            "enabled" : true,
+                                            "focused" : false,
+                                            "frame" : {
+                                              "height" : 83,
+                                              "width" : 402,
+                                              "x" : 0,
+                                              "y" : 791
+                                            },
+                                            "hit_point" : {
+                                              "x" : 201,
+                                              "y" : 832.5
+                                            },
+                                            "identifier" : "",
+                                            "label" : "",
+                                            "selected" : false,
+                                            "type" : "other",
+                                            "value" : null
+                                          }
+                                        ],
+                                        "enabled" : true,
+                                        "focused" : false,
+                                        "frame" : {
+                                          "height" : 83,
+                                          "width" : 402,
+                                          "x" : 0,
+                                          "y" : 791
+                                        },
+                                        "hit_point" : {
+                                          "x" : 201,
+                                          "y" : 832.5
+                                        },
+                                        "identifier" : "",
+                                        "label" : "",
+                                        "selected" : false,
+                                        "type" : "other",
+                                        "value" : null
+                                      }
+                                    ],
+                                    "enabled" : true,
+                                    "focused" : false,
+                                    "frame" : {
+                                      "height" : 83,
+                                      "width" : 402,
+                                      "x" : 0,
+                                      "y" : 791
+                                    },
+                                    "hit_point" : {
+                                      "x" : 201,
+                                      "y" : 832.5
+                                    },
+                                    "identifier" : "",
+                                    "label" : "",
+                                    "selected" : false,
+                                    "type" : "other",
+                                    "value" : null
+                                  }
+                                ],
+                                "enabled" : true,
+                                "focused" : false,
+                                "frame" : {
+                                  "height" : 874,
+                                  "width" : 402,
+                                  "x" : 0,
+                                  "y" : 0
+                                },
+                                "hit_point" : {
+                                  "x" : 201,
+                                  "y" : 437
+                                },
+                                "identifier" : "",
+                                "label" : "",
+                                "selected" : false,
+                                "type" : "other",
+                                "value" : null
+                              }
+                            ],
+                            "enabled" : true,
+                            "focused" : false,
+                            "frame" : {
+                              "height" : 874,
+                              "width" : 402,
+                              "x" : 0,
+                              "y" : 0
+                            },
+                            "hit_point" : {
+                              "x" : 201,
+                              "y" : 437
+                            },
+                            "identifier" : "",
+                            "label" : "",
+                            "selected" : false,
+                            "type" : "other",
+                            "value" : null
+                          },
+                          {
+                            "children" : [
+
+                            ],
+                            "enabled" : true,
+                            "focused" : false,
+                            "frame" : {
+                              "height" : 778,
+                              "width" : 402,
+                              "x" : 0,
+                              "y" : 62
+                            },
+                            "hit_point" : {
+                              "x" : 201,
+                              "y" : 451
+                            },
+                            "identifier" : "",
+                            "label" : "",
+                            "selected" : false,
+                            "type" : "other",
+                            "value" : null
+                          }
+                        ],
+                        "enabled" : true,
+                        "focused" : false,
+                        "frame" : {
+                          "height" : 874,
+                          "width" : 402,
+                          "x" : 0,
+                          "y" : 0
+                        },
+                        "hit_point" : {
+                          "x" : 201,
+                          "y" : 437
+                        },
+                        "identifier" : "",
+                        "label" : "",
+                        "selected" : false,
+                        "type" : "other",
+                        "value" : null
+                      }
+                    ],
+                    "enabled" : true,
+                    "focused" : false,
+                    "frame" : {
+                      "height" : 874,
+                      "width" : 402,
+                      "x" : 0,
+                      "y" : 0
+                    },
+                    "hit_point" : {
+                      "x" : 201,
+                      "y" : 437
+                    },
+                    "identifier" : "",
+                    "label" : "",
+                    "selected" : false,
+                    "type" : "other",
+                    "value" : null
+                  }
+                ],
+                "enabled" : true,
+                "focused" : false,
+                "frame" : {
+                  "height" : 874,
+                  "width" : 402,
+                  "x" : 0,
+                  "y" : 0
+                },
+                "hit_point" : {
+                  "x" : 201,
+                  "y" : 437
+                },
+                "identifier" : "",
+                "label" : "",
+                "selected" : false,
+                "type" : "other",
+                "value" : null
+              }
+            ],
+            "enabled" : true,
+            "focused" : false,
+            "frame" : {
+              "height" : 874,
+              "width" : 402,
+              "x" : 0,
+              "y" : 0
+            },
+            "hit_point" : {
+              "x" : 201,
+              "y" : 437
+            },
+            "identifier" : "",
+            "label" : "",
+            "selected" : false,
+            "type" : "other",
+            "value" : null
+          }
+        ],
+        "enabled" : true,
+        "focused" : false,
+        "frame" : {
+          "height" : 874,
+          "width" : 402,
+          "x" : 0,
+          "y" : 0
+        },
+        "hit_point" : {
+          "x" : 201,
+          "y" : 437
+        },
+        "identifier" : "",
+        "label" : "",
+        "selected" : false,
+        "type" : "window",
+        "value" : null
+      }
+    ],
+    "enabled" : true,
+    "focused" : false,
+    "frame" : {
+      "height" : 874,
+      "width" : 402,
+      "x" : 0,
+      "y" : 0
+    },
+    "hit_point" : {
+      "x" : 201,
+      "y" : 437
+    },
+    "identifier" : "",
+    "label" : "Meguri",
+    "selected" : false,
+    "type" : "application",
+    "value" : null
+  },
+  "schema" : 1,
+  "screenshot" : {
+    "origin" : {
+      "x" : 0,
+      "y" : 0
+    },
+    "scale" : 3
+  },
+  "window" : {
+    "height" : 874,
+    "width" : 402,
+    "x" : 0,
+    "y" : 0
+  }
+}
