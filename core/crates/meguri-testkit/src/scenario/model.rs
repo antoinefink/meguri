@@ -930,10 +930,30 @@ pub enum Step {
     SetFlag(SetFlagArgs),
     /// browser-config-ops.md B1.
     BrowserConfigSet(BrowserConfigSetArgs),
-    Bury(DraftArgs),
-    Suspend(DraftArgs),
-    Forget(DraftArgs),
-    SetDue(DraftArgs),
+    /// sched-ops.md J2.
+    #[serde(deserialize_with = "op_mapping")]
+    Bury(CardsOrNotes),
+    /// sched-ops.md J3 (model-ops.md L3's `{cards}` form).
+    #[serde(deserialize_with = "op_mapping")]
+    Suspend(CardsOrNotes),
+    /// sched-ops.md J4.
+    #[serde(deserialize_with = "op_mapping")]
+    Unsuspend(CardsArgs),
+    /// sched-ops.md J5.
+    #[serde(deserialize_with = "op_mapping")]
+    UnburyDeck(UnburyDeckArgs),
+    /// sched-ops.md J7.
+    #[serde(deserialize_with = "op_mapping")]
+    Forget(ForgetArgs),
+    /// sched-ops.md J6.
+    #[serde(deserialize_with = "op_mapping")]
+    SetDue(SetDueArgs),
+    /// sched-ops.md J8.
+    #[serde(deserialize_with = "op_mapping")]
+    GradeNow(GradeNowArgs),
+    /// sched-ops.md J9.
+    #[serde(deserialize_with = "op_mapping")]
+    EmptyFiltered(EmptyFilteredArgs),
     Reposition(DraftArgs),
     UpdatePreset(DraftArgs),
     /// deck-options-ops.md E1: the deck options screen's Save (boxed: the
@@ -1020,7 +1040,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 64] = [
+    pub const NAMES: [&'static str; 68] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1048,8 +1068,12 @@ impl Step {
         "browser_config_set",
         "bury",
         "suspend",
+        "unsuspend",
+        "unbury_deck",
         "forget",
         "set_due",
+        "grade_now",
+        "empty_filtered",
         "reposition",
         "update_preset",
         "save_deck_options",
@@ -1120,8 +1144,12 @@ impl Step {
             Step::BrowserConfigSet(_) => "browser_config_set",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
+            Step::Unsuspend(_) => "unsuspend",
+            Step::UnburyDeck(_) => "unbury_deck",
             Step::Forget(_) => "forget",
             Step::SetDue(_) => "set_due",
+            Step::GradeNow(_) => "grade_now",
+            Step::EmptyFiltered(_) => "empty_filtered",
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
             Step::SaveDeckOptions(_) => "save_deck_options",
@@ -1174,11 +1202,7 @@ impl Step {
     /// The arguments of a draft op.
     pub fn draft_args(&self) -> Option<&DraftArgs> {
         match self {
-            Step::Bury(a)
-            | Step::Suspend(a)
-            | Step::Forget(a)
-            | Step::SetDue(a)
-            | Step::Reposition(a)
+            Step::Reposition(a)
             | Step::UpdatePreset(a)
             | Step::BuildFiltered(a)
             | Step::Import(a)
@@ -1566,6 +1590,100 @@ pub struct DeckOptionsChange {
     pub historical_retention: Option<f64>,
     #[serde(default, deserialize_with = "present")]
     pub ignore_reviews_before: Option<String>,
+}
+
+/// `bury` and `suspend: {cards} | {notes}` (sched-ops.md J2, J3): exactly
+/// one of the two; at least one reference, each listed once (checked on
+/// load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardsOrNotes {
+    /// Bury Card, Suspend Card.
+    Cards(Vec<CardRef>),
+    /// Bury Note, Suspend Note: every card of the notes.
+    Notes(Vec<NoteRef>),
+}
+
+/// `unsuspend: {cards}` (sched-ops.md J4): at least one card, each listed
+/// once (checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CardsArgs {
+    pub cards: Vec<CardRef>,
+}
+
+/// `unbury_deck: {deck, mode}` (sched-ops.md J5): the deck by its stored
+/// human name (deck-ops.md K1; not empty, checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnburyDeckArgs {
+    pub deck: String,
+    pub mode: UnburyMode,
+}
+
+/// Which buried cards `unbury_deck` restores (sched-ops.md J5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnburyMode {
+    /// Queues -2 and -3.
+    All,
+    /// Queue -3, buried by the user.
+    Manual,
+    /// Queue -2, buried by the scheduler.
+    Siblings,
+}
+
+/// The screen a Set Due Date or Reset runs from (sched-ops.md J6, J7): it
+/// picks the config keys the operation remembers its choices in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedContext {
+    Reviewer,
+    Browser,
+}
+
+/// `set_due: {cards, days, context?}` (sched-ops.md J6): at least one card,
+/// each listed once (checked on load); `days` the text as typed, passed on
+/// unchanged; `context` none when missing, never null.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetDueArgs {
+    pub cards: Vec<CardRef>,
+    pub days: String,
+    #[serde(default, deserialize_with = "present")]
+    pub context: Option<SchedContext>,
+}
+
+/// `forget: {cards, restore_position?, reset_counts?, context?}`
+/// (sched-ops.md J7): the cards in the listed order, each once (checked on
+/// load); both choices false when missing, never null.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForgetArgs {
+    pub cards: Vec<CardRef>,
+    #[serde(default)]
+    pub restore_position: bool,
+    #[serde(default)]
+    pub reset_counts: bool,
+    #[serde(default, deserialize_with = "present")]
+    pub context: Option<SchedContext>,
+}
+
+/// `grade_now: {cards, rating}` (sched-ops.md J8): the cards in the listed
+/// order, each once (checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GradeNowArgs {
+    pub cards: Vec<CardRef>,
+    pub rating: Rating,
+}
+
+/// `empty_filtered: {deck}` (sched-ops.md J9): the deck by its stored human
+/// name (deck-ops.md K1; not empty, checked on load).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmptyFilteredArgs {
+    pub deck: String,
 }
 
 /// Arguments of a draft op: an object whose shape the owning area fixes

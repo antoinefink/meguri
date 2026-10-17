@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest, IgnoredBeforeCountRequest,
+    ActorName, CardsOrNotes, ClozeRequest, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest, IgnoredBeforeCountRequest,
     LegacyUpdate, LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario, SearchRequest, Side, Step,
     SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
@@ -32,11 +32,7 @@ type ArgSpec = (&'static str, bool, Arg);
 
 /// (op, its arguments): the schema's draft-op arguments. Other keys are
 /// allowed: the owning area fixes the full shape (D7.2).
-const DRAFT_ARGS: [(&str, &[ArgSpec]); 9] = [
-    ("bury", &[("cards", true, Arg::CardRefs)]),
-    ("suspend", &[("cards", true, Arg::CardRefs)]),
-    ("forget", &[("cards", true, Arg::CardRefs)]),
-    ("set_due", &[("cards", true, Arg::CardRefs), ("days", true, Arg::Str)]),
+const DRAFT_ARGS: [(&str, &[ArgSpec]); 5] = [
     (
         "reposition",
         &[("cards", true, Arg::CardRefs), ("start", true, Arg::Int)],
@@ -106,6 +102,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         record_op(step).map_err(at)?;
         deck_op(step).map_err(at)?;
         tag_op(step).map_err(at)?;
+        sched_op(step).map_err(at)?;
         browser_config_op(step).map_err(at)?;
         match step {
             Step::MediaOutside(files) => {
@@ -378,6 +375,43 @@ fn tag_op(step: &Step) -> Result<(), FormatError> {
         Step::ReparentTags(args) => names("reparent_tags", &args.tags),
         Step::SetTagCollapsed(args) => names("set_tag_collapsed", &args.tags),
         Step::SetFlag(args) if args.cards.is_empty() => Err(FormatError::new("set_flag needs at least one card")),
+        _ => Ok(()),
+    }
+}
+
+/// sched-ops.md J1, J5, J9: what the schema requires beyond the types (at
+/// least one card or note, each listed once; decks named by non-empty stored
+/// names).
+fn sched_op(step: &Step) -> Result<(), FormatError> {
+    let op = step.name();
+    let listed = |refs: Vec<LogicalRef>| {
+        if refs.is_empty() {
+            return Err(FormatError::new(format!("{op} needs at least one reference")));
+        }
+        let mut seen = BTreeSet::new();
+        match refs.into_iter().find(|r| !seen.insert(*r)) {
+            Some(r) => Err(FormatError::new(format!("{op} lists {r} twice (sched-ops.md J1)"))),
+            None => Ok(()),
+        }
+    };
+    let cards = |cards: &[super::model::CardRef]| listed(cards.iter().map(|c| c.0).collect());
+    let deck = |deck: &str| {
+        if deck.is_empty() {
+            return Err(FormatError::new(format!("{op}: a deck name must not be empty")));
+        }
+        Ok(())
+    };
+    match step {
+        Step::Bury(targets) | Step::Suspend(targets) => match targets {
+            CardsOrNotes::Cards(refs) => cards(refs),
+            CardsOrNotes::Notes(refs) => listed(refs.iter().map(|n| n.0).collect()),
+        },
+        Step::Unsuspend(args) => cards(&args.cards),
+        Step::SetDue(args) => cards(&args.cards),
+        Step::Forget(args) => cards(&args.cards),
+        Step::GradeNow(args) => cards(&args.cards),
+        Step::UnburyDeck(args) => deck(&args.deck),
+        Step::EmptyFiltered(args) => deck(&args.deck),
         _ => Ok(()),
     }
 }

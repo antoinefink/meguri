@@ -354,8 +354,6 @@ fn schema_draft_requirements() -> Vec<(String, Vec<String>, Vec<String>)> {
 /// A valid argument mapping for each draft op.
 fn valid_draft_args(op: &str) -> Value {
     match op {
-        "bury" | "suspend" | "forget" => json!({"cards": ["#c1"]}),
-        "set_due" => json!({"cards": ["#c1"], "days": "1-7"}),
         "reposition" => json!({"cards": ["#c1"], "start": 5}),
         "update_preset" => json!({"name": "Default"}),
         "build_filtered" => json!({"name": "F", "search": "deck:A"}),
@@ -453,11 +451,22 @@ fn observation_text_preserves_empty_arguments_refs_and_structured_syntax() {
 #[test]
 fn the_model_requires_what_the_schema_requires_of_draft_ops() {
     let from_schema = schema_draft_requirements();
-    // Nine draft ops: `sync` left them when sync-ops.md fixed its shape,
-    // `edit_note`, `delete_notes` and `db_exec` with record-ops.md W5, and
-    // `check_db` with collection-check.md K10.
-    assert!(from_schema.len() >= 9, "{from_schema:?}");
-    for exact in ["edit_note", "delete_notes", "db_exec", "set_config", "check_db"] {
+    // Five draft ops: `sync` left them when sync-ops.md fixed its shape,
+    // `edit_note`, `delete_notes` and `db_exec` with record-ops.md W5,
+    // `check_db` with collection-check.md K10, and `bury`, `suspend`,
+    // `forget` and `set_due` with sched-ops.md J2-J7.
+    assert!(from_schema.len() >= 5, "{from_schema:?}");
+    for exact in [
+        "edit_note",
+        "delete_notes",
+        "db_exec",
+        "set_config",
+        "check_db",
+        "bury",
+        "suspend",
+        "forget",
+        "set_due",
+    ] {
         assert!(
             !from_schema.iter().any(|(op, _, _)| op == exact),
             "{exact} is not a draft op"
@@ -2325,3 +2334,190 @@ fn declared_filtered_answer_needs_follow_answer_ownership_without_runtime_infere
     assert!(!existing.scenario.needs_on(Side::Meguri).ops.contains("answer"));
     assert!(!existing.scenario.needs_on(Side::Meguri).ops.contains("answer.filtered"));
 }
+
+/// The ops of sched-ops.md J2-J9.
+const SCHED_OPS: [&str; 8] = [
+    "bury",
+    "suspend",
+    "unsuspend",
+    "unbury_deck",
+    "set_due",
+    "forget",
+    "grade_now",
+    "empty_filtered",
+];
+
+/// A valid argument mapping for each scheduling op, every typed argument
+/// given.
+fn valid_sched_args(op: &str) -> Value {
+    match op {
+        "bury" | "suspend" => json!({"notes": ["#n2", "#n1"]}),
+        "unsuspend" => json!({"cards": ["#c1", "#c2"]}),
+        "unbury_deck" => json!({"deck": "A::B", "mode": "siblings"}),
+        "set_due" => json!({"cards": ["#c2", "#c1"], "days": "3-1!", "context": "browser"}),
+        "forget" => {
+            json!({"cards": ["#c2", "#c1"], "restore_position": true, "reset_counts": false, "context": "reviewer"})
+        }
+        "grade_now" => json!({"cards": ["#c2", "#c1"], "rating": "hard"}),
+        "empty_filtered" => json!({"deck": "F"}),
+        other => panic!("no valid example for scheduling op {other}"),
+    }
+}
+
+#[test]
+fn the_model_reads_the_sched_ops_as_the_schema_types_them() {
+    let schema = scenario_schema();
+    let steps = schema["$defs"]["step"]["properties"].as_object().unwrap();
+    // Every op the schema cites sched-ops.md for, and no other.
+    let mut cited: Vec<&str> = steps
+        .iter()
+        .filter(|(_, def)| {
+            def["description"]
+                .as_str()
+                .is_some_and(|d| d.contains("sched-ops.md J"))
+        })
+        .map(|(op, _)| op.as_str())
+        .collect();
+    cited.sort_unstable();
+    let mut ours = SCHED_OPS.to_vec();
+    ours.sort_unstable();
+    assert_eq!(cited, ours);
+    for op in SCHED_OPS {
+        assert!(Step::NAMES.contains(&op), "{op} is not in Step::NAMES");
+        let valid = valid_sched_args(op);
+        assert_eq!(model_accepts(json!({op: valid.clone()})), Ok(()), "{op}");
+        // A mapping, never the list of its values that serde's derive reads.
+        let as_list: Vec<Value> = valid.as_object().unwrap().values().cloned().collect();
+        assert!(model_accepts(json!({op: as_list})).is_err(), "{op} as a list");
+        assert!(model_accepts(json!({op: null})).is_err(), "{op}: null");
+        assert!(model_accepts(json!({op: {}})).is_err(), "{op}: {{}}");
+        let mut extra = valid.clone();
+        extra["colour"] = json!("red");
+        assert!(model_accepts(json!({op: extra})).is_err(), "{op} with an unknown key");
+        let def = resolved(&schema, &steps[op]);
+        let (required, properties) = match def.get("oneOf") {
+            // J2, J3: one form per member of cards_or_notes.
+            Some(forms) => {
+                assert_eq!(forms.as_array().unwrap().len(), 2, "{op}");
+                assert_eq!(model_accepts(json!({op: {"cards": ["#c1"]}})), Ok(()), "{op} {{cards}}");
+                assert!(
+                    model_accepts(json!({op: {"cards": ["#c1"], "notes": ["#n1"]}})).is_err(),
+                    "{op} with cards and notes"
+                );
+                (Vec::new(), vec!["notes".to_owned()])
+            }
+            None => (
+                def["required"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|k| k.as_str().unwrap().to_owned())
+                    .collect(),
+                def["properties"].as_object().unwrap().keys().cloned().collect(),
+            ),
+        };
+        for key in &required {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(key);
+            assert!(model_accepts(json!({op: without})).is_err(), "{op} without {key}");
+        }
+        // No scheduling-op argument is nullable or a mapping.
+        for key in &properties {
+            for wrong_value in [Value::Null, json!({"a": 1})] {
+                let mut wrong = valid.clone();
+                wrong[key.as_str()] = wrong_value.clone();
+                assert!(model_accepts(json!({op: wrong})).is_err(), "{op}.{key}: {wrong_value}");
+            }
+        }
+    }
+}
+
+#[test]
+fn sched_ops_read_their_arguments_and_load_time_rules() {
+    use meguri_testkit::scenario::{CardsOrNotes, Rating, SchedContext, UnburyMode};
+
+    let text = r##"
+id: sched/all-ops
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - bury: {cards: ["#c2", "#c1"]}
+  - bury: {notes: ["#n1"]}
+  - suspend: {cards: ["#c1"]}
+  - suspend: {notes: ["#n2", "#n1"]}
+  - unsuspend: {cards: ["#c1"]}
+  - unbury_deck: {deck: "A::B", mode: manual}
+  - set_due: {cards: ["#c1"], days: " 3"}
+  - set_due: {cards: ["#c2", "#c1"], days: "", context: reviewer}
+  - forget: {cards: ["#c2", "#c1"]}
+  - forget: {cards: ["#c1"], restore_position: true, reset_counts: true, context: browser}
+  - grade_now: {cards: ["#c2", "#c1"], rating: again}
+  - empty_filtered: {deck: F}
+"##;
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    let refs = |cards: &[meguri_testkit::scenario::CardRef]| cards.iter().map(|c| c.0.to_string()).collect::<Vec<_>>();
+    // J1: the listed order is kept.
+    assert!(matches!(&parsed.steps[0], Step::Bury(CardsOrNotes::Cards(c)) if refs(c) == ["#c2", "#c1"]));
+    assert!(matches!(&parsed.steps[1], Step::Bury(CardsOrNotes::Notes(n)) if n.len() == 1));
+    assert!(matches!(&parsed.steps[2], Step::Suspend(CardsOrNotes::Cards(_))));
+    assert!(matches!(&parsed.steps[3], Step::Suspend(CardsOrNotes::Notes(n)) if n[0].0.to_string() == "#n2"));
+    assert!(matches!(&parsed.steps[4], Step::Unsuspend(a) if refs(&a.cards) == ["#c1"]));
+    assert!(matches!(&parsed.steps[5], Step::UnburyDeck(a) if a.deck == "A::B" && a.mode == UnburyMode::Manual));
+    // J6: the text as typed, a refused one included; no context when missing.
+    assert!(matches!(&parsed.steps[6], Step::SetDue(a) if a.days == " 3" && a.context.is_none()));
+    assert!(matches!(
+        &parsed.steps[7],
+        Step::SetDue(a) if a.days.is_empty() && a.context == Some(SchedContext::Reviewer) && refs(&a.cards) == ["#c2", "#c1"]
+    ));
+    // J7: both choices false and no context when missing.
+    assert!(matches!(
+        &parsed.steps[8],
+        Step::Forget(a) if !a.restore_position && !a.reset_counts && a.context.is_none() && refs(&a.cards) == ["#c2", "#c1"]
+    ));
+    assert!(matches!(
+        &parsed.steps[9],
+        Step::Forget(a) if a.restore_position && a.reset_counts && a.context == Some(SchedContext::Browser)
+    ));
+    assert!(
+        matches!(&parsed.steps[10], Step::GradeNow(a) if a.rating == Rating::Again && refs(&a.cards) == ["#c2", "#c1"])
+    );
+    assert!(matches!(&parsed.steps[11], Step::EmptyFiltered(a) if a.deck == "F"));
+    let needs = parsed.needs();
+    let mut ops = SCHED_OPS.to_vec();
+    ops.sort_unstable();
+    assert_eq!(needs.ops.iter().map(String::as_str).collect::<Vec<_>>(), ops);
+
+    for (bad, why) in [
+        // The schema's minItems and uniqueItems (J1).
+        ("bury: {cards: []}", "at least one"),
+        ("bury: {notes: []}", "at least one"),
+        ("suspend: {cards: [\"#c1\", \"#c2\", \"#c1\"]}", "lists #c1 twice"),
+        ("suspend: {notes: [\"#n1\", \"#n1\"]}", "lists #n1 twice"),
+        ("unsuspend: {cards: []}", "at least one"),
+        ("set_due: {cards: [\"#c1\", \"#c1\"], days: \"1\"}", "twice"),
+        ("forget: {cards: [\"#c3\", \"#c3\"]}", "twice"),
+        ("grade_now: {cards: [], rating: good}", "at least one"),
+        // J2, J3: exactly one of cards and notes, of their kinds.
+        ("bury: {cards: [\"#c1\"], notes: [\"#n1\"]}", "single key"),
+        ("suspend: {notes: [\"#c1\"]}", "not a note reference"),
+        ("bury: {cards: [\"#n1\"]}", "not a card reference"),
+        ("bury: {decks: [A]}", "unknown variant"),
+        // Non-empty deck names (deck-ops.md K1).
+        ("unbury_deck: {deck: \"\", mode: all}", "deck name"),
+        ("empty_filtered: {deck: \"\"}", "deck name"),
+        ("unbury_deck: {deck: A, mode: user}", "unknown variant"),
+        ("set_due: {cards: [\"#c1\"], days: 3}", "invalid type"),
+        (
+            "set_due: {cards: [\"#c1\"], days: \"3\", context: editor}",
+            "unknown variant",
+        ),
+        ("forget: {cards: [\"#c1\"], reset_counts: 1}", "invalid type"),
+        ("grade_now: {cards: [\"#c1\"], rating: 3}", "invalid type"),
+    ] {
+        let text = format!("id: sched/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{{bad}}}]\n");
+        let err = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+            .expect_err(bad)
+            .to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
