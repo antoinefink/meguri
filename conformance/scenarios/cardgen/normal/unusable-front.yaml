@@ -1,0 +1,42 @@
+# A front that does not parse, or that refers to no name, makes no card;
+# cards it made before stay (R790; specs/notes/card-generation.md G3, G7).
+# A cloze note type takes its cards from the fields alone, so its own broken
+# front changes nothing (G4). Saves refuse such fronts, so the scenario
+# writes them over the stored template with db_exec: appending protobuf
+# field 1 (the front) to templates.config replaces it (model/protobuf-records
+# P2). Anki caches note types, so the collection is reopened after the write
+# (specs/conformance/note-ops.md N2). Cards are read with db_exec, since the
+# cards an edit adds have no logical id; notes are named by their sort field.
+id: cardgen/normal/unusable-front
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Broken
+      fields: [Label, A, B, C]
+      templates:
+        - {name: T0, front: "{{A}}", back: ""}
+        - {name: T1, front: "{{B}}", back: ""}
+        - {name: T2, front: "{{C}}", back: ""}
+    - name: Gap
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Broken, deck: Inbox, fields: [had-all, a, b, c]}
+    - {notetype: Broken, deck: Inbox, fields: [had-a, a, "", ""]}
+steps:
+  # T1's front becomes "{{#B}}{{B}}" (an unclosed section), T2's the plain
+  # text "static text"; Gap's front becomes "{{#Text}}{{cloze:Text}}".
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'0a0b7b7b23427d7d7b7b427d7d' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Broken') AND ord = 1"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'0a0b7374617469632074657874' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Broken') AND ord = 2"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'0a177b7b23546578747d7d7b7b636c6f7a653a546578747d7d' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Gap') AND ord = 0"}
+  - reopen: {}
+  - advance: 1h
+  - edit_note: {note: "#n2", fields: {B: b, C: c}}
+  - edit_note: {note: "#n1", fields: {A: a2, B: b2, C: c2}}
+  - add_note: {notetype: Broken, deck: Inbox, fields: [new-all, a, b, c]}
+  - add_note: {notetype: Broken, deck: Inbox, fields: [new-b-c, "", b, c]}
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c1::x}} {{c2::y}}"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.mod FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}

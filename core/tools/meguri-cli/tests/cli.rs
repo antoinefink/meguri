@@ -29,6 +29,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["ops"],
         serde_json::json!([
+            "add_note",
             "add_note_tags",
             "add_notetype",
             "add_stock_notetype",
@@ -37,7 +38,9 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "clear_unused_tags",
             "clone_notetype",
             "db_exec",
+            "delete_notes",
             "delete_tags",
+            "edit_note",
             "ensure_io_notetype",
             "handoff",
             "open",
@@ -61,7 +64,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     // (notetype-ops.md T10.2) declares it.
     assert_eq!(
         json["supports"]["setup"],
-        serde_json::json!(["config", "new_collection", "notetypes"])
+        serde_json::json!(["config", "new_collection", "notes", "notetypes"])
     );
     assert_eq!(
         json["supports"]["observations"],
@@ -70,6 +73,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "canonical_search",
             "cloze",
             "db_dump",
+            "fields_check",
             "fsrs_next",
             "notetype_structure",
             "schema_objects",

@@ -1,0 +1,60 @@
+# Random insertion order (R795; specs/notes/deck-placement-and-position.md
+# P4). A card that goes to a deck whose preset inserts new cards in random
+# order takes a position drawn from a generator seeded with the counter's
+# value p, in [1, max(p, 1000)); the counter still moves on by one. All
+# cards of a note going to random decks draw the same value; a card of the
+# same note going to an ordered deck takes p itself. A card added to a note
+# with a new sibling takes the sibling's position even in a random deck.
+# The preset's insertion order is set through its schema-11 object (new.order
+# 0 is random; model-ops.md L2). TB's deck override (Ordered) is written as
+# in cardgen/placement/new-note. The cards an edit adds have no logical id,
+# so cards are read with db_exec.
+id: cardgen/position/random
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets:
+    - {name: Shuffle}
+  decks:
+    - {name: Mixed, preset: Shuffle}
+    - Ordered
+  notetypes:
+    - name: Solo
+      fields: [Label, A, B]
+      templates:
+        - {name: TA, front: "{{A}}", back: ""}
+        - {name: TB, front: "{{B}}", back: ""}
+    - name: Split
+      fields: [Label, A, B]
+      templates:
+        - {name: TA, front: "{{A}}", back: ""}
+        - {name: TB, front: "{{B}}", back: ""}
+steps:
+  - legacy_update: {preset: Shuffle, patch: {new: {order: 0}}}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Ordered')) AS BLOB) WHERE ord = 1 AND ntid = (SELECT id FROM notetypes WHERE name = 'Split')"}
+  - reopen: {}
+  # p = 1 (a new collection's counter), then 2, 3: two cards each.
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p1, a, b]}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p2, a]}
+  - add_note: {notetype: Split, deck: Mixed, fields: [p3-split, a, b]}
+  - set_config: {key: nextPos, value: 0}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p0, a]}
+  - set_config: {key: nextPos, value: 998}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p998, a]}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p999, a]}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p1000, a]}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p1001, a]}
+  - set_config: {key: nextPos, value: 5000}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p5000, a]}
+  - set_config: {key: nextPos, value: 123456789}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p123456789, a]}
+  - set_config: {key: nextPos, value: 4294967295}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p4294967295, a]}
+  - add_note: {notetype: Solo, deck: Ordered, fields: [ordered-p0, a]}
+  - add_note: {notetype: Solo, deck: Mixed, fields: [p1-reviewed, a]}
+  - advance: 1h
+  # A new sibling's position; a note with no new card takes a fresh draw.
+  - edit_note: {note: "#n2", fields: {B: b}}
+  - answer: {card: "#c15", rating: good}
+  - edit_note: {note: "#n13", fields: {B: b}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.type, c.due FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
