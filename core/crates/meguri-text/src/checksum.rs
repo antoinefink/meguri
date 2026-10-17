@@ -29,8 +29,7 @@ pub fn note_checksum(first_field: &str) -> u32 {
     checksum_text(&sort_text(first_field))
 }
 
-/// C4 on text already stripped (the draft check's comparison text, C5).
-pub fn checksum_text(text: &str) -> u32 {
+fn checksum_text(text: &str) -> u32 {
     let digest = Sha1::digest(text.as_bytes());
     u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]])
 }

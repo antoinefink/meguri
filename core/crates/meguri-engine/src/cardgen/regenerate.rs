@@ -66,7 +66,7 @@ pub fn plan(
         for note in page {
             cancel.check()?;
             let siblings = reader.cards_of_note(note.id)?;
-            if !siblings.is_empty() {
+            if !siblings.is_empty() && (nt.config.kind == 1 || siblings.len() != nt.templates.len()) {
                 notes.push(NotePlan {
                     note: note.id,
                     cards: super::plan_note(reader, nt, &note, &siblings, None, false)?,
@@ -100,7 +100,9 @@ pub fn commit_in(scope: &mut WriteScope<'_>, planned: &RegenerationPlan) -> Resu
         after = page.last().map(|note| note.id);
         for note in page {
             let siblings = scope.cards_of_note(note.id)?;
-            if siblings.is_empty() {
+            if siblings.is_empty()
+                || (planned.notetype.config.kind != 1 && siblings.len() == planned.notetype.templates.len())
+            {
                 continue;
             }
             let entry = planned

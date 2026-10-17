@@ -402,18 +402,20 @@ fn log_readonly_probe() {
 }
 
 #[test]
-fn duplicate_check_hashes_stripped_text_only_once() {
+fn duplicate_check_applies_c4_to_comparison_text() {
     let h = fresh();
     let nt = kind(&h, false, &["Front"], &["{{Front}}"]);
-    let added = add(&h, input(nt, &["&lt;b&gt;literal&lt;/b&gt;"]));
+    add(&h, input(nt, &["&lt;b&gt;literal&lt;/b&gt;"]));
+    add(&h, input(nt, &["&lt;div&gt;"]));
     let reader = h.collection.reader(ReaderRole::Query).unwrap();
     let nt = reader.notetype(nt).unwrap().unwrap();
-    assert_eq!(
-        notes::check(&*reader, &nt, &["<i>&lt;b&gt;literal&lt;/b&gt;</i>".to_owned()], None)
-            .unwrap()
-            .duplicates,
-        vec![added.id]
-    );
+    // K4/C5 apply C4 to the comparison text. Its second H5 pass removes
+    // markup decoded by the first pass, so the stored checksums differ.
+    for draft in ["<i>&lt;b&gt;literal&lt;/b&gt;</i>", "&lt;div&gt;"] {
+        let checked = notes::check(&*reader, &nt, &[draft.to_owned()], None).unwrap();
+        assert_eq!(checked.state, notes::FieldState::Normal, "{draft}");
+        assert!(checked.duplicates.is_empty(), "{draft}");
+    }
 }
 
 #[test]

@@ -195,6 +195,164 @@ fn commit_replans_changed_cards_and_uses_live_note_fields() {
 }
 
 #[test]
+fn standard_regeneration_skips_equal_card_count_with_orphan_ordinal() {
+    let h = fresh();
+    let nt = kind(&h, false, &["Front", "Back"], &["{{Front}}", "{{Back}}"]);
+    let added = add(&h, input(nt, &["front", "back"]));
+    common::tagging::raw(
+        &h.collection,
+        "UPDATE cards SET ord=5 WHERE id=?",
+        &[meguri_storage::raw::SqlValue::Integer(added.cards[1].0)],
+    );
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let nt = reader.notetype(nt).unwrap().unwrap();
+    let plan = regenerate::plan(&*reader, &nt, &CancelToken::new(), &ProgressSink::new()).unwrap();
+    assert!(plan.notes.is_empty());
+    assert_eq!(
+        reader
+            .cards_of_note(added.id)
+            .unwrap()
+            .iter()
+            .map(|card| card.ord)
+            .collect::<Vec<_>>(),
+        vec![0, 5]
+    );
+    drop(reader);
+    let created = h
+        .collection
+        .run(OpSpec::named("regenerate", OpSource::UserUndoable), move |ctx| {
+            regenerate::commit_in(ctx.scope(), &plan)
+        })
+        .unwrap()
+        .value;
+    assert!(created.is_empty());
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    assert_eq!(
+        reader
+            .cards_of_note(added.id)
+            .unwrap()
+            .iter()
+            .map(|card| (card.id, card.ord))
+            .collect::<Vec<_>>(),
+        vec![(added.cards[0], 0), (added.cards[1], 5)]
+    );
+}
+
+#[test]
+fn commit_uses_live_card_count_for_the_standard_skip() {
+    let h = fresh();
+    let nt = kind(&h, false, &["Front", "Back"], &["{{Front}}"]);
+    let becomes_complete = add(&h, input(nt, &["front", "back"]));
+    let becomes_incomplete = add(&h, input(nt, &["other", "back"]));
+    h.collection
+        .run(OpSpec::named("orphan setup", OpSource::UserNonUndoable), move |ctx| {
+            ctx.scope().add_card(&common::card(becomes_incomplete.id, 5))?;
+            Ok(())
+        })
+        .unwrap();
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let mut draft = reader.notetype(nt).unwrap().unwrap();
+    extra_template(&mut draft);
+    let plan = regenerate::plan(&*reader, &draft, &CancelToken::new(), &ProgressSink::new()).unwrap();
+    let entry = plan
+        .notes
+        .iter()
+        .find(|entry| entry.note == becomes_complete.id)
+        .unwrap();
+    assert_eq!(entry.cards.iter().map(|card| card.ord).collect::<Vec<_>>(), vec![1]);
+    drop(reader);
+    // Complete the first note by count only, and make the skipped note
+    // incomplete. Commit must re-evaluate G9.2 for both live populations.
+    h.collection
+        .run(
+            OpSpec::named("change siblings", OpSource::UserNonUndoable),
+            move |ctx| {
+                ctx.scope().add_card(&common::card(becomes_complete.id, 5))?;
+                let orphan = ctx
+                    .scope()
+                    .cards_of_note(becomes_incomplete.id)?
+                    .into_iter()
+                    .find(|c| c.ord == 5)
+                    .unwrap();
+                meguri_engine::cards::remove_in(ctx.scope(), &[orphan.id], false)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let created = h
+        .collection
+        .run(OpSpec::named("regenerate", OpSource::UserUndoable), move |ctx| {
+            regenerate::commit_in(ctx.scope(), &plan)
+        })
+        .unwrap()
+        .value;
+    assert_eq!(created.len(), 1);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let card = reader.card(created[0]).unwrap().unwrap();
+    assert_eq!((card.note_id, card.ord), (becomes_incomplete.id, 1));
+    assert_eq!(
+        reader
+            .cards_of_note(becomes_complete.id)
+            .unwrap()
+            .iter()
+            .map(|card| card.ord)
+            .collect::<Vec<_>>(),
+        vec![0, 5]
+    );
+}
+
+#[test]
+fn cloze_regeneration_does_not_skip_equal_card_and_template_counts() {
+    let h = fresh();
+    let nt = meguri_engine::notetypes::add(
+        &h.collection,
+        meguri_engine::notetypes::NewNotetype {
+            name: "Regeneration cloze".to_owned(),
+            kind: meguri_engine::notetypes::NotetypeKind::Cloze,
+            fields: vec!["Text".to_owned()],
+            templates: vec![meguri_engine::notetypes::NewTemplate {
+                name: "Gap".to_owned(),
+                front: "{{cloze:Text}}".to_owned(),
+                back: "{{cloze:Text}}".to_owned(),
+            }],
+            css: Some(String::new()),
+        },
+    )
+    .unwrap()
+    .value
+    .id;
+    let added = add(&h, input(nt, &["{{c1::one}}"]));
+    common::tagging::raw(
+        &h.collection,
+        "UPDATE notes SET flds=? WHERE id=?",
+        &[
+            meguri_storage::raw::SqlValue::Text("{{c1::one}} {{c2::two}}".to_owned()),
+            meguri_storage::raw::SqlValue::Integer(added.id.0),
+        ],
+    );
+    let reader = h.collection.reader(ReaderRole::Maintenance).unwrap();
+    let nt = reader.notetype(nt).unwrap().unwrap();
+    let plan = regenerate::plan(&*reader, &nt, &CancelToken::new(), &ProgressSink::new()).unwrap();
+    assert_eq!(plan.notes.len(), 1);
+    assert_eq!(
+        plan.notes[0].cards.iter().map(|card| card.ord).collect::<Vec<_>>(),
+        vec![1]
+    );
+    drop(reader);
+    let created = h
+        .collection
+        .run(OpSpec::named("regenerate", OpSource::UserUndoable), move |ctx| {
+            regenerate::commit_in(ctx.scope(), &plan)
+        })
+        .unwrap()
+        .value;
+    assert_eq!(created.len(), 1);
+    let reader = h.collection.reader(ReaderRole::Query).unwrap();
+    let card = reader.card(created[0]).unwrap().unwrap();
+    assert_eq!((card.note_id, card.ord), (added.id, 1));
+}
+
+#[test]
 fn cards_remove_can_remove_orphans_without_logging() {
     let h = fresh();
     let nt = kind(&h, false, &["Front"], &["{{Front}}"]);
