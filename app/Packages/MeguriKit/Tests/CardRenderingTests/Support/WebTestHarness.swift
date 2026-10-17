@@ -116,11 +116,17 @@ final class WebTestHarness {
     /// (step 8), each message the interaction script posts, and the marks a
     /// test sets. It relies on nothing the runtime or the interaction script
     /// says about frames.
+    ///
+    /// The wrapped handlers stay reachable from `meguriTestFrames`: WebKit
+    /// drops an unreachable handler object at a collection and gives the
+    /// interaction script a fresh one without the wrapper, so its posts
+    /// would go unstamped.
     static let frameClockScript = """
         (function () {
           "use strict";
           let frames = 0;
           const stamps = [];
+          const handlers = [];
           function tick() {
             requestAnimationFrame(function () {
               frames += 1;
@@ -136,6 +142,7 @@ final class WebTestHarness {
               stamps.push({ event: name + ":" + String(what), frame: frames });
               return post.call(handler, message);
             };
+            handlers.push(handler);
           }
           wrap("\(CardRuntime.signalHandlerName)");
           wrap("\(CardRuntime.confirmationHandlerName)");
@@ -148,6 +155,7 @@ final class WebTestHarness {
           }).observe(document, { subtree: true, attributes: true, attributeFilter: ["style"] });
           window.meguriTestFrames = {
             stamps: stamps,
+            handlers: handlers,
             mark: function (event) {
               stamps.push({ event: event, frame: frames });
             },

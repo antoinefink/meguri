@@ -93,6 +93,34 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        /// The frame clock itself: it still stamps the interaction script's
+        /// posts after the page collected its garbage. WebKit replaces a
+        /// message handler object nothing holds, which dropped the clock's
+        /// wrapper and failed the case above on a simulator.
+        @Test func frameClockStampsAfterACollection() async throws {
+            try await WebTestHarness.withPage(frameClock: true) { harness, page async throws in
+                let finalized = try await page.runIsolated(
+                    """
+                    let finalized = 0;
+                    const registry = new FinalizationRegistry(function () { finalized += 1; });
+                    (function () { registry.register({ sentinel: true }, 1); })();
+                    for (let round = 0; round < 400; round++) {
+                      let garbage = [];
+                      for (let i = 0; i < 20000; i++) garbage.push({ i: i, text: "g" + i });
+                      garbage = null;
+                      await new Promise(function (resolve) { setTimeout(resolve, 2); });
+                    }
+                    return finalized;
+                    """)
+                #expect(finalized as? Int == 1, "the page collected no garbage")
+                try await page.announce(card: 2, generation: 1)
+                try await page.showQuestion("<p>q</p>")
+                try await harness.signal("settled", from: page)
+                _ = try await page.frame(of: "\(CardRuntime.signalHandlerName):settled")
+                _ = try await page.frame(of: "\(CardRuntime.confirmationHandlerName):settled")
+            }
+        }
+
         // MARK: SU2
 
         @Test func presentedAnswerRunsShownHooksAtOnce() async throws {
