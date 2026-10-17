@@ -6,6 +6,7 @@
 //! `schema-upgrade.md`, `ids-usn-mtime.md`, `config-table.md`, `graves.md`
 //! and `derived-store.md`.
 
+pub mod bootstrap;
 pub mod bulk;
 pub mod checkpoint;
 pub mod collation;

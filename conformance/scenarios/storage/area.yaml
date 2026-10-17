@@ -4,3 +4,4 @@ area: storage
 active:
   - "open/*"
   - "upgrade/*"
+  - "new-collection/*"

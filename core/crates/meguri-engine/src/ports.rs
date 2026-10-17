@@ -132,3 +132,9 @@ impl Ports {
         }
     }
 }
+
+/// U127's pre-operation backup hook. The caller waits off the writer;
+/// failure prevents the deletion. meguri-host supplies the package service.
+pub trait BackupService: Send + Sync {
+    fn before_deck_delete(&self) -> Result<(), EngineError>;
+}

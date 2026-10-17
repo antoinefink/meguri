@@ -67,16 +67,16 @@ fn add(session: &mut Session<'_>, spec: &NoteSpec) -> Result<notes::Added, ExecE
     let collection = collection(session)?;
     let writer = collection.writer();
     let nt = find(writer, &spec.notetype)?;
-    // Names are resolved from the setup, including a deck deleted by db_exec:
-    // use the cached id captured when setup first completes (N1).
     let deck = match &spec.deck {
         None => DeckId(1),
-        Some(name) => DeckId(
-            *session
-                .decks
-                .get(name)
-                .ok_or_else(|| unknown(format!("no setup deck {name:?}")))?,
-        ),
+        Some(name) => writer
+            .deck_rows()
+            .map_err(core)?
+            .iter()
+            .find(|d| d.human_name() == *name)
+            .map(|d| d.id)
+            .or_else(|| session.decks.get(name).copied().map(DeckId))
+            .ok_or_else(|| unknown(format!("no deck {name:?}")))?,
     };
     let input = notes::AddNote {
         notetype_id: nt.id,

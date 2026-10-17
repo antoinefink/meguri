@@ -249,8 +249,11 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 10] = [
+    pub const AREAS: [&'static str; 13] = [
         "browser",
+        "decks",
+        "cards",
+        "model",
         "clock",
         "notetypes",
         "notes",
@@ -277,6 +280,9 @@ impl MeguriExecutor {
         let mut registry = Registry::default();
         for area in areas {
             match *area {
+                "cards" => super::cards::register(&mut registry),
+                "model" => super::model::register(&mut registry),
+                "decks" => super::decks::register(&mut registry),
                 "browser" => super::browser::register(&mut registry),
                 "clock" => super::clock::register(&mut registry),
                 "notetypes" => super::notetypes::register(&mut registry),

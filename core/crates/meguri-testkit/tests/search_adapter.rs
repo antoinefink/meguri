@@ -138,7 +138,7 @@ fn search_without_a_collection_is_an_invalid_scenario() {
     );
     let areas: Vec<&str> = MeguriExecutor::AREAS
         .into_iter()
-        .filter(|area| *area != "notetypes")
+        .filter(|area| *area != "storage")
         .collect();
     let without_new_collection = MeguriExecutor::with(MeguriExecutor::area_registry(&areas));
     let error = without_new_collection.run(&loaded).unwrap_err();

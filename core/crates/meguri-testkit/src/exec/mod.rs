@@ -5,9 +5,12 @@
 //! scenarios through the parties executor (sync-ops.md S10, `parties`).
 
 mod browser;
+mod cards;
 pub mod clock;
+mod decks;
 pub mod live;
 mod meguri;
+mod model;
 mod notes;
 mod notetypes;
 mod oracle;

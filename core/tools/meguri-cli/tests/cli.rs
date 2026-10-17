@@ -29,27 +29,39 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["ops"],
         serde_json::json!([
+            "add_deck",
             "add_note",
             "add_note_tags",
             "add_notetype",
+            "add_preset",
             "add_stock_notetype",
             "advance",
             "browser_config_set",
             "clear_unused_tags",
             "clone_notetype",
+            "clone_preset",
             "db_exec",
+            "delete_decks",
             "delete_notes",
             "delete_tags",
             "edit_note",
             "ensure_io_notetype",
             "handoff",
+            "legacy_update",
             "open",
             "remove_note_tags",
+            "remove_preset",
+            "rename_deck",
+            "rename_preset",
             "rename_tag",
             "reopen",
+            "reparent_decks",
             "reparent_tags",
             "set_clock",
             "set_config",
+            "set_current_deck",
+            "set_deck_collapsed",
+            "set_deck_preset",
             "set_flag",
             "set_tag_collapsed",
             "update_notetype",
@@ -57,31 +69,34 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "update_notetype.field_options",
             "update_notetype.rename",
             "update_notetype.rename_template",
-            "update_notetype.template"
+            "update_notetype.template",
         ])
     );
-    // dsl.md D8: the new collection is a setup capability; U29's stand-in
-    // (notetype-ops.md T10.2) declares it.
+    // dsl.md D8: U28 bootstrap declares the new_collection capability.
     assert_eq!(
         json["supports"]["setup"],
-        serde_json::json!(["config", "new_collection", "notes", "notetypes"])
+        serde_json::json!(["config", "decks", "new_collection", "notes", "notetypes", "presets",])
     );
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!([
             "browser_config",
             "canonical_search",
+            "card",
             "cloze",
             "db_dump",
+            "deck_tree",
+            "decks",
             "fields_check",
             "fsrs_next",
+            "legacy_json",
             "notetype_structure",
             "schema_objects",
             "search",
             "tag_tree",
             "template",
             "text",
-            "timing"
+            "timing",
         ])
     );
     // dsl.md D7.2: 54 ops besides observe, the actor ops of sync-ops.md, the
@@ -151,9 +166,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             .any(|k| k == "undo_status")
     );
     // observations.md O4: blob_decode and package_col (model-ops.md L5),
-    // decks and deck_tree (deck-ops.md K11, K12) are kinds of the language,
-    // which Meguri's executor does not run yet.
-    for kind in ["blob_decode", "package_col", "decks", "deck_tree"] {
+    // remain kinds of the language that Meguri's executor does not run yet.
+    for kind in ["blob_decode", "package_col"] {
         assert!(
             json["language"]["observations"]
                 .as_array()

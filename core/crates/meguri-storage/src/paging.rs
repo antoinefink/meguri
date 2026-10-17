@@ -131,6 +131,44 @@ pub trait ReadRows: sealed::Connected {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }
 
+    /// Deck rows in the hierarchy's unicase order (decks/decks D3).
+    fn deck_rows(&self) -> Result<Vec<Deck>, StorageError> {
+        let mut statement = self
+            .connection()
+            .prepare_cached("SELECT id, name, mtime_secs, usn, common, kind FROM decks ORDER BY name")?;
+        let rows = statement.query_map([], |row| rows::row_image(row, Table::Decks))?;
+        rows.map(|row| Deck::from_cells(&row?).map_err(StorageError::from))
+            .collect()
+    }
+
+    fn deck_config_rows(&self) -> Result<Vec<DeckConfig>, StorageError> {
+        rows::select_where(self.connection(), Table::DeckConfig, "1", &[])?
+            .iter()
+            .map(|row| DeckConfig::from_cells(row).map_err(StorageError::from))
+            .collect()
+    }
+
+    /// Includes a home deck's cards currently held in a filtered deck.
+    fn cards_of_deck(&self, id: DeckId) -> Result<Vec<Card>, StorageError> {
+        rows::select_where(
+            self.connection(),
+            Table::Cards,
+            "did = ?1 OR odid = ?1",
+            &[Cell::Integer(id.0)],
+        )?
+        .iter()
+        .map(|row| Card::from_cells(row).map_err(StorageError::from))
+        .collect()
+    }
+
+    fn deck_has_cards(&self, id: DeckId) -> Result<bool, StorageError> {
+        Ok(self
+            .connection()
+            .query_row("SELECT EXISTS(SELECT 1 FROM cards WHERE did = ?1)", [id.0], |r| {
+                r.get(0)
+            })?)
+    }
+
     fn deck_config(&self, id: DeckConfigId) -> Result<Option<DeckConfig>, StorageError> {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }

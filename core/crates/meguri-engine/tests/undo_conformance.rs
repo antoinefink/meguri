@@ -1,6 +1,6 @@
 //! Undo scenarios through real U27 note add, update, generation and deletion.
-//! New collection/deck setup and the single answer remain test stand-ins
-//! until U28/U38/U44 provide the production executor adapters.
+//! Uses U28 bootstrap and deck operations. The single answer remains a test
+//! stand-in until U44, and U38 owns the production undo session adapter.
 
 mod common;
 
@@ -15,13 +15,8 @@ use meguri_engine::{ClearCause, Collection, DisabledReason, EngineError, OpSpec,
 use meguri_model::card::{CardQueue, CardType};
 use meguri_model::card_data::MemoryState;
 use meguri_model::changes::OpSource;
-use meguri_model::clock::Clock;
-use meguri_model::deck::Deck;
 use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId, RevlogId};
-use meguri_model::proto::ProtoBlob;
-use meguri_model::proto::deck::{DeckCommon, DeckKind, DeckKindMessage, NormalDeck};
 use meguri_model::revlog::{RevlogEntry, RevlogKind};
-use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 use meguri_storage::raw::{RawRows, SqlValue};
 use meguri_storage::{ConfigValue, ReadRows, ReaderRole};
@@ -94,7 +89,7 @@ impl Player {
         let mut decks = BTreeMap::new();
         decks.insert("Default".to_owned(), DeckId(1));
         Player {
-            h: Harness::open(),
+            h: common::fresh(),
             scenario,
             decks,
             notetypes: BTreeMap::new(),
@@ -124,54 +119,6 @@ impl Player {
         json!({ "rows": db_exec_rows(&rows) })
     }
 
-    /// The new collection a scenario starts from (dsl.md D6), as the goldens
-    /// show it: no notes, cards, review log, graves or tags, `crt` the day
-    /// start at 04:00 (the default rollover) of `clock.start`, `scm` its
-    /// instant and `mod` 0.
-    fn new_collection(&self) {
-        let now_ms = self.h.clock.now_ms();
-        let now = now_ms.div_euclid(1000);
-        let mut crt = now - now.rem_euclid(86_400) + 4 * 3600;
-        if crt > now {
-            crt -= 86_400;
-        }
-        for table in [
-            "notes",
-            "cards",
-            "revlog",
-            "graves",
-            "tags",
-            "notetypes",
-            "fields",
-            "templates",
-        ] {
-            self.db_exec(&format!("DELETE FROM {table}"), Vec::new());
-        }
-        self.db_exec(
-            "DELETE FROM config WHERE substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_'",
-            Vec::new(),
-        );
-        self.c()
-            .run(
-                Player::setup_op().stamp(meguri_storage::StampMode::CallerSupplied),
-                |ctx| {
-                    let (scope, random) = ctx.scope_and_random();
-                    meguri_engine::notetypes::stock::add_to_new_collection(scope, random)?;
-                    scope.set_config("nextPos", &ConfigValue::from(1_i64))?;
-                    let mut preset = scope.deck_config(meguri_model::ids::DeckConfigId(1))?.unwrap();
-                    preset.config.new_card_insert_order = 0;
-                    scope.put(&preset)?;
-                    Ok(())
-                },
-            )
-            .unwrap();
-        self.db_exec(
-            "UPDATE col SET crt = ?, mod = 0, scm = ?, ver = 18, dty = 0, usn = 0, ls = 0, \
-             conf = '', models = '', decks = '', dconf = '', tags = ''",
-            vec![SqlValue::Integer(crt), SqlValue::Integer(now_ms)],
-        );
-    }
-
     fn setup_op() -> OpSpec {
         OpSpec::named("scenario_setup", OpSource::UserNonUndoable).skip_undo()
     }
@@ -189,23 +136,8 @@ impl Player {
             self.set_config(key, value, false);
         }
         for deck in setup.decks.iter().flatten() {
-            assert!(!deck.name().contains("::"), "the scenarios' decks are top-level");
             let name = deck.name().to_owned();
-            let mut normal = NormalDeck::default();
-            normal.config_id = 1;
-            let row = Deck {
-                id: DeckId(0),
-                name: name.clone(),
-                mtime: EpochSecs(0),
-                usn: Usn::PENDING,
-                common: ProtoBlob::new(DeckCommon::default()),
-                kind: ProtoBlob::new(DeckKindMessage::new(DeckKind::Normal(normal))),
-            };
-            let id = self
-                .c()
-                .run(Player::setup_op(), move |ctx| Ok(ctx.scope().add_deck(&row)?))
-                .unwrap()
-                .value;
+            let id = meguri_engine::decks::add(self.c(), name.clone()).unwrap().value.id;
             self.decks.insert(name, id);
         }
         for notetype in setup.notetypes.iter().flatten() {
@@ -699,7 +631,6 @@ fn play(name: &str) {
     assert_eq!(golden["tz"], json!("UTC"));
 
     let mut player = Player::new(loaded);
-    player.new_collection();
     player.setup();
     let steps: Vec<Step> = player.scenario.scenario.steps.clone();
     let observed: Vec<Value> = steps.iter().map(|step| player.step(step)).collect();

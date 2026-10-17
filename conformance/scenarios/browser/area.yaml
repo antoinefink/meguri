@@ -4,9 +4,7 @@
 # open the schema-18 storage fixture, and config/live-roundtrip's Meguri
 # segment opens the collection the oracle hands over
 # (specs/browser/config-keys.md K13). config/new-collection starts from the
-# executor's new collection (dsl.md D8): until U28's bootstrap, the note
-# type area's stand-in (specs/conformance/notetype-ops.md T10.2), which
-# holds K1's sortType and sortBackwards.
+# executor's new collection (storage/new-collection B11), bootstrapped by U28.
 area: browser
 active:
   - "config/absent-defaults"

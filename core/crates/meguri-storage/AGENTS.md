@@ -20,3 +20,5 @@
 - `derived/` owns `meguri-derived.db` (`specs/storage/derived-store.md`). Never `ATTACH` it on the collection writer (its `BEGIN IMMEDIATE` would lock the derived file too) and never put a derived object in the collection; readers attach it only through `Reader::attach_derived`, outside a read transaction.
 - Component SQL names tables only through `ComponentTables::table`: live tables are `<component>__<table>`, a rebuild's `meguri_build__<component>__<table>`, indexes `<component>__<index>__<build>` (created at the swap, so the swap renames tables without index-name clashes). Never select a component's tables by prefix: `foo_`'s `foo___rows` starts with `foo__` too (`rebuild::owned_by`).
 - A file that fails the open checks is deleted with its `-wal`/`-shm`. Truncation usually fails the open reads; only a damaged page in place reaches `quick_check`'s rows (`tests/derived_store.rs` covers both).
+
+- `bootstrap::create` stages the entire new collection and publishes with a same-directory hard link: never replace that with an overwriting rename. The engine freezes the creation clock and supplies the rows; the storage callback runs only on the unpublished file.

@@ -1,0 +1,3 @@
+# U28: all deck scenarios pass on the production executor.
+area: decks
+active: ["*"]

@@ -306,7 +306,7 @@ fn a_scenario_with_an_op_meguri_lacks_is_pending_and_t0_still_passes() {
     let missing = outcome.missing.as_ref().unwrap();
     assert!(missing.ops.contains("build_filtered"));
     assert!(!missing.setup.contains("notes"));
-    assert!(missing.setup.contains("decks"));
+    assert!(!missing.setup.contains("decks"));
     assert!(report.failures().is_empty());
     assert!(
         report
@@ -1122,10 +1122,7 @@ fn actor_scenarios_are_live_or_pending_in_t0_and_never_run_there() {
         missing.ops.iter().map(String::as_str).collect::<Vec<_>>(),
         ["actor", "sync"]
     );
-    assert_eq!(
-        missing.observations.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["card"]
-    );
+    assert!(missing.observations.is_empty());
     // Its new collection is the note type area's (notetype-ops.md T10.2).
     assert!(missing.setup.is_empty(), "{:?}", missing.setup);
     assert!(report.failures().is_empty(), "{}", report.render_text());
