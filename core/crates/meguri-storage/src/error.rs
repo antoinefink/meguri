@@ -117,6 +117,9 @@ pub enum StorageError {
     },
     /// A file-system operation failed.
     Io { detail: String },
+    /// The derived store refused a component definition or a table name
+    /// (`storage/derived-store` D4).
+    Derived { detail: String },
 }
 
 /// Why the storage-only builder refuses a path (`write_scope`).
@@ -170,6 +173,7 @@ impl fmt::Display for StorageError {
                 extended_code, message, ..
             } => write!(f, "SQLite error {extended_code}: {message}"),
             StorageError::Io { detail } => write!(f, "I/O error: {detail}"),
+            StorageError::Derived { detail } => write!(f, "derived store: {detail}"),
         }
     }
 }

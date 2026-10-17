@@ -1,0 +1,33 @@
+# The structure of the six stock kinds (specs/notetypes/stock-kinds.md K1,
+# K3, K4) in a new collection and when added again ("Add: <kind>", K8): names
+# (made unique with '+'), kinds, stored stock kind values, fields with their
+# options, tags and protection, template names and card requirements. Template
+# text and CSS differ by design (R908) and are never observed (R1959).
+id: notetypes/records/stock-structure
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe: [notetype_structure]
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - add_stock_notetype: {kind: basic}
+  - add_stock_notetype: {kind: basic_and_reversed, name: Two Way}
+  - add_stock_notetype: {kind: basic_optional_reversed}
+  - add_stock_notetype: {kind: basic_typing, name: "Typing \"Drill\""}
+  - add_stock_notetype: {kind: cloze, name: cloze}
+  - add_stock_notetype: {kind: image_occlusion}
+  - observe:
+      - notetype_structure:
+          notetypes: [Basic+, Two Way, Basic (optional reversed card)+, Typing Drill, cloze+, Image Occlusion+]
+  - db_exec:
+      sql: >-
+        SELECT name, mtime_secs, usn FROM notetypes
+        WHERE id > (SELECT id FROM notetypes WHERE name = 'Image Occlusion') ORDER BY id
+  - db_exec:
+      sql: >-
+        SELECT n.name, t.ord, t.name, t.mtime_secs, t.usn FROM templates t JOIN notetypes n ON n.id = t.ntid
+        WHERE n.id > (SELECT id FROM notetypes WHERE name = 'Image Occlusion') ORDER BY n.id, t.ord
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT CAST(c.val AS TEXT) = CAST(n.id AS TEXT) FROM config c, notetypes n
+        WHERE c.KEY = 'curModel' AND n.name = 'Image Occlusion+'

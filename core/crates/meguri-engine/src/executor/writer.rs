@@ -338,6 +338,7 @@ fn run_op<T>(
         restore: meta.restore,
         last_seq: shared.last_seq(),
         on_commit: Vec::new(),
+        random: Arc::clone(&env.reopen.random),
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&mut context)));
     let media = MediaNotes {
@@ -358,6 +359,16 @@ fn run_op<T>(
             return Err(error);
         }
     };
+    // `notetypes/schema-changes` G6: a note type whose field or template
+    // count changed never commits with `scm <= ls`, except in the undo that
+    // restores the `scm` its step set.
+    let undoing = meta
+        .restore
+        .is_some_and(|restore| restore.action.direction() == Direction::Undo);
+    if let Err(error) = crate::schema_gate::guard(&scope, undoing) {
+        scope.rollback()?;
+        return Err(error);
+    }
 
     // Commit and take the seq under the commit lock, so a snapshot begun
     // under it knows exactly which commits it sees (O6).
@@ -409,6 +420,7 @@ fn run_op<T>(
                     revlog_added: &derived.revlog_added,
                     revlog_removed: &derived.revlog_removed,
                     config: &derived.config,
+                    collection: derived.collection.as_ref(),
                 },
             );
         }

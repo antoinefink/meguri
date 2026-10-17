@@ -126,7 +126,8 @@ fn terms_of_later_units_are_run_errors() {
     assert_eq!((error.kind.as_str(), error.step), ("unsupported_observation", Some(5)));
 }
 
-// S1: `search` needs the scenario's collection.
+// S1: `search` needs the scenario's collection. The run starts from the
+// new collection (dsl.md D8); an executor without one has none open.
 #[test]
 fn search_without_a_collection_is_an_invalid_scenario() {
     let dir = tempfile::tempdir().unwrap();
@@ -135,6 +136,11 @@ fn search_without_a_collection_is_an_invalid_scenario() {
         "search/nothing-open",
         "steps:\n  - observe:\n      - search: [{query: ''}]\n",
     );
-    let error = MeguriExecutor::new().run(&loaded).unwrap_err();
+    let areas: Vec<&str> = MeguriExecutor::AREAS
+        .into_iter()
+        .filter(|area| *area != "notetypes")
+        .collect();
+    let without_new_collection = MeguriExecutor::with(MeguriExecutor::area_registry(&areas));
+    let error = without_new_collection.run(&loaded).unwrap_err();
     assert_eq!((error.kind.as_str(), error.step), ("invalid_scenario", Some(0)));
 }

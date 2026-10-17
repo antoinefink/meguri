@@ -36,7 +36,8 @@ A value type (`meguri_model::changes`, KTD2), derived from the op's journal (U23
 - An observer receives: the op's seq and generation, the change set, and the row payloads:
   - per changed card, its row before and after (absent when added or removed), read as a typed card on demand;
   - the review-log rows added (their stored rows) and removed (their before-images);
-  - per changed config key, its stored value before and after.
+  - per changed config key, its stored value before and after;
+  - the `col` row after the op, when the op changed it (every op that moved `col.mod`): the derived store's stamp (`storage/derived-store` D3, D6).
   Note contents are not in the payload (the journal keeps a digest of a note's new row); an observer that needs them reads them after the commit.
 - Observers never call Swift and never submit ops and wait for them (the writer is busy running them). They keep their work short: the next op waits for them.
 - An observer that fails or panics does not undo the commit: the commit stands, the failure is logged, the remaining observers still run, and the change set is still published. Data an observer derives is rebuildable (U26).
@@ -59,7 +60,7 @@ A value type (`meguri_model::changes`, KTD2), derived from the op's journal (U23
   | `RolledOver{old_day, new_day}` | the day clock saw the scheduler day change, either way, and its rollover op committed (`sched/day-clock` D8, D9) |
   | `TimeZoneChanged{zone_id}` | a day clock check found an IANA zone id other than the one it last saw, whether or not the day or the offset changed (`sched/day-clock` D8) |
   | `NextDayAtChanged{next_day_at}` | the next day boundary a day clock check found differs from the one it last reported, in epoch seconds (`sched/day-clock` D8) |
-  | `Extension(payload)` | a crate above the engine publishes its own event kind (U95 stats, U106 sync status, U31 media arrived, U26 derived readiness, U100 widget snapshot): the engine carries it without reading it, and U6's dispatcher maps it to its `CoreEvent` variant |
+  | `Extension(payload)` | a crate above the engine publishes its own event kind (U95 stats, U106 sync status, U31 media arrived, U26 derived readiness and `DerivedApplied` (`storage/derived-store` D8), U100 widget snapshot): the engine carries it without reading it, and U6's dispatcher maps it to its `CoreEvent` variant |
 
 - The day clock's three kinds follow the commit of the `Rollover` op whose check found them, in the order of the table, after that op's `Changes` event; their `cause_seq` is that op's seq when it published a change set, otherwise none. The first check after an open or a generation change publishes none of them (`sched/day-clock` D8).
 - Ordering with observers: an op's seq is reserved at its commit and the `Changes` event is filled in once the observers ran. Events are delivered strictly in seq order: an event published by another thread with a higher seq waits until every lower seq has been filled or given up. A reservation is given up when the op published nothing (an empty change set) or its thread failed before publishing; the gap is skipped.

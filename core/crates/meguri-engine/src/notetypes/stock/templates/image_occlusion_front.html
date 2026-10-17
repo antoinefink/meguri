@@ -1,0 +1,19 @@
+{{#Header}}<div class="occlusion-title">{{Header}}</div>{{/Header}}
+<div class="occlusion-masks" style="display: none">{{cloze:Occlusion}}</div>
+<div id="image-occlusion-container">
+  {{Image}}
+  <canvas id="image-occlusion-canvas"></canvas>
+</div>
+<script>
+(function () {
+  try {
+    anki.imageOcclusion.setup();
+  } catch (failure) {
+    var notice = document.createElement("p");
+    notice.className = "occlusion-trouble";
+    notice.textContent = "The masks for this picture could not be drawn on this device.";
+    var picture = document.getElementById("image-occlusion-container");
+    picture.parentNode.insertBefore(notice, picture);
+  }
+})();
+</script>

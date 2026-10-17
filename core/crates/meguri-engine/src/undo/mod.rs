@@ -85,7 +85,7 @@ impl UndoAction {
         }
     }
 
-    fn direction(self) -> Direction {
+    pub(crate) fn direction(self) -> Direction {
         match self {
             UndoAction::Undo(_) => Direction::Undo,
             UndoAction::Redo(_) => Direction::Redo,

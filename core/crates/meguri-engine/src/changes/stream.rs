@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Condvar, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
@@ -100,6 +100,8 @@ impl fmt::Debug for ChangeStream {
 #[derive(Default)]
 struct Inner {
     state: Mutex<State>,
+    /// Notified when `next_release` moves (`wait_settled`).
+    released: Condvar,
 }
 
 struct State {
@@ -177,19 +179,16 @@ impl ChangeStream {
 
     /// Publishes an event at the next seq and returns the seq.
     pub fn publish(&self, generation: Generation, cause_seq: Option<Seq>, kind: EventKind) -> Seq {
-        let (seq, wakers) = {
-            let mut state = self.inner.lock();
-            let seq = state.take_seq();
-            let event = Event {
-                seq: Seq(seq),
-                generation,
-                cause_seq,
-                kind,
-            };
-            state.pending.insert(seq, Some(Some(Arc::new(event))));
-            (seq, state.release())
+        let mut state = self.inner.lock();
+        let seq = state.take_seq();
+        let event = Event {
+            seq: Seq(seq),
+            generation,
+            cause_seq,
+            kind,
         };
-        wake(wakers);
+        state.pending.insert(seq, Some(Some(Arc::new(event))));
+        self.release(state);
         Seq(seq)
     }
 
@@ -224,12 +223,39 @@ impl ChangeStream {
         Seq(self.inner.lock().next_seq)
     }
 
+    /// The last seq up to which nothing is pending: every op up to it has
+    /// run its in-core observers and was published or given up.
+    pub(crate) fn settled_through(&self) -> Seq {
+        Seq(self.inner.lock().next_release - 1)
+    }
+
+    /// Waits until [`ChangeStream::settled_through`] reaches `seq`, a seq
+    /// already handed out: every op up to it has run its in-core observers.
+    pub(crate) fn wait_settled(&self, seq: Seq) {
+        let state = self.inner.lock();
+        let _settled = self
+            .inner
+            .released
+            .wait_while(state, |state| state.next_release <= seq.0)
+            .unwrap_or_else(PoisonError::into_inner);
+    }
+
     fn settle(&self, seq: Seq, event: Option<Event>) {
-        let wakers = {
-            let mut state = self.inner.lock();
-            state.pending.insert(seq.0, Some(event.map(Arc::new)));
-            state.release()
-        };
+        let mut state = self.inner.lock();
+        state.pending.insert(seq.0, Some(event.map(Arc::new)));
+        self.release(state);
+    }
+
+    /// Releases what is settled, then, the lock dropped, wakes
+    /// `wait_settled` and async receivers.
+    fn release(&self, mut state: MutexGuard<'_, State>) {
+        let from = state.next_release;
+        let wakers = state.release();
+        let moved = state.next_release != from;
+        drop(state);
+        if moved {
+            self.inner.released.notify_all();
+        }
         wake(wakers);
     }
 }
@@ -432,6 +458,24 @@ mod tests {
         drop(stream.reserve());
         stream.publish(Generation(1), None, EventKind::Available);
         assert_eq!(seqs(&subscription), [5], "a dropped reservation is given up");
+    }
+
+    #[test]
+    fn wait_settled_returns_once_every_seq_up_to_it_is_filled_or_given_up() {
+        let stream = ChangeStream::new();
+        stream.wait_settled(Seq(0));
+        let first = stream.reserve();
+        let second = stream.reserve();
+        let waiter = {
+            let stream = stream.clone();
+            std::thread::spawn(move || stream.wait_settled(Seq(2)))
+        };
+        second.fill(Generation(1), None, EventKind::Available);
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(!waiter.is_finished(), "seq 1 is still pending");
+        first.give_up();
+        waiter.join().unwrap();
+        assert_eq!(stream.settled_through(), Seq(2));
     }
 
     #[test]

@@ -2,7 +2,9 @@
 """Notes.
 
 add_note / setup.notes: {notetype, deck?, fields: [str] | {field: str}, tags?: [str]}
-Each note gets the next #nN; its cards get the next #cN in template order.
+The note type is any the collection holds, by its exact stored name when the
+step runs (notetype-ops.md T1; unknown_ref otherwise). Each note gets the next
+#nN; its cards get the next #cN in template order.
 Field values and tags must be strings: str(1.0) or str(True) is Python's text,
 which a Meguri adapter would not reproduce.
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 from ..errors import invalid
 from ..registry import op, setup_section
 from .decks import deck_id
+from .notetypes import notetype_id
 
 NOTE_KEYS = {"notetype", "deck", "fields", "tags"}
 EDIT_KEYS = {"note", "fields", "tags"}
@@ -61,10 +64,9 @@ def add(session, spec) -> dict:
     if unknown:
         raise invalid(f"unknown note keys: {', '.join(unknown)}")
     name = spec.get("notetype")
-    if name not in session.notetypes:
-        raise invalid(f"note type {name!r} is not in setup.notetypes or not in the current collection")
+    ntid = notetype_id(session, name)
     col = session.col
-    note = col.new_note(col.models.get(session.notetypes[name]))
+    note = col.new_note(col.models.get(ntid))
     _set_fields(note, spec.get("fields", []), f"note type {name!r}")
     note.tags = _tags(spec.get("tags", []))
     col.add_note(note, deck_id(session, spec.get("deck")))
