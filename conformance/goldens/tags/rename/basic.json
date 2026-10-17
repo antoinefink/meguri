@@ -1,0 +1,190 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n5"
+        }
+      },
+      {},
+      {
+        "rename_tag": {
+          "count": 3
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" bar other ", 1894705200, -1],
+            [" bar::child bar::kid ", 1894705200, -1],
+            [" foobar ", 1894701600, -1],
+            [" bar bar ", 1894705200, -1],
+            [" a zzz ", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "a": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "a",
+              "usn": -1
+            },
+            "bar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar",
+              "usn": -1
+            },
+            "bar::child": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::child",
+              "usn": -1
+            },
+            "bar::kid": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::kid",
+              "usn": -1
+            },
+            "foobar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "foobar",
+              "usn": -1
+            },
+            "other": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "other",
+              "usn": -1
+            },
+            "zzz": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zzz",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000]
+          ]
+        }
+      },
+      {},
+      {
+        "rename_tag": {
+          "count": 1
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" bar other ", 1894705200, -1],
+            [" bar::child bar::kid ", 1894705200, -1],
+            [" foobar ", 1894701600, -1],
+            [" bar bar ", 1894705200, -1],
+            [" zzz2 zzz ", 1894708800, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "bar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar",
+              "usn": -1
+            },
+            "bar::child": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::child",
+              "usn": -1
+            },
+            "bar::kid": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::kid",
+              "usn": -1
+            },
+            "foobar": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "foobar",
+              "usn": -1
+            },
+            "other": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "other",
+              "usn": -1
+            },
+            "zzz": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zzz",
+              "usn": -1
+            },
+            "zzz2": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zzz2",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/rename/basic",
+  "scenario_sha256": "94f67b27db6e78198ba60f90bfbf3859b81d9716468882290a4811d3e0d19f9c",
+  "tz": "UTC"
+}

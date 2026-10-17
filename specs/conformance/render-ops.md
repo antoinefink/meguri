@@ -1,11 +1,11 @@
-# Render ops: the `template` observation
+# Render ops: the `template` and `render_status` observations
 
 Spec: conformance/render-ops
-Requirements: R1883, R1887, R1907, R1908, R1909
+Requirements: R1883, R1887, R1907, R1908, R1909, R908, R909
 Anki: 26.09.3
-Scenarios: conformance/scenarios/render/
+Scenarios: conformance/scenarios/render/, conformance/scenarios/notetypes/records/stock-render-handoff.yaml
 
-The observation kind (`observations.md` O4) that evaluates the template engine on given template texts, so the render area's syntax, filter and special-field scenarios run without card generation or the render pipeline. Both executors implement it with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold its shapes. The behavior it runs is `specs/render/template-syntax.md`, `filters.md` and `special-fields.md`. The per-card `render` kind (stored templates, audio tags, play markers) stays draft for U62.
+Two observation kinds (`observations.md` O4). `template` (Q1) evaluates the template engine on given template texts, so the render area's syntax, filter and special-field scenarios run without card generation or the render pipeline. `render_status` (Q4) reports, without any text, whether stored cards render for review, so a live scenario can check that Anki renders note types whose template text is Meguri's own. Both executors implement them with the meanings below; `conformance/schema/scenario.schema.json` and `observation.schema.json` hold their shapes. The behavior they run is `specs/render/template-syntax.md`, `filters.md`, `special-fields.md` and `cloze.md`. The per-card `render` kind (stored templates, audio tags, play markers) stays draft for U62.
 
 ## Q1. `template`
 
@@ -86,3 +86,39 @@ Nothing in the scenario's collection changes. New-note cases never read it.
 - The oracle driver implements the kind: every scenario under `conformance/scenarios/render/` has its golden, recorded with `tools/mg oracle record render`.
 - Meguri's executor (the testkit's `template` adapter, U60) runs new-note cases with meguri-template and a field map built as Q1.2 says. New-note cases of a cloze note type (the blank check of T10, `render/cloze#C15`) and templates that use the `cloze` or `cloze-only` filter run with U61's cloze module (`render/cloze/blank-check`, `render/cloze/templates`).
 - Card cases also need notes, cards, decks and note types in the collection (the `notes`, `decks` and `notetypes` setup sections and the `ids` observation: U27, U28, U29) and, for a cloze card, the cloze blank check (U61). U62 adds card cases to the adapter and activates `special-fields/cards`. `template/legacy-req` needs the `legacy_update` and `legacy_json` adapters and a note type save that recomputes each template's requirement (`template-syntax.md` T11.3); U36 activates it. Until then T0 reports both `pending`, and meguri-template's golden-pair tests check the engine's part of both against their goldens (`conformance/scenarios/render/area.yaml`).
+
+## Q4. `render_status`
+
+Whether each card renders for review from its stored templates, as a status only. Live scenarios use it where the two sides' template text differs by design: Anki rendering notes of the stock kinds Meguri wrote (R908, `notetypes/stock-kinds` K9), where any output text or length would differ from the golden. It reports what `collection-check` K8 reports per card, without the byte counts.
+
+### Q4.1 Request
+
+- `render_status`: every card that has a logical id, in logical-id order.
+- `render_status(#c1, #c3)` or `{render_status: ["#c1", "#c3"]}`: those cards, in the order given.
+- It is a per-card kind (`observations.md` O2): two requests in one step merge when they name different cards; naming a card twice in one step is invalid. Only card references (`#cN`) are allowed.
+
+### Q4.2 Evaluation
+
+Each card is rendered as review renders it, from the collection at this step: its note's fields, its note type's stored templates (for a standard note type the template at the card's ordinal, for a cloze note type the first template), never the browser's appearance templates (R935), and its deck, flags and id for the special fields (`render/special-fields` P3). Its status is the first that applies:
+
+| Status | When |
+|---|---|
+| `template_error` | the question side has an error (`render/template-syntax` T6–T9) |
+| `empty` | the question is blank (T10; for a cloze note type, `render/cloze` C15) |
+| `template_error` | the answer side has an error |
+| `ok` | otherwise |
+
+So the status is the card's error by T9 when it has one, and a blank question hides an error on the answer side. Nothing else is reported: no question or answer text, no length, no error kind or side, no message (R1887). Audio and TTS extraction, LaTeX and media names play no part in the status.
+
+### Q4.3 Value
+
+`{"render_status": {"#cN": {"ord": <integer>, "status": "ok" | "empty" | "template_error"} | null, ...}}`: one member per requested card, `ord` the card's stored ordinal, `null` when the card no longer exists. Compared exactly (O7).
+
+### Q4.4 Errors
+
+A reference to a card not created yet is `unknown_ref`. A card of a standard note type whose ordinal has no template is a run error; scenarios avoid it. Nothing in the scenario's collection changes.
+
+### Q4.5 Status
+
+- Oracle: the driver implements the kind with Anki's review render of an existing card, the render of `collection-check` K8. `notetypes/records/stock-render-handoff` observes it; its golden, recorded with `tools/mg oracle record notetypes/records/stock-render-handoff`, has every card `ok`.
+- Meguri: the executor adds the kind with the render pipeline (U62), from the stored templates through `render/template-syntax` and `render/cloze`. Until then a scenario that observes it in T0, or in a segment Meguri runs, is `pending`. `notetypes/records/stock-render-handoff` observes it only in the oracle's segment, so Meguri needs only `handoff` and the new collection there (`dsl.md` D9.2).

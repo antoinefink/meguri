@@ -139,6 +139,22 @@
           "description": "model-ops.md L2: the op has no output, so only a rejection appears.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_json"] } } }]
         },
+        "add_notetype": { "description": "notetype-ops.md T2.", "$ref": "#/$defs/notetype_save" },
+        "add_stock_notetype": { "description": "notetype-ops.md T3.", "$ref": "#/$defs/notetype_save" },
+        "clone_notetype": { "description": "notetype-ops.md T4.", "$ref": "#/$defs/notetype_save" },
+        "update_notetype": { "description": "notetype-ops.md T5.", "$ref": "#/$defs/notetype_save" },
+        "ensure_io_notetype": {
+          "description": "notetype-ops.md T6: the Image Occlusion note type's stored name.",
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" } }
+        },
+        "notetype_structure": {
+          "description": "notetype-ops.md T8: note types by stored name, without template text, CSS or ids.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/notetype_structure" }
+        },
         "blob_decode": {
           "description": "model-ops.md L4: per record, ok or invalid_blob.",
           "type": "object",
@@ -250,6 +266,25 @@
             "unicase_compare": { "type": "array", "items": { "enum": [-1, 0, 1] } }
           }
         },
+        "render_status": {
+          "description": "specs/conformance/render-ops.md Q4.3: per card, its stored ordinal and whether it renders for review from its stored templates; null when the card no longer exists.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/card_key" },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["ord", "status"],
+                "additionalProperties": false,
+                "properties": {
+                  "ord": { "type": "integer", "minimum": 0 },
+                  "status": { "enum": ["ok", "empty", "template_error"] }
+                }
+              },
+              { "type": "null" }
+            ]
+          }
+        },
         "template": {
           "description": "specs/conformance/render-ops.md Q1.5: one result per case, in case order.",
           "type": "array",
@@ -295,6 +330,85 @@
           }
         },
         "db_dump": { "$ref": "#/$defs/db_dump" },
+        "browser_config": {
+          "description": "specs/conformance/browser-config-ops.md B2: the 23 browser and search config keys as Anki's own reads give them; the last eight are stored JSON values of any shape.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "browserTableShowNotesMode", "collapseSavedSearches", "collapseToday", "collapseFlags", "collapseCardState",
+            "collapseDecks", "collapseNotetypes", "collapseTags", "previewBothSides", "ignoreAccentsInSearch",
+            "restorePositionBrowser", "resetCountsBrowser", "normalize_note_text", "setDueBrowser", "defaultSearchText",
+            "activeCols", "activeNoteCols", "sortType", "noteSortType", "sortBackwards", "browserNoteSortBackwards",
+            "savedFilters", "flagLabels"
+          ],
+          "properties": {
+            "browserTableShowNotesMode": { "type": "boolean" },
+            "collapseSavedSearches": { "type": "boolean" },
+            "collapseToday": { "type": "boolean" },
+            "collapseFlags": { "type": "boolean" },
+            "collapseCardState": { "type": "boolean" },
+            "collapseDecks": { "type": "boolean" },
+            "collapseNotetypes": { "type": "boolean" },
+            "collapseTags": { "type": "boolean" },
+            "previewBothSides": { "type": "boolean" },
+            "ignoreAccentsInSearch": { "type": "boolean" },
+            "restorePositionBrowser": { "type": "boolean" },
+            "resetCountsBrowser": { "type": "boolean" },
+            "normalize_note_text": { "type": "boolean" },
+            "setDueBrowser": { "type": "string" },
+            "defaultSearchText": { "type": "string" },
+            "activeCols": true,
+            "activeNoteCols": true,
+            "sortType": true,
+            "noteSortType": true,
+            "sortBackwards": true,
+            "browserNoteSortBackwards": true,
+            "savedFilters": true,
+            "flagLabels": true
+          }
+        },
+        "add_note_tags": { "description": "specs/conformance/tag-ops.md G1: notes written.", "$ref": "#/$defs/op_count" },
+        "remove_note_tags": { "description": "tag-ops.md G2: notes written.", "$ref": "#/$defs/op_count" },
+        "delete_tags": { "description": "tag-ops.md G3: notes written.", "$ref": "#/$defs/op_count" },
+        "rename_tag": {
+          "description": "tag-ops.md G4: notes written, or the rejection invalid_name.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_name"] } } }] }
+          ]
+        },
+        "reparent_tags": { "description": "tag-ops.md G5: notes written.", "$ref": "#/$defs/op_count" },
+        "clear_unused_tags": { "description": "tag-ops.md G6: registry rows removed.", "$ref": "#/$defs/op_count" },
+        "set_flag": {
+          "description": "tag-ops.md G8: cards written, or the rejection invalid_flag.",
+          "anyOf": [
+            { "$ref": "#/$defs/op_count" },
+            { "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_flag"] } } }] }
+          ]
+        },
+        "tag_tree": {
+          "description": "tag-ops.md G9: top-level nodes of the tag tree (specs/tags/tags.md T13).",
+          "type": "array",
+          "items": { "$ref": "#/$defs/tag_node" }
+        },
+        "undo": {
+          "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]
+        },
+        "redo": {
+          "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_redo", "changed_externally"] } } }]
+        },
+        "undo_status": {
+          "description": "undo-ops.md V2: the step an undo and a redo would apply now, or null.",
+          "type": "object",
+          "required": ["undo", "redo"],
+          "additionalProperties": false,
+          "properties": {
+            "undo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] },
+            "redo": { "anyOf": [{ "$ref": "#/$defs/undo_step" }, { "type": "null" }] }
+          }
+        },
         "search": {
           "description": "specs/conformance/search-ops.md S1: one output per request, in request order.",
           "type": "array",
@@ -343,12 +457,12 @@
               "type": "object",
               "required": ["result"],
               "additionalProperties": false,
-              "properties": { "result": { "enum": ["ok", "no_changes", "full_sync", "full_upload", "full_download"] } }
+              "properties": { "result": { "enum": ["ok", "no_changes", "normal_sync", "full_sync", "full_upload", "full_download"] } }
             },
             {
               "allOf": [
                 { "$ref": "#/$defs/rejection" },
-                { "properties": { "error": { "enum": ["clock_incorrect", "network"] } } }
+                { "properties": { "error": { "enum": ["auth_failed", "clock_incorrect", "network"] } } }
               ]
             }
           ]
@@ -374,6 +488,33 @@
       }
     },
     "text_strings": { "type": "array", "items": { "type": "string" } },
+    "op_count": {
+      "type": "object",
+      "required": ["count"],
+      "additionalProperties": false,
+      "properties": { "count": { "type": "integer", "minimum": 0 } }
+    },
+    "tag_node": {
+      "type": "object",
+      "required": ["name", "collapsed", "children"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "collapsed": { "type": "boolean" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/tag_node" } }
+      }
+    },
+    "undo_step": {
+      "description": "undo-ops.md V4: the id of an undo step's name.",
+      "enum": [
+        "add_deck", "add_note", "add_note_type", "answer_card", "build_deck", "bury", "change_deck", "change_note_type",
+        "clear_unused_tags", "custom_study", "deck_options", "delete_deck", "delete_note", "empty", "empty_cards",
+        "find_and_replace", "grade_now", "image_occlusion", "import", "preferences", "remove_note_type", "remove_tag",
+        "rename_deck", "rename_tag", "reposition", "reset_card", "select_deck", "set_due_date", "set_flag", "suspend",
+        "toggle_load_balancer", "unbury_unsuspend", "update_card", "update_config", "update_deck", "update_note",
+        "update_note_type", "update_tag"
+      ]
+    },
     "search_error": {
       "description": "specs/search/errors.md E1 kinds; provided and context per E2, backticks replaced by apostrophes (search-ops.md S3).",
       "type": "object",
@@ -456,6 +597,91 @@
           "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
         }
       ]
+    },
+    "notetype_save": {
+      "description": "notetype-ops.md T2-T5: the stored name, or a rejection of T7.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["name"],
+          "additionalProperties": false,
+          "properties": { "name": { "type": "string" } }
+        },
+        {
+          "allOf": [
+            { "$ref": "#/$defs/rejection" },
+            {
+              "properties": {
+                "error": {
+                  "enum": ["invalid_notetype", "template_parse_error", "duplicate_front", "no_front_field", "unknown_field", "missing_cloze"]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "notetype_structure": {
+      "description": "notetype-ops.md T8.",
+      "type": "object",
+      "required": ["kind", "original_stock_kind", "original_id", "sort_field", "fields", "templates"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["standard", "cloze"] },
+        "original_stock_kind": { "type": "integer" },
+        "original_id": { "type": ["integer", "null"] },
+        "sort_field": { "type": "integer", "minimum": 0 },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name", "sticky", "rtl", "font_name", "font_size", "description", "plain_text", "collapsed",
+              "exclude_from_search", "tag", "prevent_deletion"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "sticky": { "type": "boolean" },
+              "rtl": { "type": "boolean" },
+              "font_name": { "type": "string" },
+              "font_size": { "type": "integer", "minimum": 0 },
+              "description": { "type": "string" },
+              "plain_text": { "type": "boolean" },
+              "collapsed": { "type": "boolean" },
+              "exclude_from_search": { "type": "boolean" },
+              "tag": { "type": ["integer", "null"] },
+              "prevent_deletion": { "type": "boolean" }
+            }
+          }
+        },
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "deck", "requirement"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "deck": { "type": ["string", "integer", "null"] },
+              "requirement": {
+                "anyOf": [
+                  { "type": "null" },
+                  {
+                    "type": "object",
+                    "required": ["kind", "fields"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": { "enum": ["none", "any", "all"] },
+                      "fields": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     },
     "rejection": {
       "description": "An op Anki refused (dsl.md D7.3). An op whose D7.2 row lists rejection kinds takes anyOf [its output, this with error restricted to those kinds]; the others record none.",

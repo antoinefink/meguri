@@ -1,0 +1,185 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "ensure_io_notetype": {
+          "name": "Image Occlusion"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Image Occlusion", 0, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "add_notetype": {
+          "name": "Image Occlusion"
+        }
+      },
+      {},
+      {
+        "ensure_io_notetype": {
+          "name": "Image Occlusion+"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Image Occlusion", 1894701660, -1],
+            ["Image Occlusion+", 1894701720, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "Image Occlusion+": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Occlusion",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 0
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Image",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 1
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Header",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 2
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Back Extra",
+                "plain_text": false,
+                "prevent_deletion": true,
+                "rtl": false,
+                "sticky": false,
+                "tag": 3
+              },
+              {
+                "collapsed": false,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 20,
+                "name": "Comments",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": false,
+                "tag": 4
+              }
+            ],
+            "kind": "cloze",
+            "original_id": null,
+            "original_stock_kind": 6,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": null,
+                "name": "Image Occlusion",
+                "requirement": {
+                  "fields": [0, 1, 2],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      },
+      {},
+      {
+        "ensure_io_notetype": {
+          "name": "Image Occlusion+"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "ensure_io_notetype": {
+          "name": "Image Occlusion++"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Image Occlusion", 1894701660, -1],
+            ["Image Occlusion+", 1894701720, -1],
+            ["Image Occlusion++", 1894701840, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/io-on-demand",
+  "scenario_sha256": "2ccf16362daf705d13b05bf82e58d4bee41c03c855af0e717fcef7bf804822e4",
+  "tz": "UTC"
+}

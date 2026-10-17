@@ -4,30 +4,46 @@
 //! This crate's core (U24) is the single serialized write path (C1), the
 //! ordered change stream and in-core observers (C2), the collection
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
-//! registry, the ports, cancellation and progress. Specs:
-//! `specs/engine/op-model.md`, `change-stream.md`, `lifecycle.md`, `jobs.md`.
+//! registry, the ports, cancellation and progress; U25 adds undo and redo
+//! (C3); U26 the derived store's host (`specs/storage/derived-store.md`);
+//! U30 the tags, flags and marked notes (`specs/tags/`); U40 the day clock
+//! (C6, `sched`); U83 the browser and search config writes
+//! (`specs/browser/config-keys.md`); U29 note types and the schema-change
+//! gate (`notetypes`, `schema_gate`). Specs: `specs/engine/op-model.md`,
+//! `change-stream.md`, `lifecycle.md`, `jobs.md`, `undo.md`,
+//! `specs/sched/day-clock.md`, `specs/notetypes/`.
 
+pub mod browser_config;
 pub mod cancel;
 pub mod changes;
 pub mod collection;
+pub mod derived_host;
 pub mod error;
 pub mod executor;
+pub mod flags;
 pub mod jobs;
 pub mod lifecycle;
+pub mod marked;
 pub mod monotonic;
+pub mod notetypes;
 pub mod ports;
 pub mod progress;
 pub mod readers;
+pub mod sched;
+pub mod schema_gate;
+pub mod tags;
 pub mod threads;
+pub mod undo;
 
 pub use cancel::CancelToken;
 pub use changes::observers::{CardDelta, ConfigDelta, ObservedCommit};
 pub use changes::stream::{ChangeStream, Event, EventKind, ExtensionEvent, Reservation, Seq, Subscription};
 pub use collection::Collection;
+pub use derived_host::{DerivedApplied, DerivedHost, DerivedReadiness, Readiness};
 pub use error::EngineError;
-pub use executor::catalog::OpDef;
+pub use executor::catalog::{OpDef, UndoClass};
 pub use executor::op::{OpContext, OpResult, OpSpec, OpTiming, Pending, UndoMeta, WriteDelay};
-pub use executor::plan_commit::{Plan, PlanContext, plan_and_commit};
+pub use executor::plan_commit::{Plan, PlanContext, plan_and_commit, plan_and_commit_with};
 pub use executor::preconditions::Precondition;
 pub use jobs::registry::{JobRegistry, RunningJob};
 pub use jobs::{JobContext, JobHandle, JobId, JobKind, JobOutcome};
@@ -40,4 +56,11 @@ pub use meguri_model::changes::{ChangeKind, ChangeSet, OpSource};
 pub use ports::{ChangeObserver, GenerationListener, OpenStep, PortKind, Ports, SuspendParticipant};
 pub use progress::{Progress, ProgressListener, ProgressPhase, ProgressSink};
 pub use readers::{ReaderLease, Snapshot};
-pub use threads::{Qos, ThreadInfo, ThreadRegistry};
+pub use sched::{DayCache, DayClock, DayQuery, DayReport, day_query};
+pub use schema_gate::{SchemaReason, mark_schema_change};
+pub use threads::{Qos, RegisteredThread, ThreadInfo, ThreadRegistry};
+pub use undo::entry::{EntryId, RestorerState, SessionId, StepInfo, StepKind};
+pub use undo::holdback::{HeldBackRun, HeldRow, SyncHold, SyncMerge};
+pub use undo::reasons::{ClearCause, DisabledReason, SourceEffect, source_effect};
+pub use undo::restorers::{Direction, RestoredStep, UndoRestorer};
+pub use undo::{UndoScope, UndoStatus};

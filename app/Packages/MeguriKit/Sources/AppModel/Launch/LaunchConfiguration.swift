@@ -15,8 +15,8 @@ public struct LaunchConfiguration {
     /// so tests never bind the ports a running daily-driver app holds.
     public var ankiConnectPort: UInt16?
     public var migakuPort: UInt16?
-    /// What the root shows over Home at launch; nil opens Home (the initial
-    /// route seam, which U150's navigation state takes over).
+    /// A screen, sheet or alert the root shows at launch; nil shows the
+    /// navigation's own state.
     public var initialPresentation: InitialPresentation?
 
     public init() {}
@@ -36,7 +36,7 @@ public struct InitialPresentation {
     /// The buttons of an alert.
     public let alertActions: AnyView?
 
-    /// A screen pushed onto the root navigation stack.
+    /// A screen shown on its own, in place of the app's navigation.
     public static func screen<Content: View>(@ViewBuilder _ content: () -> Content) -> InitialPresentation {
         InitialPresentation(style: .screen, content: AnyView(content()), alertTitle: nil, alertMessage: nil, alertActions: nil)
     }

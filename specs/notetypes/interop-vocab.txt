@@ -1,0 +1,81 @@
+# Interface names the notetypes specs use: note type tables and columns, the
+# col columns of the schema stamp, the current note type config key, protobuf
+# field names of note type, field and template configs, their schema-11 keys,
+# special template names, the template filter and CSS class names the stock
+# kinds rely on, the image-occlusion element ids, script call and CSS custom
+# properties, and the commands of the default LaTeX header.
+# Tables and columns
+notetypes
+ntid
+mtime_secs
+usn
+scm
+ls
+# Config key
+curModel
+# Note type config
+sort_field_idx
+css
+target_deck_id_unused
+latex_pre
+latex_post
+latex_svg
+reqs
+original_stock_kind
+original_id
+card_ord
+field_ords
+# Field config
+sticky
+rtl
+font_name
+font_size
+plain_text
+exclude_from_search
+prevent_deletion
+# Template config
+q_format
+a_format
+q_format_browser
+a_format_browser
+target_deck_id
+browser_font_name
+browser_font_size
+# Schema-11 keys
+req
+latexPre
+latexPost
+latexsvg
+originalStockKind
+originalId
+sortf
+flds
+tmpls
+# Template special names, filters and CSS classes
+FrontSide
+CardFlag
+Subdeck
+CardID
+cloze
+nightMode
+# Image occlusion contract
+image-occlusion-container
+image-occlusion-canvas
+imageOcclusion
+inactive-shape-color
+active-shape-color
+highlight-shape-color
+inactive-shape-border
+active-shape-border
+highlight-shape-border
+# Default LaTeX header
+documentclass
+papersize
+usepackage
+inputenc
+utf8
+amssymb
+amsmath
+pagestyle
+setlength
+parindent

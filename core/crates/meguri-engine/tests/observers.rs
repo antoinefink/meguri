@@ -81,6 +81,8 @@ fn an_observer_gets_the_changed_rows_on_the_writer_before_the_change_set_is_publ
         stream: Mutex::default(),
     });
     let h = Harness::open_with(Ports::default().observer(recorder.clone()));
+    // The day clock's first check at open (`sched/day-clock` D8) wrote.
+    recorder.seen.lock().unwrap().clear();
     *recorder.stream.lock().unwrap() = Some(h.engine.stream().subscribe());
     let subscription = h.engine.stream().subscribe();
 
@@ -172,6 +174,8 @@ fn a_failing_or_panicking_observer_never_undoes_the_commit_and_the_others_still_
         .observer(Arc::new(Failing { panic: false }))
         .observer(recorder.clone());
     let h = Harness::open_with(ports);
+    // The day clock's first check at open (`sched/day-clock` D8) wrote.
+    recorder.seen.lock().unwrap().clear();
     let subscription = h.engine.stream().subscribe();
     let result = add_note_with_card(&h.collection, OpSource::UserUndoable, &["kept", "x"]);
     let (nid, _) = result.value;
@@ -193,6 +197,8 @@ fn observers_see_no_op_that_changed_nothing() {
         stream: Mutex::default(),
     });
     let h = Harness::open_with(Ports::default().observer(recorder.clone()));
+    // The day clock's first check at open (`sched/day-clock` D8) wrote.
+    recorder.seen.lock().unwrap().clear();
     h.collection
         .run(OpSpec::named("nothing", OpSource::UserUndoable), |_| Ok(()))
         .unwrap();

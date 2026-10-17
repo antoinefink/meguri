@@ -99,21 +99,12 @@ impl ThreadRegistry {
     ) -> io::Result<JoinHandle<T>> {
         let name = name.into();
         let busy = Arc::new(AtomicBool::new(false));
-        let id = {
-            let mut registry = self.lock();
-            registry.next_id += 1;
-            let id = registry.next_id;
-            registry.threads.insert(
-                id,
-                Record {
-                    name: name.clone(),
-                    qos,
-                    reported_qos: None,
-                    busy: Arc::clone(&busy),
-                },
-            );
-            id
-        };
+        let id = self.list(Record {
+            name: name.clone(),
+            qos,
+            reported_qos: None,
+            busy: Arc::clone(&busy),
+        });
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let registry = self.clone();
         let spawned = thread::Builder::new().name(name).spawn(move || {
@@ -142,6 +133,36 @@ impl ThreadRegistry {
         }
     }
 
+    /// Lists the calling thread, which a runtime the core owns started (the
+    /// sync runtime's tokio threads, KTD14) and so did not come from
+    /// [`ThreadRegistry::spawn`], and sets its class as `spawn` does. It is
+    /// listed idle until [`RegisteredThread::set_busy`], and leaves the list
+    /// when the returned value drops.
+    pub fn register_current(&self, name: impl Into<String>, qos: Qos) -> RegisteredThread {
+        let busy = Arc::new(AtomicBool::new(false));
+        let reported_qos = apply_qos(qos);
+        let id = self.list(Record {
+            name: name.into(),
+            qos,
+            reported_qos,
+            busy: Arc::clone(&busy),
+        });
+        RegisteredThread {
+            registry: self.clone(),
+            id,
+            busy,
+        }
+    }
+
+    /// Adds a thread to the list under a new id.
+    fn list(&self, record: Record) -> u64 {
+        let mut registry = self.lock();
+        registry.next_id += 1;
+        let id = registry.next_id;
+        registry.threads.insert(id, record);
+        id
+    }
+
     /// Every live registered thread, by id.
     pub fn threads(&self) -> Vec<ThreadInfo> {
         self.lock()
@@ -160,6 +181,29 @@ impl ThreadRegistry {
     /// The registered threads that are busy now.
     pub fn busy_threads(&self) -> Vec<ThreadInfo> {
         self.threads().into_iter().filter(|t| t.busy).collect()
+    }
+}
+
+/// A thread listed by [`ThreadRegistry::register_current`]. Keep it on that
+/// thread and drop it before the thread ends: dropping it removes the thread
+/// from the list.
+#[derive(Debug)]
+pub struct RegisteredThread {
+    registry: ThreadRegistry,
+    id: u64,
+    busy: Arc<AtomicBool>,
+}
+
+impl RegisteredThread {
+    /// Lists the thread busy or idle (a runtime's park and unpark hooks).
+    pub fn set_busy(&self, busy: bool) {
+        self.busy.store(busy, Ordering::SeqCst);
+    }
+}
+
+impl Drop for RegisteredThread {
+    fn drop(&mut self) {
+        self.registry.lock().threads.remove(&self.id);
     }
 }
 
