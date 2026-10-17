@@ -1,0 +1,63 @@
+# Cloning a note type (specs/notetypes/records.md N7): the clone keeps every
+# field and template with its id and options, the styling, LaTeX values and
+# stock kind; it loses the original id, gets a new id and local stamps, its
+# template rows get mtime_secs and usn 0, it is named '<name> copy' unless a
+# name is given (then made unique), and it becomes the current note type.
+# Cloning is not a schema change (specs/notetypes/schema-changes.md G2).
+id: notetypes/records/clone
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Src
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { font-size: 30px; }"
+steps:
+  - legacy_update:
+      notetype: Src
+      patch:
+        sortf: 1
+        latexPre: "% src pre\n"
+        latexPost: "% src post"
+        originalStockKind: 2
+        originalId: 1234567890123
+        flds:
+          - {name: Front, ord: 0, sticky: true, rtl: false, font: Arial, size: 24, description: "word", plainText: false, collapsed: false, excludeFromSearch: false, id: 5001}
+          - {name: Back, ord: 1, sticky: false, rtl: true, font: Georgia, size: 18, description: "", plainText: true, collapsed: true, excludeFromSearch: true, id: 5002}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", bqfmt: "{{Front}} (b)", bafmt: "", did: 1, bfont: Arial, bsize: 12, id: 6001}
+          - {name: Backward, ord: 1, qfmt: "{{Back}}", afmt: "{{Front}}", id: 6002}
+  - db_exec:
+      sql: >-
+        UPDATE templates SET mtime_secs = 55, usn = 66
+        WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Src')
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1m
+  - clone_notetype: {notetype: Src}
+  - clone_notetype: {notetype: Src, name: "src copy"}
+  - clone_notetype: {notetype: Src copy}
+  - db_exec:
+      sql: >-
+        SELECT name, mtime_secs, usn FROM notetypes
+        WHERE name IN ('Src', 'Src copy', 'src copy+', 'Src copy copy') ORDER BY id
+  - db_exec:
+      sql: >-
+        SELECT n.name, hex(n.config) FROM notetypes n
+        WHERE n.name IN ('Src', 'Src copy') ORDER BY n.id
+  - db_exec:
+      sql: >-
+        SELECT n.name, f.ord, f.name, hex(f.config) FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name IN ('Src', 'Src copy') ORDER BY n.id, f.ord
+  - db_exec:
+      sql: >-
+        SELECT n.name, t.ord, t.name, t.mtime_secs, t.usn, hex(t.config) FROM templates t
+        JOIN notetypes n ON n.id = t.ntid WHERE n.name IN ('Src', 'Src copy') ORDER BY n.id, t.ord
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT CAST(c.val AS TEXT) = CAST(n.id AS TEXT) FROM config c, notetypes n
+        WHERE c.KEY = 'curModel' AND n.name = 'Src copy copy'
+  - observe:
+      - {notetype_structure: {notetypes: [Src, Src copy]}}

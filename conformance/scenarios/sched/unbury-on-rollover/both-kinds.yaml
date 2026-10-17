@@ -1,0 +1,45 @@
+# AE24 (R592, R598, R599; specs/sched/day-clock.md D7): Europe/Paris, rollover
+# 4. Cards buried by the scheduler (queue -2) and by the user (queue -3) on
+# day 5 stay buried at 03:59:59 the next morning and return to the queue
+# their type and due give at 04:00:00, with mod and usn unchanged; a suspended
+# card stays suspended; col.mod does not move; lastUnburied becomes 6. Notes
+# and cards are written with db_exec (mod 1700000000 + n, usn 3) so the
+# scenario needs no note type of its own; the first note type of the new
+# collection only gives the notes a valid mid.
+id: sched/unbury-on-rollover/both-kinds
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-20T20:00:00"
+  - observe: [timing]
+  - db_exec: {sql: "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (1700000000000, 'g1700000000000', (SELECT id FROM notetypes ORDER BY id LIMIT 1), 1700000000, 3, '', 'one' || char(31) || 'uno', 'one', 0, 0, '')"}
+  # 1: new, buried by the scheduler
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000001, 1700000000000, 1, 0, 1700000001, 3, 0, -2, 1, 0, 0, 0, 0, 0, 0, 0, 0, '')"}
+  # 2: review due on day 5, buried by the user
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000002, 1700000000000, 1, 0, 1700000002, 3, 2, -3, 5, 3, 2500, 4, 0, 0, 0, 0, 0, '')"}
+  # 3: learning, due at a timestamp, buried by the scheduler
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000003, 1700000000000, 1, 0, 1700000003, 3, 1, -2, 1895202000, 0, 0, 1, 0, 1, 0, 0, 0, '')"}
+  # 4: learning, due on day 6 (interday), buried by the user
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000004, 1700000000000, 1, 0, 1700000004, 3, 1, -3, 6, 0, 0, 1, 0, 1, 0, 0, 0, '')"}
+  # 5: relearning, due at a timestamp, buried by the scheduler
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000005, 1700000000000, 1, 0, 1700000005, 3, 3, -2, 1895202000, 1, 2300, 6, 1, 1, 0, 0, 0, '')"}
+  # 6: relearning, due on day 6, buried by the user
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000006, 1700000000000, 1, 0, 1700000006, 3, 3, -3, 6, 1, 2300, 6, 1, 1, 0, 0, 0, '')"}
+  # 7: review, suspended
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000007, 1700000000000, 1, 0, 1700000007, 3, 2, -1, 5, 3, 2500, 4, 0, 0, 0, 0, 0, '')"}
+  # 8 and 9: learning due at exactly 1,000,000,000 (a day number) and one above (a timestamp)
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000008, 1700000000000, 1, 0, 1700000008, 3, 1, -3, 1000000000, 0, 0, 1, 0, 1, 0, 0, 0, '')"}
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1700000000009, 1700000000000, 1, 0, 1700000009, 3, 1, -2, 1000000001, 0, 0, 1, 0, 1, 0, 0, 0, '')"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - set_clock: "2030-01-21T03:59:59"
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT id, type, queue, due, ivl, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}

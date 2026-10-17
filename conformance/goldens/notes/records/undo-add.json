@@ -1,0 +1,561 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701600000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4089731945,
+              "data": "",
+              "flags": 0,
+              "flds": "lake",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "lake",
+              "tags": " geo ",
+              "usn": -1
+            }
+          },
+          "tags": {
+            "geo": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "geo",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", "1894701600006", -1, 1894701600],
+            ["_nt_1894701600006_lastDeck", "1894701600000", -1, 1894701600],
+            ["curModel", "1894701600006", -1, 1894701600],
+            ["nextPos", "2", -1, 1894701600]
+          ]
+        }
+      },
+      {},
+      {
+        "add_note": {
+          "cards": ["#c2", "#c3"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894705200000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894705200000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894705200,
+              "nid": 1894705200000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894705200001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894705200001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894705200,
+              "nid": 1894705200000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894705200000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4089731945,
+              "data": "",
+              "flags": 0,
+              "flds": "lake",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "lake",
+              "tags": " geo ",
+              "usn": -1
+            },
+            "1894705200000": {
+              "csum": 150726050,
+              "data": "",
+              "flags": 0,
+              "flds": "river\u001frio",
+              "guid": "#random",
+              "id": 1894705200000,
+              "mid": 1894701600007,
+              "mod": 1894705200,
+              "sfld": "river",
+              "tags": " water ",
+              "usn": -1
+            }
+          },
+          "tags": {
+            "geo": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "geo",
+              "usn": -1
+            },
+            "water": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "water",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "add_note"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", "1894701600007", -1, 1894705200],
+            ["_nt_1894701600006_lastDeck", "1894701600000", -1, 1894701600],
+            ["_nt_1894701600007_lastDeck", "1894701600000", -1, 1894705200],
+            ["curModel", "1894701600007", -1, 1894705200],
+            ["nextPos", "3", -1, 1894705200]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701600000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4089731945,
+              "data": "",
+              "flags": 0,
+              "flds": "lake",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "lake",
+              "tags": " geo ",
+              "usn": -1
+            }
+          },
+          "tags": {
+            "geo": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "geo",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": "add_note",
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", "1894701600006", -1, 1894701600],
+            ["_nt_1894701600006_lastDeck", "1894701600000", -1, 1894701600],
+            ["curModel", "1894701600006", -1, 1894701600],
+            ["nextPos", "2", -1, 1894701600]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894705200000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894705200000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894705200,
+              "nid": 1894705200000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            },
+            "1894705200001": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 2,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894705200001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894705200,
+              "nid": 1894705200000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894705200000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4089731945,
+              "data": "",
+              "flags": 0,
+              "flds": "lake",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "lake",
+              "tags": " geo ",
+              "usn": -1
+            },
+            "1894705200000": {
+              "csum": 150726050,
+              "data": "",
+              "flags": 0,
+              "flds": "river\u001frio",
+              "guid": "#random",
+              "id": 1894705200000,
+              "mid": 1894701600007,
+              "mod": 1894705200,
+              "sfld": "river",
+              "tags": " water ",
+              "usn": -1
+            }
+          },
+          "tags": {
+            "geo": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "geo",
+              "usn": -1
+            },
+            "water": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "water",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "add_note"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", "1894701600007", -1, 1894705200],
+            ["_nt_1894701600006_lastDeck", "1894701600000", -1, 1894701600],
+            ["_nt_1894701600007_lastDeck", "1894701600000", -1, 1894705200],
+            ["curModel", "1894701600007", -1, 1894705200],
+            ["nextPos", "3", -1, 1894705200]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_dump": {
+          "cards": {
+            "1894701600000": {
+              "data": "{}",
+              "did": 1894701600000,
+              "due": 1,
+              "factor": 0,
+              "flags": 0,
+              "id": 1894701600000,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894701600,
+              "nid": 1894701600000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": -1
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1894680000,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 0,
+              "mod": 1894701600000,
+              "models": "",
+              "scm": 1894701600000,
+              "tags": "",
+              "usn": 0,
+              "ver": 18
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1894701600000": {
+              "csum": 4089731945,
+              "data": "",
+              "flags": 0,
+              "flds": "lake",
+              "guid": "#random",
+              "id": 1894701600000,
+              "mid": 1894701600006,
+              "mod": 1894701600,
+              "sfld": "lake",
+              "tags": " geo ",
+              "usn": -1
+            }
+          },
+          "tags": {
+            "geo": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "geo",
+              "usn": -1
+            }
+          }
+        },
+        "undo_status": {
+          "redo": "add_note",
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", "1894701600006", -1, 1894701600],
+            ["_nt_1894701600006_lastDeck", "1894701600000", -1, 1894701600],
+            ["curModel", "1894701600006", -1, 1894701600],
+            ["nextPos", "2", -1, 1894701600]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "ecb0c593606d7e5686ebcbdb0ffd447e96f9ce434c8499049597f34b283404fa",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/records/undo-add",
+  "scenario_sha256": "ada73815efd0c8e27f919c2e99574727a0cbea8a3ed0e1561424e097d6c3b43b",
+  "tz": "UTC"
+}

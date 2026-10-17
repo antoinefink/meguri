@@ -1,0 +1,70 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "text": "dog cat OR fish"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a OR b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "a OR b"
+          },
+          {
+            "text": "a b"
+          },
+          {
+            "text": "\"and\""
+          },
+          {
+            "text": "x y OR z"
+          },
+          {
+            "text": "x OR y z"
+          },
+          {
+            "text": "x OR y OR z"
+          },
+          {
+            "text": "7 8 OR 9"
+          },
+          {
+            "text": "a b OR c d"
+          },
+          {
+            "text": "not a"
+          },
+          {
+            "text": "and:x"
+          },
+          {
+            "text": "andy OR orb"
+          },
+          {
+            "text": "a OR b"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/structure/operators",
+  "scenario_sha256": "15af2847d6f5f25cd21a7fe6abcc0a0f775c32eaab2af96a8fdb234e28a457df",
+  "tz": "UTC"
+}

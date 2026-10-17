@@ -1,0 +1,25 @@
+# specs/conformance/dsl.md D9.1. Active scenarios pass T0 on Meguri's executor
+# with U30's tag adapters, U29's notetypes setup and U27's add_note/edit_note.
+# They use the stand-in new collection of notetype-ops.md T10.2 (dsl.md D8)
+# until U28 replaces it. Only flags/set stays inactive: it still needs the
+# card observation. The unit that adds that observation activates it here.
+area: tags
+active:
+  - "bulk/add"
+  - "bulk/remove"
+  - "canon/normalize"
+  - "canon/spelling"
+  - "clear-unused/parents"
+  - "collapse/set"
+  - "delete/children"
+  - "marked/mark"
+  - "rename/basic"
+  - "rename/case-only"
+  - "rename/existing-spelling"
+  - "rename/implicit-parent"
+  - "rename/new-casing"
+  - "rename/refused"
+  - "rename/rows"
+  - "reparent/existing-spelling"
+  - "reparent/rules"
+  - "tree/structure"

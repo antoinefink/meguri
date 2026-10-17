@@ -1,0 +1,35 @@
+# Writing card flags (specs/tags/flags-and-marked.md F2). The low three bits
+# change and the other bits stay (131 = 0b1000_0011 → 133 → 130 → 128). A
+# written card gets usn -1 and keeps its mod; a card that already has the
+# value is not written. A value above 7 is refused and changes nothing.
+# Toggling (F3) is the caller's rule and is not an op.
+id: tags/flags/set
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"]}
+  - add_note: {notetype: Pair, fields: ["front", "back"]}
+  - db_exec: {sql: "UPDATE cards SET usn = 3"}
+  - db_exec: {sql: "UPDATE cards SET flags = 131 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)"}
+  - db_exec: {sql: "UPDATE cards SET flags = 2 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - advance: 1h
+  - set_flag: {cards: ["#c1"], flag: 5}
+  - observe: [card]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1h
+  - set_flag: {cards: ["#c1"], flag: 5}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - set_flag: {cards: ["#c1", "#c2", "#c3"], flag: 2}
+  - set_flag: {cards: ["#c1"], flag: 0}
+  - set_flag: {cards: ["#c2"], flag: 8}
+  - set_flag: {cards: ["#c2"], flag: 7}
+  - observe: [card]

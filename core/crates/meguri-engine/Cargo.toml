@@ -14,9 +14,20 @@ test-hooks = ["meguri-model/test-hooks", "meguri-storage/test-hooks"]
 
 [dependencies]
 meguri-model.workspace = true
+# The browser and search config keys (U83): their reading and the values
+# each user action writes (`browser_config.rs`).
+meguri-search.workspace = true
+# The day clock's math (sched/day-clock, timing/).
+meguri-sched.workspace = true
 meguri-storage.workspace = true
+# Note type validation and card requirements parse templates (U60).
+meguri-template.workspace = true
 # The touch index compares tag keys with the collection's `unicase` folding.
 meguri-text.workspace = true
+# Tag matching (`specs/tags/tags.md` T5): Unicode 16.0 simple case folding
+# is the pinned crate's case-insensitive mode.
+regex.workspace = true
+rand.workspace = true
 tracing.workspace = true
 
 # The pthread QoS calls of the thread registry (KTD9).
@@ -29,12 +40,26 @@ criterion.workspace = true
 # reads, the steppable clock, WAL-flush observations) and gives them fixture
 # collections.
 meguri-testkit.workspace = true
+# undo_conformance.rs: scenario values and the golden's observations.
+serde_json.workspace = true
 tempfile.workspace = true
 
 # Criterion wall-clock suite (U12 harness, R1864): empty-op overhead and the
 # answer-sized write phase (`specs/engine/op-model.md` O10).
 [[bench]]
 name = "executor"
+harness = false
+
+# Criterion wall-clock suite: undo of an answer (`specs/engine/undo.md` M12,
+# R1811).
+[[bench]]
+name = "undo"
+harness = false
+
+# Criterion wall-clock suite: bulk tag operations on 10k notes
+# (`specs/tags/tags.md` T7, T10; R1831).
+[[bench]]
+name = "tags"
 harness = false
 
 [[test]]

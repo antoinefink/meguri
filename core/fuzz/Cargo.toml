@@ -17,6 +17,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 meguri-model = { path = "../crates/meguri-model" }
+meguri-search = { path = "../crates/meguri-search" }
+meguri-sync = { path = "../crates/meguri-sync" }
 meguri-template = { path = "../crates/meguri-template" }
 meguri-text = { path = "../crates/meguri-text" }
 
@@ -54,6 +56,20 @@ bench = false
 [[bin]]
 name = "template_parse"
 path = "fuzz_targets/template_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "search_parser"
+path = "fuzz_targets/search_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sync_json"
+path = "fuzz_targets/sync_json.rs"
 test = false
 doc = false
 bench = false

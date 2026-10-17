@@ -174,6 +174,51 @@ class XcresultTest(unittest.TestCase):
         self.assertIn("declares probe.syntheticDelay but has no measurements of it", done.stderr)
         self.assertFalse(os.path.exists(out))
 
+    def iphone_run(self):
+        with open(data("smoke-iphone/metrics.json")) as f:
+            metrics = json.load(f)
+        with open(data("smoke-iphone/activities.json")) as f:
+            activities = json.load(f)
+        return metrics, activities
+
+    def test_a_run_that_kept_no_attachments_says_so(self):
+        # R1866: U241's gate refuses UI results whose tests kept screenshots
+        # or attachments, and results that cannot show they kept none.
+        metrics, activities = self.iphone_run()
+        doc = perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities)
+        self.assertEqual(doc["attachments"], 0)
+
+    def test_attachments_anywhere_in_the_suites_activities_are_counted(self):
+        metrics, activities = self.iphone_run()
+        activities[1]["testRuns"][0]["activities"][2].setdefault("childActivities", []).append(
+            {"title": "Automatic Screenshot", "attachments": [{"name": "Screenshot", "uuid": "A"},
+                                                              {"name": "Screenshot", "uuid": "B"}]})
+        activities[0]["testRuns"][0]["activities"].append({"title": "Note", "attachments": [{"name": "log.txt"}]})
+        doc = perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities)
+        self.assertEqual(doc["attachments"], 3)
+
+    def test_the_attachment_count_is_left_out_when_a_measured_test_has_no_activities(self):
+        metrics, activities = self.iphone_run()
+        doc = perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities[1:])
+        self.assertNotIn("attachments", doc)
+        self.assertNotIn("attachments", self.convert())
+
+    def test_a_declared_fixture_marks_the_rows_of_its_test(self):
+        metrics, activities = self.iphone_run()
+        probe = "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()"
+        [doc] = [a for a in activities if a["testIdentifier"] == probe]
+        doc["testRuns"][0]["activities"].append({"title": "meguri.perf.fixture: 150k"})
+        out = perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities)
+        self.assertEqual({r.get("fixture") for r in out["results"] if r["test"] == probe}, {"150k"})
+        self.assertEqual({r.get("fixture") for r in out["results"] if r["test"] != probe}, {None})
+
+    def test_the_converted_smoke_run_validates_with_its_attachment_count(self):
+        metrics, activities = self.iphone_run()
+        out = os.path.join(self.dir, "SmokePerfTests.json")
+        with open(out, "w") as f:
+            json.dump(perf_compare.from_xcresult(metrics, "SmokePerfTests", "Profile", SIMULATOR, activities), f)
+        self.assertEqual(perf_compare.validate([out]), [])
+
     def test_an_unknown_unit_is_refused(self):
         metrics = json.loads(json.dumps(self.metrics))
         metrics[0]["testRuns"][0]["metrics"][0]["unitOfMeasurement"] = "furlongs"

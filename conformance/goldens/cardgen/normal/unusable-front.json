@@ -1,0 +1,69 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c7", "#c8"],
+          "note": "#n5"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["had-all", 0, 1894701600],
+            ["had-all", 1, 1894701600],
+            ["had-all", 2, 1894701600],
+            ["had-a", 0, 1894701600],
+            ["new-all", 0, 1894705200],
+            ["new-b-c", 0, 1894705200],
+            ["{{c1::x}} {{c2::y}}", 0, 1894705200],
+            ["{{c1::x}} {{c2::y}}", 1, 1894705200]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/normal/unusable-front",
+  "scenario_sha256": "bd19fe7f44e99880a7d5989e4267b843b3744578d36168eb39472d938a543e73",
+  "tz": "UTC"
+}

@@ -1,0 +1,28 @@
+# Quarantined tests (R1953; docs/process/tiers.md, "Quarantine").
+#
+# A quarantined test still runs and is reported; its failure does not block
+# the gate until its deadline, after which the gate fails. The milestone runs
+# fail while any conformance, sync or data-safety test is quarantined.
+# Nothing is ever retried: a flaky test fails the gate until it is fixed or
+# listed here.
+#
+# Add entries only with `tools/mg quarantine add` (it checks the evidence and
+# writes the entry), and only after Antoine approved the quarantine in chat.
+# Each entry:
+#   test         the failure id its job reports (result.json failures[].id)
+#   run          the tools/gate/tiers.yaml run that reports it
+#   class        unit, conformance, sync, data-safety, ui, perf, static,
+#                tooling or similarity: the run's class when that is
+#                conformance, sync or data-safety; otherwise what the test
+#                checks (a sync test in core-test is a sync test)
+#   owner        who fixes it (a unit or a role)
+#   reason       why it is flaky
+#   deadline     YYYY-MM-DD; after it the gate fails
+#   approved_by  antoine
+#   evidence     commit, failed, passed: two gate runs on that commit, the
+#                test failing in one and its run passing in the other
+#   escalation   optional: the approval escalation
+#
+# Remove an entry by deleting its block once the test is fixed.
+
+entries:

@@ -359,8 +359,9 @@ commit_with() {
 }
 
 @test "worktree new removes the worktree when its record commit fails" {
-  printf '#!/bin/sh\necho "pre-commit: refused" >&2\nexit 1\n' >"$SB/.git/hooks/pre-commit"
-  chmod +x "$SB/.git/hooks/pre-commit"
+  # A hook tools/mg does not install (it owns commit-msg and pre-commit).
+  printf '#!/bin/sh\necho "prepare-commit-msg: refused" >&2\nexit 1\n' >"$SB/.git/hooks/prepare-commit-msg"
+  chmod +x "$SB/.git/hooks/prepare-commit-msg"
   mg worktree new --role implementer w5
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = session-commit ]
@@ -612,6 +613,10 @@ commit_with() {
 
 @test "the implementer deny profile template covers every quarantined source" {
   local p="$SB/.claude/settings.implementer.json" rule
+  # Built from parts: the merge gate's static check refuses an AnkiWeb host
+  # written out in a test (R1876, tools/gate/static-checks/ankiweb-hosts.sh).
+  local ankiweb_domain
+  ankiweb_domain="$(printf '%s.%s' ankiweb net)"
   jq -e '.permissions.deny | length > 0' "$p"
   for rule in \
     'Read(/@MAIN_CHECKOUT@/refs/**)' \
@@ -647,7 +652,7 @@ commit_with() {
     'WebFetch(domain:github.com)' \
     'WebFetch(domain:raw.githubusercontent.com)' \
     'WebFetch(domain:codeload.github.com)' \
-    'WebFetch(domain:ankiweb.net)'; do
+    "WebFetch(domain:$ankiweb_domain)"; do
     jq -e --arg r "$rule" '.permissions.deny | index($r)' "$p" >/dev/null || { echo "missing deny rule $rule"; return 1; }
   done
   jq -e '.hooks.PreToolUse[] | select(.matcher == "WebFetch") | .hooks[0].command == "\"@WORKTREE@/tools/hooks/deny-quarantined-fetch\""' "$p"

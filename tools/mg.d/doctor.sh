@@ -4,7 +4,7 @@
 # lists what is missing in user_steps (docs/process/one-time-setup.md).
 
 mg_job doctor host mg_doctor \
-  "Check Xcode, iOS runtime, Docker, Rust targets, disk and the macOS test VM (Mac UI suites and simulators); list missing one-time user steps"
+  "Check Xcode, iOS runtime, Docker, Rust targets, disk, the macOS test VM (Mac UI suites and simulators), the host session and the Mac UI input; list missing user steps (tools/mg catch-up runs queued runs once theirs clear)"
 
 MG_DOCTOR_TEAM=DNQ34W43XX
 MG_DOCTOR_MIN_XCODE_MAJOR=27
@@ -39,7 +39,7 @@ mg__doctor_toolchain_values() {
 # only: a stopped VM is not started (jobs start it). Problems warn; Mac UI
 # suites and simulator jobs queue without the VM.
 mg__doctor_mac_vm() {
-  local host_xcode="$1 ($2)" rc n i=0 vm name tart ssh state out vxv vxb status msg vms='[]' missing=0 pin rt
+  local host_xcode="$1 ($2)" rc n i=0 vm name tart ssh state out vxv vxb vmb status msg vms='[]' missing=0 pin rt
   mg__mac_vm_read_config
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -56,7 +56,7 @@ mg__doctor_mac_vm() {
     name="$(jq -r .name <<<"$vm")"
     tart="$(jq -r .tart <<<"$vm")"
     ssh="$(jq -r .ssh <<<"$vm")"
-    state="" vxv="" vxb="" rt=""
+    state="" vxv="" vxb="" vmb="" rt=""
     if [ ! -x "$tart" ] || [ ! -x "$ssh" ]; then
       status=warn missing=1
       msg="$name: $([ -x "$tart" ] && echo "its SSH wrapper $ssh" || echo "the tart wrapper $tart") is not there; connect the drive that holds the VM"
@@ -77,6 +77,8 @@ mg__doctor_mac_vm() {
             status=pass msg="$name: running, SSH answers, Xcode $vxv ($vxb) as on this Mac"
           fi
           if [ -n "$vxv" ]; then
+            # The macOS build, for the mac-input check (mg__doctor_mac_input).
+            vmb="$("$ssh" "sw_vers -buildVersion" </dev/null 2>/dev/null | head -n 1)"
             # The simulators' runtime (U8c): the pool runs there on it.
             rt="$("$ssh" "xcrun simctl list runtimes --json" </dev/null 2>/dev/null | jq -r --argjson p "$pin" \
               'if any(.runtimes[]?; .identifier == $p.identifier and .buildversion == $p.build and .isAvailable != false) then "yes" else "no" end' 2>/dev/null)"
@@ -93,14 +95,59 @@ mg__doctor_mac_vm() {
     fi
     mg__doctor_check "mac-vm/$name" "$status" "$msg"
     vms="$(jq -c --arg n "$name" --argjson d "$([ -x "$tart" ] && [ -x "$ssh" ] && echo true || echo false)" --arg s "$state" \
-      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" --arg rt "$rt" '. + [{name: $n, drive_connected: $d,
+      --arg x "$vxv" --arg b "$vxb" --arg hx "$host_xcode" --arg rt "$rt" --arg mb "$vmb" '. + [{name: $n, drive_connected: $d,
         present: (if $s == "" then null else $s != "missing" end), state: (if $s == "" or $s == "missing" then null else $s end),
         ssh: (if $s != "running" then null else $x != "" end),
         xcode: (if $x == "" then null else "\($x) (\($b))" end), xcode_matches_host: (if $x == "" then null else "\($x) (\($b))" == $hx end),
+        macos_build: (if $mb == "" then null else $mb end),
         sim_runtime: (if $rt == "" then null else $rt == "yes" end)}]' <<<"$vms")"
   done
   [ "$missing" -eq 0 ] || mg_mac_vm_user_step
+  MG_DOCTOR_VMS="$vms"
   mg_detail mac_vm "$(jq -nc --arg c "$(mg_mac_vm_config_path)" --argjson v "$vms" '{config: $c, configured: true, vms: $v}')"
+}
+
+# mg__doctor_host_session: whether the session is unlocked with a display
+# awake (mg_host_session_state). While it is not, jobs that launch the app on
+# this Mac are queued (U19b), and tools/mg catch-up waits.
+mg__doctor_host_session() {
+  local state
+  state="$(mg_host_session_state)"
+  if [ "$state" = ok ]; then
+    mg__doctor_check host-session pass "the session is unlocked and a display is awake"
+    return 0
+  fi
+  mg__doctor_check host-session warn "the Mac is $state: jobs that launch the app on this Mac are queued until it is unlocked and awake"
+  mg_user_step host-session missing true "Unlock the Mac and keep a display awake" \
+    "Jobs that launch the app on this Mac are queued while the Mac is locked or its display sleeps; tools/mg catch-up runs them again once it is unlocked."
+}
+
+# mg__doctor_mac_input <host macOS build> <host Xcode>: the last Mac UI run
+# whose input macOS dropped (mg_app_mac_input_record) names its runner and
+# that runner's macOS and Xcode builds. mac-input is missing while the runner
+# still has both (or doctor cannot read them: a VM that is not running), and
+# clear once either changed or no drop was seen (U19b).
+mg__doctor_mac_input() {
+  local seen now
+  seen="$(cat "$(mg_app_mac_input_path)" 2>/dev/null)"
+  if [ -z "$seen" ] || ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$seen"; then
+    mg__doctor_check mac-input pass "no Mac UI run has seen macOS drop its synthesized input"
+    return 0
+  fi
+  mg_detail mac_input "$seen"
+  if [ "$(jq -r .runner <<<"$seen")" = vm ]; then
+    now="$(jq -c --arg n "$(jq -r '.vm // ""' <<<"$seen")" 'first(.[] | select(.name == $n) | {macos_build, xcode}) // {}' <<<"${MG_DOCTOR_VMS:-[]}")"
+  else
+    now="$(jq -nc --arg b "$1" --arg x "$2" '{macos_build: (if $b == "" then null else $b end), xcode: (if $x == "" then null else $x end)}')"
+  fi
+  if jq -e --argjson s "$seen" '.macos_build != null and .xcode != null and $s.macos_build != null and $s.xcode != null
+      and (.macos_build != $s.macos_build or .xcode != $s.xcode)' >/dev/null 2>&1 <<<"$now"; then
+    mg__doctor_check mac-input pass "$(jq -r --argjson n "$now" '"macOS or Xcode changed on \(.vm // "this Mac") since it dropped Mac UI input on \(.at): macOS \(.macos_build), Xcode \(.xcode) then; macOS \($n.macos_build), Xcode \($n.xcode) now. The next Mac UI run tells"' <<<"$seen")"
+    return 0
+  fi
+  mg__doctor_check mac-input warn "$(jq -r --argjson n "$now" '"Mac UI runs on \(.vm // "this Mac") drop the input XCUITest synthesizes (\(.job) \(.run_id), \(.at); macOS \(.macos // "?") (\(.macos_build // "?")), Xcode \(.xcode // "?"))\(if $n.macos_build == null then "; doctor cannot read its builds now" else "" end)"' <<<"$seen")"
+  mg_user_step mac-input missing true "Use a macOS and Xcode pair whose Mac UI tests can click and type" \
+    "Mac UI runs are queued while macOS drops the input XCUITest synthesizes (macOS 27.0.1 does). Update macOS or Xcode where they run (docs/process/one-time-setup.md); tools/mg catch-up runs them again once doctor sees another pair."
 }
 
 mg_doctor() {
@@ -269,7 +316,15 @@ mg_doctor() {
   fi
 
   # The Mac UI test VM (U8b)
+  MG_DOCTOR_VMS='[]'
   mg__doctor_mac_vm "$xversion" "$xbuild"
+
+  # What queues runs while agents work (U19b): the host session and the Mac
+  # UI input.
+  mg__doctor_host_session
+  local macos_build=""
+  [ "$os" != Darwin ] || macos_build="$(sw_vers -buildVersion 2>/dev/null)"
+  mg__doctor_mac_input "$macos_build" "$( [ -z "$xversion" ] || echo "$xversion ($xbuild)")"
 
   # Steps doctor cannot verify from the command line
   mg_user_step uitest-automation unverified true "Let the Xcode UI-test runner control the Mac" \
@@ -280,8 +335,8 @@ mg_doctor() {
     "Only if macOS motion capture is wanted: System Settings > Privacy & Security > Screen Recording."
   mg_user_step xcode-external-agents unverified false "Allow external agents to use Xcode tools" \
     "Optional: enable 'Allow external agents to use Xcode tools' in Xcode's settings."
-  mg_user_step nightly-scheduler unverified false "Approve the scheduler entry for nightly jobs" \
-    "When tools/mg nightly (U19) asks for its scheduler entry, approve it."
+  mg_user_step nightly-scheduler unverified false "Approve the scheduler entries for the nightly and weekly runs" \
+    "tools/mg nightly --print-schedule writes them; copy them to ~/Library/LaunchAgents and load them with launchctl."
 
   # Result
   local checks env npass nwarn nfail status

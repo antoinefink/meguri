@@ -1,0 +1,123 @@
+# Every kind of record an incremental sync carries reaches the Meguri actor
+# (specs/sync/wire-format.md W4-W12; R1464, R1523): after a one-way upload and
+# download, client_a changes a note type, a deck and a preset (each with one
+# synthetic add-on member in `other`), adds a filtered deck, a note with new
+# tags and two reviews (one with a negative interval), edits a note, deletes a
+# cloze note (three graves) and sets a config key, then syncs. The Meguri actor
+# receives it all: graves in the `start` answer, objects, tags, config and
+# `crt` in the `applyChanges` answer, cards, notes and review rows in `chunk`
+# answers. In the mixed run this tests Meguri's decoding (and U107's merge);
+# the oracle's recording of this scenario holds every body on the wire.
+# Each `other` holds one top-level member, so Anki's stored bytes are
+# deterministic and db_dump digests compare (conformance/AGENTS.md).
+# 10:03 is epoch second 1894701780.
+id: sync/wire/records-down
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  config: {fsrs: true}
+  presets: [{name: Fsrs, desired_retention: 0.87}]
+  decks:
+    - {name: Words, preset: Fsrs}
+    - "Words::Kanji"
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+    - name: Reading
+      fields: [Expression, Meaning]
+      templates:
+        - {name: Recognize, front: "{{Expression}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}"}
+        - {name: Recall, front: "{{Meaning}}", back: "{{FrontSide}}<hr id=answer>{{Expression}}"}
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}]
+  notes:
+    - {notetype: Pair, deck: Words, fields: [sun, sol]}
+    - {notetype: Reading, deck: "Words::Kanji", fields: [山, mountain]}
+    - {notetype: Gap, deck: Words, fields: ["{{c1::Paris}} is in {{c2::France}}", ""]}
+steps:
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1101}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1102}
+        tmpls: [{name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2101}]
+  - legacy_update:
+      notetype: Reading
+      patch:
+        flds:
+          - {name: Expression, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1201}
+          - {name: Meaning, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1202}
+        tmpls:
+          - {name: Recognize, ord: 0, qfmt: "{{Expression}}", afmt: "{{FrontSide}}<hr id=answer>{{Meaning}}", id: 2201}
+          - {name: Recall, ord: 1, qfmt: "{{Meaning}}", afmt: "{{FrontSide}}<hr id=answer>{{Expression}}", id: 2202}
+  - legacy_update:
+      notetype: Gap
+      patch:
+        flds:
+          - {name: Text, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1301}
+          - {name: Extra, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1302}
+        tmpls: [{name: Cloze, ord: 0, qfmt: "{{cloze:Text}}", afmt: "{{cloze:Text}}<br>{{Extra}}", id: 2301}]
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_download}
+  - actor: client_a
+  - advance: 1m
+  - legacy_update:
+      notetype: Reading
+      patch:
+        usn: -1
+        mod: 1894701780
+        x_reader: {lang: ja, rate: 1.25, voices: [kyoko, otoya]}
+        flds:
+          - {name: Expression, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1201, x_reader_role: word}
+          - {name: Meaning, ord: 1, sticky: true, rtl: false, font: Arial, size: 18, description: English gloss, id: 1202, x_reader_role: gloss}
+        tmpls:
+          - {name: Recognize, ord: 0, qfmt: "{{Expression}}", afmt: "{{FrontSide}}<hr id=answer>{{Meaning}}", id: 2201, x_reader_side: front}
+          - {name: Recall, ord: 1, qfmt: "{{Meaning}}", afmt: "{{FrontSide}}<hr id=answer>{{Expression}}", id: 2202, x_reader_side: back}
+  - legacy_update:
+      deck: Words
+      patch:
+        usn: -1
+        mod: 1894701780
+        x_deck: {color: "#3a7", pinned: true}
+        reviewLimit: 120
+        newLimitToday: {limit: 7, today: 2}
+        desc: "Daily <b>words</b>"
+  - legacy_update:
+      preset: Fsrs
+      patch:
+        fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]
+        fsrsParams6: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.1542]
+        x_sched: {enabled: true, ratio: 0.5, tiers: [[1, -2], []], label: "日本語 ✓"}
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1894701780100, 'Words' || char(31) || 'Cram', 1894701780, -1, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c')"
+  - add_note: {notetype: Pair, deck: Words, fields: [moon, luna], tags: [vocab, "jlpt::n5"]}
+  - answer: {card: "#c1", rating: good, time_ms: 4200}
+  - answer: {card: "#c2", rating: easy, time_ms: 3100}
+  - edit_note: {note: "#n2", fields: [山, "mountain; hill"]}
+  - delete_notes: {notes: ["#n3"]}
+  - set_config: {key: x_wire_check, value: {flag: true, list: [1, 2.5, "x"]}}
+  - observe:
+      - db_dump: {tables: [graves, tags]}
+  - sync: {kind: normal}
+  - observe:
+      - db_dump: {tables: [col, notetypes, decks, deck_config, graves, tags, config]}
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: normal}
+  - observe:
+      - legacy_json:
+          notetypes: [Pair, Reading, Gap]
+          decks: [Default, Words, "Words::Kanji", "Words::Cram"]
+          presets: [Default, Fsrs]
+      - card
+      - revlog
+      - db_dump
