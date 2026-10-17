@@ -15,9 +15,12 @@ whose results it reads. Commands:
 
 Everything but `load` is stdlib only, for macOS's /usr/bin/python3 (3.9).
 
+The milestones and their order are the manifest's `milestones` list (which
+check keeps equal to the plan's table); nothing here knows their names.
+
 Exit status: load and check: 0 valid, 1 invalid (errors as JSON on stdout),
 2 usage. evaluate: 0 pass, 1 fail, 3 awaiting_user, 2 an invalid manifest or
-input (errors as JSON on stdout) or usage.
+input, an unknown milestone (errors as JSON on stdout) or usage.
 """
 
 import argparse
@@ -28,7 +31,10 @@ import re
 import subprocess
 import sys
 
-MILESTONES = ("M0", "M1", "M2", "M3", "M4", "M5")
+# A milestone id: a word of the plan's table (its row starts **<id> <name>**).
+# `release` is tools/mg milestone's release run, never a milestone.
+MILESTONE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+NOT_A_MILESTONE = ("release",)
 UNIT = re.compile(r"^U[0-9]+[a-z]?$")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 RID = re.compile(r"^R[0-9]{3,4}$")
@@ -58,8 +64,10 @@ VALIDATOR_KEYS = {
     "trial": {"days"},
     "device-session": {"days"},
     "capture": {"index", "cases", "cases_file"},
+    "first-sync": {"results"},
     "report": set(),
 }
+TIMESTAMP = "%Y-%m-%dT%H:%M:%SZ"
 
 # U241 owns the budget report a device run records: its schema, measurement
 # dimensions, fixture, configuration and the budget cases each run must cover.
@@ -102,7 +110,11 @@ STEP_WORDING = {
                      '"variant picks" or "sign-off"'),
     "capture": (re.compile(r"capture\b", re.I), ("user_steps",), '"capture"'),
     "setup": (re.compile(r"\bR1969\b"), ("user_steps",), "R1969 (the one-time setup steps)"),
+    "first-sync": (re.compile(r"\bfirst real sync\b", re.I), ("user_steps",), '"first real sync"'),
 }
+# Wording a step of the key's kind may hold besides its own: the first real
+# sync starts the trial it mentions, so its "trial" is not a trial step.
+OUTRANKS = {"first-sync": ("trial",)}
 
 
 class Invalid(Exception):
@@ -140,8 +152,13 @@ def as_date(value):
     return None
 
 
-def milestone_index(m):
-    return MILESTONES.index(m)
+def as_time(value):
+    if isinstance(value, str):
+        try:
+            return datetime.datetime.strptime(value, TIMESTAMP)
+        except ValueError:
+            return None
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +331,12 @@ def unclaimed(text, covered):
 def milestone_claims(model, m):
     """A milestone's plan excerpts by cell: [{key, who, b, step, spans}], key
     telling the definitions apart, step the user step (else None), spans
-    where the excerpt occurs in the cell's text."""
+    where the excerpt occurs in the cell's text. A global condition applies
+    from its `from` milestone on: its excerpts must occur in that milestone's
+    text, and claim a later milestone's text where they occur there too (a
+    later row that repeats the clause)."""
     mid = m["id"]
+    order = model["order"]
     claims = {cell: [] for cell in PLAN_CELLS}
 
     def add(cell, key, who, b, step=None):
@@ -325,10 +346,13 @@ def milestone_claims(model, m):
     for s in m["suites"]:
         for b in s["plan"]:
             add("gate", ("suite", s["id"]), "%s %s" % (mid, s["id"]), b)
+    for b in m["cumulative"]:
+        add("gate", ("cumulative", mid), "%s cumulative" % mid, b)
     for g in model["global"]:
-        if g["from"] == mid:
+        if g["from"] in order and order.index(g["from"]) <= order.index(mid):
             for b in g["plan"]:
-                add("gate", ("global", g["id"]), "global %s" % g["id"], b)
+                if g["from"] == mid or excerpt_spans(m["plan"]["gate"], b["text"]):
+                    add("gate", ("global", g["id"]), "global %s" % g["id"], b)
     for st in m["user_steps"]:
         for b in st["plan"]:
             add(b["cell"], ("step", st["id"]), "%s %s" % (mid, st["id"]), b, st)
@@ -443,7 +467,11 @@ def check_wording(m, claims, errors):
                         continue
                     v = c["step"]["validator"] if c["step"] else None
                     if v is None:
-                        got = "a suite" if c["key"][0] == "suite" else "a global condition"
+                        got = {"suite": "a suite", "cumulative": "the cumulative rule"}.get(c["key"][0],
+                                                                                         "a global condition")
+                    elif (kind in OUTRANKS.get(v.get("type"), ())
+                          and STEP_WORDING[v["type"]][0].search(c["b"]["text"])):
+                        continue  # the step's own wording names it; the other kind's is part of its clause
                     elif v.get("type") != kind:
                         got = "a %s step" % v.get("type")
                     elif days is not None and v.get("days") != days:
@@ -524,7 +552,7 @@ def runnable(run):
     return None
 
 
-def gate_milestones(job, args):
+def gate_milestones(job, args, order):
     """The milestones a run of `job args` requires the gate of."""
     if job != GATE_JOB:
         return []
@@ -532,12 +560,12 @@ def gate_milestones(job, args):
     for a in args:
         if "{milestone}" in a:
             out.append("{milestone}")
-        elif a in MILESTONES:
+        elif a in order:
             out.append(a)
     return out
 
 
-def check_suite(where, s, runs, mi, errors):
+def check_suite(where, s, runs, order, mi, errors):
     if not isinstance(s, dict):
         errors.append("%s: a suite must be a mapping" % where)
         return None
@@ -562,10 +590,10 @@ def check_suite(where, s, runs, mi, errors):
         why_not = runnable(run)
         if why_not:
             errors.append("%s: run %s %s" % (where, s["run"], why_not))
-        for m in gate_milestones(run["job"], run["args"]):
-            if m == "{milestone}" or milestone_index(m) >= mi:
+        for m in gate_milestones(run["job"], run["args"], order):
+            if m == "{milestone}" or order.index(m) >= mi:
                 errors.append("%s: run %s runs `tools/mg %s %s`, which requires the %s gate; no milestone's suites may require its own gate"
-                              % (where, s["run"], run["job"], " ".join(run["args"]), MILESTONES[mi] if m == "{milestone}" else m))
+                              % (where, s["run"], run["job"], " ".join(run["args"]), order[mi] if m == "{milestone}" else m))
     scope = check_scope(where, s.get("scope"), errors)
     plan = check_bindings(where, s.get("plan"), False, errors)
     if scope:
@@ -619,11 +647,16 @@ def check_step(where, st, errors):
             errors.append("%s: cases must be a list of case ids" % where)
         elif "cases_file" in v and not is_rel_path(v["cases_file"]):
             errors.append("%s: cases_file must be a path" % where)
+    if t == "first-sync" and (not is_str_list(v.get("results")) or not all(SLUG.match(r) for r in v["results"])
+                              or len(set(v["results"])) != len(v["results"])):
+        errors.append("%s: first-sync needs results: [<id of each result the sync relied on>, ...]" % where)
     plan = check_bindings(where, st.get("plan"), True, errors)
     if t == "variant-pick" and is_str_list(v.get("screens")):
         check_items(where, plan, v["screens"], "screens", errors)
     elif t == "capture" and is_str_list(v.get("cases")):
         check_items(where, plan, v["cases"], "cases", errors)
+    elif t == "first-sync" and is_str_list(v.get("results")):
+        check_items(where, plan, v["results"], "results", errors)
     else:
         check_items(where, plan, None, "a %s step" % t, errors)
     return {"id": st["id"], "description": st.get("description"), "evidence": st.get("evidence"), "validator": dict(v),
@@ -690,16 +723,21 @@ def build_model(manifest, config):
             RID.match(k) and isinstance(v, list) and v and all(d in DEVICES for d in v) for k, v in devices.items()):
         errors.append("budget_devices maps budget R-IDs to lists of %s" % ", ".join(DEVICES))
         devices = {}
-    model = {"plan": manifest.get("plan"), "evidence_paths": list(evidence), "budget_devices": devices,
-             "global": [], "milestones": []}
     ms = manifest.get("milestones")
-    if not isinstance(ms, list) or [m.get("id") if isinstance(m, dict) else None for m in ms] != list(MILESTONES):
-        errors.append("milestones must be M0, M1, M2, M3, M4 and M5, in that order")
+    order = [m.get("id") if isinstance(m, dict) else None for m in ms] if isinstance(ms, list) else []
+    if (not order or not all(isinstance(i, str) and MILESTONE_ID.match(i) and i not in NOT_A_MILESTONE for i in order)
+            or len(set(order)) != len(order)):
+        errors.append("milestones must be a list of milestones in delivery order, each with its own id (a word, "
+                      "not %s), as the plan's Delivery Milestones table lists them; got %s"
+                      % (" or ".join(NOT_A_MILESTONE), json.dumps(order)))
         return None, errors, problems
+    # The one milestone list and its order: everything else reads it from here.
+    model = {"plan": manifest.get("plan"), "evidence_paths": list(evidence), "budget_devices": devices,
+             "global": [], "milestones": [], "order": list(order)}
     seen_units, suite_runs, suite_details = {}, {}, {}
     for mi, m in enumerate(ms):
         mid = m["id"]
-        extra = set(m) - {"id", "name", "plan", "units", "suites", "budgets", "user_steps", "deferred"}
+        extra = set(m) - {"id", "name", "plan", "units", "cumulative", "suites", "budgets", "user_steps", "deferred"}
         if extra:
             errors.append("%s: unknown keys %s" % (mid, ", ".join(sorted(extra))))
         plan = m.get("plan")
@@ -709,6 +747,15 @@ def build_model(manifest, config):
                 or not all(isinstance(v, str) for v in plan.values())):
             errors.append("%s: plan must hold the table's gate and user_steps texts" % mid)
             plan = {"gate": "", "user_steps": ""}
+        # The closing gate text that states the cumulative rule, which the
+        # evaluator applies to every milestone: each excerpt names an earlier
+        # milestone, whose gate this one includes.
+        cumulative = check_bindings("%s cumulative" % mid, m.get("cumulative"), False, errors)
+        check_items("%s cumulative" % mid, cumulative, None, "the cumulative rule", errors)
+        for b in cumulative:
+            if not any(re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(e), b["text"]) for e in order[:mi]):
+                errors.append("%s cumulative: plan excerpt %r names no earlier milestone (%s)"
+                              % (mid, b["text"], ", ".join(order[:mi]) or "none"))
         units = m.get("units")
         if not is_str_list(units, nonempty=False) or not all(UNIT.match(u) for u in units):
             errors.append("%s: units must be unit ids" % mid)
@@ -720,7 +767,7 @@ def build_model(manifest, config):
             seen_units[u] = mid
         suites, ids = [], set()
         for i, s in enumerate(m.get("suites") or []):
-            out = check_suite("%s suites[%d]" % (mid, i), s, runs, mi, errors)
+            out = check_suite("%s suites[%d]" % (mid, i), s, runs, order, mi, errors)
             if out is None:
                 continue
             if out["id"] in ids:
@@ -760,7 +807,8 @@ def build_model(manifest, config):
                 entry["problems"] = probs
                 deferred.append(entry)
         model["milestones"].append({"id": mid, "name": m.get("name"), "plan": plan, "units": list(units),
-                                    "suites": suites, "budgets": budgets, "user_steps": steps, "deferred": deferred})
+                                    "cumulative": cumulative, "suites": suites, "budgets": budgets,
+                                    "user_steps": steps, "deferred": deferred})
     gids = set()
     for i, g in enumerate(manifest.get("global") or []):
         where = "global[%d]" % i
@@ -776,10 +824,10 @@ def build_model(manifest, config):
         if g["id"] in gids:
             errors.append("%s: listed twice" % where)
         gids.add(g["id"])
-        frm = g.get("from", "M0")
-        if frm not in MILESTONES:
-            errors.append("%s: from must be a milestone" % where)
-            frm = "M0"
+        frm = g.get("from", order[0])
+        if frm not in order:
+            errors.append("%s: from must be a milestone (%s)" % (where, ", ".join(order)))
+            frm = order[0]
         kind, pending = g.get("kind"), g.get("pending")
         if (kind is None) == (pending is None):
             errors.append("%s: give either kind (%s) or pending: <unit>" % (where, ", ".join(GLOBAL_KINDS)))
@@ -834,8 +882,9 @@ def cumulative(model, mi):
 
 
 def plan_tables(text):
-    """({milestone: {name, units, gate, user_steps}}, unit index ids, unit heading ids)."""
-    rows, index, headings, section = {}, [], [], None
+    """({milestone: {name, units, gate, user_steps}} in the table's order,
+    unit index ids, unit heading ids, rows of the table that do not parse)."""
+    rows, index, headings, bad, section = {}, [], [], [], None
     for line in text.splitlines():
         if line.startswith("### "):
             section = line[4:].strip()
@@ -843,26 +892,37 @@ def plan_tables(text):
             if m:
                 headings.append(m.group(1))
             continue
-        if section == "Delivery Milestones" and line.startswith("| **M"):
+        if section == "Delivery Milestones" and line.startswith("| **"):
+            # A milestone row: | **<id> <name>** | units | gate | user steps |
             cells = [c.strip() for c in re.split(r"(?<!\\)\|", line)[1:-1]]
-            m = re.match(r"^\*\*(M[0-9]) (.+)\*\*$", cells[0]) if len(cells) == 4 else None
-            if m:
-                rows[m.group(1)] = {"name": m.group(2), "units": [u.strip() for u in cells[1].split(",")],
-                                    "gate": cells[2], "user_steps": cells[3]}
+            m = re.match(r"^\*\*(\S+) (.+)\*\*$", cells[0]) if len(cells) == 4 else None
+            if m is None or m.group(1) in rows:
+                bad.append(line[:80])
+                continue
+            rows[m.group(1)] = {"name": m.group(2), "units": [u.strip() for u in cells[1].split(",")],
+                                "gate": cells[2], "user_steps": cells[3]}
         elif section == "Unit Index":
             m = re.match(r"^\| (U[0-9]+[a-z]?) \|", line)
             if m:
                 index.append(m.group(1))
-    return rows, index, headings
+    return rows, index, headings, bad
 
 
 def check_plan(model, text):
     errors = []
-    rows, index, headings = plan_tables(text)
+    rows, index, headings, bad = plan_tables(text)
     if not rows:
         return ["the plan has no Delivery Milestones table"]
     if not index:
         errors.append("the plan has no Unit Index")
+    for line in bad:
+        errors.append("the plan's Delivery Milestones table has a row that is not | **<id> <name>** | units | "
+                      "closing gate | user steps | of a new id: %s" % line)
+    listed_order = [i for i in model["order"] if i in rows]
+    table_order = [i for i in rows if i in model["order"]]
+    if listed_order != table_order:
+        errors.append("the manifest lists the milestones as %s; the plan's table orders them %s"
+                      % (", ".join(listed_order), ", ".join(table_order)))
     for m in model["milestones"]:
         row = rows.get(m["id"])
         if row is None:
@@ -880,7 +940,7 @@ def check_plan(model, text):
             if row[key] != m["plan"][key]:
                 errors.append("%s: plan.%s is not the table's %s text; copy the cell and update the %s"
                               % (m["id"], key, label, "suites" if key == "gate" else "user steps"))
-    for extra in sorted(set(rows) - set(MILESTONES)):
+    for extra in [i for i in rows if i not in model["order"]]:
         errors.append("the plan's table has a row %s that the manifest lacks" % extra)
     listed = {u for m in model["milestones"] for u in m["units"]}
     for u in index:
@@ -1420,9 +1480,62 @@ def v_report(ctx, step, v):
     return "pass", "Antoine reported a pass on %s" % data["date"], {"date": data["date"]}
 
 
+def v_first_sync(ctx, step, v):
+    """The first real sync with AnkiWeb (M1R). It is checked against the
+    results it relied on, never against the gate commit: fixes made during
+    the trial move the gate commit, and the first sync cannot be redone."""
+    data, missing = evidence_json(ctx, step["evidence"])
+    if missing:
+        return missing
+    path = step["evidence"]
+    shape = ("{build: {commit, dirty}, sync_started_at, results: {<id>: {job, commit, finished_at, outcome}}, "
+             "backup: {file, taken_at}} (times YYYY-MM-DDTHH:MM:SSZ)")
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), dict) for k in ("build", "results", "backup")):
+        return "fail", "%s: expected %s" % (path, shape), {}
+    build, results, backup = data["build"], data["results"], data["backup"]
+    started = as_time(data.get("sync_started_at"))
+    if started is None:
+        return "fail", "%s: sync_started_at must be YYYY-MM-DDTHH:MM:SSZ" % path, {}
+    commit = build.get("commit")
+    if not isinstance(commit, str) or not SHA.match(commit) or ctx["git"].commit(commit) != commit:
+        return "fail", "%s: build.commit must be a full commit id of this repository" % path, {}
+    bad = []
+    if build.get("dirty") is not False:
+        bad.append("the build is not from a clean tree (build.dirty is %s)" % json.dumps(build.get("dirty")))
+    for rid in v["results"]:
+        r = results.get(rid)
+        if not isinstance(r, dict):
+            bad.append("it records no %s result" % rid)
+            continue
+        finished = as_time(r.get("finished_at"))
+        if not isinstance(r.get("job"), str) or not r["job"] or finished is None:
+            bad.append("the %s result needs its job and finished_at" % rid)
+            continue
+        if r.get("commit") != commit:
+            bad.append("the %s result is on %s, not the build's commit %s"
+                       % (rid, str(r.get("commit"))[:12], commit[:12]))
+        if r.get("outcome") != "pass":
+            bad.append("the %s result is %s, not a pass" % (rid, json.dumps(r.get("outcome"))))
+        if finished >= started:
+            bad.append("the %s result finished at %s, not before the sync started (%s)"
+                       % (rid, r["finished_at"], data["sync_started_at"]))
+    taken = as_time(backup.get("taken_at"))
+    if not isinstance(backup.get("file"), str) or not backup["file"] or taken is None:
+        bad.append("the backup needs its file and taken_at")
+    elif taken >= started:
+        bad.append("the backup %s was taken at %s, not before the sync started (%s)"
+                   % (backup["file"], backup["taken_at"], data["sync_started_at"]))
+    if bad:
+        return "fail", "%s: %s" % (path, "; ".join(bad)), {}
+    return "pass", "first sync at %s, on clean build %s, after passing %s and backup %s" % (
+        data["sync_started_at"], commit[:12], ", ".join(v["results"]), backup["file"]), {
+        "build_commit": commit, "sync_started_at": data["sync_started_at"], "backup": backup,
+        "results": {rid: results[rid] for rid in v["results"]}}
+
+
 VALIDATORS = {
     "setup": v_setup, "device-run": v_device_run, "variant-pick": v_variant_pick, "trial": v_trial,
-    "device-session": v_device_session, "capture": v_capture, "report": v_report,
+    "device-session": v_device_session, "capture": v_capture, "first-sync": v_first_sync, "report": v_report,
 }
 
 
@@ -1449,7 +1562,8 @@ def parse_ledger(text):
 
 def evaluate(model, config, a):
     git = Git(a.root)
-    mi = milestone_index(a.milestone)
+    order = model["order"]
+    mi = order.index(a.milestone)
     milestone = model["milestones"][mi]
     now = a.now
     today = datetime.datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").date()
@@ -1571,7 +1685,7 @@ def evaluate(model, config, a):
     globals_ = []
     for g in model["global"]:
         rec = {"id": g["id"], "kind": g["kind"], "from": g["from"], "outcome": None, "message": "", "why": g["why"]}
-        if mi < milestone_index(g["from"]):
+        if mi < order.index(g["from"]):
             rec["outcome"], rec["message"] = "not-applicable", "applies from %s" % g["from"]
         elif g["pending"]:
             rec["outcome"], rec["message"] = "pending", "its check lands with %s" % g["pending"]
@@ -1674,12 +1788,12 @@ def evaluate(model, config, a):
     # User steps of this milestone.
     start = None
     if mi > 0:
-        prev = git.show(head, "%s/%s.json" % (RECORDS, MILESTONES[mi - 1]))
+        prev = git.show(head, "%s/%s.json" % (RECORDS, order[mi - 1]))
         try:
             closed = json.loads(prev.decode("utf-8")).get("closed_at") if prev is not None else None
             start = datetime.datetime.strptime(closed, "%Y-%m-%dT%H:%M:%SZ").date() if closed else None
         except (UnicodeDecodeError, ValueError, AttributeError, TypeError):
-            fail("previous-record", "%s/%s.json does not parse" % (RECORDS, MILESTONES[mi - 1]))
+            fail("previous-record", "%s/%s.json does not parse" % (RECORDS, order[mi - 1]))
     doctor = None
     if a.doctor:
         try:
@@ -1739,9 +1853,6 @@ def evaluate(model, config, a):
 
 
 def cmd_evaluate(a):
-    if a.milestone not in MILESTONES:
-        print(json.dumps({"errors": ["the milestone must be one of %s" % ", ".join(MILESTONES)]}))
-        return 2
     try:
         datetime.datetime.strptime(a.now, "%Y-%m-%dT%H:%M:%SZ")
     except ValueError:
@@ -1757,6 +1868,10 @@ def cmd_evaluate(a):
     model, errors, _ = build_model(manifest, config)
     if errors:
         print(json.dumps({"errors": errors}, ensure_ascii=False))
+        return 2
+    if a.milestone not in model["order"]:
+        print(json.dumps({"errors": ["unknown milestone %r; the milestones of the manifest are %s"
+                                     % (a.milestone, ", ".join(model["order"]))]}, ensure_ascii=False))
         return 2
     try:
         evaluation = evaluate(model, config, a)

@@ -1,4 +1,4 @@
-# Delivery milestones M0-M5 (U240; plan "Delivery Milestones"; docs/process/tiers.md).
+# Delivery milestones (U240, U240r; plan "Delivery Milestones"; docs/process/tiers.md).
 #
 # Membership, closing gates and user steps are defined once, in the plan's
 # Delivery Milestones table. This file mirrors it: `units` and the `plan`
@@ -10,6 +10,10 @@
 # so removing a required entry, scope item or device run fails the check.
 # When the table changes, copy the cells here and update the suites, user
 # steps and their excerpts to match.
+#
+# `milestones` is the one list of milestones, in delivery order (M0, M1R, M1,
+# M2, ...): `tools/mg milestone` and `milestone-gate` take the names and the
+# order from it, and --check keeps it equal to the table's rows, in order.
 #
 # `tools/mg milestone <M>` (U19) runs the suites; `tools/mg milestone-gate <M>`
 # evaluates them with tools/scripts/gates/milestone_gate.py. A milestone
@@ -64,7 +68,10 @@
 # a unit range). Together they must cover the text but for punctuation and
 # the words a, an, and, as, at, by, for, in, of, on, or, plus, the, to, with,
 # and claim every unit it names. A suite or global condition (in its `from`
-# milestone) quotes the closing gate text; a user step quotes the user steps
+# milestone) quotes the closing gate text; a global condition's excerpt also
+# claims a later milestone's text where it occurs there. A milestone's
+# `cumulative` excerpts claim the closing gate text that states the cumulative
+# rule (each names an earlier milestone). A user step quotes the user steps
 # text, or the closing gate text with {text, cell: gate}. Device-run steps
 # must cover the devices their excerpts name (all three when they name none),
 # and a trial's excerpt states its days ("7-day"). A suite or user step the
@@ -78,8 +85,9 @@
 #     "trial" or "daily-driver" is a trial (of N days), "device run" (in
 #     either text) a device-run, "device session" a device-session, "variant
 #     picks" or "sign-off" a variant-pick, "capture" a capture, R1969 a setup
-#     step; only steps of that kind claim it, each step claims its kind's
-#     wording, and text that names no kind is a report.
+#     step, "first real sync" a first-sync (its clause may say "trial": the
+#     sync starts it); only steps of that kind claim it, each step claims its
+#     kind's wording, and text that names no kind is a report.
 #
 # User steps (performed by Antoine; agents only record his reports):
 #   id, description, evidence (the path read at HEAD), validator:
@@ -116,6 +124,16 @@
 #   capture       {index, cases | cases_file}: the JSON index {cases: [{id},
 #                 ...]} lists every case id; cases_file is a JSON file of the
 #                 same shape that lists the required ids
+#   first-sync    {results: [<id>, ...]}: the first real sync with AnkiWeb
+#                 (M1R): {build: {commit, dirty}, sync_started_at, results:
+#                 {<id>: {job, commit, finished_at, outcome}}, backup: {file,
+#                 taken_at}} (times YYYY-MM-DDTHH:MM:SSZ). It passes only when
+#                 the build is a commit of this repository from a clean tree,
+#                 every listed result is a pass on that commit that finished
+#                 before the sync started, and the backup predates the sync.
+#                 It is never compared with the gate commit: fixes during the
+#                 trial move the gate commit, and the first sync cannot be
+#                 redone
 #   report        a JSON file {date, result: pass|fail, reported_by: antoine}
 #                 recorded from Antoine's report
 # Missing evidence awaits Antoine; evidence that records a failure, or that
@@ -171,9 +189,9 @@ global:
   - id: native-oracle
     kind: suite
     run: native-oracle
-    from: M1
+    from: M1R
     plan: ["plus the macOS-native oracle check (KTD24)"]
-    why: The macOS-native oracle result is attached from M1 (U246, KTD24)
+    why: The macOS-native oracle result is attached from M1R (U246, KTD24); M1 repeats the clause
   - id: nightly-divergences
     pending: U247
     from: M2
@@ -183,9 +201,9 @@ milestones:
   - id: M0
     name: Foundations
     plan:
-      gate: "The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). A two-client full upload and download runs under a frozen clock (U13)."
+      gate: "The oracle image builds and records the first goldens: the 10k fuzz table, id allocation and a rollover×TZ subset (U3, U4). T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R. The similarity scan and provenance-trailer check are enforced (U2). The XCFramework builds, and the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy (U6–U8). The `lint-ui` gate is active (U9). A stub screen emits a named interval that U241 evaluates (U12). A two-client full upload and download runs under a frozen clock (U13)."
       user_steps: "Xcode license, simulator runtime and Xcode agent access (R1969)"
-    units: [U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241]
+    units: [U1, U2, U3, U4, U5, U6, U7, U8, U8b, U8c, U9, U10, U11, U12, U13, U19, U20, U21, U22, U23, U240, U241]
     suites:
       - {id: static, run: static, plan: [provenance-trailer check, are enforced (U2)], why: "provenance trailers and the static checks (U2, U19)"}
       - {id: static-tree, run: static-tree, why: "the static checks over the whole tree (U19)"}
@@ -196,7 +214,7 @@ milestones:
       - {id: canary-scenarios, run: canary-scenarios, why: "the fuzz-table and collation canaries (U4)"}
       - id: conformance
         run: conformance
-        plan: ["T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1"]
+        plan: ["T0 runs them, with id allocation passing (U23) and the fuzz-table and rollover scenarios reported pending until U45 and U40 land in M1R"]
         why: T0 runs the first goldens, id allocation passing (U4, U23)
       - id: goldens-check
         run: goldens-check
@@ -217,7 +235,7 @@ milestones:
         run: xcode-check
         plan: ["the app launches on iPhone and iPad simulators and on the Mac with a fixture, giving a screenshot and hierarchy", U8]
         why: the app launches on iPhone and iPad simulators and on the Mac with a fixture, with a screenshot and hierarchy (U8)
-      - {id: mac-ui, run: mac-ui, why: "Mac UI suites in the test VM (U8)"}
+      - {id: mac-ui, run: mac-ui, why: "Mac UI suites in the test VM (U8, U8b)"}
       - {id: lint-ui, run: lint-ui, plan: ["The `lint-ui` gate is active (U9)"], why: "the lint-ui gate is active (U9)"}
       - {id: lint-ui-selftest, run: lint-ui-selftest, why: "the lint rules' own tests (U9)"}
       - {id: design-docs, run: design-docs, why: "the design documents and screen inventory (U9, U10)"}
@@ -249,19 +267,17 @@ milestones:
         plan: [Xcode agent access, (R1969)]
     deferred: []
 
-  - id: M1
-    name: Daily review driver
+  - id: M1R
+    name: Reviews first
     plan:
-      gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 coexistence soak. U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag."
-      user_steps: "Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged"
-    units: [U14, U15, U18, U24, U25, U26, U27, U28, U29, U30, U31, U32, U33, U34, U35, U36, U37, U38, U40,
-      U41, U42, U43, U44, U45, U46, U47, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70,
-      U80, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101, U103, U105, U106, U107,
-      U109, U110, U111, U113, U114, U117, U118, U120, U121, U122, U123, U124, U126, U127, U128, U129, U130,
-      U131, U132, U133, U150, U151, U152, U153, U154, U155, U156, U157, U158, U159, U160, U161, U162, U163,
-      U166, U175, U176, U177, U178, U179, U180, U181, U182, U183, U184, U185, U186, U187, U188, U190, U191,
-      U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U243, U244, U245, U246, U248, U249,
-      U250, U251, U252, U253, U254, U256]
+      gate: "U246: areas storage, sched (R1890–R1903, R1906), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators, gated by U241 against the review-loop budgets (R1807–R1817). U248 coexistence soak (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210). U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup (AE86). U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names. U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check), and U176's snapshot-swap fallback exists behind its flag."
+      user_steps: "Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure). U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks). The first real sync with AnkiWeb, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248, U250 sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, cards created in desktop Anki)"
+    units: [U8d, U19b, U240r, U14, U15, U24, U25, U26, U27, U28, U29, U30, U31, U32, U36, U37, U38, U40, U41,
+      U42, U43, U44, U45, U46, U48, U49, U50, U51, U60, U61, U62, U63, U64, U65, U66, U67, U68, U70, U80,
+      U82a, U85a, U105, U106, U107, U109, U110, U111, U113, U114, U117, U118, U124a, U126, U127, U132,
+      U133a, U150, U151, U152, U153, U154, U155, U157, U158, U160, U161, U163a, U166, U175, U176, U177,
+      U178, U179, U180, U181, U182, U185, U186, U187, U188, U228a, U243, U246, U248, U249, U250, U251,
+      U256]
     suites:
       - id: u246-conformance
         run: u246-conformance
@@ -279,6 +295,97 @@ milestones:
         why: U249 subset on the private collection (R1938-R1943)
       - {id: private-selftest, run: private-selftest, why: "the private vault's mount and scan (U15)"}
       - {id: anonymize-check, run: anonymize-check, why: "the anonymized clone (U15)"}
+      - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: ["U243 on the Mac host and simulators"], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
+      - id: perf-gate
+        run: perf-gate
+        scope: {detail: groups, items: [review]}
+        plan:
+          - {text: "gated by U241 against the review-loop budgets (R1807–R1817)", items: [review]}
+        why: U241 gates U243's review loop against the review-loop budgets (R1807-R1817)
+      - id: u248-soak
+        run: u248-soak
+        pending: U248
+        scope: {detail: scenarios, items: [coexistence]}
+        plan:
+          - {text: "U248 coexistence soak (its two-device optimizer race wires in with U47, its Browse edit during a sync with U210)", items: [coexistence]}
+        why: U248 coexistence soak, run by tools/mg milestone; its optimizer race comes with U47 (M1)
+      - {id: u36-preservation, run: u36-preservation, pending: U36, plan: ["U36 preservation suite (R2017)"], why: "the preservation suite (R2017)"}
+      - id: u250-fault
+        run: u250-fault
+        pending: U250
+        scope: {detail: classes, items: [review, sync, full-download, backup]}
+        plan: [{text: "U250 fault classes: review, sync, full download, backup (AE86)", items: [review, sync, full-download, backup]}]
+        why: U250 fault classes (AE86)
+      - id: u251-safety-app
+        run: u251-safety-app
+        pending: U251
+        scope: {detail: cases, items: [kill-review, kill-sync, kill-first-full-download, background-suspend, corrupt-collection, restore]}
+        plan:
+          - text: "U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names"
+            items: [kill-review, kill-sync, kill-first-full-download, background-suspend, corrupt-collection, restore]
+        why: U251's M1R legs (AE86), restore through Settings (U163a)
+      - {id: u38-wiring, run: u38-wiring, pending: U38, plan: ["U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check)"], why: "U38's wiring/pending.rs lists only ports of units outside M1R"}
+      - {id: u176-fallback, run: u176-fallback, pending: U176, plan: ["U176's snapshot-swap fallback exists behind its flag"], why: "U176's snapshot-swap fallback exists behind its flag"}
+    # Device-run budgets by group (U241 keys them); a milestone's device runs
+    # cover its groups and every earlier milestone's.
+    budgets:
+      review: [R1807, R1808, R1809, R1810, R1811, R1812, R1813, R1814, R1815, R1816, R1817]
+    user_steps:
+      - id: r1913-capture
+        description: Before U68, hand-capture the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)
+        evidence: conformance/references/render/
+        validator: {type: capture, index: conformance/references/render/index.json, cases_file: conformance/references/render/cases.json}
+        plan: ["Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)"]
+      - id: device-run-iphone
+        description: U256 device run on the iPhone (AE81); it awaits Antoine's Apple account in Xcode
+        evidence: docs/process/milestone-records/device-runs/M1R/iphone.json
+        validator: {type: device-run, device: iphone}
+        plan: ["U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks)"]
+      - id: device-run-ipad
+        description: U256 device run on the iPad (AE81); it awaits Antoine's Apple account in Xcode
+        evidence: docs/process/milestone-records/device-runs/M1R/ipad.json
+        validator: {type: device-run, device: ipad}
+        plan: ["U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks)"]
+      - id: device-run-mac
+        description: U256 device run on the Mac (AE81)
+        evidence: docs/process/milestone-records/device-runs/M1R/mac.json
+        validator: {type: device-run, device: mac}
+        plan: ["U256 device run on iPhone, iPad and Mac (AE81), one user step per device; the iPhone and iPad steps stay `awaiting_user` until Antoine adds his Apple account in Xcode (Risks)"]
+      - id: first-sync
+        description: The first real sync with AnkiWeb, made with a clean-tree build after its M1R sync conformance results passed on its commit and after a backup of the real collection; it starts the M1R trial
+        evidence: docs/process/milestone-records/M1R/first-sync.json
+        validator: {type: first-sync, results: [u246-sync-area, u248-soak, u250-sync-classes]}
+        plan:
+          - text: "The first real sync with AnkiWeb, made with a clean-tree build whose commit has passing M1R sync conformance results (U246 sync area, U248, U250 sync classes), after those results finished and after a backup of the real collection exists (U240's `first-sync` validator; it does not compare with the gate commit, so fixes during the trial keep the step valid); it starts the M1R trial (all reviews in Meguri, cards created in desktop Anki)"
+            items: [u246-sync-area, u248-soak, u250-sync-classes]
+    deferred: []
+
+  - id: M1
+    name: Daily review driver
+    plan:
+      gate: "Cumulative over M1R: the full daily-driver gate. U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933), plus the macOS-native oracle check (KTD24). U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down. U243 on the Mac host and simulators. U241 and U242 groups for launch, review, open and sync (R1813, R1817, R1818, R1823, R1842–R1844). U244 launch and Home group (R1818–R1822). U245 review and memory subset. U248 coexistence soak, with its two-device optimizer race. U36 preservation suite (R2017). U250 fault classes: review, sync, full download, backup, optimizer write (AE86). U251 kill during review and sync, plus restore. U252–U254 for Home, deck page and review, including U253's sweep of those screens. U38's `wiring/pending.rs` is empty, and U176's snapshot-swap fallback exists behind its flag."
+      user_steps: "U256 device run on iPhone, iPad and Mac (AE81). Variant picks for Home, deck page and review (U254). A 7-day trial: all reviews in Meguri, cards created in desktop Anki, no data incident, logged"
+    units: [U18, U33, U34, U35, U47, U81, U82, U83, U84, U85, U88, U92, U95, U96, U97, U98, U99, U100, U101,
+      U103, U120, U121, U122, U123, U124, U128, U129, U130, U131, U133, U156, U159, U162, U163, U183, U184,
+      U190, U191, U192, U193, U195, U210, U222, U225, U227, U228, U229, U232, U242, U244, U245, U252, U253,
+      U254]
+    cumulative: ["Cumulative over M1R: the full daily-driver gate"]
+    suites:
+      - id: u246-conformance
+        run: u246-conformance
+        pending: U246
+        scope: {detail: areas, items: [storage, sched, optimizer, render, sync]}
+        plan:
+          - text: "U246: areas storage, sched (R1890–R1903, R1906), the optimizer (R1904, R1905; U47 ships here), render (R1907–R1915) and sync (R1926–R1933)"
+            items: [storage, sched, optimizer, render, sync]
+        why: U246 areas storage, sched (R1890-R1903, R1906), the optimizer (R1904, R1905), render (R1907-R1915) and sync (R1926-R1933)
+      - id: private-suite
+        run: private-suite
+        pending: U249
+        scope: {detail: checks, items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+        plan:
+          - {text: "U249 subset: next states, queues, memory states, revlog replay, render-all, full sync up and down", items: [next-states, queues, memory-states, revlog-replay, render-all, full-sync-up, full-sync-down]}
+        why: U249 subset on the private collection (R1938-R1943)
       - {id: u243-review-loop, run: u243-review-loop, pending: U243, plan: [U243 on the Mac host and simulators], why: "review-loop frame budgets on the Mac host and simulators (R1807-R1817)"}
       - id: perf-gate
         run: perf-gate
@@ -304,16 +411,17 @@ milestones:
       - id: u248-soak
         run: u248-soak
         pending: U248
-        scope: {detail: scenarios, items: [coexistence]}
-        plan: [{text: "U248 coexistence soak", items: [coexistence]}]
-        why: U248 coexistence soak, run by tools/mg milestone
+        scope: {detail: scenarios, items: [coexistence, two-device-optimizer]}
+        plan: [{text: "U248 coexistence soak, with its two-device optimizer race", items: [coexistence, two-device-optimizer]}]
+        why: U248 coexistence soak with its two-device optimizer race (U47)
       - {id: u36-preservation, run: u36-preservation, pending: U36, plan: [U36 preservation suite (R2017)], why: "the preservation suite (R2017)"}
       - id: u250-fault
         run: u250-fault
         pending: U250
-        scope: {detail: classes, items: [review, sync, full-download, backup]}
-        plan: [{text: "U250 fault classes: review, sync, full download, backup (AE86)", items: [review, sync, full-download, backup]}]
-        why: U250 fault classes (AE86)
+        scope: {detail: classes, items: [review, sync, full-download, backup, optimizer-write]}
+        plan:
+          - {text: "U250 fault classes: review, sync, full download, backup, optimizer write (AE86)", items: [review, sync, full-download, backup, optimizer-write]}
+        why: U250 fault classes, with the optimizer write (AE86)
       - id: u251-safety-app
         run: u251-safety-app
         pending: U251
@@ -340,20 +448,12 @@ milestones:
         why: U254 critic loop; the screens are verified
       - {id: u38-wiring, run: u38-wiring, pending: U38, plan: ["U38's `wiring/pending.rs` is empty"], why: "U38's wiring/pending.rs is empty"}
       - {id: u176-fallback, run: u176-fallback, pending: U176, plan: ["U176's snapshot-swap fallback exists behind its flag"], why: "U176's snapshot-swap fallback exists behind its flag"}
-    # Device-run budgets by group (U241 keys them); a milestone's device runs
-    # cover its groups and every earlier milestone's.
     budgets:
-      review: [R1807, R1808, R1809, R1810, R1811, R1812, R1813, R1814, R1815, R1816, R1817]
       launch-home: [R1818, R1819, R1820, R1821, R1822]
       open: [R1823]
       sync: [R1842, R1843, R1844]
       memory: [R1851, R1853]
     user_steps:
-      - id: r1913-capture
-        description: Before U68, hand-capture the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)
-        evidence: conformance/references/render/
-        validator: {type: capture, index: conformance/references/render/index.json, cases_file: conformance/references/render/cases.json}
-        plan: ["Before U68: hand-capture of the R1913 reference screenshots from AnkiMobile and Anki desktop (U256 procedure)"]
       - id: device-run-iphone
         description: U256 device run on the iPhone (AE81)
         evidence: docs/process/milestone-records/device-runs/M1/iphone.json
@@ -484,18 +584,19 @@ milestones:
     deferred: []
 
   - id: M3
-    name: Stats, widgets, automatic optimization
+    name: Stats graphs, widget, deck options
     plan:
-      gate: "U246: stats (R1921), optimizer (R1904, R1905). U249 adds stats per deck. U244 stats group (R1837–R1839, R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U248 two-device optimizer scenario. U252–U254 for stats, deck options and widget."
+      gate: "U246: stats (R1921); the optimizer area (R1904, R1905) already gates M1. U249 adds stats per deck. U244 stats group (R1837–R1839, R1841). U242 memory states and optimizer (R1849, R1850). U245 widget memory (R1840). U252–U254 for stats, deck options and widget."
       user_steps: "Variant picks for stats and deck options. Device run"
     units: [U104, U165, U226, U230, U231, U233, U234, U236, U237]
+    cumulative: ["the optimizer area (R1904, R1905) already gates M1"]
     suites:
       - id: u246-conformance
         run: u246-conformance
         pending: U246
-        scope: {detail: areas, items: [stats, optimizer]}
-        plan: [{text: "U246: stats (R1921), optimizer (R1904, R1905)", items: [stats, optimizer]}]
-        why: U246 stats (R1921), optimizer (R1904, R1905)
+        scope: {detail: areas, items: [stats]}
+        plan: [{text: "U246: stats (R1921)", items: [stats]}]
+        why: U246 stats (R1921); the optimizer area gates M1, so M3 too
       - id: private-suite
         run: private-suite
         pending: U249
@@ -519,12 +620,6 @@ milestones:
         scope: {detail: groups, items: [widget-memory]}
         plan: [{text: "U245 widget memory (R1840)", items: [widget-memory]}]
         why: U245 widget memory (R1840)
-      - id: u248-soak
-        run: u248-soak
-        pending: U248
-        scope: {detail: scenarios, items: [two-device-optimizer]}
-        plan: [{text: "U248 two-device optimizer scenario", items: [two-device-optimizer]}]
-        why: U248 two-device optimizer scenario
       - id: u252-snapshot-matrix
         run: u252-snapshot-matrix
         pending: U252

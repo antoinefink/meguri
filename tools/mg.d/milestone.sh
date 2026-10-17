@@ -1,7 +1,7 @@
 # Milestone and release runs (U19: R1950 T3/T4, R1880, R1953;
 # docs/process/tiers.md). Sourced by tools/mg.
 #
-# `tools/mg milestone <M0..M5|release>` runs every T0 and T1 run in full (no
+# `tools/mg milestone <milestone|release>` runs every T0 and T1 run in full (no
 # path triggers), then T3, and lists T4 (device runs, U256) as user steps. It
 # writes one summary result. On top of the runs' own results it fails while
 # any conformance, sync or data-safety test is quarantined (R1953), and its
@@ -10,18 +10,26 @@
 # `milestone-gate` evaluates a milestone from these results and the manifest.
 # It runs in the main checkout on a clean tree: the private suite and the
 # similarity scan need it, and a result from a dirty tree proves nothing.
+# The milestones are those of docs/process/milestones.yaml (M0, M1R, M1, ...),
+# read with milestone-gate.sh's loader; the quarantine rule holds at every one.
 
 mg_job milestone host mg_milestone \
-  "Milestone and release runs (R1950 T3/T4, R1880, R1953): <M0..M5|release>; every T0 and T1 run in full, then T3, T4 as user steps; fails while a conformance, sync or data-safety test is quarantined; main checkout, clean tree; one summary result"
+  "Milestone and release runs (R1950 T3/T4, R1880, R1953): <milestone|release>, a milestone of docs/process/milestones.yaml (M0, M1R, M1, ...); every T0 and T1 run in full, then T3, T4 as user steps; fails while a conformance, sync or data-safety test is quarantined; main checkout, clean tree; one summary result"
 
 mg_milestone() {
-  local which="${1:-}" mode=milestone
-  [ "$#" -le 1 ] || { mg_gate__usage "usage: tools/mg milestone <M0..M5|release>"; return 0; }
-  case "$which" in
-    M[0-5]) ;;
-    release) mode=release ;;
-    *) mg_gate__usage "usage: tools/mg milestone <M0..M5|release>"; return 0 ;;
-  esac
+  local which="${1:-}" mode=milestone manifest="$MG_RUN_DIR/manifest.json"
+  [ "$#" -eq 1 ] && [ -n "$which" ] || { mg_gate__usage "usage: tools/mg milestone <milestone|release>"; return 0; }
+  if [ "$which" = release ]; then
+    mode=release
+  else
+    # The milestone names and their order are the manifest's (U240).
+    mg_gate__load "$MG_RUN_DIR/config.json" || return 0
+    mg_milestone_gate__load "$manifest" || return 0
+    if ! mg_milestone_gate__known "$which" "$manifest"; then
+      mg_gate__usage "unknown milestone '$which'; usage: tools/mg milestone <milestone|release>, where the milestones of $MG_MILESTONES_FILE are $(mg_milestone_gate__ids "$manifest" | paste -sd, - | sed 's/,/, /g')"
+      return 0
+    fi
+  fi
   if ! mg_gate__in_main; then
     mg_gate__usage "tools/mg milestone runs in the main checkout ($(mg_gate__main_checkout)): the private suite and the similarity scan need it"
     return 0

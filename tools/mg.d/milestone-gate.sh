@@ -1,7 +1,8 @@
 # Milestone gate (U240; docs/process/milestones.yaml, docs/process/tiers.md).
 # Sourced by tools/mg.
 #
-# `tools/mg milestone-gate <M0..M5>` evaluates one milestone with
+# `tools/mg milestone-gate <milestone>` evaluates one milestone of the
+# manifest (its `milestones` list names them, in order: M0, M1R, M1, ...) with
 # tools/scripts/gates/milestone_gate.py: the results that `tools/mg milestone
 # <M>` (U19) leaves in build/mg, all on one gate commit; unit merges and open
 # escalations; the user-step evidence committed at HEAD (setup steps read a
@@ -13,7 +14,7 @@
 # plan's Delivery Milestones table and Unit Index (a T0 run).
 
 mg_job milestone-gate host mg_milestone_gate \
-  "Milestone gate (U240): <M0..M5> evaluates docs/process/milestones.yaml (suite results on one gate commit, unit merges and escalations, user-step evidence at HEAD, deferrals, global conditions): pass, fail, or warn when awaiting Antoine; a pass writes docs/process/milestone-records/<M>.json | --check: the manifest against tiers.yaml and the plan"
+  "Milestone gate (U240): <milestone> (M0, M1R, M1, ... as docs/process/milestones.yaml lists them) evaluates docs/process/milestones.yaml (suite results on one gate commit, unit merges and escalations, user-step evidence at HEAD, deferrals, global conditions): pass, fail, or warn when awaiting Antoine; a pass writes docs/process/milestone-records/<M>.json | --check: the manifest against tiers.yaml and the plan"
 
 MG_MILESTONES_FILE="docs/process/milestones.yaml"
 MG_MILESTONE_GATE_PY="tools/scripts/gates/milestone_gate.py"
@@ -23,7 +24,7 @@ mg_milestone_gate__python() { python3 -B -I "$MG_ROOT/$MG_MILESTONE_GATE_PY" "$@
 # mg_milestone_gate__load <out>: milestones.yaml as JSON. PyYAML is in the dev
 # container; a python3 that has it reads the file here. Call it after
 # mg_gate__load, which checks Docker and builds the dev image when needed.
-# Returns 1 after recording the errors.
+# Returns 1 after recording the errors. `tools/mg milestone` (U19) calls it too.
 mg_milestone_gate__load() {
   local out="$1" errors="$MG_RUN_DIR/manifest-errors.json" rel rc
   if python3 -c 'import yaml' >/dev/null 2>&1; then
@@ -49,8 +50,15 @@ mg_milestone_gate__load() {
   fi
 }
 
+# mg_milestone_gate__ids <manifest.json>: the manifest's milestones, one per
+# line, in delivery order. Nothing else names them: no tool matches M<digit>.
+mg_milestone_gate__ids() { jq -r '.milestones[]? | .id? | strings' "$1"; }
+
+# mg_milestone_gate__known <id> <manifest.json>: <id> is one of them.
+mg_milestone_gate__known() { mg_milestone_gate__ids "$2" | grep -Fxq -- "$1"; }
+
 mg_milestone_gate__usage() {
-  mg_failure usage "usage: tools/mg milestone-gate <M0..M5> | --check; $1" "tools/mg --list"
+  mg_failure usage "usage: tools/mg milestone-gate <milestone> | --check; $1" "tools/mg --list"
   mg_message "milestone-gate: $1"
   mg_status error
 }
@@ -58,13 +66,13 @@ mg_milestone_gate__usage() {
 mg_milestone_gate() {
   local which="${1:-}" config="$MG_RUN_DIR/config.json" manifest="$MG_RUN_DIR/manifest.json" rc
   [ "$#" -eq 1 ] || { mg_milestone_gate__usage "one argument is required"; return 0; }
-  case "$which" in
-    M[0-5] | --check) ;;
-    *) mg_milestone_gate__usage "unknown argument '$which'"; return 0 ;;
-  esac
   mg_gate__load "$config" || return 0
   mg_milestone_gate__load "$manifest" || return 0
   mg_artifact manifest "$manifest" "the manifest as JSON"
+  if [ "$which" != --check ] && ! mg_milestone_gate__known "$which" "$manifest"; then
+    mg_milestone_gate__usage "unknown milestone '$which'; the milestones of $MG_MILESTONES_FILE are $(mg_milestone_gate__ids "$manifest" | paste -sd, - | sed 's/,/, /g')"
+    return 0
+  fi
 
   if [ "$which" = --check ]; then
     local report="$MG_RUN_DIR/check.json" n

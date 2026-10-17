@@ -28,10 +28,14 @@ setup_file() {
   cp "$REPO_ROOT/.gitignore" "$t/"
   for f in "$t"/tools/mg.d/*.sh; do
     case "$(basename "$f")" in
-      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | session.sh | host.sh | oracle.sh | conformance.sh) ;;
+      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | milestone-gate.sh | session.sh | host.sh | oracle.sh | conformance.sh) ;;
       *) rm -f "$f" ;;
     esac
   done
+  # The milestones `tools/mg milestone` accepts, in order (U240r): the ids of
+  # the manifest's list are all it reads.
+  mkdir -p "$t/docs/process"
+  { printf 'version: 1\nmilestones:\n'; printf '  - {id: %s}\n' M0 M1R M1 M2 M3 M4 M5; } >"$t/docs/process/milestones.yaml"
   printf 'id: smoke/a\n' >"$t/conformance/scenarios/smoke/a.yaml"
   printf 'id: sched/b\n' >"$t/conformance/scenarios/sched/b.yaml"
   printf '# notes\n' >"$t/docs/notes.md"
@@ -101,6 +105,7 @@ utilities:
   - {job: quarantine, why: quarantine}
   - {job: nightly, why: T2}
   - {job: milestone, why: T3}
+  - {job: milestone-gate, why: milestone.sh reads the manifest's milestones}
   - {job: session, why: sessions}
   - {job: oracle, why: its tree helpers}
   - {job: conformance, why: its oracle file lookup}
@@ -1072,6 +1077,23 @@ $TRAILERS"
   mg milestone M1
   [ "$status" -eq 1 ]
   jq -e --arg t "quarantine-protected:unit:$t" '.failures[] | select(.id == $t)' "$result"
+  # From M1R on, every milestone (U240r).
+  mg milestone M1R
+  [ "$status" -eq 1 ]
+  jq -e --arg t "quarantine-protected:unit:$t" '.failures[] | select(.id == $t)' "$result"
+}
+
+@test "a milestone run takes the milestone names from the manifest (U240r)" {
+  printf 'unclassified 0\n' >"$FX/harvest.counts"
+  mg milestone M1R
+  [ "$status" -eq 0 ]
+  [ "$(field .details.milestone)" = M1R ]
+  [ "$(called '^t-job unit @main$')" = 1 ]
+  mg milestone M1X
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = usage ]
+  [[ "$(field '.failures[0].message')" == *"unknown milestone 'M1X'"*"are M0, M1R, M1, M2, M3, M4, M5"* ]]
+  [ "$(called '^t-job unit @main$')" = 1 ]
 }
 
 @test "a milestone run refuses a dirty tree or a worktree" {

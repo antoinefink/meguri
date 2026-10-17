@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GATE = os.path.join(os.path.dirname(HERE), "milestone_gate.py")
 TIERS_GATE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "gate", "gate.py")
 NOW = "2026-11-20T12:00:00Z"
-MS = ("M0", "M1", "M2", "M3", "M4", "M5")
+MS = ("M0", "M1R", "M1", "M2", "M3", "M4", "M5")  # the manifest's order, as the plan's table has it
 FOLDABLE = {"job": "sim-setup", "args": [], "detail": "foldable",
             "equals": {"status": "unavailable", "reason": "toolchain"}}
 ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid", GIT_COMMITTER_NAME="t",
@@ -56,6 +56,10 @@ def manifest(**per_milestone):
         entry.update(per_milestone.get(m, {}))
         out["milestones"].append(entry)
     return out
+
+
+def milestone(man, mid):
+    return [m for m in man["milestones"] if m["id"] == mid][0]
 
 
 class Sandbox(unittest.TestCase):
@@ -458,7 +462,7 @@ class ManifestTests(Sandbox):
         ] + ["| **%s Milestone %s** | %s | g | u |" % (m, m, "U1, U2" if m == "M0" else "U%d" % (i + 2))
              for i, m in enumerate(MS)] + [
             "", "### Unit Index", "", "| U-ID | Title |", "|---|---|",
-        ] + ["| U%d | t |" % i for i in range(1, 8)] + ["", "### U2b. A sub-unit", ""])
+        ] + ["| U%d | t |" % i for i in range(1, len(MS) + 2)] + ["", "### U2b. A sub-unit", ""])
         man = manifest(**{m: {
             "units": ["U1", "U2"] if m == "M0" else ["U%d" % (i + 2)], "plan": {"gate": "g", "user_steps": "u"},
             "suites": [{"id": "g", "run": "g", "pending": "U9", "plan": ["g"]}],
@@ -466,9 +470,9 @@ class ManifestTests(Sandbox):
                             "plan": ["u"]}]} for i, m in enumerate(MS)})
         rc, out = self.check(man, plan)
         self.assertEqual((rc, out["errors"]), (0, []))
-        man["milestones"][0]["units"] = ["U1"]
-        man["milestones"][2]["plan"]["gate"] = "changed"
-        man["milestones"][3]["name"] = "Other"
+        milestone(man, "M0")["units"] = ["U1"]
+        milestone(man, "M2")["plan"]["gate"] = "changed"
+        milestone(man, "M3")["name"] = "Other"
         rc, out = self.check(man, plan)
         self.assertEqual(rc, 1)
         text = "\n".join(out["errors"])
@@ -520,7 +524,7 @@ class ManifestTests(Sandbox):
         self.assertEqual((rc, out["errors"]), (0, []))
 
         def m1(m):
-            return m["milestones"][1]
+            return milestone(m, "M1")
 
         def drop(key, ident):
             return lambda m: m1(m).__setitem__(key, [x for x in m1(m)[key] if x["id"] != ident])
@@ -589,7 +593,7 @@ class ManifestTests(Sandbox):
 
     def test_device_runs_the_plan_does_not_name_cover_every_device(self):
         man = self.bound_manifest()
-        m1 = man["milestones"][1]
+        m1 = milestone(man, "M1")
         m1["plan"]["user_steps"] = "Device run. A 7-day trial, logged"
         for st in m1["user_steps"][:2]:
             st["plan"] = ["Device run"]
@@ -987,15 +991,18 @@ class UserStepTests(Sandbox):
             "| 2026-11-10 | home.deckList | Picked B | calmer | gallery, reviews/2026-11-10.json |",
             "| 2026-11-11 | review.question | Vetoed A | too loud | chat |",
             "| 2026-09-01 | review.question | Picked C | old pick | chat |", ""])
+        # The window starts when the milestone before M1 in the manifest's
+        # order (M1R) closed, not M0.
         self.commit("Picks", {"docs/design/decisions.md": decisions,
-                              "docs/process/milestone-records/M0.json": {"closed_at": "2026-10-01T00:00:00Z"}})
+                              "docs/process/milestone-records/M0.json": {"closed_at": "2026-08-01T00:00:00Z"},
+                              "docs/process/milestone-records/M1R.json": {"closed_at": "2026-10-01T00:00:00Z"}})
         steps = [{"id": "variant-picks", "description": "picks", "evidence": "docs/design/decisions.md",
                   "validator": {"type": "variant-pick", "screens": ["home.deckList", "home.deckPage", "review.question"]}}]
         rc, ev = self.evaluate(self.man(steps), "M1")
         self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
         message = ev["awaiting"][0]["message"]
         self.assertIn("home.deckPage", message)
-        self.assertIn("review.question", message)  # vetoed, and picked before M0 closed
+        self.assertIn("review.question", message)  # vetoed, and picked before M1R closed
         self.assertNotIn("home.deckList", message)
         self.assertEqual(ev["window_start"], "2026-10-01")
 
@@ -1124,6 +1131,294 @@ class UserStepTests(Sandbox):
         rc, ev = self.evaluate(self.man(self.device_steps()[:1]), "M1")
         self.assertEqual(rc, 3)
         self.assertIn("uncommitted", ev["awaiting"][0]["message"])
+
+
+class MilestoneOrderTests(Sandbox):
+    """U240r: the milestones and their order are the manifest's one list
+    (M0, M1R, M1, ...), which --check keeps equal to the plan's table."""
+
+    def reviews_first(self):
+        self.run_("unit", job="core-test")
+        self.run_("review-loop", job="u243", cls="perf")
+        self.run_("sync-soak", job="u248", tier="T3", cls="sync")
+        self.run_("browser", job="u244", cls="perf")
+        return manifest(M0={"suites": [{"id": "unit", "run": "unit"}]},
+                        M1R={"suites": [{"id": "review-loop", "run": "review-loop"},
+                                        {"id": "sync-soak", "run": "sync-soak"}]},
+                        M1={"suites": [{"id": "browser", "run": "browser"}]})
+
+    def test_m1r_with_every_suite_result_missing_reports_each_missing(self):
+        rc, ev = self.evaluate(self.reviews_first(), "M1R")
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+        self.assertEqual([(s["id"], s["since"], s["outcome"]) for s in ev["suites"]],
+                         [("unit", "M0", "missing"), ("review-loop", "M1R", "missing"),
+                          ("sync-soak", "M1R", "missing")])
+        for sid in ("unit", "review-loop", "sync-soak"):
+            self.assertIn("no result", self.failure(ev, "suite:" + sid))
+
+    def test_m1_includes_m1rs_suites(self):
+        man = self.reviews_first()
+        for job in ("core-test", "u243", "u248", "u244"):
+            self.result(job)
+        rc, ev = self.evaluate(man, "M1")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual([(s["id"], s["since"]) for s in ev["suites"]],
+                         [("unit", "M0"), ("review-loop", "M1R"), ("sync-soak", "M1R"), ("browser", "M1")])
+        # M1R itself does not run M1's suites.
+        os.remove(self.record)
+        rc, ev = self.evaluate(man, "M1R")
+        self.assertEqual([s["id"] for s in ev["suites"]], ["unit", "review-loop", "sync-soak"])
+
+    def test_an_unknown_milestone_is_rejected_with_the_manifests_names(self):
+        rc, out = self.evaluate(manifest(), "M1X")
+        self.assertEqual(rc, 2)
+        self.assertIn("unknown milestone 'M1X'", out["errors"][0])
+        self.assertIn("M0, M1R, M1, M2, M3, M4, M5", out["errors"][0])
+
+    def test_the_names_are_the_manifests_own(self):
+        # Nothing matches M<digit>: any ordered list of words is the milestones.
+        self.run_("unit", job="core-test")
+        self.result("core-test")
+        man = {"version": 1, "plan": "plan.md", "evidence_paths": [], "budget_devices": {},
+               "global": [{"id": "quarantine", "kind": "quarantine"}],
+               "milestones": [{"id": i, "name": i, "plan": {"gate": "", "user_steps": ""}, "units": [],
+                               "suites": s, "user_steps": [], "deferred": []}
+                              for i, s in (("Alpha", [{"id": "unit", "run": "unit"}]), ("Beta", []))]}
+        rc, ev = self.evaluate(man, "Beta")
+        self.assertEqual(rc, 0, ev)
+        self.assertEqual([(s["id"], s["since"]) for s in ev["suites"]], [("unit", "Alpha")])
+        rc, out = self.evaluate(man, "M0")
+        self.assertEqual(rc, 2)
+        self.assertIn("Alpha, Beta", out["errors"][0])
+
+    def test_milestone_ids_are_unique_words_and_never_release(self):
+        for ids in (["M0", "M1R", "M1R"], ["M0", "release"], ["M0", "M 1"], []):
+            with self.subTest(ids=ids):
+                man = manifest()
+                man["milestones"] = [dict(copy.deepcopy(man["milestones"][0]), id=i) for i in ids]
+                rc, out = self.evaluate(man, "M0")
+                self.assertEqual(rc, 2)
+                self.assertIn("each with its own id", out["errors"][0])
+
+    def test_a_suite_may_not_require_its_own_milestones_gate(self):
+        self.run_("m1r-gate", job="milestone-gate", args=["M1R"], tier="T3", cls="static")
+        rc, out = self.evaluate(manifest(M1R={"suites": [{"id": "g", "run": "m1r-gate"}]}), "M1R")
+        self.assertEqual(rc, 2)
+        self.assertTrue(any("requires the M1R gate" in e for e in out["errors"]), out)
+        rc, out = self.evaluate(manifest(M1={"suites": [{"id": "g", "run": "m1r-gate"}]}), "M1")
+        self.assertNotEqual(rc, 2, out)  # an earlier milestone's gate
+
+    def test_the_quarantine_rule_holds_at_m1r_and_every_later_gate(self):
+        self.config["quarantine"]["entries"] = [{
+            "test": "sync::first_download", "run": "sync-smoke", "class": "sync", "owner": "U107",
+            "reason": "flaky port", "deadline": "2026-12-31", "approved_by": "antoine", "evidence": None,
+            "escalation": None, "label": "sync-smoke:sync::first_download"}]
+        for m in MS[MS.index("M1R"):]:
+            with self.subTest(milestone=m):
+                rc, ev = self.evaluate(manifest(), m)
+                self.assertEqual(rc, 1)
+                self.assertIn("U19", self.failure(ev, "quarantine-protected:sync-smoke:sync::first_download"))
+
+    def test_the_native_oracle_is_attached_from_m1r(self):
+        self.run_("native-oracle", job="fp-probe", tier="T3", cls="conformance")
+        man = manifest()
+        man["global"].append({"id": "native-oracle", "kind": "suite", "run": "native-oracle", "from": "M1R"})
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual(rc, 0, ev["failures"])
+        for m in ("M1R", "M1"):
+            rc, ev = self.evaluate(man, m)
+            self.assertIn("global:native-oracle", self.failure_ids(ev))
+        man["global"][1]["from"] = "M9"
+        rc, out = self.evaluate(man, "M1")
+        self.assertEqual(rc, 2)
+        self.assertTrue(any("from must be a milestone (M0, M1R, M1" in e for e in out["errors"]), out)
+
+    def test_check_reads_every_row_of_the_table_in_order(self):
+        man = manifest(**{m: {"units": ["U%d" % (i + 1)]} for i, m in enumerate(MS)})
+        plan = ManifestTests.plan_for(man)
+        self.assertIn("| **M1R Milestone M1R** |", plan)
+        rc, out = self.check(man, plan)
+        self.assertEqual((rc, out["errors"]), (0, []))
+        lacking = copy.deepcopy(man)
+        lacking["milestones"] = [m for m in lacking["milestones"] if m["id"] != "M1R"]
+        milestone(lacking, "M1")["units"] += ["U2"]
+        rc, out = self.check(lacking, plan)
+        self.assertEqual(rc, 1)
+        self.assertIn("the plan's table has a row M1R that the manifest lacks", "\n".join(out["errors"]))
+        swapped = copy.deepcopy(man)
+        swapped["milestones"][1], swapped["milestones"][2] = swapped["milestones"][2], swapped["milestones"][1]
+        rc, out = self.check(swapped, plan)
+        self.assertEqual(rc, 1)
+        self.assertIn("the manifest lists the milestones as M0, M1, M1R, M2, M3, M4, M5; the plan's table orders "
+                      "them M0, M1R, M1, M2, M3, M4, M5", "\n".join(out["errors"]))
+        rc, out = self.check(man, plan.replace("| **M1R Milestone M1R** |", "| **M1R** |"))
+        self.assertEqual(rc, 1)
+        self.assertIn("a row that is not | **<id> <name>** |", "\n".join(out["errors"]))
+
+
+class ReviewsFirstCoverageTests(Sandbox):
+    """U240r: the M1R row binds to its definitions like every other row. Its
+    first-sync step says "trial" (the sync starts the trial); M1 repeats M1R's
+    clauses and states the cumulative rule; a global condition from M1R claims
+    the clause M1 repeats."""
+
+    SYNC = ("The first real sync with AnkiWeb, after passing results (U246 sync area, U248) and a backup; "
+            "it starts the M1R trial")
+
+    def bound(self):
+        self.run_("native", job="fp-probe", tier="T3", cls="conformance")
+        per = {m: {"units": ["U%d" % (i + 1)]} for i, m in enumerate(MS)}
+        per["M1R"] = {
+            "units": ["U246", "U248", "U256"],
+            "plan": {"gate": "U246: areas storage and sync, plus the native oracle check (KTD24).",
+                     "user_steps": "U256 device run on iPhone, iPad and Mac (AE81). " + self.SYNC},
+            "suites": [{"id": "u246", "run": "u246", "pending": "U246",
+                        "scope": {"detail": "areas", "items": ["storage", "sync"]},
+                        "plan": [{"text": "U246: areas storage and sync", "items": ["storage", "sync"]}]}],
+            "user_steps": [
+                {"id": "device-run-%s" % d, "description": "run", "evidence": "docs/%s.json" % d,
+                 "validator": {"type": "device-run", "device": d}, "plan": ["U256 device run on iPhone, iPad and Mac (AE81)"]}
+                for d in ("iphone", "ipad", "mac")] + [
+                {"id": "first-sync", "description": "first sync", "evidence": "docs/first-sync.json",
+                 "validator": {"type": "first-sync", "results": ["u246-sync-area", "u248-soak"]},
+                 "plan": [{"text": self.SYNC, "items": ["u246-sync-area", "u248-soak"]}]}]}
+        per["M1"] = {
+            "units": ["U47"],
+            "plan": {"gate": "Cumulative over M1R: the full gate. U246: areas storage, optimizer and sync, plus the "
+                             "native oracle check (KTD24).", "user_steps": ""},
+            "cumulative": ["Cumulative over M1R: the full gate"],
+            "suites": [{"id": "u246", "run": "u246", "pending": "U246",
+                        "scope": {"detail": "areas", "items": ["storage", "optimizer", "sync"]},
+                        "plan": [{"text": "U246: areas storage, optimizer and sync",
+                                  "items": ["storage", "optimizer", "sync"]}]}]}
+        man = manifest(**per)
+        man["global"].append({"id": "native-oracle", "kind": "suite", "run": "native", "from": "M1R",
+                              "plan": ["plus the native oracle check (KTD24)"]})
+        return man
+
+    def test_the_reviews_first_rows_bind_to_their_definitions(self):
+        man = self.bound()
+        rc, out = self.check(man, ManifestTests.plan_for(man))
+        self.assertEqual((rc, out["errors"]), (0, []))
+
+        def step(m, sid):
+            return [s for s in milestone(m, "M1R")["user_steps"] if s["id"] == sid][0]
+
+        cases = [
+            ("the cumulative rule unclaimed", lambda m: milestone(m, "M1").pop("cumulative"),
+             "M1: the closing gate text 'Cumulative over M1R: the full gate'"),
+            ("a cumulative excerpt that names no earlier milestone",
+             lambda m: milestone(m, "M1").update({"cumulative": ["the full gate"]}), "names no earlier milestone"),
+            ("the global condition unbound", lambda m: m["global"][1].pop("plan"),
+             "M1: the closing gate text 'plus the native oracle check (KTD24)'"),
+            ("the first sync swapped for a report", lambda m: step(m, "first-sync").update(
+                {"validator": {"type": "report"}, "plan": [self.SYNC]}), "which asks for a first-sync step"),
+            ("the first sync swapped for a trial", lambda m: step(m, "first-sync").update(
+                {"validator": {"type": "trial", "days": 7}, "plan": [self.SYNC]}), "which asks for a first-sync step"),
+            ("a result the first sync relied on dropped",
+             lambda m: step(m, "first-sync")["validator"].update({"results": ["u246-sync-area"]}),
+             "binds u248-soak, which its results lacks"),
+            ("the first sync removed",
+             lambda m: milestone(m, "M1R").update({"user_steps": milestone(m, "M1R")["user_steps"][:3]}),
+             "The first real sync with AnkiWeb"),
+            ("the Mac device run removed", lambda m: milestone(m, "M1R").update(
+                {"user_steps": [s for s in milestone(m, "M1R")["user_steps"] if s["id"] != "device-run-mac"]}),
+             "no device-run user step on mac"),
+        ]
+        for name, mutate, expected in cases:
+            with self.subTest(name):
+                broken = copy.deepcopy(man)
+                mutate(broken)
+                rc, out = self.check(broken, ManifestTests.plan_for(broken))
+                self.assertEqual(rc, 1, out)
+                self.assertTrue(any(expected in e for e in out["errors"]), "%r not in %s" % (expected, out["errors"]))
+
+
+def first_sync(build, started="2026-11-15T09:00:00Z", **change):
+    data = {"build": {"commit": build, "dirty": False}, "sync_started_at": started,
+            "results": {rid: {"job": job, "commit": build, "finished_at": "2026-11-15T08:%02d:00Z" % n, "outcome": "pass"}
+                        for n, (rid, job) in enumerate((("u246-sync-area", "conformance"), ("u248-soak", "sync-soak"),
+                                                         ("u250-sync-classes", "fault")))},
+            "backup": {"file": "collection-2026-11-15-0850.colpkg", "taken_at": "2026-11-15T08:50:00Z"}}
+    for path, value in change.items():
+        obj, keys = data, path.split("__")
+        for k in keys[:-1]:
+            obj = obj[k]
+        if value is None:
+            del obj[keys[-1]]
+        else:
+            obj[keys[-1]] = value
+    return data
+
+
+class FirstSyncTests(Sandbox):
+    """U240's first-sync validator (M1R): checked against the results the sync
+    relied on and the backup before it, never against the gate commit."""
+
+    EVIDENCE = "docs/process/milestone-records/M1R/first-sync.json"
+
+    def setUp(self):
+        super().setUp()
+        self.run_("unit", job="core-test")
+        self.build = self.commit("The build Antoine synced with", {"app/A.swift": "// a\n"})
+        self.commit("A fix made during the trial", {"app/A.swift": "// b\n"})
+        self.result("core-test")
+        self.gate = self.git("rev-parse", "HEAD")
+
+    def man(self):
+        step = {"id": "first-sync", "description": "first sync", "evidence": self.EVIDENCE,
+                "validator": {"type": "first-sync", "results": ["u246-sync-area", "u248-soak", "u250-sync-classes"]}}
+        return manifest(M0={"suites": [{"id": "unit", "run": "unit"}]}, M1R={"user_steps": [step]})
+
+    def test_absent_evidence_awaits_antoine(self):
+        rc, ev = self.evaluate(self.man(), "M1R")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        self.assertEqual([a["id"] for a in ev["awaiting"]], ["user-step:first-sync"])
+
+    def test_valid_evidence_on_a_build_older_than_the_gate_commit_is_accepted(self):
+        self.commit("Record the first sync", {self.EVIDENCE: first_sync(self.build)})
+        rc, ev = self.evaluate(self.man(), "M1R")
+        self.assertEqual(rc, 0, ev["failures"])
+        self.assertEqual(ev["gate_commit"], self.gate)
+        details = ev["user_steps"][0]["details"]
+        self.assertEqual(details["build_commit"], self.build)
+        self.assertEqual(sorted(details["results"]), ["u246-sync-area", "u248-soak", "u250-sync-classes"])
+
+    def test_invalid_evidence_fails_and_names_the_step(self):
+        cases = [
+            ({"results__u248-soak__commit": self.gate}, "the u248-soak result is on %s, not the build's commit" % self.gate[:12]),
+            ({"results__u246-sync-area__finished_at": "2026-11-15T09:00:00Z"},
+             "the u246-sync-area result finished at 2026-11-15T09:00:00Z, not before the sync started"),
+            ({"results__u250-sync-classes__outcome": "fail"}, 'the u250-sync-classes result is "fail", not a pass'),
+            ({"build__dirty": True}, "not from a clean tree"),
+            ({"build__dirty": None}, "not from a clean tree"),
+            ({"backup__taken_at": "2026-11-15T09:05:00Z"}, "was taken at 2026-11-15T09:05:00Z, not before the sync"),
+            ({"results__u250-sync-classes": None}, "records no u250-sync-classes result"),
+            ({"build__commit": "f" * 40}, "build.commit must be a full commit id of this repository"),
+            ({"sync_started_at": "yesterday"}, "sync_started_at must be"),
+            ({"backup": None}, "expected {build"),
+        ]
+        for change, expected in cases:
+            with self.subTest(expected):
+                self.commit("Record the first sync", {self.EVIDENCE: first_sync(self.build, **change)})
+                rc, ev = self.evaluate(self.man(), "M1R")
+                self.assertEqual((rc, ev["outcome"]), (1, "fail"))
+                message = self.failure(ev, "user-step:first-sync")
+                self.assertTrue(message.startswith("first-sync: "), message)
+                self.assertIn(expected, message)
+                self.assertFalse(os.path.exists(self.record))
+
+    def test_m1r_device_runs_await_each_device(self):
+        steps = [{"id": "device-run-%s" % d, "description": "run",
+                  "evidence": "docs/process/milestone-records/device-runs/M1R/%s.json" % d,
+                  "validator": {"type": "device-run", "device": d}} for d in ("iphone", "ipad", "mac")]
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}]},
+                       M1R={"user_steps": steps, "budgets": {"review": ["R1807", "R1813"]}})
+        rc, ev = self.evaluate(man, "M1R")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        self.assertEqual([a["id"] for a in ev["awaiting"]],
+                         ["user-step:device-run-iphone", "user-step:device-run-ipad", "user-step:device-run-mac"])
+        self.assertIn("device-runs/M1R/iphone.json", ev["awaiting"][0]["message"])
 
 
 if __name__ == "__main__":
