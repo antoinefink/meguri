@@ -67,6 +67,23 @@ class MissingIdentifier(unittest.TestCase):
             with self.subTest(type=t):
                 self.assertEqual(kinds(hierarchy_check.check(doc(el(t, f=(0, 0, 50, 20))))), ["missing-identifier"])
 
+    def test_a_list_row_is_identified_by_its_content(self):
+        # Seen in real exports of SwiftUI lists: the Mac's outline row and
+        # cell, and the iPad's cell, wrap the row's content, which carries
+        # the identifier the row was given.
+        mac_row = el("outlineRow", f=(0, 82, 144, 32), children=[el("cell", f=(10, 82, 124, 32), children=[
+            el("staticText", "shell.root.sidebar.home", f=(19, 89, 64, 17))])])
+        ipad_row = el("cell", f=(16, 486, 288, 52), children=[el("other", f=(16, 486, 288, 52), children=[
+            el("staticText", "shell.root.sidebar.browse", "Browse", f=(16, 486, 288, 52)), el("image", "magnifyingglass", f=(33, 500, 21, 21))])])
+        self.assertEqual(hierarchy_check.check(doc(el("outline", f=(0, 82, 144, 300), children=[mac_row]), ipad_row)), [])
+
+    def test_a_row_whose_content_has_no_identifier_of_the_apps_is_reported(self):
+        # A symbol's name on the row's image is the system's, not the row's.
+        row = el("cell", f=(16, 86, 288, 52), children=[
+            el("staticText", label="Home", f=(16, 86, 288, 52)), el("image", "house", f=(31, 100, 26, 23))])
+        issues = hierarchy_check.check(doc(row))
+        self.assertEqual([(i["kind"], i["type"]) for i in issues], [("missing-identifier", "cell")])
+
     def test_static_text_images_and_containers_need_none(self):
         tree = doc(el("other", children=[el("staticText", label="Hello", f=(0, 0, 50, 20)), el("image", f=(0, 30, 20, 20))]))
         self.assertEqual(hierarchy_check.check(tree), [])
@@ -140,6 +157,41 @@ class MissingIdentifier(unittest.TestCase):
         )
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_a_mac_scroll_bars_parts_are_the_systems(self):
+        # Seen in a real export of a Mac scroll view (the shell's deck page):
+        # AppKit's scroller reports its knob, arrows and page regions, the
+        # page region below the knob as an unlabelled button, none with an
+        # identifier, and none can take one.
+        bar = el("scrollBar", f=(1162, 81, 19, 722.5), children=[
+            el("valueIndicator", f=(1166, 85, 11, 260.5)),
+            el("incrementArrow", f=(1163, 82, 0, 0)),
+            el("decrementArrow", f=(1163, 82, 0, 0)),
+            el("button", f=(1166, 346, 11, 453.5)),
+            el("button", f=(1166, 85, 11, 0)),
+        ])
+        tree = doc(el("scrollView", f=(300, 81, 881, 722.5), children=[
+            el("staticText", "testhooks.shell.deckPageRow.1", "Row 1", f=(320, 100, 600, 20)), bar]), window=(0, 0, 1180, 800))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_a_button_beside_a_scroll_bar_still_needs_an_identifier(self):
+        tree = doc(el("scrollView", f=(0, 0, 400, 800), children=[
+            el("scrollBar", f=(390, 0, 10, 800)), el("button", label="Load more", f=(16, 700, 200, 44))]))
+        self.assertEqual([(i["kind"], i["label"]) for i in hierarchy_check.check(tree)], [("missing-identifier", "Load more")])
+
+    def test_the_split_views_sidebar_toggle_is_the_systems(self):
+        # Seen in real exports: the Mac toolbar's toggle and the iPad
+        # sidebar's, in its navigation bar; neither takes an identifier.
+        tree = doc(el("toolbar", f=(0, 30, 800, 52), children=[el("button", label="Hide Sidebar", f=(92, 30, 44, 52))]),
+                   el("navigationBar", f=(0, 32, 320, 54), children=[el("button", label="Show Sidebar", f=(270, 36, 36, 36))]))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_a_sidebar_label_outside_a_bar_or_another_bar_button_still_needs_an_identifier(self):
+        tree = doc(el("button", label="Hide Sidebar", f=(0, 100, 44, 44)),
+                   el("toolbar", f=(0, 30, 800, 52), children=[el("button", label="Add", f=(700, 30, 44, 52))]),
+                   el("navigationBar", f=(0, 32, 320, 54), children=[el("other", f=(0, 32, 320, 54), children=[
+                       el("button", label="Hide Sidebar", f=(270, 36, 36, 36))])]))
+        self.assertEqual([i["label"] for i in hierarchy_check.check(tree)], ["Hide Sidebar", "Add", "Hide Sidebar"])
+
     def test_zero_size_controls_are_not_on_screen_and_skipped(self):
         self.assertEqual(hierarchy_check.check(doc(el("button", label="hidden", f=(0, 0, 0, 0)))), [])
 
@@ -187,6 +239,33 @@ class IdentifierFormat(unittest.TestCase):
         }
         self.assertEqual(hierarchy_check.check(tree), [])
 
+    def test_ios_names_navigation_bars_after_their_title_and_symbol_images_after_the_symbol(self):
+        # Seen in real exports: UIKit's navigation bar takes its title as its
+        # identifier, an SF Symbol's image its name, on every image of it.
+        tree = doc(el("navigationBar", "Spanish::Mining", f=(0, 62, 400, 106), children=[
+                       el("staticText", label="Spanish::Mining", f=(16, 119, 200, 40))]),
+                   el("image", "house", "Home", f=(10, 200, 40, 40)), el("image", "gearshape.fill", "Gear", f=(60, 200, 40, 40)),
+                   el("image", "rectangle.stack", f=(10, 300, 20, 20)), el("image", "rectangle.stack", f=(10, 340, 20, 20)))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_a_navigation_bar_named_otherwise_and_an_images_own_identifier_are_still_checked(self):
+        tree = doc(el("navigationBar", "Home", f=(0, 62, 400, 106), children=[el("staticText", label="Decks", f=(16, 119, 200, 40))]),
+                   el("image", "home.deckIcon", f=(10, 200, 40, 40)), el("button", "gearshape", "Settings", f=(60, 200, 40, 40)))
+        issues = hierarchy_check.check(tree)
+        self.assertEqual([(i["kind"], i["identifier"]) for i in issues],
+                         [("bad-identifier", "Home"), ("bad-identifier", "home.deckIcon"), ("bad-identifier", "gearshape")])
+
+    def test_a_mac_split_view_and_its_list_column_are_named_by_swiftui(self):
+        # Seen in real exports: NavigationSplitView's split group after the
+        # window's scene id, and the one column of a SwiftUI List.
+        tree = doc(el("splitGroup", "main, SidebarNavigationSplitView", f=(0, 30, 800, 600), children=[
+            el("outline", label="Sidebar", f=(0, 82, 144, 548), children=[el("tableColumn", "ListColumn", f=(10, 82, 124, 548))])]))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_those_names_on_other_elements_are_still_reported(self):
+        tree = doc(el("group", "main, SidebarNavigationSplitView", f=(0, 30, 800, 600)), el("button", "ListColumn", f=(0, 0, 40, 40)))
+        self.assertEqual(kinds(hierarchy_check.check(tree)), ["bad-identifier", "bad-identifier"])
+
     def test_alert_button_ids_outside_a_sheet_and_symbol_ids_elsewhere_are_still_reported(self):
         tree = doc(el("button", "action-button-1", "Save", f=(0, 0, 40, 40)), el("button", "chevron.backward", "Back", f=(0, 50, 40, 40)))
         self.assertEqual(kinds(hierarchy_check.check(tree)), ["bad-identifier", "bad-identifier"])
@@ -210,6 +289,34 @@ class TextOverlap(unittest.TestCase):
         tree = doc(el("staticText", "sample.defects.waiting", "Waiting", f=(16, 200, 100, 20)),
                    el("activityIndicator", "sample.defects.spinner", "In progress", f=(40, 196, 28, 28),
                       children=[el("staticText", label="Loading", f=(30, 205, 60, 16))]))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_rows_a_scroll_view_clips_do_not_overlap_the_text_below_it(self):
+        # Seen in a real export (the shell's deck page on the iPad, its
+        # state probe below the scroll view): a lazy stack's next rows hang
+        # past the scroll view's edge, clipped; only what shows counts.
+        tree = doc(el("scrollView", f=(0, 0, 1032, 1334.5), children=[
+            el("staticText", "testhooks.shell.deckPageRow.20", "Row 20", f=(372, 1312.5, 608, 44.5)),
+            el("staticText", "testhooks.shell.deckPageRow.21", "Row 21", f=(372, 1369, 608, 44.5))]),
+            el("staticText", "testhooks.shell.state", "layout=sidebar", f=(0, 1334.5, 1032, 41.5)), window=(0, 0, 1032, 1376))
+        self.assertEqual(hierarchy_check.check(tree), [])
+
+    def test_the_visible_part_of_a_clipped_row_still_overlaps(self):
+        # A label floating over the scroll view's last visible points.
+        tree = doc(el("scrollView", f=(0, 0, 400, 400), children=[
+            el("staticText", "home.list.row.9", "Row 9", f=(16, 380, 300, 44))]),
+            el("staticText", "home.list.badge", "New", f=(16, 390, 100, 20)))
+        issues = hierarchy_check.check(tree)
+        self.assertEqual(kinds(issues), ["text-overlap"])
+        self.assertEqual(issues[0]["labels"], ["Row 9", "New"])
+        self.assertIn("overlap by 100x10 pt", issues[0]["message"])
+
+    def test_a_table_clips_its_rows_to_the_scroll_view_around_it(self):
+        # On the Mac a table's frame is its whole content; the scroll view
+        # around it is what shows.
+        tree = doc(el("scrollView", f=(0, 100, 400, 300), children=[el("table", f=(0, 100, 400, 2000), children=[
+            el("staticText", "home.list.row.30", "Row 30", f=(16, 410, 300, 20))])]),
+            el("staticText", "home.footer.total", "40 decks", f=(16, 410, 120, 20)))
         self.assertEqual(hierarchy_check.check(tree), [])
 
     def test_text_inside_text_is_one_element_not_an_overlap(self):
@@ -262,6 +369,24 @@ class RealExports(unittest.TestCase):
         for name in ["mac-sample-screen.json", "mac-sample-sheet.json", "mac-sample-alert.json"]:
             with self.subTest(name=name):
                 self.assertEqual(hierarchy_check.check(self.load(name)), [])
+
+    def test_the_shell_on_iphone_and_ipad_has_no_issue(self):
+        # The tab bar with its buttons' identifiers and symbol images, the
+        # iPad sidebar's rows, toggle and navigation bars named by UIKit.
+        for name in ["ios-shell-typical.json", "ipad-shell-typical.json"]:
+            with self.subTest(name=name):
+                self.assertEqual(hierarchy_check.check(self.load(name)), [])
+
+    def test_the_shell_deck_page_on_the_mac_has_no_issue(self):
+        # A scroll view with AppKit's scroller, its lazy rows hanging past
+        # its bottom edge into the state probe's strip below it.
+        tree = self.load("mac-shell-deck-page.json")
+        self.assertEqual(hierarchy_check.check(tree), [])
+        root = hierarchy_check.Element(tree["root"], None, 0)
+        self.assertTrue(any(e.type == "scrollBar" for e in root.walk()))
+        probe = next(e for e in root.walk() if e.identifier == "testhooks.shell.state")
+        self.assertTrue(any(e.identifier.startswith("testhooks.shell.deckPageRow.") and e.y < probe.y + probe.h and e.y + e.h > probe.y
+                            for e in root.walk()), "no row's full frame reaches the probe")
 
     def test_the_defects_route_on_iphone_reports_its_two_defects_and_not_the_spinner(self):
         issues = hierarchy_check.check(self.load("ios-sample-defects.json"))

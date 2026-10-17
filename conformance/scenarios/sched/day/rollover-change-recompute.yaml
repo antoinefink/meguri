@@ -1,0 +1,19 @@
+# R597, R760 (D6, D12.2): rollover moves from 4 to 12 at 10:00 through a
+# config write. Meguri computes the day afresh at once: day 5 becomes day 4
+# until 12:00. Anki keeps the cached day 5 until its boundary (04:00 the next
+# morning) passes. Deviation day-clock-config-change-* in
+# conformance/deviations.yaml.
+id: sched/day/rollover-change-recompute
+clock: {tz: Europe/Paris, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-20T10:00:00"
+  - observe: [timing]
+  - set_config: {key: rollover, value: 12}
+  - observe: [timing]
+  - set_clock: "2030-01-20T12:00:00"
+  - observe: [timing]
+  - set_clock: "2030-01-21T05:00:00"
+  - observe: [timing]
+  - set_clock: "2030-01-21T12:00:00"
+  - observe: [timing]

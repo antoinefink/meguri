@@ -20,6 +20,8 @@
     {
       "parallelizable" : false,
       "skippedTests" : [
+        "CardSwapTimingGateTests",
+        "CardSwapTimingSpikeTests",
         "PerfTestCaseTests",
         "SmokePerfTests"
       ],

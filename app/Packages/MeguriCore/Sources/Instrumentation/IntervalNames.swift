@@ -78,6 +78,11 @@ public enum IntervalNames {
     /// label changing (U12's smoke performance test). Never emitted outside
     /// Debug and Profile builds.
     public static let probeSyntheticDelay = IntervalName("probe.syntheticDelay", .probe)
+    /// The rendering spike's baseline (U65, S1): input → the display frame
+    /// that presents a swap of two plain native views, ended the way
+    /// `answerToNextVisible` ends, so R1807 compares the page swap with it.
+    /// Never emitted outside Debug and Profile builds.
+    public static let probeNativeSwap = IntervalName("probe.nativeSwap", .probe)
 
     /// Every interval, in registry order.
     public static let all: [IntervalName] = [
@@ -86,7 +91,7 @@ public enum IntervalNames {
         reviewStartToFirstCard, reviewPresentToNextSettled, reviewOnDemandRender, reviewAnswerMainThread,
         reviewUndoToCardVisible, reviewActionToNextVisible, reviewTouchDownToTint, searchFirstPage,
         statsAllGraphs, statsScopeChange, heatmapRender, cardInfoOpen,
-        probeSyntheticDelay,
+        probeSyntheticDelay, probeNativeSwap,
     ] + BridgeCall.all.map(\.interval)
 
     /// The interval registered under `name`, if any.

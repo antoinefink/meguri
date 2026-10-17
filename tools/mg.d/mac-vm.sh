@@ -142,7 +142,7 @@ mg_mac_ui_begin() {
     mg_detail mac_runner '"host"'
     return 0
   fi
-  mg__mac_vm_queued "Mac UI suites run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac's screen"
+  mg__mac_vm_queued "Mac UI suites run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac's screen" "the Mac UI suites"
   return 1
 }
 
@@ -153,12 +153,14 @@ mg__mac_vm_config_error() {
   mg_status error
 }
 
-# mg__mac_vm_queued <what runs only in the VM>: no VM can run the job now:
-# queued (warn), with the mac-vm user step.
+# mg__mac_vm_queued <what runs only in the VM> <part>: no VM can run the job
+# now: <part> is queued (mg_queued_part), and so is the run (warn), with the
+# mac-vm user step.
 mg__mac_vm_queued() {
   mg_detail queued true
   mg_detail mac_vm "$(jq -nc --arg r "$MG_MAC_VM_REASON" --arg c "$(mg_mac_vm_config_path)" '{reason: $r, config: $c}')"
   mg_mac_vm_user_step
+  mg_queued_part mac-vm "$2" "$MG_MAC_VM_REASON"
   mg_message "$MG_JOB: queued: $MG_MAC_VM_REASON; $1"
   mg_status warn
 }
@@ -248,7 +250,7 @@ mg_sim_begin() {
     mg_detail sim_runner '"host"'
     return 0
   fi
-  mg__mac_vm_queued "simulators run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac"
+  mg__mac_vm_queued "simulators run only in the test VM (docs/process/mac-ui-vm.md), never on this Mac" "the simulator runs"
   return 2
 }
 

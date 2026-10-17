@@ -33,7 +33,10 @@ meguri-search = { workspace = true, features = ["test-hooks"] }
 meguri-storage = { workspace = true, features = ["test-hooks"] }
 # The sync endpoint guard (R1876) lives in meguri-sync behind test-hooks, so
 # the transport and the harnesses share one rule; exec::sync_guard re-exports it.
-meguri-sync = { workspace = true, features = ["test-hooks"] }
+# ankiweb: every test build has the AnkiWeb rules, with the stand-in names of
+# specs/sync/transport.md T12 (core-lint's scan build checks the build
+# without them).
+meguri-sync = { workspace = true, features = ["ankiweb", "test-hooks"] }
 # The render area's `template` observation (exec/render.rs).
 meguri-template.workspace = true
 meguri-text.workspace = true
@@ -42,7 +45,12 @@ meguri-text.workspace = true
 # (phys_footprint) that bench::memory samples (R1864).
 libc.workspace = true
 rand.workspace = true
+# The sync stub's certificates: a test root and leaves for `.test` names
+# (sync_stub, transport.md T13).
+rcgen.workspace = true
 regex.workspace = true
+# The sync stub's TLS server side, on the provider reqwest uses.
+rustls = { workspace = true, features = ["aws_lc_rs", "tls12"] }
 ryu.workspace = true
 serde.workspace = true
 # raw_value lets observe::parse_json read floats with std's exact parser:
@@ -53,6 +61,8 @@ serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 # The session directory of a scenario that opens a collection.
 tempfile.workspace = true
+# The sync stub's bodies (zstd, transport.md T5, T6).
+zstd.workspace = true
 
 [dev-dependencies]
 # Wall-clock suites (benches/*.rs) and the harness tests that drive them.

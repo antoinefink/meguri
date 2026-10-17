@@ -1,2 +1,4 @@
 # Append-only session records: branches each append lines, so a merge keeps both.
 docs/process/provenance/sessions.jsonl merge=union
+# Append-only escalations (tools/mg escalation, merge): the same rule.
+docs/process/provenance/escalations.jsonl merge=union

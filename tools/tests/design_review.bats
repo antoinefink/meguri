@@ -288,6 +288,37 @@ probe_fixture() {
   [ "$(field -c '.artifacts[] | select(.kind == "registry") | .path' | xargs jq -c '.screens["home.deckList"].platforms')" = '["iphone","mac"]' ]
 }
 
+# bats test_tags=gate
+@test "snapshots on a locked Mac keep the simulators' results and queue the Mac part (host-session); a simulator failure still fails (U19b)" {
+  probe_fixture
+  # The simulators run in the test VM, which needs no host lease; the Mac's
+  # in-process run takes it.
+  cat >>"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
+mg_sim_begin() { MG_SIM_RUNNER=vm; return 0; }
+mg_snapshots__sim_lease() { MG_SNAP_SIM_LEASED=1; return 0; }
+EOF
+  stub ioreg 'echo "+-o Root  <class IORegistryEntry>"; echo "  \"IOConsoleUsers\" = ({\"kCGSSessionOnConsoleKey\"=Yes,\"CGSSessionScreenIsLocked\"=Yes})"'
+  mg snapshots --platform mac,iphone
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '[.details.queued_parts[] | "\(.user_step) \(.part)"] | join(", ")')" = "host-session mac" ]
+  [ "$(field '.failures | length')" = 0 ]
+  called 'mode=verify dest=id=FAKE-iphone suites=all target=iphone '
+  called 'mode=verify dest=id=FAKE-iphone-small suites=all target=iphone-small '
+  not_called 'dest=platform=macOS'
+  [ "$(field .details.counts.pass)" -ge 1 ]
+  [[ "$(field .message)" == *"queued: mac"*"host-session"* ]]
+
+  # A failing iPhone snapshot fails the run, Mac queued or not.
+  result_line home.deckList/typical/light-standard-iphoneLarge fail >>"$FX_RESULTS"
+  mg snapshots --platform mac,iphone
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '[.failures[].id] | unique | join(" ")')" = "snapshot/home.deckList/typical/light-standard-iphoneLarge" ]
+}
+
 @test "a settings group without its probe image fails the run" {
   probe_fixture
   export FX_PLAN="$BATS_TEST_TMPDIR/plan.jsonl" FX_RESULTS_DIR="$BATS_TEST_TMPDIR/by-group"
@@ -565,6 +596,24 @@ EOF
   [ "$(git -C "$wt" log -1 --format=%s)" = "Approve changed signature baselines in the review gallery" ]
   [ "$(git -C "$wt" log -1 --format='%(trailers:key=Approved-by,valueonly)' | sed '/^$/d')" = antoine ]
   [ -z "$(git -C "$wt" status --porcelain -- docs/design)" ]
+}
+
+@test "the gallery shows the key variants, also as a screen renders them with Reduce Transparency" {
+  cat >"$SB/tools/mg.d/zz-gallery-keys.sh" <<'EOF'
+mg_job fx-keys host fx_keys "fixture: key variant names"
+fx_keys() {
+  local p kept=""
+  for p in light-standard-iphoneLarge dark-ax5-ipadRegular+rt light-standard-macDefault dark-ax5-iphoneLarge+hc \
+    light-xxxLarge-ipadRegular+rt light-standard-ipadRegular+rt+rm dark-standard-ipadCompact+rt; do
+    printf 'app/Snapshots/K/s/typical/%s.png\n' "$p" | grep -qE "$MG_GALLERY_KEY_VARIANT" && kept="$kept $p"
+  done
+  mg_detail kept "$(jq -n --arg k "${kept# }" '$k')"
+  mg_status pass
+}
+EOF
+  mg fx-keys
+  [ "$(field .status)" = pass ]
+  [ "$(field .details.kept)" = "light-standard-iphoneLarge dark-ax5-ipadRegular+rt light-standard-macDefault" ]
 }
 
 @test "the gallery takes a baseline's blob only when HEAD holds the file as it is" {

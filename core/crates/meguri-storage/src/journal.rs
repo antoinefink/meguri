@@ -102,6 +102,11 @@ impl ColumnSet {
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
+
+    /// The columns in either set.
+    pub fn union(self, other: ColumnSet) -> ColumnSet {
+        ColumnSet(self.0 | other.0)
+    }
 }
 
 /// A note row after the operation: the SHA-256 of its image (in the
@@ -353,6 +358,11 @@ impl Journal {
             Some(image) => After::Row(image),
             None => After::Absent,
         };
+        self.push(table, key, before, after)
+    }
+
+    /// Adds an entry for a key the journal does not hold yet.
+    fn push(&mut self, table: Table, key: RowKey, before: Option<RowImage>, after: After) -> Result<(), StorageError> {
         let before = match before {
             None => Before::Absent,
             Some(image) => self.keep(image)?,
@@ -371,6 +381,42 @@ impl Journal {
         }
         self.len += 1;
         Ok(())
+    }
+
+    /// The journal of this operation followed by `later`, as if one
+    /// operation had made both (U25: note edits merged into one undo step,
+    /// `engine/undo` A3). Every key either changed, in this journal's order
+    /// and then `later`'s, with the before-image of the first journal that
+    /// changed it and the after-image of the last. A note's changed columns
+    /// are those either operation changed, so they may include one the
+    /// second set back. Before-images are copied and spill as this
+    /// journal's options say.
+    pub fn then(&self, later: &Journal) -> Result<Journal, StorageError> {
+        let mut out = Journal::new(self.options.clone());
+        for entry in self.entries() {
+            let after = match later.entry(entry.table, &entry.key) {
+                None => entry.after.clone(),
+                Some(next) => match (&entry.after, &next.after) {
+                    (After::Note(first), After::Note(second)) => After::Note(NoteDigest {
+                        sha256: second.sha256,
+                        changed: first.changed.union(second.changed),
+                    }),
+                    (_, after) => after.clone(),
+                },
+            };
+            out.push(entry.table, entry.key.clone(), self.before(entry)?, after)?;
+        }
+        for entry in later.entries() {
+            if self.slot(entry.table, &entry.key).is_none() {
+                out.push(
+                    entry.table,
+                    entry.key.clone(),
+                    later.before(entry)?,
+                    entry.after.clone(),
+                )?;
+            }
+        }
+        Ok(out)
     }
 
     /// Remembers the journal's state for a savepoint.

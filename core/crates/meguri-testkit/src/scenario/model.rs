@@ -157,10 +157,51 @@ impl<'de> Deserialize<'de> for NoArgs {
     }
 }
 
-/// `sync: {kind}` (sync-ops.md S4).
+/// `sync: {kind, credentials?}` (sync-ops.md S4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncSpec {
     pub kind: SyncKind,
+    /// What a `login` sends (S4.5); `Account` for every other kind.
+    pub credentials: Credentials,
+}
+
+impl SyncSpec {
+    /// The rejections a sync step records (S4.4, dsl.md D7.2): the list a
+    /// Meguri sync adapter registers with `Registry::op_rejecting`.
+    pub const REJECTIONS: [&'static str; 3] = ["auth_failed", "clock_incorrect", "network"];
+}
+
+/// How a `login` derives its credentials from the scenario's account
+/// (sync-ops.md S4.5). A scenario never names a credential.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Credentials {
+    /// The account's user name and password.
+    #[default]
+    Account,
+    /// The account's user name with its password followed by `-wrong`: the
+    /// server refuses it (`auth_failed`).
+    WrongPassword,
+}
+
+impl Credentials {
+    /// What `wrong_password` appends to the account's password (S4.5).
+    pub const WRONG_PASSWORD_SUFFIX: &'static str = "-wrong";
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Credentials::Account => "account",
+            Credentials::WrongPassword => "wrong_password",
+        }
+    }
+
+    /// The password a login with these credentials sends for an account
+    /// whose password is `password`.
+    pub fn password(self, password: &str) -> String {
+        match self {
+            Credentials::Account => password.to_owned(),
+            Credentials::WrongPassword => format!("{password}{}", Credentials::WRONG_PASSWORD_SUFFIX),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -170,6 +211,9 @@ pub enum SyncKind {
     Normal,
     FullUpload,
     FullDownload,
+    /// The sync status (S4.1; `specs/sync/meta-status.md` M6): results
+    /// `no_changes`, `normal_sync` or `full_sync`; it syncs nothing.
+    Status,
 }
 
 impl SyncKind {
@@ -179,6 +223,7 @@ impl SyncKind {
             SyncKind::Normal => "normal",
             SyncKind::FullUpload => "full_upload",
             SyncKind::FullDownload => "full_download",
+            SyncKind::Status => "status",
         }
     }
 }
@@ -190,9 +235,31 @@ impl<'de> Deserialize<'de> for SyncSpec {
         struct Raw {
             kind: SyncKind,
         }
-        let map = mapping(deserializer, "sync")?;
+        let mut map = mapping(deserializer, "sync")?;
+        // Read by hand, so its errors name the argument and a present
+        // `credentials: null` is not taken for a missing one.
+        let credentials = map.remove("credentials");
         let raw: Raw = serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)?;
-        Ok(SyncSpec { kind: raw.kind })
+        let credentials = match credentials {
+            None => Credentials::Account,
+            Some(_) if raw.kind != SyncKind::Login => {
+                return Err(de::Error::custom(format!(
+                    "sync {}: credentials are allowed only with kind login (sync-ops.md S4.5)",
+                    raw.kind.as_str()
+                )));
+            }
+            Some(Value::String(text)) if text == "account" => Credentials::Account,
+            Some(Value::String(text)) if text == "wrong_password" => Credentials::WrongPassword,
+            Some(other) => {
+                return Err(de::Error::custom(format!(
+                    "sync credentials {other} is not account or wrong_password (sync-ops.md S4.5)"
+                )));
+            }
+        };
+        Ok(SyncSpec {
+            kind: raw.kind,
+            credentials,
+        })
     }
 }
 
@@ -443,7 +510,7 @@ pub struct NotetypeSpec {
     pub css: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemplateSpec {
     pub name: String,
@@ -538,6 +605,186 @@ pub struct LegacyUpdate {
     pub patch: Map<String, Value>,
 }
 
+/// The six stock kinds of `add_stock_notetype` (notetype-ops.md T3;
+/// `notetypes/stock-kinds` K1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StockKind {
+    Basic,
+    BasicAndReversed,
+    BasicOptionalReversed,
+    BasicTyping,
+    Cloze,
+    ImageOcclusion,
+}
+
+/// `add_stock_notetype: {kind, name?}` (notetype-ops.md T3): `name` not
+/// empty (checked on load), the kind's name when missing.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddStockNotetypeArgs {
+    pub kind: StockKind,
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+}
+
+/// `clone_notetype: {notetype, name?}` (notetype-ops.md T4): both not empty
+/// (checked on load); `<notetype> copy` when `name` is missing.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CloneNotetypeArgs {
+    pub notetype: String,
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+}
+
+/// `update_notetype: {notetype, edits, skip_checks?}` (notetype-ops.md T5):
+/// `notetype` not empty (checked on load); the edits apply in order to one
+/// draft, saved once.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateNotetypeArgs {
+    pub notetype: String,
+    pub edits: Vec<NotetypeEdit>,
+    #[serde(default)]
+    pub skip_checks: bool,
+}
+
+/// One edit of `update_notetype` (notetype-ops.md T5): a mapping with exactly
+/// one key. Field and template names refer to the draft as the earlier edits
+/// left it; they are resolved when the step runs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotetypeEdit {
+    Rename(String),
+    Css(String),
+    SortField(String),
+    AddField(String),
+    RemoveField(String),
+    #[serde(deserialize_with = "op_mapping")]
+    RenameField(RenamePair),
+    #[serde(deserialize_with = "op_mapping")]
+    MoveField(MoveFieldEdit),
+    #[serde(deserialize_with = "op_mapping")]
+    FieldOptions(FieldOptionsEdit),
+    /// `{name, front?, back?}`, texts empty when missing.
+    #[serde(deserialize_with = "op_mapping")]
+    AddTemplate(TemplateSpec),
+    RemoveTemplate(String),
+    #[serde(deserialize_with = "op_mapping")]
+    RenameTemplate(RenamePair),
+    #[serde(deserialize_with = "op_mapping")]
+    MoveTemplate(MoveTemplateEdit),
+    #[serde(deserialize_with = "op_mapping")]
+    Template(TemplateEdit),
+}
+
+impl NotetypeEdit {
+    /// The edit's key as written in scenarios.
+    pub fn key(&self) -> &'static str {
+        match self {
+            NotetypeEdit::Rename(_) => "rename",
+            NotetypeEdit::Css(_) => "css",
+            NotetypeEdit::SortField(_) => "sort_field",
+            NotetypeEdit::AddField(_) => "add_field",
+            NotetypeEdit::RemoveField(_) => "remove_field",
+            NotetypeEdit::RenameField(_) => "rename_field",
+            NotetypeEdit::MoveField(_) => "move_field",
+            NotetypeEdit::FieldOptions(_) => "field_options",
+            NotetypeEdit::AddTemplate(_) => "add_template",
+            NotetypeEdit::RemoveTemplate(_) => "remove_template",
+            NotetypeEdit::RenameTemplate(_) => "rename_template",
+            NotetypeEdit::MoveTemplate(_) => "move_template",
+            NotetypeEdit::Template(_) => "template",
+        }
+    }
+
+    /// The capability the edit needs (notetype-ops.md T10.1):
+    /// `update_notetype.<key>`, and `update_notetype.template_text` for a
+    /// `template` edit that sets `front` or `back`.
+    pub fn capability(&self) -> String {
+        match self {
+            NotetypeEdit::Template(t) if t.front.is_some() || t.back.is_some() => {
+                "update_notetype.template_text".to_owned()
+            }
+            other => format!("update_notetype.{}", other.key()),
+        }
+    }
+}
+
+/// `{from, to}` of `rename_field` and `rename_template`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenamePair {
+    pub from: String,
+    pub to: String,
+}
+
+/// `move_field: {field, to}`: `to` a 0-based position of the draft's
+/// fields, checked when the step runs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveFieldEdit {
+    pub field: String,
+    pub to: u64,
+}
+
+/// `move_template: {template, to}`: `to` a 0-based position.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoveTemplateEdit {
+    pub template: String,
+    pub to: u64,
+}
+
+/// `field_options: {field, ...}`: the options given (`model/protobuf-records`
+/// P6.2 names); missing ones stay as they are.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldOptionsEdit {
+    pub field: String,
+    #[serde(default, deserialize_with = "present")]
+    pub sticky: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub rtl: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub font_name: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub font_size: Option<u64>,
+    #[serde(default, deserialize_with = "present")]
+    pub description: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub plain_text: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub collapsed: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub exclude_from_search: Option<bool>,
+}
+
+/// `template: {name, ...}`: the values given for the named template; missing
+/// ones stay as they are.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateEdit {
+    pub name: String,
+    #[serde(default, deserialize_with = "present")]
+    pub front: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub back: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_front: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_back: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_font_name: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub browser_font_size: Option<u64>,
+    /// The deck override: `None` when missing (kept), `Some(None)` for null
+    /// (cleared), `Some(Some(name))` to set it.
+    #[serde(default, deserialize_with = "present")]
+    pub deck: Option<Option<String>>,
+}
+
 /// `open: {fixture}` (storage-ops.md P1.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenSpec {
@@ -616,8 +863,32 @@ pub enum Step {
     EditNote(EditNoteArgs),
     /// record-ops.md W3.
     DeleteNotes(DeleteNotesArgs),
-    /// record-ops.md W4.
+    /// record-ops.md W4; `undoable`: undo-ops.md V3.1.
     SetConfig(SetConfigArgs),
+    /// undo-ops.md V3.2.
+    RemoveConfig(RemoveConfigArgs),
+    /// undo-ops.md V1: the top step of the undo history.
+    Undo(NoArgs),
+    /// undo-ops.md V1: the top step of the redo history.
+    Redo(NoArgs),
+    /// tag-ops.md G1.
+    AddNoteTags(NoteTagsArgs),
+    /// tag-ops.md G2.
+    RemoveNoteTags(NoteTagsArgs),
+    /// tag-ops.md G3.
+    DeleteTags(DeleteTagsArgs),
+    /// tag-ops.md G4.
+    RenameTag(RenameTagArgs),
+    /// tag-ops.md G5.
+    ReparentTags(ReparentTagsArgs),
+    /// tag-ops.md G6.
+    ClearUnusedTags(NoArgs),
+    /// tag-ops.md G7.
+    SetTagCollapsed(SetTagCollapsedArgs),
+    /// tag-ops.md G8.
+    SetFlag(SetFlagArgs),
+    /// browser-config-ops.md B1.
+    BrowserConfigSet(BrowserConfigSetArgs),
     Bury(DraftArgs),
     Suspend(DraftArgs),
     Forget(DraftArgs),
@@ -626,6 +897,20 @@ pub enum Step {
     UpdatePreset(DraftArgs),
     /// model-ops.md L2.
     LegacyUpdate(LegacyUpdate),
+    /// notetype-ops.md T2: shaped as a `setup.notetypes` entry.
+    #[serde(deserialize_with = "op_mapping")]
+    AddNotetype(NotetypeSpec),
+    /// notetype-ops.md T3.
+    #[serde(deserialize_with = "op_mapping")]
+    AddStockNotetype(AddStockNotetypeArgs),
+    /// notetype-ops.md T4.
+    #[serde(deserialize_with = "op_mapping")]
+    CloneNotetype(CloneNotetypeArgs),
+    /// notetype-ops.md T5.
+    #[serde(deserialize_with = "op_mapping")]
+    UpdateNotetype(UpdateNotetypeArgs),
+    /// notetype-ops.md T6.
+    EnsureIoNotetype(NoArgs),
     BuildFiltered(DraftArgs),
     Import(DraftArgs),
     Export(DraftArgs),
@@ -685,7 +970,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 38] = [
+    pub const NAMES: [&'static str; 55] = [
         "advance",
         "set_clock",
         "add_note",
@@ -694,6 +979,18 @@ impl Step {
         "edit_note",
         "delete_notes",
         "set_config",
+        "remove_config",
+        "undo",
+        "redo",
+        "add_note_tags",
+        "remove_note_tags",
+        "delete_tags",
+        "rename_tag",
+        "reparent_tags",
+        "clear_unused_tags",
+        "set_tag_collapsed",
+        "set_flag",
+        "browser_config_set",
         "bury",
         "suspend",
         "forget",
@@ -701,6 +998,11 @@ impl Step {
         "reposition",
         "update_preset",
         "legacy_update",
+        "add_notetype",
+        "add_stock_notetype",
+        "clone_notetype",
+        "update_notetype",
+        "ensure_io_notetype",
         "build_filtered",
         "import",
         "export",
@@ -740,6 +1042,18 @@ impl Step {
             Step::EditNote(_) => "edit_note",
             Step::DeleteNotes(_) => "delete_notes",
             Step::SetConfig(_) => "set_config",
+            Step::RemoveConfig(_) => "remove_config",
+            Step::Undo(_) => "undo",
+            Step::Redo(_) => "redo",
+            Step::AddNoteTags(_) => "add_note_tags",
+            Step::RemoveNoteTags(_) => "remove_note_tags",
+            Step::DeleteTags(_) => "delete_tags",
+            Step::RenameTag(_) => "rename_tag",
+            Step::ReparentTags(_) => "reparent_tags",
+            Step::ClearUnusedTags(_) => "clear_unused_tags",
+            Step::SetTagCollapsed(_) => "set_tag_collapsed",
+            Step::SetFlag(_) => "set_flag",
+            Step::BrowserConfigSet(_) => "browser_config_set",
             Step::Bury(_) => "bury",
             Step::Suspend(_) => "suspend",
             Step::Forget(_) => "forget",
@@ -747,6 +1061,11 @@ impl Step {
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
             Step::LegacyUpdate(_) => "legacy_update",
+            Step::AddNotetype(_) => "add_notetype",
+            Step::AddStockNotetype(_) => "add_stock_notetype",
+            Step::CloneNotetype(_) => "clone_notetype",
+            Step::UpdateNotetype(_) => "update_notetype",
+            Step::EnsureIoNotetype(_) => "ensure_io_notetype",
             Step::BuildFiltered(_) => "build_filtered",
             Step::Import(_) => "import",
             Step::Export(_) => "export",
@@ -927,11 +1246,89 @@ pub struct DeleteNotesArgs {
     pub notes: Vec<NoteRef>,
 }
 
-/// `set_config: {key, value}` (record-ops.md W4): `key` not empty (checked
-/// on load), `value` any JSON value, null included.
+/// `set_config: {key, value, undoable?}` (record-ops.md W4): `key` not
+/// empty (checked on load), `value` any JSON value, null included.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SetConfigArgs {
+    pub key: String,
+    pub value: Value,
+    /// undo-ops.md V3.1: true makes the write an "Update Config" undo step;
+    /// false when missing (an explicit null is invalid).
+    #[serde(default)]
+    pub undoable: bool,
+}
+
+/// `remove_config: {key}` (undo-ops.md V3.2): `key` not empty (checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveConfigArgs {
+    pub key: String,
+}
+
+/// `add_note_tags` and `remove_note_tags: {notes, tags}` (tag-ops.md G1,
+/// G2): at least one note (checked on load); `tags` the tag text as a caller
+/// gives it, which the executor splits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoteTagsArgs {
+    pub notes: Vec<NoteRef>,
+    pub tags: String,
+}
+
+/// `delete_tags: {tags}` (tag-ops.md G3): the tag text of the names to
+/// delete.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteTagsArgs {
+    pub tags: String,
+}
+
+/// `rename_tag: {from, to}` (tag-ops.md G4): `from` one non-empty name
+/// without U+0020 or U+3000 (checked on load); `to` the new name as typed.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenameTagArgs {
+    pub from: String,
+    pub to: String,
+}
+
+/// `reparent_tags: {tags, parent}` (tag-ops.md G5): at least one source,
+/// each non-empty (checked on load); `parent` the target, empty for the top
+/// level.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReparentTagsArgs {
+    pub tags: Vec<String>,
+    pub parent: String,
+}
+
+/// `set_tag_collapsed: {tags, collapsed}` (tag-ops.md G7): at least one
+/// name, each non-empty (checked on load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetTagCollapsedArgs {
+    pub tags: Vec<String>,
+    pub collapsed: bool,
+}
+
+/// `set_flag: {cards, flag}` (tag-ops.md G8): at least one card (checked on
+/// load); `flag` an integer from 0, a value above 7 being the executor's
+/// `invalid_flag` rejection.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetFlagArgs {
+    pub cards: Vec<CardRef>,
+    pub flag: u64,
+}
+
+/// `browser_config_set: {key, value}` (browser-config-ops.md B1): `key` one
+/// of the 22 browser config keys, `value` of its shape (both checked on
+/// load).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserConfigSetArgs {
     pub key: String,
     pub value: Value,
 }
@@ -1264,6 +1661,8 @@ pub enum ObservationKind {
     /// deck-ops.md K11.
     Decks,
     Render,
+    /// render-ops.md Q4.
+    RenderStatus,
     /// render-ops.md Q1.
     Template,
     /// search-ops.md S1.
@@ -1279,10 +1678,18 @@ pub enum ObservationKind {
     BlobDecode,
     PackageCol,
     Text,
+    /// undo-ops.md V2.
+    UndoStatus,
     /// cloze-ops.md Z1.
     Cloze,
     /// float-determinism.md F5.
     FsrsNext,
+    /// tag-ops.md G9.
+    TagTree,
+    /// browser-config-ops.md B2.
+    BrowserConfig,
+    /// notetype-ops.md T8.
+    NotetypeStructure,
 }
 
 /// How a kind takes arguments.
@@ -1303,7 +1710,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 24] = [
+    pub const ALL: [ObservationKind; 29] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1315,6 +1722,7 @@ impl ObservationKind {
         ObservationKind::DeckTree,
         ObservationKind::Decks,
         ObservationKind::Render,
+        ObservationKind::RenderStatus,
         ObservationKind::Template,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
@@ -1326,8 +1734,12 @@ impl ObservationKind {
         ObservationKind::BlobDecode,
         ObservationKind::PackageCol,
         ObservationKind::Text,
+        ObservationKind::UndoStatus,
         ObservationKind::Cloze,
         ObservationKind::FsrsNext,
+        ObservationKind::TagTree,
+        ObservationKind::BrowserConfig,
+        ObservationKind::NotetypeStructure,
     ];
 
     pub fn name(self) -> &'static str {
@@ -1343,6 +1755,7 @@ impl ObservationKind {
             ObservationKind::DeckTree => "deck_tree",
             ObservationKind::Decks => "decks",
             ObservationKind::Render => "render",
+            ObservationKind::RenderStatus => "render_status",
             ObservationKind::Template => "template",
             ObservationKind::Search => "search",
             ObservationKind::CanonicalSearch => "canonical_search",
@@ -1354,8 +1767,12 @@ impl ObservationKind {
             ObservationKind::BlobDecode => "blob_decode",
             ObservationKind::PackageCol => "package_col",
             ObservationKind::Text => "text",
+            ObservationKind::UndoStatus => "undo_status",
             ObservationKind::Cloze => "cloze",
             ObservationKind::FsrsNext => "fsrs_next",
+            ObservationKind::TagTree => "tag_tree",
+            ObservationKind::BrowserConfig => "browser_config",
+            ObservationKind::NotetypeStructure => "notetype_structure",
         }
     }
 
@@ -1370,10 +1787,15 @@ impl ObservationKind {
             | ObservationKind::DeckTree
             | ObservationKind::Decks
             | ObservationKind::Digest
-            | ObservationKind::SchemaObjects => ArgShape::None,
-            ObservationKind::Card | ObservationKind::Revlog | ObservationKind::NextStates | ObservationKind::Render => {
-                ArgShape::CardRefs
-            }
+            | ObservationKind::SchemaObjects
+            | ObservationKind::UndoStatus
+            | ObservationKind::TagTree
+            | ObservationKind::BrowserConfig => ArgShape::None,
+            ObservationKind::Card
+            | ObservationKind::Revlog
+            | ObservationKind::NextStates
+            | ObservationKind::Render
+            | ObservationKind::RenderStatus => ArgShape::CardRefs,
             ObservationKind::FuzzTable
             | ObservationKind::NetProbe
             | ObservationKind::LegacyJson
@@ -1383,7 +1805,10 @@ impl ObservationKind {
             | ObservationKind::Text
             | ObservationKind::Cloze
             | ObservationKind::FsrsNext => ArgShape::Mapping,
-            ObservationKind::Queue | ObservationKind::DbDump | ObservationKind::Stats => ArgShape::OptionalMapping,
+            ObservationKind::Queue
+            | ObservationKind::DbDump
+            | ObservationKind::Stats
+            | ObservationKind::NotetypeStructure => ArgShape::OptionalMapping,
             ObservationKind::Search | ObservationKind::CanonicalSearch => ArgShape::List,
         }
     }
@@ -1408,6 +1833,24 @@ pub struct ObservationRequest {
 }
 
 impl ObservationRequest {
+    /// D8: the kinds that never read a collection, `text`, `cloze`,
+    /// `fsrs_next` and `canonical_search`, and `template` when every case is
+    /// a new-note case.
+    pub fn reads_no_collection(&self) -> bool {
+        match self.kind {
+            ObservationKind::Text
+            | ObservationKind::Cloze
+            | ObservationKind::FsrsNext
+            | ObservationKind::CanonicalSearch => true,
+            ObservationKind::Template => match &self.args {
+                ObservationArgs::Mapping(map) => TemplateRequest::from_mapping(map)
+                    .is_ok_and(|request| request.cases.iter().all(|c| matches!(c, TemplateCase::NewNote(_)))),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     fn parse_text(text: &str) -> Result<ObservationRequest, FormatError> {
         let bad = || FormatError::new(format!("observation {text:?} must look like name or name(#c1, ...)"));
         let trimmed = text.trim();
@@ -2206,6 +2649,10 @@ impl<'de> Deserialize<'de> for ObservationRequest {
     }
 }
 
+/// The new collection a scenario starts from as a capability (D8), listed
+/// with the setup sections.
+pub const NEW_COLLECTION: &str = "new_collection";
+
 /// What a scenario uses: the capabilities an executor needs to run it (D8).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Needs {
@@ -2243,12 +2690,33 @@ impl Scenario {
         Ok(scenario)
     }
 
-    /// The setup sections, ops and observation kinds the scenario uses.
+    /// The setup sections, ops and observation kinds the scenario uses, and
+    /// the new collection it starts from (D8).
     pub fn needs(&self) -> Needs {
         let mut needs = Needs::default();
+        if self.starts_from_new_collection() {
+            needs.setup.insert(NEW_COLLECTION.to_owned());
+        }
         needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
         add_step_needs(&mut needs, &self.steps);
         needs
+    }
+
+    /// Whether a run starts from a new collection made at `clock.start`
+    /// (D8): unless its first step is `open`, or it has no setup and no step
+    /// touches a collection (only `advance`, `set_clock` and observations of
+    /// kinds that never read one).
+    pub fn starts_from_new_collection(&self) -> bool {
+        if self.starts_with_open() {
+            return false;
+        }
+        !self.setup.sections().is_empty() || self.steps.iter().any(touches_collection)
+    }
+
+    /// storage-ops.md P1: the scenario replaces its collection with a fixture
+    /// before anything else.
+    pub fn starts_with_open(&self) -> bool {
+        matches!(self.steps.first(), Some(Step::Open(_)))
     }
 
     /// A live scenario has handoff steps (D9.2) or actors (D9.3): only T1
@@ -2284,16 +2752,18 @@ impl Scenario {
     }
 
     /// What Meguri needs to play the Meguri actors of an actor scenario
-    /// (sync-ops.md S10.2): the op `actor`; the setup sections when the first
-    /// actor is a Meguri actor; the ops and observation kinds of the steps
-    /// Meguri actors run; `advance` and `set_clock` when the scenario uses
-    /// them; `db_dump` for `converge`. Nothing without a Meguri actor.
+    /// (sync-ops.md S10.2): the op `actor`; the new collection each of them
+    /// starts from (S2.2, D8); the setup sections when the first actor is a
+    /// Meguri actor; the ops and observation kinds of the steps Meguri actors
+    /// run; `advance` and `set_clock` when the scenario uses them; `db_dump`
+    /// for `converge`. Nothing without a Meguri actor.
     pub fn needs_of_meguri_actors(&self) -> Needs {
         let mut needs = Needs::default();
         if !self.actors().iter().any(ActorName::is_meguri) {
             return needs;
         }
         needs.ops.insert("actor".to_owned());
+        needs.setup.insert(NEW_COLLECTION.to_owned());
         if self.actors()[0].is_meguri() {
             needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
         }
@@ -2345,13 +2815,17 @@ impl Scenario {
         segments
     }
 
-    /// What one side needs to run its segments of a live scenario: the setup
-    /// sections when it runs the first segment, the ops and observations of
-    /// its segments, and `handoff`.
+    /// What one side needs to run its segments of a live scenario: the new
+    /// collection (unless the first step is `open`) and the setup sections
+    /// when it runs the first segment (D9.2), the ops and observations of its
+    /// segments, and `handoff`.
     pub fn needs_on(&self, side: Side) -> Needs {
         let mut needs = Needs::default();
         for (i, segment) in self.segments().iter().enumerate().filter(|(_, s)| s.side == side) {
             if i == 0 {
+                if !self.starts_with_open() {
+                    needs.setup.insert(NEW_COLLECTION.to_owned());
+                }
                 needs.setup.extend(self.setup.sections().into_iter().map(str::to_owned));
             }
             add_step_needs(&mut needs, &self.steps[segment.steps.clone()]);
@@ -2374,6 +2848,17 @@ impl Scenario {
     }
 }
 
+/// D8: a step that reads or writes the scenario's collection. Only `advance`,
+/// `set_clock` and observations of kinds that never read a collection leave
+/// it alone.
+fn touches_collection(step: &Step) -> bool {
+    match step {
+        Step::Advance(_) | Step::SetClock(_) => false,
+        Step::Observe(requests) => requests.iter().any(|r| !r.reads_no_collection()),
+        _ => true,
+    }
+}
+
 fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
     for step in steps {
         match step {
@@ -2381,6 +2866,11 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
                 needs
                     .observations
                     .extend(requests.iter().map(|r| r.kind.name().to_owned()));
+            }
+            // notetype-ops.md T10.1: the op and a capability per kind of edit.
+            Step::UpdateNotetype(args) => {
+                needs.ops.insert(step.name().to_owned());
+                needs.ops.extend(args.edits.iter().map(NotetypeEdit::capability));
             }
             other => {
                 needs.ops.insert(other.name().to_owned());

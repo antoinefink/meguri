@@ -1,0 +1,57 @@
+# The sync status (R1559; specs/sync/meta-status.md M5, M6) answered offline
+# when the collection's stamps decide it, from the remembered answer for 300 s,
+# and from the server otherwise. Steps that must not touch the network run
+# with every connection to the server reset (net_fault), so an answer there
+# proves no request was made; once the remembered answer is 300 s old the same
+# request fails with `network`.
+# - A collection that never synced against an account that holds nothing: the
+#   server is asked, and both modification times are 0, so no_changes.
+# - The answer of a sync is remembered: no_changes at 299 s, a request at 300 s.
+# - A one-way sync needed by the server's state is found online.
+# - After a download, nothing pending: no_changes without a request.
+# - A local change: normal_sync without a request.
+# - A local schema time past the last sync: full_sync without a request.
+id: sync/meta/status
+clock: {tz: UTC, start: "2030-01-15T10:00:00", mode: step}
+actors: [client_a, meguri]
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+  notes: [{notetype: Pair, deck: Words, fields: [sun, sol]}]
+steps:
+  - actor: meguri
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: status}
+  - sync: {kind: normal}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
+  - actor: client_a
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: full_upload}
+  - actor: meguri
+  - net_fault: {kind: reset, direction: to_server}
+  - sync: {kind: status}
+  - advance: 3m59s
+  - sync: {kind: status}
+  - advance: 1s
+  - sync: {kind: status}
+  - net_fault: {kind: clear}
+  - sync: {kind: status}
+  - sync: {kind: full_download}
+  - net_fault: {kind: reset, direction: to_server}
+  - sync: {kind: status}
+  - advance: 1m
+  - add_note: {notetype: Pair, deck: Words, fields: [moon, luna]}
+  - sync: {kind: status}
+  - net_fault: {kind: clear}
+  - sync: {kind: normal}
+  - net_fault: {kind: reset, direction: to_server}
+  - sync: {kind: status}
+  - db_exec: {sql: "UPDATE col SET scm = ls + 1000"}
+  - sync: {kind: status}
+  - net_fault: {kind: clear}
+  - db_exec: {sql: "SELECT mod, scm, ls, usn FROM col"}
