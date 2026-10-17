@@ -8,6 +8,7 @@ mod browser;
 pub mod clock;
 pub mod live;
 mod meguri;
+mod notetypes;
 mod oracle;
 pub mod parties;
 mod render;

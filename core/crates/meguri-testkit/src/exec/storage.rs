@@ -16,8 +16,12 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use meguri_model::col::Col;
+use meguri_model::config::ConfigEntry;
 use meguri_storage::raw::{RawRows, SqlValue};
-use meguri_storage::{ConfigValue, OpenError, OpenOptions, OpenedCollection, StampMode, open_collection};
+use meguri_storage::{
+    CollectionBuilder, ConfigValue, OpenError, OpenOptions, OpenedCollection, StampMode, WriteScope, open_collection,
+};
 use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -317,6 +321,34 @@ fn write_config(session: &mut Session<'_>, key: &str, value: &Value) -> Result<(
         super::sched::day_query_now(session)?;
     }
     Ok(())
+}
+
+/// The storage area's create path for a new collection (dsl.md D6): the
+/// storage-only builder makes the session's `collection.anki2` with this
+/// `col` row and these config rows, `fill` writes the first rows in one
+/// scope that writes them as given (`CallerSupplied`), and the file is
+/// closed and opened through the gate. The open runs no day query
+/// (`sched/day-clock` D14.2).
+pub(super) fn create_collection(
+    session: &mut Session<'_>,
+    col: &Col,
+    config: &[ConfigEntry],
+    fill: impl FnOnce(&mut WriteScope<'_>) -> Result<(), ExecError>,
+) -> Result<(), ExecError> {
+    session.storage.close()?;
+    let path = session.storage.dir()?.join(COLLECTION);
+    let builder = CollectionBuilder::create(&path, col, config, &OpenOptions::new(&*session.clock, &*session.random))
+        .map_err(|e| core(format!("creating the new collection: {e}")))?;
+    let mut scope = builder
+        .begin(StampMode::CallerSupplied, &*session.clock)
+        .map_err(core)?;
+    fill(&mut scope)?;
+    scope.commit().map_err(core)?;
+    builder.finish().map_err(core)?;
+    let collection = open_collection(&path, &OpenOptions::new(&*session.clock, &*session.random))
+        .map_err(|e| core(format!("opening the new collection: {e}")))?;
+    session.day.clear();
+    session.storage.opened(collection)
 }
 
 /// sync-ops.md S6: closes the session's collection and opens it again from

@@ -82,15 +82,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         }
     }
     for notetype in s.setup.notetypes.iter().flatten() {
-        if notetype.name.is_empty() {
-            return Err(empty("a note type name"));
-        }
-        if notetype.fields.is_empty() {
-            return Err(empty(&format!("note type {:?}'s field list", notetype.name)));
-        }
-        if notetype.templates.is_empty() {
-            return Err(empty(&format!("note type {:?}'s template list", notetype.name)));
-        }
+        notetype_spec(notetype)?;
     }
     actors(s)?;
     opens(s)?;
@@ -103,6 +95,7 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         if let Step::LegacyUpdate(update) = step {
             legacy_update(update).map_err(at)?;
         }
+        notetype_op(step).map_err(at)?;
         record_op(step).map_err(at)?;
         tag_op(step).map_err(at)?;
         browser_config_op(step).map_err(at)?;
@@ -347,6 +340,43 @@ fn legacy_update(update: &LegacyUpdate) -> Result<(), FormatError> {
     Ok(())
 }
 
+/// A `setup.notetypes` entry or `add_notetype` (dsl.md D6.4,
+/// notetype-ops.md T2): a non-empty name, field list and template list.
+fn notetype_spec(notetype: &super::model::NotetypeSpec) -> Result<(), FormatError> {
+    let empty = |what: &str| Err(FormatError::new(format!("{what} must not be empty")));
+    if notetype.name.is_empty() {
+        return empty("a note type name");
+    }
+    if notetype.fields.is_empty() {
+        return empty(&format!("note type {:?}'s field list", notetype.name));
+    }
+    if notetype.templates.is_empty() {
+        return empty(&format!("note type {:?}'s template list", notetype.name));
+    }
+    Ok(())
+}
+
+/// notetype-ops.md T2-T5: what the schema requires beyond the types (note
+/// types named by non-empty names).
+fn notetype_op(step: &Step) -> Result<(), FormatError> {
+    let named = |names: &[Option<&String>]| {
+        if names.iter().flatten().any(|name| name.is_empty()) {
+            return Err(FormatError::new(format!(
+                "{}: a note type name must not be empty",
+                step.name()
+            )));
+        }
+        Ok(())
+    };
+    match step {
+        Step::AddNotetype(spec) => notetype_spec(spec),
+        Step::AddStockNotetype(args) => named(&[args.name.as_ref()]),
+        Step::CloneNotetype(args) => named(&[Some(&args.notetype), args.name.as_ref()]),
+        Step::UpdateNotetype(args) => named(&[Some(&args.notetype)]),
+        _ => Ok(()),
+    }
+}
+
 /// model-ops.md L6: an export with `legacy` is exactly
 /// `{format: apkg, name: <package file name>, legacy: true}`. Other forms stay
 /// draft (D7.2).
@@ -527,6 +557,15 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
                         return bad(&format!("table {name} is listed twice"));
                     }
                 }
+            }
+        }
+        // notetype-ops.md T8.
+        ObservationKind::NotetypeStructure => {
+            let names_ok = map.get("notetypes").and_then(Value::as_array).is_some_and(|names| {
+                !names.is_empty() && names.iter().all(|n| n.as_str().is_some_and(|n| !n.is_empty()))
+            });
+            if map.len() != 1 || !names_ok {
+                return bad("takes {notetypes}, a non-empty list of note type names");
             }
         }
         _ => {}

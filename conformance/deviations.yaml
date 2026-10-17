@@ -76,6 +76,25 @@ deviations:
     scenarios: [storage/config/other-bytes-kept]
     pointer: /steps/4/db_exec/rows
     transform: {replace: [[3, 1700000000, 1]]}
+  # specs/notetypes/records.md N3.1: saving a note type that did not change
+  # writes nothing; Anki stamps it (mtime_secs now, usn -1) and moves col.mod.
+  - id: notetype-unchanged-save
+    requirement: R906
+    summary: Saving the note type Pair with no edit keeps its synced stamps (mtime_secs 1700000000, usn 5) and col.mod.
+    test: notetypes/records/stamps
+    scenarios: [notetypes/records/stamps]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [[1700000000, 5, 1700000000000, 1600000000000, 1700000000000]]}
+  # specs/notetypes/records.md N1, N3.2 and specs/model/protobuf-records.md P4:
+  # unknown protobuf fields of a note type, its fields and its templates
+  # survive a save; Anki drops them from every row of the saved note type.
+  - id: notetype-unknown-fields-kept
+    requirement: R1485
+    summary: After a styling change, the note type's, its first field's and its first template's config still end with the unknown fields the scenario appended.
+    test: notetypes/records/preserve-on-edit
+    scenarios: [notetypes/records/preserve-on-edit]
+    pointer: /steps/7/db_exec/rows
+    transform: {replace: [[1, 1, 1]]}
   # specs/engine/undo.md A8: a redo whose rows changed outside the undo
   # history (here a trigger took the answer's review-log id) is refused by
   # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row

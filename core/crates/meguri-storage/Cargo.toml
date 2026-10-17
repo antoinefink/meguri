@@ -84,5 +84,9 @@ name = "snapshots"
 required-features = ["test-hooks"]
 
 [[test]]
+name = "derived_store"
+required-features = ["test-hooks"]
+
+[[test]]
 name = "day_writes"
 required-features = ["test-hooks"]

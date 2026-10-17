@@ -1,18 +1,17 @@
 # specs/conformance/dsl.md D9.1. Active: Meguri must pass them (T1 for the
 # live chain). They need only the browser adapters (meguri-testkit
-# exec/browser.rs, U83), the clock and the storage area: the four T0
-# scenarios open the schema-18 storage fixture, and config/live-roundtrip's
-# Meguri segment opens the collection the oracle hands over
+# exec/browser.rs, U83), the clock and the storage area: four T0 scenarios
+# open the schema-18 storage fixture, and config/live-roundtrip's Meguri
+# segment opens the collection the oracle hands over
 # (specs/browser/config-keys.md K13). config/new-collection starts from the
-# new collection (dsl.md D8); U28, which gives Meguri's executor that
-# collection, activates it here (docs/process/review-log/U83.md, A1).
-# Meanwhile core/crates/meguri-testkit/tests/browser_config_conformance.rs
-# plays it on Meguri's executor against its golden, with the fixture
-# standing in.
+# executor's new collection (dsl.md D8): until U28's bootstrap, the note
+# type area's stand-in (specs/conformance/notetype-ops.md T10.2), which
+# holds K1's sortType and sortBackwards.
 area: browser
 active:
   - "config/absent-defaults"
   - "config/live-roundtrip"
+  - "config/new-collection"
   - "config/other-keys-untouched"
   - "config/write-shapes"
   - "config/wrong-shapes"

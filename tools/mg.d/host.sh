@@ -8,8 +8,17 @@
 # VM's lease, which works the same way (mg__lease_try). Holding the host
 # lease, the job checks that the macOS session is unlocked and a display
 # awake, and keeps the display awake (caffeinate) until it ends; a locked or
-# sleeping Mac makes the job report `blocked: host` (status error, user step
-# host-session), never fail.
+# sleeping Mac queues the job (`blocked: host`, user step host-session),
+# never fail.
+#
+# The machine's state queues a run, never fails or errs it (U19b): the host
+# session (host-session), macOS dropping the input XCUITest synthesizes
+# (mac-input, app.sh) and a missing test VM (mac-vm, mac-vm.sh). A job
+# records each part that could not run with mg_queued_part and keeps the
+# results of the parts that did; a job with partial results ends with
+# mg_queued_settle, so a failure stays fail and an error error, and only a
+# run with nothing else wrong is queued (warn, details.queued). tools/mg
+# merge queues such runs for tools/mg catch-up (catch-up.sh).
 #
 # Mac UI suites (Mac XCUITest) run in the macOS test VM (mac-vm.sh), as often
 # as needed: they take the VM's lease, not the host lease, and never drive
@@ -52,6 +61,40 @@ mg__run_exit_cmds() {
 mg_sleep() {
   sleep "$1" &
   wait "$!"
+}
+
+# ---------------------------------------------------------------------------
+# Parts the machine's state kept from running (U19b)
+
+MG_QUEUED_PARTS='[]'
+
+# mg_queued_part <user step> <part> <reason> [repro]: a part of this job that
+# could not test because of the machine's state; lists it in
+# details.queued_parts. The caller records the user step itself (its title
+# and how) and decides the status (mg_queued_settle).
+mg_queued_part() {
+  MG_QUEUED_PARTS="$(jq -c --arg s "$1" --arg p "$2" --arg r "$3" --arg x "${4:-}" \
+    '. + [{user_step: $s, part: $p, reason: $r} + (if $x == "" then {} else {repro: $x} end)]' <<<"$MG_QUEUED_PARTS")"
+  mg_detail queued_parts "$MG_QUEUED_PARTS"
+}
+
+# mg_queued_parts_text: "<part> (<user step>), ..." for messages.
+mg_queued_parts_text() {
+  jq -r 'map("\(.part) (\(.user_step))") | join(", ")' <<<"$MG_QUEUED_PARTS"
+}
+
+# mg_queued_settle: once a job with queued parts has its own status, a run
+# whose other parts passed (pass, warn or no status yet) becomes queued (warn,
+# details.queued); a fail or an error stays, and is not queued.
+mg_queued_settle() {
+  [ "$MG_QUEUED_PARTS" != '[]' ] || return 0
+  case "$(cat "$MG_STATE/status" 2>/dev/null)" in
+    pass | warn | "")
+      mg_detail queued true
+      mg_status warn
+      ;;
+    *) mg_detail queued false ;;
+  esac
 }
 
 mg__epoch() { date -u +%s; }
@@ -173,17 +216,27 @@ mg__lease_try() {
   return 1
 }
 
-# mg_host_lease [--no-session]: takes the host lease, waiting while another
-# job holds it (mg__lease_try: a recording of this checkout lets its jobs in
-# nested), then checks the session. Sets MG_LEASE_DIR. Returns 0 when the job
-# may go on (the lease is released when the job ends); otherwise records the
-# result and returns 1. --no-session is for jobs that use neither the screen
+# mg_host_lease [--no-session] [--part <what>]: takes the host lease,
+# waiting while another job holds it (mg__lease_try: a recording of this
+# checkout lets its jobs in nested), then checks the session. Sets
+# MG_LEASE_DIR. Returns 0 when the job may go on (the lease is released when
+# the job ends). A locked Mac or a sleeping display returns 2: the lease is
+# released, and <what> (default: the job) is a queued part with the
+# host-session step, and the run is queued (warn) unless the job's later
+# status says otherwise (mg_queued_settle). Anything else records the result
+# (error) and returns 1. --no-session is for jobs that use neither the screen
 # nor a simulator (bench-mac): they run on a locked Mac too, and keep it from
 # idle sleep but let the display sleep.
 mg_host_lease() {
   local dir wait="${MEGURI_HOST_LEASE_WAIT_SECONDS:-3600}" poll="${MEGURI_HOST_LEASE_POLL_SECONDS:-5}"
-  local start holder announced="" lock session=check
-  [ "${1:-}" != --no-session ] || session=skip
+  local start holder announced="" lock session=check part="$MG_JOB"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-session) session=skip && shift ;;
+      --part) part="$2" && shift 2 ;;
+      *) shift ;;
+    esac
+  done
   dir="$(mg_host_lease_dir)"
   mkdir -p "$(dirname "$dir")" || {
     mg_failure host-lease "cannot create $(dirname "$dir")"
@@ -228,14 +281,17 @@ mg_host_lease() {
   fi
   state="$(mg_host_session_state)"
   if [ "$state" != ok ]; then
+    # The lease goes back at once: the queued job holds nothing others wait for.
+    mg__host_lease_release "$dir" $$
     mg_user_step host-session missing true "Unlock the Mac and keep a display awake" \
-      "App, simulator and Mac UI jobs wait while the Mac is locked or its display sleeps; unlock it, or run them later."
-    mg_failure blocked-host "blocked: host ($state); the job did not run" "$MG_DEFAULT_REPRO"
+      "Jobs that launch the app on this Mac are queued while the Mac is locked or its display sleeps; tools/mg catch-up runs them again once it is unlocked."
+    mg_queued_part host-session "$part" "host ($state)" "$MG_DEFAULT_REPRO"
     mg_detail blocked '"host"'
     mg_detail host_session "$(jq -n --arg s "$state" '$s')"
-    mg_message "$MG_JOB: blocked: host ($state); run it again once the Mac is unlocked and awake"
-    mg_status error
-    return 1
+    mg_detail queued true
+    mg_message "$MG_JOB: queued: host ($state): $part did not run (user step host-session); it runs again once the Mac is unlocked and awake"
+    mg_status warn
+    return 2
   fi
   if command -v caffeinate >/dev/null 2>&1; then
     caffeinate -d -i -w "$$" >/dev/null 2>&1 &
@@ -397,7 +453,7 @@ mg_mac_ui() {
   mg_app_build mac Debug || return 0
   mg_mac_ui_take || return 0
 
-  local passed=0 failed=0 errors=0 name result record since only c
+  local passed=0 failed=0 errors=0 queued=0 name result record since only c
   for s in "${suites[@]}"; do
     case "$s" in
       drive:*) name="drive-$(basename "${s#drive:}" .json)" ;;
@@ -421,7 +477,13 @@ mg_mac_ui() {
         mg_app_xcodebuild_test "$MG_RUN_DIR/$name" mac "platform=macOS,arch=arm64" Debug \
           $(for c in $only; do printf -- '-only-testing:MeguriUITests/%s\n' "$c"; done)
         result=$?
-        ! mg_app_mac_input_refused "$since" || result=2
+        # A suite whose input macOS dropped tested nothing it acted on: it is
+        # queued (mac-input), unless it could not run at all or a test failed
+        # where the drop does not explain it (mg_app_mac_input_result).
+        if [ "$result" -ne 2 ] && mg_app_mac_input_refused "$since" "$name"; then
+          mg_app_mac_input_result "$MG_RUN_DIR/$name.xcresult" "$result" "$name"
+          result=$?
+        fi
         ;;
       drive:*)
         # A script that marks a transition also records it (motion capture).
@@ -434,6 +496,7 @@ mg_mac_ui() {
     case "$result" in
       0) passed=$((passed + 1)) ;;
       1) failed=$((failed + 1)) && mg_failure "suite/$name" "Mac UI suite $name failed; see log.txt" "tools/mg mac-ui --suite $s" ;;
+      3) queued=$((queued + 1)) ;;
       *) errors=$((errors + 1)) && mg_failure "suite/$name" "Mac UI suite $name could not run; see log.txt" "tools/mg mac-ui --suite $s" ;;
     esac
   done
@@ -441,18 +504,19 @@ mg_mac_ui() {
   mg_count passed "$passed"
   mg_count failed "$failed"
   mg_count errors "$errors"
+  mg_count queued "$queued"
   if [ "$failed" -gt 0 ]; then
-    mg_message "mac-ui: $failed of ${#suites[@]} suite(s) failed"
+    mg_message "mac-ui: $failed of ${#suites[@]} suite(s) failed$([ "$queued" -eq 0 ] || echo "; $queued queued (user step mac-input)")"
     mg_status fail
   elif [ "$errors" -gt 0 ]; then
-    if [ -n "${MG_MAC_INPUT_REFUSED:-}" ]; then
-      mg_message "mac-ui: blocked: macOS dropped the input XCUITest synthesized (user step mac-input); $errors of ${#suites[@]} suite(s) did not test the app"
-    else
-      mg_message "mac-ui: $errors of ${#suites[@]} suite(s) could not run"
-    fi
+    mg_message "mac-ui: $errors of ${#suites[@]} suite(s) could not run$([ "$queued" -eq 0 ] || echo "; $queued queued (user step mac-input)")"
     mg_status error
+  elif [ "$queued" -gt 0 ]; then
+    mg_message "mac-ui: $passed passed; $queued of ${#suites[@]} suite(s) queued: macOS dropped the input XCUITest synthesized in $(jq -r 'map(.part) | join(", ")' <<<"$MG_QUEUED_PARTS") (user step mac-input)"
+    mg_status pass
   else
     mg_message "mac-ui: ${#suites[@]} suite(s) passed"
     mg_status pass
   fi
+  mg_queued_settle
 }

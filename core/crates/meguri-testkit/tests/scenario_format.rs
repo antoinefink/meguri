@@ -1351,3 +1351,399 @@ fn open_scenarios_are_checked_when_they_load() {
         assert!(load(bad).is_err(), "accepted {bad}");
     }
 }
+
+/// The ops of notetype-ops.md T2-T6.
+const NOTETYPE_OPS: [&str; 5] = [
+    "add_notetype",
+    "add_stock_notetype",
+    "clone_notetype",
+    "update_notetype",
+    "ensure_io_notetype",
+];
+
+/// A valid argument mapping for each note type op, every typed argument
+/// given.
+fn valid_notetype_args(op: &str) -> Value {
+    match op {
+        "add_notetype" => json!({
+            "name": "Pair",
+            "kind": "cloze",
+            "fields": ["Text"],
+            "templates": [{"name": "Cloze", "front": "{{cloze:Text}}", "back": ""}],
+            "css": ".card {}"
+        }),
+        "add_stock_notetype" => json!({"kind": "basic_typing", "name": "Typing"}),
+        "clone_notetype" => json!({"notetype": "Pair", "name": "Pair 2"}),
+        "update_notetype" => json!({"notetype": "Pair", "edits": [{"css": ".card {}"}], "skip_checks": true}),
+        "ensure_io_notetype" => json!({}),
+        other => panic!("no valid example for note type op {other}"),
+    }
+}
+
+/// A valid example of each note type edit (notetype-ops.md T5), every typed
+/// member given.
+fn valid_notetype_edit(key: &str) -> Value {
+    match key {
+        "rename" => json!("Q"),
+        "css" => json!(".card {}"),
+        "sort_field" => json!("Back"),
+        "add_field" => json!("Extra"),
+        "remove_field" => json!("Back"),
+        "rename_field" => json!({"from": "Back", "to": "Answer"}),
+        "move_field" => json!({"field": "Back", "to": 0}),
+        "field_options" => json!({
+            "field": "Back",
+            "sticky": true,
+            "rtl": false,
+            "font_name": "Arial",
+            "font_size": 20,
+            "description": "d",
+            "plain_text": true,
+            "collapsed": false,
+            "exclude_from_search": true
+        }),
+        "add_template" => json!({"name": "T", "front": "{{Front}}", "back": "{{Back}}"}),
+        "remove_template" => json!("T"),
+        "rename_template" => json!({"from": "T", "to": "U"}),
+        "move_template" => json!({"template": "T", "to": 1}),
+        "template" => json!({
+            "name": "T",
+            "front": "f",
+            "back": "b",
+            "browser_front": "bf",
+            "browser_back": "bb",
+            "browser_font_name": "Arial",
+            "browser_font_size": 12,
+            "deck": "Default"
+        }),
+        other => panic!("no valid example for note type edit {other}"),
+    }
+}
+
+fn scenario_schema() -> Value {
+    serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap()).unwrap()
+}
+
+/// A schema definition with its `$ref` (`#/$defs/<name>`) followed.
+fn resolved<'a>(schema: &'a Value, def: &'a Value) -> &'a Value {
+    match def["$ref"].as_str() {
+        Some(target) => &schema["$defs"][target.strip_prefix("#/$defs/").unwrap()],
+        None => def,
+    }
+}
+
+#[test]
+fn the_model_reads_the_notetype_ops_as_the_schema_types_them() {
+    let schema = scenario_schema();
+    let steps = schema["$defs"]["step"]["properties"].as_object().unwrap();
+    // Every op the schema cites notetype-ops.md for, and no other.
+    let mut cited: Vec<&str> = steps
+        .iter()
+        .filter(|(_, def)| {
+            def["description"]
+                .as_str()
+                .is_some_and(|d| d.starts_with("notetype-ops.md"))
+        })
+        .map(|(op, _)| op.as_str())
+        .collect();
+    cited.sort_unstable();
+    let mut ours = NOTETYPE_OPS.to_vec();
+    ours.sort_unstable();
+    assert_eq!(cited, ours);
+    for op in NOTETYPE_OPS {
+        assert!(Step::NAMES.contains(&op), "{op} is not in Step::NAMES");
+        let def = resolved(&schema, &steps[op]);
+        let valid = valid_notetype_args(op);
+        assert_eq!(model_accepts(json!({op: valid.clone()})), Ok(()), "{op}");
+        // A mapping, never the list of its values that serde's derive reads.
+        let as_list: Vec<Value> = valid.as_object().unwrap().values().cloned().collect();
+        assert!(model_accepts(json!({op: as_list})).is_err(), "{op} as a list");
+        assert!(model_accepts(json!({op: null})).is_err(), "{op}: null");
+        let mut extra = valid.clone();
+        extra["colour"] = json!("red");
+        assert!(model_accepts(json!({op: extra})).is_err(), "{op} with an unknown key");
+        for key in def["required"].as_array().into_iter().flatten() {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(key.as_str().unwrap());
+            assert!(model_accepts(json!({op: without})).is_err(), "{op} without {key}");
+        }
+        // No argument of these ops is nullable or a mapping.
+        for key in def["properties"].as_object().into_iter().flatten().map(|(k, _)| k) {
+            for wrong_value in [Value::Null, json!({"a": 1})] {
+                let mut wrong = valid.clone();
+                wrong[key.as_str()] = wrong_value.clone();
+                assert!(model_accepts(json!({op: wrong})).is_err(), "{op}.{key}: {wrong_value}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_model_reads_the_notetype_edits_as_the_schema_types_them() {
+    let schema = scenario_schema();
+    let edit_defs = schema["$defs"]["notetype_edit"]["properties"].as_object().unwrap();
+    assert_eq!(edit_defs.len(), 13, "T5 has 13 edits");
+    let update = |edits: Value| model_accepts(json!({"update_notetype": {"notetype": "Pair", "edits": edits}}));
+    assert_eq!(update(json!([])), Ok(()));
+    for (key, def) in edit_defs {
+        let def = resolved(&schema, def);
+        let valid = valid_notetype_edit(key);
+        assert_eq!(update(json!([{key.clone(): valid.clone()}])), Ok(()), "{key}");
+        // One key per edit, and only the edits of T5.
+        let other = if key == "css" { "rename" } else { "css" };
+        assert!(
+            update(json!([{key.clone(): valid.clone(), other: ""}])).is_err(),
+            "{key} and {other}"
+        );
+        assert!(update(json!([key])).is_err(), "{key} as a string");
+        let Some(members) = valid.as_object() else {
+            assert!(update(json!([{key.clone(): {"a": 1}}])).is_err(), "{key}: a mapping");
+            assert!(update(json!([{key.clone(): null}])).is_err(), "{key}: null");
+            continue;
+        };
+        let as_list: Vec<Value> = members.values().cloned().collect();
+        assert!(update(json!([{key.clone(): as_list}])).is_err(), "{key} as a list");
+        let mut extra = valid.clone();
+        extra["colour"] = json!("red");
+        assert!(
+            update(json!([{key.clone(): extra}])).is_err(),
+            "{key} with an unknown key"
+        );
+        for required in def["required"].as_array().unwrap() {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(required.as_str().unwrap());
+            assert!(
+                update(json!([{key.clone(): without}])).is_err(),
+                "{key} without {required}"
+            );
+        }
+        for (member, member_def) in def["properties"].as_object().unwrap() {
+            let nullable = member_def["type"]
+                .as_array()
+                .is_some_and(|t| t.contains(&json!("null")));
+            let mut wrongs = vec![json!({"a": 1}), json!(-1)];
+            if !nullable {
+                wrongs.push(Value::Null);
+            }
+            for wrong_value in wrongs {
+                let mut wrong = valid.clone();
+                wrong[member.as_str()] = wrong_value.clone();
+                assert!(
+                    update(json!([{key.clone(): wrong}])).is_err(),
+                    "{key}.{member}: {wrong_value}"
+                );
+            }
+        }
+    }
+    assert!(update(json!([{"rename_note": "Q"}])).is_err());
+    assert!(update(json!([{}])).is_err());
+}
+
+#[test]
+fn notetype_ops_read_their_arguments_and_load_time_rules() {
+    use meguri_testkit::scenario::{NotetypeEdit, NotetypeKind, StockKind};
+
+    let text = r##"
+id: notetypes/all-ops
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_notetype: {name: Pair, fields: [Front, Back], templates: [{name: Card 1, front: "{{Front}}"}]}
+  - add_stock_notetype: {kind: image_occlusion}
+  - add_stock_notetype: {kind: basic_and_reversed, name: Both}
+  - clone_notetype: {notetype: Pair}
+  - update_notetype:
+      notetype: Pair
+      edits:
+        - {rename_field: {from: Back, to: Answer}}
+        - {template: {name: Card 1, deck: null}}
+        - {template: {name: Card 1, deck: Default, browser_front: "{{Front}}"}}
+        - {template: {name: Card 1}}
+        - {move_field: {field: Answer, to: 0}}
+  - update_notetype: {notetype: Pair, edits: [], skip_checks: true}
+  - ensure_io_notetype: {}
+  - observe: [notetype_structure, {notetype_structure: null}, {notetype_structure: {notetypes: [Pair, Both]}}]
+"##;
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(matches!(
+        &parsed.steps[0],
+        Step::AddNotetype(spec) if spec.name == "Pair" && spec.kind == NotetypeKind::Standard
+            && spec.fields == ["Front", "Back"] && spec.css.is_empty()
+            && spec.templates.len() == 1 && spec.templates[0].back.is_empty()
+    ));
+    assert!(
+        matches!(&parsed.steps[1], Step::AddStockNotetype(a) if a.kind == StockKind::ImageOcclusion && a.name.is_none())
+    );
+    assert!(matches!(
+        &parsed.steps[2],
+        Step::AddStockNotetype(a) if a.kind == StockKind::BasicAndReversed && a.name.as_deref() == Some("Both")
+    ));
+    assert!(matches!(&parsed.steps[3], Step::CloneNotetype(a) if a.notetype == "Pair" && a.name.is_none()));
+    let Step::UpdateNotetype(update) = &parsed.steps[4] else {
+        panic!("{:?}", parsed.steps[4]);
+    };
+    assert_eq!(update.notetype, "Pair");
+    assert!(!update.skip_checks);
+    assert!(matches!(&update.edits[0], NotetypeEdit::RenameField(p) if p.from == "Back" && p.to == "Answer"));
+    // The deck override: null clears it, a name sets it, missing keeps it.
+    assert!(matches!(&update.edits[1], NotetypeEdit::Template(t) if t.deck == Some(None) && t.front.is_none()));
+    assert!(matches!(
+        &update.edits[2],
+        NotetypeEdit::Template(t) if t.deck == Some(Some("Default".to_owned())) && t.browser_front.as_deref() == Some("{{Front}}")
+    ));
+    assert!(matches!(&update.edits[3], NotetypeEdit::Template(t) if t.deck.is_none()));
+    assert!(matches!(&update.edits[4], NotetypeEdit::MoveField(m) if m.field == "Answer" && m.to == 0));
+    assert!(matches!(&parsed.steps[5], Step::UpdateNotetype(u) if u.skip_checks && u.edits.is_empty()));
+    assert!(matches!(&parsed.steps[6], Step::EnsureIoNotetype(_)));
+    assert!(parsed.needs().observations.contains("notetype_structure"));
+
+    for (bad, why) in [
+        // The schema's minLength and minItems, as for setup.notetypes.
+        (
+            "add_notetype: {name: \"\", fields: [F], templates: [{name: T}]}",
+            "note type name",
+        ),
+        (
+            "add_notetype: {name: Q, fields: [], templates: [{name: T}]}",
+            "field list",
+        ),
+        ("add_notetype: {name: Q, fields: [F], templates: []}", "template list"),
+        (
+            "add_notetype: {name: Q, kind: io, fields: [F], templates: [{name: T}]}",
+            "unknown variant",
+        ),
+        ("add_stock_notetype: {kind: basic, name: \"\"}", "note type name"),
+        ("add_stock_notetype: {kind: basic_reversed}", "unknown variant"),
+        ("clone_notetype: {notetype: \"\"}", "note type name"),
+        ("clone_notetype: {notetype: Pair, name: \"\"}", "note type name"),
+        ("update_notetype: {notetype: \"\", edits: []}", "note type name"),
+        (
+            "update_notetype: {notetype: Pair, edits: [{move_field: {field: F, to: 1.5}}]}",
+            "invalid type",
+        ),
+        ("ensure_io_notetype: {name: X}", "unknown key"),
+        ("observe: [\"notetype_structure(#c1)\"]", "does not take"),
+        ("observe: [{notetype_structure: {}}]", "notetypes"),
+        ("observe: [{notetype_structure: {notetypes: []}}]", "notetypes"),
+        ("observe: [{notetype_structure: {notetypes: [\"\"]}}]", "notetypes"),
+        ("observe: [{notetype_structure: {notetypes: Pair}}]", "notetypes"),
+        (
+            "observe: [{notetype_structure: {notetypes: [Pair], kind: x}}]",
+            "notetypes",
+        ),
+    ] {
+        let text =
+            format!("id: notetypes/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{{bad}}}]\n");
+        let err = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+            .expect_err(bad)
+            .to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn update_notetype_needs_a_capability_per_kind_of_edit() {
+    let needs_of = |edits: &str| {
+        let text = format!(
+            "id: notetypes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps:\n  - update_notetype: {{notetype: Pair, edits: {edits}, skip_checks: true}}\n"
+        );
+        let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap();
+        parsed.needs().ops.into_iter().collect::<Vec<_>>()
+    };
+    // notetype-ops.md T10.1: the op, and one capability per kind of edit;
+    // skip_checks and an empty list add nothing.
+    assert_eq!(needs_of("[]"), ["update_notetype"]);
+    assert_eq!(
+        needs_of("[{css: a}, {css: b}, {rename: Q}]"),
+        ["update_notetype", "update_notetype.css", "update_notetype.rename"]
+    );
+    // A template edit that sets front or back needs template_text instead.
+    assert_eq!(
+        needs_of("[{template: {name: T, browser_front: x, deck: null}}]"),
+        ["update_notetype", "update_notetype.template"]
+    );
+    assert_eq!(
+        needs_of("[{template: {name: T, front: x}}]"),
+        ["update_notetype", "update_notetype.template_text"]
+    );
+    assert_eq!(
+        needs_of("[{template: {name: T, back: x}}, {template: {name: T}}]"),
+        [
+            "update_notetype",
+            "update_notetype.template",
+            "update_notetype.template_text"
+        ]
+    );
+    // Every other edit needs its own key.
+    let schema = scenario_schema();
+    for key in schema["$defs"]["notetype_edit"]["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+    {
+        if key == "template" {
+            continue;
+        }
+        let edit = serde_json::to_string(&json!([{key.clone(): valid_notetype_edit(key)}])).unwrap();
+        assert_eq!(
+            needs_of(&edit),
+            ["update_notetype".to_owned(), format!("update_notetype.{key}")],
+            "{key}"
+        );
+    }
+    // The same names in a live chain's and a Meguri actor's needs.
+    let text = "id: notetypes/live\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - handoff: meguri\n  - update_notetype: {notetype: Pair, edits: [{add_field: F}]}\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(
+        parsed
+            .needs_on(scenario::Side::Meguri)
+            .ops
+            .contains("update_notetype.add_field")
+    );
+}
+
+/// render-ops.md Q4.1: `render_status` takes card references or none, and
+/// reads the collection.
+#[test]
+fn render_status_requests_follow_the_schema() {
+    let parse = |request: &str| {
+        let text = format!(
+            "id: notetypes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    for good in [
+        "render_status",
+        "\"render_status(#c1, #c3)\"",
+        "{render_status: [\"#c2\"]}",
+        "\"render_status(#c1)\", {render_status: [\"#c2\"]}",
+    ] {
+        let parsed = parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+        assert!(parsed.needs().observations.contains("render_status"), "{good}");
+        assert!(parsed.starts_from_new_collection(), "{good}");
+    }
+    for (bad, why) in [
+        ("\"render_status(#n1)\"", "does not take these arguments"),
+        ("{render_status: [\"#n1\"]}", "does not take these arguments"),
+        ("{render_status: {cards: [\"#c1\"]}}", "does not take these arguments"),
+        ("{render_status: []}", "at least one reference"),
+        ("{render_status: null}", "cannot take null"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// records.md N12: in notetypes/records/stock-render-handoff Meguri only makes
+/// its new collection and hands it over; the oracle adds and renders.
+#[test]
+fn stock_render_handoff_needs_only_the_new_collection_and_handoff_on_meguri() {
+    let path = conformance_dir().join("scenarios/notetypes/records/stock-render-handoff.yaml");
+    let text = fs::read_to_string(path).unwrap();
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap();
+    let meguri = parsed.needs_on(scenario::Side::Meguri);
+    assert_eq!(meguri.setup.iter().collect::<Vec<_>>(), [scenario::NEW_COLLECTION]);
+    assert_eq!(meguri.ops.iter().collect::<Vec<_>>(), ["handoff"]);
+    assert!(meguri.observations.is_empty(), "{}", meguri.summary());
+    let oracle = parsed.needs_on(scenario::Side::Oracle);
+    assert!(oracle.observations.contains("render_status"), "{}", oracle.summary());
+}

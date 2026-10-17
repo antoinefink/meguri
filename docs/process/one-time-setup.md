@@ -39,7 +39,7 @@ Keep the T9 drive with the macOS test VM connected. Every Mac UI suite (`tools/m
 
 ### `mac-input`
 
-Use a macOS and Xcode pair whose Mac UI tests can click and type. On macOS 27.0.1 (26A434) with Xcode 27.0, WindowServer refuses the input service of `testmanagerd` (log: "missing the 'com.apple.private.hid.client.event-dispatch' entitlement"). The tests start, but no tap, key press or drag reaches the app. No permission fixes this: update macOS or Xcode. The test VM runs the same macOS build and has the same bug. Until then, `tools/mg mac-ui` and `tools/mg drive --platform mac` report `blocked: mac-input` (status error) when the unified log shows the dropped input. Mac suites without input still pass. Doctor cannot verify this.
+Use a macOS and Xcode pair whose Mac UI tests can click and type. On macOS 27.0.1 (26A434) with Xcode 27.0, WindowServer refuses the input service of `testmanagerd` (log: "missing the 'com.apple.private.hid.client.event-dispatch' entitlement"). The tests start, but no tap, key press or drag reaches the app. No permission fixes this: update macOS or Xcode. The test VM runs the same macOS build and has the same bug. Until then, a Mac UI run (`tools/mg mac-ui`, `a11y --platform mac`, `drive --platform mac`, `perf-ui --platform mac`) whose unified log shows the dropped input is queued (status warn, `blocked: mac-input`); the suites without input still pass or fail. The run records where it saw the drop, with that runner's macOS and Xcode builds (`build/mg/mac-input.json` in the main checkout). Doctor lists the step while the runner still has both builds, or while it cannot read them (a VM that is not running), and clears it once either changed; `tools/mg catch-up` then runs the queued runs again.
 
 ## Optional or later
 
@@ -67,7 +67,7 @@ Approve the scheduler entries for the nightly and weekly runs. `tools/mg nightly
 
 ### `host-session`
 
-Not a one-time step. Jobs that launch the Mac app on this Mac (`run --platform mac`, `screenshot --platform mac`, the hidden launches of `xcode-check`) wait while the Mac is locked or its display sleeps. They report `blocked: host` and run again later. While they run, they keep the display awake. Simulator jobs and Mac UI suites run in the test VM and need no unlocked session; only a host run (`MEGURI_SIM_ALLOW_HOST=1`, `MEGURI_MAC_UI_ALLOW_HOST=1`) waits, and a Mac UI host run takes the screen at most once an hour.
+Not a one-time step. Jobs that launch the Mac app on this Mac (`run --platform mac`, `screenshot --platform mac`, the hidden launches of `xcode-check`, the Mac part of `snapshots`) are queued while the Mac is locked or its display sleeps (status warn, `blocked: host`); the parts that ran keep their results. Doctor lists the step while it holds, and `tools/mg catch-up` runs the queued runs of merged units again once it clears. While they run, they keep the display awake. Simulator jobs and Mac UI suites run in the test VM and need no unlocked session; only a host run (`MEGURI_SIM_ALLOW_HOST=1`, `MEGURI_MAC_UI_ALLOW_HOST=1`) waits, and a Mac UI host run takes the screen at most once an hour.
 
 ## Not user steps
 

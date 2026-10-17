@@ -3,8 +3,8 @@
 //! only crate that issues SQL against the collection.
 //!
 //! Specs: `specs/storage/open-and-connections.md`, `schema-18.md`,
-//! `schema-upgrade.md`, `ids-usn-mtime.md`, `config-table.md` and
-//! `graves.md`.
+//! `schema-upgrade.md`, `ids-usn-mtime.md`, `config-table.md`, `graves.md`
+//! and `derived-store.md`.
 
 pub mod bulk;
 pub mod checkpoint;
@@ -12,6 +12,7 @@ pub mod collation;
 pub mod conn_init;
 pub mod connections;
 mod day_writes;
+pub mod derived;
 mod durability;
 mod error;
 pub mod ids;

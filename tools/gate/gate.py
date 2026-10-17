@@ -66,8 +66,11 @@ BRACED = re.compile(r"\{([^{}]*)\}")
 # A whole argument naming a file an earlier run of the same gate wrote (an
 # artifact of its result); tools/mg resolves it when the run starts.
 ARTIFACT = re.compile(r"^\{artifact:([a-z][a-z0-9-]*):([A-Za-z0-9._-]+)\}$")
-# Outcomes that never block. `queued`: a VM job without the VM (warn with
-# details.queued); the verification is recorded as queued (root AGENTS.md).
+# Outcomes that never block. `queued`: a run the machine's state kept from
+# testing (warn with details.queued: no test VM, a locked host, macOS
+# dropping XCUITest's input; U19b). Its receipt record names the user steps
+# and the parts that did not run; tools/mg merge queues it for tools/mg
+# catch-up, which runs it again once doctor reports the steps clear.
 NONBLOCKING = ("pass", "warn", "queued", "quarantined", "pending", "disabled", "not-triggered",
                "skipped-local", "user-step")
 # Outcomes that leave a receipt incomplete for a merge: the run still has to
@@ -615,7 +618,8 @@ def cmd_plan(a):
         k, _, val = v.partition("=")
         if val:
             values[k] = val
-    only = set(a.only.split(",")) if a.only else None
+    # --only "" selects no run (a milestone with none); without --only, all.
+    only = {x for x in a.only.split(",") if x} if a.only is not None else None
     if only:
         unknown = only - {r["id"] for r in config["runs"]}
         if unknown:
@@ -648,7 +652,8 @@ def assess(item, entry, quarantine, day):
     rec = {"id": item["id"], "job": item["job"], "tier": item["tier"], "stage": item["stage"],
            "class": item["class"], "args": item["args"], "blocking": item["blocking"], "budget_s": item["budget_s"],
            "result": entry.get("result"), "status": None, "outcome": None, "message": "", "failures": [],
-           "quarantined": [], "duration_ms": None, "over_budget": False, "repro": None, "queued": False}
+           "quarantined": [], "duration_ms": None, "over_budget": False, "repro": None, "queued": False,
+           "user_steps": [], "queued_parts": []}
     if entry.get("outcome"):
         rec["outcome"] = entry["outcome"]
         rec["message"] = entry.get("message", "")
@@ -676,6 +681,8 @@ def assess(item, entry, quarantine, day):
     elif status == "warn":
         rec["queued"] = details.get("queued") is True
         rec["outcome"] = "queued" if rec["queued"] else "warn"
+        if rec["queued"]:
+            rec["queued_parts"], rec["user_steps"] = queued_for(res)
     elif any(i in ORACLE_TREE_FAILURES for i in ids):
         # Whatever else failed ran against another oracle/ than the branch's.
         rec["outcome"] = "needs-oracle-tree"
@@ -714,6 +721,22 @@ def assess(item, entry, quarantine, day):
                     rec["failures"].append({"id": r["id"], "message": "%s: %s; only %s allowed"
                                             % (r["detail"], bad, ", ".join(r["only_keys"])), "repro": rec["repro"]})
     return rec
+
+
+def queued_for(res):
+    """(parts, user steps) of a queued result: details.queued_parts
+    ({user_step, part, reason[, repro]}), and the steps they name; a result
+    without parts (from before U19b) names its missing user steps only."""
+    details = res.get("details") or {}
+    parts = [p for p in details.get("queued_parts") or [] if isinstance(p, dict) and p.get("user_step")]
+    steps = []
+    for p in parts:
+        if p["user_step"] not in steps:
+            steps.append(p["user_step"])
+    if not steps:
+        steps = [u.get("id") for u in res.get("user_steps") or []
+                 if isinstance(u, dict) and u.get("state") == "missing" and u.get("id")]
+    return parts, steps
 
 
 def shell_quote(s):
@@ -769,7 +792,8 @@ def cmd_evaluate(a):
                    "class": item["class"], "args": item["args"], "blocking": item["blocking"],
                    "budget_s": item["budget_s"], "result": None, "status": None,
                    "outcome": item["outcome"] or "not-run", "message": item["reason"], "failures": [],
-                   "quarantined": [], "duration_ms": None, "over_budget": False, "repro": None, "queued": False}
+                   "quarantined": [], "duration_ms": None, "over_budget": False, "repro": None, "queued": False,
+                   "user_steps": [], "queued_parts": []}
             if item["outcome"] == "deferred-main":
                 rec["merge_args"] = item["merge_args"]
         runs.append(rec)
@@ -827,6 +851,11 @@ def cmd_evaluate(a):
         "receipt_blocking": receipt_blocking,
         "blocking": blocking,
         "incomplete": incomplete,
+        # Runs the machine's state kept from testing: non-blocking, and what
+        # tools/mg merge queues for tools/mg catch-up.
+        "queued": [{"id": r["id"], "job": r["job"], "args": r["args"], "result": r["result"],
+                    "user_steps": r.get("user_steps") or [], "parts": r.get("queued_parts") or []}
+                   for r in runs if r["outcome"] == "queued"],
         "pass": not blocking,
         "merge_ready": (not blocking and not incomplete and a.dirty != "true" and plan["mode"] == "full"),
     }
@@ -930,7 +959,7 @@ def main(argv):
     s.add_argument("--oracle-tree", choices=ORACLE_TREES, default="own")
     s.add_argument("--var", action="append")
     s.add_argument("--all", action="store_true")
-    s.add_argument("--only", default="")
+    s.add_argument("--only", default=None)
     s.add_argument("--out", required=True)
     s = sub.add_parser("evaluate")
     s.add_argument("--config", required=True)

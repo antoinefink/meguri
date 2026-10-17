@@ -1642,6 +1642,7 @@ dependencies = [
  "meguri-sched",
  "meguri-search",
  "meguri-storage",
+ "meguri-template",
  "meguri-testkit",
  "meguri-text",
  "regex",
