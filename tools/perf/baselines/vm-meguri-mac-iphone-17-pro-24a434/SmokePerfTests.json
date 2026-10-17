@@ -1,0 +1,24 @@
+{
+  "kind": "ui",
+  "measured_commit": "d247c03108ada51d1d5f5006cd569b0fcfecd003",
+  "reason": "First baseline of the smoke probe on the test VM's iPhone 17 Pro simulator (iOS 27.0, 24A434)",
+  "rows": [
+    {
+      "metric": "duration",
+      "name": "probe.syntheticDelay",
+      "percentile": "p50",
+      "test": "SmokePerfTests/testProbeIntervalMeasuresItsSyntheticDelay()",
+      "unit": "ms",
+      "value": 35.054834
+    }
+  ],
+  "runner": {
+    "id": "vm/meguri-mac/iPhone 17 Pro/24A434",
+    "kind": "simulator",
+    "model": "iPhone 17 Pro",
+    "os": "iOS 27.0",
+    "os_build": "24A434"
+  },
+  "schema_version": 1,
+  "suite": "SmokePerfTests"
+}

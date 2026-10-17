@@ -1,0 +1,45 @@
+# specs/search/canonical-form.md F7: canonical texts read back to themselves,
+# except the four shapes where Anki's own canonical text does not: negated
+# operator words, raw values holding \", a field named has-cd, and a search
+# that is one group holding one group (one level of brackets goes per writing).
+id: search/canonical/round-trips
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          # canonical texts
+          - 'dog cat OR fish'
+          - 'deck:*'
+          - '"key:value with spaces"'
+          - 'key: value'
+          - '"a(" ")b"'
+          - '"-bloom"'
+          - 'deck:a:b'
+          - '-"-a"'
+          - '-'
+          - '--'
+          - 'q\_\:\*'
+          - '"Or" "aND"'
+          - '"k l m" no'
+          - 'tag:re\:x'
+          - '"re:\("'
+          - 'prop:ease>3'
+          - 'card:1'
+          - 'rated:1'
+          - '-(a OR b)'
+          - 'a\\\:b'
+          - 'dupe:1,\\\"'
+          - 're:a\\\"'
+          # Anki's exceptions
+          - '- '
+          - '- OR '
+          - '-and'
+          - 'a -  b'
+          - 'preset:a\"b'
+          - 'preset:a\\"b'
+          - 'prop:cds:k=a\"b'
+          - 'has\-cd:x'
+          - 'has-cd:x'
+          - '((a b))'
+          - '(a b)'
+          - '(((x)))'

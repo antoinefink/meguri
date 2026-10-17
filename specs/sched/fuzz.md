@@ -3,11 +3,11 @@
 Spec: sched/fuzz
 Requirements: R652, R659, R660, R661, R662, R663, R664, R666, R1892
 Anki: 26.09.3
-Scenarios: conformance/scenarios/sched/fuzz/, conformance/scenarios/fp-probe/
+Scenarios: conformance/scenarios/sched/fuzz/, conformance/scenarios/fp-probe/, conformance/scenarios/sched/steps/, conformance/scenarios/sched/answer/
 
 How Anki spreads a review interval over a range of nearby days, so that cards answered together do not stay together. Fuzz cannot be turned off (R664): Anki has no setting for it, and every interval below goes through it.
 
-Z1 to Z6 were written for the floating-point probe (U14, `conformance/float-determinism`): review-interval fuzz, the no-regression minimum and the fuzz-delta observation. U45 adds learning-step fuzz (Z7) and where review fuzz is applied, with the hook through which the load balancer (U44, R666) replaces Z4's pick (Z8).
+Z1 to Z6 were written for the floating-point probe (U14, `conformance/float-determinism`): review-interval fuzz, the no-regression minimum and the fuzz-delta observation. Z7, learning-step fuzz (R663), is applied by `sched/answering` when an answer is written and by the next-state engine (U45) when it reconstructs a learning card's last answer. Z8 says where the engine applies review fuzz and gives the hook through which the load balancer (U44, R666) replaces Z4's pick.
 
 ## Z1. Seed
 
@@ -100,29 +100,40 @@ The `fuzz_table` rows of a card whose preset has a small maximum show the clampi
 
 ## Z7. Learning-step fuzz (R663)
 
-A learning or relearning delay that stays in seconds (`sched/steps#L7`) gets a random extra that is never shown on the buttons:
+When an answer puts a card into an intraday learning or relearning step (`sched/answering` A3.2: a delay that stays in seconds, `sched/steps#L7`), its `due` is the answer second plus the step's delay with a small random extra, so that cards answered together are not shown again together. The extra is never shown on the answer buttons and never recorded in the review log.
 
-1. `E` = the delay `d` (unsigned 32-bit) converted to `f32`, times 0.25 in `f32`, then the smaller of that and 300.0, rounded down, as an unsigned integer.
-2. When `E` is 0, the fuzzed delay is `d`.
-3. Otherwise it is the first value that `rand` 0.9.4 returns for `Rng::random_range(d..d + E)` over `u32` on a generator made by `StdRng::seed_from_u64(seed)`: a whole number of seconds in `[d, d + E)`. This is a fresh generator, not the one of Z2, and the draw is an integer range, not Z2's float.
+Given the delay `s` in whole seconds (an unsigned 32-bit integer) and a seed:
 
-- Seeds: the answer that puts a card in the intraday learning queue (U44) uses the seed of Z1 (card id + reviews before the answer); its due time is now + the fuzzed delay. The current state of a card in that queue reconstructs the time of the last answer with the card id + (reviews − 1) taken in 32 bits (`sched/steps#L8`).
-- Delays that become days are not fuzzed this way (`sched/steps#L7`); review fuzz (Z4) never applies to steps.
-- Bounds: `E` is at most 300 s and at most a quarter of the delay. 3 s has no room (`E` 0), 4 s has `E` = 1 (the draw is always 4), 30 s draws from [30, 37), 600 s from [600, 750), 7200 s and longer from [d, d + 300).
+1. `w` = `floor(min(f(s) × 0.25, 300.0))` in 32-bit float arithmetic, where `f(s)` is `s` converted to `f32`, then converted to an unsigned integer. So `w` is a quarter of the delay, at most 300 seconds (5 minutes).
+2. When `w` is 0 (delays under 4 seconds), the fuzzed delay is `s`.
+3. Otherwise the fuzzed delay is the first value that the `rand` crate, version 0.9.4 exactly (as Z2), returns for `Rng::random_range(s..s + w)`, a half-open range of `u32`, on a generator made by `StdRng::seed_from_u64(seed)`. It lies in `[s, s + w − 1]`. This is a fresh generator, not the one that gave Z2's factor, and the draw is an integer range, not Z2's float, so it is the same on every platform.
 
-| Card id | Reviews counted | Delay | Fuzzed |
-|---|---|---|---|
-| 1894701600002 | 0 | 30 | 33 |
-| 1894701600003 | 4294967295 | 30 | 31 |
-| 1894701600004 | 1 | 30 | 34 |
-| 1894701600005 | 0 | 600 | 705 |
-| 1894701600006 | 999 | 600 | 719 |
-| 1894701600007 | 2 | 7200 | 7360 |
-| 1894701600008 | 3 | 72000 | 72267 |
-| 1894701600012 | 5 | 600 | 722 |
-| 1894747200004 | 0 | 600 | 676 (an answer: due = now + 676) |
+Seeds:
 
-(Goldens `sched/steps/learning-fuzz`, where "reviews counted" is the card's reviews minus one, and `sched/steps/rollover-answer` c5.)
+- An answer uses the seed of Z1 (card id plus `reps` before the answer); its `due` is the answer second plus the fuzzed delay.
+- The current state of a card in the intraday learning queue reconstructs the instant of its last answer from its `due` and the fuzzed delay of the previous answer: the seed is the card id plus (`reps` − 1) taken in unsigned 32-bit arithmetic, so 0 reviews give 4,294,967,295 (Z1, `sched/steps#L8`).
+
+Delays that become days are not fuzzed this way (`sched/steps#L7`), and review fuzz (Z4) never applies to steps. Bounds: 3 s has no room (`w` 0), 4 s has `w` = 1 (the draw is always 4), 30 s draws from [30, 37), 600 s from [600, 750), 7200 s and longer from [s, s + 300).
+
+Examples (oracle; "reviews counted" is the count in the seed):
+
+| Card id | Reviews counted | `s` | `w` | Fuzzed delay | Golden |
+|---|---|---|---|---|---|
+| 1894701600000 | 0 | 600 | 150 | 739 | `storage/stamps/answer`, step 4 |
+| 1894698000000 | 0 | 600 | 150 | 696 | `smoke/fsrs-new-card`, step 3 |
+| 1894698000000 | 2 | 600 | 150 | 715 | `smoke/fsrs-new-card`, step 8 |
+| 1894719600000 | 3 | 600 | 150 | 705 | `smoke/sm2-new-card`, step 9 |
+| 1894701600002 | 0 | 30 | 7 | 33 | `sched/steps/learning-fuzz` |
+| 1894701600003 | 4294967295 | 30 | 7 | 31 | `sched/steps/learning-fuzz` |
+| 1894701600004 | 1 | 30 | 7 | 34 | `sched/steps/learning-fuzz` |
+| 1894701600005 | 0 | 600 | 150 | 705 | `sched/steps/learning-fuzz` |
+| 1894701600006 | 999 | 600 | 150 | 719 | `sched/steps/learning-fuzz` |
+| 1894701600007 | 2 | 7200 | 300 | 7360 | `sched/steps/learning-fuzz` |
+| 1894701600008 | 3 | 72000 | 300 | 72267 | `sched/steps/learning-fuzz` |
+| 1894701600012 | 5 | 600 | 150 | 722 | `sched/steps/learning-fuzz` |
+| 1894747200004 | 0 | 600 | 150 | 676 (an answer: `due` = now + 676) | `sched/steps/rollover-answer`, `#c5` |
+
+In `sched/steps/learning-fuzz` the count in the seed is the observed card's `reps` minus one in 32 bits: its current state reconstructs the previous answer.
 
 ## Z8. Where review fuzz is applied, and the fuzzed-day chooser (R664, R666)
 
@@ -143,7 +154,7 @@ The engine takes an optional fuzzed-day chooser. At each point above it first of
 |---|---|
 | `fp-probe/corpus/fuzz-table` | Z1 to Z4 and Z6 on 10,000 (card id, reps) pairs at 20 intervals with maximum 36,500 (R1892); U45 activates it with its `fuzz_table` adapter |
 | `sched/fuzz/table-bounds` | Z1 (shared seeds, the largest ids and review counts), Z4 clamping under maximums 36,500, 100, 3 and 1 |
-| `sched/steps/learning-fuzz`, `sched/steps/rollover-answer` | Z7 |
+| `sched/steps/learning-fuzz`, `sched/steps/rollover-answer`, `sched/answer/*` | Z7 |
 | `sched/fsrs/*`, `sched/steps/*` | Z4, Z5 and Z8 inside the transitions |
 
 All goldens are recorded. Z4's table, the widening of step 5 and Z1's negative ids are unit tests.

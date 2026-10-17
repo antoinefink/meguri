@@ -1,0 +1,71 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "rename_tag": {
+          "count": 1
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "bar": {
+              "collapsed": 0,
+              "config": {
+                "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+              },
+              "tag": "bar",
+              "usn": -1
+            },
+            "bar::a": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::a",
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" bar bar::a ", 1894705200, -1],
+            [" bar ", 1894701600, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/rename/rows",
+  "scenario_sha256": "9c4b6f224fb07d745b019c6bf2d876db34035b161130a8b60af7f558b49ed69e",
+  "tz": "UTC"
+}

@@ -11,3 +11,4 @@
 - The `test-hooks` (model, engine, sync, ffi) and `ankiweb` (sync, ffi) features are never default.
 - Fault points are `meguri_model::faultpoint!("<name>")?`. Whether they fire is meguri-model's `test-hooks` feature, not the calling crate's: a crate's own `test-hooks` must enable `meguri-model/test-hooks`. Names belong to U250's catalog.
 - Host builds write `core/target/`; Docker builds use the `cargo-target` volume.
+- `tools/mg core-test --canaries` runs only the canary phase: it is the merge gate's canary stage (U19), which stops the gate when it fails.

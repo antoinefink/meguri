@@ -1,0 +1,8 @@
+# Interface names the tags specs use that are not ordinary words: the stamp
+# columns of the notes, cards and tags tables, the collation, and the synced
+# config key holding flag names. Ordinary words that are also names (tags,
+# tag, notes, cards, flags, collapsed, config, marked, blank) stay unmasked.
+usn
+mod
+unicase
+flagLabels

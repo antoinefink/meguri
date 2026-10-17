@@ -12,6 +12,7 @@ use meguri_model::changes::{
     CardChange, ChangeKind, ChangeSet, ConfigKeyChange, DeckChange, DeckConfigChange, NoteChange, NotetypeChange,
     OpSource, TagChange,
 };
+use meguri_model::col::Col;
 use meguri_model::ids::{CardId, DeckConfigId, DeckId, NoteId, NotetypeId, RevlogId};
 use meguri_model::revlog::RevlogEntry;
 use meguri_storage::journal::{After, ColumnSet, Entry, Journal};
@@ -39,6 +40,8 @@ pub(crate) struct Derived {
     pub revlog_added: Vec<RevlogEntry>,
     pub revlog_removed: Vec<RevlogEntry>,
     pub config: Vec<ConfigDelta>,
+    /// The `col` row after the op, when the op changed it.
+    pub collection: Option<Col>,
     /// Rows the journal holds.
     pub rows: usize,
 }
@@ -59,6 +62,7 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
     let mut revlog_added = Vec::new();
     let mut revlog_removed = Vec::new();
     let mut config = Vec::new();
+    let mut collection = None;
     let mut notetypes: BTreeMap<i64, (Option<ChangeKind>, bool)> = BTreeMap::new();
     let mut rows = 0;
 
@@ -67,6 +71,12 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
         let Some(kind) = kind_of(entry) else { continue };
         match entry.table() {
             Table::Col => {
+                if payload && let After::Row(image) = entry.after() {
+                    match Col::from_cells(image) {
+                        Ok(col) => collection = Some(col),
+                        Err(error) => tracing::warn!(%error, "the changed col row is unreadable"),
+                    }
+                }
                 if kind != ChangeKind::Updated {
                     changes.collection_row = true;
                 } else if let (Some(before), After::Row(after)) = (before_image(journal, entry), entry.after()) {
@@ -223,6 +233,7 @@ pub(crate) fn derive(journal: Option<&Journal>, source: OpSource, media: MediaNo
         revlog_added,
         revlog_removed,
         config,
+        collection,
         rows,
     }
 }

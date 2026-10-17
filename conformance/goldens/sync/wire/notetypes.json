@@ -1,0 +1,257 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {},
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Gap": {
+              "css": "",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1301,
+                  "name": "Text",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1302,
+                  "name": "Extra",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600008,
+              "latexPost": "\\end{document}",
+              "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1894701600,
+              "name": "Gap",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{cloze:Text}}<br>{{Extra}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2301,
+                  "name": "Cloze",
+                  "ord": 0,
+                  "qfmt": "{{cloze:Text}}"
+                }
+              ],
+              "type": 1,
+              "usn": -1
+            },
+            "Pair": {
+              "css": ".card { margin: 0; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1101,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1102,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "\\end{document}",
+              "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1894701600,
+              "name": "Pair",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{Back}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2101,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}"
+                }
+              ],
+              "type": 0,
+              "usn": -1
+            },
+            "Reading": {
+              "css": ".card { font-family: serif; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1201,
+                  "name": "Expression",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null,
+                  "x_reader_role": "word"
+                },
+                {
+                  "collapsed": false,
+                  "description": "English gloss",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 1202,
+                  "name": "Meaning",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 18,
+                  "sticky": true,
+                  "tag": null,
+                  "x_reader_order": 2,
+                  "x_reader_role": "gloss"
+                }
+              ],
+              "id": 1894701600007,
+              "latexPost": "\\end{document}",
+              "latexPre": "\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1894701600,
+              "name": "Reading",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ],
+                [
+                  1,
+                  "any",
+                  [1]
+                ]
+              ],
+              "sortf": 0,
+              "tags": ["vocab"],
+              "tmpls": [
+                {
+                  "afmt": "{{FrontSide}}<hr id=answer>{{Meaning}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2201,
+                  "name": "Recognize",
+                  "ord": 0,
+                  "qfmt": "{{Expression}}",
+                  "x_reader_side": "front"
+                },
+                {
+                  "afmt": "{{FrontSide}}<hr id=answer>{{Expression}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "{{Meaning}}?",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 2202,
+                  "name": "Recall",
+                  "ord": 1,
+                  "qfmt": "{{Meaning}}"
+                }
+              ],
+              "type": 0,
+              "usn": -1,
+              "vers": [],
+              "x_reader_cfg": {
+                "autoplay": false,
+                "rate": 1.25,
+                "voices": ["kyoko", "otoya"]
+              },
+              "x_reader_lang": "ja"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "32ece948047d3a7da83048cf8c8316e05d4e76a549a4c0290c793248b756bb6f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sync/wire/notetypes",
+  "scenario_sha256": "d470afa3d9fa1ad7d76a9e552c3ef0087b286e3caf2a6f8d4db91cd466f1a432",
+  "tz": "UTC"
+}

@@ -1,0 +1,28 @@
+/* Meguri's card styling for its stock note types: system text, centred,
+   with the page's own light and dark colours. */
+.card {
+  font-family: system-ui, -apple-system, "Helvetica Neue", sans-serif;
+  font-size: 1.3em;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--fg, #1d1d1f);
+  background-color: var(--canvas, #f5f5f7);
+}
+
+.card.nightMode,
+.nightMode .card {
+  color: var(--fg, #f5f5f7);
+  background-color: var(--canvas, #1d1d1f);
+}
+
+.card .prompt,
+.card .response,
+.card .extra {
+  margin: 0.4em auto;
+  max-width: 40em;
+}
+
+.card .extra {
+  font-size: 0.85em;
+  opacity: 0.85;
+}

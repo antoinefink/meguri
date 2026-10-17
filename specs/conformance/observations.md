@@ -37,7 +37,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | Kind | Arguments | Value |
 |---|---|---|
 | `ids` | note and card references, or none for all | `{"#nN": <note id>, "#cN": <card id>}`: real ids, allocated by `specs/storage/ids-usn-mtime.md` I2: the clock's instant in milliseconds, or the table's largest id plus one when that instant is taken |
-| `timing` | none | `{days_elapsed, next_day_at, now, utc_offset_secs}`: the scheduler's day number, the next day boundary and the current instant in epoch seconds, and the local UTC offset now |
+| `timing` | none | `{days_elapsed, next_day_at, now, utc_offset_secs}`: the scheduler's day number, the next day boundary and the current instant in epoch seconds, and the local UTC offset now (seconds east). Observing it runs one day query with its writes and unbury check (`sched/day-clock#D5`, `#D7`, `#D14.2`) |
 | `card` | card references or none | `{"#cN": <row> \| null}`: the stored card row with columns `id` (as `#cN`), `nid` (as `#nN`), `did` and `odid` (deck names; `null` for 0), `ord`, `mod`, `usn`, `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `flags` and `data` (parsed JSON object; `{}` when empty; the text when it is not JSON) |
 | `revlog` | card references or none | `{"#cN": [<row>, ...]}`: the card's review-log rows in id order, columns `id`, `cid` (as `#cN`), `usn`, `ease`, `ivl`, `lastIvl`, `factor`, `time`, `type` |
 | `next_states` | card references or none | `{"#cN": {current, again, hard, good, easy}}`: the scheduling state now and after each rating (O5) |
@@ -48,17 +48,23 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `queue` | none or `{deck}` | draft (sched): the cards in the order the scheduler would show them, as `#cN`, and the new, learning and review counts |
 | `deck_tree` | none | draft (sched): deck names with their counts, nested |
 | `render` | card references or none | draft (render, U62): question and answer HTML with play markers, AV tags and error kind per card, from the stored templates |
+| `render_status` | card references or none | `{"#cN": {ord, status} \| null}`: whether the card renders for review from its stored templates, `status` `ok`, `empty` (blank question) or `template_error`, with no text or length (`render-ops.md` Q4) |
 | `template` | `{notetype?, cases: [...]}` | `[<result>, ...]`, one per case: `{question, answer, empty}` or `{error: {kind, side}}`, the template engine's output for given template texts on a note not yet added or an existing card (`render-ops.md` Q1); at most one request per step; never changes the scenario's collection |
-| `search` | `{query, kind?: cards \| notes, order?}` | draft (search): `{ids: [...]}` in result order, or `{error: <kind>}` |
+| `search` | list of `{query, kind?: cards \| notes}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
+| `canonical_search` | list of search texts | `search-ops.md` S2: one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |
 | `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
 | `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |
 | `blob_decode` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: "ok" \| "invalid_blob"}, decks?: {...}, presets?: {...}}`, whether each record's protobuf blobs decode now (`model-ops.md` L4) |
+| `notetype_structure` | none, or `{notetypes: [<name>, ...]}` | `{<name>: {kind, original_stock_kind, original_id, sort_field, fields, templates}}`: note types without template text, CSS or ids (`notetype-ops.md` T8) |
 | `package_col` | `{name, columns}`: a package file an `export` step wrote, and a list of `col` columns | `{<column>: <value>}`: the `col` row of the legacy package's collection, `ver` an integer and the JSON columns parsed (`model-ops.md` L7) |
 | `text` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: pure text functions (O9); never reads or changes the scenario's collection |
+| `tag_tree` | none | `[{name, collapsed, children}, ...]`: the tag tree of `specs/tags/tags.md` T13, top-level nodes first (`tag-ops.md` G9) |
+| `undo_status` | none | `{undo, redo}`: the step an `undo` and a `redo` would apply now, each a step id or `null` (`undo-ops.md` V2, V4); reading it changes neither history |
 | `cloze` | `{fns: [<function>, ...], inputs: [<input>, ...]}` | `{<function>: [<output>, ...], ...}`: cloze numbers, `cloze:` and `cloze-only:` output and type-in extraction (`cloze-ops.md` Z1); never reads or changes the scenario's collection |
 | `fsrs_next` | `{param_sets: {<name>: [<number>, ...]}, inputs: [<input>, ...]}`, at most once per observe step | `{rows: [<row>, ...]}`: the FSRS next states of a review card per input, as twelve values (days, stability and difficulty for again, hard, good and easy); never reads or changes the scenario's collection (`float-determinism.md` F3, F5) |
+| `browser_config` | none | `{<key>: <value>, ...}`: the 23 browser and search config keys as Anki's own reads give them, defaults included (`browser-config-ops.md` B2) |
 
 ## O5. Scheduling states
 

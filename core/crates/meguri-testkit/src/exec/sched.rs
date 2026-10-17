@@ -1,23 +1,76 @@
-//! The scheduler area's adapters. So far the pure `fsrs_next` observation
+//! The scheduler area's adapters: the pure `fsrs_next` observation
 //! (float-determinism.md F3, F5): the FSRS answer states of a stored review
-//! card per input, computed by meguri-sched without a collection (F5.5).
+//! card per input, computed by meguri-sched without a collection (F5.5);
 //! `meguri-cli fp-probe` evaluates the probe corpus with the same functions
-//! (F10.1), and also the fuzz table (`sched/fuzz` Z6).
+//! (F10.1), and also the fuzz table (`sched/fuzz` Z6). And the day clock's
+//! `timing` observation and `reopen` op (`sched/day-clock` D14.2): one day
+//! query on the session's collection, with the engine's `day_query` in a
+//! `Raw` write scope and the session's cached day, until the session runs
+//! the engine (U38).
 
 use std::collections::BTreeMap;
 
 use fsrs::FSRS;
+use meguri_engine::{DayQuery, day_query};
+use meguri_model::clock::Clock;
 use meguri_sched::states::fuzz;
 use meguri_sched::states::review::{self, ReviewAnswers, ReviewCard};
+use meguri_storage::{StampMode, StorageError};
 use serde_json::{Value, json};
 
-use super::{ExecError, Registry, Session};
+use super::{ExecError, OpResult, Registry, Session};
 use crate::observe;
-use crate::scenario::{FsrsNextInput, FsrsNextRequest, ObservationArgs, ObservationRequest};
+use crate::scenario::{FsrsNextInput, FsrsNextRequest, ObservationArgs, ObservationRequest, Step};
 
-/// Registers the `fsrs_next` kind.
+/// Registers the `fsrs_next` and `timing` kinds and the `reopen` op.
 pub(super) fn register(registry: &mut Registry) {
     registry.observation("fsrs_next", observe);
+    registry.observation("timing", timing);
+    registry.op("reopen", reopen);
+}
+
+/// One day query now (`sched/day-clock` D5 to D7) on the session's
+/// collection: the engine's `checkRollover()` without its events, which no
+/// observation reads.
+pub(super) fn day_query_now(session: &mut Session<'_>) -> Result<DayQuery, ExecError> {
+    let Session {
+        storage, day, clock, ..
+    } = session;
+    let collection = storage
+        .collection()
+        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
+    let now_ms = clock.now_ms();
+    let core = |e: StorageError| ExecError::new("core_error", e.to_string());
+    let mut scope = collection
+        .writer()
+        .begin_write(StampMode::Raw, clock.as_ref(), None)
+        .map_err(core)?;
+    let query = day_query(&mut scope, day, now_ms.div_euclid(1000), clock.utc_offset_at(now_ms)).map_err(core)?;
+    scope.commit().map_err(core)?;
+    Ok(query)
+}
+
+/// observations.md O4: the day number, the next boundary, now and the
+/// offset now, after one day query.
+fn timing(session: &mut Session<'_>, _request: &ObservationRequest) -> Result<Value, ExecError> {
+    let query = day_query_now(session)?;
+    let now_ms = session.clock.now_ms();
+    Ok(json!({
+        "days_elapsed": query.day.today,
+        "next_day_at": query.day.next_day_at,
+        "now": now_ms.div_euclid(1000),
+        "utc_offset_secs": session.clock.utc_offset_at(now_ms).seconds(),
+    }))
+}
+
+/// sync-ops.md S6: closes the collection and opens it again from its file.
+/// An engine open drops the cached day and runs the day clock's first check
+/// (D8, D14.2).
+fn reopen(session: &mut Session<'_>, _step: &Step) -> Result<OpResult, ExecError> {
+    super::storage::reopen_collection(session)?;
+    session.day.clear();
+    day_query_now(session)?;
+    Ok(OpResult::Done)
 }
 
 fn invalid(detail: impl Into<String>) -> ExecError {
