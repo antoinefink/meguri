@@ -1527,3 +1527,21 @@ fn rig_accepts_the_meguri_identity_and_empty_bodies() {
     let err = request(&mut stranger, Method::Meta, meta).unwrap_err();
     assert!(err.is_auth_failure(), "{err}");
 }
+
+#[test]
+fn idle_dns_pool_threads_do_not_exhaust_the_suspend_budget() {
+    let stub = SyncStub::serve(|_| ok_meta());
+    let url = stub.url().replace("127.0.0.1", "localhost");
+    request(&mut new_job(&options(&url)), Method::Meta, Payload::empty()).unwrap();
+    let deadline = now() + Duration::from_millis(200);
+    while !threads().busy_threads().is_empty() && now() < deadline {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(threads().busy_threads().is_empty(), "{:?}", threads().threads());
+    assert!(
+        threads()
+            .threads()
+            .iter()
+            .all(|t| t.suspend_owner.as_deref() == Some("jobs"))
+    );
+}

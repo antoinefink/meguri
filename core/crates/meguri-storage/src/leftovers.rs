@@ -53,3 +53,24 @@ pub fn staging_directory(directory: &Path) -> Result<tempfile::TempDir, StorageE
         .prefix(".meguri-stage-")
         .tempdir_in(directory)?)
 }
+
+/// Media contains published user files. Sweep only reserved regular files
+/// at its top level, and never follow a link used as the media directory.
+pub fn cleanup_media(directory: &Path) -> Result<Vec<PathBuf>, StorageError> {
+    match std::fs::symlink_metadata(directory) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    }
+    let mut removed = Vec::new();
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        if entry.file_type()?.is_file() && entry.file_name().to_str().is_some_and(reserved) {
+            std::fs::remove_file(entry.path())?;
+            removed.push(entry.path());
+        }
+    }
+    removed.sort();
+    Ok(removed)
+}

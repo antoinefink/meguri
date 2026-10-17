@@ -6,7 +6,7 @@ use crate::executor::{
 use crate::monotonic;
 use crate::{Engine, EngineError, JobContext, JobHandle, JobId, JobKind};
 use meguri_storage::{OpenOptions, ReaderFactory, open_collection};
-use std::sync::PoisonError;
+use std::sync::{MutexGuard, PoisonError, TryLockError};
 use std::time::Duration;
 
 /// Failed background WAL syncs reach the control/event consumer even though
@@ -61,6 +61,28 @@ fn check_deadline(deadline: Duration, phase: &str) -> Result<(), EngineError> {
     }
 }
 impl Engine {
+    pub(crate) fn control_lane_until(&self, deadline: Duration) -> Result<MutexGuard<'_, ()>, EngineError> {
+        loop {
+            check_deadline(deadline, "control lane")?;
+            match self.inner.control_lane.try_lock() {
+                Ok(lane) => return Ok(lane),
+                Err(TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
+                Err(TryLockError::WouldBlock) => {
+                    std::thread::sleep(Duration::from_millis(1).min(deadline.saturating_sub(monotonic::now())));
+                }
+            }
+        }
+    }
+
+    // Job registration must refuse reentrant calls from a participant or op
+    // while a control call is waiting for it, instead of deadlocking it.
+    pub(crate) fn job_control_lane(&self) -> Result<MutexGuard<'_, ()>, EngineError> {
+        match self.inner.control_lane.try_lock() {
+            Ok(lane) => Ok(lane),
+            Err(TryLockError::Poisoned(error)) => Ok(error.into_inner()),
+            Err(TryLockError::WouldBlock) => Err(EngineError::unavailable("a lifecycle control call is running")),
+        }
+    }
     pub fn flush_for_background(&self) -> Result<(), EngineError> {
         let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         self.flush_background_inner()
@@ -74,8 +96,8 @@ impl Engine {
         collection.core.exec.control(Control::Flush).wait().map(drop)
     }
     pub fn suspend(&self, timeout_budget: Duration) -> Result<SuspendOutcome, EngineError> {
-        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         let deadline = monotonic::now() + timeout_budget;
+        let _lane = self.control_lane_until(deadline)?;
         self.collection()?;
         self.jobs().pause(true);
         let jobs = self.jobs().running();
@@ -152,7 +174,11 @@ impl Engine {
         let participants = self.ports().suspend_participants;
         for thread in self.threads().threads() {
             let owned = thread.suspend_owner.as_deref().is_some_and(|owner| {
-                owner == "writer" || owner == "jobs" || participants.iter().any(|p| p.name() == owner)
+                // Events only deliver value envelopes; they never own SQLite handles.
+                owner == "writer"
+                    || owner == "jobs"
+                    || owner == "events"
+                    || participants.iter().any(|p| p.name() == owner)
             });
             if !owned {
                 return Err(EngineError::InvalidArgument {
@@ -171,7 +197,7 @@ impl Engine {
         Ok(())
     }
     pub fn resume(&self) -> Result<ResumeReport, EngineError> {
-        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let _lane = self.control_lane_until(monotonic::now() + Duration::from_secs(5))?;
         let state = self.state();
         if !matches!(state, crate::LifecycleState::Ready { .. }) {
             return Err(EngineError::unavailable(state.describe()));
@@ -221,7 +247,7 @@ impl Engine {
             });
         }
         // Serialize registration and policy selection with suspend.
-        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let _lane = self.job_control_lane()?;
         if self.lock_state().suspended {
             return Err(EngineError::unavailable("the collection is suspended"));
         }
@@ -290,4 +316,28 @@ pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<Contro
         }
     }
     Ok(reply)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_lane_contention_counts_toward_suspend_deadline() {
+        let engine = Engine::new(crate::EngineConfig::default()).unwrap();
+        let lane = engine.inner.control_lane.lock().unwrap();
+        let caller = engine.clone();
+        let started = monotonic::now();
+        let result = std::thread::spawn(move || caller.suspend(Duration::from_millis(20)))
+            .join()
+            .unwrap();
+        drop(lane);
+        assert_eq!(
+            result,
+            Err(EngineError::SuspendDeadline {
+                phase: "control lane".into()
+            })
+        );
+        assert!(monotonic::now() - started < Duration::from_millis(200));
+    }
 }

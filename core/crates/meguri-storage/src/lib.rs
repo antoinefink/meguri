@@ -12,6 +12,8 @@ pub mod checkpoint;
 pub mod collation;
 pub mod conn_init;
 pub mod connections;
+#[cfg(feature = "test-hooks")]
+pub mod counting_vfs;
 mod day_writes;
 pub mod derived;
 mod durability;

@@ -30,6 +30,11 @@ pub(crate) fn file_uri(path: &Path, query: Option<&str>) -> String {
         uri.push('?');
         uri.push_str(query);
     }
+    #[cfg(feature = "test-hooks")]
+    if crate::counting_vfs::selected(path) {
+        uri.push_str(if query.is_some() { "&" } else { "?" });
+        uri.push_str("vfs=meguri-counting");
+    }
     uri
 }
 
@@ -56,8 +61,6 @@ pub(crate) const READ_WRITE: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
 pub struct Writer {
     pub(crate) conn: Connection,
     #[cfg(feature = "test-hooks")]
-    pub(crate) wal_sync_probe: std::cell::Cell<bool>,
-    #[cfg(feature = "test-hooks")]
     pub(crate) fail_next_wal_sync: std::cell::Cell<bool>,
 }
 
@@ -78,8 +81,6 @@ impl Writer {
         })?;
         Ok(Writer {
             conn,
-            #[cfg(feature = "test-hooks")]
-            wal_sync_probe: std::cell::Cell::new(false),
             #[cfg(feature = "test-hooks")]
             fail_next_wal_sync: std::cell::Cell::new(false),
         })

@@ -154,7 +154,9 @@ impl Dispatcher {
         });
         let worker = Arc::clone(&dispatcher);
         threads
-            .spawn(DISPATCHER_THREAD_NAME, Qos::UserInitiated, move |_| worker.run())
+            .spawn_owned(DISPATCHER_THREAD_NAME, Qos::UserInitiated, "events", move |_| {
+                worker.run()
+            })
             .map_err(|e| CoreError::Internal {
                 message: format!("cannot start the event dispatcher: {e}"),
             })?;
@@ -275,6 +277,20 @@ mod tests {
         let stream = ChangeStream::new();
         let dispatcher = Dispatcher::start(&stream, &ThreadRegistry::new()).unwrap();
         (stream, dispatcher)
+    }
+
+    #[test]
+    fn dispatcher_has_a_non_sqlite_suspend_owner() {
+        let engine = meguri_engine::Engine::new(meguri_engine::EngineConfig::default()).unwrap();
+        let _dispatcher = Dispatcher::start(engine.stream(), engine.threads()).unwrap();
+        let thread = engine
+            .threads()
+            .threads()
+            .into_iter()
+            .find(|t| t.name == DISPATCHER_THREAD_NAME)
+            .unwrap();
+        assert_eq!(thread.suspend_owner.as_deref(), Some("events"));
+        assert!(!thread.busy);
     }
 
     #[test]

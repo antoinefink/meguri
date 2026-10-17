@@ -222,54 +222,56 @@ fn a_replace_that_fails_after_swapping_the_file_still_flushes_the_reopened_write
 
 #[test]
 fn vfs_shim_counts_full_wal_syncs_covering_twenty_answers() {
-    let h = Harness::open();
+    use meguri_storage::counting_vfs::{CountingVfs, clock};
+    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let probe = CountingVfs::for_path(&path);
+    let h = Harness::open_path(dir, path);
     let (_, cid) = common::steps::setup_note(&h.collection, "WAL sync answers");
-    let baseline = h
-        .collection
-        .submit_maintenance(catalog::WAL_CHECKPOINT, Duration::ZERO, |writer| {
-            writer.enable_wal_sync_probe_for_test();
-            Ok(writer.wal_vfs_sync_counts_for_test())
-        })
-        .wait()
-        .unwrap();
-    h.collection.record_durability_events();
     let lease = h.collection.reader(ReaderRole::Sync).unwrap();
     let snapshot = lease.snapshot().unwrap();
-    let _ = snapshot.col().unwrap();
+    let original = snapshot.col().unwrap();
     let mut commits = Vec::new();
     for _ in 0..20 {
-        let answer = common::steps::answer(&h.collection, None, cid).unwrap();
-        commits.push((answer.seq, monotonic::now()));
+        common::steps::answer(&h.collection, None, cid).unwrap();
+        commits.push(clock::now());
         thread::sleep(Duration::from_millis(60));
     }
-    let deadline = commits.last().unwrap().1 + Duration::from_secs(1);
-    loop {
-        if h.collection
-            .durability_events()
-            .syncs
+    let wal = h.path.with_extension("anki2-wal").to_string_lossy().into_owned();
+    let deadline = *commits.last().unwrap() + Duration::from_secs(1);
+    let records = loop {
+        let records = probe.records();
+        if records
             .iter()
-            .any(|s| s.succeeded && s.through >= commits.last().unwrap().0)
+            .any(|r| r.filename == wal && r.flags & 0x0f == 3 && r.result == 0 && r.started >= *commits.last().unwrap())
         {
-            break;
+            break records;
         }
-        assert!(monotonic::now() < deadline);
+        assert!(
+            clock::now() < deadline,
+            "no full WAL sync after last answer: {records:?}"
+        );
         thread::sleep(Duration::from_millis(2));
-    }
-    let events = h.collection.durability_events();
-    let counts = h
-        .collection
-        .submit_maintenance(catalog::WAL_CHECKPOINT, Duration::ZERO, |writer| {
-            Ok(writer.wal_vfs_sync_counts_for_test())
-        })
-        .wait()
-        .unwrap();
-    assert!(counts.0 > baseline.0);
-    assert_eq!(counts.0 - baseline.0, counts.1 - baseline.1, "every VFS sync used FULL");
-    assert!(counts.1 - baseline.1 >= events.syncs.iter().filter(|s| s.succeeded).count() as u64);
+    };
+    assert_eq!(snapshot.col().unwrap(), original);
     let mut costs = Vec::new();
-    for (seq, committed_at) in commits {
-        let covering = events.syncs.iter().find(|s| s.succeeded && s.through >= seq).unwrap();
-        assert!(covering.completed.saturating_sub(committed_at) <= Duration::from_secs(1));
+    for committed_at in commits {
+        // SQLITE_OPEN_WAL=0x80000, SQLITE_SYNC_FULL=3, SQLITE_OK=0.
+        // Match the actual filename and completion clock, never an executor
+        // seq, sync event, or the file pointer chosen by sync_wal.
+        let covering = records
+            .iter()
+            .find(|r| {
+                r.filename == wal
+                    && r.open_flags & 0x80000 != 0
+                    && r.flags & 0x0f == 3
+                    && r.result == 0
+                    && r.started >= committed_at
+            })
+            .expect("full WAL sync");
+        assert!(
+            covering.completed - committed_at <= Duration::from_secs(1),
+            "{covering:?}"
+        );
         costs.push(covering.completed - covering.started);
     }
     costs.sort();
@@ -277,6 +279,6 @@ fn vfs_shim_counts_full_wal_syncs_covering_twenty_answers() {
         "U32 full WAL sync: p50={:?}, p95={:?}, VFS calls={}",
         costs[10],
         costs[19],
-        counts.1 - baseline.1
+        records.len()
     );
 }

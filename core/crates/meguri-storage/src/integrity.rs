@@ -37,11 +37,11 @@ fn check(conn: &rusqlite::Connection, sql: &str) -> Result<IntegrityReport, Stor
 }
 impl Reader {
     pub fn quick_check(&self) -> Result<IntegrityReport, StorageError> {
-        check(&self.conn, "PRAGMA quick_check")
+        check(&self.conn, "PRAGMA main.quick_check")
     }
 }
 pub fn integrity_check(path: &Path) -> Result<IntegrityReport, StorageError> {
     let conn = rusqlite::Connection::open_with_flags(file_uri(path, Some("mode=ro")), READ_ONLY)?;
     crate::conn_init::probe(&conn).map_err(|detail| StorageError::ConnectionInit { detail })?;
-    check(&conn, "PRAGMA integrity_check")
+    check(&conn, "PRAGMA main.integrity_check")
 }

@@ -215,7 +215,13 @@ On the M3 Max with `FULL`, the answer's p99 was 8.2–9.4 ms and its maximum 16�
 
 ### C9.5 U32 counting-VFS smoke measurement
 
-On 2026-10-17, `cargo nextest run -p meguri-engine --all-features --test wal_durability` on the Linux aarch64 implementation container exercised 20 answer-sized transactions with the sync reader pinned. The forwarding xSync shim counted two successful calls, both with `SQLITE_SYNC_FULL`; each covered its answer commits within one second. The measured covering-sync cost was 8.125 µs at p50 and p95 in that run (grouped commits share their covering sync). This is container filesystem smoke evidence, not a physical-drive or Apple fullfsync benchmark. The Apple measurement and suspend timing still run through the Mac verification lane.
+The initial 2026-10-17 Linux result (8.125 µs p50/p95) used a shim installed only around the explicit sync call. It did not independently identify the WAL or observe SQLite's other syncs and is superseded as verification evidence.
+
+The U32 review replaces it with a registered forwarding VFS selected through `vfs=meguri-counting` before open. It records actual filenames, open and sync flags, result codes and monotonic start/completion times for every xSync of the test collection and sidecars. With the sync snapshot pinned, the test requires a successful FULL sync of the actual `collection.anki2-wal` after each of 20 returned answer commits within one second, using those records independently of the executor's durability events. A separate observer check issues a NORMAL sync of the main file and distinguishes its filename and flags from the WAL.
+
+A Linux smoke run of the registered observer on 2026-10-17 measured covering sync p50 2.500 µs and p95 3.458 µs, with three total VFS sync records; every answer met the one-second bound. This measures the container filesystem cache only.
+
+Apple physical-drive cost and native/simulator suspend timing are **queued**, owned by U37 (native Mac engine suites and counting-VFS p50/p95 before U37 acceptance) and U151 (Mac and VM simulator lifecycle integration before U151 acceptance/M1R). Their budgets and required artifacts are recorded in `docs/process/review-log/U32.md`. Every answer's WAL sync must complete within 1 s and successful suspend(2 s) must finish within 2 s at 150k cards. Linux filesystem timing is smoke evidence only and makes no claim about F_FULLFSYNC cost.
 
 ## C10. Close
 

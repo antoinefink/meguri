@@ -274,8 +274,8 @@ impl Engine {
     /// raw open entry point: only meguri-host calls it (`CoreHost::open`
     /// wires the ports), so layering-check refuses the name elsewhere.
     pub fn open_raw(&self, path: &Path, config: OpenConfig) -> Result<Collection, EngineError> {
-        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         {
+            let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
             let mut guard = self.lock_state();
             match guard.state {
                 LifecycleState::NoCollection | LifecycleState::Failed { .. } if guard.current.is_none() => {}
@@ -294,6 +294,7 @@ impl Engine {
                 .unwrap_or(Path::new("."));
             let ownership = meguri_storage::lockfile::CollectionLock::acquire(directory)?;
             meguri_storage::leftovers::cleanup(directory)?;
+            meguri_storage::leftovers::cleanup_media(&directory.join("collection.media"))?;
             if let Some(backups) = &config.backups_directory {
                 meguri_storage::paths::CollectionPaths::new(directory, backups)?;
                 meguri_storage::leftovers::cleanup(backups)?;
@@ -413,6 +414,7 @@ impl Engine {
                 return Err(error);
             }
         }
+        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         exec.set_admission(Admission::Open);
         let mut guard = self.lock_state();
         guard.current = Some(Current {
@@ -438,6 +440,9 @@ impl Engine {
     /// entered through it, no longer act (L5).
     pub fn close(&self) -> Result<(), EngineError> {
         let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        if matches!(self.state(), LifecycleState::Opening | LifecycleState::Upgrading { .. }) {
+            return Err(EngineError::unavailable("the collection is opening"));
+        }
         self.jobs().pause(true);
         for job in self.jobs().running() {
             job.cancel.cancel();
@@ -497,7 +502,7 @@ impl Engine {
         kind: JobKind,
         work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
     ) -> Result<JobHandle, EngineError> {
-        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let _control = self.job_control_lane()?;
         if self.lock_state().suspended {
             return Err(EngineError::unavailable("the collection is suspended"));
         }

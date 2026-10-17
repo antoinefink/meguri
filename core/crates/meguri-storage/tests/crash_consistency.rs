@@ -216,3 +216,78 @@ fn zero_mod_and_scm_are_valid_external_change_baselines() {
     assert!(opened.external_change);
     opened.close().unwrap();
 }
+
+#[test]
+fn quick_check_ignores_damage_in_attached_derived_store() {
+    use meguri_storage::raw::{PlainDatabase, SqlValue};
+    use std::os::unix::fs::FileExt;
+    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let derived = dir.path().join("meguri-derived.db");
+    std::fs::File::create(&derived).unwrap();
+    let db = PlainDatabase::open(&derived).unwrap();
+    db.execute_batch("PRAGMA page_size=4096; CREATE TABLE cache(value TEXT); INSERT INTO cache VALUES ('cache')")
+        .unwrap();
+    drop(db);
+    let file = std::fs::OpenOptions::new().write(true).open(&derived).unwrap();
+    file.write_all_at(&[0xff; 16], 4096).unwrap();
+    let opened = common::open(&path).unwrap();
+    let mut reader = opened.open_reader(ReaderRole::Maintenance).unwrap();
+    reader.attach_derived(&derived, 1).unwrap();
+    let damaged = reader.execute_raw("PRAGMA derived.quick_check", &[]);
+    assert!(damaged.is_err() || damaged.unwrap().rows != vec![vec![SqlValue::Text("ok".into())]]);
+    assert!(reader.quick_check().unwrap().is_ok());
+    drop(reader);
+    opened.close().unwrap();
+}
+
+#[test]
+fn counting_vfs_distinguishes_main_normal_sync_from_full_wal_sync() {
+    use meguri_storage::counting_vfs::{CountingVfs, clock};
+    use meguri_storage::rusqlite::{Connection, OpenFlags, ffi};
+    let (_dir, path) = common::copy_fixture("schema-18.anki2");
+    let probe = CountingVfs::for_path(&path);
+    let conn = Connection::open_with_flags(
+        format!("file:{}?vfs=meguri-counting", path.display()),
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .unwrap();
+    let before = clock::now();
+    // Exercise the observer independently of sync_wal: the main file, NORMAL
+    // flags. A hard-coded FULL flag or WAL filename in the observer fails.
+    unsafe {
+        let mut file = std::ptr::null_mut::<ffi::sqlite3_file>();
+        assert_eq!(
+            ffi::sqlite3_file_control(
+                conn.handle(),
+                c"main".as_ptr(),
+                ffi::SQLITE_FCNTL_FILE_POINTER,
+                std::ptr::from_mut(&mut file).cast()
+            ),
+            ffi::SQLITE_OK
+        );
+        assert_eq!(
+            ((*(*file).pMethods).xSync.unwrap())(file, ffi::SQLITE_SYNC_NORMAL),
+            ffi::SQLITE_OK
+        );
+    }
+    let records = probe.records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].filename, path.to_string_lossy());
+    assert_eq!(records[0].flags, 2); // SQLITE_SYNC_NORMAL
+    assert_eq!(records[0].open_flags & 0x100, 0x100); // SQLITE_OPEN_MAIN_DB
+    assert_eq!(records[0].result, 0);
+    assert!(records[0].started >= before);
+    assert!(records[0].completed >= records[0].started);
+    assert!(records[0].completed <= clock::now());
+    drop(conn);
+    let opened = common::open(&path).unwrap();
+    common::exec(opened.writer(), "UPDATE col SET mod = 42");
+    assert!(opened.writer().sync_wal().unwrap());
+    let records = probe.records();
+    assert!(
+        records.iter().any(|r| r.filename.ends_with("collection.anki2-wal")
+            && r.open_flags & 0x80000 != 0
+            && r.flags & 0x0f == 3)
+    );
+    opened.close().unwrap();
+}

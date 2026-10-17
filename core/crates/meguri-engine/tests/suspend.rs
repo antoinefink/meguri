@@ -508,3 +508,147 @@ fn replacement_never_runs_a_swap_after_collection_close_fails() {
     assert_eq!(common::note_fields(&collection, nid), "preserved\u{1f}back");
     h.engine.close().unwrap();
 }
+
+#[test]
+fn launch_cleans_media_temps_without_following_links_or_descending() {
+    use std::os::unix::fs::symlink;
+    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let media = dir.path().join("collection.media");
+    std::fs::create_dir(&media).unwrap();
+    let temp = media.join(".meguri-tmp-media-killed");
+    std::fs::write(&temp, b"partial").unwrap();
+    std::fs::write(media.join("photo.jpg"), b"published").unwrap();
+    let nested = media.join("album");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::write(nested.join(".meguri-tmp-media-kept"), b"nested").unwrap();
+    symlink(
+        nested.join(".meguri-tmp-media-kept"),
+        media.join(".meguri-tmp-media-link"),
+    )
+    .unwrap();
+    let h = common::Harness::open_path(dir, path);
+    assert!(!temp.exists());
+    assert_eq!(std::fs::read(media.join("photo.jpg")).unwrap(), b"published");
+    assert!(nested.join(".meguri-tmp-media-kept").exists());
+    assert!(
+        media
+            .join(".meguri-tmp-media-link")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    h.engine.close().unwrap();
+}
+
+#[test]
+fn suspend_during_a_slow_open_returns_within_its_budget() {
+    use meguri_engine::{Collection, Engine, EngineConfig, EngineError, OpenStep, Ports};
+    use std::sync::{Arc, Mutex, mpsc};
+    struct SlowOpen(mpsc::Sender<()>, Mutex<mpsc::Receiver<()>>);
+    impl OpenStep for SlowOpen {
+        fn name(&self) -> &str {
+            "slow open"
+        }
+        fn run(&self, _: &Collection) -> Result<(), EngineError> {
+            self.0.send(()).unwrap();
+            self.1.lock().unwrap().recv().unwrap();
+            Ok(())
+        }
+    }
+    let (_dir, path) = common::copy_fixture("schema-18.anki2");
+    let engine = Engine::new(EngineConfig::default()).unwrap();
+    let (entered, ready) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let opener = engine.clone();
+    let opening = std::thread::spawn(move || {
+        let clock = Arc::new(meguri_model::clock::StepClock::new(
+            common::NOW_MS,
+            meguri_model::clock::UtcOffset::UTC,
+            "UTC",
+        ));
+        opener.open_raw(
+            &path,
+            common::open_config(&clock)
+                .ports(Ports::default().open_step(Arc::new(SlowOpen(entered, Mutex::new(wait))))),
+        )
+    });
+    ready.recv().unwrap();
+    let watchdog = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        release.send(()).unwrap();
+    });
+    let started = meguri_engine::monotonic::now();
+    let result = engine.suspend(Duration::from_millis(30));
+    let elapsed = meguri_engine::monotonic::now() - started;
+    watchdog.join().unwrap();
+    opening.join().unwrap().unwrap();
+    engine.close().unwrap();
+    assert!(result.is_err());
+    assert!(elapsed < Duration::from_millis(200), "suspend blocked for {elapsed:?}");
+}
+
+#[test]
+fn a_dispatcher_that_only_delivers_values_allows_suspend_and_close() {
+    use meguri_engine::Qos;
+    let h = common::Harness::open();
+    let (stop, wait) = std::sync::mpsc::channel();
+    let worker = h
+        .engine
+        .threads()
+        .spawn_owned("meguri-events", Qos::UserInitiated, "events", move |_| {
+            wait.recv().unwrap();
+        })
+        .unwrap();
+    let result = h.engine.suspend(Duration::from_secs(2));
+    let closed = if result.is_ok() { h.engine.close() } else { Ok(()) };
+    // Always release the test worker, including on a failed assertion.
+    stop.send(()).unwrap();
+    worker.join().unwrap();
+    assert_eq!(result.unwrap(), SuspendOutcome::Suspended);
+    closed.unwrap();
+}
+
+#[test]
+fn reentrant_job_starts_during_control_calls_are_refused_promptly() {
+    use meguri_engine::{Engine, EngineError, JobKind, Ports, SuspendParticipant};
+    use std::sync::Arc;
+    struct StartsJob(Engine);
+    impl SuspendParticipant for StartsJob {
+        fn name(&self) -> &str {
+            "job starter"
+        }
+        fn flush(&self) -> Result<(), EngineError> {
+            assert!(self.0.start_job(JobKind::NormalSync, |_| Ok(())).is_err());
+            assert!(self.0.start_continued_job(JobKind::OneWaySync, |_| Ok(())).is_err());
+            Ok(())
+        }
+    }
+    let (dir, path) = common::copy_fixture("schema-18.anki2");
+    let engine = Engine::new(meguri_engine::EngineConfig::default()).unwrap();
+    let clock = Arc::new(meguri_model::clock::StepClock::new(
+        common::NOW_MS,
+        meguri_model::clock::UtcOffset::UTC,
+        "UTC",
+    ));
+    engine
+        .open_raw(
+            &path,
+            common::open_config(&clock)
+                .ports(Ports::default().suspend_participant(Arc::new(StartsJob(engine.clone())))),
+        )
+        .unwrap();
+    let (finished, outcome) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let suspended = engine.suspend(Duration::from_secs(2));
+        let closed = engine.close();
+        finished.send((suspended, closed)).unwrap();
+    });
+    let (suspended, closed) = outcome
+        .recv_timeout(Duration::from_secs(3))
+        .expect("job registration deadlocked the control lane");
+    suspended.unwrap();
+    closed.unwrap();
+    worker.join().unwrap();
+    drop(dir);
+}

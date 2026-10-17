@@ -163,11 +163,21 @@ impl ThreadRegistry {
     /// listed idle until [`RegisteredThread::set_busy`], and leaves the list
     /// when the returned value drops.
     pub fn register_current(&self, name: impl Into<String>, qos: Qos) -> RegisteredThread {
+        self.register_current_inner(name.into(), qos, None)
+    }
+
+    /// Registers a runtime thread with its owner atomically, before it can
+    /// appear in a concurrent suspend enumeration.
+    pub fn register_current_owned(&self, name: impl Into<String>, qos: Qos, owner: &str) -> RegisteredThread {
+        self.register_current_inner(name.into(), qos, Some(owner.into()))
+    }
+
+    fn register_current_inner(&self, name: String, qos: Qos, owner: Option<String>) -> RegisteredThread {
         let busy = Arc::new(AtomicBool::new(false));
         let reported_qos = apply_qos(qos);
         let id = self.list(Record {
-            name: name.into(),
-            suspend_owner: None,
+            name,
+            suspend_owner: owner,
             qos,
             reported_qos,
             busy: Arc::clone(&busy),

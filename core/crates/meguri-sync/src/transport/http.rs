@@ -335,7 +335,9 @@ impl reqwest::dns::Resolve for SystemResolver {
         let host = name.as_str().to_owned();
         Box::pin(async move {
             let found = tokio::task::spawn_blocking(move || {
-                std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), 0)).map(Iterator::collect::<Vec<_>>)
+                super::runtime::blocking_work(|| {
+                    std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), 0)).map(Iterator::collect::<Vec<_>>)
+                })
             })
             .await
             .unwrap_or_else(|join| Err(io::Error::other(join.to_string())));

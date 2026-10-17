@@ -39,3 +39,8 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-storage) and test(=real_disk_full_on_size_limited_tmpfs_leaves_original_intact)'
 threads-required = "num-test-threads"
+
+# U32 review regressions: lane contention and the DNS pool's idle accounting.
+[[profile.default.overrides]]
+filter = 'test(=control_lane_contention_counts_toward_suspend_deadline) or test(=suspend_during_a_slow_open_returns_within_its_budget) or test(=idle_dns_pool_threads_do_not_exhaust_the_suspend_budget) or test(=a_cancelled_lookup_stays_busy_until_its_blocking_closure_ends)'
+threads-required = "num-test-threads"
