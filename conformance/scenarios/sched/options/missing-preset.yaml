@@ -1,0 +1,52 @@
+# A deck whose preset is missing is swept up by any deck options save
+# (specs/sched/deck-options.md O7.2 steps 3 to 6): it gets the saved preset
+# and the saved deck's own values, its learning cards keep their remaining
+# steps (no previous preset, sched/step-remap.md R3), its new cards keep
+# their positions (Sequential before and after), and its cards are
+# recomputed because the desired retention in force changed.
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+# Lang: learning steps 1m 10m 1h. Words uses Lang, with This-deck limits
+# 12 new and 150 reviews and its own desired retention 85 %. Orphan has its
+# own new limit 7 and a config_id (999) that names no preset.
+# c1 (Orphan): learning card with 3 steps left; c2 (Orphan): review card
+# with a review history and no memory state; c3 (Orphan): new card at
+# position 50; c4 (Words): review card with the same history.
+id: sched/options/missing-preset
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets: [{name: Lang, learn_steps: [1m, 10m, 1h]}]
+  decks: [{name: Words, preset: Lang}, Orphan]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Orphan, fields: [one, a]}
+    - {notetype: Pair, deck: Orphan, fields: [two, a]}
+    - {notetype: Pair, deck: Orphan, fields: [three, a]}
+    - {notetype: Pair, deck: Words, fields: [four, a]}
+steps:
+  - legacy_update: {deck: Words, patch: {newLimit: 12, reviewLimit: 150, desiredRetention: 85}}
+  - legacy_update: {deck: Orphan, patch: {newLimit: 7, conf: 999}}
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5, factor = v.column6, reps = v.column7, left = v.column8, data = '{}'
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES
+          (1, 1, 1, 1894702200, 0, 0, 1, 3),
+          (2, 2, 2, 5, 20, 2500, 3, 0),
+          (3, 0, 0, 50, 0, 0, 0, 0),
+          (4, 2, 2, 5, 20, 2500, 3, 0)
+        ) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # c2 and c4: a learning run on 2030-01-01, then two reviews.
+  - db_exec:
+      sql: "INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) SELECT v.column1 + c.n, c.cid, -1, v.column2, v.column3, v.column4, v.column5, 5000, v.column6 FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c JOIN (VALUES (1893492000000, 3, -600, -60, 0, 0), (1893492600000, 3, 1, -600, 2500, 0), (1893578400000, 3, 4, 1, 2500, 1), (1893924000000, 3, 20, 4, 2500, 1)) AS v WHERE c.n IN (2, 4)"
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1h
+  - observe: [{legacy_json: {decks: [Words, Orphan]}}]
+  # The Words screen saves without a change.
+  - save_deck_options: {deck: Words}
+  - observe: ["card(#c1, #c2, #c3, #c4)", {legacy_json: {decks: [Words, Orphan], presets: [Lang]}}]

@@ -75,7 +75,6 @@ revlog
 cid
 ease
 lastIvl
-factor
 dr
 decay
 sm2Retention
@@ -97,12 +96,8 @@ card_ids
 # deck counters (decks.common) and their schema-11 names, the answer time cap.
 queue
 left
-lastIvl
-cid
 usn
 pos
-dr
-decay
 cd
 mtime_secs
 last_day_studied
@@ -124,12 +119,6 @@ odue
 initial_ease
 config_id
 nextPos
-setDueReviewer
-setDueBrowser
-restorePositionReviewer
-restorePositionBrowser
-resetCountsReviewer
-resetCountsBrowser
 # Day clock (sched/day-clock): config keys, col, cards and config columns,
 # and the conformance timing observation members.
 rollover
@@ -137,7 +126,6 @@ creationOffset
 localOffset
 lastUnburied
 collapseTime
-schedVer
 crt
 col
 cards
@@ -157,8 +145,6 @@ learn_steps
 relearn_steps
 initialFactor
 minInt
-cardStateCustomizer
-fsrsParams7
 FSRSError
 InvalidParameters
 InvalidInput
@@ -170,16 +156,51 @@ newSortOrder
 reviewOrder
 newMix
 interdayLearningMix
+# Deck options and step remapping (sched/deck-options, sched/step-remap):
+# deck config protobuf fields and schema-11 keys, deck limit fields and
+# keys, the deck options config keys and the col and card columns they use.
+deck_config
+new_per_day
+reviews_per_day
+new_per_day_minimum
+easy_multiplier
+hard_multiplier
+lapse_multiplier
+interval_multiplier
+maximum_review_interval
+minimum_lapse_interval
+graduating_interval_good
+graduating_interval_easy
+new_card_insert_order
+new_card_gather_priority
+new_card_sort_order
+new_mix
+interday_learning_mix
+review_order
+leech_action
+leech_threshold
+disable_autoplay
+skip_question_when_replaying_answer
+show_timer
+stop_timer_on_answer
+seconds_to_show_question
+seconds_to_show_answer
+wait_for_audio
+question_action
+answer_action
+bury_new
+bury_reviews
+bury_interday_learning
+new_limit
+review_limit
+new_limit_today
+review_limit_today
 newLimit
 reviewLimit
 newLimitToday
 reviewLimitToday
 curDeck
 fnvhash
-bury_new
-bury_reviews
-bury_interday_learning
-odue
 flags
 ord
 meguri_card_f32
@@ -192,11 +213,11 @@ rev.bury
 lapse.leechFails
 lapse.leechAction
 leech
-leech_action
-leech_threshold
 leechAction
 conf
 common
 WeightedIndex
 timeLim
 activeDecks
+scm
+ls

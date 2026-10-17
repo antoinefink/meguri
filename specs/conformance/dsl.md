@@ -178,7 +178,8 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `empty_filtered` | `{deck}` | none; rejection `not_filtered` | stable (`sched-ops.md` J9) |
 | `reposition` | `{cards, start, step?, randomize?, shift?}` | none | draft (sched) |
 | `update_preset` | `{name, <option>: <value>, ...}` with the D6.2 options | none | draft (deckconfig) |
-| `save_deck_options` | `{deck, preset?, options?, deck_desired_retention?}`: the deck options screen's Save for `deck`, with the deck switched to `preset` and `options` (the D6.2 options, `historical_retention`, `ignore_reviews_before`) applied to it | none | stable (`deck-options-ops.md` E1) |
+| `save_deck_options` | `{deck, preset?, options?, deck_desired_retention?, limits?, globals?, remove?, subtree?}`: the deck options screen's Save for `deck`, with the deck switched to `preset`, `options` (the D6.2 options, `historical_retention`, `ignore_reviews_before`, `insertion_order`) applied to it, the deck's own values and the global limit options set, `remove`'s presets removed, and with `subtree` for every subdeck | none; rejection `default_preset` | stable (`deck-options-ops.md` E1) |
+| `set_scheduling_prefs` | `{rollover?, learn_ahead_minutes?, load_balancer?}`, at least one: the scheduling settings' save | none | stable (`deck-options-ops.md` E4) |
 | `legacy_update` | `{notetype \| deck \| preset: <name>, patch: <object>}`: merge `patch` into the record's schema-11 object and save the result (`model-ops.md` L2) | none; rejection `invalid_json` | stable (`model-ops.md` L2) |
 | `build_filtered` | `{name, search, limit?, order?, reschedule?}` | `{deck: <name>, cards: <count>}` | draft (sched; preservation only) |
 | `import` | `{fixture: <path under conformance/fixtures/>, ...options}` | counts defined by the package area | draft (package) |

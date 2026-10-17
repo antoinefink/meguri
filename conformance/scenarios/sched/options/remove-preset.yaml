@@ -1,0 +1,54 @@
+# Removing presets in a deck options save (R733; specs/sched/deck-options.md
+# O7.1, O7.2 steps 1, 3 and 5): the default preset cannot be removed; any
+# other is deleted without a grave, `scm` moves past `ls` (the next sync is
+# one-way), and every deck that used it gets the saved preset with the saved
+# deck's own values, its learning cards remapped from the removed preset's
+# steps. Undo brings everything back, `scm` included.
+# Lang (learning 1m 10m 1h) is used by Words, which has its own new limit
+# 12; Gone (learning 1m 10m) by Old1 and Old2, Old2 with its own new limit
+# 7; Other by Misc. c1 is a learning card in Old1 that passed its first
+# step (left 1). The collection was just synced (ls = scm).
+# Needs save_deck_options with remove (specs/conformance/deck-options-ops.md
+# E1, E3).
+id: sched/options/remove-preset
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Lang, learn_steps: [1m, 10m, 1h]}
+    - {name: Gone, learn_steps: [1m, 10m]}
+    - {name: Other}
+  decks: [{name: Words, preset: Lang}, {name: Old1, preset: Gone}, {name: Old2, preset: Gone}, {name: Misc, preset: Other}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Old1, fields: [one, a]}
+steps:
+  - legacy_update: {deck: Words, patch: {newLimit: 12}}
+  - legacy_update: {deck: Old2, patch: {newLimit: 7}}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200, reps = 1, left = 1, usn = 5, mod = 1700000000"}
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - advance: 1h
+  # 1. The default preset cannot be removed: refused, nothing changes.
+  - save_deck_options: {deck: Words, remove: [Default]}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY name"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  # 2. From the Words screen, Gone removed.
+  - save_deck_options: {deck: Words, remove: [Gone]}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY name"}
+  - db_exec: {sql: "SELECT scm > ls, scm FROM col"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}
+  - observe: ["card(#c1)", undo_status]
+  # 3. Undo, then redo.
+  - undo: {}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY name"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  - observe: ["card(#c1)", undo_status]
+  - redo: {}
+  - db_exec: {sql: "SELECT name FROM deck_config ORDER BY name"}
+  - db_exec: {sql: "SELECT scm > ls FROM col"}
+  # The decks after the removal.
+  - observe: [{legacy_json: {decks: [Words, Old1, Old2, Misc], presets: [Lang]}}]

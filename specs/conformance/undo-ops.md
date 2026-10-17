@@ -66,7 +66,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `change_note_type` | Change Note Type | |
 | `clear_unused_tags` | Clear Unused Tags | |
 | `custom_study` | Custom Study | |
-| `deck_options` | Deck Options | |
+| `deck_options` | Deck Options | `save_deck_options` (`deck-options-ops.md` E1) |
 | `delete_deck` | Delete Deck | |
 | `delete_note` | Delete Note | `delete_notes` |
 | `empty` | Empty | `empty_filtered` (`sched-ops.md` J9) |
@@ -75,7 +75,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `grade_now` | Grade Now | `grade_now` (`sched-ops.md` J8) |
 | `image_occlusion` | Image Occlusion | |
 | `import` | Import | |
-| `preferences` | Preferences | |
+| `preferences` | Preferences | `set_scheduling_prefs` (`deck-options-ops.md` E4) |
 | `remove_note_type` | Remove Note Type | |
 | `remove_tag` | Remove Tag | |
 | `rename_deck` | Rename Deck | (renaming or moving a deck) |

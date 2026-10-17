@@ -1,0 +1,37 @@
+# Anki reads what Meguri's deck options save writes (T1; R762, R765;
+# specs/sched/deck-options.md O7, O3): Meguri saves every option the screen
+# shows that the op can change, and the deck's own desired retention; then
+# Anki decodes every preset and deck and reads the same legacy JSON as after
+# its own save. The golden is the oracle running both segments.
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+id: sched/options/live-save
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets: [{name: Lang}]
+  decks: [{name: Words, preset: Lang}]
+steps:
+  - handoff: meguri
+  - advance: 1h
+  - save_deck_options:
+      deck: Words
+      options:
+        learn_steps: [2m, 15m, 3h]
+        relearn_steps: [20m]
+        new_per_day: 35
+        reviews_per_day: 400
+        max_interval_days: 3650
+        min_lapse_interval_days: 2
+        leech_threshold: 6
+        leech_action: suspend
+        bury_new: true
+        bury_reviews: true
+        bury_interday_learning: true
+        desired_retention: 0.87
+        historical_retention: 0.85
+        ignore_reviews_before: "2030-01-01"
+      deck_desired_retention: 0.92
+  - handoff: oracle
+  - observe:
+      - {blob_decode: {presets: [Default, Lang], decks: [Default, Words]}}
+      - {legacy_json: {presets: [Default, Lang], decks: [Words]}}

@@ -148,7 +148,6 @@ fsrsParams6
 fsrsParams5
 fsrsWeights
 desiredRetention
-loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
 # Media setup, ops, observations and rejections (media-ops.md, U31).
 media_files
@@ -205,7 +204,6 @@ filtered_deck
 # keys, preset key and fixture name the suite names.
 adopt
 kitchen-sink
-setDueReviewer
 restorePositionReviewer
 resetCountsReviewer
 customStudyIncludeTags
@@ -245,3 +243,12 @@ revToday
 # Explicit finer-capability metadata (D8.1).
 needs:answer.filtered
 answer.filtered
+# deck-options-ops.md (U49): save_deck_options members and the settings op
+set_scheduling_prefs
+insertion_order
+learn_ahead_minutes
+load_balancer
+new_cards_ignore_review_limit
+apply_all_parent_limits
+new_today
+review_today

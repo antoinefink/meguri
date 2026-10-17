@@ -1,0 +1,44 @@
+# The deck-level limits a deck options save writes (R740;
+# specs/sched/deck-options.md O9, specs/sched/presets.md D3): This-deck
+# limits are stored or removed; a Today-only limit is stored with today's
+# day; cleared, it is removed on the collection's first day (day 0) or when
+# its day is in the future, and otherwise kept with its day moved into the
+# past. A save that does not name a Today-only limit passes it on only
+# while it applies today, as the screen does.
+# Needs save_deck_options with limits (specs/conformance/deck-options-ops.md
+# E1, E3).
+id: sched/options/deck-limits
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  presets: [{name: Lang}]
+  decks: [{name: Words, preset: Lang}]
+steps:
+  - observe: [timing]
+  # Day 0. 1. Every limit set.
+  - save_deck_options: {deck: Words, limits: {new: 30, review: 300, new_today: 50, review_today: 500}}
+  - observe: [{legacy_json: {decks: [Words]}}]
+  # 2. Today-only new limit cleared on day 0: removed. The review one, which
+  # applies today, is kept.
+  - save_deck_options: {deck: Words, limits: {new_today: null}}
+  - observe: [{legacy_json: {decks: [Words]}}]
+  # Day 2.
+  - set_clock: "2030-01-17T10:00:00"
+  - observe: [timing]
+  # 3. A new Today-only limit of 60; the review one, set on day 0 and not
+  # named, no longer applies: removed (its day is 0).
+  - save_deck_options: {deck: Words, limits: {new_today: 60}}
+  - observe: [{legacy_json: {decks: [Words]}}]
+  # 4. Cleared on day 2: kept as 60, its day moved to 1.
+  - save_deck_options: {deck: Words, limits: {new_today: null}}
+  - observe: [{legacy_json: {decks: [Words]}}]
+  # 5. A save naming nothing: the past limit stays as it is.
+  - save_deck_options: {deck: Words}
+  - observe: [{legacy_json: {decks: [Words]}}]
+  # 6. A Today-only review limit for day 9 (as an import can leave it): the
+  # next save removes it.
+  - legacy_update: {deck: Words, patch: {reviewLimitToday: {limit: 70, today: 9}}}
+  - save_deck_options: {deck: Words}
+  - observe: [{legacy_json: {decks: [Words]}}]
+  # 7. This-deck limits cleared.
+  - save_deck_options: {deck: Words, limits: {new: null, review: null}}
+  - observe: [{legacy_json: {decks: [Words]}}]

@@ -1,0 +1,46 @@
+# Changing a preset's insertion order re-sorts the new cards of every deck
+# that uses it, each deck from position 1 (R744; specs/sched/deck-options.md
+# O7.2 step 4, O8). Lang is used by Words (n1 to n3) and Phrases (n4, n5);
+# 10; Phrases 50, 40; Misc 70, 60. After the Random save only what holds for
+# every draw is read: per deck, the count, the smallest and largest
+# position and the number of distinct positions.
+# Needs save_deck_options with options.insertion_order
+# (specs/conformance/deck-options-ops.md E1, E3).
+id: sched/options/insertion-order-option
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets: [{name: Lang}, {name: Other}]
+  decks: [{name: Words, preset: Lang}, {name: Phrases, preset: Lang}, {name: Misc, preset: Other}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [one, a]}
+    - {notetype: Pair, deck: Words, fields: [two, a]}
+    - {notetype: Pair, deck: Words, fields: [three, a]}
+    - {notetype: Pair, deck: Phrases, fields: [four, a]}
+    - {notetype: Pair, deck: Phrases, fields: [five, a]}
+    - {notetype: Pair, deck: Misc, fields: [six, a]}
+    - {notetype: Pair, deck: Misc, fields: [seven, a]}
+steps:
+  - db_exec:
+      sql: |
+        UPDATE cards SET due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 30), (2, 20), (3, 10), (4, 50), (5, 40), (6, 70), (7, 60)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - advance: 1h
+  # 1. Lang becomes Random, from the Words screen: Words and Phrases are
+  # re-sorted, Misc is not.
+  - save_deck_options: {deck: Words, options: {insertion_order: random}}
+  - db_exec: {sql: "SELECT d.name, count(*), min(c.due), max(c.due), count(DISTINCT c.due) FROM cards c JOIN decks d ON d.id = c.did GROUP BY d.name ORDER BY d.name"}
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), due FROM cards WHERE did = (SELECT id FROM decks WHERE name = 'Misc') ORDER BY id"}
+  - advance: 1h
+  # 2. Lang back to Sequential, from the Phrases screen: both decks sorted by
+  # order added, from 1.
+  - save_deck_options: {deck: Phrases, options: {insertion_order: sequential}}
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), due FROM cards ORDER BY id"}
+  - observe: [{legacy_json: {presets: [Lang]}}]

@@ -1,0 +1,28 @@
+# The two global daily-limit options a deck options save writes (R741;
+# specs/sched/deck-options.md O7.2 step 7): each key is written when its
+# value changes, and an unchanged one keeps its row and stamps. Every save
+# here changes at least one of them, so no save leaves a missing key that
+# Anki would add (O12).
+# Needs save_deck_options with globals (specs/conformance/deck-options-ops.md
+# E1, E3).
+id: sched/options/globals
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+steps:
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('applyAllParentLimits', 'newCardsIgnoreReviewLimit') ORDER BY KEY"}
+  - advance: 1h
+  # 1. Both on.
+  - save_deck_options: {deck: Words, globals: {new_cards_ignore_review_limit: true, apply_all_parent_limits: true}}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('applyAllParentLimits', 'newCardsIgnoreReviewLimit') ORDER BY KEY"}
+  - advance: 1h
+  # 2. New cards ignore review limit off; Limits start from top unchanged.
+  - save_deck_options: {deck: Words, globals: {new_cards_ignore_review_limit: false}}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('applyAllParentLimits', 'newCardsIgnoreReviewLimit') ORDER BY KEY"}
+  - advance: 1h
+  # 3. Limits start from top off, then undone.
+  - save_deck_options: {deck: Words, globals: {apply_all_parent_limits: false}}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('applyAllParentLimits', 'newCardsIgnoreReviewLimit') ORDER BY KEY"}
+  - observe: [undo_status]
+  - undo: {}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('applyAllParentLimits', 'newCardsIgnoreReviewLimit') ORDER BY KEY"}

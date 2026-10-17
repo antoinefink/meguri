@@ -1,0 +1,55 @@
+# The scheduling preferences op (R760, R761, R665;
+# specs/sched/deck-options.md O10): "Next day starts at" takes effect at
+# once, in both directions; the learn-ahead limit is stored in seconds; the
+# load balancer is a stored toggle; the op is one undoable "Preferences"
+# step. UTC, collection created 2030-01-15 10:00 (day 0). c1 is a review
+# card due on day 2, c2 a review card due on day 1. Timing is observed right
+# after each change, at the same instant, so both executors run the day
+# query (and its unbury) together (specs/sched/day-clock.md D14.2). Only the
+# three keys are read: Anki's preferences save also writes other keys of
+# the settings screen.
+# Needs set_scheduling_prefs (specs/conformance/deck-options-ops.md E4).
+id: sched/options/prefs-rollover
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Words, fields: [one, a]}
+    - {notetype: Pair, deck: Words, fields: [two, a]}
+steps:
+  - observe: [timing]
+  # 1. Day 0, 10:00: the day starts at 06:00 from now on; still day 0.
+  - set_scheduling_prefs: {rollover: 6}
+  - observe: [timing]
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = 2, queue = 2, ivl = 2, due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 2), (2, 1)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # Day 1 begins at 2030-01-16 06:00; at 2030-01-17 05:00 it is still day 1.
+  - set_clock: "2030-01-17T05:00:00"
+  - observe: [timing, {search: [{query: "is:due"}]}]
+  # c2 buried by the user on day 1.
+  - db_exec: {sql: "UPDATE cards SET queue = -3 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 1)"}
+  - observe: [timing, {search: [{query: "is:due"}, {query: "is:buried"}]}]
+  # 2. Back to 04:00: day 2 starts at once; c2 is unburied, lastUnburied 2.
+  - set_scheduling_prefs: {rollover: 4}
+  - observe: [timing, "card(#c2)", {search: [{query: "is:due"}, {query: "is:buried"}]}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('rollover', 'lastUnburied') ORDER BY KEY"}
+  # 3. Learn ahead 30 minutes and the load balancer off, the same day, then
+  # undone. Both histories are emptied first: Meguri cleared its own at the
+  # day changes, Anki did not (specs/sched/day-clock.md D9, D12.4).
+  - db_exec: {sql: "UPDATE cards SET usn = usn WHERE 0"}
+  - set_scheduling_prefs: {learn_ahead_minutes: 30, load_balancer: false}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('collapseTime', 'loadBalancerEnabled') ORDER BY KEY"}
+  - observe: [undo_status]
+  - undo: {}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT) FROM config WHERE KEY IN ('collapseTime', 'loadBalancerEnabled') ORDER BY KEY"}
+  - observe: [undo_status]

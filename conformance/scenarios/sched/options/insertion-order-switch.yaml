@@ -1,0 +1,81 @@
+# Re-sorting a deck's new cards when its insertion order changes because
+# the deck switches presets (R744; specs/sched/deck-options.md O7.2 step 4,
+# O8). Seq keeps the default order (Sequential); Rand is set to Random.
+# Words and Phrases use Seq. Each note of Two has two cards.
+# Words: n1 (c1, c2), n2 (c3 a review card, c4 new), n3 (c5 suspended new,
+# c6 buried new), n4 (c7, c8 in the filtered deck Cram). Phrases: n5 (c9,
+# n4 10 (in odue for Cram's cards). A random order cannot be reproduced, so
+# the steps after a Random sort read only what holds for every draw: the
+# positions of Words' new cards are 1 to 4, one per note, siblings equal.
+# Needs save_deck_options (specs/conformance/deck-options-ops.md E1).
+id: sched/options/insertion-order-switch
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets: [{name: Seq}, {name: Rand}]
+  decks: [{name: Words, preset: Seq}, {name: Phrases, preset: Seq}]
+  notetypes:
+    - name: Two
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Two, deck: Words, fields: [one, a]}
+    - {notetype: Two, deck: Words, fields: [two, b]}
+    - {notetype: Two, deck: Words, fields: [three, c]}
+    - {notetype: Two, deck: Words, fields: [four, d]}
+    - {notetype: Two, deck: Phrases, fields: [five, e]}
+    - {notetype: Two, deck: Phrases, fields: [six, f]}
+steps:
+  # Rand: insertion order Random (schema-11 new.order 0).
+  - legacy_update: {preset: Rand, patch: {new: {order: 0}}}
+  - db_exec:
+      sql: |
+        UPDATE cards SET due = v.column2
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (1, 40), (2, 40), (3, 30), (4, 30), (5, 20), (6, 20), (7, 10), (8, 10)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  # c3 a review card due on day 5; c5 suspended; c6 buried by the user.
+  - db_exec:
+      sql: |
+        UPDATE cards SET type = v.column2, queue = v.column3, due = v.column4, ivl = v.column5
+        FROM (SELECT id AS cid, row_number() OVER (ORDER BY id) AS n FROM cards) AS c
+        JOIN (VALUES (3, 2, 2, 5, 5), (5, 0, -1, 20, 0), (6, 0, -3, 20, 0)) AS v ON v.column1 = c.n
+        WHERE cards.id = c.cid
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (900, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"
+  # c7 and c8 sit in Cram: home deck in odid, position in odue.
+  - db_exec:
+      sql: "UPDATE cards SET odid = did, did = 900, odue = due, due = -100000 + due WHERE id IN (SELECT id FROM cards ORDER BY id LIMIT 2 OFFSET 6)"
+  - db_exec: {sql: "UPDATE cards SET usn = 5, mod = 1700000000"}
+  - advance: 1h
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), type, queue, due, odue, mod, usn FROM cards ORDER BY id"}
+  # 1. Words switches from Seq to Rand: its new cards are re-sorted at random.
+  - save_deck_options: {deck: Words, preset: Rand}
+  - observe: [undo_status]
+  # Words' new cards (c1, c2, c4 to c8): 7 cards, positions 1 to 4, 4 notes.
+  - db_exec: {sql: "SELECT count(*), min(p), max(p), count(DISTINCT p), count(DISTINCT nid) FROM (SELECT nid, CASE WHEN odid != 0 THEN odue ELSE due END AS p FROM cards WHERE type = 0 AND (did = (SELECT id FROM decks WHERE name = 'Words') OR odid = (SELECT id FROM decks WHERE name = 'Words')))"}
+  # Notes whose new cards in Words hold different positions: none.
+  - db_exec: {sql: "SELECT count(*) FROM (SELECT nid FROM cards WHERE type = 0 AND (did = (SELECT id FROM decks WHERE name = 'Words') OR odid = (SELECT id FROM decks WHERE name = 'Words')) GROUP BY nid HAVING count(DISTINCT CASE WHEN odid != 0 THEN odue ELSE due END) > 1)"}
+  # What a sort never changes: types, queues, Cram's due, the review card,
+  # Phrases' cards.
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), type, queue, CASE WHEN did = 900 THEN due ELSE NULL END FROM cards ORDER BY id"}
+  - observe: ["card(#c3, #c9, #c10, #c11, #c12)"]
+  # 2. Undo: every card back as it was.
+  - undo: {}
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), type, queue, due, odue, mod, usn FROM cards ORDER BY id"}
+  - observe: [undo_status]
+  # 3. Redo: Random again.
+  - redo: {}
+  - db_exec: {sql: "SELECT count(*), min(p), max(p), count(DISTINCT p), count(DISTINCT nid) FROM (SELECT nid, CASE WHEN odid != 0 THEN odue ELSE due END AS p FROM cards WHERE type = 0 AND (did = (SELECT id FROM decks WHERE name = 'Words') OR odid = (SELECT id FROM decks WHERE name = 'Words')))"}
+  - advance: 1h
+  # 4. Words switches back to Seq: positions by note id, 1 to 4.
+  - save_deck_options: {deck: Words, preset: Seq}
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), type, queue, due, odue FROM cards ORDER BY id"}
+  - advance: 1h
+  # 5. A save of Phrases that changes nothing re-sorts nothing: Phrases keeps
+  # positions 5 and 6.
+  - save_deck_options: {deck: Phrases}
+  - db_exec: {sql: "SELECT row_number() OVER (ORDER BY id), due, mod FROM cards WHERE did = (SELECT id FROM decks WHERE name = 'Phrases') ORDER BY id"}

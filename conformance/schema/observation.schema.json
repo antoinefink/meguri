@@ -703,6 +703,10 @@
           "description": "sched-ops.md J9: the op has no output, so only the rejection not_filtered appears.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["not_filtered"] } } }]
         },
+        "save_deck_options": {
+          "description": "deck-options-ops.md E1: the op has no output, so only a rejection appears: default_preset when remove names the default preset.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["default_preset"] } } }]
+        },
         "undo": {
           "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]

@@ -6,22 +6,22 @@ h07c1d1d6c593,rust,supplementary,deckconfig,in-scope,the default preset cannot b
 h0f4f7e722f1e,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,,deferred
 h0fa4ffa48585,rust,supplementary,deckconfig,in-scope,a new preset gets a free id,decks/presets/add-clone-rename storage/ids/all-tables,done
 h17ecc898d745,rust,supplementary,deckconfig,in-scope,saving a preset from its legacy JSON,model/schema11/preset-values,done
-h1c1a2a378925,rust,tag,deckconfig,in-scope,"U49/U246: verify no-op option saves, preset creation/removal, assignment, new-position resorting and schema-change effects together (R710-R762).",,deferred
+h1c1a2a378925,rust,tag,deckconfig,in-scope,"U49/U246: verify no-op option saves, preset creation/removal, assignment, new-position resorting and schema-change effects together (R710-R762).",sched/options/insertion-order-switch sched/options/insertion-order-option sched/options/remove-preset,deferred
 h1df457b7a669,rust,supplementary,deckconfig,in-scope,the built-in defaults stand in when even the default preset is missing; seen through scheduling,,deferred
-h27c58d269610,rust,tag,deckconfig,in-scope,U49/U246: adding an unpassed learning step must expand the active card's remaining-step count without restarting passed work.,,deferred
+h27c58d269610,rust,tag,deckconfig,in-scope,U49/U246: adding an unpassed learning step must expand the active card's remaining-step count without restarting passed work.,sched/options/remap-steps,deferred
 h29179d9ceae2,rust,supplementary,deckconfig,in-scope,a created preset is read back,decks/presets/add-clone-rename,done
 h2e6e22823ea4,rust,supplementary,deckconfig,in-scope,removing a preset,decks/presets/remove,done
 h2e8ed638f17b,rust,supplementary,deckconfig,in-scope,With no ignore date every card with a learning row is included,sched/memory/ignore-before-count,done
-h3219d2cb2ba0,rust,tag,deckconfig,in-scope,U49/U246: prepending an already passed relearning step must leave the current remaining count unchanged.,,deferred
+h3219d2cb2ba0,rust,tag,deckconfig,in-scope,U49/U246: prepending an already passed relearning step must leave the current remaining count unchanged.,sched/options/remap-steps,deferred
 h351975c45911,rust,supplementary,deckconfig,not-applicable,an API getter for one preset,,done
 h385f4aeda2a6,rust,supplementary,deckconfig,out-of-scope,"The pinned release computes costs across retention percentages, but the retention-advice simulator is excluded by R752.",,done
 h3d8240dabf39,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,,deferred
 h3dc2e6c7647a,rust,supplementary,deckconfig,in-scope,a deck whose preset is missing uses the default preset; seen through scheduling,,deferred
 h402aaecf9a85,rust,supplementary,deckconfig,in-scope,updating a preset as an undoable change,decks/presets/add-clone-rename,done
 h4939abe921e2,rust,supplementary,deckconfig,out-of-scope,The pinned release includes searched existing cards in retention advice; that simulator is excluded by R752.,,done
-h4f44f64a9d78,rust,tag,deckconfig,in-scope,U49/U246: shortened lapse settings cannot graduate an unfinished card; remaining-step floor is 1.,,deferred
+h4f44f64a9d78,rust,tag,deckconfig,in-scope,U49/U246: shortened lapse settings cannot graduate an unfinished card; remaining-step floor is 1.,sched/options/remap-steps,deferred
 h54bd0b969d29,rust,supplementary,deckconfig,in-scope,the legacy JSON of a preset,model/schema11/preset-values,done
-h5e274df557cf,rust,tag,deckconfig,in-scope,U49/U246: changing relearning steps must not remap a card currently in learning.,,deferred
+h5e274df557cf,rust,tag,deckconfig,in-scope,U49/U246: changing relearning steps must not remap a card currently in learning.,sched/options/remap-steps,deferred
 h65b62d476674,rust,supplementary,deckconfig,in-scope,a changed preset is stamped,decks/presets/add-clone-rename,done
 h69f9ba4c6483,rust,supplementary,deckconfig,in-scope,presets arriving as legacy JSON by sync or import are added,,deferred
 h6a74f5728f8c,rust,supplementary,deckconfig,in-scope,the default preset stands in for a missing one; seen through scheduling,,deferred
@@ -31,12 +31,12 @@ h74f60c8aa789,rust,supplementary,deckconfig,in-scope,assigning a preset to a dec
 h774fd17fd8ea,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import are added only when their id is free,,deferred
 h78189711cf81,rust,tag,deckconfig,in-scope,"reserved keys in a preset's other bytes, top level and sub-objects, never reach the legacy JSON object",model/schema11/preset-other,done
 h788f98b55f1d,rust,tag,deckconfig,in-scope,"U49/U246: verify future ignore-before dates clamp to today while past, current and empty dates survive the options save (R697).",,deferred
-h7f7645f98775,rust,tag,deckconfig,in-scope,U49/U246: changing learning steps must not alter the remaining steps of a card currently relearning.,,deferred
-h81d3f640e8fd,rust,tag,deckconfig,in-scope,U49/U246: adding unpassed relearning steps must increase the current card's remaining count.,,deferred
+h7f7645f98775,rust,tag,deckconfig,in-scope,U49/U246: changing learning steps must not alter the remaining steps of a card currently relearning.,sched/options/remap-steps,deferred
+h81d3f640e8fd,rust,tag,deckconfig,in-scope,U49/U246: adding unpassed relearning steps must increase the current card's remaining count.,sched/options/remap-steps,deferred
 h87ef468beabc,rust,supplementary,deckconfig,in-scope,the built-in default preset values,storage/new-collection/rows,done
 habc378b0ea2b,rust,supplementary,deckconfig,in-scope,removing a preset,decks/presets/remove,done
 hac8e0ee77853,rust,supplementary,deckconfig,in-scope,A date text that does not read as a date is refused,sched/memory/ignore-before-count,done
-hae800fcda356,rust,tag,deckconfig,in-scope,U49/U246: shortened initial steps cannot graduate an unfinished card; remaining-step floor is 1.,,deferred
+hae800fcda356,rust,tag,deckconfig,in-scope,U49/U246: shortened initial steps cannot graduate an unfinished card; remaining-step floor is 1.,sched/options/remap-steps,deferred
 hb50a0cec5249,rust,supplementary,deckconfig,out-of-scope,"The pinned retention-advice service validates parameter vectors, but that simulator and its manual parameter interface are excluded by R752.",,done
 hba00bf856693,rust,supplementary,deckconfig,in-scope,The ignore-date count includes cards with a learning row after the date,sched/memory/ignore-before-count,done
 hbfa3b0173663,rust,supplementary,deckconfig,in-scope,an unchanged preset is not written,decks/presets/add-clone-rename,done
@@ -47,7 +47,7 @@ hd2c8c7020dc2,rust,tag,deckconfig,in-scope,"legacy graduating and easy intervals
 hd3586154cc8d,rust,supplementary,deckconfig,in-scope,undoing a preset removal restores it; asserted by the core tests until deck undo scenarios exist,,deferred
 hd68f57dc3fd2,rust,supplementary,deckconfig,in-scope,a new preset is stamped,decks/presets/add-clone-rename,done
 hd709478326d6,rust,supplementary,deckconfig,in-scope,a missing preset id falls back to the default preset; seen through scheduling,,deferred
-he12744628934,rust,tag,deckconfig,in-scope,U49/U246: inserting already passed learning steps must preserve the current remaining count.,,deferred
+he12744628934,rust,tag,deckconfig,in-scope,U49/U246: inserting already passed learning steps must preserve the current remaining count.,sched/options/remap-steps,deferred
 he9efe2bce55c,rust,supplementary,deckconfig,not-applicable,an API option that returns nothing for a missing preset,,done
 heaf6b0314ef9,rust,supplementary,deckconfig,in-scope,U49/U246: the pinned options-read service returns the requested deck and its applicable presets; add a real read/save contract scenario.,,deferred
 hf1fc2f580d06,rust,supplementary,deckconfig,in-scope,presets arriving by sync or import keep their ids,,deferred
@@ -57,7 +57,7 @@ h1dc1c50d96e2,typescript,tag,deckconfig,in-scope,U234/U246: format near-integral
 h1e72f458212b,typescript,tag,deckconfig,in-scope,"U234/U246: whole-minute learning steps must round-trip through seconds, minutes, hours and days in the steps editor.",,deferred
 h35f01eb07a7f,typescript,tag,deckconfig,in-scope,U234/U246: fractional-minute learning steps must round-trip through second and minute labels without dropping precision.,,deferred
 h413f1956a499,typescript,tag,deckconfig,preservation-only,"U232/U246: saving multiple preset drafts must retain opaque auxiliary maps, including maps on a preset that is no longer selected (R762).",,deferred
-h83f55b823be2,typescript,tag,deckconfig,in-scope,"U232/U246: draft saves must include changed presets, preserve the selected assignment and distinguish discarded new presets from deleted persisted ones.",,deferred
+h83f55b823be2,typescript,tag,deckconfig,in-scope,"U232/U246: draft saves must include changed presets, preserve the selected assignment and distinguish discarded new presets from deleted persisted ones.",sched/options/undo-save sched/options/missing-preset,deferred
 h90b32cd0020c,typescript,tag,deckconfig,in-scope,U234/U246: exercise empty step text and mixed numeric/nonnumeric tokens; prove the approved error policy.,,deferred
 haa85eb491ea1,typescript,tag,deckconfig,in-scope,the preset menu appends the current time to a duplicate name; the menu is the deck options screen,,deferred
 hfb585bb34348,typescript,tag,deckconfig,in-scope,"U232/U246: verify sorted preset choices, usage counts, rename/create/select/remove behavior and refusal to remove the default preset.",,deferred

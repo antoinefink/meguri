@@ -210,6 +210,10 @@
         }
       }
     },
+    "deck_limit_value": {
+      "description": "deck-options-ops.md E1: a deck limit the save sets (an integer 0 to 9999) or clears (null).",
+      "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 9999 }, { "type": "null" }]
+    },
     "preset_options": {
       "learn_steps": { "type": "array", "items": { "$ref": "#/$defs/duration" } },
       "relearn_steps": { "type": "array", "items": { "$ref": "#/$defs/duration" } },
@@ -1112,7 +1116,7 @@
           "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["name"], "properties": { "name": { "type": "string" } } }]
         },
         "save_deck_options": {
-          "description": "Stable (deck-options-ops.md E1): the deck options screen's Save for deck, switched to preset, with options applied to that preset and the deck's own desired retention set (a number), removed (null) or kept (missing).",
+          "description": "Stable (deck-options-ops.md E1): the deck options screen's Save for deck, switched to preset, with options applied to that preset, the deck's own values (limits, deck_desired_retention) set, removed (null) or kept (missing), the global limit options set or kept, presets removed, and for all subdecks when subtree is true. The members subtree, remove, limits, globals and options.insertion_order await the driver (E3).",
           "type": "object",
           "required": ["deck"],
           "additionalProperties": false,
@@ -1144,10 +1148,42 @@
                 "desired_retention": { "$ref": "#/$defs/preset_options/desired_retention" },
                 "fsrs_params": { "$ref": "#/$defs/preset_options/fsrs_params" },
                 "historical_retention": { "type": "number" },
-                "ignore_reviews_before": { "type": "string" }
+                "ignore_reviews_before": { "type": "string" },
+                "insertion_order": { "enum": ["sequential", "random"] }
               }
             },
-            "deck_desired_retention": { "type": ["number", "null"] }
+            "deck_desired_retention": { "type": ["number", "null"] },
+            "limits": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "new": { "$ref": "#/$defs/deck_limit_value" },
+                "review": { "$ref": "#/$defs/deck_limit_value" },
+                "new_today": { "$ref": "#/$defs/deck_limit_value" },
+                "review_today": { "$ref": "#/$defs/deck_limit_value" }
+              }
+            },
+            "globals": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "new_cards_ignore_review_limit": { "type": "boolean" },
+                "apply_all_parent_limits": { "type": "boolean" }
+              }
+            },
+            "remove": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+            "subtree": { "type": "boolean" }
+          }
+        },
+        "set_scheduling_prefs": {
+          "description": "Stable (deck-options-ops.md E4): the scheduling settings' save as one Preferences undo step; awaits the driver (E3).",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "properties": {
+            "rollover": { "type": "integer", "minimum": 0, "maximum": 23 },
+            "learn_ahead_minutes": { "type": "integer", "minimum": 0, "maximum": 999 },
+            "load_balancer": { "type": "boolean" }
           }
         },
         "legacy_update": {
