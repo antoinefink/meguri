@@ -34,7 +34,6 @@
   const mathMax = Math.max;
   const stringSlice = String.prototype.slice;
   const stringLower = String.prototype.toLowerCase;
-  const stringTrim = String.prototype.trim;
   const stringSplit = String.prototype.split;
   const stringIndexOf = String.prototype.indexOf;
   const regexpExec = RegExp.prototype.exec;
@@ -734,25 +733,28 @@
   ];
   for (let i = 0; i < javascriptTypeList.length; i++) JAVASCRIPT_TYPES[javascriptTypeList[i]] = true;
 
+  // HTML's ASCII whitespace at the ends of a value (tab, line feed, form
+  // feed, carriage return, space), never the other characters
+  // String.prototype.trim removes.
+  const ASCII_WHITESPACE_ENDS = /^[\t\n\f\r ]*([^]*?)[\t\n\f\r ]*$/;
+
   // "classic", "module" or null (a data block), from the type and language
-  // attributes as the platform reads them.
+  // attributes as WebKit reads them (ScriptSemanticsTests checks each form
+  // against the engine). A JavaScript type may have ASCII whitespace around
+  // it; "module" may not, and a language value is used as it is.
+  // Lowercasing is enough for the case-insensitive match: the only
+  // non-ASCII letter it turns into an ASCII one is the Kelvin sign, and no
+  // name it is compared with has a k.
   function scriptKind(script) {
     const type = call(getAttribute, script, "type");
     const language = call(getAttribute, script, "language");
-    let block;
     if (type !== null) {
       if (type === "") return "classic";
-      block = type;
-    } else if (language !== null) {
-      if (language === "") return "classic";
-      block = "text/" + language;
-    } else {
-      return "classic";
+      if (JAVASCRIPT_TYPES[call(stringLower, call(regexpExec, ASCII_WHITESPACE_ENDS, type)[1])]) return "classic";
+      return call(stringLower, type) === "module" ? "module" : null;
     }
-    block = call(stringLower, call(stringTrim, block));
-    if (JAVASCRIPT_TYPES[block]) return "classic";
-    if (block === "module") return "module";
-    return null;
+    if (language === null || language === "") return "classic";
+    return JAVASCRIPT_TYPES[call(stringLower, "text/" + language)] ? "classic" : null;
   }
 
   // Whether the engine will fetch the script's src, and so fire load or error.

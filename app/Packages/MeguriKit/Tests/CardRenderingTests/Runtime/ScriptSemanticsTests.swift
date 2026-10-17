@@ -157,6 +157,88 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        // MARK: SS12, C6.5, D9: the forms of type and language
+
+        /// `type` and `language` values a `src` script can carry: padded with
+        /// whitespace the HTML standard strips from `type` (space, tab, line
+        /// feed) and with whitespace it keeps (no-break space, vertical tab),
+        /// in upper case, with parameters, legacy language names, and
+        /// `language` next to a `type`.
+        static let scriptTypeVariants = [
+            #"type=" text/javascript ""#,
+            "type=\"\ttext/javascript\n\"",
+            #"type="TEXT/JavaScript""#,
+            #"type="&#xA0;text/javascript""#,
+            #"type="text/javascript&#x0B;""#,
+            #"type="text/javascript; charset=utf-8""#,
+            #"type="javascript""#,
+            #"type="  ""#,
+            #"type=" module ""#,
+            "type=\"\tmodule\n\"",
+            #"type="MODULE""#,
+            #"type="&#xA0;module""#,
+            #"type="module&#x0B;""#,
+            #"type="module" nomodule"#,
+            #"language="javascript""#,
+            #"language="JavaScript""#,
+            #"language=" javascript""#,
+            #"language="javascript ""#,
+            #"language="javascript1.5""#,
+            #"language="javascript1.6""#,
+            #"language="javascript1.7""#,
+            #"language="livescript""#,
+            #"language="ecmascript""#,
+            #"language="jscript""#,
+            #"language="vbscript""#,
+            #"language="module""#,
+            #"language="""#,
+            #"language="javascript" nomodule"#,
+            #"type="" language="vbscript""#,
+            #"type="text/x-tmpl" language="javascript""#,
+        ]
+
+        /// C6.5's waiting rule against the engine itself: the walk waits for a
+        /// `src` script exactly when the engine fetches it, which the scheme
+        /// handler sees. Waiting for one the engine skips would stop the page
+        /// for good (D9); not waiting for one it fetches would run the next
+        /// script first.
+        @Test func walkWaitsExactlyForTheScriptsTheEngineFetches() async throws {
+            try await WebTestHarness.withPage { harness, page async throws in
+                var side = ""
+                for (index, attributes) in Self.scriptTypeVariants.enumerated() {
+                    harness.media.add("/_k\(index).js", text: #"log("ran\#(index)");"#)
+                    harness.media.delay("/_k\(index).js", by: .milliseconds(40))
+                    side += #"<script \#(attributes) src="_k\#(index).js"></script><script>log("next\#(index)")</script>"# + "\n"
+                }
+                try await page.present()
+                try await page.showQuestion(side)
+                do {
+                    try await harness.signal("shown", from: page, timeout: .seconds(5))
+                } catch {
+                    let log = try await page.log()
+                    let stalled = Self.scriptTypeVariants.indices.first { !log.contains("next\($0)") }.map { Self.scriptTypeVariants[$0] }
+                    Issue.record("the walk stopped at <script \(stalled ?? "?") src>: \(log)")
+                    return
+                }
+                let fetched = Self.scriptTypeVariants.indices.filter { !harness.media.requests(for: "/_k\($0).js").isEmpty }
+                try await harness.until("every fetched script ran") {
+                    let log = try await page.log()
+                    return fetched.allSatisfy { log.contains("ran\($0)") }
+                }
+                let log = try await page.log()
+                for (index, attributes) in Self.scriptTypeVariants.enumerated() {
+                    let ran = log.firstIndex(of: "ran\(index)")
+                    let next = try #require(log.firstIndex(of: "next\(index)"))
+                    if fetched.contains(index) {
+                        #expect(ran.map { $0 < next } == true, "<script \(attributes) src> was fetched but not waited for: \(log)")
+                    } else {
+                        #expect(ran == nil, "<script \(attributes) src> ran without a request: \(log)")
+                    }
+                }
+                print("SS12 engine fetched: \(fetched.map { Self.scriptTypeVariants[$0] })")
+            }
+        }
+
         // MARK: SS13, C6.5
 
         @Test func aScriptAddedAheadOfTheWalkIsReplacedToo() async throws {
