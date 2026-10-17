@@ -187,6 +187,8 @@ pub struct Session<'a> {
     pub random: Arc<SeededRandom>,
     pub notes: Vec<i64>,
     pub cards: Vec<i64>,
+    /// Setup deck identities survive raw deletion and reopen (note-ops N1).
+    pub decks: BTreeMap<String, i64>,
     /// The actor this session plays in a mixed run of an actor scenario;
     /// `None` elsewhere.
     pub actor: Option<Seat>,
@@ -247,10 +249,11 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 9] = [
+    pub const AREAS: [&'static str; 10] = [
         "browser",
         "clock",
         "notetypes",
+        "notes",
         "render",
         "sched",
         "search",
@@ -277,6 +280,7 @@ impl MeguriExecutor {
                 "browser" => super::browser::register(&mut registry),
                 "clock" => super::clock::register(&mut registry),
                 "notetypes" => super::notetypes::register(&mut registry),
+                "notes" => super::notes::register(&mut registry),
                 "render" => super::render::register(&mut registry),
                 "sched" => super::sched::register(&mut registry),
                 "search" => super::search::register(&mut registry),
@@ -312,6 +316,7 @@ impl MeguriExecutor {
             random: Arc::new(SeededRandom::new(seed(loaded))),
             notes: resume.map(|h| h.notes.clone()).unwrap_or_default(),
             cards: resume.map(|h| h.cards.clone()).unwrap_or_default(),
+            decks: BTreeMap::new(),
             actor: None,
             storage: Default::default(),
             day: Default::default(),
@@ -337,6 +342,7 @@ impl MeguriExecutor {
                 .ok_or_else(|| ExecError::new("unsupported_setup", format!("no adapter for setup.{section}")))?;
             f(session, setup)?;
         }
+        super::notes::capture_decks(session)?;
         Ok(())
     }
 
@@ -465,6 +471,7 @@ impl MeguriExecutor {
                 random: Arc::new(SeededRandom::new(actor_seed(loaded, name.as_str()))),
                 notes: Vec::new(),
                 cards: Vec::new(),
+                decks: BTreeMap::new(),
                 actor: None,
                 storage: Default::default(),
                 day: Default::default(),
