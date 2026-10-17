@@ -1,0 +1,242 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 10,
+          "next_day_at": 1895630400,
+          "now": 1895565600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 5.048,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1895133600,
+              "pos": 1,
+              "s": 12.5
+            },
+            "did": "Home",
+            "due": 13,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 8,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1895565600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 0,
+              "factor": 549,
+              "id": 1895565600000,
+              "ivl": 8,
+              "lastIvl": 10,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "set_due_date"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1895565600000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 5.048,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1895133600,
+              "pos": 1,
+              "s": 12.5
+            },
+            "did": "Home",
+            "due": 15,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 10,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": 0
+          }
+        },
+        "revlog": {
+          "#c1": []
+        },
+        "undo_status": {
+          "redo": "set_due_date",
+          "undo": null
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "d": 5.048,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1895133600,
+              "pos": 1,
+              "s": 12.5
+            },
+            "did": "Home",
+            "due": 13,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 8,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1895565600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 0,
+              "factor": 549,
+              "id": 1895565600000,
+              "ivl": 8,
+              "lastIvl": 10,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "set_due_date"
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {
+              "d": 5.048,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1895133600,
+              "pos": 1,
+              "s": 12.5
+            },
+            "did": "Home",
+            "due": 13,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 8,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1895565720,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 549,
+              "id": 1895565720000,
+              "ivl": 8,
+              "lastIvl": 10,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "b8f6bae22ae3648605d51d66c132652736545e3b7217bc6a9044ffdf43d2ba3d",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/ops/set-due/ae26",
+  "scenario_sha256": "6ebff64085eb54e3e9a8cf78a25ee9601eb7d1af53f72e920b3868efaf8fd381",
+  "tz": "UTC"
+}

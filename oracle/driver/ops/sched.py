@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Answering and suspending.
+"""Answering.
 
 answer: {card: #cN, rating: again|hard|good|easy, time_ms?: int}
 The card moves to the state Anki computes for that rating at the current frozen
 instant, which is also the review time recorded in the log.
 
-suspend: {cards: [#cN, ...]} (model-ops.md L3)
-Anki's suspend operation on the listed cards; a card already suspended is left
-as is.
+The scheduling ops on chosen cards (suspend, bury, Grade Now, ...) are
+sched_manual.py.
 """
 
 from __future__ import annotations
@@ -48,9 +47,3 @@ def answer(session, args):
         )
     )
 
-
-@op("suspend")
-def suspend(session, args):
-    if not isinstance(args, dict) or set(args) != {"cards"} or not isinstance(args["cards"], list):
-        raise invalid("suspend takes {cards: [#cN, ...]}")
-    session.col.sched.suspend_cards([session.resolve(ref, "c") for ref in args["cards"]])

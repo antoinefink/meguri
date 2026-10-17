@@ -18,6 +18,7 @@ from . import (  # noqa: F401
     presets,
     preservation,
     sched,
+    sched_manual,
     storage,
     storage_open,
     sync_client,

@@ -1,0 +1,444 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Home",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Home",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -3,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          },
+          "#c3": {
+            "data": {},
+            "did": "Home::Sub",
+            "due": 1894702200,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 1,
+            "mod": 1894701660,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Home::Sub",
+            "due": 1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 2,
+            "lapses": 1,
+            "left": 1,
+            "mod": 1894701600,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -3,
+            "reps": 5,
+            "type": 3,
+            "usn": 0
+          },
+          "#c5": {
+            "data": {},
+            "did": "Home::Sub",
+            "due": 4,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 3,
+            "type": 2,
+            "usn": 0
+          },
+          "#c6": {
+            "data": {},
+            "did": "Home::Drill",
+            "due": -100000,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 3,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n6",
+            "odid": "Home",
+            "odue": 2,
+            "ord": 0,
+            "queue": 2,
+            "reps": 2,
+            "type": 2,
+            "usn": -1
+          },
+          "#c7": {
+            "data": {},
+            "did": "Other",
+            "due": 7,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -2,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          },
+          "#c8": {
+            "data": {},
+            "did": "Cram",
+            "due": -100001,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n8",
+            "odid": "Home",
+            "odue": 8,
+            "ord": 0,
+            "queue": -2,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "unbury_unsuspend"
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {},
+            "did": "Home",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701720,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {},
+            "did": "Home::Sub",
+            "due": 1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 2,
+            "lapses": 1,
+            "left": 1,
+            "mod": 1894701720,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 3,
+            "reps": 5,
+            "type": 3,
+            "usn": -1
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "unbury_unsuspend"
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c7": {
+            "data": {},
+            "did": "Other",
+            "due": 7,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c7",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701780,
+            "nid": "#n7",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701780000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894701780000]
+          ]
+        }
+      },
+      {
+        "card": {
+          "#c5": {
+            "data": {},
+            "did": "Home::Sub",
+            "due": 4,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 3,
+            "type": 2,
+            "usn": 0
+          }
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Home",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {},
+            "did": "Home::Sub",
+            "due": 4,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701900,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": -1
+          },
+          "#c8": {
+            "data": {},
+            "did": "Cram",
+            "due": -100001,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c8",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701900,
+            "nid": "#n8",
+            "odid": "Home",
+            "odue": 8,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "unbury_unsuspend"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "b8f6bae22ae3648605d51d66c132652736545e3b7217bc6a9044ffdf43d2ba3d",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/ops/bury/unbury-deck",
+  "scenario_sha256": "05254bb3996345df194802a06394d6f6481ea6cef23295312bb59aeb6822fb07",
+  "tz": "UTC"
+}

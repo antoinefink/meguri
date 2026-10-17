@@ -1,0 +1,197 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["setDueBrowser", "\"4-2!\"", 1894701660, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1, 2, 2, 0, 1894701660]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "set_due_date"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Home",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          }
+        },
+        "revlog": {
+          "#c1": []
+        },
+        "undo_status": {
+          "redo": "set_due_date",
+          "undo": null
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["setDueBrowser", "\"4-2!\"", 1894701660, -1]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["setDueBrowser", "\"4-2!\"", 1894701660, -1],
+            ["setDueReviewer", "\"1\"", 1894701780, -1]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["setDueBrowser", "\"4-2!\"", 1894701660, -1],
+            ["setDueReviewer", "\"1\"", 1894701780, -1]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["setDueBrowser", "\"4-2!\"", 1894701660, -1],
+            ["setDueReviewer", "\"1\"", 1894701780, -1]
+          ]
+        }
+      },
+      {
+        "card": {
+          "#c2": {
+            "data": {
+              "pos": 2
+            },
+            "did": "Home",
+            "due": 2,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701900,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701780000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            },
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701840000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            },
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701900000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "2e993a20a570457109e4dd8f718c5bb8f99c2d9bf78b6d5d41812c7b67c005a5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/ops/set-due/context",
+  "scenario_sha256": "d8ca630c400bd4728a2eb1c866d04fa241d6f5243d8ed68640f8a702c4af2a0c",
+  "tz": "UTC"
+}

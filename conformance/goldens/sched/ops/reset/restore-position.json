@@ -1,0 +1,484 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["nextPos", "7", 1894701600, -1]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "cd": "{\"k\":1}",
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894615200
+            },
+            "did": "Home",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 2,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 7,
+            "type": 0,
+            "usn": -1
+          },
+          "#c2": {
+            "data": {},
+            "did": "Home",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": -1
+          },
+          "#c3": {
+            "data": {
+              "lrt": 1894615200
+            },
+            "did": "Home",
+            "due": 8,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 0,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 4,
+            "type": 0,
+            "usn": -1
+          },
+          "#c4": {
+            "data": {
+              "lrt": 1894701000
+            },
+            "did": "Home",
+            "due": 4,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894701660,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 1,
+            "type": 0,
+            "usn": -1
+          },
+          "#c5": {
+            "data": {
+              "lrt": 1894615200
+            },
+            "did": "Home",
+            "due": 5,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n5",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 3,
+            "type": 0,
+            "usn": -1
+          },
+          "#c6": {
+            "data": {},
+            "did": "Home",
+            "due": 7,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 4,
+            "type": 0,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 0,
+              "factor": 0,
+              "id": 1894701660003,
+              "ivl": 0,
+              "lastIvl": 10,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ],
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 0,
+              "id": 1894701660001,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ],
+          "#c3": [
+            {
+              "cid": "#c3",
+              "ease": 0,
+              "factor": 0,
+              "id": 1894701660002,
+              "ivl": 0,
+              "lastIvl": 3,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ],
+          "#c4": [
+            {
+              "cid": "#c4",
+              "ease": 0,
+              "factor": 0,
+              "id": 1894701660004,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ],
+          "#c5": [
+            {
+              "cid": "#c5",
+              "ease": 0,
+              "factor": 0,
+              "id": 1894701660005,
+              "ivl": 0,
+              "lastIvl": 6,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ],
+          "#c6": [
+            {
+              "cid": "#c6",
+              "ease": 0,
+              "factor": 0,
+              "id": 1894701660000,
+              "ivl": 0,
+              "lastIvl": 8,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": "reset_card"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["nextPos", "9", 1894701660, -1],
+            ["resetCountsBrowser", "false", 1894701660, -1],
+            ["restorePositionBrowser", "true", 1894701660, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["withpos", " leech ", 1894701600, -1],
+            ["stillnew", "", 1894701600, -1],
+            ["suspended", "", 1894701600, -1],
+            ["learning", "", 1894701600, -1],
+            ["filtered", "", 1894701600, -1],
+            ["nopos", "", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701660000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "cd": "{\"k\":1}",
+              "d": 5.0,
+              "decay": 0.154,
+              "dr": 0.9,
+              "lrt": 1894615200,
+              "pos": 1,
+              "s": 4.5
+            },
+            "did": "Home",
+            "due": 5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 10,
+            "lapses": 2,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 7,
+            "type": 2,
+            "usn": 0
+          },
+          "#c2": {
+            "data": {},
+            "did": "Home",
+            "due": 2,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          },
+          "#c3": {
+            "data": {
+              "d": 6.0,
+              "lrt": 1894615200,
+              "s": 3.0
+            },
+            "did": "Home",
+            "due": 5,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c3",
+            "ivl": 3,
+            "lapses": 1,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n3",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": -1,
+            "reps": 4,
+            "type": 2,
+            "usn": 0
+          },
+          "#c4": {
+            "data": {
+              "d": 2.1,
+              "lrt": 1894701000,
+              "pos": 4,
+              "s": 2.3
+            },
+            "did": "Home",
+            "due": 1894702200,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c4",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 2,
+            "mod": 1894701600,
+            "nid": "#n4",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 1,
+            "reps": 1,
+            "type": 1,
+            "usn": 0
+          },
+          "#c5": {
+            "data": {
+              "d": 4.0,
+              "lrt": 1894615200,
+              "pos": 5,
+              "s": 8.0
+            },
+            "did": "Cram",
+            "due": -100000,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c5",
+            "ivl": 6,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n5",
+            "odid": "Home",
+            "odue": 9,
+            "ord": 0,
+            "queue": 2,
+            "reps": 3,
+            "type": 2,
+            "usn": 0
+          },
+          "#c6": {
+            "data": {},
+            "did": "Home",
+            "due": 3,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c6",
+            "ivl": 8,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n6",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 4,
+            "type": 2,
+            "usn": 0
+          }
+        },
+        "revlog": {
+          "#c1": [],
+          "#c2": [],
+          "#c3": [],
+          "#c4": [],
+          "#c5": [],
+          "#c6": []
+        },
+        "undo_status": {
+          "redo": "reset_card",
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["nextPos", "7", 1894701600, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "2e993a20a570457109e4dd8f718c5bb8f99c2d9bf78b6d5d41812c7b67c005a5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/ops/reset/restore-position",
+  "scenario_sha256": "bd9267c41866a0eff5e8ced608ad7813ef608dde36b7fdc77a905ceca0117aac",
+  "tz": "UTC"
+}

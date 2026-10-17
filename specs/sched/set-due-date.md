@@ -129,7 +129,7 @@ Each target card gets one row, inserted right after its card row is computed:
 - A card in a filtered deck is taken out of it (R710); the filtered deck itself is not changed.
 - No note, tag or deck row is written.
 
-## S8. Examples (oracle library, 26.09.3; goldens pending, `specs/conformance/sched-ops.md` J11)
+## S8. Examples (oracle, 26.09.3; `specs/conformance/sched-ops.md` J11)
 
 FSRS on, `today` 0, `next_day_at` B, text `3`, one operation on five cards:
 

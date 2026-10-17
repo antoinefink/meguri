@@ -1,0 +1,327 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "timing": {
+          "days_elapsed": 0,
+          "next_day_at": 1894766400,
+          "now": 1894701600,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000]
+          ]
+        }
+      },
+      {},
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "set_due": {
+          "error": "invalid_days"
+        }
+      },
+      {
+        "card": {
+          "#c1": {
+            "data": {},
+            "did": "Home",
+            "due": 1,
+            "factor": 0,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701600,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 0,
+            "reps": 0,
+            "type": 0,
+            "usn": 0
+          }
+        },
+        "revlog": {
+          "#c1": []
+        },
+        "undo_status": {
+          "redo": null,
+          "undo": null
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000]
+          ]
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c1": {
+            "data": {
+              "pos": 1
+            },
+            "did": "Home",
+            "due": 7,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c1",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701660,
+            "nid": "#n1",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701660000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1, 2, 2, 0, 2500, 1894701720, -1]
+          ]
+        }
+      },
+      {
+        "revlog": {
+          "#c1": [
+            {
+              "cid": "#c1",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701660000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            },
+            {
+              "cid": "#c1",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701720000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        }
+      },
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {
+              "pos": 2
+            },
+            "did": "Home",
+            "due": -1,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701720,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701720001,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "card": {
+          "#c2": {
+            "data": {
+              "pos": 2
+            },
+            "did": "Home",
+            "due": 0,
+            "factor": 2500,
+            "flags": 0,
+            "id": "#c2",
+            "ivl": 0,
+            "lapses": 0,
+            "left": 0,
+            "mod": 1894701780,
+            "nid": "#n2",
+            "odid": null,
+            "odue": 0,
+            "ord": 0,
+            "queue": 2,
+            "reps": 0,
+            "type": 2,
+            "usn": -1
+          }
+        },
+        "revlog": {
+          "#c2": [
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701720001,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            },
+            {
+              "cid": "#c2",
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894701780000,
+              "ivl": 0,
+              "lastIvl": 0,
+              "time": 0,
+              "type": 4,
+              "usn": -1
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "2e993a20a570457109e4dd8f718c5bb8f99c2d9bf78b6d5d41812c7b67c005a5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/ops/set-due/parse",
+  "scenario_sha256": "5639dee149336aaa4255621f827f7e0b3508ab7f98497e65fde0ae8ca2931308",
+  "tz": "UTC"
+}
