@@ -16,12 +16,12 @@ use meguri_storage::{Initializers, OpenOptions, OpenedCollection, ReaderFactory,
 
 use crate::cancel::CancelToken;
 use crate::changes::observers::{self, ObservedCommit};
-use crate::changes::stream::{EventKind, Seq};
+use crate::changes::stream::{EventKind, Reservation, Seq};
 use crate::changes::{self, MediaNotes};
 use crate::error::EngineError;
 use crate::executor::exclusive::Privilege;
 use crate::executor::live_file::LiveFile;
-use crate::executor::op::{OpContext, OpResult, OpSpec, OpTiming, UndoMeta, WriteDelay};
+use crate::executor::op::{CommitNotice, OpContext, OpResult, OpSpec, OpTiming, UndoMeta, WriteDelay};
 use crate::executor::preconditions::{self, TouchIndex};
 use crate::executor::source::QueueKind;
 use crate::executor::{ExecShared, WriterWake};
@@ -29,6 +29,9 @@ use crate::lifecycle::Generation;
 use crate::monotonic;
 use crate::progress::ProgressPhase;
 use crate::threads::ThreadActivity;
+use crate::undo::reasons::DisabledReason;
+use crate::undo::restorers::Direction;
+use crate::undo::{Applied, CommitInfo, Restore, UndoNotes};
 
 /// One item of the writer's queues.
 pub(crate) struct Task {
@@ -45,6 +48,9 @@ pub(crate) struct TaskMeta {
     pub park: bool,
     pub cancel: Option<Arc<CancelToken>>,
     pub declared: Option<Duration>,
+    /// An undo or redo op (`engine/undo` M4.1): the writer resolves its step,
+    /// catalog op and declared write as it takes the op.
+    pub restore: Option<Restore>,
     pub submitted: Duration,
     /// Control tasks bypass admission and the generation check.
     pub control: bool,
@@ -70,6 +76,17 @@ pub(crate) struct Reopen {
     pub initializers: Initializers,
 }
 
+thread_local! {
+    /// Set on writer threads: work there must never wait for the writer
+    /// (the day query, `sched/day-clock` D8).
+    static ON_WRITER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the current thread is a collection's writer thread.
+pub(crate) fn on_writer_thread() -> bool {
+    ON_WRITER.with(std::cell::Cell::get)
+}
+
 /// The writer thread's loop: runs tasks until the executor stops and its
 /// queues are empty.
 pub(crate) fn run(
@@ -79,12 +96,13 @@ pub(crate) fn run(
     floor: Seq,
     activity: &ThreadActivity,
 ) {
+    ON_WRITER.with(|on| on.set(true));
     let mut collection = Some(collection);
     let mut touched = TouchIndex::new(floor);
     let mut flush = WalFlush::default();
     loop {
         flush.observe(&shared, collection.as_ref());
-        let task = match shared.next_task(flush.due) {
+        let mut task = match shared.next_task(flush.due) {
             WriterWake::Task(task) => task,
             WriterWake::Flush => {
                 let _busy = activity.busy();
@@ -93,6 +111,7 @@ pub(crate) fn run(
             }
             WriterWake::Stop => break,
         };
+        resolve_restore(&shared, &mut task.meta);
         {
             let _busy = activity.busy();
             // A catalog long write/maintenance task may hold the thread past
@@ -134,6 +153,20 @@ pub(crate) fn run(
     {
         tracing::warn!(%error, "closing the collection when the writer stopped");
     }
+}
+
+/// `engine/undo` M4.1: an undo or redo acts on the step on top of its scope
+/// when the writer takes it, and from then on runs as the catalog op for
+/// that step, declaring its write (O8), so the WAL flush before a long
+/// write and its `WriteDelay` follow the step it restores.
+fn resolve_restore(shared: &ExecShared, meta: &mut TaskMeta) {
+    let Some(restore) = meta.restore.as_mut() else {
+        return;
+    };
+    let resolved = shared.undo.resolve(restore.action);
+    restore.target = Some(resolved.target);
+    meta.name = resolved.def.name();
+    meta.declared = resolved.declared;
 }
 
 /// Group nearby commits. Start early enough to leave room for a normal
@@ -274,6 +307,9 @@ fn run_op<T>(
         progress.set_phase(ProgressPhase::Committing);
     }
     let shared = env.shared;
+    // The second the op began: what merges note edits into one step
+    // (engine/undo A3).
+    let began = shared.clock.now_ms().div_euclid(1000);
     let delay = meta
         .declared
         .map(|declared| DelayGuard::start(shared, meta.name, declared));
@@ -297,12 +333,19 @@ fn run_op<T>(
         progress: spec.progress.clone(),
         media_added: Vec::new(),
         media_removed: Vec::new(),
+        undo: &shared.undo,
+        undo_notes: UndoNotes::default(),
+        restore: meta.restore,
+        last_seq: shared.last_seq(),
+        on_commit: Vec::new(),
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&mut context)));
     let media = MediaNotes {
         added: std::mem::take(&mut context.media_added),
         removed: std::mem::take(&mut context.media_removed),
     };
+    let undo_notes = std::mem::take(&mut context.undo_notes);
+    let hooks = std::mem::take(&mut context.on_commit);
     let value = match outcome {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -333,6 +376,25 @@ fn run_op<T>(
             .record(seq, journal.entries().map(|e| (e.table(), e.key())), journal.len());
     }
     let change_set = Arc::new(derived.changes);
+    // The history changes before anyone sees the commit (engine/undo M2).
+    let applied = shared.undo.after_commit(CommitInfo {
+        seq,
+        began,
+        name: meta.name,
+        source: spec.source,
+        spec: &spec.undo,
+        declared: spec.declared,
+        journal: committed.journal.map(Arc::new),
+        changes: &change_set,
+        notes: undo_notes,
+    });
+    shared.undo.notify_restorers(&applied, &change_set);
+    // The day clock computes afresh after a change of its keys or of `col`
+    // (`sched/day-clock` D6, D8). Noted before anyone hears of the commit, so
+    // a check made on its event never takes the cached day.
+    if !change_set.is_empty() && shared.day_clock.note_commit(&change_set) {
+        shared.day_clock.schedule_check(shared);
+    }
     if change_set.is_empty() {
         reservation.give_up();
     } else {
@@ -353,6 +415,18 @@ fn run_op<T>(
         }
         reservation.fill(generation, None, EventKind::Changes(Arc::clone(&change_set)));
     }
+    let notice = CommitNotice {
+        seq,
+        generation,
+        published: !change_set.is_empty(),
+    };
+    for hook in hooks {
+        // The commit stands whatever a hook does.
+        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| hook(notice))) {
+            let message = crate::error::panic_message(payload.as_ref());
+            tracing::error!(op = meta.name, %message, "a commit hook panicked");
+        }
+    }
     drop(delay);
 
     let write = monotonic::now().saturating_sub(started);
@@ -368,10 +442,21 @@ fn run_op<T>(
     if let Some(plan) = spec.plan_time {
         span.record("plan_ms", plan.as_secs_f64() * 1000.0);
     }
-    let undo = (spec.source == OpSource::UserUndoable && !change_set.is_empty()).then_some(UndoMeta {
-        name: meta.name,
-        source: spec.source,
-    });
+    let undo = match applied {
+        Applied::Recorded(step) => Some(UndoMeta {
+            name: step.name,
+            source: spec.source,
+        }),
+        Applied::Restored {
+            direction: Direction::Redo,
+            step,
+            ..
+        } => Some(UndoMeta {
+            name: step.name,
+            source: spec.source,
+        }),
+        Applied::Restored { .. } | Applied::Nothing => None,
+    };
     Ok(OpResult {
         value,
         seq,
@@ -448,16 +533,25 @@ where
 
 /// What a replace leaves (`engine/lifecycle` L8).
 pub(crate) struct Replaced {
-    /// Why the swap or the reopen failed; `factory` says whether a
-    /// collection is open again.
+    /// Why the swap, the reopen or the new generation's first day check
+    /// failed; `factory` says whether a collection is open again.
     pub error: Option<EngineError>,
-    /// The new generation, when a file the swap changed was reopened: after
-    /// every successful swap, and after a failed one that had already
-    /// changed the file.
-    pub generation: Option<Generation>,
+    /// The new generation, when a file the swap changed was reopened and its
+    /// first day check committed: after every successful swap, and after a
+    /// failed one that had already changed the file.
+    pub generation: Option<NewGeneration>,
     /// Readers of the collection open now: the new file, or the old one when
     /// the swap failed before changing it; `None` when nothing is open.
     pub factory: Option<ReaderFactory>,
+}
+
+/// A generation a replace made (`engine/lifecycle` L8): its number, and the
+/// seq its `CollectionReplaced` holds. That seq precedes every event of the
+/// new generation; the replace's caller fills it once the readers are open,
+/// so nobody hears of the generation before its first day check committed.
+pub(crate) struct NewGeneration {
+    pub generation: Generation,
+    pub announce: Reservation,
 }
 
 /// The swap of `engine/lifecycle` L8: runs with the collection path and
@@ -495,6 +589,12 @@ impl TaskBody for ReplaceTask {
         // collection. Checked before the reopen (see `LiveFile::changed`).
         let changed = live.changed();
         let replacing = swapped.is_ok() || changed;
+        if replacing {
+            // The steps describe the file the swap replaced; dropped before
+            // any op of the new generation, also when the reopen fails
+            // (engine/undo M6).
+            shared.undo.reset(DisabledReason::ClearedByOneWay);
+        }
         let reopen = env.reopen;
         let options =
             OpenOptions::new(reopen.clock.as_ref(), reopen.random.as_ref()).initializers(reopen.initializers.clone());
@@ -508,20 +608,48 @@ impl TaskBody for ReplaceTask {
                 factory: None,
             },
             Ok(collection) => {
-                let factory = Some(collection.reader_factory());
+                let factory = collection.reader_factory();
                 *env.collection = Some(collection);
                 env.touched.reset(*shared.lock_commit());
-                let generation = replacing.then(|| {
+                if replacing {
                     let generation = Generation(shared.generation_cell.fetch_add(1, Ordering::SeqCst) + 1);
-                    shared
-                        .stream
-                        .publish(generation, None, EventKind::CollectionReplaced { generation });
-                    generation
-                });
-                Replaced {
-                    error: swapped.err(),
-                    generation,
-                    factory,
+                    let announce = shared.stream.reserve();
+                    match first_day_check(env) {
+                        Ok(()) => Replaced {
+                            error: swapped.err(),
+                            generation: Some(NewGeneration { generation, announce }),
+                            factory: Some(factory),
+                        },
+                        Err(check_error) => {
+                            // As an open whose day check fails (L2): nothing
+                            // stays open, no reader ever opens on the new
+                            // file, and nobody hears of its generation.
+                            drop(announce);
+                            if let Some(collection) = env.collection.take()
+                                && let Err(error) = collection.close()
+                            {
+                                tracing::warn!(%error, "closing the collection after its first day check failed");
+                            }
+                            let error = match swapped {
+                                Ok(()) => check_error,
+                                Err(swap_error) => {
+                                    tracing::warn!(error = %check_error, "the first day check after a failed swap");
+                                    swap_error
+                                }
+                            };
+                            Replaced {
+                                error: Some(error),
+                                generation: None,
+                                factory: None,
+                            }
+                        }
+                    }
+                } else {
+                    Replaced {
+                        error: swapped.err(),
+                        generation: None,
+                        factory: Some(factory),
+                    }
                 }
             }
         };
@@ -537,6 +665,22 @@ impl TaskBody for ReplaceTask {
     }
 }
 
+/// The new generation's first day check (`engine/lifecycle` L8,
+/// `sched/day-clock` D8), run by the replace task itself: the day clock
+/// forgets the old collection's day and what it reported, then writes and
+/// unburies on the new file in a `Rollover` op, while the readers are still
+/// closed and before anyone hears of the generation. Its error fails the
+/// replace, as it fails an open.
+fn first_day_check(env: &mut WriterEnv<'_>) -> Result<(), EngineError> {
+    let shared = env.shared;
+    shared.day_clock.reset();
+    let day_clock = Arc::clone(&shared.day_clock);
+    let spec = crate::sched::day_clock::op_spec();
+    let mut meta = shared.meta(spec.def.name(), spec.source);
+    meta.planned = Some(shared.generation());
+    run_op(env, &meta, spec, move |ctx| day_clock.run(ctx)).map(drop)
+}
+
 /// Closes the collection (`engine/lifecycle` L10).
 pub(crate) struct CloseTask {
     pub reply: SyncSender<Result<(), EngineError>>,
@@ -544,6 +688,8 @@ pub(crate) struct CloseTask {
 
 impl TaskBody for CloseTask {
     fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
+        // Steps live only while the collection is open (engine/undo M1, M6).
+        env.shared.undo.reset(DisabledReason::None);
         let result = match env.collection.take() {
             Some(collection) => collection.close().map(|_| ()).map_err(EngineError::from),
             None => Ok(()),

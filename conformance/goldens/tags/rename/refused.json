@@ -1,0 +1,192 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n5"
+        }
+      },
+      {},
+      {
+        "rename_tag": {
+          "error": "invalid_name"
+        }
+      },
+      {
+        "rename_tag": {
+          "error": "invalid_name"
+        }
+      },
+      {
+        "rename_tag": {
+          "error": "invalid_name"
+        }
+      },
+      {
+        "rename_tag": {
+          "error": "invalid_name"
+        }
+      },
+      {
+        "rename_tag": {
+          "error": "invalid_name"
+        }
+      },
+      {
+        "rename_tag": {
+          "error": "invalid_name"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" foo ", 1894701600, -1],
+            [" c+ c++ ", 1894701600, -1],
+            [" c++::x ", 1894701600, -1],
+            [" ÉTÉ::k ", 1894701600, -1],
+            [" Straße ", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894701600000]
+          ]
+        }
+      },
+      {
+        "rename_tag": {
+          "count": 1
+        }
+      },
+      {
+        "rename_tag": {
+          "count": 1
+        }
+      },
+      {
+        "rename_tag": {
+          "count": 1
+        }
+      },
+      {
+        "rename_tag": {
+          "count": 2
+        }
+      },
+      {
+        "rename_tag": {
+          "count": 1
+        }
+      },
+      {
+        "rename_tag": {
+          "count": 0
+        }
+      },
+      {},
+      {
+        "rename_tag": {
+          "count": 0
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [" blank ", 1894705200, -1],
+            [" c+ cpp ", 1894705200, -1],
+            [" cpp::x ", 1894705200, -1],
+            [" ete::k ", 1894705200, -1],
+            [" Straße ", 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "Straße": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Straße",
+              "usn": -1
+            },
+            "blank": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "blank",
+              "usn": -1
+            },
+            "c+": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "c+",
+              "usn": -1
+            },
+            "cpp": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "cpp",
+              "usn": -1
+            },
+            "cpp::x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "cpp::x",
+              "usn": -1
+            },
+            "ete::k": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "ete::k",
+              "usn": -1
+            },
+            "lonely": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "lonely",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "206717ce7d7fe9d20a0032f53072215ac9b104a6497d7bff19618b427939a126",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/rename/refused",
+  "scenario_sha256": "8aef9fcf557970f04d707c78d4f9fbfcc3cc67238fed2538f10e05a7802c7f55",
+  "tz": "UTC"
+}

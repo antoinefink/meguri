@@ -1,0 +1,648 @@
+# Test tiers (R1950, KTD23, oracle-harness.md section 6; docs/process/tiers.md).
+#
+# Each run is one `tools/mg <job> <args>` call with its tier, the paths that
+# trigger it, where its work happens (R1952) and a time budget. `tools/mg gate`
+# runs T0 and, when core/ changed, T1; `tools/mg nightly` runs T2; `tools/mg
+# milestone` runs T0, T1, T3 and T4 in full. Every registered tools/mg job is a
+# run here or a utility below: `tools/mg gate` refuses this file otherwise.
+#
+# Run fields:
+#   id            unique slug; receipts and quarantine entries name it
+#   job, args     the tools/mg call. Placeholders: {base} (the commit the
+#                 change is measured from), {tip} (the commit under test),
+#                 {seed} (the nightly seed, R1937), {milestone}; and, as a
+#                 whole argument, {artifact:<run id>:<file name>}: that file
+#                 among the artifacts of an earlier run of the same gate (the
+#                 run is unresolved, and blocks, when there is none)
+#   tier          T0..T4
+#   stage         static and canary run before every other run; a canary
+#                 whose failure blocks (not quarantined) stops the gate (AE82
+#                 ordering). Default main.
+#   triggers      path globs (`**`, `*`, trailing `/`, leading `!` excludes);
+#                 absent: every change. T2-T4 runs have none.
+#   filters       instead of triggers, for conformance: path glob -> scenario
+#                 filters appended to args; `*` selects every scenario
+#   placement     where the run's work happens: host, vm (the macOS test VM)
+#                 or docker:<service>; a list when it spans several
+#   needs         oracle, sync-server, image-diff and frame-extraction run in
+#                 Docker; simulator, device, mac-ui and vm on the host or the
+#                 VM (R1952); refs and private-data only in the main checkout
+#   budget_s      time budget; a run over it is reported, not failed
+#   local         runs in `tools/mg gate --local` (default true); the
+#                 similarity scan and oracle-image runs do not (U2)
+#   where         worktree (default), main or tip. Outside the main checkout,
+#                 `tools/mg merge` runs a main run from the main checkout with
+#                 merge_args, against the branch's tree, and a tip run with
+#                 its args in a full checkout of the branch tip (the branch's
+#                 code and oracle/, the main checkout's similarity corpus)
+#   oracle        an oracle-image run: it needs the branch's own oracle/. A
+#                 checkout without one uses the main checkout's when that is
+#                 this HEAD's; otherwise the merge runs it in its tip checkout
+#   oracle_files  reads files of the branch's oracle/ without its image (the
+#                 pin's lock, the harvest inventory): runs in gate --local, but
+#                 where the oracle/ it would read is not this HEAD's, the gate
+#                 defers it as it does an oracle-image run
+#   class        unit, conformance, sync, data-safety, ui, perf, static,
+#                 tooling or similarity; quarantined tests of a conformance,
+#                 sync or data-safety run fail every milestone run (R1953)
+#   schedule      T2: nightly or weekly
+#   require       pass rules on the job's result: {id, summary, max} or
+#                 {id, detail, only_keys}; `release: true` applies one only in
+#                 release runs
+#   release_only  T3 runs that only `tools/mg milestone release` runs
+#   user_step     T4: performed by Antoine (U256); the run reports it as
+#                 awaiting him, and its job need not be a tools/mg job
+#   pending       the unit that lands the job; the run is listed and reported,
+#                 never run. Once the job is registered this file is refused
+#                 until the run is wired (pending removed).
+#   disabled      the job exists, but this run waits for the unit named here
+#   blocking      false: reported, never fails the gate (default true)
+
+version: 1
+
+tiers:
+  T0: {when: every change, what: "static checks, canaries, committed goldens on macOS and Linux, unit tests, lint, dependency gate, similarity scan, snapshot and accessibility tests for touched UI, simulator perf smoke for touched hot paths", budget: "conformance part under 60 s"}
+  T1: {when: every change under core/ (and to scenarios or goldens), what: "live oracle suites for the touched areas, sync smoke, oracle-checked fixtures", budget: "2-5 min"}
+  T2: {when: nightly (weekly for the weekly runs), what: "fuzzing with a logged seed, JPlag, Meguri-versus-Anki timing, long simulations, the full sync, media and fault matrix", budget: "60-90 min"}
+  T3: {when: milestone and release, what: "private collection suite, macOS-native oracle confirmation, Mac benchmarks, harvest coverage (R1880), release audit", budget: "10-30 min plus the benchmarks"}
+  T4: {when: milestone and release, what: "on-device performance, performed by Antoine (U256)", budget: "per R1863"}
+
+runs:
+  # --- T0: static ------------------------------------------------------------
+  - id: static
+    job: static-checks
+    args: [--base, "{base}"]
+    tier: T0
+    stage: static
+    placement: host
+    class: static
+    budget_s: 60
+  - id: static-tree
+    job: static-checks
+    args: [--base, "{base}"]
+    merge_args: [--rev, "{tip}", --base, "{base}"]
+    tier: T0
+    stage: static
+    placement: host
+    class: static
+    budget_s: 60
+    local: false
+    where: main
+
+  # --- T0: canaries (AE82: a pin bump fails before anything else) -----------
+  - id: pin-canary
+    job: core-test
+    args: [--canaries]
+    tier: T0
+    stage: canary
+    placement: docker:dev
+    class: unit
+    triggers: [core/, tools/mg.d/core.sh]
+    budget_s: 600
+  - id: canary-scenarios
+    job: conformance
+    # The 10,000-pair fuzz table (pending until U45 activates it), its smoke
+    # subset and the unicase collation canaries.
+    args: [--lane, all, fp-probe/corpus/fuzz-table, smoke/fuzz-table-small, text/fold/unicase, storage/open/collation]
+    tier: T0
+    stage: canary
+    placement: [host, docker:dev]
+    class: conformance
+    triggers: [core/, conformance/scenarios/, conformance/goldens/, conformance/goldens-apple/, tools/mg.d/conformance.sh]
+    budget_s: 900
+
+  # --- T0: Rust ---------------------------------------------------------------
+  - id: core-lint
+    job: core-lint
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: [core/, tools/mg.d/core.sh, tools/scripts/ankiweb-scan.py]
+    budget_s: 1200
+  - id: core-deny
+    job: core-deny
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: ["core/**/Cargo.toml", core/Cargo.lock, core/deny.toml, tools/mg.d/core.sh]
+    budget_s: 600
+  - id: core-test
+    job: core-test
+    tier: T0
+    placement: docker:dev
+    class: unit
+    triggers: [core/, conformance/, tools/mg.d/core.sh]
+    budget_s: 2400
+
+  # --- T0: conformance on the committed goldens --------------------------------
+  - id: conformance
+    job: conformance
+    args: [--lane, all]
+    tier: T0
+    placement: [host, docker:dev]
+    class: conformance
+    triggers: [core/, conformance/, tools/mg.d/conformance.sh]
+    budget_s: 1200
+  - id: goldens-check
+    job: goldens-check
+    args: [--base, "{base}"]
+    tier: T0
+    placement: [host, docker:dev]
+    class: conformance
+    triggers: [conformance/, core/crates/meguri-testkit/, core/tools/meguri-cli/, tools/conformance/, tools/mg.d/conformance.sh]
+    oracle_files: true
+    budget_s: 900
+  - id: harvest-report
+    job: harvest-report
+    tier: T0
+    placement: [host, docker:dev]
+    class: conformance
+    triggers: [conformance/catalog/, conformance/scenarios/, core/crates/meguri-testkit/src/catalog.rs, tools/mg.d/conformance.sh]
+    oracle_files: true
+    budget_s: 900
+
+  # --- T0: tooling self-tests -------------------------------------------------
+  - id: selftest
+    job: selftest
+    tier: T0
+    placement: docker:dev
+    class: tooling
+    triggers: [tools/, docker/, .claude/, .gitattributes, .gitignore]
+    budget_s: 2400
+  - id: selftest-host
+    job: selftest-host
+    tier: T0
+    placement: [host, docker:dev]
+    class: tooling
+    triggers: [tools/mg, tools/mg.d/, tools/tests/mg_host_selftest.sh, docker/compose.yml, "docker/*.Dockerfile"]
+    budget_s: 1200
+  - id: selftest-xcframework
+    job: selftest-xcframework
+    tier: T0
+    placement: host
+    class: tooling
+    triggers: [tools/scripts/build-core-xcframework.sh, tools/tests/xcframework_selftest.sh]
+    budget_s: 2400
+  - id: image-tools-selftest
+    job: image-tools-selftest
+    tier: T0
+    placement: docker:image-tools
+    class: tooling
+    triggers: [tools/scripts/contact-sheet/, tools/scripts/hierarchy-check/, tools/scripts/image-diff/, tools/scripts/screen-status/, tools/scripts/critic/, tools/scripts/gallery/, tools/scripts/perf-compare/, "docker/image-tools.Dockerfile*", tools/mg.d/selftest.sh]
+    budget_s: 900
+  - id: lint-ui-selftest
+    job: lint-ui-selftest
+    tier: T0
+    placement: host
+    class: tooling
+    triggers: [tools/lint-ui/, tools/mg.d/lint-ui.sh]
+    budget_s: 300
+  - id: private-selftest
+    job: private-selftest
+    tier: T0
+    placement: [host, docker:private]
+    class: data-safety
+    triggers: [tools/mg.d/private.sh, tools/scripts/private-scan/, core/crates/meguri-testkit/src/private/, core/tools/meguri-cli/src/private.rs, docker/compose.yml]
+    budget_s: 900
+  - id: design-docs
+    job: design-docs
+    tier: T0
+    placement: docker:dev
+    class: static
+    triggers: [docs/design/, tools/scripts/design-screens.py, tools/mg.d/design.sh]
+    budget_s: 300
+  # U240: the milestone manifest mirrors the plan's Delivery Milestones and
+  # names only runs that tools/mg milestone executes.
+  - id: milestones
+    job: milestone-gate
+    args: [--check]
+    tier: T0
+    placement: [host, docker:dev]
+    class: static
+    triggers: [docs/process/milestones.yaml, docs/plans/, tools/gate/tiers.yaml, tools/gate/gate.py, tools/scripts/gates/, tools/mg.d/milestone-gate.sh]
+    budget_s: 300
+
+  # --- T0: Apple side ---------------------------------------------------------
+  - id: lint-ui
+    job: lint-ui
+    tier: T0
+    placement: host
+    class: static
+    triggers: [app/, tools/lint-ui/, tools/mg.d/lint-ui.sh]
+    budget_s: 300
+  - id: swift-test-core
+    job: swift-test
+    args: [--package, MeguriCore]
+    tier: T0
+    placement: host
+    class: unit
+    triggers: [app/Packages/MeguriCore/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/scripts/build-core-xcframework.sh, tools/mg.d/bridge.sh]
+    budget_s: 1800
+  - id: swift-test-kit
+    job: swift-test
+    args: [--package, MeguriKit]
+    tier: T0
+    placement: host
+    class: unit
+    triggers: [app/Packages/, core/crates/, core/Cargo.lock, core/Cargo.toml, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/bridge.sh]
+    budget_s: 1800
+  - id: build-app-ios
+    job: build-app
+    args: [--platform, ios-sim]
+    tier: T0
+    placement: host
+    class: tooling
+    triggers: [app/, core/crates/, core/Cargo.lock, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/app.sh, tools/scripts/build-core-xcframework.sh]
+    budget_s: 1800
+  - id: build-app-mac
+    job: build-app
+    args: [--platform, mac]
+    tier: T0
+    placement: host
+    class: tooling
+    triggers: [app/, core/crates/, core/Cargo.lock, "!core/crates/meguri-testkit/**", "!core/crates/*/tests/**", "!core/crates/*/benches/**", tools/mg.d/app.sh, tools/scripts/build-core-xcframework.sh]
+    budget_s: 1800
+  - id: xcode-check
+    job: xcode-check
+    tier: T0
+    placement: [host, vm]
+    needs: [simulator]
+    class: tooling
+    triggers: [app/, tools/tests/xcode_project_check.sh, tools/mg.d/xcode.sh]
+    budget_s: 3600
+  - id: snapshots
+    job: snapshots
+    tier: T0
+    placement: [vm, docker:image-tools]
+    needs: [simulator, image-diff]
+    class: ui
+    triggers: [app/Meguri/, app/Packages/MeguriKit/, app/MeguriSnapshotTests/, app/Snapshots/, tools/mg.d/snapshots.sh, tools/scripts/image-diff/]
+    budget_s: 3600
+  - id: a11y-iphone
+    job: a11y
+    args: [--platform, iphone]
+    tier: T0
+    placement: vm
+    needs: [simulator]
+    class: ui
+    triggers: [app/Meguri/, app/Packages/MeguriKit/, app/MeguriUITests/, tools/mg.d/a11y.sh]
+    budget_s: 1800
+  - id: a11y-mac
+    job: a11y
+    args: [--platform, mac]
+    tier: T0
+    placement: vm
+    needs: [mac-ui]
+    class: ui
+    triggers: [app/Meguri/, app/Packages/MeguriKit/, app/MeguriUITests/, tools/mg.d/a11y.sh]
+    budget_s: 1800
+  - id: mac-ui
+    job: mac-ui
+    tier: T0
+    placement: vm
+    needs: [mac-ui]
+    class: ui
+    triggers: [app/, tools/drive-scripts/, tools/mg.d/mac-vm.sh, tools/mg.d/drive.sh]
+    budget_s: 3600
+  - id: critic
+    job: critic
+    args: [latest]
+    tier: T0
+    placement: host
+    class: ui
+    triggers: [app/Meguri/, app/Packages/MeguriKit/]
+    budget_s: 1800
+    disabled: "U254 wires the critic loop; a critic run writes docs/design/screen-status.yaml, which a gate run must not change"
+  # R1863: the simulator perf smoke for changes to the app or the core's hot
+  # paths; U241's perf-gate applies budgets and baselines to its results.
+  - id: perf-smoke
+    job: perf-ui
+    args: [--platform, iphone]
+    tier: T0
+    placement: vm
+    needs: [simulator]
+    class: perf
+    triggers: &hot-paths [app/Meguri/, app/Packages/MeguriKit/Sources/, app/Packages/MeguriCore/Sources/, core/crates/meguri-engine/src/, core/crates/meguri-storage/src/, core/crates/meguri-sched/src/, core/crates/meguri-template/src/, core/crates/meguri-search/src/, core/crates/meguri-ffi/src/, core/crates/meguri-host/src/, app/TestPlans/Performance.xctestplan]
+    budget_s: 2400
+  - id: perf-gate
+    job: perf-gate
+    tier: T0
+    placement: host
+    class: perf
+    triggers: *hot-paths
+    budget_s: 300
+    pending: U241
+  - id: notices
+    job: notices
+    tier: T0
+    placement: host
+    class: static
+    triggers: [core/Cargo.lock, "core/**/Cargo.toml", "app/**/Package.resolved", "app/Packages/*/Package.swift", app/Meguri.xcodeproj/]
+    budget_s: 300
+    pending: U16
+
+  # --- T0: similarity (main checkout: refs/) ----------------------------------
+  - id: similarity
+    job: similarity
+    args: [--base, "{base}"]
+    merge_args: [--rev, "{tip}", --base, "{base}"]
+    tier: T0
+    placement: [host, docker:similarity]
+    needs: [refs]
+    class: similarity
+    triggers: [core/, app/, tools/, docker/, conformance/runner/, .claude/]
+    budget_s: 600
+    local: false
+    where: main
+  # The branch's own scanner and its tests, with the main checkout's corpus.
+  - id: similarity-selftest
+    job: similarity-selftest
+    tier: T0
+    placement: [host, docker:similarity]
+    needs: [refs]
+    class: tooling
+    triggers: [tools/similarity/, docker/similarity.Dockerfile, tools/mg.d/similarity.sh]
+    budget_s: 1200
+    local: false
+    where: tip
+
+  # --- T1: live oracle ----------------------------------------------------------
+  - id: live-oracle
+    job: conformance
+    args: [--live, --lane, native]
+    tier: T1
+    placement: [host, docker:oracle]
+    needs: [oracle, sync-server]
+    class: conformance
+    oracle: true
+    local: false
+    budget_s: 1200
+    filters:
+      core/: [smoke/sync]
+      core/crates/meguri-text/: [text]
+      core/crates/meguri-model/: [model]
+      core/crates/meguri-storage/: [storage, maintenance]
+      core/crates/meguri-engine/: [undo, maintenance]
+      core/crates/meguri-sched/: [sched, fp-probe]
+      core/crates/meguri-template/: [render]
+      core/crates/meguri-search/: [search]
+      core/crates/meguri-sync/: [sync]
+      core/crates/meguri-package/: [maintenance]
+      core/crates/meguri-host/: ["*"]
+      core/crates/meguri-testkit/: ["*"]
+      core/tools/meguri-cli/: ["*"]
+      core/Cargo.lock: ["*"]
+      core/Cargo.toml: ["*"]
+      core/pins.toml: ["*"]
+      conformance/scenarios/: ["*"]
+      conformance/goldens/: ["*"]
+      conformance/deviations.yaml: ["*"]
+      conformance/oracle.json: ["*"]
+      conformance/fixtures/: ["*"]
+      tools/mg.d/conformance.sh: ["*"]
+      tools/mg.d/oracle.sh: ["*"]
+  - id: oracle-test
+    job: oracle
+    args: [test]
+    tier: T1
+    placement: docker:oracle
+    needs: [oracle]
+    class: tooling
+    oracle: true
+    local: false
+    triggers: [oracle/, tools/mg.d/oracle.sh]
+    budget_s: 900
+  - id: fixtures-check
+    job: fixtures-check
+    tier: T1
+    placement: [host, docker:dev, docker:oracle]
+    needs: [oracle]
+    class: conformance
+    oracle: true
+    local: false
+    triggers: [core/crates/meguri-testkit/src/generate/, core/tools/meguri-cli/src/generate.rs, tools/mg.d/fixtures.sh]
+    budget_s: 2400
+  - id: anonymize-check
+    job: anonymize-check
+    tier: T1
+    placement: [host, docker:private, docker:oracle]
+    needs: [oracle]
+    class: data-safety
+    oracle: true
+    local: false
+    triggers: [core/crates/meguri-testkit/src/anonymize/, core/tools/meguri-cli/src/anonymize.rs, tools/mg.d/private.sh]
+    budget_s: 1800
+
+  # --- T2: nightly and weekly ---------------------------------------------------
+  - id: core-fuzz
+    job: core-fuzz
+    args: [--seed, "{seed}"]
+    tier: T2
+    schedule: nightly
+    placement: docker:fuzz
+    class: unit
+    budget_s: 4500
+  - id: fuzz-diff
+    job: fuzz-diff
+    # R1937: a fixed 30-60 min budget; the seed is the nightly summary's.
+    args: [--minutes, "45", --seed, "{seed}"]
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:oracle]
+    needs: [oracle, sync-server]
+    class: conformance
+    budget_s: 3600
+    pending: U247
+  - id: search-fuzz
+    job: search-fuzz
+    args: [--seed, "{seed}"]
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:oracle]
+    needs: [oracle]
+    class: conformance
+    budget_s: 1800
+    pending: U91
+  - id: dst-365
+    job: dst-365
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:oracle]
+    needs: [oracle]
+    class: conformance
+    budget_s: 1800
+    pending: U247
+  - id: fault-matrix
+    job: fault
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:oracle]
+    needs: [oracle, sync-server]
+    class: data-safety
+    budget_s: 3600
+    pending: U250
+  - id: x86-64
+    job: conformance-x86
+    tier: T2
+    schedule: nightly
+    placement: docker:dev
+    class: conformance
+    budget_s: 1800
+    pending: an x86_64 Linux host
+  - id: similarity-nightly
+    job: similarity-nightly
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:similarity]
+    needs: [refs]
+    class: similarity
+    budget_s: 3600
+    local: false
+    where: main
+    merge_args: []
+  - id: perf-ratio
+    job: perf-ratio
+    args: [--sizes, "10k,100k"]
+    tier: T2
+    schedule: nightly
+    placement: [host, docker:oracle]
+    needs: [oracle]
+    class: perf
+    budget_s: 3600
+  - id: bench
+    job: bench
+    tier: T2
+    schedule: nightly
+    placement: docker:dev
+    class: perf
+    budget_s: 3600
+  - id: bench-icount
+    job: bench-icount
+    tier: T2
+    schedule: nightly
+    placement: docker:dev
+    class: perf
+    budget_s: 3600
+  - id: gallery
+    job: gallery
+    tier: T2
+    schedule: weekly
+    placement: [host, docker:image-tools]
+    needs: [image-diff]
+    class: ui
+    budget_s: 1800
+  - id: soak
+    job: soak
+    tier: T2
+    schedule: weekly
+    placement: [host, docker:oracle]
+    needs: [oracle, sync-server]
+    class: sync
+    budget_s: 7200
+    pending: U248
+  - id: sync-fuzz
+    job: sync-fuzz
+    args: [--seed, "{seed}"]
+    tier: T2
+    schedule: weekly
+    placement: [host, docker:oracle]
+    needs: [oracle, sync-server]
+    class: sync
+    budget_s: 3600
+    pending: U118
+
+  # --- T3: milestone and release ----------------------------------------------
+  - id: private-suite
+    job: private
+    args: [suite]
+    tier: T3
+    placement: [host, docker:private]
+    needs: [private-data]
+    class: conformance
+    budget_s: 3600
+    local: false
+    where: main
+    merge_args: [suite]
+  - id: native-oracle
+    job: fp-probe
+    tier: T3
+    placement: host
+    class: conformance
+    budget_s: 1800
+  - id: bench-mac
+    job: bench-mac
+    tier: T3
+    placement: host
+    class: perf
+    budget_s: 7200
+  # R1880: zero unclassified harvest rows at every milestone; at release every
+  # in-scope and preservation-only scenario passes. The live oracle run's T1
+  # report gives the live chains their statuses (otherwise they stay `live`).
+  - id: harvest-coverage
+    job: harvest-report
+    args: [--live-report, "{artifact:live-oracle:t1-live.json}"]
+    tier: T3
+    placement: [host, docker:dev]
+    class: conformance
+    oracle_files: true
+    budget_s: 900
+    require:
+      - {id: R1880-unclassified, summary: unclassified, max: 0}
+      - {id: R1880-in-scope, detail: harvest.by_classification.in-scope.statuses, only_keys: [pass], release: true}
+      - {id: R1880-preservation, detail: harvest.by_classification.preservation-only.statuses, only_keys: [pass], release: true}
+  - id: release-check
+    job: release-check
+    tier: T3
+    release_only: true
+    placement: host
+    class: static
+    budget_s: 1800
+    pending: U255
+  - id: release-audit
+    job: release-audit
+    tier: T3
+    release_only: true
+    placement: host
+    class: static
+    budget_s: 1800
+    pending: U17
+
+  # --- T4: on device (Antoine) -------------------------------------------------
+  - id: device-perf
+    job: device-run
+    tier: T4
+    placement: host
+    needs: [device]
+    class: perf
+    budget_s: 7200
+    user_step: device-run
+
+utilities:
+  - {job: gate, why: "runs the tiers"}
+  - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
+  - {job: nightly, why: "runs T2"}
+  - {job: milestone, why: "runs T0, T1, T3 and T4"}
+  - {job: quarantine, why: "edits and checks tools/gate/quarantine.yaml"}
+  - {job: escalation, why: "records escalations for Antoine"}
+  - {job: doctor, why: "reads host state and lists user steps"}
+  - {job: dev-image, why: "builds the dev images every docker job uses"}
+  - {job: worktree, why: "creates role worktrees"}
+  - {job: session, why: "records agent sessions"}
+  - {job: hooks, why: "installs the git hooks"}
+  - {job: core-xcframework, why: "build step of swift-test, build-app and xcode-check"}
+  - {job: run, why: "launches the app for an agent to look at"}
+  - {job: drive, why: "drives the app for an agent; mac-ui and xcode-check run the example drive scripts"}
+  - {job: ui-tree, why: "exports a hierarchy for an agent"}
+  - {job: screenshot, why: "captures a screen for an agent"}
+  - {job: record, why: "records a simulator for an agent"}
+  - {job: contact-sheet, why: "turns a recording into contact sheets; drive --record uses it"}
+  - {job: hierarchy-check, why: "checks a hierarchy export; drive uses it"}
+  - {job: metrics, why: "an Instruments recording around a drive script for an agent"}
+  - {job: sim, why: "leases pool simulators"}
+  - {job: sim-setup, why: "prepares the simulator pool"}
+  - {job: sim-reset, why: "resets a leased simulator"}
+  - {job: sync-rig, why: "starts and stops the local sync server; the actor scenarios of live-oracle and the sync suites use it"}
+  - {job: fixtures, why: "generates collections; fixtures-check verifies the generator"}
+  - {job: anonymize, why: "makes the anonymized clone; private-suite and anonymize-check cover it"}
+  - {job: harvest-inventory, why: "spec side: re-inventories Anki's tests"}
+  - {job: oracle, why: "spec side: builds, records and bumps the oracle (oracle-test runs its tests)"}

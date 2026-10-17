@@ -18,6 +18,8 @@ use crate::executor::catalog::OpDef;
 use crate::executor::preconditions::Precondition;
 use crate::lifecycle::Generation;
 use crate::progress::ProgressSink;
+use crate::undo::entry::{SessionId, StepKind};
+use crate::undo::{Restore, UndoManager, UndoNotes, UndoSpec};
 
 /// How an op is to run.
 #[derive(Clone, Debug)]
@@ -32,6 +34,7 @@ pub struct OpSpec {
     pub(crate) declared: Option<Duration>,
     pub(crate) plan_time: Option<Duration>,
     pub(crate) any_generation: bool,
+    pub(crate) undo: UndoSpec,
 }
 
 impl OpSpec {
@@ -47,6 +50,7 @@ impl OpSpec {
             declared: None,
             plan_time: None,
             any_generation: false,
+            undo: UndoSpec::default(),
         }
     }
 
@@ -113,6 +117,28 @@ impl OpSpec {
         self
     }
 
+    /// The name and kind of the undo step a `UserUndoable` op records
+    /// (`engine/undo` M1): Anki's op name ("Answer Card", R370). Without it
+    /// the step takes the op's name and kind `Other`.
+    pub fn undo_step(mut self, name: &'static str, kind: StepKind) -> OpSpec {
+        self.undo.step = Some((name, kind));
+        self
+    }
+
+    /// The review session the op belongs to (`engine/undo` M3, M8).
+    pub fn session(mut self, session: SessionId) -> OpSpec {
+        self.undo.session = Some(session);
+        self
+    }
+
+    /// Neither recorded nor clearing the history (`engine/undo` M2): only for
+    /// `UserNonUndoable` ops such as selecting a deck (R42). Other sources are
+    /// refused with `InvalidArgument` at submit.
+    pub fn skip_undo(mut self) -> OpSpec {
+        self.undo.skip = true;
+        self
+    }
+
     pub(crate) fn stamp_mode(&self) -> StampMode {
         self.stamp
             .unwrap_or_else(|| crate::executor::source::default_stamp(self.source))
@@ -130,7 +156,29 @@ pub struct OpContext<'s, 'c> {
     pub(crate) progress: Option<ProgressSink>,
     pub(crate) media_added: Vec<String>,
     pub(crate) media_removed: Vec<String>,
+    pub(crate) undo: &'c UndoManager,
+    pub(crate) undo_notes: UndoNotes,
+    /// For an undo or redo op, the step the writer resolved for it (M4.1).
+    pub(crate) restore: Option<Restore>,
+    /// The seq of the last committed op: what a snapshot begun now sees.
+    pub(crate) last_seq: Seq,
+    /// Work for the writer once the op committed and published its change
+    /// set (`OpContext::on_commit`); dropped when the op rolls back.
+    pub(crate) on_commit: Vec<CommitHook>,
 }
+
+/// What an op's commit hook learns: the op's seq and generation, and
+/// whether its change set was published (it was not empty).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CommitNotice {
+    pub seq: Seq,
+    pub generation: Generation,
+    pub published: bool,
+}
+
+/// Work an op leaves for after its commit, on the writer: the day clock's
+/// events (`sched/day-clock` D8), which follow the rollover op's change set.
+pub(crate) type CommitHook = Box<dyn FnOnce(CommitNotice) + Send>;
 
 impl fmt::Debug for OpContext<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -165,24 +213,38 @@ impl<'c> OpContext<'_, 'c> {
     }
 
     /// Runs one step of a composite op in a savepoint (O3): when the step
-    /// returns an error, its writes, journal entries and media notes are
-    /// rolled back and the error is returned for the op to handle. The op
-    /// keeps one transaction and one journal.
+    /// returns an error, its writes, journal entries, media notes and undo
+    /// notes (restorer state, sync merge) are rolled back and the error is
+    /// returned for the op to handle. The op keeps one transaction and one
+    /// journal.
     pub fn step<T>(&mut self, step: impl FnOnce(&mut Self) -> Result<T, EngineError>) -> Result<T, EngineError> {
         let savepoint = self.scope.savepoint()?;
         let media = (self.media_added.len(), self.media_removed.len());
-        match step(self) {
+        let hooks = self.on_commit.len();
+        // The step notes into an empty set, kept only when it commits.
+        let before = std::mem::take(&mut self.undo_notes);
+        let outcome = step(self);
+        let noted = std::mem::replace(&mut self.undo_notes, before);
+        match outcome {
             Ok(value) => {
                 self.scope.release_savepoint(savepoint)?;
+                self.undo_notes.absorb(noted);
                 Ok(value)
             }
             Err(error) => {
                 self.scope.rollback_to_savepoint(savepoint)?;
                 self.media_added.truncate(media.0);
                 self.media_removed.truncate(media.1);
+                self.on_commit.truncate(hooks);
                 Err(error)
             }
         }
+    }
+
+    /// Runs `hook` on the writer once the op has committed and its change
+    /// set is published; never when the op rolls back.
+    pub(crate) fn on_commit(&mut self, hook: impl FnOnce(CommitNotice) + Send + 'static) {
+        self.on_commit.push(Box::new(hook));
     }
 
     /// Reports a media file the op added (U31 stages media inside the op).
@@ -207,7 +269,8 @@ impl<'c> OpContext<'_, 'c> {
     }
 }
 
-/// What U25 records for an undoable op that changed something.
+/// The undo step an op recorded (`engine/undo` M1): set for a `UserUndoable`
+/// op that changed something and for a redo. The step's id is the op's seq.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UndoMeta {
     pub name: &'static str,

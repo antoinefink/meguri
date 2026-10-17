@@ -3,25 +3,36 @@
 (specs/conformance/sync-ops.md S2, S4-S7).
 
 actor: <name>               the declared actor that runs the next steps (global)
-sync: {kind: login | normal | full_upload | full_download}
+sync: {kind: login | normal | status | full_upload | full_download,
+       credentials?: account | wrong_password (login only)}
                             on the current actor -> {result}; rejections
-                            clock_incorrect and network
+                            auth_failed, clock_incorrect and network
 net_fault: {kind: reset, direction: to_client | to_server} | {kind: clear}
                             on the run's fault proxy (global)
 reopen: {}                  close the current collection and open it again
 converge: {}                a fresh client's full download against every
                             actor's raw dump -> {differences, dump} (global)
 
-Static checks: actor names are declared and each actor's first sync, in step
-order, is a login.
+Static checks: actor names are declared, sync values have S4.1's and S4.5's
+shape, and each actor's first sync, in step order, is a login.
 
-Rejections come from the exception's class, never its text (R1887): Anki's
-NetworkError is `network`; the clock error reaches Python as a sync error of
-the "other" kind, told apart only by its message, which is compared with the
-same collection's own translation of the clock-error string and never
-written anywhere. Every other failure is anki_error. A full sync closes the
-collection in the backend and reopens it whatever the result; no server usn is
-passed, so no media sync follows.
+A login with credentials wrong_password sends the account's user name and its
+password followed by -wrong (S4.5).
+
+status is the backend's sync status (specs/sync/meta-status.md M6) with the
+same host key and endpoint as normal. It runs on the actor's open collection:
+the answer remembered for 300 s lives in that collection's backend, which a
+sync job also updates, so the op never opens the collection again.
+
+Rejections come from the exception's class and kind, never its text (R1887):
+Anki's NetworkError is `network`; a sync error of the auth kind (Anki's
+mapping of HTTP 403, whatever the request) is `auth_failed`, and takes the
+actor's host key (S4.2); the clock error reaches Python as a sync error of the
+"other" kind, told apart only by its message, which is compared with the same
+collection's own translation of the clock-error string and never written
+anywhere. Every other failure is anki_error. A full sync closes the collection
+in the backend and reopens it whatever the result; no server usn is passed, so
+no media sync follows.
 """
 
 from __future__ import annotations
@@ -33,24 +44,49 @@ from typing import Any
 
 from anki.collection import Collection
 from anki.errors import NetworkError, SyncError, SyncErrorKind
-from anki.sync import SyncAuth, SyncOutput
+from anki.sync import SyncAuth, SyncOutput, SyncStatus
 
-from ..errors import Rejected, invalid
+from ..errors import DriverError, Rejected, invalid
 from ..observe.db_dump import dump
 from ..registry import op, scenario_check
 from . import sync_server
 
-KINDS = ("login", "normal", "full_upload", "full_download")
+KINDS = ("login", "normal", "status", "full_upload", "full_download")
+CREDENTIALS = ("account", "wrong_password")
+WRONG_PASSWORD_SUFFIX = "-wrong"
 OUTCOMES = {
     SyncOutput.NO_CHANGES: "no_changes",
     SyncOutput.FULL_SYNC: "full_sync",
     SyncOutput.FULL_UPLOAD: "full_upload",
     SyncOutput.FULL_DOWNLOAD: "full_download",
 }
+STATUSES = {
+    SyncStatus.NO_CHANGES: "no_changes",
+    SyncStatus.NORMAL_SYNC: "normal_sync",
+    SyncStatus.FULL_SYNC: "full_sync",
+}
 # Columns that record a party's sync history, not its content (S7.3): those of
 # the col row, and those of every config entry (config travels whole, and each
 # round restamps all of it on both sides).
 EXCLUDED_COLUMNS = {"col": ("mod", "usn", "ls"), "config": ("usn", "mtime_secs")}
+
+
+def sync_args(args) -> tuple[str, str]:
+    """A sync step's (kind, credentials), or invalid_scenario (S4.1, S4.5)."""
+    if not isinstance(args, dict) or not set(args) <= {"kind", "credentials"} or args.get("kind") not in KINDS:
+        raise invalid("sync takes {kind: login | normal | status | full_upload | full_download, credentials?}")
+    if "credentials" in args and args["kind"] != "login":
+        raise invalid("credentials go only with kind login")
+    credentials = args.get("credentials", "account")
+    if credentials not in CREDENTIALS:
+        raise invalid("credentials is account or wrong_password")
+    return args["kind"], credentials
+
+
+def login_credentials(credentials: str) -> tuple[str, str]:
+    """The user name and password a login sends (S4.5)."""
+    password = sync_server.PASSWORD if credentials == "account" else sync_server.PASSWORD + WRONG_PASSWORD_SUFFIX
+    return sync_server.USERNAME, password
 
 
 @scenario_check
@@ -66,7 +102,11 @@ def check_actor_steps(scenario: dict) -> None:
                 raise invalid(f"actor {args!r} is not in actors", step=index)
             current = args
         elif name == "sync":
-            kind = args.get("kind") if isinstance(args, dict) else None
+            try:
+                kind, _ = sync_args(args)
+            except DriverError as exc:
+                exc.fields["step"] = index
+                raise
             if current not in logged_in and kind != "login":
                 raise invalid(f"{current}'s first sync must be a login", step=index)
             logged_in.add(current)
@@ -84,6 +124,8 @@ def _run(session) -> sync_server.SyncRun:
 def _rejected_kind(col: Collection, exc: Exception) -> str | None:
     if isinstance(exc, NetworkError):
         return "network"
+    if isinstance(exc, SyncError) and exc.kind == SyncErrorKind.AUTH:
+        return "auth_failed"
     if isinstance(exc, SyncError) and exc.kind == SyncErrorKind.OTHER and str(exc) == col.tr.sync_clock_off():
         return "clock_incorrect"
     return None
@@ -97,31 +139,38 @@ def _full_sync(col: Collection, auth: SyncAuth, upload: bool) -> None:
         col.reopen(after_full_sync=True)
 
 
-@op("sync", rejects=("clock_incorrect", "network"), needs_actors=True)
+@op("sync", rejects=("auth_failed", "clock_incorrect", "network"), needs_actors=True)
 def sync(session, args):
-    if not isinstance(args, dict) or set(args) != {"kind"} or args["kind"] not in KINDS:
-        raise invalid("sync takes {kind: login | normal | full_upload | full_download}")
-    kind, col, current = args["kind"], session.col, session.current
+    kind, credentials = sync_args(args)
+    col, current = session.col, session.current
     endpoint = _run(session).actor_endpoint(current.name, session.step_index)
     try:
         if kind == "login":
-            auth = col.sync_login(username=sync_server.USERNAME, password=sync_server.PASSWORD, endpoint=endpoint)
+            username, password = login_credentials(credentials)
+            auth = col.sync_login(username=username, password=password, endpoint=endpoint)
             current.data["hkey"] = auth.hkey
             return {"result": "ok"}
         if "hkey" not in current.data:
-            raise invalid(f"{current.name} holds no host key: its login was rejected")
+            raise invalid(f"{current.name} holds no host key: no login of it succeeded, or auth_failed took the key")
         auth = SyncAuth(hkey=current.data["hkey"], endpoint=endpoint)
         if kind == "normal":
             out = col.sync_collection(auth, sync_media=False)
             if out.required not in OUTCOMES:
                 raise RuntimeError("a collection sync asked for another normal sync")
             return {"result": OUTCOMES[out.required]}
+        if kind == "status":
+            status = col.sync_status(auth)
+            if status.required not in STATUSES:
+                raise RuntimeError("the sync status is none of the three the protocol names")
+            return {"result": STATUSES[status.required]}
         _full_sync(col, auth, upload=kind == "full_upload")
         return {"result": "ok"}
     except (NetworkError, SyncError) as exc:
         rejected = _rejected_kind(col, exc)
         if rejected is None:
             raise
+        if rejected == "auth_failed":
+            current.data.pop("hkey", None)  # whatever an earlier login gave (S4.2, S4.4)
         raise Rejected(rejected) from exc
 
 

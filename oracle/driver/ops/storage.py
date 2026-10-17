@@ -8,9 +8,11 @@ db_exec: {sql, params?}   one statement through the collection's raw query API,
     -> {rows: [[value, ...], ...]}, by the storage class of each value: INTEGER
     int, REAL float, TEXT str (Anki's bridge already replaced invalid UTF-8
     with U+FFFD), BLOB {sha256} (it arrives as a list of byte values), NULL null.
-set_config: {key, value}   the collection's config setter with its default (no
-    undo entry, undo history kept). The value reaches Anki's JSON encoder as
-    the scenario gave it, so 1.0 stays a float.
+set_config: {key, value, undoable?}   the collection's config setter. Without
+    undoable (or false) with its default: no undo entry, undo steps kept
+    (W4). undoable: true passes undoable=True: one "Update Config" step
+    (undo-ops.md V3.1). The value reaches Anki's JSON encoder as the scenario
+    gave it, so 1.0 stays a float.
 
 Params bind as given: str TEXT, int INTEGER, float REAL, None NULL. A JSON
 integer outside 64 bits cannot bind as INTEGER (Anki's bridge would bind a
@@ -78,10 +80,13 @@ def _check_json(value: Any) -> None:
 
 @op("set_config")
 def set_config(session, args):
-    if not isinstance(args, dict) or set(args) != {"key", "value"}:
-        raise invalid("set_config takes {key, value}")
+    if not isinstance(args, dict) or not {"key", "value"} <= set(args) <= {"key", "value", "undoable"}:
+        raise invalid("set_config takes {key, value, undoable?}")
     key = args["key"]
     if not isinstance(key, str) or not key:
         raise invalid("set_config key is a non-empty string")
+    undoable = args.get("undoable", False)
+    if not isinstance(undoable, bool):
+        raise invalid("set_config undoable is a boolean")
     _check_json(args["value"])
-    session.col.set_config(key, args["value"])
+    session.col.set_config(key, args["value"], undoable=undoable)

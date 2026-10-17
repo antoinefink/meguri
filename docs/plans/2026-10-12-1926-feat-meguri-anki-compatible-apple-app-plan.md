@@ -5243,7 +5243,9 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Catalog test: every registered op has an undoability class; destructive non-undoable ops declare confirmation and backup.
 - Undo of an answer at 150k cards: core time p95 well under the R1811 50 ms budget (U12 bench).
 
-**Verification:** `conformance/scenarios/undo/` match goldens; property test 10k cases clean; catalog test green.
+**Verification:** every `conformance/scenarios/undo/` scenario, played on the engine's undo by `core/crates/meguri-engine/tests/undo_conformance.rs`, matches its golden with the deviations `conformance/deviations.yaml` lists for it; property test 10k cases clean; catalog test green.
+
+Amended 2026-10-16 after U25's review (`docs/process/review-log/U25.md`, A1). This line first asked for `conformance/scenarios/undo/` to match its goldens on Meguri's executor. Every undo scenario starts from the fresh collection of `specs/conformance/dsl.md` D6, which U28's bootstrap creates, and uses `undo`, `redo` and `undo_status`, whose adapter `specs/conformance/undo-ops.md` V6 places once the conformance session runs ops through the engine (U38's `CoreHost::open`; only meguri-engine and meguri-host may open the engine). Nine of the ten also use the `notetypes`, `decks` and `notes` setup sections (U27, U28, U29); eight of them use `edit_note` or `delete_notes` (U27), and `undo/revlog-taken-id` uses `answer` and the `card` and `revlog` observations (U44). U27, U28 and U38 depend on U25, so U25 cannot run them without building their collection, deck, note type and note logic ahead of the core. U38 now builds the undo adapter, and each undo scenario becomes active in the unit that lands the last op, setup section or observation it uses: U27, U28, U38 or U44, whose Verification lines say so. Until then `undo_conformance.rs` plays every undo scenario on the engine against its golden, with stand-ins for the new collection, the setup sections and the note and answer ops (amended again after review round 3, A2: it first played `undo/config-writes` alone).
 
 ### U26. Derived store
 
@@ -5348,12 +5350,14 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - `core/crates/meguri-host/src/lib.rs`, `src/open.rs` (`CoreHost::open`, `close`), `src/config.rs` (`HostConfig`), `src/wiring/mod.rs`, `src/wiring/pending.rs`
 - `core/crates/meguri-host/tests/ports.rs`, `tests/headless_parity.rs`
 - `specs/engine/host.md` (Meguri design doc)
+- `core/crates/meguri-testkit/src/exec/undo.rs` (Meguri's undo adapter, moved from U25)
 
 **Approach:**
 - `CoreHost::open(HostConfig)` takes the collection directory, the backups directory, the App Group snapshot path, the clock and the `DiskSpaceProvider`. It opens the engine through its raw open entry point, which only this crate may call (U5 layering-check rule), and registers every port implementation.
 - Wiring is per area under `src/wiring/`: U127 adds `backup.rs` (package BackupService), U95 and U100 add `stats.rs` (stats observers, widget builder), U113 adds `sync.rs` (session and lifecycle events fed into the sync policy). Until a provider unit lands, its port uses the engine's explicit `Unavailable` provider listed in `wiring/pending.rs`; that list must be empty when M1 closes.
 - Callers: meguri-ffi (U37), meguri-servers (U135) for headless contract runs, and every testkit or cli path that executes engine ops from this unit on (U117, U250). None of them registers ports itself.
 - `core/crates/meguri-host/AGENTS.md` records the traps: no business logic here, only construction and wiring; a new port needs a wiring entry and a `ports.rs` case.
+- Undo adapter (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1): once the conformance session runs ops through `CoreHost::open`, this unit builds Meguri's undo adapter (`specs/conformance/undo-ops.md` V1–V3, V6): `undo`, `redo` and `undo_status` in `exec/undo.rs`, `set_config`'s `undoable` and `remove_config` beside `set_config`, and `db_exec` emptying both histories after a statement that is not a select (`specs/conformance/record-ops.md` W1). The engine side exists (U25; `core/crates/meguri-engine/tests/undo_conformance.rs` plays every undo scenario on it, with stand-ins this adapter and the area units replace).
 
 **Execution note:** Meguri-designed contract; no spec-writer pass. Land the crate with an empty wiring table right after U32 so U37 and the area units can add to it.
 
@@ -5365,7 +5369,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - A crate other than meguri-host that calls the engine's raw open → `core-lint` fails (U5 rule).
 - `close` after open → every registered thread idle, writer and readers closed, no `-wal` content left after the final checkpoint.
 
-**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`.
+**Verification:** host tests green in Docker; `wiring/pending.rs` empty at the M1 gate; U37, U135 and the testkit runners build only against `CoreHost`. Meguri's undo adapter is registered, and every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U33. Schema-11 legacy writer
 
@@ -5530,7 +5534,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Regenerating after a template add across 20k notes → progress ≤ ~10 Hz, cancel before commit leaves no cards, completion equals the oracle's card set.
 - LocalApi add → `curModel` and last-deck keys unchanged; Add-screen add → all three written.
 
-**Verification:** notes and cardgen scenarios (including harvested ones) match goldens; add-note p95 < 5 ms at 150k cards (U12).
+**Verification:** notes and cardgen scenarios (including harvested ones) match goldens; add-note p95 < 5 ms at 150k cards (U12). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; nine of the ten use the `notes` setup section, eight `edit_note` or `delete_notes`) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1).
 
 ### U28. Decks, deck presets and new-collection defaults
 
@@ -5574,7 +5578,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Emoji and mixed-script deck names round-trip unchanged.
 - New collection → normalized dump (ids and times masked, stock template text excluded) equals the oracle's new collection plus the IO notetype; the oracle opens it and adds a note (T1).
 
-**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes.
+**Verification:** deck and new-collection scenarios match goldens; T1 oracle reopen of a Meguri-bootstrapped collection passes. Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; all ten start from the fresh collection) passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1). Every `conformance/scenarios/sched/day/` scenario (the generated `matrix/` included) but `legacy-timing-after-answer`, and every `sched/unbury-on-rollover/` scenario, passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/sched/area.yaml`: the new collection, with `crt` and `creationOffset` from U40's new-collection timing (`sched/day-clock` D11), is the last thing they lack there (moved from U40, amended 2026-10-16; `docs/process/review-log/U40.md`, A1). `browser/config/new-collection` passes on Meguri's executor on the macOS and Linux lanes and is listed in `conformance/scenarios/browser/area.yaml` (moved from U83, amended 2026-10-16; `docs/process/review-log/U83.md`, A1).
 
 ### U31. Media service: names, store, change journal, staging, trash (C9)
 
@@ -5831,7 +5835,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Each rollover hour from 0 to 23 × each time zone in R1899, one second before, at and after the boundary: day and `next_day_at` equal the goldens (scenario matrix generated into `conformance/scenarios/sched/day/`).
 - 23-hour and 25-hour DST days each count as one day (Europe/Paris and America/New_York transition dates).
 - A collection created in Asia/Tokyo and studied in America/Los_Angeles matches the oracle (R1900).
-- A legacy collection without `creationOffset` gives the oracle's day number and keeps its timing mode after an answer and a sync.
+- A legacy collection without `creationOffset` gives the oracle's day number and keeps its timing mode after an answer and a sync. The answer half runs on U44's answer path in `sched/day/legacy-timing-after-answer`, which U44 activates (amended 2026-10-16; `docs/process/review-log/U40.md`, A2); here the engine tests check the day number, a card write and the sync half.
 - `crt` for a collection created at 03:30 local is the previous day's 04:00; created at 10:00, it is the same day's 04:00 (R596).
 - An offset change between two calls writes `localOffset` once; an unchanged offset writes nothing.
 - `lastUnburied` set 10 days ahead triggers an unbury on the next check.
@@ -5841,7 +5845,9 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Europe/Paris → Africa/Ceuta (same offset, same day) → `TimeZoneChanged` and no `RolledOver`.
 - A `Rollover` op refused during a one-way sync's exclusive phase → it runs once the lifecycle is `Ready` again.
 
-**Verification:** All `conformance/scenarios/sched/day/` and `unbury-on-rollover/` goldens match on macOS native and in Linux Docker; no polling timers exist in the core (R1854).
+**Verification:** every `conformance/scenarios/sched/day/` scenario (the generated `matrix/` included) but `legacy-timing-after-answer`, and every `sched/unbury-on-rollover/` scenario, played on the engine's day clock by `core/crates/meguri-engine/tests/day_conformance.rs`, matches its golden with the deviations `conformance/deviations.yaml` lists for it (Linux dev container, `tools/mg core-test`); Meguri's executor has the `timing` observation, the `reopen` op and the `config` setup section the day scenarios use; no polling timers exist in the core (R1854).
+
+Amended 2026-10-16 after U40's review (`docs/process/review-log/U40.md`, A1 and A2). This line first asked for all `sched/day/` and `unbury-on-rollover/` goldens to match on Meguri's executor, macOS native and Linux Docker. Every one of those scenarios starts from the new collection of `specs/conformance/dsl.md` D6 and D8, which Meguri's executor gets from U28's bootstrap (`storage/new-collection`), and U28 depends on U40 for the new collection's `crt` and `creationOffset` (R596); the only stand-in a spec defines before it, U29's (`notetype-ops` T10.2, on spec/U29), does not say how it sets them. `legacy-timing-after-answer` also uses the `notetypes` and `notes` setup sections (U29, U27) and `answer` (U44). So U28 activates the day and unbury scenarios in `conformance/scenarios/sched/area.yaml` and passes them on both lanes, U44 does the same for `legacy-timing-after-answer`, and their Verification lines say so. Until then `day_conformance.rs` plays them on the engine against their goldens, with a stand-in for the new collection.
 
 ### U42. Scheduling data model: card fields, cards.data, presets and scheduling config
 
@@ -6186,7 +6192,7 @@ Amended 2026-10-14 after U21's review (`docs/process/review-log/U21.md`, A1). Th
 - Fault injection (U24 test hook) fails the revlog insert: no card, deck, sibling or tag change persists.
 - Perf: the answer op commit ≤ 5 ms release at 14.4k cards; the 1 s durability bound (R2006) is asserted in U43.
 
-**Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys).
+**Verification:** All `sched/answer`, `sched/loadbalancer`, `sched/bury`, `sched/leech` and `sched/revlog` goldens match; a property test of answer then undo returns a byte-identical collection digest (excluding the undo-free config keys). Every `conformance/scenarios/undo/` scenario this unit completes (the last op, setup section or observation kind it uses that Meguri's executor lacked lands here; `undo/revlog-taken-id` uses `answer`, `card` and `revlog`) passes on Meguri's executor on the macOS and Linux lanes, `undo/revlog-taken-id` with its three `undo-revlog-taken-id-*` deviations, and is listed in `conformance/scenarios/undo/area.yaml` (moved from U25, amended 2026-10-16; `docs/process/review-log/U25.md`, A1). `sched/day/legacy-timing-after-answer` passes on Meguri's executor on both lanes and is listed in `conformance/scenarios/sched/area.yaml`: a real answer in a collection without `creationOffset` leaves the day count legacy and writes no `creationOffset` (`sched/day-clock` D4, D12.3; moved from U40, amended 2026-10-16; `docs/process/review-log/U40.md`, A2).
 
 ### U43. Review session (contract C5)
 
@@ -7391,7 +7397,9 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - `browserTableShowNotesMode` toggled → one config write, no undo entry.
 - An undoable `test-hooks` op, then a saved-search write → `peek` names "Save Search"; two undos restore the saved-search map and then the earlier op's rows.
 
-**Verification:** `conformance/scenarios/browser/config/` matches the goldens. The T1 live round-trip of config keys through the oracle shows no diff.
+**Verification:** `conformance/scenarios/browser/config/` matches the goldens, except `browser/config/new-collection`, whose Meguri run is U28's. The T1 live round-trip of config keys through the oracle shows no diff.
+
+Amended 2026-10-16 after U83's review (`docs/process/review-log/U83.md`, A1). This line first asked for every browser/config scenario to match its golden on Meguri's executor. `browser/config/new-collection` reads which browser keys a new collection holds (`specs/browser/config-keys.md` K1, K13). Its only step is a `db_exec` read of the collection that the `new_collection` capability (`specs/conformance/dsl.md` D8) makes. On Meguri that collection is U28's bootstrap, and D8 lets the executor declare the capability only for U28's bootstrap or for a stand-in that an area's spec defines. U83 builds no new collection, so this scenario's Meguri run moves to U28, whose Verification names it. Until then, `core/crates/meguri-testkit/tests/browser_config_conformance.rs` plays it on Meguri against its golden, with the schema-18 storage fixture (a new collection of the pinned Anki) in place of the new collection.
 
 ### U84. Browser rows, columns and sorting
 
@@ -8305,7 +8313,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 **Approach:**
 - Wire codecs follow wire-format.md. Tuples accept the numeric float forms Anki accepts. Notetypes, decks and deck configs travel as schema-11 JSON produced by U21's converters, with protobuf `other` keys flattened into the object (R1464). Numbers decode into the types the spec names (f32 for FSRS values, i64 for ids; rust-stack JSON precision note). Unknown protobuf fields cannot travel through schema-11 JSON; they survive only locally (same limitation as Anki).
 - `meta` (R1513): sends `v` and `cv`. If `cont` is false, the job stops with a server-message error (R1514). Clock skew over 300 s → clock-incorrect error before any local or remote write (R1515). The comparison yields NoChanges, Normal, or OneWay with upload/download availability (R1517, R1518). A non-empty `msg` is returned verbatim; sanitising and display are U151's job (R1516, R168).
-- Offline status (R1559) is read from the col row (`ls`, `mod`, `scm`). The online result is cached in memory for 300 s and invalidated by any ChangeSet that moves `mod`, by a login or server change, and after every sync.
+- Offline status (R1559) is read from the col row (`ls`, `mod`, `scm`). The online result is remembered in memory for 300 s as `specs/sync/meta-status.md` M6 and M6.1 say (its age limit and the outcomes of syncs are the oracle's, `sync/meta/status`): a change that moves `mod` (or `scm`) past `ls` answers offline before the remembered answer is read; the answer serves only the base and host key it came with, so a server or account change asks again and replaces it, while a new login to the same account keeps it; every completed sync job replaces it with its own outcome, and a failed or cancelled job leaves it; closing or replacing the collection (other than by a one-way sync) forgets it (amended 2026-10-16 after U106's review; `docs/process/review-log/U106.md`, A1).
 - Meta-only probe: returns the server `mod` so the optimizer write gate (KTD8, U47) can check that the server is unchanged since sync 1.
 - Error taxonomy (errors.md, Meguri-original classification): one enum with kind, retryability, R165 class (transient / actionable / blocking) and message parameters. Kinds: auth failed (403), conflict (409), client too old (501), server error (500/502/503/504), database check required (400), proxy auth (407), network/offline, timeout, TLS (with an "HTTPS / TLS 1.2" hint flag), clock incorrect, server message, upload too large, sanity check failed, notetype schema changed (R1525), missing notetype (R1528), cancelled, interrupted, disk full (R2015), session active (R458), exclusive busy, media resync failed. Swift localises each kind through String Catalog keys (U151, U160).
 - No panic may cross FFI: every decoder returns typed errors. The fuzz target covers all response decoders.
@@ -8324,7 +8332,9 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - Table test through the stub, which omits `anki-original-size` on every error status: each status in R1561 maps to the expected kind and class.
 - Nightly: the `sync_json` fuzz target runs 10 minutes without a panic.
 
-**Verification:** Wire goldens pass in T0 on macOS and Linux; meta scenarios pass against U13; the fuzz target builds and runs.
+**Verification:** Wire goldens pass in T0 on macOS and Linux; the status check, the sync status and the meta probe pass against U13 in the `rig_*` tests of `core/crates/meguri-sync/tests/status.rs` (AE63 among them), run at the integrated head; the fuzz target builds and runs. The actor scenarios under `conformance/scenarios/sync/meta/` run on Meguri's executor with U117.
+
+Amended 2026-10-16 after U106's review (`docs/process/review-log/U106.md`, A2). This line first asked for the meta scenarios to pass against U13. They are actor scenarios: a Meguri actor uploads, downloads and runs normal syncs in them, and Meguri's executor gets the `sync` op only with U117 (after U107 and U109), so T0 reports them `pending` (`specs/conformance/sync-ops.md` S10.2). U106 checks its own calls on the rig's official server instead. `tools/mg sync-rig up` refuses a unit branch whose `oracle/` differs from the main worktree's, so those tests run at the integrated head.
 
 ### U107. Normal sync with hold-back
 
@@ -8770,7 +8780,7 @@ Amended 2026-10-16 after U61's review (`docs/process/review-log/U61.md`). A1: th
 - R1590 sweep: for each incremental op in the op set, after a Meguri sync the server `scm` is unchanged.
 - Exchange comparison for a normal sync with 300 objects shows the same method sequence and body shapes as Anki's recording.
 
-**Verification:** All `conformance/scenarios/sync/**` suites pass in T1 in Docker; the exchange comparison has no unexplained differences; a once-per-milestone manual AnkiMobile check is recorded (see coverage).
+**Verification:** All `conformance/scenarios/sync/**` suites pass in T1 in Docker, `sync/meta/` included (its Meguri runs moved from U106, amended 2026-10-16; `docs/process/review-log/U106.md`, A2); the exchange comparison has no unexplained differences; a once-per-milestone manual AnkiMobile check is recorded (see coverage).
 
 ### U118. Sync robustness, property tests and budgets
 

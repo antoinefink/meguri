@@ -1,0 +1,56 @@
+# R592, R1899: Europe/Paris across both 2030 DST changes, rollover 4. The
+# 23-hour day (31 March) and the 25-hour day (27 October) each count as one
+# day; localOffset is written once per offset change (D5).
+id: sched/day/dst-europe-paris
+clock: {tz: Europe/Paris, start: "2030-03-20T10:00:00", mode: step}
+steps:
+  # the first day query, at creation (D14.2)
+  - observe: [timing]
+  # the day before the first change
+  - set_clock: "2030-03-30T03:59:59+01:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  # the day of the first change: reopen so the oracle computes the day afresh (D6)
+  - set_clock: "2030-03-31T03:59:59+02:00"
+  - reopen: {}
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  # the day after
+  - set_clock: "2030-04-01T03:59:59+02:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  # the day before the second change
+  - set_clock: "2030-10-26T03:59:59+02:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  # the day of the second change: reopen so the oracle computes the day afresh (D6)
+  - set_clock: "2030-10-27T03:59:59+01:00"
+  - reopen: {}
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
+  # the day after
+  - set_clock: "2030-10-28T03:59:59+01:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}
