@@ -5,8 +5,9 @@
 //! ordered change stream and in-core observers (C2), the collection
 //! lifecycle with generations and exclusive-op arbitration (C7), the job
 //! registry, the ports, cancellation and progress; U25 adds undo and redo
-//! (C3); U30 the tags, flags and marked notes (`specs/tags/`); U40 the day
-//! clock (C6, `sched`); U83 the browser and search config writes
+//! (C3); U26 the derived store's host (`specs/storage/derived-store.md`);
+//! U30 the tags, flags and marked notes (`specs/tags/`); U40 the day clock
+//! (C6, `sched`); U83 the browser and search config writes
 //! (`specs/browser/config-keys.md`); U29 note types and the schema-change
 //! gate (`notetypes`, `schema_gate`). Specs: `specs/engine/op-model.md`,
 //! `change-stream.md`, `lifecycle.md`, `jobs.md`, `undo.md`,
@@ -16,6 +17,7 @@ pub mod browser_config;
 pub mod cancel;
 pub mod changes;
 pub mod collection;
+pub mod derived_host;
 pub mod error;
 pub mod executor;
 pub mod flags;
@@ -37,6 +39,7 @@ pub use cancel::CancelToken;
 pub use changes::observers::{CardDelta, ConfigDelta, ObservedCommit};
 pub use changes::stream::{ChangeStream, Event, EventKind, ExtensionEvent, Reservation, Seq, Subscription};
 pub use collection::Collection;
+pub use derived_host::{DerivedApplied, DerivedHost, DerivedReadiness, Readiness};
 pub use error::EngineError;
 pub use executor::catalog::{OpDef, UndoClass};
 pub use executor::op::{OpContext, OpResult, OpSpec, OpTiming, Pending, UndoMeta, WriteDelay};
