@@ -1,0 +1,105 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "fields_check": [
+          {
+            "duplicates": ["#n1"],
+            "state": "duplicate"
+          },
+          {
+            "duplicates": ["#n2"],
+            "state": "duplicate"
+          },
+          {
+            "duplicates": ["#n1"],
+            "state": "duplicate"
+          },
+          {
+            "duplicates": ["#n3"],
+            "state": "duplicate"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "duplicates": ["#n4"],
+            "state": "duplicate"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "normal"
+          }
+        ]
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n6"
+        }
+      },
+      {
+        "fields_check": [
+          {
+            "duplicates": ["#n1", "#n6"],
+            "state": "duplicate"
+          },
+          {
+            "duplicates": ["#n6"],
+            "state": "duplicate"
+          },
+          {
+            "duplicates": ["#n1"],
+            "state": "duplicate"
+          },
+          {
+            "state": "normal"
+          }
+        ]
+      },
+      {},
+      {
+        "fields_check": [
+          {
+            "state": "normal"
+          },
+          {
+            "duplicates": ["#n4"],
+            "state": "duplicate"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "50210d1d4bd9b2ab0d4536832998e23ac3d314d44a38c56a81804b8102c3b9ef",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/fields-check/duplicates",
+  "scenario_sha256": "07dfd8c93036d4f5ca4af6c9e69d1865f454eeb1999e2ecc977b5ca770478a7e",
+  "tz": "UTC"
+}

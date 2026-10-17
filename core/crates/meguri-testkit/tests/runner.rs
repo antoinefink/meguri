@@ -305,7 +305,8 @@ fn a_scenario_with_an_op_meguri_lacks_is_pending_and_t0_still_passes() {
     assert_eq!(outcome.status, Status::Pending);
     let missing = outcome.missing.as_ref().unwrap();
     assert!(missing.ops.contains("build_filtered"));
-    assert!(missing.setup.contains("notes"));
+    assert!(!missing.setup.contains("notes"));
+    assert!(missing.setup.contains("decks"));
     assert!(report.failures().is_empty());
     assert!(
         report
@@ -925,7 +926,7 @@ fn an_inactive_scenario_with_a_null_the_schema_forbids_fails_t0() {
     for (name, body) in cases {
         write(root, &format!("scenarios/nulls/{name}.yaml"), &scenario(name, body));
     }
-    // With a golden, Meguri lacking add_note would make it pending.
+    // The schema refusal must precede capability checking or execution.
     let text = scenario("add-note-deck", cases[7].1);
     let sha = meguri_testkit::scenario::scenario_sha256(&meguri_testkit::scenario::parse_yaml(&text).unwrap()).unwrap();
     write(
@@ -1041,13 +1042,18 @@ fn an_op_anki_refuses_is_recorded_and_the_run_goes_on() {
 
     // delete_notes touches the collection: the run starts from the new
     // collection (dsl.md D8), the note type area's (notetype-ops.md T10.2).
-    let mut registry = MeguriExecutor::core_registry();
+    let areas: Vec<_> = MeguriExecutor::AREAS
+        .iter()
+        .copied()
+        .filter(|area| *area != "notes")
+        .collect();
+    let mut registry = MeguriExecutor::area_registry(&areas);
     registry.op_rejecting("delete_notes", &["no_such_note"], refuse);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Pass, "{}", report.render_text());
 
     // A kind outside the op's list is the adapter's error, not a rejection.
-    let mut registry = MeguriExecutor::core_registry();
+    let mut registry = MeguriExecutor::area_registry(&areas);
     registry.op_rejecting("delete_notes", &["no_such_note"], refuse_oddly);
     let report = suite.run(&[], &MeguriExecutor::with(registry), "test");
     assert_eq!(report.outcomes[0].status, Status::Error);
