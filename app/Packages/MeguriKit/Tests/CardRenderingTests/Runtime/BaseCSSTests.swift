@@ -187,9 +187,11 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
-        /// C4.2: the override reaches every `isMac` element below the root,
-        /// never the root, at the specificity of `:root .isMac` (0,2,0):
-        /// card CSS replaces it only at that specificity or more (C4).
+        // MARK: BC8b
+
+        /// C4.2: the Mac value reaches every `isMac` element but the document
+        /// element, at specificity 0,2,0: card CSS replaces it only at that
+        /// specificity or more.
         @Test func focusColourOverrideReachesIsMacElementsBelowTheRoot() async throws {
             let mac = "rgba(0 103 244 / 0.247)"
             try await WebTestHarness.withPage(platform: .iPhone, log: false) { _, page async throws in
