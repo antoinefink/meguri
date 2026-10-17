@@ -27,3 +27,15 @@ threads-required = "num-test-threads"
 [[profile.default.overrides]]
 filter = 'package(meguri-sync) and binary(transport) and (test(/times_out$/) or test(/^a_cancelled_token_/) or test(=bytes_past_the_declared_size_are_refused_and_never_handed_out))'
 threads-required = "num-test-threads"
+
+# U32: WAL full-sync coverage and bounded suspension must measure an idle
+# machine; fault/kill loops run separately through nextest process isolation.
+[[profile.default.overrides]]
+filter = 'package(meguri-engine) and (binary(wal_durability) or test(=held_reader_times_out_and_resume_recovers) or test(=external_snapshot_blocks_checkpoint_without_marking_shutdown_clean) or test(=busy_uncooperative_thread_prevents_successful_suspend) or test(=derived_builder_honors_suspend_deadline_and_finishes_before_success))'
+threads-required = "num-test-threads"
+
+# This integration test deliberately exhausts the container's 64 MiB /dev
+# tmpfs. Keep it isolated from every other test until its filler is dropped.
+[[profile.default.overrides]]
+filter = 'package(meguri-storage) and test(=real_disk_full_on_size_limited_tmpfs_leaves_original_intact)'
+threads-required = "num-test-threads"

@@ -56,6 +56,8 @@ pub(crate) const READ_WRITE: OpenFlags = OpenFlags::SQLITE_OPEN_READ_WRITE
 pub struct Writer {
     pub(crate) conn: Connection,
     #[cfg(feature = "test-hooks")]
+    pub(crate) wal_sync_probe: std::cell::Cell<bool>,
+    #[cfg(feature = "test-hooks")]
     pub(crate) fail_next_wal_sync: std::cell::Cell<bool>,
 }
 
@@ -66,6 +68,8 @@ impl Writer {
         let conn =
             Connection::open_with_flags(file_uri(path, None), READ_WRITE).map_err(|e| OpenError::from_sqlite(&e))?;
         conn_init::full(&conn, initializers).map_err(|detail| OpenError::ConnectionInit { detail })?;
+        conn.execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .map_err(|e| OpenError::from_sqlite(&e))?;
         pragmas::writer(&conn).map_err(|error| match error {
             WriterSettingsError::Sqlite(e) => OpenError::from_sqlite(&e),
             WriterSettingsError::NotWal(mode) => OpenError::Io {
@@ -74,6 +78,8 @@ impl Writer {
         })?;
         Ok(Writer {
             conn,
+            #[cfg(feature = "test-hooks")]
+            wal_sync_probe: std::cell::Cell::new(false),
             #[cfg(feature = "test-hooks")]
             fail_next_wal_sync: std::cell::Cell::new(false),
         })

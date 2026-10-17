@@ -85,6 +85,9 @@ impl Engine {
     /// Takes the slot for `op`, or `Busy` naming the holder (L5).
     pub fn acquire_slot(&self, op: LongOp) -> Result<SlotGuard, EngineError> {
         let mut state = self.lock_state();
+        if state.suspended {
+            return Err(EngineError::unavailable("the collection is suspended"));
+        }
         if let Some(holder) = state.slot {
             return Err(EngineError::Busy {
                 running_op: holder.op.name().to_owned(),
@@ -168,5 +171,8 @@ impl Engine {
 }
 
 fn available(state: &LcState) -> bool {
-    matches!(state.state, LifecycleState::Ready { .. }) && state.slot.is_none() && state.current.is_some()
+    !state.suspended
+        && matches!(state.state, LifecycleState::Ready { .. })
+        && state.slot.is_none()
+        && state.current.is_some()
 }

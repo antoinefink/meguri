@@ -140,6 +140,8 @@ pub struct TagChange {
 /// and holds each key once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeSet {
+    /// Conservative invalidation after an external writer (U32).
+    pub whole_collection: bool,
     pub source: OpSource,
     pub cards: Vec<CardChange>,
     pub notes: Vec<NoteChange>,
@@ -160,6 +162,7 @@ impl ChangeSet {
     /// A change set that lists nothing.
     pub fn empty(source: OpSource) -> ChangeSet {
         ChangeSet {
+            whole_collection: false,
             source,
             cards: Vec::new(),
             notes: Vec::new(),
@@ -178,7 +181,8 @@ impl ChangeSet {
 
     /// Whether the change set lists nothing; such a set is never published.
     pub fn is_empty(&self) -> bool {
-        self.cards.is_empty()
+        !self.whole_collection
+            && self.cards.is_empty()
             && self.notes.is_empty()
             && self.notetypes.is_empty()
             && self.decks.is_empty()

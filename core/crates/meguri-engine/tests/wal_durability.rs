@@ -62,6 +62,7 @@ fn twenty_commits_are_full_synced_within_one_second_with_a_snapshot_open() {
 #[test]
 fn a_failed_sync_retries_the_same_commits_and_clean_idle_does_not_sync() {
     let h = Harness::open();
+    let subscription = h.engine.stream().subscribe();
     h.collection.record_durability_events();
     h.collection
         .submit_maintenance(catalog::WAL_CHECKPOINT, Duration::ZERO, |writer| {
@@ -89,6 +90,27 @@ fn a_failed_sync_retries_the_same_commits_and_clean_idle_does_not_sync() {
     assert_eq!(failed.through, commit.seq);
     assert_eq!(retry.through, failed.through);
     assert!(retry.started >= failed.completed);
+
+    use meguri_engine::{EventKind, suspend::DurabilityStatus};
+    let statuses: Vec<_> = common::drain(&subscription, Duration::from_millis(10))
+        .iter()
+        .filter_map(|event| match &event.kind {
+            EventKind::Extension(payload) => payload.as_any().downcast_ref::<DurabilityStatus>().cloned(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            DurabilityStatus::Failed {
+                through: commit.seq,
+                error: meguri_storage::StorageError::Io {
+                    detail: "injected WAL sync failure".into()
+                },
+            },
+            DurabilityStatus::Recovered { through: commit.seq },
+        ]
+    );
 
     // Once covered, clean idle must not start periodic work.
     thread::sleep(Duration::from_millis(1100));
@@ -196,4 +218,65 @@ fn a_replace_that_fails_after_swapping_the_file_still_flushes_the_reopened_write
         );
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+#[test]
+fn vfs_shim_counts_full_wal_syncs_covering_twenty_answers() {
+    let h = Harness::open();
+    let (_, cid) = common::steps::setup_note(&h.collection, "WAL sync answers");
+    let baseline = h
+        .collection
+        .submit_maintenance(catalog::WAL_CHECKPOINT, Duration::ZERO, |writer| {
+            writer.enable_wal_sync_probe_for_test();
+            Ok(writer.wal_vfs_sync_counts_for_test())
+        })
+        .wait()
+        .unwrap();
+    h.collection.record_durability_events();
+    let lease = h.collection.reader(ReaderRole::Sync).unwrap();
+    let snapshot = lease.snapshot().unwrap();
+    let _ = snapshot.col().unwrap();
+    let mut commits = Vec::new();
+    for _ in 0..20 {
+        let answer = common::steps::answer(&h.collection, None, cid).unwrap();
+        commits.push((answer.seq, monotonic::now()));
+        thread::sleep(Duration::from_millis(60));
+    }
+    let deadline = commits.last().unwrap().1 + Duration::from_secs(1);
+    loop {
+        if h.collection
+            .durability_events()
+            .syncs
+            .iter()
+            .any(|s| s.succeeded && s.through >= commits.last().unwrap().0)
+        {
+            break;
+        }
+        assert!(monotonic::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let events = h.collection.durability_events();
+    let counts = h
+        .collection
+        .submit_maintenance(catalog::WAL_CHECKPOINT, Duration::ZERO, |writer| {
+            Ok(writer.wal_vfs_sync_counts_for_test())
+        })
+        .wait()
+        .unwrap();
+    assert!(counts.0 > baseline.0);
+    assert_eq!(counts.0 - baseline.0, counts.1 - baseline.1, "every VFS sync used FULL");
+    assert!(counts.1 - baseline.1 >= events.syncs.iter().filter(|s| s.succeeded).count() as u64);
+    let mut costs = Vec::new();
+    for (seq, committed_at) in commits {
+        let covering = events.syncs.iter().find(|s| s.succeeded && s.through >= seq).unwrap();
+        assert!(covering.completed.saturating_sub(committed_at) <= Duration::from_secs(1));
+        costs.push(covering.completed - covering.started);
+    }
+    costs.sort();
+    println!(
+        "U32 full WAL sync: p50={:?}, p95={:?}, VFS calls={}",
+        costs[10],
+        costs[19],
+        counts.1 - baseline.1
+    );
 }

@@ -28,7 +28,14 @@ impl LiveFile {
     /// Whether the path now holds something else. Closes the old file: do it
     /// before SQLite opens the path again, because closing any descriptor of
     /// a file drops the process's POSIX locks on it, SQLite's included.
-    pub(crate) fn changed(self) -> bool {
+    pub(crate) fn changed(mut self) -> bool {
+        self.release_and_check()
+    }
+
+    /// Retain the original stamp across a failed reopen, but never retain a
+    /// descriptor whose later close could release the reopened SQLite locks.
+    pub(crate) fn release_and_check(&mut self) -> bool {
+        self._held.take();
         Stamp::of(&self.path) != self.before
     }
 }

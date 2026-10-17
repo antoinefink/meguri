@@ -70,6 +70,8 @@ public struct ChangeSet: Sendable, Hashable {
         public let change: Change
     }
 
+    /// An external writer invalidated every cached collection value.
+    public let wholeCollection: Bool
     public let source: OpSource
     public let cards: [Card]
     public let notes: [Row]
@@ -91,6 +93,7 @@ extension ChangeSet {
     init(_ changes: MeguriCoreBindings.ChangeSet) {
         let rows = { (list: [IdChange]) in list.map { Row(id: $0.id, change: Change($0.kind)) } }
         let named = { (list: [NameChange]) in list.map { Named(name: $0.name, change: Change($0.kind)) } }
+        wholeCollection = changes.wholeCollection
         source = OpSource(changes.source)
         cards = changes.cards.map {
             Card(id: $0.id, noteID: $0.noteId, change: Change($0.kind), memoryStateOnly: $0.memoryStateOnly)

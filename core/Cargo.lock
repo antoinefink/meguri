@@ -1712,6 +1712,7 @@ version = "0.0.0"
 name = "meguri-storage"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "meguri-model",
  "meguri-testkit",
  "meguri-text",

@@ -144,6 +144,7 @@ func withRawListener<T>(_ listener: RecordingListener, _ body: () async throws -
         }
         // The sample the hook publishes (Rust `changes::sample`).
         let expected = CoreBridge.ChangeSet(
+            wholeCollection: false,
             source: .localApi,
             cards: [
                 .init(id: 11, noteID: 21, change: .updated, memoryStateOnly: true),

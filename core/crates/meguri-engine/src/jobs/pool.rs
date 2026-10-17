@@ -32,7 +32,7 @@ impl JobPool {
         let shared = Arc::new(Shared::default());
         for n in 1..=workers {
             let shared = Arc::clone(&shared);
-            threads.spawn(format!("meguri-job-{n}"), Qos::UserInitiated, move |activity| {
+            threads.spawn_owned(format!("meguri-job-{n}"), Qos::UserInitiated, "jobs", move |activity| {
                 while let Some(work) = shared.next() {
                     let _busy = activity.busy();
                     work();

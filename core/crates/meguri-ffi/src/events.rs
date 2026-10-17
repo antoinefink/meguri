@@ -229,6 +229,7 @@ mod tests {
             kind,
         };
         ChangeSet {
+            whole_collection: false,
             source: OpSource::LocalApi,
             cards: vec![
                 CardChange {

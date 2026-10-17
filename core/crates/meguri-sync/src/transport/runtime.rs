@@ -51,6 +51,7 @@ fn runtime(threads: &ThreadRegistry) -> Result<Arc<Runtime>, SyncError> {
         .thread_name(THREAD_NAME)
         .on_thread_start(move || {
             let thread = registry.register_current(THREAD_NAME, Qos::UserInitiated);
+            thread.set_suspend_owner("jobs");
             thread.set_busy(true);
             LISTED.with(|listed| *listed.borrow_mut() = Some(thread));
         })

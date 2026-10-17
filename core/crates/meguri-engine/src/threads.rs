@@ -32,6 +32,7 @@ pub struct ThreadInfo {
     /// platforms); `None` where there is no QoS API.
     pub reported_qos: Option<Qos>,
     pub busy: bool,
+    pub suspend_owner: Option<String>,
 }
 
 /// Where registered threads are listed. Clones share it.
@@ -49,6 +50,7 @@ struct Registry {
 #[derive(Debug)]
 struct Record {
     name: String,
+    suspend_owner: Option<String>,
     qos: Qos,
     reported_qos: Option<Qos>,
     busy: Arc<AtomicBool>,
@@ -97,10 +99,32 @@ impl ThreadRegistry {
         qos: Qos,
         work: impl FnOnce(&ThreadActivity) -> T + Send + 'static,
     ) -> io::Result<JoinHandle<T>> {
-        let name = name.into();
+        self.spawn_inner(name.into(), qos, None, work)
+    }
+
+    /// A core worker whose quiescence is owned by a participant, the writer
+    /// drain, or the job registry. Unowned workers fail U32's enumeration.
+    pub fn spawn_owned<T: Send + 'static>(
+        &self,
+        name: impl Into<String>,
+        qos: Qos,
+        owner: &str,
+        work: impl FnOnce(&ThreadActivity) -> T + Send + 'static,
+    ) -> io::Result<JoinHandle<T>> {
+        self.spawn_inner(name.into(), qos, Some(owner.to_owned()), work)
+    }
+
+    fn spawn_inner<T: Send + 'static>(
+        &self,
+        name: String,
+        qos: Qos,
+        owner: Option<String>,
+        work: impl FnOnce(&ThreadActivity) -> T + Send + 'static,
+    ) -> io::Result<JoinHandle<T>> {
         let busy = Arc::new(AtomicBool::new(false));
         let id = self.list(Record {
             name: name.clone(),
+            suspend_owner: owner,
             qos,
             reported_qos: None,
             busy: Arc::clone(&busy),
@@ -143,6 +167,7 @@ impl ThreadRegistry {
         let reported_qos = apply_qos(qos);
         let id = self.list(Record {
             name: name.into(),
+            suspend_owner: None,
             qos,
             reported_qos,
             busy: Arc::clone(&busy),
@@ -171,6 +196,7 @@ impl ThreadRegistry {
             .map(|(id, record)| ThreadInfo {
                 id: *id,
                 name: record.name.clone(),
+                suspend_owner: record.suspend_owner.clone(),
                 qos: record.qos,
                 reported_qos: record.reported_qos,
                 busy: record.busy.load(Ordering::SeqCst),
@@ -195,6 +221,12 @@ pub struct RegisteredThread {
 }
 
 impl RegisteredThread {
+    pub fn set_suspend_owner(&self, owner: &str) {
+        if let Some(record) = self.registry.lock().threads.get_mut(&self.id) {
+            record.suspend_owner = Some(owner.into());
+        }
+    }
+
     /// Lists the thread busy or idle (a runtime's park and unpark hooks).
     pub fn set_busy(&self, busy: bool) {
         self.busy.store(busy, Ordering::SeqCst);

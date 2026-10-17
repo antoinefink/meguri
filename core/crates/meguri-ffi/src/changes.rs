@@ -61,6 +61,7 @@ pub struct NameChange {
 /// Everything one committed op changed.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct ChangeSet {
+    pub whole_collection: bool,
     pub source: OpSource,
     pub cards: Vec<CardChange>,
     pub notes: Vec<IdChange>,
@@ -104,6 +105,7 @@ impl From<model::ChangeKind> for ChangeKind {
 impl From<&model::ChangeSet> for ChangeSet {
     fn from(changes: &model::ChangeSet) -> ChangeSet {
         ChangeSet {
+            whole_collection: changes.whole_collection,
             source: changes.source.into(),
             cards: changes
                 .cards
@@ -171,6 +173,7 @@ fn id_changes<T>(list: &[T], entry: impl Fn(&T) -> (i64, model::ChangeKind)) -> 
 pub(crate) fn sample() -> model::ChangeSet {
     use meguri_model::ids::{CardId, DeckConfigId, DeckId, NoteId, NotetypeId, RevlogId};
     model::ChangeSet {
+        whole_collection: false,
         source: model::OpSource::LocalApi,
         cards: vec![
             model::CardChange {

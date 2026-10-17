@@ -43,6 +43,7 @@ pub struct OpenOptions<'a> {
     random: &'a dyn RandomSource,
     initializers: Initializers,
     progress: Option<&'a dyn Fn(OpenEvent)>,
+    managed: bool,
 }
 
 impl<'a> OpenOptions<'a> {
@@ -54,7 +55,14 @@ impl<'a> OpenOptions<'a> {
             random,
             initializers: Initializers::default(),
             progress: None,
+            managed: false,
         }
+    }
+
+    /// Engine-owned collection with device-only durability metadata (U32).
+    pub fn managed(mut self) -> Self {
+        self.managed = true;
+        self
     }
 
     /// The initializers every writer and reader of the collection runs
@@ -88,6 +96,9 @@ pub struct OpenedCollection {
     pre_upgrade_copy: Option<PathBuf>,
     objects: ExpectedObjects,
     _registered: Registered,
+    managed: bool,
+    pub previous_clean_shutdown: bool,
+    pub external_change: bool,
 }
 
 /// Paths of the collections open through the gate in this process, with how
@@ -190,12 +201,27 @@ impl OpenedCollection {
         ReaderFactory::new(&self.path, &self.initializers)
     }
 
+    pub fn save_sidecar(&self, clean: bool) -> Result<(), StorageError> {
+        use crate::ReadRows;
+        let path = crate::atomic_file::parent(&self.path).join("meguri-sidecar.json");
+        let mut sidecar = crate::sidecar::Sidecar::load(&path)?;
+        let col = self.writer.col()?;
+        sidecar.clean_shutdown = clean;
+        sidecar.last_mod = col.modified.0;
+        sidecar.last_scm = col.schema_modified.0;
+        sidecar.upgrade_in_progress = false;
+        sidecar.save(&path)
+    }
+
     /// The storage side of closing (C10), once every reader is closed: the
     /// checkpoint primitive, then the writer closes and SQLite removes the
     /// `-wal` and `-shm` files. The writer closes even when the checkpoint
     /// was busy; the outcome says so.
     pub fn close(self) -> Result<CheckpointOutcome, StorageError> {
         let outcome = self.writer.checkpoint();
+        if self.managed && outcome.as_ref().is_ok_and(|o| o.succeeded()) {
+            self.save_sidecar(true)?;
+        }
         self.writer.conn.close().map_err(|(_, e)| StorageError::from(e))?;
         outcome
     }
@@ -228,6 +254,24 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
         None
     };
 
+    // The managed path has passed all read-only refusals. Record upgrade intent
+    // before the first write; failed upgrades deliberately leave this marker.
+    let sidecar_path = crate::atomic_file::parent(path).join("meguri-sidecar.json");
+    let (previous, known_previous) = if options.managed {
+        let prior = crate::sidecar::Sidecar::load_existing(&sidecar_path)
+            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
+        let known = prior.is_some();
+        let mut value = prior.unwrap_or_default();
+        let previous = value.clone();
+        value.clean_shutdown = false;
+        value.upgrade_in_progress = upgrading;
+        value
+            .save(&sidecar_path)
+            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
+        (previous, known)
+    } else {
+        (crate::sidecar::Sidecar::default(), false)
+    };
     // Phase 4.
     let writer = Writer::open(path, &options.initializers)?;
     if upgrading {
@@ -253,7 +297,12 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
         drop(writer);
         return Err(OpenError::NotACollection { missing_tables });
     }
-    Ok(OpenedCollection {
+    use crate::ReadRows;
+    let col = writer.col().map_err(|e| OpenError::Io { detail: e.to_string() })?;
+    let external_change = options.managed
+        && known_previous
+        && (previous.last_mod != col.modified.0 || previous.last_scm != col.schema_modified.0);
+    let opened = OpenedCollection {
         path: path.to_path_buf(),
         writer,
         initializers: options.initializers.clone(),
@@ -261,7 +310,16 @@ pub fn open_collection(path: &Path, options: &OpenOptions<'_>) -> Result<OpenedC
         pre_upgrade_copy,
         objects,
         _registered: Registered::new(path),
-    })
+        managed: options.managed,
+        previous_clean_shutdown: previous.clean_shutdown && !previous.upgrade_in_progress,
+        external_change,
+    };
+    if options.managed {
+        opened
+            .save_sidecar(false)
+            .map_err(|e| OpenError::Io { detail: e.to_string() })?;
+    }
+    Ok(opened)
 }
 
 /// Phase 1, with C3's hot-journal case. A refused file must keep its bytes

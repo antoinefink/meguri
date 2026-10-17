@@ -49,6 +49,9 @@ impl From<EngineError> for CoreError {
             EngineError::Cancelled => CoreError::Cancelled,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
             EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
+            EngineError::SuspendDeadline { .. } => CoreError::Unavailable {
+                reason: error.to_string(),
+            },
             EngineError::StaleGeneration { .. }
             | EngineError::UndoUnavailable { .. }
             | EngineError::NeedsSchemaConfirmation { .. } => CoreError::Unavailable {

@@ -23,6 +23,7 @@ use crate::readers::{ReaderLease, Readers};
 pub(crate) struct CollectionCore {
     pub(crate) exec: Arc<ExecShared>,
     pub(crate) readers: Readers,
+    pub(crate) space: Arc<dyn crate::DiskSpaceProvider>,
     /// Attaches the derived store to readers (`storage/derived-store` D9),
     /// once the store's open step ran.
     pub(crate) derived: OnceLock<Arc<crate::derived_host::Attachment>>,
@@ -78,6 +79,19 @@ impl Collection {
 
     pub fn path(&self) -> &Path {
         &self.core.exec.path
+    }
+
+    /// Capacity supplied by Swift (important usage), or statvfs in headless runs.
+    /// Large-operation callers supply their complete temporary-space budget.
+    pub fn require_space(&self, required: u64) -> Result<(), EngineError> {
+        self.check_current()?;
+        let directory = self
+            .path()
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        meguri_storage::space::require_space(self.core.space.as_ref(), directory, required)?;
+        Ok(())
     }
 
     /// The seq of the last committed op.

@@ -6,6 +6,7 @@
 //! `schema-upgrade.md`, `ids-usn-mtime.md`, `config-table.md`, `graves.md`
 //! and `derived-store.md`.
 
+pub mod atomic_file;
 pub mod bulk;
 pub mod checkpoint;
 pub mod collation;
@@ -16,15 +17,21 @@ pub mod derived;
 mod durability;
 mod error;
 pub mod ids;
+pub mod integrity;
 pub mod journal;
+pub mod leftovers;
+pub mod lockfile;
 pub mod open;
 pub mod paging;
+pub mod paths;
 mod pragmas;
 #[cfg(feature = "test-hooks")]
 pub mod raw;
 pub mod rows;
 pub mod schema;
+pub mod sidecar;
 pub mod snapshot;
+pub mod space;
 pub mod stamp;
 pub mod write_scope;
 

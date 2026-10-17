@@ -32,10 +32,13 @@ mod armed {
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// What an armed point does when it is reached.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug)]
     pub enum Fault {
         /// Ends the process at once, as a crash would.
         Abort,
+        /// Test driver handshake at the exact boundary (for crash-consistent
+        /// db/WAL captures). Never compiled into production.
+        Callback(fn()),
         /// Returns an I/O error of this kind from the point.
         IoError(io::ErrorKind),
     }
@@ -77,6 +80,10 @@ mod armed {
         match fault {
             None => Ok(()),
             Some(Fault::Abort) => std::process::abort(),
+            Some(Fault::Callback(callback)) => {
+                callback();
+                Ok(())
+            }
             Some(Fault::IoError(kind)) => Err(io::Error::new(kind, format!("injected fault at {name}"))),
         }
     }

@@ -225,9 +225,10 @@ enum Msg {
         snapshot: Option<Seq>,
         outcome: Outcome,
     },
-    Invalidate(Invalidation),
+    Invalidate(Invalidation, Option<Seq>),
     Flush(SyncSender<()>),
     Suspend(SyncSender<()>),
+    ReleaseForSuspend(SyncSender<Result<(), EngineError>>),
     /// Answered once the file says the store is in use, or with why it
     /// cannot (D11).
     Resume(SyncSender<Result<(), EngineError>>),
@@ -375,9 +376,12 @@ impl DerivedHostBuilder {
         let worker = Worker::new(Arc::clone(&shared), inbox, sender.clone());
         let writer = shared
             .threads
-            .spawn("meguri-derived-writer", Qos::Utility, move |activity| {
-                worker.run(activity)
-            })
+            .spawn_owned(
+                "meguri-derived-writer",
+                Qos::Utility,
+                "derived-store",
+                move |activity| worker.run(activity),
+            )
             .map_err(|e| EngineError::internal(format!("cannot start the derived writer: {e}")))?;
         Ok(DerivedHost {
             shared,
@@ -501,7 +505,7 @@ impl DerivedHost {
 
     /// Rebuilds every component through staging (D10).
     pub fn invalidate(&self, why: Invalidation) {
-        let _ = self.sender.send(Msg::Invalidate(why));
+        let _ = self.sender.send(Msg::Invalidate(why, None));
     }
 
     /// Returns once every commit observed before the call is applied or
@@ -569,6 +573,23 @@ fn ask<T>(sender: &Sender<Msg>, message: impl FnOnce(SyncSender<T>) -> Msg) -> O
     answer.recv().ok()
 }
 
+fn ask_until(
+    sender: &Sender<Msg>,
+    message: impl FnOnce(SyncSender<()>) -> Msg,
+    deadline: Duration,
+) -> Result<(), EngineError> {
+    let (ack, answer) = mpsc::sync_channel(1);
+    if sender.send(message(ack)).is_err() {
+        return Ok(());
+    }
+    match answer.recv_timeout(deadline.saturating_sub(monotonic::now())) {
+        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => Ok(()),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(EngineError::SuspendDeadline {
+            phase: "derived-store".into(),
+        }),
+    }
+}
+
 /// The collection mark and the seq of one snapshot of `collection`.
 fn read_mark(collection: &Collection) -> Result<(CollectionMark, Seq), EngineError> {
     let lease = collection.reader(ReaderRole::Maintenance)?;
@@ -600,6 +621,13 @@ impl ChangeObserver for HostObserver {
     }
 
     fn observe(&self, commit: &ObservedCommit<'_>) -> Result<(), EngineError> {
+        if commit.changes.whole_collection {
+            self.sent.fetch_max(commit.seq.0, Ordering::SeqCst);
+            let _ = self
+                .sender
+                .send(Msg::Invalidate(Invalidation::ExternalChange, Some(commit.seq)));
+            return Ok(());
+        }
         let mut deltas = Vec::new();
         for (slot, component) in self.components.iter().enumerate() {
             let captured = panic::catch_unwind(AssertUnwindSafe(|| component.capture(commit)));
@@ -705,6 +733,26 @@ impl SuspendParticipant for HostPort {
     fn suspend(&self) -> Result<(), EngineError> {
         let _ = ask(&self.sender, Msg::Suspend);
         Ok(())
+    }
+
+    fn flush_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        ask_until(&self.sender, Msg::Flush, deadline)
+    }
+
+    fn suspend_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        ask_until(&self.sender, Msg::Suspend, deadline)
+    }
+
+    fn release_connections_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        let (ack, answer) = mpsc::sync_channel(1);
+        if self.sender.send(Msg::ReleaseForSuspend(ack)).is_err() {
+            return Ok(());
+        }
+        answer
+            .recv_timeout(deadline.saturating_sub(monotonic::now()))
+            .map_err(|_| EngineError::SuspendDeadline {
+                phase: "derived connection close".into(),
+            })?
     }
 
     /// An error: the store could not record that it is in use, so it
@@ -831,6 +879,9 @@ struct Worker {
     /// A message read while batching commits, handled next.
     pending: Option<Msg>,
     file: Option<DerivedFile>,
+    physically_suspended: bool,
+    invalidated_while_closed: bool,
+    closed_cause: Option<Seq>,
     collection: Option<Collection>,
     generation: Option<Generation>,
     bind_seq: Seq,
@@ -868,6 +919,9 @@ impl Worker {
             sender,
             pending: None,
             file: None,
+            physically_suspended: false,
+            invalidated_while_closed: false,
+            closed_cause: None,
             collection: None,
             generation: None,
             bind_seq: Seq(0),
@@ -950,7 +1004,7 @@ impl Worker {
                 self.done(refresh, snapshot, outcome);
                 self.ack_suspend();
             }
-            Msg::Invalidate(why) => self.invalidate(why),
+            Msg::Invalidate(why, cause) => self.invalidate(why, cause),
             Msg::Flush(ack) => {
                 let _ = ack.send(());
             }
@@ -965,6 +1019,21 @@ impl Worker {
                 self.suspended = true;
                 self.suspend_acks.push(ack);
                 self.ack_suspend();
+            }
+            Msg::ReleaseForSuspend(ack) => {
+                let result = (|| -> Result<(), EngineError> {
+                    self.pay_unclean()?;
+                    if self.suspended
+                        && self.builders.is_empty()
+                        && let Some(file) = self.file.take()
+                    {
+                        self.physically_suspended = true;
+                        self.shared.lock().bound = None;
+                        file.close()?;
+                    }
+                    Ok(())
+                })();
+                let _ = ack.send(result);
             }
             Msg::Resume(ack) => {
                 let _ = ack.send(self.resume());
@@ -999,6 +1068,21 @@ impl Worker {
     /// mark, D5.2): the store unbinds, still owing `clean` 0, and the caller
     /// gets the error.
     fn resume(&mut self) -> Result<(), EngineError> {
+        if self.physically_suspended {
+            self.physically_suspended = false;
+            self.marked_clean = false;
+            if let Some(collection) = self.collection.clone() {
+                let (mark, seq) = read_mark(&collection)?;
+                self.bind(collection, mark, seq);
+                if self.file.is_none() {
+                    return Err(EngineError::internal("cannot reopen derived store after suspend"));
+                }
+                if std::mem::take(&mut self.invalidated_while_closed) {
+                    let cause = self.closed_cause.take();
+                    self.invalidate(Invalidation::ExternalChange, cause);
+                }
+            }
+        }
         self.suspended = false;
         self.pay_unclean()?;
         if let Err(error) = self.mark_clean(false) {
@@ -1091,6 +1175,12 @@ impl Worker {
 
     /// D6.
     fn apply_commits(&mut self, batch: Vec<CommitMsg>) {
+        if self.physically_suspended {
+            if !batch.is_empty() {
+                self.invalidated_while_closed = true;
+            }
+            return;
+        }
         let Some(through) = batch.iter().map(|c| c.seq).max() else {
             return;
         };
@@ -1401,12 +1491,12 @@ impl Worker {
             refresh: id,
             abort,
         };
-        let spawned = self
-            .shared
-            .threads
-            .spawn("meguri-derived-builder", Qos::Utility, move |activity| {
-                builder.run(activity)
-            });
+        let spawned = self.shared.threads.spawn_owned(
+            "meguri-derived-builder",
+            Qos::Utility,
+            "derived-store",
+            move |activity| builder.run(activity),
+        );
         match spawned {
             Ok(_) => self.builders.push(id),
             Err(error) => {
@@ -1684,7 +1774,12 @@ impl Worker {
         }
     }
 
-    fn invalidate(&mut self, why: Invalidation) {
+    fn invalidate(&mut self, why: Invalidation, cause: Option<Seq>) {
+        if self.physically_suspended {
+            self.invalidated_while_closed = true;
+            self.closed_cause = cause.or(self.closed_cause);
+            return;
+        }
         let Some(generation) = self.generation else { return };
         if self.file.is_none() {
             return;
@@ -1707,10 +1802,10 @@ impl Worker {
             self.queue.push_back(Queued {
                 slot,
                 kind: Kind::Rebuild,
-                cause: None,
+                cause,
             });
             self.shared
-                .set_readiness(&mut state, slot, generation, Readiness::Stale, None);
+                .set_readiness(&mut state, slot, generation, Readiness::Stale, cause);
         }
     }
 

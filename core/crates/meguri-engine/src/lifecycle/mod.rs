@@ -9,7 +9,7 @@ pub mod state;
 pub mod wait;
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
@@ -57,6 +57,8 @@ pub struct OpenConfig {
     /// (`storage/open-and-connections` C5).
     pub initializers: Initializers,
     pub ports: Ports,
+    pub backups_directory: Option<PathBuf>,
+    pub disk_space_provider: Arc<dyn crate::DiskSpaceProvider>,
 }
 
 impl fmt::Debug for OpenConfig {
@@ -75,7 +77,19 @@ impl OpenConfig {
             random,
             initializers: Initializers::default(),
             ports: Ports::default(),
+            backups_directory: None,
+            disk_space_provider: Arc::new(meguri_storage::space::StatvfsSpace),
         }
+    }
+
+    pub fn disk_space_provider(mut self, provider: Arc<dyn crate::DiskSpaceProvider>) -> Self {
+        self.disk_space_provider = provider;
+        self
+    }
+
+    pub fn backups_directory(mut self, directory: PathBuf) -> Self {
+        self.backups_directory = Some(directory);
+        self
     }
 
     pub fn ports(mut self, ports: Ports) -> OpenConfig {
@@ -115,9 +129,13 @@ pub(crate) struct EngineInner {
     state: Mutex<LcState>,
     pub(crate) changed: Condvar,
     next_token: AtomicU64,
+    pub(crate) control_lane: Mutex<()>,
 }
 
 pub(crate) struct LcState {
+    pub(crate) suspended: bool,
+    /// A failed participant flush must be retried before closing SQLite.
+    pub(crate) suspend_flush_pending: bool,
     pub(crate) state: LifecycleState,
     pub(crate) slot: Option<wait::SlotHolder>,
     /// Whether `Available` was last published as true.
@@ -130,6 +148,8 @@ pub(crate) struct Current {
     pub(crate) core: Arc<CollectionCore>,
     writer: Option<JoinHandle<()>>,
     ports: Ports,
+    _lock: meguri_storage::lockfile::CollectionLock,
+    previous_clean_shutdown: bool,
 }
 
 impl Engine {
@@ -145,6 +165,8 @@ impl Engine {
                 jobs,
                 generation: Arc::new(AtomicU64::new(0)),
                 state: Mutex::new(LcState {
+                    suspended: false,
+                    suspend_flush_pending: true,
                     state: LifecycleState::NoCollection,
                     slot: None,
                     available: false,
@@ -152,6 +174,7 @@ impl Engine {
                 }),
                 changed: Condvar::new(),
                 next_token: AtomicU64::new(1),
+                control_lane: Mutex::new(()),
             }),
         })
     }
@@ -251,6 +274,7 @@ impl Engine {
     /// raw open entry point: only meguri-host calls it (`CoreHost::open`
     /// wires the ports), so layering-check refuses the name elsewhere.
     pub fn open_raw(&self, path: &Path, config: OpenConfig) -> Result<Collection, EngineError> {
+        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
         {
             let mut guard = self.lock_state();
             match guard.state {
@@ -263,6 +287,32 @@ impl Engine {
             }
             self.set_state_locked(&mut guard, LifecycleState::Opening);
         }
+        let ownership = (|| -> Result<_, EngineError> {
+            let directory = path
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let ownership = meguri_storage::lockfile::CollectionLock::acquire(directory)?;
+            meguri_storage::leftovers::cleanup(directory)?;
+            if let Some(backups) = &config.backups_directory {
+                meguri_storage::paths::CollectionPaths::new(directory, backups)?;
+                meguri_storage::leftovers::cleanup(backups)?;
+            }
+            Ok(ownership)
+        })();
+        let ownership = match ownership {
+            Ok(lock) => lock,
+            Err(error) => {
+                self.set_state(LifecycleState::Failed {
+                    reason: FailedReason::OpenStep {
+                        step: "ownership".into(),
+                        detail: error.to_string(),
+                    },
+                });
+                return Err(error);
+            }
+        };
+        self.jobs().pause(false);
         let progress = |event: OpenEvent| {
             let state = match event {
                 OpenEvent::Opening => LifecycleState::Opening,
@@ -272,7 +322,8 @@ impl Engine {
         };
         let options = OpenOptions::new(config.clock.as_ref(), config.random.as_ref())
             .initializers(config.initializers.clone())
-            .progress(&progress);
+            .progress(&progress)
+            .managed();
         let opened = match open_collection(path, &options) {
             Ok(opened) => opened,
             Err(error) => {
@@ -283,6 +334,7 @@ impl Engine {
             }
         };
         self.set_state(LifecycleState::Opening);
+        let previous_clean_shutdown = opened.previous_clean_shutdown;
 
         let generation = Generation(self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1);
         let privilege = Privilege(self.new_token());
@@ -303,6 +355,7 @@ impl Engine {
             exec: Arc::clone(&exec),
             readers: Readers::new(opened.reader_factory()),
             derived: std::sync::OnceLock::new(),
+            space: config.disk_space_provider,
         });
         let reopen = Reopen {
             clock: Arc::clone(&config.clock),
@@ -313,7 +366,7 @@ impl Engine {
         let writer = self
             .inner
             .threads
-            .spawn("meguri-writer", Qos::UserInitiated, move |activity| {
+            .spawn_owned("meguri-writer", Qos::UserInitiated, "writer", move |activity| {
                 writer::run(writer_exec, opened, reopen, last_seq, activity);
             })
             .map_err(|e| EngineError::internal(format!("cannot start the writer thread: {e}")));
@@ -366,7 +419,11 @@ impl Engine {
             core: Arc::clone(&core),
             writer: Some(writer),
             ports: config.ports,
+            _lock: ownership,
+            previous_clean_shutdown,
         });
+        guard.suspended = false;
+        guard.suspend_flush_pending = true;
         self.set_state_locked(&mut guard, LifecycleState::Ready { generation });
         Ok(Collection {
             core,
@@ -380,9 +437,22 @@ impl Engine {
     /// The long-operation slot is freed: its guard, and an exclusive phase
     /// entered through it, no longer act (L5).
     pub fn close(&self) -> Result<(), EngineError> {
+        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        self.jobs().pause(true);
+        for job in self.jobs().running() {
+            job.cancel.cancel();
+        }
+        let deadline = crate::monotonic::now() + Duration::from_secs(5);
+        if self.lock_state().current.is_some() {
+            self.quiesce_for_suspend(deadline)?;
+        } else {
+            self.jobs().wait_empty_until(deadline)?;
+        }
         let current = {
             let mut guard = self.lock_state();
             let current = guard.current.take();
+            guard.suspended = false;
+            guard.suspend_flush_pending = true;
             if current.is_some() {
                 guard.slot = None;
                 self.update_availability(&mut guard);
@@ -390,11 +460,17 @@ impl Engine {
             current
         };
         let Some(mut current) = current else {
+            self.jobs().pause(false);
             return Ok(());
         };
         let result = shut_down(&current.core, current.writer.take());
         self.set_state(LifecycleState::NoCollection);
+        self.jobs().pause(false);
         result
+    }
+
+    pub fn previous_clean_shutdown(&self) -> Option<bool> {
+        self.lock_state().current.as_ref().map(|c| c.previous_clean_shutdown)
     }
 
     /// Marks the open collection corrupt (U132): every op is refused, and
@@ -421,6 +497,13 @@ impl Engine {
         kind: JobKind,
         work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
     ) -> Result<JobHandle, EngineError> {
+        let _control = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.lock_state().suspended {
+            return Err(EngineError::unavailable("the collection is suspended"));
+        }
+        if kind == JobKind::Open {
+            self.jobs().pause(false);
+        }
         let slot = match kind.long_op() {
             Some(op) => Some(self.acquire_slot(op)?),
             None => None,
@@ -632,7 +715,7 @@ impl Drop for Exclusive<'_> {
             self.prior.clone()
         };
         let admission = match back {
-            LifecycleState::Ready { .. } => Admission::Open,
+            LifecycleState::Ready { .. } if !guard.suspended => Admission::Open,
             _ => Admission::Closed {
                 reason: back.describe(),
             },

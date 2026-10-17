@@ -24,6 +24,16 @@ impl CheckpointOutcome {
 }
 
 impl Writer {
+    /// Bound SQLite's reader-lock wait by the remaining suspend budget.
+    pub fn checkpoint_with_timeout(&self, timeout: std::time::Duration) -> Result<CheckpointOutcome, StorageError> {
+        let previous: u32 = self.conn.query_row("PRAGMA busy_timeout", [], |r| r.get(0))?;
+        self.conn.busy_timeout(timeout)?;
+        let result = self.checkpoint();
+        self.conn
+            .busy_timeout(std::time::Duration::from_millis(u64::from(previous)))?;
+        result
+    }
+
     /// Runs `PRAGMA wal_checkpoint(TRUNCATE)` once, outside any transaction
     /// (inside one it fails with [`StorageError::TransactionOpen`] and does
     /// nothing). It does not retry when busy; the caller decides (U32). A

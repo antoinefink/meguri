@@ -33,8 +33,31 @@ pub trait SuspendParticipant: Send + Sync {
     /// Commits or hands over pending work now (U43 flushes its answer
     /// overlay into ops). Called while the collection still admits ops.
     fn flush(&self) -> Result<(), EngineError>;
+    /// Bounded flush for suspension; long implementations override this.
+    fn flush_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        if crate::monotonic::now() >= deadline {
+            return Err(EngineError::SuspendDeadline {
+                phase: self.name().into(),
+            });
+        }
+        self.flush()
+    }
     /// Quiesces before suspension (U32).
     fn suspend(&self) -> Result<(), EngineError> {
+        Ok(())
+    }
+    /// Deadline-aware participants override this for bounded quiescence.
+    fn suspend_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        if crate::monotonic::now() >= deadline {
+            return Err(EngineError::SuspendDeadline {
+                phase: self.name().into(),
+            });
+        }
+        self.suspend()
+    }
+    /// Releases participant-owned connections after all workers have quiesced
+    /// and the engine's readers (including attached databases) have closed.
+    fn release_connections_until(&self, _deadline: std::time::Duration) -> Result<(), EngineError> {
         Ok(())
     }
     /// Resumes after suspension (U32).
@@ -132,3 +155,6 @@ impl Ports {
         }
     }
 }
+
+/// Swift supplies important-usage capacity; Linux uses statvfs (U32).
+pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;

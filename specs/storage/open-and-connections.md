@@ -213,6 +213,10 @@ On the M3 Max with `FULL`, the answer's p99 was 8.2–9.4 ms and its maximum 16�
 - The rule fires without the iPhone and iPad numbers. The Mac is one of Meguri's target platforms, and on the M3 Max that U24's verification names, the answer write under `FULL` is at the 5 ms budget and over it in three of four measurements. The cost is the drive-cache flush that a full sync must make, so code changes cannot remove it.
 - Device numbers, when U12 has them, are recorded in this table. They cannot reverse the choice, because the setting is the same on every platform and the Mac under `FULL` is already over the budget.
 
+### C9.5 U32 counting-VFS smoke measurement
+
+On 2026-10-17, `cargo nextest run -p meguri-engine --all-features --test wal_durability` on the Linux aarch64 implementation container exercised 20 answer-sized transactions with the sync reader pinned. The forwarding xSync shim counted two successful calls, both with `SQLITE_SYNC_FULL`; each covered its answer commits within one second. The measured covering-sync cost was 8.125 µs at p50 and p95 in that run (grouped commits share their covering sync). This is container filesystem smoke evidence, not a physical-drive or Apple fullfsync benchmark. The Apple measurement and suspend timing still run through the Mac verification lane.
+
 ## C10. Close
 
 The storage side of closing (U32 orchestrates it):

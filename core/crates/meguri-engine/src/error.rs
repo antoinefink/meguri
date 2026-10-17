@@ -13,6 +13,9 @@ use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
+    SuspendDeadline {
+        phase: String,
+    },
     /// A precondition of the op failed (`engine/op-model` O7): the row it
     /// was planned on changed. Nothing was written.
     Stale {
@@ -121,6 +124,7 @@ impl From<OpenError> for EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EngineError::SuspendDeadline { phase } => write!(f, "suspend deadline exceeded: {phase}"),
             EngineError::Stale { table, key } => write!(f, "stale: row {key} of {table} changed since it was read"),
             EngineError::StaleGeneration { planned, current } => write!(
                 f,

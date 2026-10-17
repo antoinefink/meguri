@@ -2159,3 +2159,59 @@ fn a_rebuild_over_150k_cards_leaves_answers_fast_and_reports_its_progress_at_150
     assert_eq!(rows, expected(collection));
     opened.close();
 }
+
+#[test]
+fn external_writer_invalidates_derived_rows_through_resume() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let opened = open(&path);
+    opened.settle();
+    let cid = add_cards(&opened.collection, &[7])[0];
+    opened.settle();
+    let prior_builds = opened.builds();
+    let external = meguri_storage::raw::PlainDatabase::open(&path).unwrap();
+    external
+        .execute(
+            "UPDATE cards SET due = 818 WHERE id = ?1",
+            &[meguri_storage::raw::RawValue::Integer(cid.0)],
+        )
+        .unwrap();
+    drop(external);
+    assert!(opened.engine.resume().unwrap().external_change);
+    opened.settle();
+    assert_eq!(opened.builds(), prior_builds + 1);
+    assert!(
+        mirrored(&opened.collection)
+            .iter()
+            .any(|row| row.0 == cid.0 && row.4 == 818)
+    );
+    opened.close();
+}
+
+#[test]
+fn derived_builder_honors_suspend_deadline_and_finishes_before_success() {
+    let (_dir, path) = copy_fixture("schema-18.anki2");
+    let gate = Arc::new(Gate::default());
+    let held = Arc::clone(&gate);
+    let opened = open_with(&path, |counters| CardMirror {
+        gate: Some(held),
+        batch: 1,
+        ..CardMirror::new(counters)
+    });
+    opened.wait_for_first_batch();
+    let began = monotonic::now();
+    assert!(matches!(
+        opened.engine.suspend(Duration::from_millis(30)),
+        Err(EngineError::SuspendDeadline { .. })
+    ));
+    assert!(monotonic::now() - began < Duration::from_millis(200));
+    gate.open();
+    opened.engine.suspend(Duration::from_secs(2)).unwrap();
+    assert!(opened.engine.threads().busy_threads().is_empty());
+    assert!(
+        !path.parent().unwrap().join("meguri-derived.db-wal").exists(),
+        "derived SQLite connection must close too"
+    );
+    opened.engine.resume().unwrap();
+    opened.settle();
+    opened.close();
+}

@@ -1,0 +1,293 @@
+//! Control-lane durability and suspend orchestration (engine/suspend S1–S4).
+use crate::executor::{
+    exclusive::{Admission, Privilege},
+    writer::WriterEnv,
+};
+use crate::monotonic;
+use crate::{Engine, EngineError, JobContext, JobHandle, JobId, JobKind};
+use meguri_storage::{OpenOptions, ReaderFactory, open_collection};
+use std::sync::PoisonError;
+use std::time::Duration;
+
+/// Failed background WAL syncs reach the control/event consumer even though
+/// the covered ops have already returned. One failure and recovery per episode.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DurabilityStatus {
+    Failed {
+        through: crate::Seq,
+        error: meguri_storage::StorageError,
+    },
+    Recovered {
+        through: crate::Seq,
+    },
+}
+
+impl crate::changes::stream::ExtensionEvent for DurabilityStatus {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SuspendOutcome {
+    Suspended,
+    Deferred { job_id: JobId },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResumeReport {
+    pub external_change: bool,
+    pub rolled_over: bool,
+    pub next_day_at: i64,
+}
+
+pub(crate) enum Control {
+    Flush,
+    Suspend { deadline: Duration },
+    Resume,
+}
+pub(crate) struct ControlReply {
+    pub external_change: bool,
+    pub factory: Option<ReaderFactory>,
+}
+
+fn timeout(phase: &str) -> EngineError {
+    EngineError::SuspendDeadline { phase: phase.into() }
+}
+fn check_deadline(deadline: Duration, phase: &str) -> Result<(), EngineError> {
+    if monotonic::now() >= deadline {
+        Err(timeout(phase))
+    } else {
+        Ok(())
+    }
+}
+impl Engine {
+    pub fn flush_for_background(&self) -> Result<(), EngineError> {
+        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        self.flush_background_inner()
+    }
+    pub(crate) fn flush_background_inner(&self) -> Result<(), EngineError> {
+        let collection = self.collection()?;
+        for participant in self.ports().suspend_participants {
+            participant.flush()?;
+        }
+        collection.core.exec.wait_idle();
+        collection.core.exec.control(Control::Flush).wait().map(drop)
+    }
+    pub fn suspend(&self, timeout_budget: Duration) -> Result<SuspendOutcome, EngineError> {
+        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let deadline = monotonic::now() + timeout_budget;
+        self.collection()?;
+        self.jobs().pause(true);
+        let jobs = self.jobs().running();
+        for job in &jobs {
+            if !job.continued_processing {
+                job.cancel.cancel();
+            }
+        }
+        if let Some(job) = jobs.iter().find(|j| j.continued_processing) {
+            self.jobs().pause(false);
+            return Ok(SuspendOutcome::Deferred { job_id: job.id });
+        }
+        self.quiesce_for_suspend(deadline)?;
+        Ok(SuspendOutcome::Suspended)
+    }
+
+    /// Also used by close, after it cancels *all* jobs, including continued
+    /// processing. An error always closes admission; unfinished flushes are
+    /// remembered separately from a quiesce that can safely be retried.
+    pub(crate) fn quiesce_for_suspend(&self, deadline: Duration) -> Result<(), EngineError> {
+        let collection = self.collection()?;
+        let result = self.quiesce_inner(&collection, deadline);
+        if result.is_err() {
+            let mut state = self.lock_state();
+            state.suspended = true;
+            collection.core.exec.set_admission(Admission::Closed {
+                reason: "suspension is incomplete".into(),
+            });
+            self.update_availability(&mut state);
+        }
+        result
+    }
+
+    fn quiesce_inner(&self, collection: &crate::Collection, deadline: Duration) -> Result<(), EngineError> {
+        let exec = &collection.core.exec;
+        // Repeatable after a timeout: participants must make their flush and
+        // suspend idempotent. They flush before we stop public admission.
+        if self.lock_state().suspend_flush_pending {
+            // A failed flush left admission closed. A retry has the same
+            // write-admitting flush phase as the first attempt.
+            {
+                let mut state = self.lock_state();
+                if state.suspended && matches!(state.state, crate::LifecycleState::Ready { .. }) {
+                    state.suspended = false;
+                    exec.set_admission(Admission::Open);
+                    self.update_availability(&mut state);
+                }
+            }
+            for participant in self.ports().suspend_participants {
+                check_deadline(deadline, participant.name())?;
+                participant.flush_until(deadline)?;
+            }
+            let mut state = self.lock_state();
+            state.suspend_flush_pending = false;
+            state.suspended = true;
+            exec.set_admission(Admission::Closed {
+                reason: "the collection is suspended".into(),
+            });
+            self.update_availability(&mut state);
+        }
+        exec.wait_idle_until(deadline)?;
+        for participant in self.ports().suspend_participants {
+            participant.suspend_until(deadline)?;
+        }
+        self.jobs().wait_empty_until(deadline)?;
+        collection.core.readers.close_until(deadline)?;
+        for participant in self.ports().suspend_participants {
+            participant.release_connections_until(deadline)?;
+        }
+        while !self.threads().busy_threads().is_empty() {
+            check_deadline(deadline, "thread registry")?;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let participants = self.ports().suspend_participants;
+        for thread in self.threads().threads() {
+            let owned = thread.suspend_owner.as_deref().is_some_and(|owner| {
+                owner == "writer" || owner == "jobs" || participants.iter().any(|p| p.name() == owner)
+            });
+            if !owned {
+                return Err(EngineError::InvalidArgument {
+                    message: format!("thread {} has no suspend participant", thread.name),
+                });
+            }
+        }
+        check_deadline(deadline, "checkpoint")?;
+        exec.control(Control::Suspend { deadline }).wait()?;
+        exec.wait_idle_until(deadline)?;
+        while !self.threads().busy_threads().is_empty() {
+            check_deadline(deadline, "thread registry")?;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        check_deadline(deadline, "completion")?;
+        Ok(())
+    }
+    pub fn resume(&self) -> Result<ResumeReport, EngineError> {
+        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = self.state();
+        if !matches!(state, crate::LifecycleState::Ready { .. }) {
+            return Err(EngineError::unavailable(state.describe()));
+        }
+        let mut collection = self.collection()?;
+        let exec = &collection.core.exec;
+        let privilege = Privilege(self.new_token());
+        {
+            let mut state = self.lock_state();
+            state.suspended = true;
+            self.update_availability(&mut state);
+        }
+        exec.set_admission(Admission::Privileged {
+            privilege,
+            reason: "the collection is resuming".into(),
+        });
+        exec.wait_idle();
+        let report = exec.control(Control::Resume).wait()?;
+        if let Some(factory) = report.factory {
+            collection.core.readers.set_factory(factory);
+        }
+        collection.privilege = Some(privilege);
+        let day = collection.check_rollover()?;
+        for participant in self.ports().suspend_participants {
+            participant.resume()?;
+        }
+        self.jobs().pause(false);
+        exec.set_admission(Admission::Open);
+        let mut state = self.lock_state();
+        state.suspended = false;
+        state.suspend_flush_pending = true;
+        self.update_availability(&mut state);
+        Ok(ResumeReport {
+            external_change: report.external_change,
+            rolled_over: day.rolled_over_from.is_some(),
+            next_day_at: day.next_day_at,
+        })
+    }
+    pub fn start_continued_job(
+        &self,
+        kind: JobKind,
+        work: impl FnOnce(&JobContext) -> Result<(), EngineError> + Send + 'static,
+    ) -> Result<JobHandle, EngineError> {
+        if !matches!(kind, JobKind::OneWaySync | JobKind::ColpkgImport | JobKind::ApkgImport) {
+            return Err(EngineError::InvalidArgument {
+                message: "this job cannot use continued processing".into(),
+            });
+        }
+        // Serialize registration and policy selection with suspend.
+        let _lane = self.inner.control_lane.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.lock_state().suspended {
+            return Err(EngineError::unavailable("the collection is suspended"));
+        }
+        let slot = kind.long_op().map(|op| self.acquire_slot(op)).transpose()?;
+        let handle = self.jobs().start(kind.name(), self.generation(), slot, work);
+        self.jobs().set_continued(handle.id);
+        Ok(handle)
+    }
+}
+
+pub(crate) fn control(env: &mut WriterEnv<'_>, action: Control) -> Result<ControlReply, EngineError> {
+    let mut reply = ControlReply {
+        external_change: false,
+        factory: None,
+    };
+    match action {
+        Control::Flush => {
+            if let Some(collection) = env.collection.as_ref() {
+                collection.writer().sync_wal()?;
+            }
+        }
+        Control::Suspend { deadline } => {
+            check_deadline(deadline, "checkpoint")?;
+            if let Some(collection) = env.collection.as_ref() {
+                let result = collection
+                    .writer()
+                    .checkpoint_with_timeout(deadline.saturating_sub(monotonic::now()))?;
+                if !result.succeeded() {
+                    return Err(EngineError::unavailable("checkpoint blocked by an external reader"));
+                }
+            }
+            if let Some(collection) = env.collection.take() {
+                collection.close()?;
+            }
+            if env.suspended_file.is_none() {
+                *env.suspended_file = Some(super::executor::live_file::LiveFile::before_swap(&env.shared.path));
+            }
+            *env.external_version = None;
+        }
+        Control::Resume => {
+            let changed_file = env
+                .suspended_file
+                .as_mut()
+                .is_some_and(|stamp| stamp.release_and_check());
+            if env.collection.is_none() {
+                let options = OpenOptions::new(env.reopen.clock.as_ref(), env.reopen.random.as_ref())
+                    .initializers(env.reopen.initializers.clone())
+                    .managed();
+                let collection = open_collection(&env.shared.path, &options)?;
+                reply.external_change = changed_file || collection.external_change;
+                *env.external_version = Some(collection.writer().external_data_version()?);
+                *env.collection = Some(collection);
+            } else if let Some(collection) = env.collection.as_ref() {
+                let version = collection.writer().external_data_version()?;
+                reply.external_change = env.external_version.is_some_and(|v| v != version);
+                *env.external_version = Some(version);
+                collection.save_sidecar(false)?;
+            }
+            if let Some(collection) = env.collection.as_ref() {
+                if reply.external_change {
+                    crate::external_change::notify(env.shared, collection.writer(), env.touched)?;
+                }
+                reply.factory = Some(collection.reader_factory());
+            }
+            *env.suspended_file = None;
+        }
+    }
+    Ok(reply)
+}

@@ -23,6 +23,7 @@ pub struct RunningJob {
     pub id: JobId,
     pub name: String,
     pub cancel: Arc<CancelToken>,
+    pub continued_processing: bool,
 }
 
 /// The registry. Clones share it.
@@ -31,9 +32,15 @@ pub struct JobRegistry {
     inner: Arc<Inner>,
 }
 
+#[derive(Default)]
+struct RegistryState {
+    running: BTreeMap<JobId, RunningJob>,
+    paused: bool,
+}
+
 struct Inner {
     next_id: AtomicU64,
-    running: Mutex<BTreeMap<JobId, RunningJob>>,
+    running: Mutex<RegistryState>,
     pool: JobPool,
     stream: ChangeStream,
 }
@@ -53,14 +60,14 @@ impl JobRegistry {
         Ok(JobRegistry {
             inner: Arc::new(Inner {
                 next_id: AtomicU64::new(1),
-                running: Mutex::new(BTreeMap::new()),
+                running: Mutex::new(RegistryState::default()),
                 pool: JobPool::new(threads, workers)?,
                 stream,
             }),
         })
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<JobId, RunningJob>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, RegistryState> {
         self.inner.running.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -77,14 +84,31 @@ impl JobRegistry {
         let id = JobId(self.inner.next_id.fetch_add(1, Ordering::SeqCst));
         let cancel = CancelToken::new();
         let progress = ProgressSink::new();
-        self.lock().insert(
+        let mut state = self.lock();
+        if state.paused {
+            cancel.cancel();
+            drop(state);
+            drop(slot);
+            self.inner.stream.publish(
+                generation,
+                None,
+                EventKind::JobFinished {
+                    id,
+                    outcome: JobOutcome::Cancelled,
+                },
+            );
+            return JobHandle { id, cancel, progress };
+        }
+        state.running.insert(
             id,
             RunningJob {
                 id,
                 name: name.to_owned(),
                 cancel: Arc::clone(&cancel),
+                continued_processing: false,
             },
         );
+        drop(state);
         let context = JobContext {
             id,
             cancel: Arc::clone(&cancel),
@@ -110,7 +134,7 @@ impl JobRegistry {
             // The slot goes before the event, so a caller reacting to it is
             // not refused.
             drop(context);
-            registry.lock().remove(&id);
+            registry.lock().running.remove(&id);
             registry
                 .inner
                 .stream
@@ -119,14 +143,36 @@ impl JobRegistry {
         JobHandle { id, cancel, progress }
     }
 
+    /// Closing this gate and taking the running snapshot use the same mutex
+    /// as start, so no unregistered queued work escapes suspend enumeration.
+    pub(crate) fn pause(&self, paused: bool) {
+        self.lock().paused = paused;
+    }
+
+    pub(crate) fn set_continued(&self, id: JobId) {
+        if let Some(job) = self.lock().running.get_mut(&id) {
+            job.continued_processing = true;
+        }
+    }
+
+    pub(crate) fn wait_empty_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        while !self.running().is_empty() {
+            if crate::monotonic::now() >= deadline {
+                return Err(EngineError::SuspendDeadline { phase: "jobs".into() });
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        Ok(())
+    }
+
     /// Cancels a running or queued job by id; `false` when none has it.
     pub fn cancel(&self, id: JobId) -> bool {
-        let token = self.lock().get(&id).map(|job| Arc::clone(&job.cancel));
+        let token = self.lock().running.get(&id).map(|job| Arc::clone(&job.cancel));
         token.inspect(|token| token.cancel()).is_some()
     }
 
     /// The jobs started and not yet finished, by id.
     pub fn running(&self) -> Vec<RunningJob> {
-        self.lock().values().cloned().collect()
+        self.lock().running.values().cloned().collect()
     }
 }

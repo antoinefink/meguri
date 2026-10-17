@@ -566,8 +566,10 @@ impl<'c> WriteScope<'c> {
         } else {
             None
         };
+        meguri_model::faultpoint!("storage.commit.before")?;
         self.conn.execute_batch("COMMIT")?;
         self.open = false;
+        meguri_model::faultpoint!("storage.commit.after")?;
         Ok(Committed {
             journal: self.journal.take(),
             changed: self.changed,

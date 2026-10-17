@@ -93,6 +93,33 @@ impl Readers {
         }
     }
 
+    pub(crate) fn close_until(&self, deadline: std::time::Duration) -> Result<(), EngineError> {
+        *self.factory.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        for slot in &self.slots {
+            loop {
+                match slot.reader.try_lock() {
+                    Ok(mut reader) => {
+                        reader.take();
+                        break;
+                    }
+                    Err(std::sync::TryLockError::Poisoned(e)) => {
+                        e.into_inner().take();
+                        break;
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {
+                        if crate::monotonic::now() >= deadline {
+                            return Err(EngineError::SuspendDeadline {
+                                phase: "reader leases".into(),
+                            });
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Readers open on the collection `factory` names from now on.
     pub(crate) fn set_factory(&self, factory: ReaderFactory) {
         *self.factory.lock().unwrap_or_else(PoisonError::into_inner) = Some(factory);

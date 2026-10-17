@@ -6,7 +6,7 @@ pub mod catalog;
 #[cfg(feature = "test-hooks")]
 pub mod durability_events;
 pub(crate) mod exclusive;
-mod live_file;
+pub(crate) mod live_file;
 pub mod op;
 pub mod plan_commit;
 pub mod preconditions;
@@ -395,6 +395,35 @@ impl ExecShared {
             generation: None,
             factory: None,
         })
+    }
+
+    pub(crate) fn control(&self, action: crate::suspend::Control) -> Pending<crate::suspend::ControlReply> {
+        let (reply, rx) = mpsc::sync_channel(1);
+        let mut meta = self.meta("durability_control", meguri_model::changes::OpSource::Maintenance);
+        meta.control = true;
+        self.submit(Task {
+            meta,
+            body: Box::new(writer::ControlTask { action, reply }),
+        });
+        Pending { rx }
+    }
+
+    pub(crate) fn wait_idle_until(&self, deadline: Duration) -> Result<(), EngineError> {
+        let mut queue = self.lock_queue();
+        while queue.running || !queue.queues.is_empty() {
+            let remaining = deadline.saturating_sub(crate::monotonic::now());
+            if remaining.is_zero() {
+                return Err(EngineError::SuspendDeadline {
+                    phase: "writer drain".into(),
+                });
+            }
+            queue = self
+                .idle
+                .wait_timeout(queue, remaining)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+        Ok(())
     }
 
     /// Closes the collection on the writer and waits.

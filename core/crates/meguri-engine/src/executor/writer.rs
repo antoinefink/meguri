@@ -67,6 +67,8 @@ pub(crate) struct WriterEnv<'w> {
     pub collection: &'w mut Option<OpenedCollection>,
     pub touched: &'w mut TouchIndex,
     pub reopen: &'w Reopen,
+    pub external_version: &'w mut Option<i64>,
+    pub suspended_file: &'w mut Option<LiveFile>,
 }
 
 /// What reopening the file after a swap needs (`engine/lifecycle` L8).
@@ -97,8 +99,14 @@ pub(crate) fn run(
     activity: &ThreadActivity,
 ) {
     ON_WRITER.with(|on| on.set(true));
+    let mut external_version = collection.writer().external_data_version().ok();
+    let external_at_open = collection.external_change;
+    let mut suspended_file = None;
     let mut collection = Some(collection);
     let mut touched = TouchIndex::new(floor);
+    if external_at_open && let Some(opened) = &collection {
+        let _ = crate::external_change::notify(&shared, opened.writer(), &mut touched);
+    }
     let mut flush = WalFlush::default();
     loop {
         flush.observe(&shared, collection.as_ref());
@@ -136,6 +144,8 @@ pub(crate) fn run(
                     collection: &mut collection,
                     touched: &mut touched,
                     reopen: &reopen,
+                    external_version: &mut external_version,
+                    suspended_file: &mut suspended_file,
                 };
                 // A bug in a task must not end the writer: the task's result
                 // channel drops, so its caller gets an internal error.
@@ -207,7 +217,7 @@ impl WalFlush {
         }
     }
 
-    fn sync(&mut self, _shared: &ExecShared, collection: Option<&OpenedCollection>) {
+    fn sync(&mut self, shared: &ExecShared, collection: Option<&OpenedCollection>) {
         let Some(collection) = collection else {
             *self = Self::default();
             return;
@@ -215,12 +225,12 @@ impl WalFlush {
         // No other commit can run on this writer during xSync. Only a
         // successful call advances coverage; a failure keeps every commit due.
         #[cfg(feature = "test-hooks")]
-        let (started, through) = (monotonic::now(), _shared.last_seq());
+        let (started, through) = (monotonic::now(), shared.last_seq());
         let result = collection.writer().sync_wal();
         #[cfg(feature = "test-hooks")]
         if !matches!(result, Ok(false)) {
             let completed = monotonic::now();
-            _shared.record_durability(|events| {
+            shared.record_durability(|events| {
                 events.syncs.push(super::durability_events::WalSync {
                     started,
                     completed,
@@ -231,10 +241,29 @@ impl WalFlush {
         }
         match result {
             Ok(_) => {
+                if self.failures > 0 {
+                    shared.stream.publish(
+                        shared.generation(),
+                        None,
+                        EventKind::Extension(Arc::new(crate::suspend::DurabilityStatus::Recovered {
+                            through: shared.last_seq(),
+                        })),
+                    );
+                }
                 self.due = None;
                 self.failures = 0;
             }
             Err(error) => {
+                if self.failures == 0 {
+                    shared.stream.publish(
+                        shared.generation(),
+                        None,
+                        EventKind::Extension(Arc::new(crate::suspend::DurabilityStatus::Failed {
+                            through: shared.last_seq(),
+                            error: error.clone(),
+                        })),
+                    );
+                }
                 self.failures = self.failures.saturating_add(1);
                 let backoff = WAL_FLUSH_RETRY
                     .saturating_mul(1 << (self.failures - 1).min(5))
@@ -322,6 +351,18 @@ fn run_op<T>(
         shared.clock.as_ref(),
         Some(collection.journal_options()),
     )?;
+    // BEGIN IMMEDIATE excludes a foreign commit between this check and the op.
+    let version = collection.writer().external_data_version()?;
+    if env.external_version.is_some_and(|old| old != version) {
+        *env.external_version = Some(version);
+        crate::external_change::notify(shared, collection.writer(), env.touched)?;
+        scope.rollback()?;
+        return Err(EngineError::Stale {
+            table: meguri_storage::Table::Col,
+            key: "external change".into(),
+        });
+    }
+    *env.external_version = Some(version);
     preconditions::check(&spec.preconditions, &scope, env.touched)?;
 
     let mut context = OpContext {
@@ -590,12 +631,19 @@ impl TaskBody for ReplaceTask {
             });
             return;
         };
-        if let Err(error) = collection.close() {
-            tracing::warn!(%error, "closing the collection before a swap");
-        }
+        let closed = collection.close();
         let live = LiveFile::before_swap(&shared.path);
-        let swapped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
-            .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())));
+        // Never replace a file whose final commit/checkpoint could not be
+        // made durable. Reopen the original through the same recovery path
+        // as a swap that failed before touching it.
+        let swapped = match closed {
+            Ok(outcome) if outcome.succeeded() => {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| swap(&shared.path)))
+                    .unwrap_or_else(|payload| Err(EngineError::from_panic(payload.as_ref())))
+            }
+            Ok(_) => Err(EngineError::unavailable("checkpoint blocked by an external reader")),
+            Err(error) => Err(error.into()),
+        };
         // A swap that failed after changing the file still replaced the
         // collection. Checked before the reopen (see `LiveFile::changed`).
         let changed = live.changed();
@@ -607,8 +655,9 @@ impl TaskBody for ReplaceTask {
             shared.undo.reset(DisabledReason::ClearedByOneWay);
         }
         let reopen = env.reopen;
-        let options =
-            OpenOptions::new(reopen.clock.as_ref(), reopen.random.as_ref()).initializers(reopen.initializers.clone());
+        let options = OpenOptions::new(reopen.clock.as_ref(), reopen.random.as_ref())
+            .initializers(reopen.initializers.clone())
+            .managed();
         let replaced = match open_collection(&shared.path, &options) {
             Err(error) => Replaced {
                 error: Some(match swapped {
@@ -620,6 +669,7 @@ impl TaskBody for ReplaceTask {
             },
             Ok(collection) => {
                 let factory = collection.reader_factory();
+                *env.external_version = collection.writer().external_data_version().ok();
                 *env.collection = Some(collection);
                 env.touched.reset(*shared.lock_commit());
                 if replacing {
@@ -708,6 +758,21 @@ impl TaskBody for CloseTask {
         let _ = self.reply.send(result);
     }
 
+    fn fail(self: Box<Self>, error: EngineError) {
+        let _ = self.reply.send(Err(error));
+    }
+}
+
+/// Short lifecycle work bypasses public admission, but always uses the writer.
+pub(crate) struct ControlTask {
+    pub action: crate::suspend::Control,
+    pub reply: SyncSender<Result<crate::suspend::ControlReply, EngineError>>,
+}
+impl TaskBody for ControlTask {
+    fn run(self: Box<Self>, env: &mut WriterEnv<'_>, _meta: &TaskMeta) {
+        let result = crate::suspend::control(env, self.action);
+        let _ = self.reply.send(result);
+    }
     fn fail(self: Box<Self>, error: EngineError) {
         let _ = self.reply.send(Err(error));
     }

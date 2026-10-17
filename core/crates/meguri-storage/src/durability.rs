@@ -7,6 +7,16 @@ use rusqlite::ffi;
 use crate::{StorageError, Writer};
 
 impl Writer {
+    /// External commits only, unlike SQLITE_FCNTL_DATA_VERSION.
+    pub fn external_data_version(&self) -> Result<i64, StorageError> {
+        self.conn
+            .query_row("PRAGMA data_version", [], |r| r.get(0))
+            .map_err(Into::into)
+    }
+    pub fn is_autocommit(&self) -> bool {
+        self.conn.is_autocommit()
+    }
+
     /// The main database's change token, including this connection's own
     /// commits (unlike `PRAGMA data_version`). The executor uses it to notice
     /// writes by ops and maintenance without replacing SQLite's WAL hook or
@@ -64,6 +74,11 @@ impl Writer {
             let sync = methods.xSync.ok_or_else(|| StorageError::Io {
                 detail: "the WAL VFS has no xSync method".to_owned(),
             })?;
+            #[cfg(feature = "test-hooks")]
+            if self.wal_sync_probe.get() {
+                check(counting::call(file))?;
+                return Ok(true);
+            }
             check(sync(file, ffi::SQLITE_SYNC_FULL))?;
         }
         Ok(true)
@@ -81,5 +96,63 @@ fn check(code: i32) -> Result<(), StorageError> {
         Ok(())
     } else {
         Err(rusqlite::Error::SqliteFailure(ffi::Error::new(code), None).into())
+    }
+}
+
+/// An xSync shim installed only for the duration of the explicit WAL sync.
+/// It forwards to the real VFS and counts successful calls and their flags;
+/// unlike executor timestamps, these counts come from inside the VFS call.
+#[cfg(feature = "test-hooks")]
+mod counting {
+    use rusqlite::ffi;
+    use std::cell::Cell;
+    type Sync = unsafe extern "C" fn(*mut ffi::sqlite3_file, i32) -> i32;
+    thread_local! {
+        static ORIGINAL: Cell<Option<Sync>> = const { Cell::new(None) };
+        static COUNTS: Cell<(u64, u64)> = const { Cell::new((0, 0)) };
+    }
+    unsafe extern "C" fn sync(file: *mut ffi::sqlite3_file, flags: i32) -> i32 {
+        let Some(original) = ORIGINAL.get() else {
+            return ffi::SQLITE_IOERR_FSYNC;
+        };
+        // SAFETY: forwarded from the live WAL handle, with its original flags.
+        let result = unsafe { original(file, flags) };
+        if result == ffi::SQLITE_OK {
+            let (all, full) = COUNTS.get();
+            COUNTS.set((all + 1, full + u64::from(flags & 0x0f == ffi::SQLITE_SYNC_FULL)));
+        }
+        result
+    }
+    pub(super) fn counts() -> (u64, u64) {
+        COUNTS.get()
+    }
+    pub(super) unsafe fn call(file: *mut ffi::sqlite3_file) -> i32 {
+        // SAFETY: the caller proved the methods are live and xSync exists.
+        // Only this thread owns this NO_MUTEX connection. No SQLite call
+        // intervenes; the stack methods and TLS original outlive the callback.
+        unsafe {
+            let original_methods = (*file).pMethods;
+            let Some(original_sync) = (*original_methods).xSync else {
+                return ffi::SQLITE_IOERR_FSYNC;
+            };
+            let mut methods = std::ptr::read(original_methods);
+            methods.xSync = Some(sync);
+            ORIGINAL.set(Some(original_sync));
+            (*file).pMethods = &methods;
+            let result = ((*(*file).pMethods).xSync.unwrap())(file, ffi::SQLITE_SYNC_FULL);
+            (*file).pMethods = original_methods;
+            ORIGINAL.set(None);
+            result
+        }
+    }
+}
+
+#[cfg(feature = "test-hooks")]
+impl Writer {
+    pub fn enable_wal_sync_probe_for_test(&self) {
+        self.wal_sync_probe.set(true);
+    }
+    pub fn wal_vfs_sync_counts_for_test(&self) -> (u64, u64) {
+        counting::counts()
     }
 }
