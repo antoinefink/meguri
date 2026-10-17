@@ -1,0 +1,736 @@
+{
+  "id": "sched/day/matrix/europe-paris",
+  "description": "Day number and next day boundary in Europe/Paris for rollover hours 0 to 23, one second before, at and after each boundary (R1898, R1899).",
+  "tags": [
+    "generated",
+    "rollover-matrix",
+    "tz:Europe/Paris"
+  ],
+  "clock": {
+    "tz": "Europe/Paris",
+    "start": "2030-01-15T10:00:00",
+    "mode": "step"
+  },
+  "steps": [
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 0
+      }
+    },
+    {
+      "set_clock": "2030-01-16T23:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 1
+      }
+    },
+    {
+      "set_clock": "2030-01-19T00:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 2
+      }
+    },
+    {
+      "set_clock": "2030-01-21T01:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 3
+      }
+    },
+    {
+      "set_clock": "2030-01-23T02:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 4
+      }
+    },
+    {
+      "set_clock": "2030-01-25T03:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 5
+      }
+    },
+    {
+      "set_clock": "2030-01-27T04:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 6
+      }
+    },
+    {
+      "set_clock": "2030-01-29T05:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 7
+      }
+    },
+    {
+      "set_clock": "2030-01-31T06:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 8
+      }
+    },
+    {
+      "set_clock": "2030-02-02T07:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 9
+      }
+    },
+    {
+      "set_clock": "2030-02-04T08:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 10
+      }
+    },
+    {
+      "set_clock": "2030-02-06T09:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 11
+      }
+    },
+    {
+      "set_clock": "2030-02-08T10:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 12
+      }
+    },
+    {
+      "set_clock": "2030-02-10T11:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 13
+      }
+    },
+    {
+      "set_clock": "2030-02-12T12:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 14
+      }
+    },
+    {
+      "set_clock": "2030-02-14T13:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 15
+      }
+    },
+    {
+      "set_clock": "2030-02-16T14:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 16
+      }
+    },
+    {
+      "set_clock": "2030-02-18T15:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 17
+      }
+    },
+    {
+      "set_clock": "2030-02-20T16:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 18
+      }
+    },
+    {
+      "set_clock": "2030-02-22T17:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 19
+      }
+    },
+    {
+      "set_clock": "2030-02-24T18:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 20
+      }
+    },
+    {
+      "set_clock": "2030-02-26T19:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 21
+      }
+    },
+    {
+      "set_clock": "2030-02-28T20:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 22
+      }
+    },
+    {
+      "set_clock": "2030-03-02T21:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "set_config": {
+        "key": "rollover",
+        "value": 23
+      }
+    },
+    {
+      "set_clock": "2030-03-04T22:59:59+01:00"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    },
+    {
+      "advance": "1s"
+    },
+    {
+      "observe": [
+        "timing"
+      ]
+    }
+  ]
+}

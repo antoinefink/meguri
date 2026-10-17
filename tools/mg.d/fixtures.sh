@@ -288,11 +288,14 @@ MG_FIXTURES_LAUNCH_SUITE=MeguriSnapshotTests/RecipeFixtureTests
 # writes <prefix>.json {result, passed, failed, skipped, messages}: the
 # suite's result, its passed and failed cases (one per recipe directory,
 # the Swift Testing arguments), skipped tests and failure messages.
-# Returns 1, with the failure recorded, when the suite could not run.
+# Returns 1, with the failure recorded, when the suite could not run, and 2
+# when a locked Mac queued it (host-session, mg_host_lease).
 mg__fixtures_launch_run() {
   local dirs="$1" prefix="$2" rc tests
   mg_app_build mac Debug Snapshot || return 1
-  mg_host_lease || return 1
+  mg_host_lease --part "the recipes' launch check"
+  rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
   mg_app_mac_guard || return 1
   rm -rf "$prefix.xcresult"
   TEST_RUNNER_MEGURI_RECIPE_FIXTURES="$dirs" xcodebuild test-without-building -project app/Meguri.xcodeproj -scheme Meguri \
@@ -313,8 +316,8 @@ mg__fixtures_launch_run() {
 
 # mg__fixtures_check_launch <summaries>: the launch suite on every recipe
 # of the run; each recipe is one passing case, and a skip is a failure.
-# Sets MG_FIXTURES_LAUNCH to pass or fail. Not run in a subshell: the host
-# lease it takes lasts until the job ends.
+# Sets MG_FIXTURES_LAUNCH to pass, fail or queued (a locked Mac). Not run in a
+# subshell: the host lease it takes lasts until the job ends.
 mg__fixtures_check_launch() {
   local summaries="$1" dirs n prefix="$MG_RUN_DIR/launch" problems line repro="tools/mg fixtures-check recipes"
   MG_FIXTURES_LAUNCH=fail
@@ -322,7 +325,12 @@ mg__fixtures_check_launch() {
   n="$(printf '%s\n' "$dirs" | grep -c .)"
   dirs="$(printf '%s\n' "$dirs" | paste -sd: -)"
   echo "fixtures-check: $n recipes -> $MG_FIXTURES_LAUNCH_SUITE" >&2
-  mg__fixtures_launch_run "$dirs" "$prefix" || return 0
+  mg__fixtures_launch_run "$dirs" "$prefix"
+  case $? in
+    0) ;;
+    2) MG_FIXTURES_LAUNCH=queued && return 0 ;;
+    *) return 0 ;;
+  esac
   mg_artifact launch "$prefix.json" "$MG_FIXTURES_LAUNCH_SUITE results"
   if ! problems="$(jq -r --argjson n "$n" '
     .messages
@@ -397,20 +405,21 @@ mg_fixtures_check() {
   if jq -e 'select(.kind == "recipe")' "$summaries" >/dev/null; then
     mg__fixtures_check_launch "$summaries"
     what="$what and the recipes' launch check"
-    if [ "$MG_FIXTURES_LAUNCH" = pass ]; then
-      passed=$((passed + 1))
-    else
-      failed=$((failed + 1))
-    fi
+    case "$MG_FIXTURES_LAUNCH" in
+      pass) passed=$((passed + 1)) ;;
+      queued) ;;
+      *) failed=$((failed + 1)) ;;
+    esac
   fi
   mg_count total $((passed + failed))
   mg_count passed "$passed"
   mg_count failed "$failed"
   if [ "$failed" -eq 0 ]; then
-    mg_message "fixtures-check: $passed checks pass ($what)"
+    mg_message "fixtures-check: $passed checks pass ($what)$([ "$MG_QUEUED_PARTS" = '[]' ] || echo "; queued: $(mg_queued_parts_text)")"
     mg_status pass
   else
     mg_message "fixtures-check: $failed of $((passed + failed)) checks fail ($what)"
     mg_status fail
   fi
+  mg_queued_settle
 }

@@ -41,6 +41,11 @@
         }
       }
     },
+    "attachments": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "UI results: the attachments, screenshots included, that the suite's tests kept (R1866 wants none). Absent when a measured test had no activities to count them from; U241's gate refuses a UI result without it."
+    },
     "results": {
       "type": "array",
       "items": { "$ref": "#/$defs/result" }
@@ -70,7 +75,7 @@
         },
         "value": { "type": "number" },
         "samples": { "type": "integer", "minimum": 1, "description": "How many measurements the value comes from: operations for core benches, iterations for UI tests." },
-        "fixture": { "type": "string", "description": "The generated collection measured on (10k, 150k, ...), when there is one." },
+        "fixture": { "type": "string", "description": "The collection measured on (10k, 150k, ..., or a named fixture), when there is one: core benches name it, UI tests declare it (PerfTestCase.fixture)." },
         "measurements": {
           "type": "array",
           "items": { "type": "number" },

@@ -1,0 +1,41 @@
+# AE39, core part (specs/notetypes/schema-changes.md G1, G2, G5): right after
+# a sync (ls = scm), a field rename leaves the schema unmodified (and marks
+# the note type pending for the next normal sync); adding a
+# field sets scm, so the schema counts as modified until the next sync; a
+# template reorder before that sync sets scm again. Schema changes in
+# scenarios run confirmed (specs/conformance/notetype-ops.md T9); Meguri's
+# confirmation request itself is tested in meguri-engine's schema_gate tests.
+id: notetypes/gate/after-sync
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+  notes:
+    - {notetype: Pair, fields: [sun, sol]}
+steps:
+  - db_exec: {sql: "UPDATE col SET ls = scm"}
+  - db_exec: {sql: "UPDATE notetypes SET usn = 0 WHERE name = 'Pair'"}
+  - advance: 1m
+  - db_exec: {sql: "SELECT scm > ls, scm, ls FROM col"}
+  - update_notetype: {notetype: Pair, edits: [{rename_field: {from: Back, to: Answer}}]}
+  # the rename is no schema change, but it marks the note type for the next sync
+  - db_exec: {sql: "SELECT c.scm > c.ls, c.scm, c.ls, n.usn FROM col c, notetypes n WHERE n.name = 'Pair'"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{add_field: Extra}]}
+  - db_exec: {sql: "SELECT scm > ls, scm, ls FROM col"}
+  - advance: 1m
+  - update_notetype: {notetype: Pair, edits: [{move_template: {template: Backward, to: 0}}]}
+  - db_exec: {sql: "SELECT scm > ls, scm, ls FROM col"}
+  - db_exec:
+      sql: >-
+        SELECT f.ord, f.name FROM fields f JOIN notetypes n ON n.id = f.ntid
+        WHERE n.name = 'Pair' ORDER BY f.ord
+  - db_exec:
+      sql: >-
+        SELECT t.ord, t.name FROM templates t JOIN notetypes n ON n.id = t.ntid
+        WHERE n.name = 'Pair' ORDER BY t.ord
+  - observe: ["card(#c1, #c2)"]

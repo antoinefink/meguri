@@ -1,0 +1,23 @@
+# specs/search/grammar.md G2: implicit AND, `and`/`or` in any letter case,
+# AND before OR, no NOT keyword (AE41, R1023, R1024).
+id: search/structure/operators
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - observe:
+      - canonical_search:
+          - 'dog cat or  fish'
+          - 'a AND b'
+          - 'a Or b'
+          - 'a and b'
+          - 'a oR b'
+          - 'a AnD b'
+          - '"and"'
+          - 'x and y or z'
+          - 'x or y and z'
+          - 'x or y or z'
+          - '7 and 8  or 9'
+          - 'a b or c d'
+          - 'not a'
+          - 'and:x'
+          - 'andy or orb'
+          - "a or\u0009b"

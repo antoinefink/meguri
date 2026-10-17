@@ -154,15 +154,17 @@ mg_app_log_now() {
   date '+%Y-%m-%d %H:%M:%S'
 }
 
-# mg_app_mac_input_refused <since>: whether macOS dropped input that XCUITest
-# synthesized since then, on this Mac or in the test VM (MG_MAC_RUNNER). On
-# macOS 27.0.1 (26A434) WindowServer refuses testmanagerd's virtual input
-# service ("missing the 'com.apple.private.hid.client.event-dispatch'
-# entitlement"), testmanagerd times out on its "Recap playback", and no
-# click, key press or drag reaches the app: a Mac UI run with input then
-# tests nothing it acts on. Records the run as blocked (user step mac-input,
-# once per job) and returns 0; returns 1 when the unified log shows no such
-# drop, or cannot be read.
+# mg_app_mac_input_refused <since> [part]: whether macOS dropped input that
+# XCUITest synthesized since then, on this Mac or in the test VM
+# (MG_MAC_RUNNER). On macOS 27.0.1 (26A434) WindowServer refuses
+# testmanagerd's virtual input service ("missing the
+# 'com.apple.private.hid.client.event-dispatch' entitlement"), testmanagerd
+# times out on its "Recap playback", and no click, key press or drag reaches
+# the app: a Mac UI run with input then tests nothing it acts on. Records
+# <part> (default: the job) as queued with the user step mac-input
+# (mg_queued_part; the step once per job) and where it was seen, for doctor
+# (mg_app_mac_input_record), and returns 0; the caller queues the run.
+# Returns 1 when the unified log shows no such drop, or cannot be read.
 mg_app_mac_input_refused() {
   local pred='process == "testmanagerd" AND eventMessage CONTAINS "Recap playback"' where repro
   if [ "$MG_MAC_RUNNER" = vm ]; then
@@ -175,14 +177,84 @@ mg_app_mac_input_refused() {
     where="on this Mac"
     repro="log show --start '$1' --predicate '$pred'"
   fi
+  mg_queued_part mac-input "${2:-$MG_JOB}" "macOS dropped the input XCUITest synthesized $where (testmanagerd's Recap playback timed out)" "$repro"
   [ -z "${MG_MAC_INPUT_REFUSED:-}" ] || return 0
   MG_MAC_INPUT_REFUSED=1
   mg_user_step mac-input missing true "Use a macOS and Xcode pair whose Mac UI tests can click and type" \
-    "macOS drops the input XCUITest synthesizes $where (on 27.0.1, WindowServer refuses testmanagerd's input service), so taps, typing and drags never reach the app. Update macOS or Xcode (docs/process/one-time-setup.md)."
-  mg_failure blocked-mac-input "blocked: macOS dropped the input XCUITest synthesized $where (testmanagerd's Recap playback timed out); no tap, key press or drag of this run reached the app" \
-    "$repro"
+    "macOS drops the input XCUITest synthesizes $where (on 27.0.1, WindowServer refuses testmanagerd's input service), so taps, typing and drags never reach the app. Update macOS or Xcode (docs/process/one-time-setup.md); tools/mg catch-up runs the queued runs again once doctor sees another pair."
   mg_detail blocked '"mac-input"'
+  mg_app_mac_input_record
   return 0
+}
+
+# mg_app_mac_input_result <xcresult> <result> <failure prefix>: the result of
+# a Mac XCUITest run whose input macOS dropped (mg_app_mac_input_refused said
+# so), from its xcodebuild result (0 passed, 1 failed): 3 (queued) when it
+# passed or when the drop explains every failing test, otherwise 1, with each
+# failure the drop does not explain recorded as <prefix>/<test id>. The drop
+# explains a failing test only when the test synthesized input (an activity
+# "Synthesize event") and its first failure (the earliest activity associated
+# with a failure) came at or after its first synthesized event, as for a
+# drive's steps from its first tap on. A failure
+# before it, a failing test that synthesized nothing (fixtures, dates,
+# configuration), a test whose activities cannot be read and a failed run
+# without a failing test tested the app regardless: they fail the run.
+mg_app_mac_input_result() {
+  local bundle="$1" prefix="$3" tests id n=0
+  [ "$2" -eq 1 ] || return 3
+  if ! tests="$(xcrun xcresulttool get test-results tests --path "$bundle" 2>/dev/null |
+    jq -c '[.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed") | {id: .nodeIdentifier,
+      message: ([.children[]? | select(.nodeType == "Failure Message") | .name] | join("; ") | .[0:800])}]')" ||
+    [ -z "$tests" ]; then
+    mg_failure "$prefix/xcresult" "the run failed and its failing tests cannot be read from $bundle: the input macOS dropped does not explain the failure"
+    return 1
+  fi
+  if [ "$tests" = '[]' ]; then
+    mg_failure "$prefix/xcresult" "the run failed, but $bundle lists no failing test: the input macOS dropped does not explain it; see the log"
+    return 1
+  fi
+  while IFS= read -r id; do
+    xcrun xcresulttool get test-results activities --test-id "$id" --path "$bundle" 2>/dev/null |
+      jq -e '[.testRuns[]? | [.activities[]? | .. | objects | select(has("startTime"))] as $a
+          | ([$a[] | select(.title == "Synthesize event") | .startTime] | min) as $input
+          | ([$a[] | select(.isAssociatedWithFailure == true) | .startTime] | min) as $failure
+          | select($failure != null) | $input != null and $failure >= $input]
+        | length > 0 and all' >/dev/null 2>&1 && continue
+    n=$((n + 1))
+    mg_failure "$prefix/$id" "$(jq -r --arg id "$id" 'first(.[] | select(.id == $id) | .message) // ""' <<<"$tests") (failed before or without the input macOS dropped)"
+  done < <(jq -r '.[].id' <<<"$tests")
+  [ "$n" -eq 0 ] && return 3
+  return 1
+}
+
+# mg_app_mac_input_path: where the last drop is recorded, beside the leases
+# every checkout shares (the main checkout's build/mg).
+mg_app_mac_input_path() { printf '%s/mac-input.json\n' "$(mvl_lease_base "$MG_ROOT")"; }
+
+# mg_app_mac_input_record: records the runner that dropped the input and its
+# macOS and Xcode builds (doctor lists mac-input until one of them changes),
+# also in details.mac_input. Values it cannot read are null.
+mg_app_mac_input_record() {
+  local out macos="" build="" xcode="" vm="" path
+  local probe='echo "macos=$(sw_vers -productVersion 2>/dev/null)"; echo "build=$(sw_vers -buildVersion 2>/dev/null)"; xcodebuild -version 2>/dev/null'
+  if [ "$MG_MAC_RUNNER" = vm ]; then
+    vm="$(jq -r .name <<<"$MG_MAC_VM")"
+    out="$(mg_mac_vm_ssh "$probe" 2>/dev/null)"
+  else
+    out="$(bash -c "$probe" 2>/dev/null)"
+  fi
+  macos="$(printf '%s\n' "$out" | sed -n 's/^macos=//p' | head -n 1)"
+  build="$(printf '%s\n' "$out" | sed -n 's/^build=//p' | head -n 1)"
+  xcode="$(printf '%s\n' "$out" | sed -n 's/^Xcode \([0-9.]*\).*/\1/p' | head -n 1)"
+  [ -z "$xcode" ] || xcode="$xcode ($(printf '%s\n' "$out" | sed -n 's/^Build version \(.*\)/\1/p' | head -n 1))"
+  out="$(jq -nc --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg job "$MG_JOB" --arg run "${MG_RUN_ID:-}" --arg wt "$MG_ROOT" \
+    --arg runner "${MG_MAC_RUNNER:-host}" --arg vm "$vm" --arg m "$macos" --arg b "$build" --arg x "$xcode" '
+    def v: if . == "" then null else . end;
+    {at: $at, job: $job, run_id: $run, worktree: $wt, runner: $runner, vm: ($vm | v), macos: ($m | v),
+     macos_build: ($b | v), xcode: ($x | v)}')"
+  mg_detail mac_input "$out"
+  path="$(mg_app_mac_input_path)"
+  mkdir -p "$(dirname "$path")" && printf '%s\n' "$out" >"$path.tmp.$$" && mv -f "$path.tmp.$$" "$path"
 }
 
 # ---------------------------------------------------------------------------

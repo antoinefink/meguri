@@ -16,7 +16,9 @@
 # the tests read at their source path) and the inventory go there, and each
 # run's output directory comes back. The Mac renders in-process on this Mac,
 # off-screen; its test host is sandboxed, so its results are written in its
-# container and copied here. `--record <filter>` then copies the images of
+# container and copied here. On a locked Mac (or a sleeping display) the Mac
+# part is queued (host-session, U19b): the simulators' results still decide,
+# so their failures fail the run. `--record <filter>` then copies the images of
 # failing or missing snapshots that match the filter into app/Snapshots/,
 # leaving the others byte for byte; `--rebaseline` records everything for
 # the current OS build and drops the baselines of other builds of the same
@@ -113,24 +115,37 @@ mg_snapshots() {
   # The simulators' lease (the test VM's) comes before the Mac's host lease,
   # whatever the platform order: every job that takes both takes them so.
   case " $platforms " in *" iphone "* | *" ipad "*) mg_snapshots__sim_lease || return 0 ;; esac
+  local ran="" rc
   for p in $platforms; do
     if [ "$p" = mac ]; then
-      mg_snapshots__mac || return 0
+      mg_snapshots__mac
+      rc=$?
+      # A locked Mac queues the Mac part (mg_host_lease); the rest goes on.
+      [ "$rc" -eq 2 ] && continue
+      [ "$rc" -eq 0 ] || return 0
+      ran="$ran mac"
       continue
     fi
     for kind in $(mg_snapshots__kinds "$p"); do
       d="$(printf '%s\n' $MG_SNAP_DEVICES | sed -n "s/^$kind=//p")"
       mg_snapshots__simulator "$kind" "$d" || return 0
     done
+    ran="$ran $p"
   done
-  mg_snapshots__finish "$platforms" "$rebaseline"
+  # Only the Mac was asked for, and it is queued.
+  [ -n "$ran" ] || return 0
+  mg_snapshots__finish "${ran# }" "$rebaseline"
 }
 
 # The host lease, taken once for the whole job (mg_host_lease is not
-# re-entrant: a second call would wait for this job itself).
+# re-entrant: a second call would wait for this job itself). Returns
+# mg_host_lease's code: 2 when the locked Mac queued <part>.
 mg_snapshots__lease() {
+  local rc
   [ -z "${MG_SNAP_LEASED:-}" ] || return 0
-  mg_host_lease || return 1
+  mg_host_lease --part "${1:-$MG_JOB}"
+  rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
   MG_SNAP_LEASED=1
 }
 
@@ -266,11 +281,14 @@ mg_snapshots__simulator() {
 }
 
 # The Mac: one in-process run, off-screen windows only. The sandboxed test
-# host writes in its own container; the results are moved here.
+# host writes in its own container; the results are moved here. Returns 2
+# when the locked Mac queued it.
 mg_snapshots__mac() {
-  local dir="$MG_RUN_DIR/mac/mac" box
+  local dir="$MG_RUN_DIR/mac/mac" box rc
   box="$HOME/Library/Containers/$MG_APP_DEV_ID/Data/tmp/meguri-snapshots/$MG_RUN_ID"
-  mg_snapshots__lease || return 1
+  mg_snapshots__lease mac
+  rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
   mg_app_mac_guard || return 1
   rm -rf "$box"
   mg_snapshots__xcodebuild "$dir" "platform=macOS,arch=arm64" all TEST_RUNNER_MEGURI_SNAPSHOT_MODE="$MG_SNAP_MODE" \
@@ -358,7 +376,8 @@ mg_snapshots__finish() {
   else
     mg_status pass
   fi
-  mg_message "snapshots: $(jq -r 'to_entries | map("\(.value) \(.key)") | join(", ")' <<<"$counts")$([ "$recorded" = 0 ] || echo "; $recorded recorded into app/Snapshots/")$([ "${MG_SNAP_VERDICT:-pass}" = pass ] || echo "; needs-human-review")"
+  mg_message "snapshots: $(jq -r 'to_entries | map("\(.value) \(.key)") | join(", ")' <<<"$counts")$([ "$recorded" = 0 ] || echo "; $recorded recorded into app/Snapshots/")$([ "${MG_SNAP_VERDICT:-pass}" = pass ] || echo "; needs-human-review")$([ "$MG_QUEUED_PARTS" = '[]' ] || echo "; queued: $(mg_queued_parts_text)")"
+  mg_queued_settle
 }
 
 # mg_snapshots__prune <results>: after a rebaseline, deletes baselines this

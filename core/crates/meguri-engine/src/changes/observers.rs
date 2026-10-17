@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use meguri_model::card::Card;
 use meguri_model::changes::ChangeSet;
+use meguri_model::col::Col;
 use meguri_model::ids::CardId;
 use meguri_model::revlog::RevlogEntry;
 use meguri_storage::{Record, RowError, RowImage};
@@ -30,6 +31,9 @@ pub struct ObservedCommit<'a> {
     pub revlog_removed: &'a [RevlogEntry],
     /// Every changed config key, by key.
     pub config: &'a [ConfigDelta],
+    /// The `col` row after the op, when the op changed it (every op that
+    /// moved `col.mod`): the derived store's stamp (U26).
+    pub collection: Option<&'a Col>,
 }
 
 /// A changed card's row before and after the op (absent when added or

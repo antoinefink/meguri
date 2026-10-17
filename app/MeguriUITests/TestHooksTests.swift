@@ -100,7 +100,7 @@ final class TestHooksTests: XCTestCase {
     func testBadLaunchOptionsReplaceTheAppWithTheHookError() throws {
         let build = try requireHooks()
         let cases: [(MeguriLaunch, String)] = [
-            (MeguriLaunch(route: "nope/missing"), "no route 'nope/missing'; registered: designsystem/gallery, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets"),
+            (MeguriLaunch(route: "nope/missing"), "no route 'nope/missing'; registered: designsystem/gallery, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical"),
             (MeguriLaunch(extra: ["-MeguriBogus", "1"]), "unknown launch option -MeguriBogus"),
             (MeguriLaunch(now: "2030-02-30T10:00:00Z"), "-MeguriNow takes YYYY-MM-DDTHH:MM:SS"),
             (MeguriLaunch(timeZone: "Mars/Olympus"), "unknown time zone 'Mars/Olympus'"),
@@ -111,7 +111,7 @@ final class TestHooksTests: XCTestCase {
             let message = app.staticTexts["testhooks.error.message"]
             XCTAssert(message.waitForExistence(timeout: 15), "no hook error for \(options.arguments)")
             XCTAssert(text(app, "testhooks.error.message").contains(expected), "'\(text(app, "testhooks.error.message"))' lacks '\(expected)'")
-            XCTAssertFalse(app.staticTexts["home.placeholder.title"].exists, "the app ran despite the hook error")
+            XCTAssertFalse(app.descendants(matching: .any)["shell.placeholder.home"].exists, "the app ran despite the hook error")
             app.terminate()
         }
     }
@@ -120,7 +120,7 @@ final class TestHooksTests: XCTestCase {
         #if os(macOS)
         let build = try requireHooks()
         let app = try launch(MeguriLaunch(animations: false, windowSize: "1000x700"), build)
-        XCTAssert(app.staticTexts["home.placeholder.title"].waitForExistence(timeout: 15))
+        XCTAssert(app.descendants(matching: .any)["shell.placeholder.home"].waitForExistence(timeout: 15))
         let window = app.windows.firstMatch
         let resized = expectation(for: NSPredicate { _, _ in abs(window.frame.width - 1000) < 1 }, evaluatedWith: nil)
         wait(for: [resized], timeout: 10)
@@ -151,7 +151,7 @@ final class TestHooksTests: XCTestCase {
             ),
             build
         )
-        XCTAssert(app.staticTexts["home.placeholder.title"].waitForExistence(timeout: 15), "the app did not open on Home")
+        XCTAssert(app.descendants(matching: .any)["shell.placeholder.home"].waitForExistence(timeout: 15), "the app did not open on Home")
         XCTAssertFalse(app.staticTexts["sample.sheet.title"].waitForExistence(timeout: 3), "a Release-style build followed -MeguriRoute")
         XCTAssertFalse(app.staticTexts["testhooks.error.message"].exists, "a Release-style build parsed the launch options")
     }

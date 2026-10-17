@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://meguri.local/conformance/schema/timing.schema.json",
+  "$comment": "SPDX-License-Identifier: MPL-2.0. Semantics: specs/conformance/timed-operations.md (T7). Written by tools/mg oracle time (side anki) and meguri-cli timing run (side meguri); never a golden.",
+  "title": "Timed operations report",
+  "type": "object",
+  "required": ["report_version", "side", "platform", "protocol", "now", "tz", "collection", "operations"],
+  "additionalProperties": false,
+  "properties": {
+    "report_version": { "const": 1 },
+    "side": { "enum": ["anki", "meguri"] },
+    "platform": {
+      "enum": ["macos-arm64", "linux-arm64", "linux-x86_64"],
+      "description": "T7.1: macos-arm64 is the native lane, linux-* the Docker lane."
+    },
+    "oracle": {
+      "type": "object",
+      "required": ["anki_version", "driver_sha256", "lock_sha256"],
+      "additionalProperties": false,
+      "description": "Side anki only: the pin of the lane that ran.",
+      "properties": {
+        "anki_version": { "type": "string", "minLength": 1 },
+        "driver_sha256": { "$ref": "#/$defs/sha256" },
+        "lock_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "meguri": {
+      "type": "object",
+      "required": ["commit", "profile"],
+      "additionalProperties": false,
+      "description": "Side meguri only: the build that ran.",
+      "properties": {
+        "commit": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[0-9a-f]{40}$" }] },
+        "profile": { "type": "string", "minLength": 1 }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "required": ["warmup", "repeat"],
+      "additionalProperties": false,
+      "properties": {
+        "warmup": { "const": 1 },
+        "repeat": { "type": "integer", "minimum": 1, "maximum": 100 }
+      }
+    },
+    "now": { "type": "integer", "minimum": 0, "description": "T2.3: the frozen instant, epoch seconds." },
+    "tz": { "type": "string", "minLength": 1, "description": "T1: the IANA zone used." },
+    "collection": {
+      "description": "T2.2: row counts of a copy of the image.",
+      "type": "object",
+      "required": ["notes", "cards", "revlog", "notetypes", "decks", "presets", "tags", "graves"],
+      "additionalProperties": false,
+      "properties": {
+        "notes": { "$ref": "#/$defs/count" },
+        "cards": { "$ref": "#/$defs/count" },
+        "revlog": { "$ref": "#/$defs/count" },
+        "notetypes": { "$ref": "#/$defs/count" },
+        "decks": { "$ref": "#/$defs/count" },
+        "presets": { "$ref": "#/$defs/count" },
+        "tags": { "$ref": "#/$defs/count" },
+        "graves": { "$ref": "#/$defs/count" }
+      }
+    },
+    "operations": { "type": "array", "items": { "$ref": "#/$defs/operation" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "side": { "const": "anki" } } },
+      "then": { "required": ["oracle"], "not": { "required": ["meguri"] } }
+    },
+    {
+      "if": { "properties": { "side": { "const": "meguri" } } },
+      "then": { "required": ["meguri"], "not": { "required": ["oracle"] } }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "T4.2: milliseconds rounded to 3 decimal places."
+    },
+    "check_open": {
+      "description": "T6.1: row counts after the open.",
+      "type": "object",
+      "required": ["cards", "notes", "revlog"],
+      "additionalProperties": false,
+      "properties": {
+        "cards": { "$ref": "#/$defs/count" },
+        "notes": { "$ref": "#/$defs/count" },
+        "revlog": { "$ref": "#/$defs/count" }
+      }
+    },
+    "check_deck_list": {
+      "description": "T6.2: decks in the tree (root not counted) and the root's numbers.",
+      "type": "object",
+      "required": ["decks", "new", "learning", "review"],
+      "additionalProperties": false,
+      "properties": {
+        "decks": { "$ref": "#/$defs/count" },
+        "new": { "$ref": "#/$defs/count" },
+        "learning": { "$ref": "#/$defs/count" },
+        "review": { "$ref": "#/$defs/count" }
+      }
+    },
+    "check_queue": {
+      "description": "T6.3, T6.4: the three counts of the fetch.",
+      "type": "object",
+      "required": ["new", "learning", "review"],
+      "additionalProperties": false,
+      "properties": {
+        "new": { "$ref": "#/$defs/count" },
+        "learning": { "$ref": "#/$defs/count" },
+        "review": { "$ref": "#/$defs/count" }
+      }
+    },
+    "check_cards": {
+      "description": "T6.5, T6.6: the number of card ids returned.",
+      "type": "object",
+      "required": ["cards"],
+      "additionalProperties": false,
+      "properties": { "cards": { "$ref": "#/$defs/count" } }
+    },
+    "check_graphs": {
+      "description": "T6.7: cards the card-count graph covers, total of the review graph's daily counts.",
+      "type": "object",
+      "required": ["cards", "reviews"],
+      "additionalProperties": false,
+      "properties": { "cards": { "$ref": "#/$defs/count" }, "reviews": { "$ref": "#/$defs/count" } }
+    },
+    "check_db": {
+      "description": "T6.8: collection-check.md K5, or the corrupt result.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "card_properties",
+            "new_positions_too_high",
+            "card_last_review_time",
+            "cards_without_note",
+            "decks_missing",
+            "field_counts",
+            "duplicate_card_ords",
+            "cards_without_template",
+            "revlog_properties",
+            "notes_invalid_utf8",
+            "future_ids",
+            "notetypes_recovered"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "card_properties": { "$ref": "#/$defs/count" },
+            "new_positions_too_high": { "$ref": "#/$defs/count" },
+            "card_last_review_time": { "$ref": "#/$defs/count" },
+            "cards_without_note": { "$ref": "#/$defs/count" },
+            "decks_missing": { "$ref": "#/$defs/count" },
+            "field_counts": { "$ref": "#/$defs/count" },
+            "duplicate_card_ords": { "$ref": "#/$defs/count" },
+            "cards_without_template": { "$ref": "#/$defs/count" },
+            "revlog_properties": { "$ref": "#/$defs/count" },
+            "notes_invalid_utf8": { "$ref": "#/$defs/count" },
+            "future_ids": { "$ref": "#/$defs/count" },
+            "notetypes_recovered": { "$ref": "#/$defs/count" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["error"],
+          "additionalProperties": false,
+          "properties": { "error": { "const": "corrupt" } }
+        }
+      ]
+    },
+    "check_apkg_export": {
+      "description": "T6.9.",
+      "type": "object",
+      "required": ["entries", "notes"],
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Package entry names sorted by code point."
+        },
+        "notes": { "$ref": "#/$defs/count" }
+      }
+    },
+    "check_colpkg_export": {
+      "description": "T6.10.",
+      "type": "object",
+      "required": ["entries"],
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Package entry names sorted by code point."
+        }
+      }
+    },
+    "check_import": {
+      "description": "T6.11: notes the import reports as new; the target's rows afterwards.",
+      "type": "object",
+      "required": ["notes_added", "cards", "revlog"],
+      "additionalProperties": false,
+      "properties": {
+        "notes_added": { "$ref": "#/$defs/count" },
+        "cards": { "$ref": "#/$defs/count" },
+        "revlog": { "$ref": "#/$defs/count" }
+      }
+    },
+    "check_upload": {
+      "description": "T6.12: rows after the reopen; pending counts rows with usn -1.",
+      "type": "object",
+      "required": ["cards", "graves", "pending"],
+      "additionalProperties": false,
+      "properties": {
+        "cards": { "$ref": "#/$defs/count" },
+        "graves": { "$ref": "#/$defs/count" },
+        "pending": { "$ref": "#/$defs/count" }
+      }
+    },
+    "check_download": {
+      "description": "T6.13: rows of the reopened collection.",
+      "type": "object",
+      "required": ["cards", "revlog"],
+      "additionalProperties": false,
+      "properties": { "cards": { "$ref": "#/$defs/count" }, "revlog": { "$ref": "#/$defs/count" } }
+    },
+    "check_memory_states": {
+      "description": "T6.14: cards whose data holds s and d.",
+      "type": "object",
+      "required": ["memory_states"],
+      "additionalProperties": false,
+      "properties": { "memory_states": { "$ref": "#/$defs/count" } }
+    },
+    "operation": {
+      "description": "T7.2. Operations appear in catalogue order (T6), at most once each.",
+      "type": "object",
+      "required": ["name", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "collection.open",
+            "decks.counts",
+            "queue.build",
+            "review.answer",
+            "search.deck",
+            "search.state",
+            "search.tag",
+            "search.text",
+            "search.regex",
+            "search.prop",
+            "search.rated",
+            "search.combined",
+            "browser.sort_field",
+            "browser.sort_due",
+            "stats.graphs",
+            "maintenance.check_db",
+            "package.apkg_export",
+            "package.colpkg_export",
+            "package.apkg_import",
+            "sync.full_upload",
+            "sync.full_download",
+            "fsrs.recompute_memory_states"
+          ]
+        },
+        "status": { "enum": ["ok", "unsupported", "error"] },
+        "samples_ms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/ms" },
+          "description": "T4.2: the timed samples in the order taken; the warm-up's is not included."
+        },
+        "statistic": {
+          "type": "object",
+          "required": ["median_ms", "min_ms"],
+          "additionalProperties": false,
+          "properties": { "median_ms": { "$ref": "#/$defs/ms" }, "min_ms": { "$ref": "#/$defs/ms" } },
+          "description": "T4.3: the lower median and the minimum of samples_ms."
+        },
+        "check": { "type": "object" },
+        "error": {
+          "type": "object",
+          "required": ["kind", "stage"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["no_input", "failed", "unstable"] },
+            "stage": { "enum": ["setup", "timed", "check"] },
+            "exception": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The class name of what a call raised, never its message."
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ok" } } },
+          "then": { "required": ["samples_ms", "statistic", "check"], "not": { "required": ["error"] } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "error" } } },
+          "then": {
+            "required": ["error"],
+            "not": {
+              "anyOf": [
+                { "required": ["samples_ms"] },
+                { "required": ["statistic"] },
+                { "required": ["check"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "unsupported" } } },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["samples_ms"] },
+                { "required": ["statistic"] },
+                { "required": ["check"] },
+                { "required": ["error"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["collection.open"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_open" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["decks.counts"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_deck_list" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["queue.build", "review.answer"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_queue" } } }
+        },
+        {
+          "if": {
+            "properties": {
+              "name": {
+                "enum": [
+                  "search.deck",
+                  "search.state",
+                  "search.tag",
+                  "search.text",
+                  "search.regex",
+                  "search.prop",
+                  "search.rated",
+                  "search.combined",
+                  "browser.sort_field",
+                  "browser.sort_due"
+                ]
+              }
+            }
+          },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_cards" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["stats.graphs"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_graphs" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["maintenance.check_db"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_db" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["package.apkg_export"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_apkg_export" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["package.colpkg_export"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_colpkg_export" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["package.apkg_import"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_import" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["sync.full_upload"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_upload" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["sync.full_download"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_download" } } }
+        },
+        {
+          "if": { "properties": { "name": { "enum": ["fsrs.recompute_memory_states"] } } },
+          "then": { "properties": { "check": { "$ref": "#/$defs/check_memory_states" } } }
+        }
+      ]
+    }
+  }
+}

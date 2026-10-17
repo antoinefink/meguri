@@ -1,0 +1,4 @@
+# Files the AnkiWeb host scan (ankiweb-hosts.sh, R1876) leaves out: only the
+# binary-scan scripts of U116 (the app built without AnkiWeb holds no AnkiWeb
+# name) and U255 (release configurations), which must search for those names.
+# One per line: <path> <unit>. Any other unit is refused.

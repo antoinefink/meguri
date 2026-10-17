@@ -23,6 +23,8 @@ import Testing
             "-MeguriAppearance", "dark",
             "-MeguriAnkiConnectPort", "18765",
             "-MeguriMigakuPort", "54432",
+            "-MeguriSizeClass", "regular",
+            "-MeguriIntegrations", "on",
             "-MeguriRoute", "review/answer",
         ])
         #expect(options.fixture == URL(filePath: "/tmp/fixture/collection.anki2"))
@@ -37,6 +39,8 @@ import Testing
         #expect(options.appearance == .dark)
         #expect(options.ankiConnectPort == 18765)
         #expect(options.migakuPort == 54432)
+        #expect(options.sizeClass == .regular)
+        #expect(options.integrations == true)
         #expect(options.route?.path == "review/answer")
     }
 
@@ -66,7 +70,7 @@ import Testing
         #expect(options.appearance == .light)
         var configuration = LaunchConfiguration()
         let apply = {
-            try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "x.dev"), routes: .standard)
+            _ = try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "x.dev"), routes: .standard)
         }
         #if os(macOS)
         try apply()
@@ -75,11 +79,33 @@ import Testing
         #endif
     }
 
+    /// The size class is iOS's (the Mac has none), the integrations flag the
+    /// Mac's (R11).
+    @Test func theSizeClassIsIOSOnlyAndTheIntegrationsFlagMacOnly() throws {
+        #expect(try Options(arguments: ["-MeguriSizeClass", "compact"]).sizeClass == .compact)
+        #expect(try Options(arguments: ["-MeguriIntegrations", "off"]).integrations == false)
+        let installer = TestHooks.FixtureInstaller(bundleIdentifier: "x.dev")
+        var configuration = LaunchConfiguration()
+        let sizeClass = try Options(arguments: ["-MeguriSizeClass", "regular"])
+        let integrations = try Options(arguments: ["-MeguriIntegrations", "on"])
+        #if os(macOS)
+        #expect(throws: TestHookError("-MeguriSizeClass applies to iOS only: the Mac has no size class")) {
+            try sizeClass.apply(to: &configuration, installer: installer, routes: .standard)
+        }
+        try integrations.apply(to: &configuration, installer: installer, routes: .standard)
+        #else
+        try sizeClass.apply(to: &configuration, installer: installer, routes: .standard)
+        #expect(throws: TestHookError("-MeguriIntegrations applies to the Mac only")) {
+            try integrations.apply(to: &configuration, installer: installer, routes: .standard)
+        }
+        #endif
+    }
+
     @Test func theWindowSizeIsMacOnly() throws {
         let options = try Options(arguments: ["-MeguriWindowSize", "large"])
         var configuration = LaunchConfiguration()
         let apply = {
-            try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "x.dev"), routes: .standard)
+            _ = try options.apply(to: &configuration, installer: TestHooks.FixtureInstaller(bundleIdentifier: "x.dev"), routes: .standard)
         }
         #if os(macOS)
         try apply()
@@ -98,6 +124,8 @@ import Testing
         (["-MeguriNow", "2030-01-15T10:00:00+25:00"], "-MeguriNow takes"),
         (["-MeguriTimeZone", "Mars/Olympus"], "unknown time zone 'Mars/Olympus'"),
         (["-MeguriLocale", "xx_NOPE"], "unknown locale 'xx_NOPE'"),
+        (["-MeguriSizeClass", "wide"], "-MeguriSizeClass takes compact or regular, got 'wide'"),
+        (["-MeguriIntegrations", "yes"], "-MeguriIntegrations takes on or off, got 'yes'"),
         (["-MeguriAnimations", "yes"], "-MeguriAnimations takes on or off"),
         (["-MeguriReduceMotion", "1"], "-MeguriReduceMotion takes on or off"),
         (["-MeguriAnkiConnectPort", "0"], "-MeguriAnkiConnectPort takes a port from 1 to 65535"),

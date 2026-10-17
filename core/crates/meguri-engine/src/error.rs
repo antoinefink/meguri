@@ -3,9 +3,13 @@
 
 use std::fmt;
 
+use meguri_model::ids::NotetypeId;
 use meguri_storage::{OpenError, StorageError, Table};
 
 use crate::lifecycle::Generation;
+use crate::notetypes::NotetypeRefusal;
+use crate::schema_gate::SchemaReason;
+use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
@@ -29,8 +33,29 @@ pub enum EngineError {
     Busy {
         running_op: String,
     },
+    /// No step to undo or redo, or the core refuses the top one
+    /// (`engine/undo` M4, M5): nothing was written.
+    UndoUnavailable {
+        reason: DisabledReason,
+    },
     /// The op's or job's cancel token was cancelled before it committed.
     Cancelled,
+    /// A schema change that asks first (`notetypes/schema-changes` G4) was
+    /// submitted without `schema_confirmed` while the schema is not modified
+    /// since the last sync: nothing was written. The caller warns the user
+    /// (R951) and submits the op again confirmed.
+    NeedsSchemaConfirmation {
+        reasons: Vec<SchemaReason>,
+    },
+    /// The storage guard (`notetypes/schema-changes` G6): the transaction
+    /// changed this note type's field or template count and would leave
+    /// `scm <= ls`. A bug in the op; nothing was written.
+    SchemaNotMarked {
+        notetype_id: NotetypeId,
+    },
+    /// A note type save refused (`notetypes/validation` V2, V3): nothing was
+    /// written.
+    NotetypeRefused(NotetypeRefusal),
     /// The open gate refused or failed (`storage/open-and-connections` C8).
     Open(OpenError),
     Storage(StorageError),
@@ -104,7 +129,18 @@ impl fmt::Display for EngineError {
             ),
             EngineError::CollectionUnavailable { reason } => write!(f, "collection unavailable: {reason}"),
             EngineError::Busy { running_op } => write!(f, "busy: {running_op} is running"),
+            EngineError::UndoUnavailable { reason } => write!(f, "undo unavailable: {reason}"),
             EngineError::Cancelled => f.write_str("cancelled"),
+            EngineError::NeedsSchemaConfirmation { reasons } => {
+                let names: Vec<&str> = reasons.iter().map(|r| r.name()).collect();
+                write!(f, "needs schema confirmation: {}", names.join(", "))
+            }
+            EngineError::SchemaNotMarked { notetype_id } => write!(
+                f,
+                "schema not marked: note type {} changed its field or template count with scm <= ls",
+                notetype_id.0
+            ),
+            EngineError::NotetypeRefused(refusal) => write!(f, "note type refused: {refusal}"),
             EngineError::Open(error) => write!(f, "open: {error}"),
             EngineError::Storage(error) => write!(f, "storage: {error}"),
             EngineError::Panicked { message } => write!(f, "panic: {message}"),

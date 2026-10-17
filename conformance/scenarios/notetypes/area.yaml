@@ -1,0 +1,21 @@
+# specs/conformance/dsl.md D9.1. Active: Meguri must pass them in T0 through
+# the testkit's note type adapters (exec/notetypes.rs: meguri-engine's
+# notetypes module, U29) on the stand-in new collection of
+# specs/conformance/notetype-ops.md T10.2. records/stock-render-handoff is
+# live and must pass in T1: Meguri's segment is that new collection only
+# (records.md N12), and the oracle adds and renders notes of the stock kinds
+# Meguri wrote. The other note type scenarios need what
+# specs/notetypes/records.md N12 and schema-changes.md G8 list:
+# records/stamps setup.decks (U28); records/clone legacy_update (U36);
+# records/preserve-on-edit legacy_update, blob_decode and legacy_json (U36);
+# records/stock-handoff add_note (U27); gate/* setup.notes (U27) and U34's
+# update_notetype edits. The unit that adds the last of them makes each
+# active here.
+area: notetypes
+active:
+  - "records/io-on-demand"
+  - "records/names"
+  - "records/stock-new-collection"
+  - "records/stock-render-handoff"
+  - "records/stock-structure"
+  - "records/validation"

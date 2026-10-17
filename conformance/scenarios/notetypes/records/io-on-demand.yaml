@@ -1,0 +1,34 @@
+# The Image Occlusion note type on demand (specs/notetypes/records.md N9,
+# R913): with the stock one present, ensuring writes nothing; once it is gone
+# (and a plain note type holds its name), ensuring adds the stock kind under
+# the next free name with local stamps and keeps the current note type. A
+# stock-kind-6 note type with fewer than 4 fields does not count. Stock-kind
+# interop scenario (R1959): only names and structure are observed.
+id: notetypes/records/io-on-demand
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - ensure_io_notetype: {}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name LIKE 'Image Occlusion%' ORDER BY id"}
+  - db_exec: {sql: "DELETE FROM templates WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Image Occlusion')"}
+  - db_exec: {sql: "DELETE FROM fields WHERE ntid = (SELECT id FROM notetypes WHERE name = 'Image Occlusion')"}
+  - db_exec: {sql: "DELETE FROM notetypes WHERE name = 'Image Occlusion'"}
+  - advance: 1m
+  - add_notetype: {name: Image Occlusion, fields: [Picture], templates: [{name: One, front: "{{Picture}}"}]}
+  - advance: 1m
+  - ensure_io_notetype: {}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name LIKE 'Image Occlusion%' ORDER BY id"}
+  - db_exec:
+      sql: >-
+        SELECT CAST(c.val AS TEXT) = CAST(n.id AS TEXT) FROM config c, notetypes n
+        WHERE c.KEY = 'curModel' AND n.name = 'Image Occlusion'
+  - observe:
+      - {notetype_structure: {notetypes: [Image Occlusion+]}}
+  - advance: 1m
+  - ensure_io_notetype: {}
+  - db_exec:
+      sql: >-
+        DELETE FROM fields WHERE ord >= 3
+        AND ntid = (SELECT id FROM notetypes WHERE name = 'Image Occlusion+')
+  - advance: 1m
+  - ensure_io_notetype: {}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM notetypes WHERE name LIKE 'Image Occlusion%' ORDER BY id"}

@@ -1,0 +1,1316 @@
+# Performance budget catalog (U241; R1802, R1803, R1861-R1864, R1866).
+#
+# One entry per budget of the plan's Performance requirements R1807-R1855,
+# plus R1583, mapped to the intervals and benchmarks that measure it. `tools/mg
+# perf-gate` judges perf results (tools/perf/perf-result.schema.json, written
+# by perf-ui, bench, bench-mac and bench-icount) against it and against the
+# baselines under tools/perf/baselines/; `tools/mg perf-gate --check` keeps it
+# equal to the plan, the interval registry, the UI performance tests and
+# docs/process/milestones.yaml. tools/scripts/gates/perf_gate.py is the
+# evaluator; its docstring states the rules.
+#
+# Entry fields:
+#   id       the budget's R-ID (probes: a slug; probes gate the harness itself)
+#   title    what the budget holds
+#   group    perf-gate's group (details.groups of its result); the perf-gate
+#            suites of milestones.yaml scope these
+#   devices  the device families it applies to (default iphone, ipad, mac);
+#            equal to milestones.yaml budget_devices
+#   cases    the measurements that prove it, each:
+#     id          slug, unique in the entry (key: <entry>/<id>)
+#     suite       the perf result's suite: a PerfTestCase subclass for UI
+#                 placements, a bench target for core ones
+#     test        a glob on the result row's test (Class/testMethod()) when one
+#                 suite measures the same interval under different conditions
+#     name        the interval (IntervalNames, R1861), xctest.<metric> for
+#                 XCTest's own metrics, or the benchmark name
+#     relative_to the interval whose value at the same percentile is
+#                 subtracted first (frames against the native-swap baseline)
+#     metric, unit  as the perf result rows carry them
+#     percentile  p50, p95, p99 or max (default p95)
+#     limit       the budget at `fixture`, in `unit`; null only while pending
+#     strict      true for "below": the limit itself fails
+#     fixture     the collection it is stated for (default 150k); a size
+#                 (10k, 150k, 500k, 1m) or a named fixture (exact match). A
+#                 row without a fixture fits only `fixture: null`: it is
+#                 never taken at the case's (PerfTestCase.fixture). Rows at
+#                 other sizes are judged, but only one at this fixture proves
+#                 the case: a 1M completion leaves a 150k case missing.
+#     multiplier_500k, rule_1m  R1803: a time budget stated at 150k or less
+#                 may be 2x at up to 500k; above 500k a result only has to
+#                 exist (completes, no crash or hang)
+#     where       core-docker, core-mac, simulator (iOS simulators and the Mac
+#                 in the test VM) and device (real iPhone and iPad, the Mac
+#                 host); every limit a budget states has a device case (R1802,
+#                 U256), not only a core bench
+#     simulator   regression: only the +10% rule on simulators, whatever the
+#                 unit (KTD19: R1807, R1808, R1815)
+#     pending     the unit that lands the measurement. A pending case is
+#                 judged when a result measures it, and its group reports
+#                 pending until then. The owning unit implements the name,
+#                 suite, test and fixture given here (or changes them here in
+#                 its own change), registers new intervals in IntervalNames and
+#                 removes `pending`; from then on --check requires its suite
+#                 to declare the interval and call measure(app:), and every
+#                 result of that suite must measure it (R1861).
+#     note        why a number or a choice is what it is
+#
+# Rules: budgets are absolute on devices and in the Mac core benchmarks. On
+# simulators only frame, hitch-ratio (ms/s), memory (MB) and count budgets are
+# absolute; ms budgets get the regression rule alone. UI metrics fail above
+# +10% against their baseline (R1863), instruction counts above +5% (R1864);
+# wall-clock benches are tracked (p50, p95, p99) and fail only on a breach.
+
+version: 1
+plan: docs/plans/2026-10-12-1926-feat-meguri-anki-compatible-apple-app-plan.md
+budget_range: [R1807, R1855]
+extra_budgets: [R1583]
+registry: app/Packages/MeguriCore/Sources/Instrumentation/IntervalNames.swift
+perf_tests: app/MeguriUITests/Performance
+
+rules:
+  ui_regression_percent: 10      # R1863
+  icount_regression_percent: 5   # R1864
+  simulator_absolute_units: [frames, ms/s, MB, count]
+  time_units: [ms, s]
+
+defaults:
+  fixture: 150k
+  percentile: p95
+  multiplier_500k: 2
+  rule_1m: completes
+
+groups:
+  launch: Launch and the start of a review (R1813, R1818)
+  review: The answer write (R1817)
+  open: Opening the collection (R1823)
+  sync: Normal, full and media sync (R1842-R1844)
+  bulk: Bulk operations and Find and Replace (R1831, R1832)
+  import: Imports (R1846)
+  check-database: Check Database (R1847)
+  backup: Backups (R1848)
+  memory-states: FSRS memory-state recompute (R1849)
+  optimizer: FSRS parameter optimization (R1850)
+  review-loop: The review loop's frame, reveal, undo, menu, audio and hitch budgets (R1807-R1812, R1814-R1816)
+  home: Home and the deck list (R1819-R1822)
+  browser-search: Search and the browser (R1824-R1830)
+  editor: The editors (R1833-R1836)
+  stats: Stats, heatmap and card info (R1837-R1839, R1841)
+  widget: Widgets (R1840)
+  memory: Peak memory and memory growth (R1851-R1853)
+  idle: Idle CPU (R1854)
+  media: Media folder checks (R1583, R1855)
+  sync-coexistence: Studying during sync (R1845)
+  smoke: The performance harness's own probe (U12)
+
+budgets:
+  # --- Review loop (U243: ReviewLoopPerfTests, ReviewRevealPerfTests,
+  # ReviewMenuOpsPerfTests; fixtures from profiles/review-corpus.toml) ------
+  - id: R1807
+    title: After an answer the next question appears in the earliest frame (p95), at most one frame later at p99, against a native view swap on the same device
+    group: review-loop
+    cases:
+      - id: frames-p95
+        suite: ReviewLoopPerfTests
+        name: review.answerToNextVisible
+        relative_to: probe.nativeSwap
+        metric: frames
+        unit: frames
+        percentile: p95
+        limit: 0
+        fixture: review-corpus
+        where: [simulator, device]
+        simulator: regression
+        pending: U243
+      - id: frames-p99
+        suite: ReviewLoopPerfTests
+        name: review.answerToNextVisible
+        relative_to: probe.nativeSwap
+        metric: frames
+        unit: frames
+        percentile: p99
+        limit: 1
+        fixture: review-corpus
+        where: [simulator, device]
+        simulator: regression
+        pending: U243
+      - id: settle-p99
+        suite: ReviewLoopPerfTests
+        name: review.presentToNextSettled
+        metric: duration
+        unit: ms
+        percentile: p99
+        limit: null
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+        note: The layer budget under R1807 (U176). Its limit is the p5 of the real dwell histogram (core/crates/meguri-testkit/profiles/review-dwell.json, U243), so with every card at fastest-5% dwell at most 1% of swaps wait on settle.
+  - id: R1808
+    title: R1807 also holds for script-heavy (Migaku-like), image occlusion and type-in cards
+    group: review-loop
+    cases:
+      - id: frames-p95
+        suite: ReviewLoopPerfTests
+        name: review.answerToNextVisible
+        relative_to: probe.nativeSwap
+        metric: frames
+        unit: frames
+        percentile: p95
+        limit: 0
+        fixture: review-corpus-scripted
+        where: [simulator, device]
+        simulator: regression
+        pending: U243
+      - id: frames-p99
+        suite: ReviewLoopPerfTests
+        name: review.answerToNextVisible
+        relative_to: probe.nativeSwap
+        metric: frames
+        unit: frames
+        percentile: p99
+        limit: 1
+        fixture: review-corpus-scripted
+        where: [simulator, device]
+        simulator: regression
+        pending: U243
+  - id: R1809
+    title: Reveal shows the answer within one refresh interval without scripts, within 50 ms at p95 with answer-side scripts
+    group: review-loop
+    cases:
+      - id: plain
+        suite: ReviewRevealPerfTests
+        name: review.revealToAnswerVisible
+        metric: frames
+        unit: frames
+        limit: 1
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+      - id: scripted
+        suite: ReviewRevealPerfTests
+        name: review.revealToAnswerVisible
+        metric: duration
+        unit: ms
+        limit: 50
+        fixture: review-corpus-scripted
+        where: [simulator, device]
+        pending: U243
+  - id: R1810
+    title: The answer buttons show their interval labels in the same frame as the answer side
+    group: review-loop
+    cases:
+      - id: same-frame
+        suite: ReviewRevealPerfTests
+        name: review.answerLabelsLag
+        metric: frames
+        unit: frames
+        percentile: max
+        limit: 0
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+  - id: R1811
+    title: Undo returns the previous card within 50 ms at p95
+    group: review-loop
+    cases:
+      - id: undo
+        suite: ReviewMenuOpsPerfTests
+        name: review.undoToCardVisible
+        metric: duration
+        unit: ms
+        limit: 50
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+  - id: R1812
+    title: After a review menu action the next card appears within 50 ms at p95
+    group: review-loop
+    cases:
+      - id: menu-action
+        suite: ReviewMenuOpsPerfTests
+        name: review.actionToNextVisible
+        metric: duration
+        unit: ms
+        limit: 50
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+  - id: R1813
+    title: Starting a review shows the first card within 150 ms at p95 while running, 400 ms right after a cold launch
+    group: launch
+    cases:
+      - id: warm
+        suite: ReviewLoopPerfTests
+        test: "ReviewLoopPerfTests/testStartReview*"
+        name: review.startToFirstCard
+        metric: duration
+        unit: ms
+        limit: 150
+        fixture: review-corpus-scripted
+        where: [simulator, device]
+        pending: U243
+      - id: cold
+        suite: ReviewLoopPerfTests
+        test: "ReviewLoopPerfTests/testStartAfterColdLaunch*"
+        name: review.startToFirstCard
+        metric: duration
+        unit: ms
+        limit: 400
+        fixture: review-corpus-scripted
+        where: [simulator, device]
+        pending: U243
+  - id: R1814
+    title: Autoplay card audio starts within 100 ms of its side being shown
+    group: review-loop
+    cases:
+      - id: autoplay
+        suite: ReviewLoopPerfTests
+        name: review.sideVisibleToAudioStart
+        metric: duration
+        unit: ms
+        limit: 100
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+  - id: R1815
+    title: A 200-card session has a hitch time ratio below 5 ms/s and no hitch longer than one refresh interval in card transitions
+    group: review-loop
+    cases:
+      - id: hitch-ratio
+        suite: ReviewLoopPerfTests
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        fixture: review-corpus
+        where: [simulator, device]
+        simulator: regression
+        pending: U243
+      - id: longest-hitch
+        suite: ReviewLoopPerfTests
+        name: review.transitionHitch
+        metric: longest
+        unit: frames
+        percentile: max
+        limit: 1
+        fixture: review-corpus
+        where: [simulator, device]
+        simulator: regression
+        pending: U243
+  - id: R1816
+    title: The tap-zone tint is committed in the touch-down frame
+    group: review-loop
+    devices: [iphone, ipad]
+    cases:
+      - id: same-frame
+        suite: ReviewLoopPerfTests
+        name: review.touchDownToTint
+        metric: frames
+        unit: frames
+        limit: 0
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+        note: No Mac counterpart (no tint on the Mac, KTD19); absolute on the iPhone and iPad simulators.
+  - id: R1817
+    title: The answer write never delays the next card and is durable within 1 s
+    group: review
+    cases:
+      - id: core
+        suite: answer
+        name: answer.toDurable
+        metric: duration
+        unit: ms
+        percentile: max
+        limit: 1000
+        where: [core-mac]
+        pending: U242
+      - id: app
+        suite: ReviewLoopPerfTests
+        name: review.answerToDurable
+        metric: duration
+        unit: ms
+        percentile: max
+        limit: 1000
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U243
+
+  # --- Launch, deck list and Home (U244: LaunchHomePerfTests) -------------
+  - id: R1818
+    title: Cold launch to an interactive deck list with correct counts within 500 ms at p95 at 150k; resume within 100 ms
+    group: launch
+    cases:
+      - id: cold-launch
+        suite: LaunchHomePerfTests
+        name: xctest.application-launch
+        metric: duration
+        unit: ms
+        limit: 500
+        where: [simulator, device]
+        pending: U244
+      - id: deck-list-interactive
+        suite: LaunchHomePerfTests
+        name: launch.toDeckListInteractive
+        metric: duration
+        unit: ms
+        limit: 500
+        where: [simulator, device]
+        pending: U244
+      - id: resume
+        suite: LaunchHomePerfTests
+        name: launch.resumeToInteractive
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+  - id: R1819
+    title: Counts shown at launch are never from a previous study day
+    group: home
+    cases:
+      - id: stale-counts
+        suite: LaunchHomePerfTests
+        name: home.staleCountsShown
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1820
+    title: The deck list, studied-today line and heatmap reflect a finished session within one refresh interval
+    group: home
+    cases:
+      - id: return-home
+        suite: LaunchHomePerfTests
+        name: home.returnToUpdated
+        metric: frames
+        unit: frames
+        limit: 1
+        where: [simulator, device]
+        pending: U244
+  - id: R1821
+    title: The deck list reflects rollover, sync, import or a bulk operation within 100 ms, without a full reload
+    group: home
+    cases:
+      - id: update
+        suite: LaunchHomePerfTests
+        name: home.eventToDeckListUpdated
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+      - id: no-reload
+        suite: LaunchHomePerfTests
+        name: home.deckListFullReloads
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1822
+    title: Collapsing or expanding a deck and opening a deck page respond within one refresh interval (Mac, iPad)
+    group: home
+    devices: [ipad, mac]
+    cases:
+      - id: toggle
+        suite: LaunchHomePerfTests
+        name: home.deckToggle
+        metric: frames
+        unit: frames
+        limit: 1
+        where: [simulator, device]
+        pending: U244
+      - id: deck-page
+        suite: LaunchHomePerfTests
+        name: home.openDeckPage
+        metric: frames
+        unit: frames
+        limit: 1
+        where: [simulator, device]
+        pending: U244
+  - id: R1823
+    title: Opening the collection takes at most 150 ms and never scans whole tables
+    group: open
+    cases:
+      - id: core
+        suite: open
+        name: collection.open
+        metric: duration
+        unit: ms
+        limit: 150
+        where: [core-mac]
+        note: The warm open of meguri-testkit's open bench (U12); its query-plan check (no full scan) is U242's.
+      - id: device
+        suite: LaunchHomePerfTests
+        name: launch.openCollection
+        metric: duration
+        unit: ms
+        limit: 150
+        where: [device]
+        pending: U244
+
+  # --- Search and browser (U244: BrowserSearchPerfTests; core shares on the
+  # M3 Max from U90's search and browse benches, about half the budget) ----
+  - id: R1824
+    title: Every keystroke in search echoes within one refresh interval, and a newer query cancels older ones
+    group: browser-search
+    cases:
+      - id: echo
+        suite: BrowserSearchPerfTests
+        name: search.keystrokeEcho
+        metric: frames
+        unit: frames
+        limit: 1
+        where: [simulator, device]
+        pending: U244
+      - id: superseded
+        suite: BrowserSearchPerfTests
+        name: search.supersededRunsNotCancelled
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1825
+    title: Plain, tag, deck, note type, flag and state searches show their first page within 100 ms at p95 at 150k
+    group: browser-search
+    cases:
+      - id: first-page
+        suite: BrowserSearchPerfTests
+        test: "BrowserSearchPerfTests/testPlain*"
+        name: search.firstPage
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+        note: From query dispatch (when the R1106 debounce fires) to the first page visible.
+      - id: keystroke-to-results
+        suite: BrowserSearchPerfTests
+        test: "BrowserSearchPerfTests/testPlain*"
+        name: search.keystrokeToResultsVisible
+        metric: duration
+        unit: ms
+        limit: 160
+        where: [simulator, device]
+        pending: U244
+        note: R1861's keystroke interval is reported as the 60 ms R1106 debounce plus R1825's 100 ms.
+      - id: core-simple
+        suite: search
+        name: search.firstPage.simple
+        metric: duration
+        unit: ms
+        limit: 15
+        where: [core-mac]
+        pending: U90
+        note: Deck, tag, state, flag, id, note type, template and recent-event searches (R1081).
+      - id: core-plain
+        suite: search
+        name: search.firstPage.plain
+        metric: duration
+        unit: ms
+        limit: 50
+        where: [core-mac]
+        pending: U90
+      - id: core-row-page
+        suite: browse
+        name: browse.rowPage
+        metric: duration
+        unit: ms
+        limit: 15
+        where: [core-mac]
+        pending: U90
+        note: Row page fetch plus decode.
+  - id: R1826
+    title: Regex, nc and field-scoped searches show their first page within 300 ms at p95 at 150k and stream the rest
+    group: browser-search
+    cases:
+      - id: first-page
+        suite: BrowserSearchPerfTests
+        test: "BrowserSearchPerfTests/testSlowLeaf*"
+        name: search.firstPage
+        metric: duration
+        unit: ms
+        limit: 300
+        where: [simulator, device]
+        pending: U244
+      - id: core-slow
+        suite: search
+        name: search.firstPage.slow
+        metric: duration
+        unit: ms
+        limit: 150
+        where: [core-mac]
+        pending: U90
+        note: re, nc, sc, w, field (plain and glob) and prop:r leaves (R1082).
+  - id: R1827
+    title: Opening the browser with its default search shows the first page within 200 ms at 150k
+    group: browser-search
+    cases:
+      - id: open
+        suite: BrowserSearchPerfTests
+        name: browser.openToFirstPage
+        metric: duration
+        unit: ms
+        limit: 200
+        where: [simulator, device]
+        pending: U244
+  - id: R1828
+    title: Changing the sort column or direction re-sorts within 200 ms at 150k
+    group: browser-search
+    cases:
+      - id: sort
+        suite: BrowserSearchPerfTests
+        name: browser.sortChange
+        metric: duration
+        unit: ms
+        limit: 200
+        where: [simulator, device]
+        pending: U244
+      - id: core-sort
+        suite: browse
+        name: browse.sortChange
+        metric: duration
+        unit: ms
+        limit: 100
+        strict: true
+        where: [core-mac]
+        pending: U90
+        note: Below 100 ms on the M3 Max, names and notes-mode aggregates included (R1083).
+  - id: R1829
+    title: Scrolling the browser has a hitch time ratio below 5 ms/s, and rows never render card templates while scrolling
+    group: browser-search
+    cases:
+      - id: hitch-ratio
+        suite: BrowserSearchPerfTests
+        test: "BrowserSearchPerfTests/testScroll*"
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        where: [simulator, device]
+        pending: U244
+      - id: template-renders
+        suite: BrowserSearchPerfTests
+        name: browser.templateRendersWhileScrolling
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1830
+    title: Switching cards and notes mode, and selecting a row to show its editor or card info, take at most 100 ms
+    group: browser-search
+    cases:
+      - id: mode
+        suite: BrowserSearchPerfTests
+        name: browser.modeToggle
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+      - id: select-row
+        suite: BrowserSearchPerfTests
+        name: browser.selectRowToDetail
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+      - id: core-mode
+        suite: browse
+        name: browse.modeToggle
+        metric: duration
+        unit: ms
+        limit: 50
+        where: [core-mac]
+        pending: U90
+        note: The core share of R1244 and R1830 (U90).
+  - id: R1831
+    title: Bulk operations on 10k selected notes finish within 2 s with progress, the app staying responsive
+    group: bulk
+    cases:
+      - id: app
+        suite: BrowserSearchPerfTests
+        name: browser.bulkOperation
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [simulator, device]
+        pending: U244
+      - id: add-tag
+        suite: bulk
+        name: bulk.addTag
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+      - id: remove-tag
+        suite: bulk
+        name: bulk.removeTag
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+      - id: set-deck
+        suite: bulk
+        name: bulk.setDeck
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+      - id: flag
+        suite: bulk
+        name: bulk.setFlag
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+      - id: suspend
+        suite: bulk
+        name: bulk.suspend
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+      - id: reschedule
+        suite: bulk
+        name: bulk.reschedule
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+  - id: R1832
+    title: Find and replace across all 150k notes finishes within 5 s with progress, cancellable before it commits
+    group: bulk
+    cases:
+      - id: app
+        suite: BrowserSearchPerfTests
+        name: browser.findReplace
+        metric: duration
+        unit: ms
+        limit: 5000
+        where: [simulator, device]
+        pending: U244
+      - id: core
+        suite: find-replace
+        name: findReplace.allNotes
+        metric: duration
+        unit: ms
+        limit: 5000
+        where: [core-mac]
+        pending: U242
+
+  # --- Editors (U244: EditorPerfTests) -------------------------------------
+  - id: R1833
+    title: The editor shows editable fields within 100 ms at p95, 31-field notes and large HTML included
+    group: editor
+    cases:
+      - id: open
+        suite: EditorPerfTests
+        name: editor.openToEditable
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+  - id: R1834
+    title: Typing in a field adds no latency beyond one refresh interval, and saving never blocks typing
+    group: editor
+    cases:
+      - id: echo
+        suite: EditorPerfTests
+        name: editor.keystrokeEcho
+        metric: frames
+        unit: frames
+        limit: 1
+        where: [simulator, device]
+        pending: U244
+      - id: save-overlap
+        suite: EditorPerfTests
+        name: editor.saveOverlapsKeystroke
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1835
+    title: The editor and template editor previews update within 100 ms after typing pauses
+    group: editor
+    cases:
+      - id: preview
+        suite: EditorPerfTests
+        name: editor.previewUpdate
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+  - id: R1836
+    title: The image occlusion editor opens a 4000x3000 image with 100 masks within 300 ms, and dragging a mask has no hitches
+    group: editor
+    cases:
+      - id: open
+        suite: EditorPerfTests
+        name: imageOcclusion.editorOpen
+        metric: duration
+        unit: ms
+        limit: 300
+        where: [simulator, device]
+        pending: U244
+      - id: drag-hitch-ratio
+        suite: EditorPerfTests
+        test: "EditorPerfTests/testMaskDrag*"
+        name: xctest.hitch
+        metric: hitch-time-ratio
+        unit: ms/s
+        limit: 5
+        strict: true
+        where: [simulator, device]
+        pending: U244
+        note: U244 reads "without hitches" as R1815's ratio below 5 ms/s.
+
+  # --- Stats, heatmap, widgets, card info (U244: StatsPerfTests; U245) -----
+  - id: R1837
+    title: Stats shows its first graphs within 200 ms and all graphs within 500 ms at 150k cards and 1.2M review-log entries
+    group: stats
+    cases:
+      - id: first-graphs
+        suite: StatsPerfTests
+        name: stats.firstGraphs
+        metric: duration
+        unit: ms
+        limit: 200
+        where: [simulator, device]
+        pending: U244
+      - id: all-graphs
+        suite: StatsPerfTests
+        name: stats.allGraphs
+        metric: duration
+        unit: ms
+        limit: 500
+        where: [simulator, device]
+        pending: U244
+  - id: R1838
+    title: Changing the stats scope refreshes within 300 ms, and graphs below the fold compute only when scrolled into view
+    group: stats
+    cases:
+      - id: scope
+        suite: StatsPerfTests
+        name: stats.scopeChange
+        metric: duration
+        unit: ms
+        limit: 300
+        where: [simulator, device]
+        pending: U244
+      - id: below-fold
+        suite: StatsPerfTests
+        name: stats.offscreenGraphComputations
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1839
+    title: The Home heatmap and streaks render within one refresh interval from incremental aggregates, never scanning the review log
+    group: stats
+    cases:
+      - id: render
+        suite: StatsPerfTests
+        name: heatmap.render
+        metric: frames
+        unit: frames
+        limit: 1
+        where: [simulator, device]
+        pending: U244
+      - id: no-scan
+        suite: StatsPerfTests
+        name: heatmap.revlogScans
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U244
+  - id: R1840
+    title: Widgets render from a small snapshot within the system's widget memory limit and never open the collection
+    group: widget
+    cases:
+      - id: memory
+        suite: WidgetMemoryTests
+        name: widget.render
+        metric: memory-peak
+        unit: MB
+        percentile: max
+        limit: null
+        where: [simulator, device]
+        pending: U245
+        note: The limit is the system's widget extension memory limit, which U245 records here when it measures it.
+      - id: no-open
+        suite: WidgetMemoryTests
+        name: widget.collectionOpens
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U245
+  - id: R1841
+    title: Card info and previous card info open within 100 ms, cards with 500 review-log entries included
+    group: stats
+    cases:
+      - id: open
+        suite: StatsPerfTests
+        name: cardInfo.open
+        metric: duration
+        unit: ms
+        limit: 100
+        where: [simulator, device]
+        pending: U244
+
+  # --- Sync, import/export, maintenance, FSRS (U242 core benches on the M3
+  # Max; device legs in U256's runs) ---------------------------------------
+  - id: R1842
+    title: Syncing a typical day takes at most 1 s of local work and 3 s end to end with a local server, media excluded
+    group: sync
+    cases:
+      - id: local-work
+        suite: sync-local
+        name: sync.normal.localWork
+        metric: duration
+        unit: ms
+        limit: 1000
+        where: [core-mac]
+        pending: U242
+        note: 410 answers and 30 note edits staged against the U13 local server.
+      - id: end-to-end
+        suite: sync-local
+        name: sync.normal.endToEnd
+        metric: duration
+        unit: ms
+        limit: 3000
+        where: [core-mac]
+        pending: U242
+      - id: device-local-work
+        suite: SyncPerfTests
+        name: sync.normal.localWork
+        metric: duration
+        unit: ms
+        limit: 1000
+        where: [device]
+        pending: U256
+        note: The core bench's day of changes against a local server; local work only, transfer excluded.
+      - id: device-end-to-end
+        suite: SyncPerfTests
+        name: sync.startToEnd
+        metric: duration
+        unit: ms
+        limit: 3000
+        where: [device]
+        pending: U256
+  - id: R1843
+    title: A full upload or download takes at most 3 s of local work for the user's collection and 10 s at 150k
+    group: sync
+    cases:
+      - id: upload
+        suite: full-sync
+        name: sync.fullUpload.localWork
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [core-mac]
+        pending: U242
+      - id: download
+        suite: full-sync
+        name: sync.fullDownload.localWork
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [core-mac]
+        pending: U242
+      - id: user-collection
+        suite: full-sync
+        name: sync.fullDownload.localWork
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: private-collection
+        where: [core-mac]
+        pending: U249
+      - id: device-download
+        suite: SyncPerfTests
+        name: sync.fullDownload.localWork
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: private-collection
+        where: [device]
+        pending: U256
+      - id: device-upload
+        suite: SyncPerfTests
+        name: sync.fullUpload.localWork
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: private-collection
+        where: [device]
+        pending: U256
+        note: To a local server only; the real-collection leg never syncs with the user's account (U256).
+      - id: device-download-150k
+        suite: SyncPerfTests
+        name: sync.fullDownload.localWork
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [device]
+        pending: U256
+      - id: device-upload-150k
+        suite: SyncPerfTests
+        name: sync.fullUpload.localWork
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [device]
+        pending: U256
+  - id: R1844
+    title: Media sync is limited only by the network, resumes after interruption and never blocks reviewing
+    group: sync
+    cases:
+      - id: review-blocked
+        suite: SyncPerfTests
+        name: mediaSync.reviewHangs
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U248
+      - id: resume
+        suite: SyncPerfTests
+        name: mediaSync.restartedFiles
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U248
+        note: Files transferred again after an interruption or relaunch.
+  - id: R1845
+    title: Reviewing, browsing and editing work during any sync, and their changes are kept for the next round
+    group: sync-coexistence
+    cases:
+      - id: lost-changes
+        suite: SyncPerfTests
+        name: sync.concurrentChangesLost
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U248
+  - id: R1846
+    title: Importing a 10k-note .apkg takes at most 3 s and the user's collection as .colpkg at most 10 s, media excluded
+    group: import
+    cases:
+      - id: apkg
+        suite: import
+        name: import.apkg
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: apkg-10k
+        where: [core-mac]
+        pending: U242
+      - id: colpkg
+        suite: import
+        name: import.colpkg
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [core-mac]
+        pending: U242
+      - id: device-apkg
+        suite: MaintenancePerfTests
+        name: import.apkg
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: apkg-10k
+        where: [device]
+        pending: U256
+      - id: device-colpkg
+        suite: MaintenancePerfTests
+        name: import.colpkg
+        metric: duration
+        unit: ms
+        limit: 10000
+        where: [device]
+        pending: U256
+        note: At 150k like the core case, ten times the user's cards (R1803), so the real collection never needs a .colpkg on the device.
+  - id: R1847
+    title: Check Database on a healthy 150k collection takes at most 5 s in the background
+    group: check-database
+    cases:
+      - id: core
+        suite: check-db
+        name: checkDatabase.run
+        metric: duration
+        unit: ms
+        limit: 5000
+        where: [core-mac]
+        pending: U242
+      - id: device
+        suite: MaintenancePerfTests
+        name: checkDatabase.run
+        metric: duration
+        unit: ms
+        limit: 5000
+        where: [device]
+        pending: U256
+  - id: R1848
+    title: A backup takes at most 2 s of background work at 150k and never blocks the UI
+    group: backup
+    cases:
+      - id: core
+        suite: backup
+        name: backup.create
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [core-mac]
+        pending: U242
+      - id: device
+        suite: MaintenancePerfTests
+        name: backup.create
+        metric: duration
+        unit: ms
+        limit: 2000
+        where: [device]
+        pending: U256
+  - id: R1849
+    title: Recomputing FSRS memory states for all cards takes at most 3 s at 100k cards, in the background
+    group: memory-states
+    cases:
+      - id: core
+        suite: memory-states
+        name: fsrs.recomputeMemoryStates
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: 100k
+        where: [core-mac]
+        pending: U242
+      - id: device
+        suite: MaintenancePerfTests
+        name: fsrs.recomputeMemoryStates
+        metric: duration
+        unit: ms
+        limit: 3000
+        fixture: 100k
+        where: [device]
+        pending: U256
+  - id: R1850
+    title: FSRS parameter optimization on 1M review-log entries takes at most 30 s at low priority
+    group: optimizer
+    cases:
+      - id: core
+        suite: optimize
+        name: fsrs.optimize
+        metric: duration
+        unit: ms
+        limit: 30000
+        fixture: revlog-1m
+        where: [core-mac]
+        pending: U242
+      - id: device
+        suite: MaintenancePerfTests
+        name: fsrs.optimize
+        metric: duration
+        unit: ms
+        limit: 30000
+        fixture: revlog-1m
+        where: [device]
+        pending: U256
+
+  # --- Memory, energy, media (U245: MemoryPerfTests, IdleEnergyTests; core
+  # counters from U242) ----------------------------------------------------
+  - id: R1851
+    title: Peak memory in normal use stays at or below 150 MB on iPhone at 150k and 500k cards
+    group: memory
+    devices: [iphone]
+    cases:
+      - id: normal-use
+        suite: MemoryPerfTests
+        test: "MemoryPerfTests/testNormalUse*"
+        name: xctest.memory
+        metric: memory-peak-physical
+        unit: MB
+        percentile: max
+        limit: 150
+        where: [simulator, device]
+        pending: U245
+        note: A memory budget, so the same 150 MB at 500k (R1803 loosens time budgets only).
+  - id: R1852
+    title: Peak memory during sync, import, export, backup, Check Database and optimization stays at or below 300 MB on iPhone at 500k
+    group: memory
+    devices: [iphone]
+    cases:
+      - id: heavy-operations
+        suite: MemoryPerfTests
+        test: "MemoryPerfTests/testHeavyOperations*"
+        name: xctest.memory
+        metric: memory-peak-physical
+        unit: MB
+        percentile: max
+        limit: 300
+        fixture: 500k
+        where: [simulator, device]
+        pending: U245
+  - id: R1853
+    title: Memory grows by at most 5 MB across a 1,000-card session, and card web content memory is released when it ends
+    group: memory
+    cases:
+      - id: growth
+        suite: MemoryPerfTests
+        name: review.sessionMemoryGrowth
+        metric: memory-growth
+        unit: MB
+        percentile: max
+        limit: 5
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U245
+      - id: web-content-released
+        suite: MemoryPerfTests
+        name: review.webContentRetained
+        metric: memory-growth
+        unit: MB
+        percentile: max
+        limit: 10
+        fixture: review-corpus
+        where: [simulator, device]
+        pending: U245
+        note: Within 10 MB of the post-warm-up level after the session closes (U245, KTD11).
+  - id: R1854
+    title: Idle Meguri uses no CPU, no polling timers and no repeated scans
+    group: idle
+    cases:
+      - id: timer-fires
+        suite: IdleEnergyTests
+        name: idle.appTimerFires
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U245
+      - id: scans
+        suite: IdleEnergyTests
+        name: idle.repeatedScans
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [simulator, device]
+        pending: U245
+  - id: R1855
+    title: Media changes are tracked without listing or hashing the media folder on launch or before a sync
+    group: media
+    cases:
+      - id: listings
+        suite: media-scan
+        name: media.folderListings
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        fixture: worst-media-30k
+        where: [core-docker, core-mac]
+        pending: U242
+      - id: hashes
+        suite: media-scan
+        name: media.fileHashes
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        fixture: worst-media-30k
+        where: [core-docker, core-mac]
+        pending: U242
+      - id: device-listings
+        suite: MemoryPerfTests
+        name: media.folderListings
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [device]
+        pending: U256
+      - id: device-hashes
+        suite: MemoryPerfTests
+        name: media.fileHashes
+        metric: count
+        unit: count
+        percentile: max
+        limit: 0
+        where: [device]
+        pending: U256
+  - id: R1583
+    title: A 30,000-file, 1.5 GB media folder with no changes is checked in under 0.5 s
+    group: media
+    cases:
+      - id: core
+        suite: media-scan
+        name: media.noChangeCheck
+        metric: duration
+        unit: ms
+        limit: 500
+        strict: true
+        fixture: worst-media-30k
+        where: [core-mac]
+        pending: U242
+      - id: app
+        suite: MemoryPerfTests
+        name: media.noChangeCheck
+        metric: duration
+        unit: ms
+        limit: 500
+        strict: true
+        fixture: worst-media-30k
+        where: [simulator, device]
+        pending: U245
+
+probes:
+  # The harness's own interval (U12): `perf/probe` emits it around a 30 ms
+  # delay. No budget; the +10% rule against its baseline.
+  - id: smoke-probe
+    title: The smoke screen's named interval (U12), evaluated per change
+    group: smoke
+    cases:
+      - id: synthetic-delay
+        suite: SmokePerfTests
+        name: probe.syntheticDelay
+        metric: duration
+        unit: ms
+        percentile: p50
+        limit: null
+        fixture: null
+        where: [simulator, device]
+        note: p50, not p95. Over the smoke's 5 iterations p95 is the slowest one, which moved 7% between three runs on the VM's iPhone simulator (36.5 to 39.1 ms) while p50 stayed at 34.1-34.3 ms; a check of the harness should not flake on one slow iteration.
