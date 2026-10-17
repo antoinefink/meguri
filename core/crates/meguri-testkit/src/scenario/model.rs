@@ -1565,7 +1565,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 29] = [
+    pub const ALL: [ObservationKind; 30] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
