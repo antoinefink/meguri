@@ -1,0 +1,129 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "canonical_search": [
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "empty_group"
+          },
+          {
+            "error": "unopened_group"
+          },
+          {
+            "error": "unclosed_group"
+          },
+          {
+            "error": "empty_quote"
+          },
+          {
+            "error": "unclosed_quote"
+          },
+          {
+            "error": "missing_key"
+          },
+          {
+            "error": "invalid_state",
+            "provided": "asleep"
+          },
+          {
+            "error": "invalid_flag"
+          },
+          {
+            "error": "invalid_property",
+            "provided": "foo>1"
+          },
+          {
+            "error": "invalid_operator",
+            "provided": "ivl"
+          },
+          {
+            "context": "ivl>x",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "1:5",
+            "error": "invalid_answer_button",
+            "provided": "5"
+          },
+          {
+            "context": "nid:",
+            "error": "invalid_id_list"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\x"
+          },
+          {
+            "error": "unknown_escape",
+            "provided": "\\"
+          },
+          {
+            "context": "ease>x",
+            "error": "invalid_number",
+            "provided": "x"
+          },
+          {
+            "context": "due=7.5",
+            "error": "invalid_whole_number",
+            "provided": "7.5"
+          },
+          {
+            "context": "rated=1",
+            "error": "invalid_negative_whole_number",
+            "provided": "1"
+          },
+          {
+            "context": "mid:",
+            "error": "invalid_whole_number",
+            "provided": "x"
+          },
+          {
+            "context": "added:",
+            "error": "invalid_positive_whole_number",
+            "provided": "x"
+          },
+          {
+            "error": "invalid_dupe"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          },
+          {
+            "error": "misplaced_and"
+          },
+          {
+            "error": "misplaced_or"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "725f3192194a0037992960660c259b74f6c530f450f91c9c874ab7d5cbb51d21",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "search/errors/kinds",
+  "scenario_sha256": "72ba4168fb2dbee77df373db6d0bd2fff3127982d528b8c5ab61f0a66a9e4d0e",
+  "tz": "UTC"
+}

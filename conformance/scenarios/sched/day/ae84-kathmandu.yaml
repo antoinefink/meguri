@@ -1,0 +1,14 @@
+# AE84 (R1898, R1899): Asia/Kathmandu, UTC+05:45, rollover at 4 AM. The day
+# number and the next boundary one second before, at and after 04:00 local.
+# Deck counts at the same instants wait for the queue area's deck_tree kind
+# (specs/sched/day-clock.md D14).
+id: sched/day/ae84-kathmandu
+clock: {tz: Asia/Kathmandu, start: "2030-01-15T10:00:00", mode: step}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-20T03:59:59"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]

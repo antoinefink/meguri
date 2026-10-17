@@ -1,0 +1,10 @@
+
+/* Hidden and revealed cloze text stands out in both appearances. */
+.cloze {
+  font-weight: 600;
+  color: #0b5cad;
+}
+
+.nightMode .cloze {
+  color: #8ec5ff;
+}

@@ -1,0 +1,25 @@
+# R592, R593 (D3): rollover 2 in Europe/Paris, where 02:00 does not exist on
+# 31 March 2030 (01:59:59 CET is followed by 03:00:00 CEST). The day computed
+# at 01:59:59 ends at the instant 02:00 +01:00, which is 03:00 CEST; the next
+# day ends at 02:00 CEST.
+id: sched/day/dst-gap-rollover-2-europe-paris
+clock: {tz: Europe/Paris, start: "2030-03-25T10:00:00", mode: step}
+setup:
+  config: {rollover: 2}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-03-30T12:00:00"
+  - observe: [timing]
+  - set_clock: "2030-03-31T01:59:59+01:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - set_clock: "2030-04-01T01:59:59+02:00"
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - advance: 1s
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT) FROM config WHERE KEY IN ('creationOffset', 'lastUnburied', 'localOffset', 'rollover') ORDER BY KEY"}

@@ -10,6 +10,12 @@ it one day and checks again. The clock file then holds what it held before.
 - none: a native worker whose libfaketime is missing or does not reach
   Python or Anki's backend. It runs on the real clock, and tools give it only
   scenarios tagged clock-free.
+
+A timing worker (ORACLE_CLOCK_CACHE=1, timed-operations.md T2.3) has
+libfaketime's cache on: it read the clock file once, at the instant the
+harness wrote there before starting it, and never reads it again. Its check
+writes nothing: Python's clock and Anki's scheduler day must stand at that
+instant, before and after real time passed. Its clock never moves.
 """
 
 from __future__ import annotations
@@ -68,8 +74,34 @@ def _follows(clock_file: str, scratch: str) -> bool:
         shutil.rmtree(directory, ignore_errors=True)
 
 
-def check(clock_file: str, scratch: str) -> str:
+def _frozen(clock_file: str, scratch: str) -> bool:
+    with open(clock_file, encoding="ascii") as f:
+        instant = int(f.read().strip())
+    if time.time() != instant:
+        return False
+    directory = tempfile.mkdtemp(prefix="selftest-", dir=scratch)
+    col = None
+    try:
+        col = Collection(os.path.join(directory, "collection.anki2"))
+        today = col._backend.sched_timing_today()
+        return (
+            instant - LONGEST_DAY < col.crt <= instant
+            and instant < today.next_day_at <= instant + LONGEST_DAY
+            and time.time() == instant
+        )
+    finally:
+        if col is not None:
+            col.close(downgrade=False)
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def check(clock_file: str, scratch: str, cached: bool = False) -> str:
     """'faketime' when the frozen clock reaches Python and Anki, else 'none'."""
+    if cached:
+        try:
+            return "faketime" if _frozen(clock_file, scratch) else "none"
+        except (OSError, ValueError):
+            return "none"
     try:
         with open(clock_file, encoding="ascii") as f:
             previous: str | None = f.read()

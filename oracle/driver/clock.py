@@ -9,6 +9,10 @@ gaps and repeated hours cannot shift the clock. Monotonic clocks are real.
 
 A follower is another clock file kept at the worker clock plus a fixed offset
 on every change (a sync server whose clock runs ahead, sync-ops.md S3.2).
+
+A cached clock (a timing worker, ORACLE_CLOCK_CACHE=1, timed-operations.md
+T2.3) is the instant libfaketime read once at the worker's start: writing the
+file would not move it, so it refuses any other instant.
 """
 
 from __future__ import annotations
@@ -19,7 +23,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .errors import invalid
+from .errors import DriverError, invalid
 
 _DURATION = re.compile(r"^(?:\d+[dhms])+$")
 _DURATION_PART = re.compile(r"(\d+)([dhms])")
@@ -76,8 +80,9 @@ def write_epoch(path: str, epoch_secs: int) -> None:
 
 
 class Clock:
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, cached: bool = False) -> None:
         self.path = path
+        self.cached = cached
         self.now = self._read()
         self.followers: dict[str, int] = {}
 
@@ -89,6 +94,8 @@ class Clock:
             return int(time.time())
 
     def set(self, epoch_secs: int) -> None:
+        if self.cached and epoch_secs != self.now:
+            raise DriverError("protocol_error", detail="a timing worker's clock stays where it started (ORACLE_CLOCK_CACHE)")
         if epoch_secs < 0 or any(epoch_secs + off < 0 for off in self.followers.values()):
             raise invalid("the clock cannot go before 1970")
         write_epoch(self.path, epoch_secs)

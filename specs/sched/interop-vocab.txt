@@ -54,3 +54,46 @@ StdRng
 seed_from_u64
 random_range
 fuzz_table
+# Answering (answering.md): card and review-log columns, card data keys, the
+# deck counters (decks.common) and their schema-11 names, the answer time cap.
+queue
+left
+lastIvl
+cid
+usn
+pos
+dr
+decay
+cd
+mtime_secs
+last_day_studied
+new_studied
+review_studied
+learning_studied
+milliseconds_studied
+newToday
+revToday
+lrnToday
+timeToday
+cap_answer_time_to_secs
+maxTaken
+Rng
+# Day clock (sched/day-clock): config keys, col, cards and config columns,
+# and the conformance timing observation members.
+rollover
+creationOffset
+localOffset
+lastUnburied
+collapseTime
+schedVer
+crt
+col
+cards
+notes
+config
+KEY
+val
+mod
+type
+nid
+utc_offset_secs

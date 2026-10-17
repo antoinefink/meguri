@@ -1,0 +1,33 @@
+# Four new cards of the default preset (learning steps 1m and 10m), FSRS on
+# with the default parameters, load balancer off: one answer each, Again, Hard,
+# Good and Easy, at one instant. The card rows, the review-log rows (ids
+# bumped past the taken instant), the studied-today counters and stamps of the
+# deck, and col.mod (specs/sched/answering.md A2 to A7; the chosen states are
+# the next_states observed before the answers). Needs answer, db_exec
+# (specs/conformance/record-ops.md W1) and legacy_json
+# (specs/conformance/model-ops.md L1).
+id: sched/answer/new-card-ratings
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Inbox]
+  notes:
+    - {notetype: Single, deck: Inbox, fields: [one, uno]}
+    - {notetype: Single, deck: Inbox, fields: [two, dos]}
+    - {notetype: Single, deck: Inbox, fields: [three, tres]}
+    - {notetype: Single, deck: Inbox, fields: [four, cuatro]}
+steps:
+  - advance: 1h
+  - observe: [timing, "next_states(#c1, #c2, #c3, #c4)"]
+  - answer: {card: "#c1", rating: again, time_ms: 1500}
+  - answer: {card: "#c2", rating: hard, time_ms: 2500}
+  - answer: {card: "#c3", rating: good, time_ms: 3500}
+  - answer: {card: "#c4", rating: easy, time_ms: 4500}
+  - observe: ["card(#c1, #c2, #c3, #c4)", "revlog(#c1, #c2, #c3, #c4)"]
+  - observe: [{legacy_json: {decks: [Inbox, Default]}}]
+  - db_exec: {sql: "SELECT id, mtime_secs, usn FROM decks ORDER BY id"}
+  - db_exec: {sql: "SELECT mod, usn FROM col"}

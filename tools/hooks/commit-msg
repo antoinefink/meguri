@@ -10,6 +10,11 @@
 #   ids such as R1987 for UI work no spec covers) and Session: (the session id
 #   from docs/process/provenance/sessions.jsonl).
 # Merge commits are not checked. Runs under macOS /bin/bash 3.2.
+#
+# `commit-msg --commit <rev>` applies the same rules to a commit already made
+# (its message and the paths it changes): the merge gate's trailer check over
+# a branch (tools/gate/static-checks/trailers.sh), which catches --no-verify
+# commits and message-only amends.
 
 set -u
 set -f # spec ids are words, never globs
@@ -22,11 +27,18 @@ reject() {
   exit 1
 }
 
-msg="${1:?usage: commit-msg <message file>}"
-git_dir="$(git rev-parse --absolute-git-dir)" || exit 1
-[ -f "$git_dir/MERGE_HEAD" ] && exit 0
-
-trailers="$(git stripspace --strip-comments <"$msg" | git interpret-trailers --parse)"
+commit=""
+if [ "${1:-}" = --commit ]; then
+  commit="${2:?usage: commit-msg --commit <rev>}"
+  commit="$(git rev-parse --verify -q "$commit^{commit}")" || reject "'$2' is not a commit"
+  [ "$(git rev-list --parents -n 1 "$commit" | wc -w | tr -d ' ')" -le 2 ] || exit 0
+  trailers="$(git log -1 --format=%B "$commit" | git stripspace --strip-comments | git interpret-trailers --parse)"
+else
+  msg="${1:?usage: commit-msg <message file>}"
+  git_dir="$(git rev-parse --absolute-git-dir)" || exit 1
+  [ -f "$git_dir/MERGE_HEAD" ] && exit 0
+  trailers="$(git stripspace --strip-comments <"$msg" | git interpret-trailers --parse)"
+fi
 
 # values <key>: the values of every trailer with this key (case-insensitive).
 values() {
@@ -53,7 +65,14 @@ fi
 
 # NUL-separated, so git does not quote (and hide) non-ASCII or tab names.
 # No rename detection: a move out of core/ must still list its core/ source.
-code_paths="$(git diff --cached --no-renames --name-only -z | tr '\0' '\n' | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
+changed_paths() {
+  if [ -n "$commit" ]; then
+    git diff-tree --root --no-commit-id -r --no-renames --name-only -z "$commit"
+  else
+    git diff --cached --no-renames --name-only -z
+  fi
+}
+code_paths="$(changed_paths | tr '\0' '\n' | grep -E '^(core/|app/|conformance/runner/)' | head -n 3)"
 [ -n "$code_paths" ] || exit 0
 first_path="$(printf '%s\n' "$code_paths" | head -n 1)"
 
@@ -75,7 +94,7 @@ done
 sessions="$(values Session)"
 if [ -z "$sessions" ]; then
   hint=""
-  if [ -f "$git_dir/meguri-session.json" ] && command -v jq >/dev/null 2>&1; then
+  if [ -z "$commit" ] && [ -f "$git_dir/meguri-session.json" ] && command -v jq >/dev/null 2>&1; then
     hint=" ('Session: $(jq -r .session "$git_dir/meguri-session.json")' for this worktree)"
   fi
   reject "$role commits touching $first_path need a Session: trailer$hint"

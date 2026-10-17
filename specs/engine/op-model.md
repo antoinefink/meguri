@@ -5,7 +5,7 @@ Requirements: R1490, R1494, R1495, R1658, R1790, R1860, R2002, R2006, R727 (mech
 Anki: none (Meguri design: no Anki behavior; written by the implementer, U24 execution note)
 Scenarios: none; tests in `core/crates/meguri-engine/tests/`
 
-How every write to `collection.anki2` runs: one serialized executor per open collection, ops with a source, one transaction per op, a sequence number, cancellation, the plan/commit pattern and its write-phase rule, and declared long writes. The change set an op produces is `engine/change-stream`; which ops the executor admits in which collection state is `engine/lifecycle`; jobs, cancel tokens and progress are `engine/jobs`. Undo (U25) consumes the op journal described here.
+How every write to `collection.anki2` runs: one serialized executor per open collection, ops with a source, one transaction per op, a sequence number, cancellation, the plan/commit pattern and its write-phase rule, and declared long writes. The change set an op produces is `engine/change-stream`; which ops the executor admits in which collection state is `engine/lifecycle`; jobs, cancel tokens and progress are `engine/jobs`. Undo (`engine/undo`, U25) consumes the op journal described here.
 
 ## O1. Ops and sources
 
@@ -15,7 +15,7 @@ An op is a closure that writes through one write scope (`storage/ids-usn-mtime`,
 |---|---|
 | name | a static name; the catalog (O9) names every op that may declare a long write |
 | source | one of the seven below |
-| stamping mode | default from the source (table below); an op may set another (`KeepMtime` for `.apkg` updates, `CallerSupplied` for undo restores, `Raw` for U40's rollover queue write) |
+| stamping mode | default from the source (table below); an op may set another (`KeepMtime` for `.apkg` updates, `CallerSupplied` for undo restores, `Raw` for the day clock's ops, U40, `sched/day-clock` D10) |
 | preconditions | O7 |
 | cancel token, progress sink | O5, `engine/jobs` |
 | planned generation | the generation of the handle the op is submitted through (`engine/lifecycle` L3); none when the op read nothing before it was submitted and says so (`run_on_any_generation`) |
@@ -33,7 +33,7 @@ An op is a closure that writes through one write scope (`storage/ids-usn-mtime`,
 | `Rollover` | background | `Local` | day-rollover writes (U40) |
 | `Maintenance` | background | `Local` | Check Database, Empty Cards and other maintenance (U128-U131) |
 
-What each source means for undo (recorded, skip, clear) is U25's.
+What each source does to the undo history (recorded, cleared, truncated, the sync merge rule; skip-undo per op) is `engine/undo` M2.
 
 ## O2. One writer, two queues
 
@@ -46,13 +46,13 @@ What each source means for undo (recorded, skip, clear) is U25's.
 ## O3. One transaction per op
 
 - Every op is one `BEGIN IMMEDIATE` write scope with the journal on (R1490). It commits when the closure returns a value and rolls back when it returns an error, panics, or is cancelled (O5). After a rollback the collection is exactly as before the op (R1860, R2002). A panic is caught on the writer thread, which goes on with the next op; the op's result is `Panicked` with the panic message.
-- A composite op runs several steps in its one transaction. A step runs inside a savepoint: when the step fails, its writes and its journal entries are rolled back to the savepoint and the op decides whether to go on. The op still has one journal, one seq and one change set, so it is one undo entry for U25 (U140's create-then-delete move).
+- A composite op runs several steps in its one transaction. A step runs inside a savepoint: when the step fails, its writes and its journal entries are rolled back to the savepoint, together with what the step noted for its op (media files, the restorer state of `engine/undo` M10, a sync merge report of M9.4), and the op decides whether to go on. The op still has one journal, one seq and one change set, so it is one undo entry for U25 (U140's create-then-delete move).
 - The journal keeps before-images in memory up to 8 MiB per op (U23's default threshold); further before-images spill to an unnamed temporary file in the collection's directory, removed when the journal drops.
 
 ## O4. Sequence numbers and the result
 
 - Every op that commits takes the next value of the engine's sequence counter at its commit, under the commit lock (O6). The counter is the change stream's (`engine/change-stream` S3): op seqs and event seqs are one strictly increasing sequence, from 1, for the life of the engine. An op that changed nothing still takes a seq, but publishes no event.
-- The result: `seq`; the change set (`engine/change-stream` S1), shared, empty when nothing changed; `undo`, the op's name and source when the op is `UserUndoable` and changed something (U25 adds the entry); `generation`; the op's own value; `past_cancel_point` (O5); timing (O10).
+- The result: `seq`; the change set (`engine/change-stream` S1), shared, empty when nothing changed; `undo`, the name and source of the undo step the op recorded (`engine/undo` M1: a `UserUndoable` op that changed something, or a redo; the step's id is the op's seq), applied on the writer before the result is returned; `generation`; the op's own value; `past_cancel_point` (O5); timing (O10).
 - An op that writes nothing gets an empty change set, `col.mod` stays unchanged (a scope without a change does not stamp it), and no event is published.
 
 ## O5. Cancellation
@@ -99,21 +99,24 @@ The precondition kinds:
 
 ## O9. Op catalog
 
-The one list of ops that may declare a long write, and of maintenance tasks. Units add their entry here and in `executor/catalog.rs` together.
+The list of named engine ops with their undo class (`engine/undo` M11, R2020), the one list of ops that may declare a long write, and the list of maintenance tasks. Units add their entry here and in `executor/catalog.rs` together. An op that is not listed is a plain op: it may not declare a long write. The writer syncs a pending WAL flush (`storage/open-and-connections` C9.2) before any op that may declare a long write, so an op that is short gets an entry that may not.
 
-| Name | Unit | Long write | Write cancellable between batches |
-|---|---|---|---|
-| `check_database` (vacuum and repairs) | U128 | yes | no |
-| `apkg_apply` (a large `.apkg` apply) | U120 | yes | no |
-| `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | yes | yes |
-| `notetype_structure_change` (on large note types) | U34 | yes | no |
-| `bulk_op` (bulk ops over large selections) | U86 | yes | no |
-| `vacuum` | U128, U132 | maintenance task | |
-| `reindex` | U128 | maintenance task | |
-| `analyze` | U132 | maintenance task | |
-| `wal_checkpoint` | U109, U132 | maintenance task | |
+| Name | Unit | Undo class | Long write | Write cancellable between batches |
+|---|---|---|---|---|
+| `check_database` (vacuum and repairs) | U128 | destructive, not undoable | yes | no |
+| `apkg_apply` (a large `.apkg` apply) | U120 | undoable | yes | no |
+| `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | not destructive | yes | yes |
+| `notetype_structure_change` (on large note types) | U34 | undoable | yes | no |
+| `bulk_op` (bulk ops over large selections) | U86 | undoable | yes | no |
+| `undo` (`engine/undo` M4) | U25 | undoable | no | |
+| `redo` (`engine/undo` M5) | U25 | undoable | no | |
+| `undo_long_write`, `redo_long_write` (undo and redo of a step whose op declared a long write) | U25 | undoable | yes | no |
+| `vacuum` | U128, U132 | not destructive | maintenance task | |
+| `reindex` | U128 | not destructive | maintenance task | |
+| `analyze` | U132 | not destructive | maintenance task | |
+| `wal_checkpoint` | U109, U132 | not destructive | maintenance task | |
 
-U37 exports the catalog's names and undoability; U25 adds each op's undo class (R2020).
+A destructive op that is not undoable is confirmed first and preceded by U127's pre-op backup. U37 exports the catalog's names and undo classes.
 
 ## O10. Timing and budgets
 

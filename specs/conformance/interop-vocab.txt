@@ -76,6 +76,15 @@ lrt
 nextPos
 localOffset
 db-check
+# Undo ops and observation (undo-ops.md, U25); undoable is the config API's
+# argument name.
+undo_status
+undoable
+remove_config
+set_config
+nothing_to_undo
+nothing_to_redo
+changed_externally
 # collection-check.md K11: config keys the schedule step reads or writes
 curDeck
 activeDecks
@@ -121,3 +130,18 @@ fsrsWeights
 desiredRetention
 loadBalancerEnabled
 fsrsShortTermWithStepsEnabled
+# timed-operations.md: package entries and kinds, sync protocol headers, the
+# browser's sort-column config values and the search keywords of its queries.
+colpkg
+collection.anki21b
+anki-sync
+anki-original-size
+noteFld
+cardDue
+sortType
+prop
+rated
+lastUnburied
+# browser-config-ops.md: the browser config op and observation kind
+browser_config_set
+browser_config

@@ -44,8 +44,9 @@ pub trait SuspendParticipant: Send + Sync {
 }
 
 /// Runs while the collection opens, before it is `Ready` (`engine/lifecycle`
-/// L2): U43's pending-answer replay, U40's rollover check. The handle it gets
-/// is the only one whose ops are admitted then. An error fails the open.
+/// L2): U43's pending-answer replay. The engine's day clock check runs after
+/// every registered step. The handle it gets is the only one whose ops are
+/// admitted then. An error fails the open.
 pub trait OpenStep: Send + Sync {
     fn name(&self) -> &str;
     fn run(&self, collection: &Collection) -> Result<(), EngineError>;

@@ -1,0 +1,52 @@
+# Config writes that record an "Update Config" step: adding undoNew, changing
+# undoKept and removing undoGone are three steps. Undoing them removes the
+# added key and writes the changed and the removed rows back exactly, their
+# server usn and old mtime_secs included; col.mod goes back step by step.
+# Redo writes the rows as the undo found them. Writing the value a key holds
+# and removing a missing key record nothing and leave col.mod, but empty the
+# redo history (specs/engine/undo.md A2, A6, A7). Needs db_exec, set_config
+# with undoable, remove_config, undo, redo and undo_status
+# (specs/conformance/undo-ops.md V1 to V3).
+id: undo/config-writes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  # Two keys another client wrote and synced.
+  - db_exec: {sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('undoKept', 4, 1700000000, CAST('[1,2]' AS BLOB))"}
+  - db_exec: {sql: "INSERT INTO config (KEY, usn, mtime_secs, val) VALUES ('undoGone', 4, 1700000000, CAST('\"bye\"' AS BLOB))"}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - observe: [undo_status]
+  - advance: 1h
+  - set_config: {key: undoNew, value: {x: 1}, undoable: true}
+  - advance: 1m
+  - set_config: {key: undoKept, value: [3], undoable: true}
+  - advance: 1m
+  - remove_config: {key: undoGone}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - observe: [undo_status]
+  - advance: 1m
+  - undo: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - undo: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - undo: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - observe: [undo_status]
+  - undo: {}
+  - advance: 1m
+  - redo: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - redo: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - redo: {}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - redo: {}
+  # The removal is undone again, so a redo step exists. The same value, and a
+  # key that does not exist: nothing is written or recorded, col.mod stays,
+  # and the redo history is emptied.
+  - undo: {}
+  - advance: 1m
+  - set_config: {key: undoKept, value: [3], undoable: true}
+  - observe: [undo_status]
+  - remove_config: {key: undoAbsent}
+  - db_exec: {sql: "SELECT KEY, usn, mtime_secs, CAST(val AS TEXT), (SELECT mod FROM col) FROM config WHERE KEY IN ('undoGone', 'undoKept', 'undoNew') ORDER BY KEY"}
+  - redo: {}

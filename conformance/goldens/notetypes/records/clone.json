@@ -1,0 +1,205 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "clone_notetype": {
+          "name": "Src copy"
+        }
+      },
+      {
+        "clone_notetype": {
+          "name": "src copy+"
+        }
+      },
+      {
+        "clone_notetype": {
+          "name": "Src copy copy"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Src", 1894701600, -1],
+            ["Src copy", 1894701660, -1],
+            ["src copy+", 1894701660, -1],
+            ["Src copy copy", 1894701660, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Src", "10011A1A2E63617264207B20666F6E742D73697A653A20333070783B207D2A0A2520737263207072650A320A252073726320706F7374420510011A01004207080110011A0101480250CB89EC8FF723"],
+            ["Src copy", "10011A1A2E63617264207B20666F6E742D73697A653A20333070783B207D2A0A2520737263207072650A320A252073726320706F7374420510011A01004207080110011A01014802"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Src", 0, "Front", "08011A05417269616C20182A04776F7264488927"],
+            ["Src", 1, "Back", "10011A0747656F726769612012300138014001488A27"],
+            ["Src copy", 0, "Front", "08011A05417269616C20182A04776F7264488927"],
+            ["Src copy", 1, "Back", "10011A0747656F726769612012300138014001488A27"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Src", 0, "Forward", 55, 66, "0A097B7B46726F6E747D7D12087B7B4261636B7D7D1A0D7B7B46726F6E747D7D2028622928013205417269616C380C40F12E"],
+            ["Src", 1, "Backward", 55, 66, "0A087B7B4261636B7D7D12097B7B46726F6E747D7D40F22E"],
+            ["Src copy", 0, "Forward", 0, 0, "0A097B7B46726F6E747D7D12087B7B4261636B7D7D1A0D7B7B46726F6E747D7D2028622928013205417269616C380C40F12E"],
+            ["Src copy", 1, "Backward", 0, 0, "0A087B7B4261636B7D7D12097B7B46726F6E747D7D40F22E"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "Src": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "word",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 24,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": true,
+                "tag": null
+              },
+              {
+                "collapsed": true,
+                "description": "",
+                "exclude_from_search": true,
+                "font_name": "Georgia",
+                "font_size": 18,
+                "name": "Back",
+                "plain_text": true,
+                "prevent_deletion": false,
+                "rtl": true,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": 1234567890123,
+            "original_stock_kind": 2,
+            "sort_field": 1,
+            "templates": [
+              {
+                "deck": "Default",
+                "name": "Forward",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Backward",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          },
+          "Src copy": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "word",
+                "exclude_from_search": false,
+                "font_name": "Arial",
+                "font_size": 24,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": true,
+                "tag": null
+              },
+              {
+                "collapsed": true,
+                "description": "",
+                "exclude_from_search": true,
+                "font_name": "Georgia",
+                "font_size": 18,
+                "name": "Back",
+                "plain_text": true,
+                "prevent_deletion": false,
+                "rtl": true,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 2,
+            "sort_field": 1,
+            "templates": [
+              {
+                "deck": "Default",
+                "name": "Forward",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              },
+              {
+                "deck": null,
+                "name": "Backward",
+                "requirement": {
+                  "fields": [1],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/clone",
+  "scenario_sha256": "b1ea7f9fb8f04ea40ab0ec288787b49d3fe8e6914786d190ba4d410d72101d49",
+  "tz": "UTC"
+}
