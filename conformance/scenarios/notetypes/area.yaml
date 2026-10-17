@@ -4,8 +4,8 @@
 # specs/conformance/notetype-ops.md T10.2. records/stock-render-handoff is
 # live and must pass in T1: Meguri's segment is that new collection only
 # (records.md N12), and the oracle adds and renders notes of the stock kinds
-# Meguri wrote. U27's add_note has landed: records/stock-handoff is runnable
-# but stays inactive until its T1 live run passes after integration.
+# Meguri wrote. U27's add_note completed records/stock-handoff: it is active,
+# and T1 runs it at merge against the full checkout of the tip.
 # The other note type scenarios need what
 # specs/notetypes/records.md N12 and schema-changes.md G8 list:
 # records/stamps setup.decks (U28); records/clone legacy_update (U36);
@@ -16,6 +16,7 @@ area: notetypes
 active:
   - "records/io-on-demand"
   - "records/names"
+  - "records/stock-handoff"
   - "records/stock-new-collection"
   - "records/stock-render-handoff"
   - "records/stock-structure"
