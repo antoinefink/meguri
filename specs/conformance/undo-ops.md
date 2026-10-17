@@ -61,7 +61,7 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `add_note_type` | Add Note Type | |
 | `answer_card` | Answer Card | `answer` (`sched/answering` A7) |
 | `build_deck` | Build Deck | (building or rebuilding a filtered deck) |
-| `bury` | Bury | |
+| `bury` | Bury | `bury` (`sched-ops.md` J2) |
 | `change_deck` | Change Deck | |
 | `change_note_type` | Change Note Type | |
 | `clear_unused_tags` | Clear Unused Tags | |
@@ -69,10 +69,10 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `deck_options` | Deck Options | |
 | `delete_deck` | Delete Deck | |
 | `delete_note` | Delete Note | `delete_notes` |
-| `empty` | Empty | (emptying a filtered deck) |
+| `empty` | Empty | `empty_filtered` (`sched-ops.md` J9) |
 | `empty_cards` | Empty Cards | |
 | `find_and_replace` | Find and Replace | |
-| `grade_now` | Grade Now | |
+| `grade_now` | Grade Now | `grade_now` (`sched-ops.md` J8) |
 | `image_occlusion` | Image Occlusion | |
 | `import` | Import | |
 | `preferences` | Preferences | |
@@ -81,13 +81,13 @@ The closed list of step ids that `undo_status` reports, with Anki's English name
 | `rename_deck` | Rename Deck | (renaming or moving a deck) |
 | `rename_tag` | Rename Tag | (renaming or moving a tag) |
 | `reposition` | Reposition | |
-| `reset_card` | Reset Card | |
+| `reset_card` | Reset Card | `forget` (`sched-ops.md` J7) |
 | `select_deck` | Select Deck | (Anki only: Meguri records no step for selecting a deck, R42) |
-| `set_due_date` | Set Due Date | |
+| `set_due_date` | Set Due Date | `set_due` (`sched-ops.md` J6) |
 | `set_flag` | Set Flag | |
-| `suspend` | Suspend | `suspend` |
+| `suspend` | Suspend | `suspend` (`sched-ops.md` J3) |
 | `toggle_load_balancer` | Toggle Load Balancer | |
-| `unbury_unsuspend` | Unbury/Unsuspend | |
+| `unbury_unsuspend` | Unbury/Unsuspend | `unsuspend`, `unbury_deck` (`sched-ops.md` J4, J5) |
 | `update_card` | Update Card | |
 | `update_config` | Update Config | `set_config` with `undoable: true`, `remove_config` |
 | `update_deck` | Update Deck | |

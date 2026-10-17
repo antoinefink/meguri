@@ -1,0 +1,46 @@
+# The remembered Set Due Date text (R709; specs/sched/set-due-date.md S6,
+# S7). From the browser the text is stored as typed ("4-2!") in
+# setDueBrowser, in the same "Set Due Date" step as the cards: undo removes
+# the key (it was missing), redo writes it again. From the review screen it
+# goes to setDueReviewer, also when it equals the default "1"; the same text
+# again leaves the row's stamps alone; without a context no key is written.
+# The drawn day of the range is read only as membership (S3). Needs set_due
+# (specs/conformance/sched-ops.md J6, J10), db_exec, undo, redo and
+# undo_status.
+id: sched/ops/set-due/context
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [one, x]}
+    - {notetype: Single, deck: Home, fields: [two, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - set_due: {cards: ["#c1"], days: "4-2!", context: browser}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT due BETWEEN 2 AND 4, type, queue, ivl, mod FROM cards ORDER BY id LIMIT 1"}
+  - observe: [undo_status]
+  - advance: 1m
+  - undo: {}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - observe: ["card(#c1)", "revlog(#c1)", undo_status]
+  - redo: {}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "1", context: reviewer}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "1", context: reviewer}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "2"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('setDueBrowser', 'setDueReviewer') ORDER BY KEY"}
+  - observe: ["card(#c2)", "revlog(#c2)"]

@@ -1,0 +1,42 @@
+# AE26 (R711, R712, R682; specs/sched/set-due-date.md S4, S5, S7). FSRS on,
+# day 10 (2030-01-25, the next day starting at 2030-01-26 04:00 UTC). A review
+# card last reviewed 5 days ago (2030-01-20 10:00, 5 days and 18 hours before
+# the next day starts) with interval 10 is set due "3": it is due on day 13
+# with interval 5 + 3 = 8, its memory state and other data keys unchanged,
+# and one manual review-log row records ease 0, ivl 8, lastIvl 10, time 0 and
+# the difficulty 5.048 as factor 549 (truncated; an answer would write 550).
+# Undo removes the row and restores the card; redo writes the row again
+# under its id. A twin card set due "3!" gets the same interval: "!" changes
+# nothing with FSRS on. Needs set_due (specs/conformance/sched-ops.md J6,
+# J10), db_exec, undo, redo and undo_status.
+id: sched/ops/set-due/ae26
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [plain, x]}
+    - {notetype: Single, deck: Home, fields: [forced, x]}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-25T10:00:00"
+  - observe: [timing]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 10, due = 15, factor = 2500, reps = 4, data = ? WHERE nid IN (SELECT id FROM notes WHERE sfld IN ('plain', 'forced'))"
+      params: ['{"pos":1,"s":12.5,"d":5.048,"dr":0.9,"decay":0.154,"lrt":1895133600}']
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - set_due: {cards: ["#c1"], days: "3"}
+  - observe: ["card(#c1)", "revlog(#c1)", undo_status]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  - undo: {}
+  - observe: ["card(#c1)", "revlog(#c1)", undo_status]
+  - redo: {}
+  - observe: ["card(#c1)", "revlog(#c1)", undo_status]
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "3!"}
+  - observe: ["card(#c2)", "revlog(#c2)"]

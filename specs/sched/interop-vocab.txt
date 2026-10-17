@@ -117,6 +117,19 @@ timeToday
 cap_answer_time_to_secs
 maxTaken
 Rng
+# Manual scheduling operations and Set Due Date (sched/manual-ops,
+# sched/set-due-date, U48): card columns, the preset's starting ease and the
+# deck's preset id, and the collection config keys the operations write.
+odue
+initial_ease
+config_id
+nextPos
+setDueReviewer
+setDueBrowser
+restorePositionReviewer
+restorePositionBrowser
+resetCountsReviewer
+resetCountsBrowser
 # Day clock (sched/day-clock): config keys, col, cards and config columns,
 # and the conformance timing observation members.
 rollover

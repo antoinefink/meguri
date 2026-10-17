@@ -1,0 +1,47 @@
+# Set Due Date with a range (R708, R711; specs/sched/set-due-date.md S3,
+# S4.2, S5). On day 10, "1-7" on four review cards with lrt and two new
+# cards: each card is due between day 11 and day 17 (its own draw, which
+# Anki does not make reproducible, so only relations that hold for any draw
+# are read): a card with lrt has interval - (due - 10) equal to its elapsed
+# days since lrt (3, 5, 8 and 0), a new card interval 0, and each review-log
+# row's ivl equals its card's interval, with ids in card id order. Needs
+# set_due (specs/conformance/sched-ops.md J6, J10) and db_exec.
+id: sched/ops/set-due/range
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [r3, x]}
+    - {notetype: Single, deck: Home, fields: [r5, x]}
+    - {notetype: Single, deck: Home, fields: [r8, x]}
+    - {notetype: Single, deck: Home, fields: [r0, x]}
+    - {notetype: Single, deck: Home, fields: [n1, x]}
+    - {notetype: Single, deck: Home, fields: [n2, x]}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-25T10:00:00"
+  - observe: [timing]
+  # lrt 3.5, 5.5 and 8.25 days before the next day starts, and 6 hours before
+  # it (0 whole days).
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 4, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'r3')"
+      params: ['{"s":4.0,"d":5.0,"lrt":1895328000}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 6, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'r5')"
+      params: ['{"s":6.0,"d":5.0,"lrt":1895155200}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 9, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'r8')"
+      params: ['{"s":9.0,"d":5.0,"lrt":1894917600}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 10, ivl = 1, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'r0')"
+      params: ['{"s":1.0,"d":5.0,"lrt":1895608800}']
+  - set_due: {cards: ["#c1", "#c2", "#c3", "#c4", "#c5", "#c6"], days: "1-7"}
+  - db_exec: {sql: "SELECT due - 10 BETWEEN 1 AND 7, type, queue, mod, usn FROM cards ORDER BY id"}
+  - db_exec: {sql: "SELECT ivl - (due - 10) FROM cards WHERE type = 2 AND ivl > 0 ORDER BY id"}
+  - db_exec: {sql: "SELECT ivl FROM cards WHERE nid IN (SELECT id FROM notes WHERE sfld IN ('n1', 'n2')) ORDER BY id"}
+  - db_exec: {sql: "SELECT r.id, r.cid, r.ivl = c.ivl, r.ease, r.lastIvl, r.factor, r.time, r.type, r.usn FROM revlog r JOIN cards c ON c.id = r.cid ORDER BY r.id"}

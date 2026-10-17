@@ -1,0 +1,37 @@
+# Reset without "Restore original position" and with "Reset repetition and
+# lapse counts" from the review screen (R713, R714, R715; specs/sched/
+# manual-ops.md M6). Three cards were added at positions 1 to 3 (nextPos 4).
+# Listed as #c2, #c1, #c3, they take 4, 5 and 6 in that order, a new card
+# and a card with a saved pos included, and nextPos becomes 7; reps and
+# lapses become 0. The reviewer's two choice keys are written (false, true).
+# A later Reset with no context and the op's defaults (both off) puts #c1 at
+# 7, keeps its (zero) counts and leaves the choice keys alone. Needs forget
+# (specs/conformance/sched-ops.md J7, J10) and db_exec.
+id: sched/ops/reset/end-of-queue
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [withpos, x]}
+    - {notetype: Single, deck: Home, fields: [stillnew, x]}
+    - {notetype: Single, deck: Home, fields: [nopos, x]}
+steps:
+  - observe: [timing]
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 12, factor = 2500, reps = 9, lapses = 2, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'withpos')"
+      params: ['{"pos":1,"s":20.0,"d":5.5,"lrt":1894615200}']
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 3, due = 1, ivl = 2, factor = 2200, reps = 6, lapses = 3, left = 1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'nopos')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - forget: {cards: ["#c2", "#c1", "#c3"], restore_position: false, reset_counts: true, context: reviewer}
+  - observe: [card, revlog]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('nextPos', 'resetCountsReviewer', 'restorePositionReviewer') ORDER BY KEY"}
+  - advance: 1m
+  - forget: {cards: ["#c1"]}
+  - observe: ["card(#c1)", "revlog(#c1)"]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('nextPos', 'resetCountsReviewer', 'restorePositionReviewer') ORDER BY KEY"}

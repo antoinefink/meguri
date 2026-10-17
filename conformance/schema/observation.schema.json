@@ -695,6 +695,14 @@
           "type": "array",
           "items": { "$ref": "#/$defs/tag_node" }
         },
+        "set_due": {
+          "description": "specs/conformance/sched-ops.md J6: the op has no output, so only the rejection invalid_days appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["invalid_days"] } } }]
+        },
+        "empty_filtered": {
+          "description": "sched-ops.md J9: the op has no output, so only the rejection not_filtered appears.",
+          "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["not_filtered"] } } }]
+        },
         "undo": {
           "description": "undo-ops.md V1: the op has no output, so only a rejection appears; changed_externally is Meguri's only.",
           "allOf": [{ "$ref": "#/$defs/rejection" }, { "properties": { "error": { "enum": ["nothing_to_undo", "changed_externally"] } } }]

@@ -1,0 +1,58 @@
+# Reset with "Restore original position" from the browser (R713, R715,
+# R716, R682; specs/sched/manual-ops.md M6). Six cards were added at
+# positions 1 to 6, so nextPos is 7. Listed as #c6, #c2, #c3, #c1, #c4, #c5:
+# the review card without pos takes 7, the new card keeps its position 2,
+# the suspended card without pos takes 8, the cards with pos 1 and 4 go back
+# there, and the review card in the filtered deck Cram goes home to its pos
+# 5; nextPos becomes 9. Every card becomes new with interval and factor 0,
+# keeps reps, lapses and left, loses s, d and pos and keeps dr, decay, lrt
+# and cd. The note keeps its leech tag. One marker row per card (ease 0, ivl
+# 0, lastIvl the old interval, factor 0, time 0, type 4), ids in the listed
+# order. The browser's two choice keys are written. One "Reset Card" step:
+# undo restores the cards, nextPos and the keys and removes the markers.
+# Needs forget (specs/conformance/sched-ops.md J7, J10), db_exec, undo and
+# undo_status.
+id: sched/ops/reset/restore-position
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [withpos, x], tags: [leech]}
+    - {notetype: Single, deck: Home, fields: [stillnew, x]}
+    - {notetype: Single, deck: Home, fields: [suspended, x]}
+    - {notetype: Single, deck: Home, fields: [learning, x]}
+    - {notetype: Single, deck: Home, fields: [filtered, x]}
+    - {notetype: Single, deck: Home, fields: [nopos, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 5, ivl = 10, factor = 2500, reps = 7, lapses = 2, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'withpos')"
+      params: ['{"pos":1,"s":4.5,"d":5.0,"dr":0.9,"decay":0.154,"lrt":1894615200,"cd":"{\"k\":1}"}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = -1, due = 5, ivl = 3, factor = 2500, reps = 4, lapses = 1, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'suspended')"
+      params: ['{"s":3.0,"d":6.0,"lrt":1894615200}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200, left = 2, reps = 1, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'learning')"
+      params: ['{"pos":4,"s":2.3,"d":2.1,"lrt":1894701000}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 6, factor = 2500, reps = 3, odid = did, did = 100, odue = 9, due = -100000, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'filtered')"
+      params: ['{"pos":5,"s":8.0,"d":4.0,"lrt":1894615200}']
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 3, ivl = 8, factor = 2500, reps = 4, data = '' WHERE nid = (SELECT id FROM notes WHERE sfld = 'nopos')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('nextPos', 'resetCountsBrowser', 'restorePositionBrowser') ORDER BY KEY"}
+  - advance: 1m
+  - forget: {cards: ["#c6", "#c2", "#c3", "#c1", "#c4", "#c5"], restore_position: true, context: browser}
+  - observe: [card, revlog, undo_status]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('nextPos', 'resetCountsBrowser', 'restorePositionBrowser') ORDER BY KEY"}
+  - db_exec: {sql: "SELECT sfld, tags, mod, usn FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  - undo: {}
+  - observe: [card, revlog, undo_status]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), mtime_secs, usn FROM config WHERE KEY IN ('nextPos', 'resetCountsBrowser', 'restorePositionBrowser') ORDER BY KEY"}

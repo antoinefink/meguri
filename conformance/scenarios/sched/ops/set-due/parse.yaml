@@ -1,0 +1,53 @@
+# The days text of Set Due Date (R708; specs/sched/set-due-date.md S2, S4.1).
+# Refused texts record invalid_days and write nothing: the card keeps its
+# row and server usn, no review-log row, no step, col.mod unchanged.
+# "007" is 7 days; "5-2!" is a range with reversed bounds (only its
+# membership is read, S3); the largest accepted number, 4294967295, on day 0
+# stores due -1 (32-bit wrap) and the next number is refused; "0" is today.
+# Needs set_due (specs/conformance/sched-ops.md J6, J10), db_exec and
+# undo_status.
+id: sched/ops/set-due/parse
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [one, x]}
+    - {notetype: Single, deck: Home, fields: [two, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  - set_due: {cards: ["#c1"], days: "abc"}
+  - set_due: {cards: ["#c1"], days: "-1"}
+  - set_due: {cards: ["#c1"], days: "3--4"}
+  - set_due: {cards: ["#c1"], days: "1-2-3"}
+  - set_due: {cards: ["#c1"], days: "3.5"}
+  - set_due: {cards: ["#c1"], days: "3!!"}
+  - set_due: {cards: ["#c1"], days: "+3"}
+  - set_due: {cards: ["#c1"], days: "3-"}
+  - set_due: {cards: ["#c1"], days: "!"}
+  - set_due: {cards: ["#c1"], days: ""}
+  - set_due: {cards: ["#c1"], days: " 3"}
+  - set_due: {cards: ["#c1"], days: "3 "}
+  - set_due: {cards: ["#c1"], days: "٣"}
+  - set_due: {cards: ["#c1"], days: "4294967296"}
+  - set_due: {cards: ["#c1"], days: "99999999999999999999"}
+  - observe: ["card(#c1)", "revlog(#c1)", undo_status]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - set_due: {cards: ["#c1"], days: "007"}
+  - observe: ["card(#c1)", "revlog(#c1)"]
+  - advance: 1m
+  - set_due: {cards: ["#c1"], days: "5-2!"}
+  - db_exec: {sql: "SELECT due BETWEEN 2 AND 5, type, queue, ivl, factor, mod, usn FROM cards WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1)"}
+  - observe: ["revlog(#c1)"]
+  - set_due: {cards: ["#c2"], days: "4294967295"}
+  - observe: ["card(#c2)", "revlog(#c2)"]
+  - advance: 1m
+  - set_due: {cards: ["#c2"], days: "0"}
+  - observe: ["card(#c2)", "revlog(#c2)"]

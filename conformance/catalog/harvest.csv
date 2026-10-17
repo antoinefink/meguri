@@ -719,13 +719,13 @@ hfe671bb51af8,typescript,tag,review,out-of-scope,A custom scheduling script repl
 h07a0e8e761e3,python,tag,sched,in-scope,"U43/U44/U246: cover fractional learning steps, remaining counts, logged delays and graduation through real answers; SM-2 graduation constants are excluded by R752.",,deferred
 h10adc68e72c5,python,tag,sched,out-of-scope,SM-2 interval spacing and the hard-factor option are excluded by the FSRS-only policy (R752).,,done
 h1b8a7b774a45,python,tag,sched,in-scope,"U41/U43/U44/U246: adding a new card must increase the new count, fetch it and move it into learning on Again with a valid due time.",,deferred
-h1f57b66e6c57,python,tag,sched,in-scope,"U48/U246: manual and sibling burial must exclude cards from review and support selective user-only, scheduler-only and combined restoration.",,deferred
-h2112a6880d74,python,tag,sched,in-scope,U48/U246: setting a new card due today or tomorrow must convert it to review and retain an interval floor of one day.,,deferred
-h25bc326d314f,python,tag,sched,in-scope,U48/U246: suspend/restore must preserve intraday relearning timing and existing filtered home/due data while removing suspended cards from queues.,,deferred
+h1f57b66e6c57,python,tag,sched,in-scope,"Bury by hand gives queue -3, the scheduler's bury -2, and each unbury mode restores only its kind",sched/ops/bury/cards-and-notes sched/ops/bury/unbury-deck,done
+h2112a6880d74,python,tag,sched,in-scope,"Set Due Date turns a new card into a review card due today or tomorrow; Meguri runs it with FSRS on, where the interval stays 0",sched/ops/set-due/parse sched/ops/set-due/card-kinds,done
+h25bc326d314f,python,tag,sched,in-scope,"Suspend and unsuspend restore the queue from the type, and a card in a filtered deck stays there when suspended",sched/ops/suspend/cards-and-notes,done
 h381d4b819a8e,python,tag,sched,preservation-only,Learning state inside a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 h3ec3f77f5c5c,python,tag,sched,preservation-only,Previewing in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 h5566e8764422,python,tag,sched,in-scope,U44/U246: an Again answer with no relearning steps must return directly to review instead of leaving the card in a nonexistent step.,,deferred
-h55746f87d38f,python,tag,sched,in-scope,U48/U246: Reset must convert a review card back to new and update review/new queue counts.,,deferred
+h55746f87d38f,python,tag,sched,in-scope,"Reset makes a review card new again, at the end of the new queue",sched/ops/reset/end-of-queue sched/ops/reset/restore-position,done
 h56c0cea0f0c6,python,tag,sched,in-scope,U41/U246: parent and child new limits must cap the gathered total and preserve the correct first deck's cards.,,deferred
 h660dab1d7e25,python,tag,sched,out-of-scope,Multiplying a lapsed card's interval by the SM-2 lapse multiplier is excluded by R752.,,done
 h69f8e4b9fca9,python,tag,sched,in-scope,"U41/U43/U44/U246: a failed card stays behind due reviews until its learning time arrives, then takes priority when due.",,deferred
@@ -753,10 +753,10 @@ hf76a58bb5a76,python,tag,sched,in-scope,U49/U44/U246: removing lapse steps durin
 h00a233a3c403,rust,tag,sched,in-scope,Hard repeats the current learning step,sched/steps/learning-progress sched/steps/hard-delays,done
 h010d3289404d,rust,tag,sched,in-scope,Good on a relearning step stays in relearning,sched/steps/relearning,done
 h0348591aa08e,rust,tag,sched,in-scope,A new collection is on day 0 with its next boundary in the future.,sched/day/creation-after-rollover-tokyo,done
-h04ac07a21de7,rust,tag,sched,in-scope,"U48/U246: user-only unbury must restore manually buried cards and retain scheduler-buried siblings, with matching queue counts.",,deferred
+h04ac07a21de7,rust,tag,sched,in-scope,Unbury's manual mode leaves cards buried by the scheduler,sched/ops/bury/unbury-deck,done
 h05a411d3dbbc,rust,tag,sched,in-scope,U43/U44/U246: undo and redo of adding and answering must restore all queue-category counts through the complete learning sequence.,,deferred
 h0875e3e791c6,rust,tag,sched,out-of-scope,SM-2 hard interval multiplier; Meguri schedules with FSRS,,done
-h0c5d8c72ae63,rust,tag,sched,in-scope,"U48/U246: due-date input must accept single offsets, normalized ranges and forced-reset suffixes while refusing empty, malformed and negative values.",,deferred
+h0c5d8c72ae63,rust,tag,sched,in-scope,"The days text: N, N-M in either order, the ! suffix, and refusals",sched/ops/set-due/parse,done
 h0cc7ca135634,rust,tag,sched,in-scope,U41/U43/U44/U246: review limits must reserve capacity for new cards and counts must update correctly through learning graduation.,,deferred
 h0d55a293e421,rust,tag,sched,in-scope,A Reset row drops the history before it; the training form is checked with the optimizer (U47),sched/memory/reset sched/memory/crafted-rows,done
 h0d7374461795,rust,tag,sched,in-scope,U41/U43/U155/U246: empty-deck completion data must report no remaining work or buried cards and a valid next-learning sentinel.,,deferred
@@ -777,7 +777,7 @@ h279126fd92b9,rust,tag,sched,in-scope,"Minimum and maximum review intervals, the
 h2bf702951408,rust,tag,sched,in-scope,A history wholly before the ignore date gives no item,sched/memory/ignore-before,done
 h319667c38026,rust,tag,sched,in-scope,"U44/U246: the review state's leech status must reflect the resulting leech flag, including the false case.",,deferred
 h34810b99051e,rust,tag,sched,in-scope,"Hard without learning steps leaves learning (FSRS interval, or short-term)",sched/fsrs/short-term,done
-h37681aedbc38,rust,tag,sched,in-scope,U48/U246: Reset must independently control restoring the original new position and clearing repetitions/lapses.,,deferred
+h37681aedbc38,rust,tag,sched,in-scope,"Reset with and without restoring the position, and the counts",sched/ops/reset/restore-position sched/ops/reset/end-of-queue,done
 h3ba7c0fbc8f2,rust,tag,sched,in-scope,Again without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
 h3d0ce2bbaef8,rust,tag,sched,out-of-scope,Assigning selected new cards consecutive positions from a chosen offset is excluded Reposition behavior.,,done
 h3dbeef95c3db,rust,tag,sched,out-of-scope,SM-2 interval modifier; Meguri schedules with FSRS,,done
@@ -788,18 +788,18 @@ h40a4438f58cc,rust,tag,sched,out-of-scope,Applying requested desired retention t
 h40e3819d7877,rust,tag,sched,in-scope,"Again, Hard and Good delays of learning steps",sched/steps/hard-delays sched/steps/learning-progress,done
 h419067ffeea3,rust,tag,sched,in-scope,Day count from the creation date and offset and the current offset and rollover hour.,sched/day/matrix/europe-paris sched/day/dst-america-new-york sched/day/created-tokyo-studied-los-angeles,done
 h431af1c97841,rust,tag,sched,in-scope,"U41/U246: new-card gathering must honor nested limits across deck, increasing-position and decreasing-position orders while retaining sibling order.",,deferred
-h4705ef5c9c23,rust,tag,sched,in-scope,"U48/U246: burying selected notes must resolve their cards, bury the correct records and report the affected count.",,deferred
+h4705ef5c9c23,rust,tag,sched,in-scope,Bury Note buries every card of the note,sched/ops/bury/cards-and-notes,done
 h4833ddf59228,rust,tag,sched,in-scope,U41/U43/U44/U246: new-before-review order with review-sibling burial must not count or serve a sibling that the preceding answer removes.,,deferred
-h49565ba9b7dc,rust,tag,sched,in-scope,U48/U246: burying an already suspended card must retain explicit suspension so daily unbury cannot restore it.,,deferred
-h4ad2bd959137,rust,tag,sched,in-scope,U48/U246: restoring a buried card must recover its original queue and make it available to queue counts again.,,deferred
-h4d0c7354dfcd,rust,tag,sched,in-scope,U48/U246: unbury-all for a selected deck must restore its buried card and update available counts.,,deferred
+h49565ba9b7dc,rust,tag,sched,in-scope,Burying never touches a suspended card,sched/ops/bury/cards-and-notes,done
+h4ad2bd959137,rust,tag,sched,in-scope,Unburying chosen cards restores their queue,sched/ops/bury/unbury-deck sched/ops/suspend/cards-and-notes,done
+h4d0c7354dfcd,rust,tag,sched,in-scope,Unbury on a deck restores the buried cards of that deck,sched/ops/bury/unbury-deck,done
 h4dcd915bda8e,rust,tag,sched,in-scope,Next day boundary before and after the rollover hour.,sched/day/matrix/utc sched/day/ae84-kathmandu,done
 h4eb04b88ea52,rust,tag,sched,in-scope,"Again without learning steps leaves learning (FSRS interval, or short-term)",sched/fsrs/short-term,done
 h53acbb05c3fb,rust,tag,sched,in-scope,A deck's studied-today counters after answers,sched/data/deck-counters,done
 h53ef76bc5048,rust,tag,sched,in-scope,Again in relearning restarts the relearning steps,sched/steps/relearning,done
 h557e34da0263,rust,tag,sched,in-scope,Hard leaving relearning without steps with the FSRS interval,sched/steps/relearning,done
 h55e6099a6eb9,rust,tag,sched,in-scope,Easy graduates above the Good interval,sched/steps/learning-progress sched/steps/new-card-buttons,done
-h561dc186a5dc,rust,tag,sched,in-scope,U48/U246: scheduler-only unbury must retain user burial and restore only scheduler-buried cards.,,deferred
+h561dc186a5dc,rust,tag,sched,in-scope,Unbury's siblings mode leaves cards buried by hand,sched/ops/bury/unbury-deck,done
 h567aebc9fabb,rust,tag,sched,out-of-scope,"Upgrading a v1-scheduler collection: Meguri refuses v1 collections and has no scheduler upgrade (R705, R1482)",,done
 h5811eae76235,rust,tag,sched,in-scope,Delays over a day rounded to whole days,sched/steps/hard-delays,done
 h5b374d4c4d55,rust,tag,sched,in-scope,"No-regression minimum of a review interval, inside and outside the fuzz range",sched/fsrs/review-buttons,done
@@ -809,15 +809,15 @@ h5e228991cac8,rust,tag,sched,out-of-scope,Building cram/preview searches from in
 h6139479db902,rust,tag,sched,in-scope,Graded rows within a day before the first interday one do not start a history without learning rows,sched/memory/sm2-history,done
 h63e4063e58e3,rust,tag,sched,in-scope,"U41/U43/U155/U246: an empty normal deck must report no new, review or learning work in completion data.",,deferred
 h6a2f74d641e5,rust,tag,sched,in-scope,Leaving relearning without steps on Again with the FSRS interval,sched/steps/relearning,done
-h6a6910e0bd6f,rust,tag,sched,in-scope,"U48/U246: suspension must set the suspended queue, remove the card from study counts and return the affected-card count.",,deferred
-h6b7f3a469b26,rust,tag,sched,in-scope,"U48/U246: manual burial must set the user-buried queue, remove the card from study counts and report its mutation.",,deferred
+h6a6910e0bd6f,rust,tag,sched,in-scope,Suspend gives queue -1 and the card leaves the study queue,sched/ops/suspend/cards-and-notes,done
+h6b7f3a469b26,rust,tag,sched,in-scope,Bury by hand gives queue -3 and the card leaves the study queue,sched/ops/bury/cards-and-notes,done
 h72885e1b6734,rust,tag,sched,in-scope,Fuzz bounds when the minimum is above the maximum interval,sched/fsrs/max-interval sched/fuzz/table-bounds,done
 h72fe93fb7887,rust,supplementary,sched,out-of-scope,"Review-priority callbacks already feed the pinned FSRS simulator, but simulator execution is excluded by R752.",,done
-h74c71d98d02e,rust,tag,sched,in-scope,U48/U246: reset preferences saved from review must persist independently from Browser reset preferences.,,deferred
+h74c71d98d02e,rust,tag,sched,in-scope,The review screen's Reset choices are stored apart from the browser's,sched/ops/reset/end-of-queue,done
 h77ff41ec7a24,rust,tag,sched,in-scope,All four answer choices expose a nonempty interval label through the real next-state label provider (R656).,sched/labels/units,done
 h78e12bdba938,rust,tag,sched,preservation-only,Building filtered decks is out of scope; existing ones and their cards are only preserved,preservation/sync/filtered-deck,done
 h78eed3fe65c6,rust,tag,sched,in-scope,"Elapsed seconds of a learning card's current state, intraday and interday",sched/steps/learning-fuzz sched/steps/interday,done
-h7ae0194021c8,rust,tag,sched,in-scope,U48/U246: Set Due Date must apply the requested offset and save its input history under the correct dialog-context key.,,deferred
+h7ae0194021c8,rust,tag,sched,in-scope,Set Due Date remembers the typed text per context,sched/ops/set-due/context,done
 h7b1a4d17232a,rust,tag,sched,in-scope,Hard without relearning steps leaves relearning (FSRS form),sched/steps/relearning,done
 h7bbb73ef0d28,rust,tag,sched,in-scope,Again resets two relearning steps to the first,sched/steps/relearning,done
 h7bd9a5ed79b8,rust,tag,sched,in-scope,U41/U43/U48/U155/U246: completion data must report user-buried cards while excluding them from new work.,,deferred
@@ -826,8 +826,8 @@ h837dc023b887,rust,tag,sched,in-scope,U44/U246: applying deck studied deltas mus
 h847bead54db9,rust,tag,sched,out-of-scope,Randomized Reposition assigning a unique permutation of new positions is explicitly excluded.,,done
 h881b1bb6d254,rust,tag,sched,in-scope,Good leaving relearning with the FSRS interval,sched/steps/relearning,done
 h8c930cc4ef19,rust,tag,sched,out-of-scope,"Persisted new-card repositioning by input order, note identity or randomness with start/step controls is excluded.",,done
-h8e0d45cd0649,rust,tag,sched,in-scope,"U44/U48/U246: scheduler burial must remain distinct from manual burial in stored queue values, available counts and completion data.",,deferred
-h91b2e4482736,rust,tag,sched,in-scope,U48/U246: reset preferences saved from Browse must not overwrite the independent reviewer defaults.,,deferred
+h8e0d45cd0649,rust,tag,sched,in-scope,"Cards buried by the scheduler (-2) stay apart from cards buried by hand (-3), with separate unbury modes",sched/ops/bury/unbury-deck,done
+h91b2e4482736,rust,tag,sched,in-scope,"Reset's two choices are remembered per context (review screen, browser)",sched/ops/reset/restore-position sched/ops/reset/end-of-queue,done
 h969273d973dd,rust,tag,sched,out-of-scope,Lowering studied counters to extend today's limits is the explicitly excluded Custom Study limit-extension mechanism.,,done
 h971848f00f1e,rust,tag,sched,in-scope,Short-term Again keeps a card in relearning,sched/steps/relearning sched/fsrs/short-term,done
 h9a5ca7ceecd6,rust,tag,sched,in-scope,"U41/U43/U246: a fetched new-card batch must identify the added card and report one new, zero learning and zero review.",,deferred
@@ -851,7 +851,7 @@ hc05411e145f1,rust,tag,sched,preservation-only,Preview states in a filtered deck
 hc3bd9890e06a,rust,tag,sched,out-of-scope,"Repositioning all new cards in a deck is explicitly excluded, even when no randomization is requested.",,done
 hc67d7d3b1875,rust,tag,sched,in-scope,Easy leaving relearning uses the FSRS interval above the fuzzed Good interval,sched/steps/relearning,done
 hc96dda7dd94f,rust,tag,sched,in-scope,Again in learning returns to the first step,sched/steps/learning-progress,done
-hcbe165cda562,rust,tag,sched,out-of-scope,Direct out-of-session grading by arbitrary card id is not a supported product operation; managed review answers remain required under U44.,,done
+hcbe165cda562,rust,tag,sched,in-scope,Grade Now answers cards by id outside the study queue,sched/ops/grade-now/four-cards,done
 hccc87afa9021,rust,tag,sched,in-scope,Training items are sorted by review time with their card ids aligned; checked with the optimizer (U47),,deferred
 hceea58e626d5,rust,tag,sched,in-scope,"U120/U246: package inspection converts v1 learning/relearning and filtered-card states, caps steps and restores reviews (R1614); direct collection open still refuses v1.",,deferred
 hcf4081192234,rust,tag,sched,in-scope,Good on a learning step moves to the next step,sched/steps/learning-progress,done
@@ -861,24 +861,24 @@ hda7aa551feeb,rust,tag,sched,in-scope,"Answer button labels (seconds, minutes, m
 hda9e7531d7db,rust,tag,sched,in-scope,A new card exposes its current state plus previews for all four buttons through the real FSRS engine (R642).,sched/steps/new-card-buttons,done
 hdb3d8a73ac7b,rust,tag,sched,in-scope,"U97/U104: a fresh collection's studied-today message must show zero count, zero duration and a zero average.",,deferred
 hdbe181187e8a,rust,tag,sched,out-of-scope,Overriding stored card retention with a simulator request is part of excluded simulation and retention-advice tools (R752).,,done
-hdd2d2f703388,rust,tag,sched,in-scope,U48/U246: resetting a graduated card must persist new type and new queue with the requested logging/position behavior.,,deferred
+hdd2d2f703388,rust,tag,sched,in-scope,Reset turns a graduated card back into a new card,sched/ops/reset/restore-position sched/ops/reset/end-of-queue,done
 hdeb239c0cf40,rust,tag,sched,in-scope,A new collection starts its day 0 at the 04:00 boundary at or before its creation.,sched/day/creation-before-rollover sched/day/creation-at-rollover-utc sched/day/creation-after-rollover-tokyo,done
 hdf5b05a2842f,rust,tag,sched,in-scope,Training leaves out a card whose learning rows straddle the ignore date; checked with the optimizer (U47),,deferred
 he2dcd7bd5b1c,rust,tag,sched,in-scope,"With an ignore date and no learning row, the history starts at the first interday graded row after the date",sched/memory/ignore-before sched/memory/ignore-before-boundary,done
-he31eded34d00,rust,tag,sched,preservation-only,U48/U246: Empty on an existing filtered deck must restore each card's home deck; creating or rebuilding the filtered deck is outside product scope (R706).,,deferred
+he31eded34d00,rust,tag,sched,in-scope,Empty returns the cards of a filtered deck to their home decks,sched/ops/empty-filtered/restore,done
 he4c4fc933d44,rust,tag,sched,in-scope,Good on the last relearning step leaves relearning,sched/steps/relearning,done
 he544632aa73a,rust,tag,sched,in-scope,A deck's own desired retention wins over its preset's when a card is answered,sched/data/desired-retention,done
 he594f0a7a983,rust,tag,sched,in-scope,Elapsed days between a card's reviews counted in days back from the next day boundary,sched/memory/on-the-fly sched/memory/sm2-history,done
 he71ab01c9816,rust,tag,sched,in-scope,An ignore date inside a card's learning rows makes its history start after the date,sched/memory/ignore-before,done
 he7fa6992322b,rust,tag,sched,in-scope,U41/U246: no reviews are gathered when the configured daily cap is zero.,,deferred
-heceeaa17fdbb,rust,tag,sched,in-scope,"U48/U246: due-date changes must distinguish shifting versus interval reset, handle relearning and restore filtered home/due fields; retain FSRS-only policy.",,deferred
+heceeaa17fdbb,rust,tag,sched,in-scope,"Set Due Date converts cards to review, keeps an existing ease, gives the starting ease to cards without one and takes cards out of filtered decks; the SM-2 interval rules are replaced by the FSRS ones Meguri runs",sched/ops/set-due/card-kinds sched/ops/set-due/ae26,done
 hee209ed2ac1b,rust,tag,sched,in-scope,Short-term Good keeps a card in relearning,sched/fsrs/short-term,done
 hee2d6b23e65c,rust,tag,sched,in-scope,"U43/U44/U246: answer undo/redo must restore sibling burial, leech tags, revlog and deck counts atomically; use FSRS intervals instead of excluded SM-2 constants.",,deferred
 hf37768bcec15,rust,tag,sched,out-of-scope,SM-2 lapse multiplier (New interval); Meguri schedules lapses with FSRS (R653),,done
 hf54cd97685d7,rust,tag,sched,in-scope,U41/U246: inherited caps prevent study in a subdeck from bypassing a depleted ancestor.,,deferred
 hf55838aff7f6,rust,tag,sched,in-scope,"U41/U246: relative-overdue review ordering must account for both due day and interval, including ties, before serving the queue.",,deferred
 hf70661f6f3cb,rust,tag,sched,preservation-only,U246: preserve saved Custom Study include/exclude tags through unrelated operations; its dialog and filtered-deck creation remain excluded (R2017).,,deferred
-hf8783ee88750,rust,tag,sched,in-scope,U48/U246: setting a new card due in three days must convert it to review with a matching interval and review queue.,,deferred
+hf8783ee88750,rust,tag,sched,in-scope,Set Due Date makes the card a review card due the given number of days from today,sched/ops/set-due/ae26 sched/ops/set-due/card-kinds,done
 hf87bc805c0cf,rust,tag,sched,in-scope,Good on a relearning step lowers the remaining count,sched/steps/relearning,done
 hfa3da761639b,rust,tag,sched,in-scope,Hard keeps the remaining count of two relearning steps,sched/steps/relearning,done
 hfb93da3c2901,rust,tag,sched,in-scope,Short-term Hard keeps a card in relearning,sched/fsrs/short-term,done

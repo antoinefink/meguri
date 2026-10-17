@@ -1,0 +1,71 @@
+# Set Due Date "3" on cards of every kind, in one operation (R710, R711;
+# specs/sched/set-due-date.md S4, S5, S7). FSRS on, day 10 (2030-01-25
+# 10:00 UTC; the next day starts 2030-01-26 04:00). Every card becomes an
+# active review card due on day 13 and leaves the filtered deck Cram; a card
+# without a factor takes the starting ease of its home deck's preset (2.5 for
+# Home, 2.3 for Soft); a new card saves its position in pos (an odue position
+# in Cram; -1 saved as 4294967295); left stays. Intervals: 0 for new and
+# never-graduated cards; elapsed days since lrt plus 3 (0 elapsed when lrt is
+# after the next day starts); without lrt the old interval shifted by the
+# change of due day (the relearning card's due timestamp counts as today,
+# the Cram card's odue as its day, and a shift below 0 stops at 0). The
+# cards are listed in reverse; the review-log ids follow card id order. The
+# memory-state cards' rows carry the truncated shifted difficulty. Needs
+# set_due (specs/conformance/sched-ops.md J6, J10), presets, db_exec.
+id: sched/ops/set-due/card-kinds
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Easy, starting_ease: 2.3}
+  decks:
+    - Home
+    - {name: Soft, preset: Easy}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Single, deck: Home, fields: [new, x]}
+    - {notetype: Single, deck: Soft, fields: [buriednew, x]}
+    - {notetype: Single, deck: Home, fields: [learning, x]}
+    - {notetype: Single, deck: Home, fields: [relearning, x]}
+    - {notetype: Single, deck: Home, fields: [suspended, x]}
+    - {notetype: Single, deck: Home, fields: [shiftdown, x]}
+    - {notetype: Single, deck: Soft, fields: [filtered, x]}
+    - {notetype: Single, deck: Home, fields: [filterednew, x]}
+    - {notetype: Single, deck: Soft, fields: [withlrt, x]}
+    - {notetype: Single, deck: Home, fields: [negativenew, x]}
+    - {notetype: Single, deck: Home, fields: [futurelrt, x]}
+steps:
+  - observe: [timing]
+  - set_clock: "2030-01-25T10:00:00"
+  - observe: [timing]
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  # #c2 new in Soft, buried by the user.
+  - db_exec: {sql: "UPDATE cards SET queue = -3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'buriednew')"}
+  # #c3 intraday learning, due in 10 minutes, two steps left.
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1895566200, left = 2, reps = 1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'learning')"}
+  # #c4 relearning due in 10 minutes, interval 4, no factor, no lrt.
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = 1, due = 1895566200, ivl = 4, factor = 0, left = 1, reps = 6, lapses = 1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'relearning')"}
+  # #c5 suspended review due on day 12, interval 10, factor 2300, no lrt.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 12, ivl = 10, factor = 2300, reps = 5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'suspended')"}
+  # #c6 review due on day 40, interval 2, no lrt.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, due = 40, ivl = 2, factor = 2500, reps = 2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'shiftdown')"}
+  # #c7 review of Soft in Cram, due on day 9 at home, interval 6, no lrt.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 6, factor = 2500, reps = 3, odid = did, did = 100, odue = 9, due = -100000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'filtered')"}
+  # #c8 new card of Home in Cram, its position in odue.
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 100, odue = due, due = -99999 WHERE nid = (SELECT id FROM notes WHERE sfld = 'filterednew')"}
+  # #c9 review of Soft with a memory state, last reviewed 7.5 days ago.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 15, ivl = 20, factor = 2400, reps = 6, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'withlrt')"
+      params: ['{"s":30.0,"d":3.0,"dr":0.9,"decay":0.154,"lrt":1894917600}']
+  # #c10 new at position -1.
+  - db_exec: {sql: "UPDATE cards SET due = -1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'negativenew')"}
+  # #c11 review whose lrt lies after the next day starts.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, due = 14, ivl = 5, factor = 2500, reps = 2, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'futurelrt')"
+      params: ['{"s":7.0,"d":6.2,"lrt":1895630500}']
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - set_due: {cards: ["#c11", "#c10", "#c9", "#c8", "#c7", "#c6", "#c5", "#c4", "#c3", "#c2", "#c1"], days: "3"}
+  - observe: [card, revlog]

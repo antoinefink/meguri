@@ -1,0 +1,50 @@
+# Bury Card and Bury Note (specs/sched/manual-ops.md M1, M2; R634, R683).
+# Burying by hand gives queue -3 to new, learning, review and
+# scheduler-buried cards, leaves suspended and already user-buried cards
+# alone (not written: their mod and server usn stay), and writes no
+# review-log row. Bury Note buries the note's cards but its suspended one,
+# as one "Bury" step that a single undo reverts; redo buries them again.
+# Needs bury and the scheduling ops' rules (specs/conformance/sched-ops.md
+# J2, J10), db_exec, undo, redo and undo_status.
+id: sched/ops/bury/cards-and-notes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Triple
+      fields: [Front, Back, Extra]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Two, front: "{{Back}}", back: "{{Front}}"}
+        - {name: Three, front: "{{Extra}}", back: "{{Front}}"}
+  decks: [Home]
+  notes:
+    - {notetype: Triple, deck: Home, fields: [a, a2, a3]}
+    - {notetype: Triple, deck: Home, fields: [b, b2, b3]}
+    - {notetype: Triple, deck: Home, fields: [c, c2, c3]}
+steps:
+  - observe: [timing]
+  # #c3 suspended; #c5 buried by the scheduler; #c6 a review card; #c7 an
+  # intraday learning card; #c9 already buried by the user. Every card gets
+  # a server usn, as after a sync, so a written card shows usn -1.
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'a') AND ord = 2"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'b') AND ord = 1"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = 2, ivl = 5, due = 3, factor = 2500, reps = 4 WHERE nid = (SELECT id FROM notes WHERE sfld = 'b') AND ord = 2"}
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = 1, due = 1894702200, left = 1, reps = 1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'c') AND ord = 0"}
+  - db_exec: {sql: "UPDATE cards SET queue = -3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'c') AND ord = 2"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - observe: [undo_status]
+  - advance: 1m
+  - bury: {cards: ["#c4", "#c5", "#c6", "#c7", "#c9", "#c3"]}
+  - observe: ["card(#c3, #c4, #c5, #c6, #c7, #c9)", "revlog(#c3, #c4, #c5, #c6, #c7, #c9)", undo_status]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  # Bury Note: #c1 and #c2 are buried, the suspended #c3 is left alone.
+  - bury: {notes: ["#n1"]}
+  - observe: ["card(#c1, #c2, #c3)", undo_status]
+  - undo: {}
+  - observe: ["card(#c1, #c2, #c3)", undo_status]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - redo: {}
+  - observe: ["card(#c1, #c2, #c3)", undo_status]
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}

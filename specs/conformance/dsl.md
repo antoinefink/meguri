@@ -169,9 +169,13 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `add_preset`, `clone_preset`, `rename_preset` | `{name}`, `{preset, name}`, `{preset, name}` | none | stable (`deck-ops.md` K8) |
 | `remove_preset` | `{preset, fallback}` | none; rejection `default_preset` | stable (`deck-ops.md` K9) |
 | `set_deck_preset` | `{deck, preset, subtree?}` | none; rejection `filtered_deck` | stable (`deck-ops.md` K10) |
-| `bury`, `suspend` | `{cards: [#cN, ...]}` | none | draft (sched) |
-| `forget` | `{cards, restore_position?: bool, reset_counts?: bool}` | none | draft (sched) |
-| `set_due` | `{cards, days: <due-date text such as "0", "1-7" or "3!">}` | none | draft (sched) |
+| `bury`, `suspend` | `{cards: [#cN, ...]}` or `{notes: [#nN, ...]}`, each listed once | none | stable (`sched-ops.md` J2, J3) |
+| `unsuspend` | `{cards}`: also unburies | none | stable (`sched-ops.md` J4) |
+| `unbury_deck` | `{deck, mode: all \| manual \| siblings}` | none | stable (`sched-ops.md` J5) |
+| `forget` | `{cards, restore_position?: bool, reset_counts?: bool, context?: reviewer \| browser}`: Reset in the listed order | none | stable (`sched-ops.md` J7) |
+| `set_due` | `{cards, days: <the text as typed, such as "0", "1-7" or "3!">, context?: reviewer \| browser}` | none; rejection `invalid_days` | stable (`sched-ops.md` J6) |
+| `grade_now` | `{cards, rating}`: in the listed order, time 0 | none | stable (`sched-ops.md` J8) |
+| `empty_filtered` | `{deck}` | none; rejection `not_filtered` | stable (`sched-ops.md` J9) |
 | `reposition` | `{cards, start, step?, randomize?, shift?}` | none | draft (sched) |
 | `update_preset` | `{name, <option>: <value>, ...}` with the D6.2 options | none | draft (deckconfig) |
 | `save_deck_options` | `{deck, preset?, options?, deck_desired_retention?}`: the deck options screen's Save for `deck`, with the deck switched to `preset` and `options` (the D6.2 options, `historical_retention`, `ignore_reviews_before`) applied to it | none | stable (`deck-options-ops.md` E1) |

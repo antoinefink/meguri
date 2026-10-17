@@ -85,6 +85,22 @@ set_config
 nothing_to_undo
 nothing_to_redo
 changed_externally
+# Scheduling ops on chosen cards (sched-ops.md, U48): op names, arguments,
+# rejection kinds and the undo step ids of their operations.
+unsuspend
+unbury_deck
+set_due
+grade_now
+empty_filtered
+restore_position
+reset_counts
+invalid_days
+not_filtered
+reset_card
+set_due_date
+unbury_unsuspend
+setDueReviewer
+setDueBrowser
 # collection-check.md K11: config keys the schedule step reads or writes
 curDeck
 activeDecks

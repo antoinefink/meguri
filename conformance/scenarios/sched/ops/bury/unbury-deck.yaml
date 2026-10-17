@@ -1,0 +1,71 @@
+# Unbury on a deck page and unsuspend of chosen cards (specs/sched/manual-ops.md
+# M4, M5; R635, R683). The deck Home has the subdeck Home::Sub and the
+# filtered descendant Home::Drill; the independent decks are outside this tree.
+# outside it. "Buried siblings" on Home restores only the cards with queue -2
+# in its tree, a filtered subdeck included, and not a Home card sitting in
+# Cram; a learning card with a timestamp due goes back to queue 1, one with a
+# day due to queue 3; "Manually buried cards" then restores the -3 cards;
+# "All" on Other restores Other's card; a deck with nothing left to unbury
+# writes nothing. Unsuspend restores a buried card in Cram and a suspended
+# card, and leaves an active card unwritten. No review-log rows. The filtered
+# decks are inserted as specs/conformance/deck-ops.md K13 says. Needs
+# unbury_deck and unsuspend (specs/conformance/sched-ops.md J4, J5, J10),
+# deck names (deck-ops.md K1), db_exec and undo_status.
+id: sched/ops/bury/unbury-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home, "Home::Sub", Other]
+  notes:
+    - {notetype: Single, deck: Home, fields: [h1, x]}
+    - {notetype: Single, deck: Home, fields: [h2, x]}
+    - {notetype: Single, deck: "Home::Sub", fields: [s1, x]}
+    - {notetype: Single, deck: "Home::Sub", fields: [s2, x]}
+    - {notetype: Single, deck: "Home::Sub", fields: [s3, x]}
+    - {notetype: Single, deck: Home, fields: [f1, x]}
+    - {notetype: Single, deck: Other, fields: [o1, x]}
+    - {notetype: Single, deck: Home, fields: [f2, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (100, 'Cram', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (101, 'Home' || char(31) || 'Drill', 0, 0, X'08011001', X'12130801120a0a066465636b3a78106428d804383c')"}
+  # #c1 new, buried by the scheduler; #c2 new, buried by the user.
+  - db_exec: {sql: "UPDATE cards SET queue = -2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'h1')"}
+  - db_exec: {sql: "UPDATE cards SET queue = -3 WHERE nid = (SELECT id FROM notes WHERE sfld = 'h2')"}
+  # #c3 learning due at an epoch second, buried by the scheduler; #c4
+  # relearning due on day 1, buried by the user; #c5 a suspended review card.
+  - db_exec: {sql: "UPDATE cards SET type = 1, queue = -2, due = 1894702200, left = 1, reps = 1 WHERE nid = (SELECT id FROM notes WHERE sfld = 's1')"}
+  - db_exec: {sql: "UPDATE cards SET type = 3, queue = -3, due = 1, ivl = 2, factor = 2500, left = 1, reps = 5, lapses = 1 WHERE nid = (SELECT id FROM notes WHERE sfld = 's2')"}
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -1, due = 4, ivl = 6, factor = 2500, reps = 3 WHERE nid = (SELECT id FROM notes WHERE sfld = 's3')"}
+# The sixth card belongs to Home and currently occupies its filtered descendant.
+  # new card of Home in Cram, buried by the scheduler.
+  - db_exec: {sql: "UPDATE cards SET type = 2, queue = -2, ivl = 3, factor = 2500, reps = 2, odid = did, did = 101, odue = 2, due = -100000 WHERE nid = (SELECT id FROM notes WHERE sfld = 'f1')"}
+  - db_exec: {sql: "UPDATE cards SET queue = -2, odid = did, did = 100, odue = due, due = -100001 WHERE nid = (SELECT id FROM notes WHERE sfld = 'f2')"}
+  # #c7 new card of Other, buried by the scheduler.
+  - db_exec: {sql: "UPDATE cards SET queue = -2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'o1')"}
+  - db_exec: {sql: "UPDATE cards SET usn = 0"}
+  - advance: 1m
+  - unbury_deck: {deck: Home, mode: siblings}
+  - observe: [card, undo_status]
+  - advance: 1m
+  - unbury_deck: {deck: Home, mode: manual}
+  - observe: ["card(#c2, #c4)", undo_status]
+  - advance: 1m
+  - unbury_deck: {deck: Other, mode: all}
+  - observe: ["card(#c7)"]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - advance: 1m
+  # Nothing buried is left under Home::Sub: nothing is written, col.mod stays.
+  - unbury_deck: {deck: "Home::Sub", mode: all}
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - observe: ["card(#c5)"]
+  - advance: 1m
+  # #c8 (new, buried in Cram) and #c5 (suspended review) come back; #c1 is
+  # active and is not written.
+  - unsuspend: {cards: ["#c8", "#c5", "#c1"]}
+  - observe: ["card(#c1, #c5, #c8)", undo_status]
+  - db_exec: {sql: "SELECT count(*) FROM revlog"}

@@ -1,0 +1,47 @@
+# Grade Now Good on four cards chosen in the browser (R718, R729, R682;
+# specs/sched/manual-ops.md M7). FSRS on, load balancer off, no study queue
+# held. The cards, listed as #c4, #c3, #c2, #c1: a suspended review card, a
+# review card, an intraday learning card (answered Good once before) and a
+# new card buried by the scheduler. Each gets the state next_states reports
+# for Good, observed just before; the suspended and the buried card become
+# active. Four review-log rows with time 0, ids at the instant and the next
+# three milliseconds in the listed order. The deck's counters count the
+# review card (the suspended and buried cards count in neither, the learning
+# card uses no limit). One "Grade Now" step: undo restores the four cards
+# and removes the four rows, leaving the earlier answer; redo writes them
+# again under the same ids. Needs grade_now (specs/conformance/sched-ops.md
+# J8, J10), answer, db_exec, undo, redo, undo_status and legacy_json.
+id: sched/ops/grade-now/four-cards
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  decks: [Home]
+  notes:
+    - {notetype: Single, deck: Home, fields: [buriednew, x]}
+    - {notetype: Single, deck: Home, fields: [learning, x]}
+    - {notetype: Single, deck: Home, fields: [review, x]}
+    - {notetype: Single, deck: Home, fields: [suspended, x]}
+steps:
+  - observe: [timing]
+  - db_exec: {sql: "UPDATE cards SET queue = -2 WHERE nid = (SELECT id FROM notes WHERE sfld = 'buriednew')"}
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 4, due = 0, factor = 2500, reps = 3, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'review')"
+      params: ['{"s":4.5,"d":5.0,"dr":0.9,"decay":0.154,"lrt":1894356000}']
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = -1, ivl = 6, due = 0, factor = 2500, reps = 4, data = ? WHERE nid = (SELECT id FROM notes WHERE sfld = 'suspended')"
+      params: ['{"s":6.5,"d":4.2,"dr":0.9,"decay":0.154,"lrt":1894183200}']
+  - answer: {card: "#c2", rating: good, time_ms: 2000}
+  - advance: 10m
+  - observe: ["next_states(#c4, #c3, #c2, #c1)"]
+  - grade_now: {cards: ["#c4", "#c3", "#c2", "#c1"], rating: good}
+  - observe: ["card(#c1, #c2, #c3, #c4)", "revlog(#c1, #c2, #c3, #c4)", undo_status]
+  - db_exec: {sql: "SELECT mod FROM col"}
+  - undo: {}
+  - observe: ["card(#c1, #c2, #c3, #c4)", "revlog(#c1, #c2, #c3, #c4)", undo_status]
+  - redo: {}
+  - observe: ["revlog(#c1, #c2, #c3, #c4)", undo_status]
+  - observe: [{legacy_json: {decks: [Home]}}]

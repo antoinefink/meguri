@@ -42,7 +42,7 @@ Saves a schema-11 object over an existing record, the way records arriving by sy
   - to insert a row (a filtered deck) that no setup section can create.
 
   Scenarios cannot name real ids, so they address rows by name, by their note type's name, or by position in `ORDER BY id` (cards are created in logical-id order, so `ORDER BY id LIMIT 1 OFFSET k` is `#c(k+1)`).
-- **`suspend`** (draft, scheduling area): `{cards: [#cN, ...]}`, no output. Suspends the listed cards with Anki's suspend operation; a card already suspended is left as is. Each suspended card's row is written again, so its `data` is rebuilt (`specs/model/card-data-json.md` C4). It is the simplest operation that rewrites a card row without changing any value stored in `data`.
+- **`suspend`** (`sched-ops.md` J3): `{cards: [#cN, ...]}`, no output. Suspends the listed cards with Anki's suspend operation; a card already suspended is left as is. Each suspended card's row is written again, so its `data` is rebuilt (`specs/model/card-data-json.md` C4). It is the simplest operation that rewrites a card row without changing any value stored in `data`.
 
 ## L4. `blob_decode` (observation kind)
 

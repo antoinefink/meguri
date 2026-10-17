@@ -104,6 +104,30 @@
     "card_ref": { "type": "string", "pattern": "^#c[1-9][0-9]*$" },
     "note_ref": { "type": "string", "pattern": "^#n[1-9][0-9]*$" },
     "card_refs": { "type": "array", "items": { "$ref": "#/$defs/card_ref" }, "minItems": 1 },
+    "distinct_card_refs": {
+      "description": "specs/conformance/sched-ops.md J1: at least one card, each listed once.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/card_ref" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "cards_or_notes": {
+      "description": "specs/conformance/sched-ops.md J2, J3: exactly one of cards and notes, each listed once.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["cards"],
+          "additionalProperties": false,
+          "properties": { "cards": { "$ref": "#/$defs/distinct_card_refs" } }
+        },
+        {
+          "type": "object",
+          "required": ["notes"],
+          "additionalProperties": false,
+          "properties": { "notes": { "type": "array", "items": { "$ref": "#/$defs/note_ref" }, "minItems": 1, "uniqueItems": true } }
+        }
+      ]
+    },
     "uint": { "type": "integer", "minimum": 0 },
     "clock": {
       "type": "object",
@@ -1016,14 +1040,67 @@
             }
           ]
         },
-        "bury": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
-        "suspend": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
-        "forget": { "allOf": [{ "$ref": "#/$defs/draft_args" }, { "required": ["cards"], "properties": { "cards": { "$ref": "#/$defs/card_refs" } } }] },
+        "bury": {
+          "description": "specs/conformance/sched-ops.md J2: the user's bury of the cards (Bury Card) or of all cards of the notes (Bury Note).",
+          "$ref": "#/$defs/cards_or_notes"
+        },
+        "suspend": {
+          "description": "sched-ops.md J3 (model-ops.md L3's {cards} form): Suspend Card or Suspend Note.",
+          "$ref": "#/$defs/cards_or_notes"
+        },
+        "unsuspend": {
+          "description": "sched-ops.md J4: every listed card in queue -1, -2 or -3 gets its queue back from its type (an unbury too).",
+          "type": "object",
+          "required": ["cards"],
+          "additionalProperties": false,
+          "properties": { "cards": { "$ref": "#/$defs/distinct_card_refs" } }
+        },
+        "unbury_deck": {
+          "description": "sched-ops.md J5: unbury the deck and its descendants; manual is queue -3, siblings queue -2, all both.",
+          "type": "object",
+          "required": ["deck", "mode"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": "string", "minLength": 1 }, "mode": { "enum": ["all", "manual", "siblings"] } }
+        },
+        "forget": {
+          "description": "sched-ops.md J7: Reset in the listed order; both booleans false when missing; context writes that screen's two choice keys.",
+          "type": "object",
+          "required": ["cards"],
+          "additionalProperties": false,
+          "properties": {
+            "cards": { "$ref": "#/$defs/distinct_card_refs" },
+            "restore_position": { "type": "boolean" },
+            "reset_counts": { "type": "boolean" },
+            "context": { "enum": ["reviewer", "browser"] }
+          }
+        },
         "set_due": {
-          "allOf": [
-            { "$ref": "#/$defs/draft_args" },
-            { "required": ["cards", "days"], "properties": { "cards": { "$ref": "#/$defs/card_refs" }, "days": { "type": "string" } } }
-          ]
+          "description": "sched-ops.md J6: Set Due Date with the text as typed; context remembers it in setDueReviewer or setDueBrowser; rejection invalid_days.",
+          "type": "object",
+          "required": ["cards", "days"],
+          "additionalProperties": false,
+          "properties": {
+            "cards": { "$ref": "#/$defs/distinct_card_refs" },
+            "days": { "type": "string" },
+            "context": { "enum": ["reviewer", "browser"] }
+          }
+        },
+        "grade_now": {
+          "description": "sched-ops.md J8: Grade Now with one rating, in the listed order, time 0.",
+          "type": "object",
+          "required": ["cards", "rating"],
+          "additionalProperties": false,
+          "properties": {
+            "cards": { "$ref": "#/$defs/distinct_card_refs" },
+            "rating": { "enum": ["again", "hard", "good", "easy"] }
+          }
+        },
+        "empty_filtered": {
+          "description": "sched-ops.md J9: Empty the filtered deck; rejection not_filtered for a normal deck.",
+          "type": "object",
+          "required": ["deck"],
+          "additionalProperties": false,
+          "properties": { "deck": { "type": "string", "minLength": 1 } }
         },
         "reposition": {
           "allOf": [
