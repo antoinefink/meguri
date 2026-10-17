@@ -56,7 +56,7 @@ The play marker is `[anki:play:` + side letter + `:` + index + `]`, the index in
 
 - **Sound entry**: the tag's name after entity decoding (`text/strip-html#H3`, all or nothing): `[sound:a&amp;b.mp3]` gives `a&b.mp3`, `[sound:&nbsp;x.mp3]` gives ` x.mp3`, `[sound:a&b&c.mp3]` stays `a&b&c.mp3`. Other characters are kept, line breaks and `/` included.
 - **TTS entry**: its **language** is the VALUE of the last option whose KEY is exactly `lang` (`[anki:tts lang=en lang=fr]` has language `fr`; quotes removed, `lang="en US"` gives `en US`); its **content** is the directive's CONTENT as written, markup included.
-- **TTS directive with an empty language** (no `lang` option, or `lang=`, as `{{tts :Field}}` produces): it adds no entry and does not advance the index. Anki writes a localized error message between `[` and `]` in its place; Meguri writes the fixed text `[tts: lang not set]` (R1887: no localized text is compared; `specs/conformance/render-ops.md` Q4.4 maps Anki's message to this text).
+- **TTS directive with an empty language** (no `lang` option, or `lang=`, as `{{tts :Field}}` produces): it adds no entry and does not advance the index. Anki writes a localized error message between `[` and `]` in its place; Meguri writes the fixed text `[tts: lang not set]` (R1887: no localized text is compared; `specs/conformance/render-ops.md` Q5.4 maps Anki's message to this text).
 - Other TTS options (`voices`, a comma-separated list; `speed`, a number, 1.0 when missing or unreadable; `cloze_blank`; any other key) only configure speech. Meguri does not speak (R564) and keeps none of them.
 
 What the entries are for: the review layer autoplays a side's list and the replay buttons index into it (U67). TTS entries play nothing but hold their index, so later sound indexes match Anki's (R559). A sound entry plays the media file named by the part of the name after its last `/` (the whole name when it has none), as Anki plays only base names from the media folder (U67).
@@ -111,4 +111,4 @@ The active cloze on the front encodes `[`, `:` and `]` in its `data-cloze` attri
 - `render/av-tags/tts`: `{{tts}}` and literal TTS directives keep their index (R559), the empty-language case, a sound inside TTS content, a directive named `TTS`.
 - `render/av-tags/grammar`: A3, A4 and A7 edge cases, entity decoding of names, literal markers in fields.
 - `render/av-tags/cloze`: A9, and a TTS filter over a cloze.
-- Observation kind: `render` (`specs/conformance/render-ops.md` Q4).
+- Observation kind: `render` (`specs/conformance/render-ops.md` Q5).

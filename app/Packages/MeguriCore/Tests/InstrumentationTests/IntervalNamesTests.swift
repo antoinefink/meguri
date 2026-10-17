@@ -48,6 +48,8 @@ import Testing
         ] {
             #expect(IntervalNames.named(name) != nil, "\(name)")
         }
+        // The rendering spike's baseline swap (U65), a test probe.
+        #expect(IntervalNames.named("probe.nativeSwap")?.category == .probe)
     }
 
     @Test func bridgeCallsAreSignpostedUnderTheirExportNamesOnly() {

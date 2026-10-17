@@ -27,6 +27,8 @@ use crate::changes::stream::{ChangeStream, Seq};
 use crate::error::EngineError;
 use crate::lifecycle::Generation;
 use crate::ports::ChangeObserver;
+use crate::sched::day_clock::DayClock;
+use crate::undo::UndoManager;
 use exclusive::{Admission, Decision, Privilege};
 use op::{OpContext, OpResult, OpSpec, Pending, WriteDelay};
 use priority::Queues;
@@ -53,6 +55,11 @@ pub(crate) struct ExecShared {
     pub(crate) observers: Vec<Arc<dyn ChangeObserver>>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) path: PathBuf,
+    /// The undo history (`engine/undo`), changed on the writer after each
+    /// commit.
+    pub(crate) undo: UndoManager,
+    /// The collection's day clock (`sched/day-clock` D8).
+    pub(crate) day_clock: Arc<DayClock>,
 }
 
 struct QueueState {
@@ -94,10 +101,12 @@ impl ExecShared {
             commit: Mutex::new(last_seq),
             delay: Mutex::new(None),
             generation_cell,
+            day_clock: Arc::new(DayClock::new(Arc::clone(&clock), stream.clone())),
             stream,
             observers,
             clock,
             path: path.to_path_buf(),
+            undo: UndoManager::default(),
         }
     }
 
@@ -284,6 +293,7 @@ impl ExecShared {
             park: false,
             cancel: None,
             declared: None,
+            restore: None,
             submitted: crate::monotonic::now(),
             control: false,
         }
@@ -311,12 +321,26 @@ impl ExecShared {
             }));
             return Pending { rx };
         }
+        if spec.undo.skip && spec.source != meguri_model::changes::OpSource::UserNonUndoable {
+            let _ = reply.send(Err(EngineError::InvalidArgument {
+                message: format!(
+                    "op {} of source {} may not skip undo: only UserNonUndoable ops may (engine/undo M2)",
+                    spec.def.name(),
+                    spec.source
+                ),
+            }));
+            return Pending { rx };
+        }
         let mut meta = self.meta(spec.def.name(), spec.source);
         meta.planned = (!spec.any_generation).then_some(planned);
         meta.privilege = privilege;
         meta.park = spec.park;
         meta.cancel = spec.cancel.clone();
         meta.declared = spec.declared;
+        meta.restore = spec
+            .undo
+            .action
+            .map(|action| crate::undo::Restore { action, target: None });
         self.submit(Task {
             meta,
             body: Box::new(OpTask { spec, op, reply }),

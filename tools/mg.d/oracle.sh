@@ -9,14 +9,14 @@
 # rewrite oracle/ files, and a copy under that checkout's build/ is outside
 # U2's deny rules. Copies they make are deleted when they finish.
 #
-# --platform apple (hello, record, compare; arm64 Mac only) runs the same
+# --platform apple (hello, record, compare, time; arm64 Mac only) runs the same
 # driver natively through oracle/macos/run-native.sh, from a venv under the
 # oracle tree's checkout (build/oracle-macos-venv/, covered by U2's deny
 # rules), for overlay goldens (specs/conformance/float-determinism.md F6, F7).
 # lock --platform apple writes oracle/macos/requirements-macos.lock.
 
 mg_job oracle host mg_oracle \
-  "Anki oracle: build | hello [--platform apple] [--tz Z] | record [--platform apple] [--jobs N] [filter...] | compare [--platform apple] [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock [--platform apple] | test [pattern]"
+  "Anki oracle: build | hello [--platform apple] [--tz Z] | record [--platform apple] [--jobs N] [filter...] | compare [--platform apple] [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | time <dir> [--platform apple] [--op N]... [--now T] [--tz Z] [--repeat N] | bump <version> | lock [--platform apple] | test [pattern]"
 
 MG_ORACLE_UV_VERSION=0.12.24
 # uv resolves for this platform tag; the lock still hashes every published wheel.
@@ -27,7 +27,7 @@ MG_ORACLE_MACOS_LOCK_PLATFORM=aarch64-apple-darwin
 MG_ORACLE_MACOS_LOCK=macos/requirements-macos.lock
 
 mg_oracle__usage() {
-  mg_failure usage "usage: tools/mg oracle build | hello [--platform apple] [--tz Z] | record [--platform apple] [--jobs N] [filter...] | compare [--platform apple] [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | bump <version> | lock [--platform apple] | test [pattern]" "tools/mg oracle build"
+  mg_failure usage "usage: tools/mg oracle build | hello [--platform apple] [--tz Z] | record [--platform apple] [--jobs N] [filter...] | compare [--platform apple] [--jobs N] [filter...] | recordings <filter>... | check <dir> [--now T] [--tz Z] [--deck D]... [--render-note N]... [--schedule] | time <dir> [--platform apple] [--op N]... [--now T] [--tz Z] [--repeat N] | bump <version> | lock [--platform apple] | test [pattern]" "tools/mg oracle build"
   mg_message "oracle: $1"
   mg_status error
 }
@@ -332,6 +332,7 @@ mg_oracle() {
     record | compare) mg_oracle_record_compare "$sub" "$@" ;;
     recordings) mg_oracle_recordings "$@" ;;
     check) mg_oracle_check "$@" ;;
+    time) mg_oracle_time "$@" ;;
     bump) mg_oracle_bump "$@" ;;
     lock) mg_oracle_lock "$@" ;;
     test) mg_oracle_test "$@" ;;
@@ -816,6 +817,115 @@ mg_oracle__check_result() {
   else
     mg_failure oracle_error "the check exited with code $rc without a report; see log.txt"
     mg_message "oracle check: no report for $dir"
+    mg_status error
+  fi
+}
+
+# time <dir> [--platform apple] [--op N]... [--now T] [--tz Z] [--repeat N]
+# (specs/conformance/timed-operations.md): one timing worker times the T6
+# operations on copies of <dir>'s collection. Docker lane: <dir> mounted
+# read-only, the worker's scratch on the container's /scratch tmpfs.
+# --platform apple: the native lane (bootstrapped first), its scratch under the
+# run directory, or under build/private/ when <dir> is there (T2.1). The
+# harness derives the clock and zone and checks --op and --repeat (T1); here
+# only the shape of the arguments and the collection file are checked. The
+# report is timing.json (artifact `report`, repeated under details.timing);
+# status per T9, and a T8 kind as the failure of an `error`.
+mg_oracle_time() {
+  local dir="" abs platform="" rc scratch private
+  local args=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --platform)
+        [ "$#" -ge 2 ] || { mg_oracle__usage "time: --platform needs apple"; return 0; }
+        platform="$2"
+        shift 2
+        ;;
+      --now | --tz | --op | --repeat)
+        [ "$#" -ge 2 ] || { mg_oracle__usage "time: $1 needs a value"; return 0; }
+        # --opt=value, so a value starting with '-' stays a value.
+        args[${#args[@]}]="$1=$2"
+        shift 2
+        ;;
+      --now=* | --tz=* | --op=* | --repeat=*) args[${#args[@]}]="$1"; shift ;;
+      -*) mg_oracle__usage "time: unknown option '$1'"; return 0 ;;
+      *)
+        [ -z "$dir" ] || { mg_oracle__usage "time takes one collection directory"; return 0; }
+        dir="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$dir" ] || { mg_oracle__usage "time needs a collection directory"; return 0; }
+  case "$platform" in "" | apple) ;; *) mg_oracle__usage "--platform takes apple"; return 0 ;; esac
+  if [ ! -f "$dir/collection.anki2" ]; then
+    mg_failure no_collection "$dir/collection.anki2 does not exist" "tools/mg oracle time <dir with a collection.anki2>"
+    mg_message "oracle time: no collection.anki2 in $dir"
+    mg_status error
+    return 0
+  fi
+  abs="$(cd "$dir" && pwd -P)"
+  rm -f "$MG_RUN_DIR/timing.json" "$MG_RUN_DIR/timing-error.json"
+  if [ "$platform" = apple ]; then
+    mg_oracle__native_host || return 0
+    mg_oracle__native_setup || return 0
+    scratch="$MG_RUN_DIR/scratch"
+    private="$(cd "$MG_ROOT/build/private" 2>/dev/null && pwd -P)"
+    if [ -n "$private" ]; then
+      case "$abs/" in "$private"/*) scratch="$private/oracle-time-$MG_RUN_ID" ;; esac
+    fi
+    MG_ORACLE_NATIVE_SCRATCH="$scratch"
+    mkdir -p "$scratch"
+    ORACLE_SCRATCH_ROOT="$scratch" "$MG_ORACLE_NATIVE" harness time --dir "$abs" --out "$MG_RUN_DIR" \
+      ${args[0]+"${args[@]}"} </dev/null
+    rc=$?
+    rm -rf "$scratch"
+    MG_ORACLE_NATIVE_SCRATCH=""
+  else
+    case "$abs" in *:*) mg_oracle__usage "time: $abs has a ':', which a bind mount cannot carry"; return 0 ;; esac
+    mg_oracle__docker_ok || return 0
+    mg_oracle__tree && mg_oracle__build "$MG_ORACLE_DIR" || return 0
+    mg_oracle__run "$MG_ORACLE_TAG" "$MG_ORACLE_DIR" -u "$(id -u):$(id -g)" \
+      -v "$abs:/in/collection:ro" -v "$MG_RUN_DIR:/out" \
+      oracle harness time --dir /in/collection --out /out ${args[0]+"${args[@]}"} </dev/null
+    rc=$?
+    mg_detail image "$(jq -nc --arg t "meguri-oracle:$MG_ORACLE_TAG" --arg i "$MG_ORACLE_ID" '{tag: $t, id: $i}')"
+  fi
+  mg_oracle__time_result "$rc" "$dir"
+}
+
+# mg_oracle__time_result <harness rc> <dir as given>: T9.
+mg_oracle__time_result() {
+  local rc="$1" dir="$2" report="$MG_RUN_DIR/timing.json" err="$MG_RUN_DIR/timing-error.json" kind total bad
+  if [ "$rc" -eq 0 ] && [ -s "$report" ]; then
+    mg_artifact report "$report" "timed operations"
+    mg_detail timing "$(jq -c . "$report")"
+    total="$(jq '.operations | length' "$report")"
+    bad="$(jq '[.operations[] | select(.status != "ok")] | length' "$report")"
+    mg_count total "$total"
+    mg_count passed "$((total - bad))"
+    mg_count failed "$bad"
+    jq -c --arg repro "$MG_DEFAULT_REPRO" '.operations[] | select(.status != "ok")
+      | {id: .name,
+         message: (.status + (if .error then " (" + .error.kind + " at " + .error.stage
+           + (if .error.exception then ", " + .error.exception else "" end) + ")" else "" end)),
+         repro: $repro}' "$report" >>"$MG_STATE/failures.jsonl"
+    if [ "$bad" -gt 0 ]; then
+      mg_message "oracle time: $bad of $total operations not ok on $(jq -r .platform "$report") in $dir; see timing.json"
+      mg_status fail
+    else
+      mg_message "oracle time: $total operations ok on $(jq -r '"\(.platform), \(.protocol.repeat) timed runs each"' "$report") in $dir"
+      mg_status pass
+    fi
+  elif [ -s "$err" ]; then
+    kind="$(jq -r '.kind' "$err")"
+    case "$kind" in usage | no_collection | open_failed | clock_unsupported | oracle_error) ;; *) kind=oracle_error ;; esac
+    mg_failure "$kind" "$(jq -r '.detail' "$err")"
+    mg_message "oracle time: $kind for $dir"
+    mg_status error
+  else
+    mg_failure oracle_error "the timing run exited with code $rc without a report; see log.txt"
+    mg_message "oracle time: no report for $dir"
     mg_status error
   fi
 }

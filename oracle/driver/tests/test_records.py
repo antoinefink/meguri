@@ -196,7 +196,6 @@ class SetConfig(unittest.TestCase):
             {"value": 1},
             {"key": "", "value": 1},
             {"key": 1, "value": 1},
-            {"key": "k", "value": 1, "undoable": True},
             {"key": "k", "value": 2**64},
             {"key": "k", "value": -(2**63) - 1},
             {"key": "k", "value": {"a": [1, {"b": 2**70}]}},

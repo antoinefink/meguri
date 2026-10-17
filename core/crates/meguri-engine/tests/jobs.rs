@@ -227,6 +227,40 @@ fn every_registered_thread_reports_its_qos_class() {
 }
 
 #[test]
+fn a_thread_another_runtime_started_is_listed_while_it_is_registered() {
+    // J6: a thread the core did not spawn through the registry (the sync
+    // runtime's tokio threads) lists itself from its own start hook.
+    let threads = ThreadRegistry::new();
+    let listing = threads.clone();
+    let (listed, busy, idle, after) = thread::spawn(move || {
+        let registered = listing.register_current("runtime-thread", Qos::UserInitiated);
+        let listed = listing.threads();
+        registered.set_busy(true);
+        let busy = listing.busy_threads();
+        registered.set_busy(false);
+        let idle = listing.busy_threads();
+        drop(registered);
+        (listed, busy, idle, listing.threads())
+    })
+    .join()
+    .unwrap();
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].name, "runtime-thread");
+    assert_eq!(listed[0].qos, Qos::UserInitiated);
+    let reported = if cfg!(target_vendor = "apple") {
+        Some(Qos::UserInitiated)
+    } else {
+        None
+    };
+    assert_eq!(listed[0].reported_qos, reported);
+    assert!(!listed[0].busy, "listed idle");
+    assert_eq!(busy.len(), 1);
+    assert!(idle.is_empty());
+    assert!(after.is_empty(), "dropped, it leaves the list: {after:?}");
+    assert!(threads.threads().is_empty());
+}
+
+#[test]
 fn a_busy_thread_is_listed_busy_until_its_work_ends() {
     let h = Harness::open();
     let gate = Gate::new();

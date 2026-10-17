@@ -1,0 +1,55 @@
+# Local saves of a note type (specs/notetypes/records.md N3, N8): a save that
+# changes nothing writes nothing (deviation notetype-unchanged-save: Anki
+# stamps the note type and moves col.mod), while a styling change, field
+# options, a template rename, browser appearance with a deck override and a
+# note type rename each stamp only the notetypes row and leave col.scm alone
+# (specs/notetypes/schema-changes.md G2). Before each save the row is reset to
+# a synced state (usn 5) so the stamp shows.
+id: notetypes/records/stamps
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  decks: [Words]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+steps:
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Pair'"}
+  - db_exec: {sql: "UPDATE col SET mod = 1700000000000, scm = 1600000000000, ls = 1700000000000"}
+  - advance: 1h
+  - update_notetype: {notetype: Pair, edits: []}
+  # step 4: unchanged save (deviation notetype-unchanged-save)
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.mod, c.scm, c.ls FROM notetypes n, col c WHERE n.name = 'Pair'"}
+  - advance: 1h
+  - update_notetype: {notetype: Pair, edits: [{css: ".card { margin: 1em; }"}]}
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.mod, c.scm, c.ls FROM notetypes n, col c WHERE n.name = 'Pair'"}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Pair'"}
+  - advance: 1h
+  - update_notetype:
+      notetype: Pair
+      edits:
+        - field_options: {field: Front, sticky: true, font_size: 28, description: "the word", exclude_from_search: true}
+        - field_options: {field: Back, rtl: true, plain_text: true, collapsed: true, font_name: Georgia}
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.mod, c.scm, c.ls FROM notetypes n, col c WHERE n.name = 'Pair'"}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Pair'"}
+  - advance: 1h
+  - update_notetype: {notetype: Pair, edits: [{rename_template: {from: Forward, to: Ahead}}]}
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.mod, c.scm, c.ls FROM notetypes n, col c WHERE n.name = 'Pair'"}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Pair'"}
+  - advance: 1h
+  - update_notetype:
+      notetype: Pair
+      edits:
+        - template: {name: Ahead, browser_front: "{{Front}} ?", browser_back: "{{Back}} !", browser_font_name: Arial, browser_font_size: 14, deck: Words}
+  - db_exec: {sql: "SELECT n.mtime_secs, n.usn, c.mod, c.scm, c.ls FROM notetypes n, col c WHERE n.name = 'Pair'"}
+  - db_exec: {sql: "UPDATE notetypes SET mtime_secs = 1700000000, usn = 5 WHERE name = 'Pair'"}
+  - advance: 1h
+  - update_notetype: {notetype: Pair, edits: [{rename: Duo}]}
+  - db_exec: {sql: "SELECT n.name, n.mtime_secs, n.usn, c.mod, c.scm, c.ls FROM notetypes n, col c WHERE n.name = 'Duo'"}
+  - db_exec:
+      sql: >-
+        SELECT t.ord, t.name, t.mtime_secs, t.usn FROM templates t JOIN notetypes n ON n.id = t.ntid
+        WHERE n.name = 'Duo' ORDER BY t.ord
+  - observe:
+      - {notetype_structure: {notetypes: [Duo]}}

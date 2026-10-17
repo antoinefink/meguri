@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""The render observation (specs/conformance/render-ops.md Q4) and the browser
+"""The render observation (specs/conformance/render-ops.md Q5) and the browser
 formats of setup.notetypes (dsl.md D6.4): review and browser outputs, play
 markers and AV entries, blank cards, template errors per mode, the TTS
 normalization, deleted notes, request checks, and that rendering changes
-nothing. Expected values come from the specs (render-ops.md Q4,
+nothing. Expected values come from the specs (render-ops.md Q5,
 specs/render/card-render-pipeline.md K4-K7, av-tags.md A5-A8) and the
 scenario's own setup, never from the driver."""
 
@@ -150,7 +150,7 @@ class RenderObservation(unittest.TestCase):
         }
         out = self.renders([spoken], [{"notetype": "Spoken", "fields": ["sun", "Sonne"]}])
         # A6: a TTS directive with no language adds no entry, keeps no index,
-        # and Anki's message is reported as Meguri's text (Q4.4), also inside
+        # and Anki's message is reported as Meguri's text (Q5.4), also inside
         # the answer's FrontSide; sound names are entity-decoded, kept whole.
         question = "[anki:play:q:0]|[tts: lang not set][anki:play:q:1][anki:play:q:2]"
         self.assertEqual(out["#c1"]["review"], rendered(
@@ -191,7 +191,7 @@ class RenderObservation(unittest.TestCase):
             [PAIR], [{"notetype": "Pair", "fields": ["sun", "Sonne", "x"]}, {"notetype": "Pair", "fields": ["a", "b", ""]}],
             steps=[{"delete_notes": {"notes": ["#n1"]}}],
         )
-        # Q4.2: null for a card that no longer exists; the others as usual.
+        # Q5.2: null for a card that no longer exists; the others as usual.
         self.assertEqual(list(out), ["#c1", "#c2", "#c3"])
         self.assertIsNone(out["#c1"])
         self.assertIsNone(out["#c2"])
@@ -252,11 +252,11 @@ class RenderObservation(unittest.TestCase):
 
     def test_run_errors(self):
         setup = {"notetypes": [PAIR], "notes": [{"notetype": "Pair", "fields": ["sun", "Sonne", "x"]}]}
-        # Q4.5: a card whose ordinal has no template cannot be rendered.
+        # Q5.5: a card whose ordinal has no template cannot be rendered.
         err = self.assert_failure("anki_error", [{"db_exec": {"sql": "UPDATE cards SET ord = 5"}}, {"observe": ["render"]}],
                                   setup)
         self.assertEqual(err.fields.get("step"), 1)
-        # Q4.5: a template error whose message is no kind of Q2.
+        # Q5.5: a template error whose message is no kind of Q2.
         faulty = {"name": "F", "fields": ["Front"],
                   "templates": [{"name": "T", "front": "{{Front}}", "back": "", "browser_front": "{{Nope}}"}]}
         with mock.patch.object(template_module, "classify", return_value=None):
@@ -301,7 +301,7 @@ class BrowserFormats(unittest.TestCase):
 
 
 class ClassifyBrowser(unittest.TestCase):
-    """Browser mode's errors carry the browser headers (render-ops.md Q4.2)."""
+    """Browser mode's errors carry the browser headers (render-ops.md Q5.2)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -11,10 +11,13 @@ mg_job xcode-check host mg_xcode_check \
 # the hidden Mac launches, the simulators and the test runs. Other worktrees'
 # app jobs are not held up by the builds. The VM's lease is taken before the
 # host's, as every job that takes both does. Without the VM the simulator
-# runs are queued (--no-sims): the run is warn at best.
+# runs are queued (--no-sims): the run is warn at best. On a locked Mac (or
+# a sleeping display) the devices phase is queued (host-session, U19b): the
+# builds' results stand, so a failing build fails the run, and passing
+# builds leave it queued.
 mg_xcode_check() {
   [ "${1:-}" = "--" ] && shift
-  local tap="$MG_RUN_DIR/xcode-check.tap" rc devices_rc sims=() queued="" begin
+  local tap="$MG_RUN_DIR/xcode-check.tap" rc devices_rc sims=() queued="" begin lease=0
   mg_lint_ui_first || return 0
   if ! mg__xcframework "$MG_RUN_DIR/xcframework.json"; then
     mg_failure xcframework "building the core XCFramework failed; see log.txt" "tools/mg core-xcframework"
@@ -32,7 +35,23 @@ mg_xcode_check() {
   rc=${PIPESTATUS[0]}
   mg_artifact tap "$tap"
   mg_artifact logs build/xcode-check/logs "xcodebuild logs"
-  if { [ "$MG_SIM_RUNNER" = vm ] && ! mg_sim_take --no-copy; } || ! mg_host_lease || ! mg_app_mac_guard; then
+  if [ "$MG_SIM_RUNNER" = vm ] && ! mg_sim_take --no-copy; then
+    lease=1
+  else
+    mg_host_lease --part "the devices phase (hidden Mac launches, simulators, test runs)"
+    lease=$?
+    [ "$lease" -ne 0 ] || mg_app_mac_guard || lease=1
+  fi
+  if [ "$lease" -eq 2 ]; then
+    # The Mac is locked: the builds' results decide, the rest is queued.
+    mg_tap_report "$tap" "$rc" ""
+    if [ "$(cat "$MG_STATE/status")" = pass ]; then
+      mg_message "xcode-check: the builds passed; queued: $(mg_queued_parts_text)"
+    fi
+    mg_queued_settle
+    return 0
+  fi
+  if [ "$lease" -ne 0 ]; then
     # The builds' results stand; the launches and test runs did not run.
     mg_tap_report "$tap" "$rc" ""
     mg_message "xcode-check: the builds were checked; the launches, simulators and test runs did not run (see the failures)"
@@ -52,6 +71,6 @@ mg_xcode_check() {
   mg_tap_report "$tap" "$rc" ""
   if [ -n "$queued" ] && [ "$(cat "$MG_STATE/status")" = pass ]; then
     mg_message "xcode-check: passed without the simulator runs, which are queued: $MG_MAC_VM_REASON (user step mac-vm)"
-    mg_status warn
   fi
+  mg_queued_settle
 }

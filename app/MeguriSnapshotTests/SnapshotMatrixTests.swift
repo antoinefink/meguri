@@ -125,4 +125,29 @@ import Testing
         // SwiftUI on the Mac ignores Dynamic Type: one text size there.
         #expect(SnapshotMatrix.cells(.keyVariants, on: .mac).map(\.name) == ["light-standard-macDefault", "dark-standard-macDefault"])
     }
+
+    /// The key variants with Reduce Transparency on and off. The light ones
+    /// with it on render, in the simulator run that has it (system glass
+    /// turns opaque); the others stay in the matrix, deferred with the
+    /// noise that keeps them from comparing, so every run lists the gap.
+    /// The Mac cannot set Reduce Transparency, so none of its cells render.
+    @Test func unstableGlassKeyVariantsRenderTheOpaqueLightOnesAndDeferTheRest() {
+        let ipad = SnapshotMatrix.cells(.unstableGlassKeyVariants, on: .ipad)
+        #expect(ipad.map(\.name) == [
+            "light-standard-ipadRegular+rt", "light-ax5-ipadRegular+rt", "dark-standard-ipadRegular+rt", "dark-ax5-ipadRegular+rt",
+            "light-standard-ipadRegular", "light-ax5-ipadRegular", "dark-standard-ipadRegular", "dark-ax5-ipadRegular",
+        ])
+        let rendered = ipad.filter { $0.deferredReason == nil }
+        #expect(rendered.map(\.name) == ["light-standard-ipadRegular+rt", "light-ax5-ipadRegular+rt"])
+        #expect(rendered.allSatisfy { $0.systemGroup == "rt1-rm0-t50" })
+        let darkOpaque = ipad.filter { $0.appearance == .dark && $0.reduceTransparency }
+        #expect(darkOpaque.allSatisfy { $0.deferredReason?.contains("near-black") == true && $0.deferredReason?.contains("U252") == true })
+        let glass = ipad.filter { !$0.reduceTransparency }
+        #expect(glass.allSatisfy { $0.deferredReason?.contains("Liquid Glass") == true && $0.deferredReason?.contains("U252") == true })
+
+        let mac = SnapshotMatrix.cells(.unstableGlassKeyVariants, on: .mac)
+        #expect(!mac.isEmpty && mac.allSatisfy { $0.deferredReason != nil })
+        // Another set's cells keep no such reason.
+        #expect(SnapshotMatrix.cells(.keyVariants, on: .ipad).allSatisfy { $0.deferredReason == nil })
+    }
 }

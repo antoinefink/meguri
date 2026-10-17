@@ -2,10 +2,10 @@
 
 Read at tag 26.09.3 (`refs/anki-26.09.3`) to write
 `specs/render/card-render-pipeline.md`, `av-tags.md`, `display-transform.md`
-and `specs/conformance/render-ops.md` Q4-Q5. No code was copied; every rule was
+and `specs/conformance/render-ops.md` Q5-Q6. No code was copied; every rule was
 re-derived in the spec writer's words and checked by black-box probes of the
 oracle image (backend `extract_av_tags` on literal texts, and an emulation of
-Q4 over every U62 scenario, composed as below), which agree with the specs.
+Q5 over every U62 scenario, composed as below), which agree with the specs.
 
 | Spec section | Anki file | Read for |
 |---|---|---|
@@ -23,7 +23,7 @@ Q4 over every U62 scenario, composed as below), which agree with the specs.
 
 ## Driver hints for the `render` kind (oracle maintainer)
 
-Meanings are `specs/conformance/render-ops.md` Q4. Never call `card.question()`,
+Meanings are `specs/conformance/render-ops.md` Q5. Never call `card.question()`,
 `card.answer()` or `render_output()`: they run pylib's `card_did_render` hooks
 (LaTeX image generation and its localized errors). Compose instead, per card
 of the scenario's collection, freshly read:
@@ -42,7 +42,7 @@ of the scenario's collection, freshly read:
   - AV entries: `sound_or_video` -> `{"sound": <value as the backend gives it,
     no basename>}`; `tts` -> `{"tts": <lang>}`.
   - Replace every occurrence of `"[" + tr.errors_bad_directive(directive="anki:tts", error=tr.errors_option_not_set(option="lang")) + "]"`
-    in both texts by `[tts: lang not set]` (Q4.4), after both extractions.
+    in both texts by `[tts: lang not set]` (Q5.4), after both extractions.
 - **browser**: the same call with `browser=True`; compose both sides with
   FrontSide nothing; no extraction. `is_empty` can only be the missing-cloze
   notice here (drop it; answer null; blank `missing_cloze`).

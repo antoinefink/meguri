@@ -5,7 +5,7 @@ Requirements: R469, R470, R472, R525, R527, R528, R531, R559, R583, R935, R960, 
 Anki: 26.09.3
 Scenarios: conformance/scenarios/render/pipeline/, conformance/scenarios/render/errors/, conformance/scenarios/render/av-tags/
 
-How the engine renders a stored card for review, preview and the browser: which templates it uses, the field map, the order of template rendering, the blank check, audio extraction and FrontSide, what it returns, and what it never does. The template engine is `template-syntax.md`, `filters.md`, `special-fields.md` and `cloze.md`; audio tags are `av-tags.md`; review HTML is `display-transform.md`. The `render` observation (`specs/conformance/render-ops.md` Q4) compares the K4 and K5 outputs with Anki's.
+How the engine renders a stored card for review, preview and the browser: which templates it uses, the field map, the order of template rendering, the blank check, audio extraction and FrontSide, what it returns, and what it never does. The template engine is `template-syntax.md`, `filters.md`, `special-fields.md` and `cloze.md`; audio tags are `av-tags.md`; review HTML is `display-transform.md`. The `render` observation (`specs/conformance/render-ops.md` Q5) compares the K4 and K5 outputs with Anki's.
 
 ## K1. Modes
 
@@ -95,7 +95,7 @@ For `_drawFlag` and `_drawMark` (R478, U66):
 ## K11. Meguri contract
 
 - **Call.** One engine call renders one card in one mode for one host and returns a `RenderedCard`: card id, ordinal, mode; for review and preview, the question and answer display HTML (`display-transform.md` D9) and both AV lists (sound: name; TTS: language and content); for browser, the K5 texts; the outcome (rendered, blank with its kind, or template error with kind and side); the note type CSS; the K9 values; the K10 flag and marked state; a type-in descriptor that U64 fills (none until then). It runs on the interactive lane (KTD9, R1857) and never on the main thread.
-- **Comparable form.** The engine also exposes the K4 and K5 outputs before any display step, which the testkit's `render` executor reports (`render-ops.md` Q4).
+- **Comparable form.** The engine also exposes the K4 and K5 outputs before any display step, which the testkit's `render` executor reports (`render-ops.md` Q5); its `render_status` executor reports the K4 outcome as a status (Q4).
 - **Parse cache.** Parsed templates may be cached per note type. A note type's `mtime_secs` has one-second resolution, so two edits within a second keep it: a cache keyed by note type id and mtime must also be cleared on every note type change event (local edit, undo, sync, import, Check Database, collection replaced), or be keyed by the template texts themselves. A render never uses a parse of text that is no longer stored.
 
 ## K12. Differences from the Product Contract's wording
@@ -113,4 +113,4 @@ For `_drawFlag` and `_drawMark` (R478, U66):
 - `render/errors/stored`: K6 through stored templates: errors on each side, a blank question that hides an answer error in review but not in browser mode, a missing cloze that hides it in both.
 - `render/av-tags/*`: `av-tags.md` A12.
 - `render/special-fields/cards` (`template` card cases, `render-ops.md` Q1.3): the field map of stored cards; U62 makes Meguri's executor run it.
-- Observation kinds: `render` (Q4) and `template` (Q1).
+- Observation kinds: `render` (Q5), `render_status` (Q4, the review outcome as a status only; `notetypes/records/stock-render-handoff` observes it) and `template` (Q1).

@@ -1,0 +1,136 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "blob_decode": {
+          "notetypes": {
+            "Keep": "ok"
+          }
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Keep"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, 0, 0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200, -1]
+          ]
+        }
+      },
+      {
+        "legacy_json": {
+          "notetypes": {
+            "Keep": {
+              "addonKey": "kept",
+              "css": ".card { color: teal; }",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": true,
+                  "description": "the word",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 7001,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 22,
+                  "sticky": true,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": true,
+                  "font": "Georgia",
+                  "id": 7002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": true,
+                  "preventDeletion": false,
+                  "rtl": true,
+                  "size": 18,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1894701600006,
+              "latexPost": "% keep post",
+              "latexPre": "% keep pre\n",
+              "latexsvg": true,
+              "mod": 1894705200,
+              "name": "Keep",
+              "originalId": 4242,
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{Back}}",
+                  "bafmt": "{{Back}} (b)",
+                  "bfont": "Arial",
+                  "bqfmt": "{{Front}} (b)",
+                  "bsize": 12,
+                  "did": null,
+                  "id": 8001,
+                  "name": "Forward",
+                  "ord": 0,
+                  "qfmt": "{{Front}}"
+                }
+              ],
+              "type": 0,
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/preserve-on-edit",
+  "scenario_sha256": "2f6074dda992de1b86d7fdd8dc67dd71ad9ed29157d40e182c352c18f4e0cfcb",
+  "tz": "UTC"
+}

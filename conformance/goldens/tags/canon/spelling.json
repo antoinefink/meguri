@@ -1,0 +1,300 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n6"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c7"],
+          "note": "#n7"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c8"],
+          "note": "#n8"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c9"],
+          "note": "#n9"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c10"],
+          "note": "#n10"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c11"],
+          "note": "#n11"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c12"],
+          "note": "#n12"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c13"],
+          "note": "#n13"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c14"],
+          "note": "#n14"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c15"],
+          "note": "#n15"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c16"],
+          "note": "#n16"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [""],
+            [" German::Verb::modal "],
+            [" German::Verb "],
+            [" Bar::x "],
+            [" Bar::x bar::y "],
+            [" A b "],
+            [" Straße "],
+            [" [ _x Y z "],
+            [" LANG LANG::DE LANG::DE::noun "],
+            [" ZZ zz::Q "],
+            [" X "],
+            [" X::Y::q "],
+            [" X::y::z "],
+            [" german::noun "],
+            [" BAR "],
+            [" Geo::Eu::it "]
+          ]
+        }
+      },
+      {
+        "db_dump": {
+          "tags": {
+            "A": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "A",
+              "usn": -1
+            },
+            "BAR": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "BAR",
+              "usn": -1
+            },
+            "Bar::x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Bar::x",
+              "usn": -1
+            },
+            "GEO::eu::de": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "GEO::eu::de",
+              "usn": 0
+            },
+            "Geo::Eu::it": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Geo::Eu::it",
+              "usn": -1
+            },
+            "German::Verb": {
+              "collapsed": 0,
+              "config": {
+                "sha256": "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222"
+              },
+              "tag": "German::Verb",
+              "usn": -1
+            },
+            "German::Verb::modal": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "German::Verb::modal",
+              "usn": -1
+            },
+            "LANG": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "LANG",
+              "usn": -1
+            },
+            "LANG::DE": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "LANG::DE",
+              "usn": -1
+            },
+            "LANG::DE::noun": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "LANG::DE::noun",
+              "usn": -1
+            },
+            "Straße": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Straße",
+              "usn": -1
+            },
+            "X": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "X",
+              "usn": -1
+            },
+            "X::Y::q": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "X::Y::q",
+              "usn": -1
+            },
+            "X::y::z": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "X::y::z",
+              "usn": -1
+            },
+            "Y": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "Y",
+              "usn": -1
+            },
+            "ZZ": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "ZZ",
+              "usn": -1
+            },
+            "[": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "[",
+              "usn": -1
+            },
+            "_x": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "_x",
+              "usn": -1
+            },
+            "b": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "b",
+              "usn": -1
+            },
+            "bar::y": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "bar::y",
+              "usn": -1
+            },
+            "geo::EU::fr": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "geo::EU::fr",
+              "usn": 0
+            },
+            "german::noun": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "german::noun",
+              "usn": -1
+            },
+            "z": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "z",
+              "usn": -1
+            },
+            "zz::Q": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "zz::Q",
+              "usn": -1
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "aa9c419b2bb8c40c3847fadaf9b4ac1480307922948ebbd6fc0490b9c054df93",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "tags/canon/spelling",
+  "scenario_sha256": "ff2efe7b88184c93c3a77cbda3453b8ff741506678ac916077c927d4d545a6eb",
+  "tz": "UTC"
+}

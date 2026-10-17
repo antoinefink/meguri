@@ -1,0 +1,51 @@
+# The studied-today counters an answer adds to the card's deck and its
+# ancestors (specs/sched/answering.md A6), FSRS on, load balancer off. A new
+# card answered in 95 s (capped at the default 60 s), then again as an intraday
+# learning card; a review card and an interday learning card due today; a card
+# of Top::Mid::Leaf after Top::Mid was removed, so the walk stops at the
+# missing parent and Top is not counted. On the next day a new card resets the
+# counters of its decks. Needs answer, db_exec (specs/conformance/record-ops.md
+# W1) and legacy_json (specs/conformance/model-ops.md L1).
+id: sched/answer/deck-counters
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  decks: ["Lang::Spanish::Verbs", "Top::Mid::Leaf"]
+  notetypes:
+    - name: Single
+      fields: [Front, Back]
+      templates: [{name: One, front: "{{Front}}", back: "{{Back}}"}]
+  notes:
+    - {notetype: Single, deck: "Lang::Spanish::Verbs", fields: [ser, to be]}
+    - {notetype: Single, deck: "Lang::Spanish::Verbs", fields: [ir, to go]}
+    - {notetype: Single, deck: "Lang::Spanish::Verbs", fields: [ver, to see]}
+    - {notetype: Single, deck: "Lang::Spanish::Verbs", fields: [dar, to give]}
+    - {notetype: Single, deck: "Top::Mid::Leaf", fields: [hoja, leaf]}
+steps:
+  # #c2 becomes a review card and #c3 an interday learning card, both due
+  # today (day 0), each with a memory state.
+  - db_exec:
+      sql: "UPDATE cards SET type = 2, queue = 2, ivl = 3, due = 0, factor = 2500, reps = 2, data = '{\"s\":3.0,\"d\":5.0,\"lrt\":1894442400}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'ir')"
+  - db_exec:
+      sql: "UPDATE cards SET type = 1, queue = 3, due = 0, left = 1, reps = 1, data = '{\"s\":1.0,\"d\":5.0,\"lrt\":1894615200}' WHERE nid = (SELECT id FROM notes WHERE sfld = 'ver')"
+  - db_exec:
+      sql: "DELETE FROM decks WHERE name = 'Top' || char(31) || 'Mid'"
+  - advance: 1h
+  - answer: {card: "#c1", rating: good, time_ms: 95000}
+  - answer: {card: "#c1", rating: good, time_ms: 4000}
+  - answer: {card: "#c2", rating: good, time_ms: 3000}
+  - answer: {card: "#c3", rating: good, time_ms: 2000}
+  - answer: {card: "#c5", rating: good, time_ms: 1000}
+  - observe:
+      - timing
+      - "revlog(#c1, #c2, #c3, #c5)"
+      - {legacy_json: {decks: ["Lang", "Lang::Spanish", "Lang::Spanish::Verbs", "Top", "Top::Mid::Leaf", "Default"]}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY name"}
+  # The next day: only the decks of the answered card are written, and their
+  # counters start again from 0.
+  - advance: 1d
+  - answer: {card: "#c4", rating: good, time_ms: 5000}
+  - observe:
+      - timing
+      - {legacy_json: {decks: ["Lang", "Lang::Spanish", "Lang::Spanish::Verbs", "Top", "Top::Mid::Leaf"]}}
+  - db_exec: {sql: "SELECT name, mtime_secs, usn FROM decks ORDER BY name"}

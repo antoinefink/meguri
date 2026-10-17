@@ -3,14 +3,16 @@
 //! only crate that issues SQL against the collection.
 //!
 //! Specs: `specs/storage/open-and-connections.md`, `schema-18.md`,
-//! `schema-upgrade.md`, `ids-usn-mtime.md`, `config-table.md` and
-//! `graves.md`.
+//! `schema-upgrade.md`, `ids-usn-mtime.md`, `config-table.md`, `graves.md`
+//! and `derived-store.md`.
 
 pub mod bulk;
 pub mod checkpoint;
 pub mod collation;
 pub mod conn_init;
 pub mod connections;
+mod day_writes;
+pub mod derived;
 mod durability;
 mod error;
 pub mod ids;
@@ -29,6 +31,7 @@ pub mod write_scope;
 pub use checkpoint::CheckpointOutcome;
 pub use conn_init::Initializers;
 pub use connections::{Reader, ReaderFactory, ReaderRole, Writer};
+pub use day_writes::CardQueueRow;
 pub use error::{BuilderRefusal, OpenError, StorageError, UpgradeStage};
 pub use journal::{Journal, JournalOptions};
 pub use open::{OpenEvent, OpenOptions, OpenedCollection, open_collection};

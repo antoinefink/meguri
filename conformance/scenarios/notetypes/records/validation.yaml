@@ -1,0 +1,60 @@
+# The template checks of a checked save (specs/notetypes/validation.md V3),
+# through add_notetype: each refusal kind, which check wins when several
+# apply, and edge cases that pass. A refused add writes nothing.
+id: notetypes/records/validation
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  # identical fronts
+  - add_notetype:
+      name: Dup
+      fields: [F, B]
+      templates: [{name: A, front: "{{F}}", back: "{{B}}"}, {name: B, front: "{{F}}", back: "{{B}}"}]
+  - add_notetype:
+      name: DupCard
+      fields: [F, B]
+      templates: [{name: A, front: "{{F}}{{Card}}", back: "{{B}}"}, {name: B, front: "{{F}}{{Card}}", back: "{{B}}"}]
+  - add_notetype:
+      name: DupCardSpaced
+      fields: [F, B]
+      templates: [{name: A, front: "{{F}}{{ Card }}", back: "{{B}}"}, {name: B, front: "{{F}}{{ Card }}", back: "{{B}}"}]
+  # no field on the front
+  - add_notetype: {name: NoFront, fields: [F], templates: [{name: A, front: "hello", back: "{{F}}"}]}
+  - add_notetype: {name: CommentFront, fields: [F], templates: [{name: A, front: "<!--{{F}}-->", back: "{{F}}"}]}
+  - add_notetype: {name: ClozeSectionFront, fields: [F], templates: [{name: A, front: "{{#c1}}x{{/c1}}", back: "{{F}}"}]}
+  - add_notetype: {name: SpecialFront, fields: [F], templates: [{name: A, front: "{{Tags}}", back: "{{F}}"}]}
+  - add_notetype: {name: SectionFront, fields: [F], templates: [{name: A, front: "{{#F}}x{{/F}}", back: ""}]}
+  - add_notetype: {name: NegatedFront, fields: [F], templates: [{name: A, front: "{{^F}}x{{/F}}", back: ""}]}
+  - add_notetype: {name: FrontSideFront, fields: [F], templates: [{name: A, front: "{{FrontSide}}", back: ""}]}
+  - add_notetype: {name: EmptyKeyFront, fields: [F], templates: [{name: A, front: "{{}}", back: ""}]}
+  # unknown fields
+  - add_notetype: {name: UnknownBack, fields: [F], templates: [{name: A, front: "{{F}}", back: "{{Nope}}"}]}
+  - add_notetype: {name: UnknownCase, fields: [Front], templates: [{name: A, front: "{{front}}", back: ""}]}
+  - add_notetype: {name: UnknownSection, fields: [F], templates: [{name: A, front: "{{F}}{{#Nope}}x{{/Nope}}", back: ""}]}
+  - add_notetype: {name: ClozeSectionOk, fields: [F], templates: [{name: A, front: "{{F}}{{#c1}}x{{/c1}}", back: ""}]}
+  - add_notetype: {name: EmptyKeyOk, fields: [F], templates: [{name: A, front: "{{F}}{{}}", back: ""}]}
+  # parse errors
+  - add_notetype: {name: ParseFront, fields: [F], templates: [{name: A, front: "{{#F}}x", back: "{{F}}"}]}
+  - add_notetype: {name: ParseBack, fields: [F], templates: [{name: A, front: "{{F}}", back: "{{/F}}"}]}
+  - add_notetype: {name: ParseMismatch, fields: [F, B], templates: [{name: A, front: "{{#F}}x{{/B}}", back: ""}]}
+  # cloze note types
+  - add_notetype: {name: ClozeNoBack, kind: cloze, fields: [T], templates: [{name: C, front: "{{cloze:T}}", back: "{{T}}"}]}
+  - add_notetype: {name: ClozeNoFront, kind: cloze, fields: [T], templates: [{name: C, front: "{{T}}", back: "{{cloze:T}}"}]}
+  - add_notetype: {name: ClozeOk, kind: cloze, fields: [T], templates: [{name: C, front: "{{cloze:T}}", back: "{{cloze:T}}"}]}
+  - add_notetype: {name: ClozeChain, kind: cloze, fields: [T], templates: [{name: C, front: "{{text:cloze:T}}", back: "{{cloze:text:T}}"}]}
+  - add_notetype:
+      name: ClozeSecond
+      kind: cloze
+      fields: [T]
+      templates: [{name: C, front: "{{cloze:T}}", back: "{{cloze:T}}"}, {name: D, front: "{{T}}", back: "{{T}}"}]
+  # order between checks
+  - add_notetype:
+      name: OrderDupFirst
+      fields: [F]
+      templates: [{name: A, front: "{{Nope}}", back: ""}, {name: B, front: "{{Nope}}", back: ""}]
+  - add_notetype:
+      name: OrderTemplateFirst
+      fields: [F]
+      templates: [{name: A, front: "plain", back: ""}, {name: B, front: "{{#F}}", back: ""}]
+  - add_notetype: {name: OrderUnknownBeforeCloze, kind: cloze, fields: [T], templates: [{name: C, front: "{{cloze:T}}{{Nope}}", back: "x"}]}
+  - add_notetype: {name: OrderParseBeforeUnknown, fields: [F], templates: [{name: A, front: "{{Nope}}{{#F}}", back: ""}]}
+  - db_exec: {sql: "SELECT name FROM notetypes WHERE id > (SELECT id FROM notetypes WHERE name = 'Image Occlusion') ORDER BY id"}

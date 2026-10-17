@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """render [(#cN, ...)]: the card render pipeline's outputs for stored cards, in
 review and browser mode, before any display step. Request, value and
-normalization: specs/conformance/render-ops.md Q4; the behavior is
+normalization: specs/conformance/render-ops.md Q5; the behavior is
 specs/render/card-render-pipeline.md K4-K5 and av-tags.md.
 
 Value: {"#cN": {review, browser} | null}, null for a card whose row is gone
@@ -32,12 +32,12 @@ Template errors are classified as for the template kind, with the browser
 side headers in browser mode; a message that fits no kind of Q2 is a run
 error (anki_error). Where a TTS directive has no language, Anki writes a
 localized message between brackets: every occurrence of exactly that text in
-the value is reported as `[tts: lang not set]` (Q4.4), after both extractions
+the value is reported as `[tts: lang not set]` (Q5.4), after both extractions
 (so FrontSide carries Anki's own text into the answer, as in review).
 
 Card and note rows are read when the request runs. Note types and decks come
 through Anki's caches, which a db_exec write does not clear: scenarios do not
-write those rows with db_exec before a render (Q4.3).
+write those rows with db_exec before a render (Q5.3).
 """
 
 from __future__ import annotations
@@ -56,9 +56,9 @@ TTS_LANG_NOT_SET = "[tts: lang not set]"
 
 
 def _targets(session, args: Any) -> list[tuple[str, int]]:
-    """render-ops.md Q4.1: no argument (every card) or card references."""
+    """render-ops.md Q5.1: no argument (every card) or card references."""
     if args is not None and not isinstance(args, (str, list)):
-        raise invalid("render takes card references or nothing (render-ops.md Q4.1)")
+        raise invalid("render takes card references or nothing (render-ops.md Q5.1)")
     targets = session.card_targets(args)
     refs = [ref for ref, _ in targets]
     if len(set(refs)) != len(refs):
@@ -82,7 +82,7 @@ def _entries(av_tags) -> list[dict]:
 def _error(col, exc: anki.errors.TemplateError, browser: bool) -> dict:
     classified = _template.classify(col.tr, str(exc), browser=browser)
     if classified is None:
-        raise exc  # Q4.5: a run error (anki_error) until Q2's list grows
+        raise exc  # Q5.5: a run error (anki_error) until Q2's list grows
     kind, side = classified
     return {"error": {"kind": kind, "side": side}}
 

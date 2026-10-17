@@ -90,7 +90,7 @@ SIDES = (
     ("question", "card_template_rendering_front_side_problem"),
     ("answer", "card_template_rendering_back_side_problem"),
 )
-# Browser mode (the render kind, render-ops.md Q4) has its own side headers.
+# Browser mode (the render kind, render-ops.md Q5) has its own side headers.
 BROWSER_SIDES = (
     ("question", "card_template_rendering_browser_front_side_problem"),
     ("answer", "card_template_rendering_browser_back_side_problem"),

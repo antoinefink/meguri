@@ -1,0 +1,140 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "add_notetype": {
+          "name": "basic+"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "pair+"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "PAIR++"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "Pair+++"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "Café"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "  spaced  "
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "invalid_notetype"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "Names"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "invalid_notetype"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "invalid_notetype"
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Pair+"
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "PAIR"
+        }
+      },
+      {
+        "update_notetype": {
+          "name": "Café+"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Café+", "436166C3A92B"],
+            ["basic+", "62617369632B"],
+            ["Pair+", "506169722B"],
+            ["PAIR++", "504149522B2B"],
+            ["Pair+++", "506169722B2B2B"],
+            ["Café", "436166C3A9"],
+            ["  spaced  ", "20207370616365642020"],
+            ["Names", "4E616D6573"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Front"],
+            [1, "a #"],
+            [2, "front+"],
+            [3, "FRONT++"],
+            [4, "Tab"],
+            [5, "Straße"],
+            [6, "STRASSE+"]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Card"],
+            [1, "card+"],
+            [2, "Q"],
+            [3, "  "]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/names",
+  "scenario_sha256": "2d50942c9d8e015814e2933efe160432c6cc5575862e2c914d2f3dd7a468c2ad",
+  "tz": "UTC"
+}
