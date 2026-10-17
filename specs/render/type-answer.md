@@ -44,6 +44,8 @@ Review builds each side it shows in this order:
 
 The `review_html` observation runs steps 1, 2 and 4: play markers stay as markers and the box has no R533 attributes. Leaving step 3 out cannot change step 4 unless a marker's spec holds a play marker, which no real template writes.
 
+Steps 2 to 4 see the whole side text, its `<style>` element included, as in Anki. `render/display-transform#D2` (U62) runs them on the side without that element and adds it last. The output is the same unless the note type's CSS itself holds a marker (A2), the exact text `<hr id=answer>` or a media tag with a local name to encode (`render/media-display#D2`); for such CSS the order here holds, so the steps must also see the CSS. No scenario has such CSS.
+
 ## A4. Question side (R532)
 
 ### A4.1 Reading the first marker

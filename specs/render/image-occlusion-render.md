@@ -109,3 +109,5 @@ AE16's card, mask 3 of three, field A03 `{{c3::[sound:x.mp3]}}`, template `…<d
 | `render/image-occlusion/render/cards` | I4, I5 on a whole card through `review_html` (`specs/conformance/type-answer-ops.md` K2): three masks and a label on each card, the image name encoded |
 | `render/image-occlusion/render/audio` | I6 through `review_html`: AE16's card and another mask's card |
 | `render/image-occlusion/render/audio-tags` | I6 through U62's `render` observation: AE16's AV tag lists |
+
+`render/image-occlusion/render/audio-tags` awaits its golden: the oracle driver gets the `render` kind with U62 (`specs/conformance/render-ops.md` Q5). Once that is on the integration branch, the golden is recorded with `tools/mg oracle record render/image-occlusion/render/audio-tags`; until then `goldens-check` reports it `missing`.
