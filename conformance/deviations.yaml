@@ -739,3 +739,23 @@ deviations:
     pointer: /steps/3/db_exec/rows
     transform:
       replace: [['{"daily":3,"weekly":2,"monthly":1,"minimum_interval_mins":45,"aaa":true,"zzz":{"b":[1,2.5]}}']]
+  # specs/package/backup-triggers.md T4.2: Meguri's forced backups (Back Up
+  # Now, safety backups) always write; Anki makes none when nothing changed
+  # since the last backup of the same opening.
+  - id: backups-forced-always-written
+    requirement: R1632
+    summary: A forced backup is written even when nothing changed since the last backup; Anki makes none.
+    test: core/crates/meguri-package/tests/backup_service.rs back_up_now_writes_when_unchanged
+    scenarios: [package/backup-triggers/forced-unchanged]
+    pointer: /steps/2/backup
+    transform: {replace: {name: "backup-2030-01-15-10.01.00.colpkg"}}
+  # specs/package/backup-triggers.md T2.3: Meguri keeps the last backup's
+  # The saved modification value survives reopen in Meguri.
+  # collection closes, so its first periodic backup after a reopen is made.
+  - id: backups-change-check-survives-reopen
+    requirement: R1630
+    summary: After a reopen with no change, Meguri makes no periodic backup; Anki makes one.
+    test: core/crates/meguri-engine/tests/maintenance_scheduler.rs change_check_survives_reopen
+    scenarios: [package/backup-triggers/reopen]
+    pointer: /steps/3/backup
+    transform: {replace: {name: null}}

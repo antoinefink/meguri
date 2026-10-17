@@ -1,0 +1,28 @@
+# specs/package/backup-triggers.md T2.1, T2.3; specs/conformance/backup-trigger-ops.md
+# H1, H3. With a minimum interval of 0 no entry blocks, so only the change rule
+# decides. The forced backup sets the reference (col.mod as the setup left it);
+# a note added in that same millisecond leaves col.mod there and is no change;
+# a later note is; a raw write that moves col.mod back an hour is a change too.
+id: package/backup-triggers/change-check
+description: A periodic backup needs col.mod to differ from the last backup's, in either direction.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 12, weekly: 10, monthly: 9, minimum_interval_mins: 0}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+steps:
+  - force_backup: {}
+  - backup: {force: false}
+  - add_note: {notetype: Pair, fields: [sol, sun]}
+  - backup: {force: false}
+  - advance: 1m
+  - add_note: {notetype: Pair, fields: [luna, moon]}
+  - backup: {force: false}
+  - backup: {force: false}
+  - advance: 1m
+  - db_exec: {sql: "UPDATE col SET mod = mod - 3600000"}
+  - backup: {force: false}
+  - observe: [backup_files]

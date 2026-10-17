@@ -1,0 +1,21 @@
+# specs/package/backup-triggers.md T2.2, T4.2; specs/conformance/backup-trigger-ops.md
+# H2. Default interval (30 minutes). A seeded file whose name dates it months
+# ago was created now, so it blocks the periodic backup; a forced backup ignores
+# the interval; one minute later that forced backup blocks the periodic backup
+# although a note changed the collection. Retention keeps both files.
+id: package/backup-triggers/recent-entry
+description: An entry created within the interval blocks a periodic backup, whatever its name says; a forced one goes ahead.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+steps:
+  - add_backup_files: {names: [backup-2029-06-01-12.00.00.colpkg]}
+  - backup: {force: false}
+  - backup: {force: true}
+  - advance: 1m
+  - add_note: {notetype: Pair, fields: [sol, sun]}
+  - backup: {force: false}
+  - observe: [backup_files]

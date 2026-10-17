@@ -1,0 +1,15 @@
+# specs/package/backup-triggers.md T2.1, T2.3. Anki forgets the last backup's
+# col.mod when the collection closes, so the first periodic backup after a
+# reopen is made with no change (output a name); Meguri keeps it in the device
+# sidecar and makes none (deviation backups-change-check-survives-reopen).
+id: package/backup-triggers/reopen
+description: A periodic backup after a reopen with no change in between.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 12, weekly: 10, monthly: 9, minimum_interval_mins: 0}
+steps:
+  - backup: {force: false}
+  - reopen: {}
+  - advance: 1m
+  - backup: {force: false}

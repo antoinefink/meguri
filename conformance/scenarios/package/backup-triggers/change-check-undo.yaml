@@ -1,0 +1,26 @@
+# specs/package/backup-triggers.md T2.1; specs/engine/undo.md A7 (an undo puts
+# col.mod back); undo-ops.md V5 (the db_exec empties both histories first).
+# The note added at 10:02 and undone leaves col.mod at the value the 10:01
+# backup was taken from, so no periodic backup is made; a later note is a change.
+id: package/backup-triggers/change-check-undo
+description: A change undone before the next check is no change for the periodic backup.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config:
+    backups: {daily: 12, weekly: 10, monthly: 9, minimum_interval_mins: 0}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+steps:
+  - advance: 1m
+  - backup: {force: false}
+  - db_exec: {sql: "UPDATE notes SET usn = usn WHERE 0"}
+  - advance: 1m
+  - add_note: {notetype: Pair, fields: [sol, sun]}
+  - undo: {}
+  - backup: {force: false}
+  - advance: 1m
+  - add_note: {notetype: Pair, fields: [luna, moon]}
+  - backup: {force: false}
+  - observe: [backup_files]

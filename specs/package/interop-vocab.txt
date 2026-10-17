@@ -72,3 +72,8 @@ F_FULLFSYNC
 # Backups (backups.md, U126): the member of the synced backups config key
 # that is not an ordinary word.
 minimum_interval_mins
+# Backup triggers (backup-triggers.md, U127): the SQLite pragma and error
+# codes that select the byte copy of a damaged collection.
+quick_check
+SQLITE_CORRUPT
+SQLITE_NOTADB

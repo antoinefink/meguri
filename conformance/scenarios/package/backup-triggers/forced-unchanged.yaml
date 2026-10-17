@@ -1,0 +1,10 @@
+# specs/package/backup-triggers.md T2.1, T4.2. Anki skips a forced backup when
+# nothing changed since the last backup of the same opening (output null);
+# Meguri always writes one (deviation backups-forced-always-written).
+id: package/backup-triggers/forced-unchanged
+description: A second forced backup with no change in between.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - backup: {force: true}
+  - advance: 1m
+  - backup: {force: true}

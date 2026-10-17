@@ -1334,6 +1334,13 @@
             "minimum_interval_mins": { "$ref": "#/$defs/u32" }
           }
         },
+        "backup": {
+          "description": "backup-trigger-ops.md H1: a backup into the backups folder, forced (force true) or periodic (force false: made only when col.mod changed since the last backup and no entry of the folder is younger than the minimum interval), retention included. The name it would take must not exist in the folder (H3).",
+          "type": "object",
+          "required": ["force"],
+          "additionalProperties": false,
+          "properties": { "force": { "type": "boolean" } }
+        },
         "check_db": {
           "description": "Stable (collection-check.md K10): Anki's Check Database on the scenario's collection.",
           "type": "object",

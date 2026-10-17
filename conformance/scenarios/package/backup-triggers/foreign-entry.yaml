@@ -1,0 +1,10 @@
+# specs/package/backup-triggers.md T2.2: every entry of the backups folder
+# counts for the interval (default 30 minutes), a file that is not a backup
+# included. The collection has no backup yet, so it counts as changed.
+id: package/backup-triggers/foreign-entry
+description: A foreign file created within the interval blocks the periodic backup.
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_backup_files: {names: [notes.txt]}
+  - backup: {force: false}
+  - observe: [backup_files]
