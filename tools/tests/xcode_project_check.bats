@@ -32,8 +32,9 @@ EOF
   unset STUB_POOL_BUSY
   # Every call is logged. Builds fail (pass with STUB_BUILD_OK=1), so no
   # product check runs; builds for testing write the plan's simulator
-  # xctestrun; test runs pass. A launched app stays up, except on the route
-  # stub/quits.
+  # xctestrun; test runs pass. A launched app stays up (`open -W` becomes a
+  # process whose command line is the app's executable), except on the route
+  # stub/quits; lsappinfo reports it as STUB_APP_TYPE (UIElement).
   cat >"$STUBS/_stub" <<'EOF'
 #!/usr/bin/env bash
 name="$(basename "$0")"
@@ -53,17 +54,21 @@ case "$name $*" in
   "xcrun xcresulttool get "*) echo '{"result":"Passed","passedTests":1,"failedTests":0,"skippedTests":0}' ;;
   "xcodebuild build "*) [ "${STUB_BUILD_OK:-}" = 1 ] || exit 65 ;;
   "open "*"-MeguriRoute stub/quits"*) ;;
-  "open "*) exec sleep 30 ;;
+  "open "*)
+    while [ "$#" -gt 0 ] && [ "$1" != --args ]; do app="$1"; shift; done
+    exec -a "$app/Contents/MacOS/Meguri" sleep 30
+    ;;
+  "lsappinfo "*) printf '[ NULL ]  ASN:0x0-0x1a01a: \n !cgsConnection !signalled type="%s" flavor=[ NULL ]\n' "${STUB_APP_TYPE:-UIElement}" ;;
 esac
 exit 0
 EOF
   chmod +x "$STUBS/_stub"
   local c
-  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint open; do
+  for c in xcrun xcodebuild codesign lipo segedit pluginkit plutil xmllint open lsappinfo; do
     ln -s _stub "$STUBS/$c"
   done
   export PATH="$STUBS:$PATH"
-  unset MEGURI_ALLOW_MAC_UI
+  unset MEGURI_ALLOW_MAC_UI STUB_APP_TYPE
 }
 
 teardown() {
@@ -255,14 +260,22 @@ SWIFT
   STUB_BUILD_OK=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
   local app
   app="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData/Build/Products/Debug/Meguri.app"
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES\$"
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/quits\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute stub/quits\$"
   [ "$(grep -c '^open ' "$STUB_LOG")" -eq 3 ]
   tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: Home'
   tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: route stub/stays'
   tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: route stub/quits'
   tap_line '# the app quit within 3 s of a hidden launch \(open -W exit 0\)'
+  [ "$(grep -c '^lsappinfo info -only ApplicationType [0-9]' "$STUB_LOG")" -eq 2 ]
+}
+
+@test "a hidden Mac launch that shows in the Dock fails xcode-check (U8d)" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 STUB_APP_TYPE=Foreground check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line '# the app showed on this Mac \(pid [0-9]+; a Dock tile or the active app\): lsappinfo:.*type="Foreground".*'
 }
 
 @test "the builds phase builds and checks, but launches, leases and tests nothing, and prints no plan" {
@@ -288,7 +301,7 @@ SWIFT
   check_project --phase devices --continue-from "$n"
   app="$(cd "$BATS_TEST_TMPDIR/work" && pwd -P)/DerivedData/Build/Products/Debug/Meguri.app"
   [ "$(head -n 1 <<<"$output")" = "ok $((n + 1)) mac-Debug launched hidden stays up: Home" ]
-  called "^open -g -j -n -W $app --args -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
+  called "^open -g -j -n -W $app --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES -MeguriRoute stub/stays\$"
   called '^sim-pool\.sh acquire iphone --holder xcode-check$'
   called '^xcodebuild test .* -destination id=POOL-iphone .*'
   not_called '^xcodebuild (-list|build .* -destination platform=macOS)'

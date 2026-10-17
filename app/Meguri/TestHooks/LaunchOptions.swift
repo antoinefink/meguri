@@ -22,6 +22,7 @@ extension TestHooks {
     /// | `-MeguriSizeClass` | iOS only: `compact` or `regular`, the window's horizontal size class whatever its width (R2–R5 on any simulator); `<bundle id>.testhooks.toggleSizeClass` flips it at run time |
     /// | `-MeguriIntegrations` | Mac only: `on` or `off`, the integrations flag U144 publishes (R11): on, closing the window keeps the app running; starts no server |
     /// | `-MeguriRoute` | a route registered in `RouteRegistry`, e.g. `sample/sheet` |
+    /// | `-MeguriBackgroundLaunch` | Mac only: `YES` or `NO`; in Debug, `YES` keeps the app out of the Dock and never active (`BackgroundLaunch`, which reads it itself; Profile ignores it). Not a UI-state option: it changes neither the restored state nor the window size |
     struct LaunchOptions: Equatable {
         enum WindowSize: Equatable {
             case minimum, standard, large
@@ -55,7 +56,7 @@ extension TestHooks {
         static let names = [
             "Fixture", "Now", "TimeZone", "Locale", "Animations", "ReduceMotion",
             "ReduceTransparency", "WindowSize", "Appearance", "AnkiConnectPort", "MigakuPort", "SizeClass",
-            "Integrations", "Route",
+            "Integrations", "Route", "BackgroundLaunch",
         ]
 
         init() {}
@@ -128,6 +129,14 @@ extension TestHooks {
             integrations = try values["Integrations"].map { value throws(TestHookError) in try Self.onOff(value, "Integrations") }
             if let value = values["Route"] {
                 route = try Route(value)
+            }
+            if let value = values["BackgroundLaunch"] {
+                guard value == "YES" || value == "NO" else {
+                    throw TestHookError("-MeguriBackgroundLaunch takes YES or NO, got '\(value)'")
+                }
+                #if !os(macOS)
+                throw TestHookError("-MeguriBackgroundLaunch applies to the Mac only")
+                #endif
             }
         }
 

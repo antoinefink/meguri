@@ -7,13 +7,15 @@
 # mg_sim_take after (the VM's lease, the products copied in), and reach the
 # simulators through mg_simctl. A --device must be a pool device this
 # checkout leased. Mac launches take the host lease (host.sh). The Mac app is
-# launched hidden (open -g -j) and never in Release or AppStore, whose ids
-# are the daily driver's (app/AGENTS.md).
+# launched hidden (open -g -j) with -MeguriBackgroundLaunch YES, so it stays
+# out of the Dock and never becomes active (U8d; mg_app_open_mac), and only in
+# Debug: Profile has no background launch, and Release and AppStore have the
+# daily driver's ids (app/AGENTS.md).
 
 mg_job build-app host mg_build_app \
   "Build the app and its UI tests: --platform ios-sim|mac [--config Debug|Profile|Release|AppStore] (lint-ui first, core XCFramework, xcodebuild build-for-testing into build/app/DerivedData; Mac: Debug and Profile only)"
 mg_job run host mg_run \
-  "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app runs hidden for N s (5) and quits"
+  "Install and launch with test-hook options: --platform iphone|iphone-small|ipad|ipad-small|foldable|mac [--device <leased udid>] [--config Debug|Profile] [--route r] [--window-size s] [--seconds N] [-- launch args]; a simulator keeps running the app (and its lease), the Mac app (Debug only) runs hidden for N s (5), out of the Dock and never active (checked with lsappinfo every second), and quits"
 
 MG_APP_DD=build/app/DerivedData
 MG_APP_DEV_ID=com.antoinefink.meguri.dev
@@ -407,6 +409,55 @@ mg_app_mac_guard() {
   return 1
 }
 
+# mg_app_mac_launchable <config>: only a Debug build stays out of sight on
+# this Mac (U8d); Profile keeps Release's launch for performance runs (R1866)
+# and would get a Dock tile. Otherwise records a usage error and returns 1,
+# before anything is built or launched.
+mg_app_mac_launchable() {
+  [ "$1" != Debug ] || return 0
+  mg_failure usage "$MG_JOB: the Mac app is launched on this Mac in Debug only: $1 has no background launch (U8d; Profile keeps Release's launch for performance runs, R1866) and would show in the Dock" "tools/mg --list"
+  mg_message "$MG_JOB: the Mac app is launched on this Mac in Debug only, not $1 (U8d)"
+  mg_status error
+  return 1
+}
+
+# mg_app_open_mac <app> [launch args...]: launches the Mac app the only way
+# tools/mg launches it on this Mac (root AGENTS.md): a new instance, hidden
+# and in the background (open -g -j), with -MeguriBackgroundLaunch YES, which
+# keeps the Debug build out of the Dock and never active (U8d,
+# app/Meguri/TestHooks/BackgroundLaunch.swift; mg_app_mac_launchable first).
+mg_app_open_mac() {
+  local app="$1"
+  shift
+  open -g -j -n "$app" --args -MeguriBackgroundLaunch YES "$@" >&2
+}
+
+# mg_app_mac_presence <pid>: how LaunchServices shows the process (lsappinfo):
+# its application type (Foreground: a Dock tile; UIElement; BackgroundOnly),
+# followed by "front" while it is the active app. Empty when LaunchServices
+# does not know the process.
+mg_app_mac_presence() {
+  local info type
+  info="$(lsappinfo info -only ApplicationType "$1" 2>/dev/null)" || return 0
+  type="$(printf '%s\n' "$info" | sed -nE 's/.*type="([A-Za-z]+)".*/\1/p' | head -n 1)"
+  case "$info" in *"(in front)"*) type="${type:+$type }front" ;; esac
+  printf '%s\n' "$type"
+}
+
+# mg_app_mac_out_of_sight <pid> <when>: a hidden launch gets no Dock tile and
+# never becomes the active app (U8d). Sets MG_APP_MAC_PRESENCE; otherwise
+# records the failure and returns 1.
+mg_app_mac_out_of_sight() {
+  MG_APP_MAC_PRESENCE="$(mg_app_mac_presence "$1")"
+  case " $MG_APP_MAC_PRESENCE " in
+    *" Foreground "* | *" front "*)
+      mg_failure in-sight "the Mac app (pid $1) showed on this Mac $2 (lsappinfo: $MG_APP_MAC_PRESENCE): a hidden tools/mg launch must get no Dock tile and never be the active app (U8d, -MeguriBackgroundLaunch YES)"
+      return 1
+      ;;
+  esac
+  return 0
+}
+
 # mg_app_quit_mac <app>: terminates the app (SIGKILL after 10 s).
 mg_app_quit_mac() {
   local pids i
@@ -528,16 +579,18 @@ mg_run() {
   mg_status pass
 }
 
-# The Mac: a hidden background launch that must stay up for <seconds>, then
-# quits (it holds the host lease meanwhile, so no other job launches the app).
+# The Mac: a hidden background launch that must stay up, out of the Dock and
+# never active, for <seconds>, then quits (it holds the host lease meanwhile,
+# so no other job launches the app).
 mg_run__mac() {
   local config="$1" seconds="$2" app pid="" i
   shift 2
+  mg_app_mac_launchable "$config" || return 0
   mg_app_build mac "$config" || return 0
   mg_host_lease || return 0
   mg_app_mac_guard || return 0
   app="$(mg_app_products mac "$config")/Meguri.app"
-  open -g -j -n "$app" --args "$@" >&2
+  mg_app_open_mac "$app" "$@"
   mg_on_exit "mg_app_quit_mac '$app'"
   for i in 1 2 3 4 5 6 7 8 9 10; do
     pid="$(mg_app_mac_pids "$app" | head -n 1)"
@@ -557,8 +610,14 @@ mg_run__mac() {
       mg_status fail
       return 0
     fi
+    if ! mg_app_mac_out_of_sight "$pid" "$i s after a hidden launch"; then
+      mg_message "run: the Mac app showed on this Mac after $i s (lsappinfo: $MG_APP_MAC_PRESENCE)"
+      mg_status fail
+      return 0
+    fi
     mg_sleep 1
   done
-  mg_message "run: the Mac app ($config) ran hidden for $seconds s (pid $pid) and was quit"
+  mg_detail application_type "$(jq -n --arg t "$MG_APP_MAC_PRESENCE" '$t')"
+  mg_message "run: the Mac app ($config) ran hidden for $seconds s (pid $pid, lsappinfo: ${MG_APP_MAC_PRESENCE:-unknown}) and was quit"
   mg_status pass
 }

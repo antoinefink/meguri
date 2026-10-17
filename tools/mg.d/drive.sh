@@ -14,7 +14,7 @@ mg_job drive host mg_drive \
 mg_job ui-tree host mg_ui_tree \
   "Launch on a route and export the UI hierarchy (and a screenshot): --route <route> [--platform ...] [--device <udid>] [--config ...] [-- launch args]"
 mg_job screenshot host mg_screenshot \
-  "Screenshot: --route <route> [--platform ...] [--device <udid>] [-- launch args] launches and captures (simulators: with the hierarchy; mac: hidden launch and screencapture -l, needs Screen Recording); --device <udid> alone captures that simulator's screen as it is"
+  "Screenshot: --route <route> [--platform ...] [--device <udid>] [-- launch args] launches and captures (simulators: with the hierarchy; mac: Debug only, hidden launch out of the Dock and screencapture -l, needs Screen Recording); --device <udid> alone captures that simulator's screen as it is"
 mg_job hierarchy-check host mg_hierarchy_check \
   "Layout and identifier checks over hierarchy exports (tools/scripts/hierarchy-check), in the image-tools container: <hierarchy.json>..."
 
@@ -665,10 +665,12 @@ mg__mac_window_id() {
     w.length ? String(w[0].kCGWindowNumber) : ''" 2>/dev/null
 }
 
-# The Mac: a hidden background launch on the route, then screencapture -l of
-# its window (root AGENTS.md); never takes over the screen.
+# The Mac: a hidden background launch on the route (mg_app_open_mac: out of
+# the Dock, never active), then screencapture -l of its window (root
+# AGENTS.md); never takes over the screen.
 mg_screenshot__mac() {
   local route="$1" config="$2" app pid="" wid="" png="$MG_RUN_DIR/mac-$(printf '%s' "$1" | tr '/' '-').png" i
+  mg_app_mac_launchable "$config" || return 0
   mg_app_build mac "$config" || return 0
   mg_host_lease || return 0
   mg_app_mac_guard || return 0
@@ -682,7 +684,7 @@ mg_screenshot__mac() {
     return 0
   fi
   app="$(mg_app_products mac "$config")/Meguri.app"
-  open -g -j -n "$app" --args -ApplePersistenceIgnoreState YES -MeguriAnimations off -MeguriRoute "$route" ${MG_D_REST[0]+"${MG_D_REST[@]}"} >&2
+  mg_app_open_mac "$app" -ApplePersistenceIgnoreState YES -MeguriAnimations off -MeguriRoute "$route" ${MG_D_REST[0]+"${MG_D_REST[@]}"}
   mg_on_exit "mg_app_quit_mac '$app'"
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     pid="$(mg_app_mac_pids "$app" | head -n 1)"
@@ -696,6 +698,11 @@ mg_screenshot__mac() {
     return 0
   fi
   mg_sleep 1
+  if ! mg_app_mac_out_of_sight "$pid" "before the capture"; then
+    mg_message "screenshot: the Mac app showed on this Mac (lsappinfo: $MG_APP_MAC_PRESENCE)"
+    mg_status fail
+    return 0
+  fi
   if ! screencapture -x -o -l "$wid" "$png" || [ ! -s "$png" ]; then
     mg_failure screencapture "screencapture -l $wid failed"
     mg_status error

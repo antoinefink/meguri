@@ -15,6 +15,10 @@ INFOPLIST_FILE[sdk=iphone*] = Meguri/Info-iOS.plist
 INFOPLIST_FILE[sdk=macosx*] = Meguri/Info-macOS.plist
 INFOPLIST_KEY_CFBundleDisplayName = Meguri
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.education
+// Debug builds start every Mac launch as a UI element (no Dock tile, never
+// reported Foreground); MeguriApp gives a launch the regular policy unless it
+// is a test host or a hidden tools/mg launch (U8d, TestHooks/BackgroundLaunch.swift).
+INFOPLIST_KEY_LSUIElement[sdk=macosx*] = $(MEGURI_MAC_UI_ELEMENT)
 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphone*] = YES
 INFOPLIST_KEY_UILaunchScreen_Generation[sdk=iphone*] = YES
 INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight

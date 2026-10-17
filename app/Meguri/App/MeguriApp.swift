@@ -29,6 +29,11 @@ struct MeguriApp: App {
     #endif
 
     init() {
+        #if MEGURI_TEST_HOOKS && DEBUG && os(macOS)
+        // Before anything else: a test host or a hidden tools/mg launch
+        // never shows in the Dock or comes to the front (U8d).
+        TestHooks.BackgroundLaunch.apply()
+        #endif
         var configuration = LaunchConfiguration()
         var features = ShellFeatures.standard
         var uiStateStore = UIStateStore.standard

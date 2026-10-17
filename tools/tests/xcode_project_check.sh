@@ -249,6 +249,12 @@ expect_sim_entitlement() { # expect_sim_entitlement <executable> <key> <JSON val
 
 hardened() { codesign -d -v "$1" 2>&1 | grep -q '^CodeDirectory.*flags=.*runtime' || { codesign -d -v "$1" 2>&1 | grep flags; return 1; }; }
 
+expect_info() { # expect_info <app> <key> <JSON value, null when absent>: the Mac app's Info.plist
+  local actual
+  actual="$(plutil -convert json -o - "$1/Contents/Info.plist" | jq -c --arg k "$2" '.[$k]')"
+  [ "$actual" = "$3" ] || { echo "$2 is $actual, expected $3" && return 1; }
+}
+
 no_build_settings_in_pbxproj() {
   local inline
   inline="$(awk '/buildSettings = \{/ {f = 1; next} f && /^[[:space:]]*\};/ {f = 0; next} f' "$PROJECT/project.pbxproj")"
@@ -383,13 +389,15 @@ entitlements_are() { # entitlements_are <bundle> <expected keys...>
 }
 
 # stays_up <app> [launch args...]: launches the app hidden and in the
-# background, as agents must (`open -g -j`, root AGENTS.md), checks that it
-# still runs 3 s later, then quits it. On the Mac an alert presented while the
-# app is hidden closes the window, and the app quits (app/AGENTS.md).
+# background, as agents must (`open -g -j`, root AGENTS.md), with
+# -MeguriBackgroundLaunch YES (U8d), checks that it still runs 3 s later, out
+# of the Dock and not the active app (lsappinfo), then quits it. On the Mac an
+# alert presented while the app is hidden closes the window, and the app quits
+# (app/AGENTS.md).
 stays_up() {
-  local app="$1" opener rc=0
+  local app="$1" opener rc=0 pid shown
   shift
-  open -g -j -n -W "$app" --args -ApplePersistenceIgnoreState YES "$@" >/dev/null 2>&1 &
+  open -g -j -n -W "$app" --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES "$@" >/dev/null 2>&1 &
   opener=$!
   sleep 3
   if ! kill -0 "$opener" 2>/dev/null; then
@@ -397,6 +405,15 @@ stays_up() {
     echo "the app quit within 3 s of a hidden launch (open -W exit $?)"
     rc=1
   fi
+  for pid in $(running "$app/Contents/MacOS/Meguri"); do
+    shown="$(lsappinfo info -only ApplicationType "$pid" 2>/dev/null | tr -s '\n ' '  ')"
+    case "$shown" in
+      *'type="Foreground"'* | *"(in front)"*)
+        echo "the app showed on this Mac (pid $pid; a Dock tile or the active app): lsappinfo:$shown"
+        rc=1
+        ;;
+    esac
+  done
   quit_running "$app/Contents/MacOS/Meguri"
   kill "$opener" 2>/dev/null
   wait "$opener" 2>/dev/null
@@ -436,6 +453,13 @@ if builds_phase; then
       [ "$(lipo -archs "$1/Contents/MacOS/Meguri")" = arm64 ] &&
       [ "$(lipo -archs "$1/Contents/PlugIns/MeguriWidget.appex/Contents/MacOS/MeguriWidget")" = arm64 ] ||
       { lipo -archs "$1/Contents/MacOS/Meguri"; exit 1; }' _ "$app"
+    # Debug starts every launch as a UI element and promotes launches by hand
+    # (U8d); Profile keeps Release's launch (R1866), and the daily-driver
+    # builds stay plain regular apps.
+    case "$config" in
+      Debug) check "mac-$config starts as a UI element (LSUIElement)" expect_info "$app" LSUIElement true ;;
+      *) check "mac-$config declares no LSUIElement" expect_info "$app" LSUIElement null ;;
+    esac
     # shellcheck disable=SC2046
     markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"
     case "$config" in
