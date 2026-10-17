@@ -235,7 +235,7 @@ PY
   mkdir -p "$dir"
   jq -nc --argjson r "$IPHONE" '{schema_version: 1, suite: "LaunchHomePerfTests", kind: "ui", configuration: "Profile",
     attachments: 0, runner: $r, results: [
-      {name: "xctest.application-launch", metric: "duration", unit: "ms", percentile: "p95", value: 540, samples: 5}]}' \
+      {name: "xctest.application-launch", metric: "duration", unit: "ms", percentile: "p95", value: 540, samples: 5, fixture: "150k"}]}' \
     >"$dir/LaunchHomePerfTests.json"
   mg perf-gate --results build/device-results --device-run M1 --device iphone
   [ "$status" -eq 1 ]
@@ -247,6 +247,44 @@ PY
   [ "$(jq -r '.budgets[] | select(.id == "R1818") | .status' "$report")" = fail ]
   [[ "$(field '.failures[0].message')" == *"R1818 xctest.application-launch p95 540 ms > 500 ms"* ]]
   [ "$(field '.details.device_run.runner')" = "iPhone18,1/24A434" ]
+  validate "$result"
+}
+
+@test "perf-gate requires explicit fixtures for full-sync device coverage" {
+  local dir="$SB/build/device-results" report
+  mkdir -p "$dir"
+  # Rows without a fixture are never taken at a case's: nothing is judged,
+  # R1843 stays pending and no device-run report is written.
+  jq -nc --argjson r "$IPHONE" '{schema_version: 1, suite: "SyncPerfTests", kind: "ui", configuration: "Profile",
+    attachments: 0, runner: $r, results: [
+      {name: "sync.fullUpload.localWork", metric: "duration", unit: "ms", percentile: "p95", value: 2000, samples: 5},
+      {name: "sync.fullDownload.localWork", metric: "duration", unit: "ms", percentile: "p95", value: 2000, samples: 5}]}' \
+    >"$dir/SyncPerfTests.json"
+  mg perf-gate --results build/device-results --device-run M1 --device iphone
+  [ "$status" -eq 1 ]
+  [ "$(field '.details.budgets.R1843')" = pending ]
+  [ "$(field '.summary.total')" -eq 0 ]
+  [ "$(field '[.artifacts[] | select(.path | endswith("device-run.json"))] | length')" -eq 0 ]
+  [[ "$(field '.failures[] | select(.id == "device-run") | .message')" == *"no iphone device results"* ]]
+  validate "$result"
+
+  jq '.results |= map(. + {fixture: "private-collection"})' "$dir/SyncPerfTests.json" >"$dir/labelled.json"
+  mv "$dir/labelled.json" "$dir/SyncPerfTests.json"
+  mg perf-gate --results build/device-results --device-run M1 --device iphone
+  [ "$status" -eq 0 ]
+  report="$(field '.artifacts[] | select(.path | endswith("device-run.json")) | .path')"
+  [ "$(jq -r '.budgets[] | select(.id == "R1843") | .status' "$report")" = incomplete ]
+  [ "$(jq '[.budgets[] | select(.id == "R1843") | .cases[] | select(.status == "pass" and .fixture == "private-collection")] | length' "$report")" -eq 2 ]
+  [ "$(jq '[.budgets[] | select(.id == "R1843") | .cases[] | select((.status == "pending" or .status == "missing") and .fixture == "150k")] | length' "$report")" -eq 2 ]
+  validate "$result"
+
+  jq '.results += [.results[] | .fixture = "150k"]' "$dir/SyncPerfTests.json" >"$dir/labelled.json"
+  mv "$dir/labelled.json" "$dir/SyncPerfTests.json"
+  mg perf-gate --results build/device-results --device-run M1 --device iphone
+  [ "$status" -eq 0 ]
+  report="$(field '.artifacts[] | select(.path | endswith("device-run.json")) | .path')"
+  [ "$(jq -r '.budgets[] | select(.id == "R1843") | .status' "$report")" = pass ]
+  [ "$(jq '[.budgets[] | select(.id == "R1843") | .cases[] | select(.status == "pass")] | length' "$report")" -eq 4 ]
   validate "$result"
 }
 

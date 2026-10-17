@@ -36,7 +36,8 @@ Rules (budgets.yaml `rules`):
     has to exist (the feature completed). Every size is judged, but only a
     measurement at a case's own fixture proves it: a 1M completion or a 500k
     pass leaves a case stated at 150k missing (budget and group statuses,
-    device-run reports).
+    device-run reports). A row without a fixture fits only a case stated
+    without one: it is never taken at a case's fixture.
   - R1861: every result of a suite must measure each case the catalog gates
     on that suite (pending cases aside, at any fixture the case takes), or
     the evaluation fails; `check` requires the suite to declare the
@@ -705,9 +706,11 @@ def baseline_rows(doc):
 def fixture_rule(case, row_fixture, rules):
     """How R1803 applies to a row: ("scale", factor) for its limit,
     ("completes", None) above 500k, or None when the row's fixture is not the
-    case's. A row without a fixture is taken at the case's."""
+    case's. A row without a fixture fits only a case without one: it is never
+    taken at the case's, so it neither proves nor is judged against a case
+    stated for a collection."""
     cf = case["fixture"]
-    rf = row_fixture if row_fixture is not None else cf
+    rf = row_fixture
     if cf is None:
         return ("scale", 1) if rf is None else None
     cs, rs = size_of(cf), size_of(rf)
@@ -721,11 +724,11 @@ def fixture_rule(case, row_fixture, rules):
 
 
 def covers(case, row_fixture):
-    """Whether a measurement at `row_fixture` (None: the case's) is at the
+    """Whether a measurement at `row_fixture` (None: no fixture) is at the
     collection the case's limit is stated for. Other sizes are judged by
     R1803's rules, but only this one proves the case."""
     cf = case["fixture"]
-    rf = row_fixture if row_fixture is not None else cf
+    rf = row_fixture
     return rf == cf or (size_of(cf) is not None and size_of(cf) == size_of(rf))
 
 
@@ -769,7 +772,7 @@ def describe(doc):
 
 def judge(case, row, doc, place, family, base, rules):
     """One evaluation of `case` on `row`: status pass, fail or unchecked."""
-    fixture = row.get("fixture", case["fixture"])
+    fixture = row.get("fixture")
     ev = {"case": case["key"], "budget": case["budget"], "kind": case["kind"], "group": case["group"],
           "suite": doc["suite"], "test": row.get("test"), "name": row["name"], "metric": row["metric"],
           "unit": row["unit"], "percentile": row.get("percentile"), "fixture": fixture, "runner": doc["runner"]["id"],

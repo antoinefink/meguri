@@ -32,7 +32,8 @@
 #     strict      true for "below": the limit itself fails
 #     fixture     the collection it is stated for (default 150k); a size
 #                 (10k, 150k, 500k, 1m) or a named fixture (exact match). A
-#                 UI row without a fixture is taken at the case's. Rows at
+#                 row without a fixture fits only `fixture: null`: it is
+#                 never taken at the case's (PerfTestCase.fixture). Rows at
 #                 other sizes are judged, but only one at this fixture proves
 #                 the case: a 1M completion leaves a 150k case missing.
 #     multiplier_500k, rule_1m  R1803: a time budget stated at 150k or less

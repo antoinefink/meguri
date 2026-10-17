@@ -205,7 +205,8 @@ def device_run(milestone, device, build, budgets, fail=(), catalog=None, measure
     `fail`, breach their budget)."""
     rows = [{"name": MEASURED[b][0], "metric": "duration" if MEASURED[b][1] == "ms" else "frames",
              "unit": MEASURED[b][1], "percentile": "p95", "value": MEASURED[b][3 if b in fail else 2], "samples": 5,
-             "test": "LaunchHomePerfTests/test%s()" % b} for b in (budgets if measured is None else measured)]
+             "test": "LaunchHomePerfTests/test%s()" % b, "fixture": "150k"}
+            for b in (budgets if measured is None else measured)]
     result = {"schema_version": 1, "suite": "LaunchHomePerfTests", "kind": "ui", "configuration": "Profile",
               "attachments": 0, "runner": RUNNERS[device], "results": rows}
     cat, errors = perf_gate.normalize(catalog or budget_catalog())

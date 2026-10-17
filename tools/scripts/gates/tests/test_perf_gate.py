@@ -92,7 +92,7 @@ def catalog(raw=None):
     return cat
 
 
-def row(name, value, metric="duration", unit="ms", percentile="p95", test=None, fixture=None, samples=5):
+def row(name, value, metric="duration", unit="ms", percentile="p95", test=None, fixture="150k", samples=5):
     out = {"name": name, "metric": metric, "unit": unit, "value": value, "samples": samples}
     if percentile:
         out["percentile"] = percentile
@@ -121,7 +121,7 @@ def inputs(*docs):
             for i, d in enumerate(docs)]
 
 
-def review_rows(start=120.0, tint=0, frames=(3, 4), swap=(3, 3), start_fixture=None, omit=()):
+def review_rows(start=120.0, tint=0, frames=(3, 4), swap=(3, 3), start_fixture="150k", omit=()):
     """A full ReviewLoopPerfTests run as raw_catalog() gates it: R1807's
     frames against the native swap, R1813's start and R1816's tint."""
     rows = [row("review.startToFirstCard", start, fixture=start_fixture),
@@ -171,7 +171,7 @@ class EvaluateScenarios(unittest.TestCase):
     def search_baseline(self, value=40.0):
         return baselines(baseline(SIM, "BrowserSearchPerfTests", [
             {"name": "search.firstPage", "metric": "duration", "unit": "ms", "percentile": "p95",
-             "test": "BrowserSearchPerfTests/testPlain()", "value": value}]))
+             "test": "BrowserSearchPerfTests/testPlain()", "fixture": "150k", "value": value}]))
 
     def test_a_simulator_search_8_percent_slower_than_its_baseline_passes(self):
         ev = perf_gate.evaluate(catalog(), inputs(self.search(43.2)), self.search_baseline())
@@ -299,7 +299,7 @@ class EvaluateRules(unittest.TestCase):
             {"name": "review.answerToNextVisible", "metric": "frames", "unit": "frames", "percentile": "p99",
              "fixture": "review-corpus", "value": 7},
             {"name": "review.startToFirstCard", "metric": "duration", "unit": "ms", "percentile": "p95",
-             "value": 120.0}]))
+             "fixture": "150k", "value": 120.0}]))
         ev = perf_gate.evaluate(catalog(), inputs(ui("ReviewLoopPerfTests", rows)), bl)
         self.assertEqual(ev["status"], "pass", failure_text(ev))
 
@@ -389,6 +389,23 @@ class Completeness(unittest.TestCase):
     """R1861: a declared interval is not an emitted one. Every result of a
     suite must measure each case the catalog gates on that suite (pending
     cases aside), or the gate fails."""
+
+    def test_a_row_without_a_fixture_is_not_taken_at_the_cases(self):
+        res = bench("open", [row("collection.open", 100, fixture=None)])
+        ev = perf_gate.evaluate(catalog(), inputs(res), {})
+        self.assertEqual(ev["status"], "fail")
+        self.assertEqual(ev["budgets"]["R1823"], "missing")
+        self.assertEqual(ev["groups"]["open"]["status"], "missing")
+        self.assertEqual(ev["evaluations"], [])
+        self.assertIn("its rows are at no fixture, the case is at 150k", failure_text(ev))
+
+    def test_a_case_without_a_fixture_accepts_a_row_without_fixture_metadata(self):
+        raw = raw_catalog()
+        [b for b in raw["budgets"] if b["id"] == "R1823"][0]["cases"][0]["fixture"] = None
+        res = bench("open", [row("collection.open", 100, fixture=None)])
+        ev = perf_gate.evaluate(catalog(raw), inputs(res), {})
+        self.assertEqual(ev["status"], "pass", failure_text(ev))
+        self.assertEqual(ev["budgets"]["R1823"], "pass")
 
     def test_a_suite_that_declares_the_probe_but_never_measures_it_fails(self):
         # The probe's test removed, testLaunch kept: the result holds the
@@ -833,6 +850,15 @@ class DeviceRun(unittest.TestCase):
         report = self.report()
         b = [b for b in report["budgets"] if b["id"] == "R1813"][0]
         b["cases"] = [dict(c, fixture="1m", value=5000.0, raw=5000.0) for c in b["cases"]]
+        outcome, message, _ = perf_gate.verify_device_report(report, catalog(), "iphone", ["R1813"])
+        self.assertEqual(outcome, "fail")
+        self.assertIn("150k", message)
+
+    def test_a_report_without_fixture_metadata_does_not_prove_a_fixture_bound_case(self):
+        report = self.report()
+        b = [b for b in report["budgets"] if b["id"] == "R1813"][0]
+        for c in b["cases"]:
+            c.pop("fixture", None)
         outcome, message, _ = perf_gate.verify_device_report(report, catalog(), "iphone", ["R1813"])
         self.assertEqual(outcome, "fail")
         self.assertIn("150k", message)
