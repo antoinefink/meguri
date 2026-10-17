@@ -143,7 +143,10 @@ waiting_for_mutex() {
 # the image-tools container, as functions that replace the real ones (the
 # fixture file sorts after drive.sh). The fake run writes a drive log of
 # three steps: launch, a tap marked "dismiss-sheet", a snapshot; with
-# MEGURI_DRIVE_FRAMES=1 the tap gets FX_FRAMES (5) sampled frames. It lasts
+# MEGURI_DRIVE_FRAMES=1 the tap gets FX_FRAMES (5) sampled frames.
+# FX_STEP1_STATUS and FX_STEP2_STATUS set the launch's and the tap's status,
+# FX_SCRIPT_ERROR the log's error, and with FX_ISSUE the hierarchy check
+# finds a control without an identifier in the first hierarchy. It lasts
 # FX_DRIVE_SECONDS (0.6), or with FX_DRIVE_UNTIL=<file> it touches
 # <file>.started and runs until <file> exists. The fake
 # contact sheet fails with FX_SHEET=fail and leaves out the sheets with
@@ -167,10 +170,11 @@ mg_app_xcodebuild_test() {
   fi
   t1="$(fx_now)"
   [ "${TEST_RUNNER_MEGURI_DRIVE_FRAMES:-0}" != 1 ] || n="${FX_FRAMES:-5}"
-  jq -n --argjson t0 "$t0" --argjson t1 "$t1" --argjson n "$n" --arg p "$platform" --arg s2 "${FX_STEP2_STATUS:-ok}" '
+  jq -n --argjson t0 "$t0" --argjson t1 "$t1" --argjson n "$n" --arg p "$platform" --arg s2 "${FX_STEP2_STATUS:-ok}" \
+    --arg s1 "${FX_STEP1_STATUS:-ok}" --arg err "${FX_SCRIPT_ERROR:-}" '
     def cap($b; $ph): {phase: $ph, hierarchy: "\($b)-\($ph).json", screenshot: "\($b)-\($ph).png"};
-    {script: "fixture", path: "/fixture.json", platform: $p, error: null, steps: [
-      {index: 1, kind: "launch", transition: null, started: $t0, ended: ($t0 + 0.05), status: "ok", captures: [cap("drive-01-launch"; "after")]},
+    {script: "fixture", path: "/fixture.json", platform: $p, error: (if $err == "" then null else $err end), steps: [
+      {index: 1, kind: "launch", transition: null, started: $t0, ended: ($t0 + 0.05), status: $s1, captures: [cap("drive-01-launch"; "after")]},
       ({index: 2, kind: "tap", transition: "dismiss-sheet", started: ($t0 + 0.1), ended: ($t1 - 0.1), status: $s2,
         captures: [cap("drive-02-tap"; "before"), cap("drive-02-tap"; "after")]}
        + (if $n > 0 then {frames: [range($n) | {file: "drive-02-tap-frame-\("00\(. + 1)" | .[-3:]).png", time: ($t0 + 0.1 + . * 0.1)}]} else {} end)),
@@ -211,7 +215,11 @@ mg_image_tools() {
       while [ "$#" -gt 0 ]; do
         case "$1" in --report) report="$2" && shift 2 ;; *) files[${#files[@]}]="$1" && shift ;; esac
       done
-      printf '%s\n' "${files[@]}" | jq -R . | jq -s '{files: map({path: ., issues: []}), counts: {files: length, issues: 0}}' >"$(fx_host "$report")"
+      printf '%s\n' "${files[@]}" | jq -R . | jq -s --arg issue "${FX_ISSUE:-}" '
+        {files: (to_entries | map({path: .value, issues: (if $issue != "" and .key == 0 then [{kind: "missing-identifier",
+          message: "button Done has no accessibility identifier", type: "button", identifier: "", label: "Done",
+          frame: {x: 10, y: 20, width: 30, height: 40}, path: "0"}] else [] end)}))}
+        | .counts = {files: (.files | length), issues: ([.files[].issues[]] | length)}' >"$(fx_host "$report")"
       ;;
     */contact_sheet.py)
       [ "${FX_SHEET:-ok}" != fail ] || { echo "contact-sheet: fake failure" >&2; return 2; }
@@ -1129,6 +1137,50 @@ EOF
   [ "$(field '.failures | length')" = 0 ]
   [ "$(field '[.details.queued_parts[] | "\(.user_step) \(.part)"] | join(", ")')" = "mac-input test-hooks" ]
   [[ "$(field .message)" == *"mac-ui: 0 passed; 1 of 1 suite(s) queued"*"test-hooks (user step mac-input)"* ]]
+}
+
+# bats test_tags=gate
+@test "a Mac drive whose input macOS dropped still fails or errs on what the drop cannot explain" {
+  add_drive_fakes
+  export MEGURI_MAC_UI_INTERVAL_MINUTES=0
+  local drive="$SB/tools/drive-scripts/examples/sample-transition.json"
+  stub log '[ -z "${STUB_INPUT_DROPPED:-}" ] || echo "2026-10-14 08:21:19.336 E  testmanagerd[21945:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."'
+  export STUB_INPUT_DROPPED=1 FX_STEP2_STATUS=failed
+
+  # The launch failed before any input: the app's failure. The tap, whose
+  # input was dropped, is not recorded.
+  FX_STEP1_STATUS=failed FX_DRIVE_RC=1 mg drive "$drive" --platform mac
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field '[.failures[].id] | join(" ")')" = drive/step-1-launch ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-input sample-transition.json" ]
+  [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
+  [[ "$(field .message)" == *"(user step mac-input)"* ]]
+
+  # A hierarchy issue: the captures show the app as it was.
+  FX_ISSUE=1 mg drive "$drive" --platform mac
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = drive/missing-identifier/Done ]
+  [ "$(field .details.queued)" = false ]
+
+  # The script's error.
+  FX_SCRIPT_ERROR="unknown step kind 'hover'" mg drive "$drive" --platform mac
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = drive/script ]
+
+  # A capture the drive log lists came out empty: an error, not queued.
+  FX_EXPORT_EMPTY=drive-03-snapshot-home.png mg drive "$drive" --platform mac
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(field '[.failures[].id] | join(" ")')" = capture/03-snapshot-home.png ]
+  [ "$(field .details.queued)" = false ]
+
+  # mac-ui runs the drive as a suite: the same issue fails the suite.
+  FX_ISSUE=1 mg mac-ui --suite "drive:$drive"
+  [ "$status" -eq 1 ]
+  [ "$(field '.summary | "\(.failed) \(.queued)"')" = "1 0" ]
+  [ "$(field .details.queued)" = false ]
 }
 
 @test "mac-ui runs the agent driver's resize test as a suite of its own" {

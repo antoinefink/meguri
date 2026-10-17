@@ -1037,6 +1037,123 @@ entry() {
   [ "$(queue_states)" = queued ]
 }
 
+@test "a caught-up run whose escalation cannot be recorded stays escalation-pending, and the next catch-up records it without running again" {
+  local a="$BATS_TEST_TMPDIR/U150" ledger="$SB/docs/process/provenance/escalations.jsonl" lock first
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+
+  # Another record holds the ledgers' lock past its wait: no escalation.
+  lock="$(git -C "$SB" rev-parse --path-format=absolute --git-common-dir)/meguri-session.lock"
+  mkdir "$lock"
+  export MG_SESSION_LOCK_SECONDS=1
+  fx ui fail ui-broke
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field .status)" = error ]
+  [ "$(queue_states)" = escalation-pending ]
+  first="$(field '.details.runs[0].result')"
+  [ "$(entry 0 '"\(.rerun) \(.rerun_status) \(.units | join(","))"')" = "$first fail U150" ]
+  jq -e '.failures[] | select(.id == "escalation:U150" and (.message | contains("escalation-pending")))' "$result"
+  jq -e '.failures[] | select(.id == "rerun:t-job ui")' "$result"
+  [ ! -e "$ledger" ]
+
+  # The ledger is free again: the escalation is recorded from the saved
+  # result, without running anything again.
+  rmdir "$lock"
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(called '^t-job ui')" = 0 ]
+  [ "$(called '^doctor')" = 0 ]
+  [ "$(queue_states)" = failed ]
+  [ "$(jq -s '[.[] | select(.kind == "blocked-red" and .unit == "U150" and .state == "open")] | length' "$ledger")" = 1 ]
+  [ "$(entry 0 .escalation)" = "$(jq -rs '.[0].id' "$ledger")" ]
+  [ "$(jq -rs '.[0].detail | "\(.result) \(.job) \(.entries | length)"' "$ledger")" = "$first t-job 1" ]
+  [ "$(field '.details.escalations[0] | "\(.unit) \(.late) \(.escalation)"')" = "U150 true $(jq -rs '.[0].id' "$ledger")" ]
+  validate "$result"
+
+  # Recorded once.
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(jq -s length "$ledger")" = 1 ]
+}
+
+@test "catch-up refuses a queue it cannot read instead of reading it as empty" {
+  local a="$BATS_TEST_TMPDIR/U150"
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+  fx ui pass
+  : >"$STUB_LOG"
+
+  # A line cut short (an append that did not finish).
+  printf '{"id": "Q-cut", "sta' >>"$SB/$QUEUE"
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = queue-unreadable ]
+  [[ "$(field '.failures[0].message')" == *"$QUEUE cannot be read"* ]]
+  [ "$(called '^doctor')" = 0 ]
+  [ "$(called '^t-job ui')" = 0 ]
+
+  # A line that is JSON, but not an entry.
+  printf '%s\n' "$(head -n 1 "$SB/$QUEUE")" '["Q-x"]' >"$SB/$QUEUE.new" && mv "$SB/$QUEUE.new" "$SB/$QUEUE"
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = queue-unreadable ]
+  [[ "$(field '.failures[0].message')" == *'not a queue entry: ["Q-x"]'* ]]
+  [ "$(called '^t-job ui')" = 0 ]
+
+  # Repaired, the entry runs.
+  head -n 1 "$SB/$QUEUE" >"$SB/$QUEUE.new" && mv "$SB/$QUEUE.new" "$SB/$QUEUE"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(queue_states)" = done ]
+}
+
+@test "a catch-up started while another works the queue runs nothing; a dead holder's lock is taken over" {
+  local a="$BATS_TEST_TMPDIR/U150" out="$BATS_TEST_TMPDIR/first.out" first dead lock="$SB/build/mg/catch-up/lock"
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+  fx ui pass
+  printf '3\n' >"$FX/ui.sleep"
+  : >"$STUB_LOG"
+  "$SB/tools/mg" catch-up >"$out" 2>/dev/null 3>&- &
+  first=$!
+  for _ in $(seq 1 100); do [ "$(called '^t-job ui')" = 1 ] && break; sleep 0.1; done
+  [ "$(called '^t-job ui')" = 1 ]
+
+  # The first one is running the entry's job: the second leaves it alone.
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [[ "$(field .message)" == *"another catch-up ($(jq -r .run_id "$lock/holder.json"), pid $first"*"is working the queue; this run did nothing"* ]]
+  [ "$(field .details.busy.job)" = catch-up ]
+  [ "$(called '^doctor')" = 1 ]
+  wait "$first"
+  [ "$(jq -r .status "$(tail -n 1 "$out")")" = pass ]
+  [ "$(called '^t-job ui')" = 1 ]
+  [ "$(queue_states)" = done ]
+  [ "$(jq -s length "$SB/$QUEUE")" = 2 ]
+  [ ! -e "$lock" ]
+
+  # A catch-up that died holding the lock does not keep others out.
+  sleep 0 &
+  dead=$!
+  wait "$dead" || true
+  mkdir "$lock"
+  jq -n --argjson pid "$dead" '{job: "catch-up", run_id: "gone", pid: $pid}' >"$lock/holder.json"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(field .message)" = "catch-up: nothing is queued" ]
+  [ ! -e "$lock" ]
+}
+
 # wt_outcome <run id>: the run's outcome in the worktree gate a merge ran.
 wt_outcome() {
   jq -r --arg id "$1" '.details.receipt.runs[] | select(.id == $id) | .outcome' \

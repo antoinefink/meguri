@@ -16,14 +16,14 @@
 
 ## Catching up queued runs
 
-`tools/mg catch-up` runs in the main checkout, on a clean tree; the orchestrator's watcher runs it on its schedule. It reads the queue, runs `tools/mg doctor`, and leaves every entry whose user step doctor still lists as missing (`host-session` while the Mac is locked, `mac-input` while the Mac UI runner still has the macOS and Xcode builds that dropped input, `mac-vm` without the VM); while a step holds, it runs nothing for it and passes. Every other entry is run again once on the integration head, one run per job and arguments, and gets a line with its new state:
+`tools/mg catch-up` runs in the main checkout, on a clean tree; the orchestrator's watcher runs it on its schedule. One catch-up at a time works the queue: it holds `build/mg/catch-up/lock` from reading the queue to writing the last state line, and a catch-up started meanwhile does nothing and passes (a dead holder's lock is taken over). A queue line that does not parse as an entry stops it (`error`, `queue-unreadable`) before anything runs. It first records the escalations an earlier catch-up could not record (below), then reads the queue, runs `tools/mg doctor`, and leaves every entry whose user step doctor still lists as missing (`host-session` while the Mac is locked, `mac-input` while the Mac UI runner still has the macOS and Xcode builds that dropped input, `mac-vm` without the VM); while a step holds, it runs nothing for it and passes. Every other entry is run again once on the integration head, one run per job and arguments, and gets a line with its new state:
 
 - the run passes: `done`;
-- it fails: `failed`, and a `blocked-red` escalation for each unit whose merge queued it, with the run's directory. Units that do not depend on that unit go on: it is not a pause;
+- it fails: `failed`, and a `blocked-red` escalation for each unit whose merge queued it, with the run's directory. Units that do not depend on that unit go on: it is not a pause. When an escalation cannot be recorded (the ledgers' lock stays busy, the commit fails), that unit's entries are `escalation-pending` with the failed run's result and catch-up ends `error`; the next catch-up records the escalation from that result, without running the job again, and marks them `failed`;
 - it is queued again (another state now holds it): it stays `queued`, waiting for the steps the new result names;
 - it errs: the entries stay as they were, and catch-up ends `error`.
 
-The queue is append-only; the lines of an entry's id, merged in order, are its state.
+The queue is append-only; the lines of an entry's id, merged in order, are its state. A run's lines are appended as soon as it ends.
 
 ## Oracle runs
 

@@ -184,13 +184,14 @@ mg_drive__motion_inputs() {
 #     marked step (the full movie is deleted);
 #   the Mac without it: FrameSampler screenshots, with the screen-recording
 #     user step.
-# Records artifacts and failures. Returns 0 pass, 1 fail (failed steps or
-# hierarchy issues), 2 error (the drive, a capture the log lists, the
-# hierarchy check or a requested sheet could not be made), 3 queued (macOS
-# dropped the input the drive synthesized: its captures and manifest are
-# kept, its failed steps are not the app's and are not recorded). A pass
-# needs every listed capture exported and non-empty, and the hierarchy check
-# run over them.
+# Records artifacts and failures. Returns 0 pass, 1 fail (failed steps, the
+# script's error or hierarchy issues), 2 error (the drive, a capture the log
+# lists, the hierarchy check or a requested sheet could not be made), 3
+# queued (macOS dropped the input the drive synthesized, and nothing the drop
+# cannot explain went wrong: its captures and manifest are kept, and its
+# failed step from the first input step on is not the app's and is not
+# recorded). A pass needs every listed capture exported and non-empty, and
+# the hierarchy check run over them.
 mg_drive_run() {
   local script="$1" platform="$2" udid="$3" config="$4" record="$5" out="$6"
   local dest name abs_script rc capture="" video="" rec_start="" rec_log recorder="" capture_error=0
@@ -452,11 +453,19 @@ mg_drive_run() {
   done
   [ -z "$video" ] || [ ! -s "$video" ] || mg_artifact video "$video" "$name: screen recording"
 
-  [ "$refused" -eq 0 ] || return 3
-
-  # Failures: failed steps, then each distinct issue once.
-  jq -c '.steps[] | select(.status == "failed") | {id: "step-\(.index)-\(.kind)", message: (.message // "failed")}' \
-    "$out/manifest.json" | while IFS= read -r line; do
+  # Failures: failed steps, the script's error, then each distinct issue once.
+  # With the input dropped, the driver's failed step from the first input
+  # step on (tap, type, swipe, scroll) is the drop's doing: it is not
+  # recorded. A failed step before any input, the script's error and the
+  # hierarchy issues (the captures show the app as it was) are the app's
+  # either way, and so are a capture or check that could not be made.
+  local failed
+  failed="$(jq -c --argjson refused "$refused" '
+    ([.steps[] | select(.kind == "tap" or .kind == "type" or .kind == "swipe" or .kind == "scroll") | .index] | min) as $input
+    | .steps[] | select(.status == "failed" and ($refused == 0 or $input == null or .index < $input))
+    | {id: "step-\(.index)-\(.kind)", message: (.message // "failed")}' "$out/manifest.json")"
+  printf '%s\n' "$failed" | while IFS= read -r line; do
+    [ -n "$line" ] || continue
     mg_failure "$name/$(jq -r .id <<<"$line")" "$(jq -r .message <<<"$line")" "tools/mg drive $script"
   done
   [ -z "$(jq -r '.error // empty' "$out/manifest.json")" ] ||
@@ -467,14 +476,16 @@ mg_drive_run() {
       "$(jq -r '.message + " at " + ((.frame // .frames[0]) | "\(.x),\(.y) \(.width)x\(.height)")' <<<"$line")" "tools/mg drive $script"
   done
 
-  # The driver reports failed steps in its log, not as test failures.
-  if [ "$rc" -ne 0 ] || [ "$(jq '.issues' "$out/manifest.json")" -gt 0 ] ||
-    jq -e '.error != null or any(.steps[]; .status == "failed")' "$out/manifest.json" >/dev/null; then
+  # The driver reports failed steps in its log, not as test failures; with
+  # the input dropped, the test failures XCTest recorded are the drop's too.
+  if [ -n "$failed" ] || [ "$(jq '.issues' "$out/manifest.json")" -gt 0 ] || jq -e '.error != null' "$out/manifest.json" >/dev/null ||
+    { [ "$refused" -eq 0 ] && { [ "$rc" -ne 0 ] || jq -e 'any(.steps[]; .status == "failed")' "$out/manifest.json" >/dev/null; }; }; then
     return 1
   fi
   if [ "$capture_error" -ne 0 ] || [ "$incomplete" -ne 0 ] || [ "$checked" = false ]; then
     return 2
   fi
+  [ "$refused" -eq 0 ] || return 3
   return 0
 }
 
@@ -524,13 +535,16 @@ mg_drive__job() {
       mg_status pass
       ;;
     1)
-      mg_message "$MG_JOB: $(jq -r '"\(.script): \([.steps[] | select(.status == "failed")] | length) failed step(s), \(.issues) issue(s); manifest: "' "$manifest" 2>/dev/null)$manifest"
+      if [ -n "${MG_MAC_INPUT_REFUSED:-}" ]; then
+        mg_message "$MG_JOB: $(jq -r '.script' "$manifest" 2>/dev/null): failed before or beside the input macOS dropped (user step mac-input): $(jq -r '"\(.issues) issue(s)\(if .error != null then ", a script error" else "" end)"' "$manifest" 2>/dev/null), see the failures; manifest: $manifest"
+      else
+        mg_message "$MG_JOB: $(jq -r '"\(.script): \([.steps[] | select(.status == "failed")] | length) failed step(s), \(.issues) issue(s); manifest: "' "$manifest" 2>/dev/null)$manifest"
+      fi
       mg_status fail
       ;;
     3)
       mg_message "$MG_JOB: queued: macOS dropped the input the drive synthesized (user step mac-input); its steps did not test the app; manifest: $manifest"
       mg_status pass
-      mg_queued_settle
       ;;
     *)
       if [ -f "$manifest" ]; then
@@ -541,6 +555,7 @@ mg_drive__job() {
       mg_status error
       ;;
   esac
+  mg_queued_settle
 }
 
 # mg_drive__args: parses the options shared by drive, ui-tree and
