@@ -145,3 +145,61 @@ for `docs/process/roles/spec-writer.md`:
    `yarn.lock` pins (one npm download, checked against its `yarn.lock`
    checksum);
 3. the compiled assets of the `aqt` 26.9.3 wheel (a PyPI download).
+
+## Completion pass, second session (s-20261017T191317Z-c933844d, 2026-10-17)
+
+Checked the first completion pass against `refs/anki-26.09.3` (HEAD
+29bb700b, `git describe` 26.09.3), made the lockfile and Sass points precise,
+and added two C10.7 details.
+
+- C19 item 1, checked again: `_create_bridge_script` in `qt/aqt/webview.py`
+  parses the slot's reply with `JSON.parse` and calls a truthy callback with
+  it; `Bridge.cmd` returns `json.dumps` of the handler's result;
+  `_onBridgeCmd` returns nothing for the late-event guard, `domDone` and
+  `close`; `qt/aqt/reviewer.py` registers `_linkHandler` with
+  `set_bridge_command` for the main and bottom web views, and it returns
+  nothing on every branch. No module under `qt/aqt` registers a
+  `webview_did_receive_js_message` handler (only `webview.py` calls the hook),
+  so only an add-on can answer. `ts/lib/tslib/bridgecommand.ts` forwards the
+  callback to the global unchanged. The callback gets `null`; C10.5, GS5 and
+  C19 item 1 stand.
+- Lockfile check, made precise: the two `ftl/` submodule pointers carry the
+  translations only. The English sources `ftl/core` and `ftl/qt`, from which
+  the generated string module is built, are not among the 34 changed files,
+  and no stylesheet reads them.
+- Sass version for the open question: `build/configure/src/aqt.rs`
+  (`build_css`) and `build/configure/src/web.rs` (`ts:reviewer:reviewer.css`)
+  compile `webview.css` and `reviewer.css` with the `CompileSass` action of
+  `build/ninja_gen/src/node.rs`, which runs the `sass` binary of the root
+  `node_modules`: the root dependency `sass: "<1.103"`, resolved to 1.102.0.
+  `yarn.lock` also holds `sass` 1.99.0, but only as a dependency of
+  `esbuild-sass-plugin`, which does not build these two stylesheets. Option 2
+  of the open question must use 1.102.0.
+- Spot check of the evaluator: `--button-primary-bg` light, recomputed from
+  `blue` 6 (`#2563eb`) with lightness scaled by 5% in HSL, gives
+  18.7843137255%, 41.8823529412% and 92.5490196078%, the spec's text to all
+  ten decimals.
+- C10.7, new detail: the `bridgeCommand` that `bridgecommand.ts` registers
+  calls the global with exactly `(command, callback)` and returns nothing,
+  so it returns `undefined` where the global returns `false`. The spec's
+  `anki/bridgecommand` row now says so, with case GS4b.
+- C10.7, edge case: `runtime-require.ts` tests membership with the `in`
+  operator on an ordinary object, so `require` returns, and `hasPackages`
+  accepts, names inherited from `Object.prototype` (`toString`,
+  `constructor`). The spec keeps Meguri's stricter behavior (throw, `false`),
+  pins it with case GS4c, and lists it with the non-function callback in
+  C15's paragraph of edge cases.
+
+## Completion pass, third check (s-20261017T192022Z-13eb7919, 2026-10-17)
+
+Read the same places again at `refs/anki-26.09.3` (HEAD 29bb700b):
+`_create_bridge_script` parses the reply and calls a truthy callback with it,
+`Bridge.cmd` returns `json.dumps` of the handler's result, `_linkHandler`
+returns nothing on every branch, and the only reference to
+`webview_did_receive_js_message` under `qt/` besides `webview.py` is its
+definition in `qt/tools/genhooks_gui.py`. `bridgecommand.ts` calls the global
+with `(command, callback)` and returns nothing; `runtime-require.ts` tests
+membership with `in`. C19 item 1 (`null`), GS4b and GS4c stand. U66-E1 was
+already marked resolved in unit/U66's review log (a8b3fefb). C4.2's element
+bullet now says the runtime puts `isMac` only on `<body>`, which no longer
+reads as contradicting the card-element sentence after it.
