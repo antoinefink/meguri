@@ -478,8 +478,12 @@ mg_mac_ui() {
           $(for c in $only; do printf -- '-only-testing:MeguriUITests/%s\n' "$c"; done)
         result=$?
         # A suite whose input macOS dropped tested nothing it acted on: it is
-        # queued (mac-input), unless it could not run at all.
-        [ "$result" -eq 2 ] || ! mg_app_mac_input_refused "$since" "$name" || result=3
+        # queued (mac-input), unless it could not run at all or a test failed
+        # where the drop does not explain it (mg_app_mac_input_result).
+        if [ "$result" -ne 2 ] && mg_app_mac_input_refused "$since" "$name"; then
+          mg_app_mac_input_result "$MG_RUN_DIR/$name.xcresult" "$result" "$name"
+          result=$?
+        fi
         ;;
       drive:*)
         # A script that marks a transition also records it (motion capture).

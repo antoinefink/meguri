@@ -1081,6 +1081,66 @@ entry() {
   [ "$(jq -s length "$ledger")" = 1 ]
 }
 
+@test "an escalation appended but not committed is committed by the next catch-up before its clean-tree check, and counts only once committed" {
+  local a="$BATS_TEST_TMPDIR/U150" rel=docs/process/provenance/escalations.jsonl ledger hooks id
+  ledger="$SB/$rel"
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+
+  # The main checkout's commits fail (its pre-commit hook refuses them): the
+  # escalation is appended to the ledger, but not committed.
+  hooks="$(git -C "$SB" rev-parse --path-format=absolute --git-path hooks)"
+  mkdir -p "$hooks"
+  printf '#!/bin/sh\n[ ! -e "%s" ] || { echo "made-up refusal" >&2; exit 1; }\n' "$FX/refuse-commits" >"$hooks/pre-commit"
+  chmod +x "$hooks/pre-commit"
+  : >"$FX/refuse-commits"
+  fx ui fail ui-broke
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(queue_states)" = escalation-pending ]
+  jq -e '.failures[] | select(.id == "escalation:U150" and (.message | contains("could not commit")))' "$result"
+  [ "$(jq -s length "$ledger")" = 1 ]
+  id="$(jq -rs '.[0].id' "$ledger")"
+  ! git -C "$SB" rev-parse -q --verify "HEAD:$rel"
+
+  # Still refused: the escalation in the working tree does not count as
+  # recorded, its entries stay escalation-pending, and nothing runs.
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = escalation-ledger ]
+  [[ "$(field '.failures[0].message')" == *"appended but not committed"* ]]
+  [ "$(queue_states)" = escalation-pending ]
+  [ "$(called '^t-job ui')" = 0 ]
+  [ "$(called '^doctor')" = 0 ]
+
+  # Commits work again: the next catch-up commits the line, then marks the
+  # entries failed with that escalation, without running anything again.
+  rm "$FX/refuse-commits"
+  mg catch-up
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(queue_states)" = failed ]
+  [ "$(entry 0 .escalation)" = "$id" ]
+  [ "$(field '.details.escalations[0] | "\(.unit) \(.late) \(.escalation)"')" = "U150 true $id" ]
+  [ "$(jq -s length "$ledger")" = 1 ]
+  [ "$(git -C "$SB" show "HEAD:$rel")" = "$(cat "$ledger")" ]
+  [ -z "$(git -C "$SB" status --porcelain -- "$rel")" ]
+  [ "$(git -C "$SB" log -1 --format=%s trunk)" = "Record escalation $id (blocked-red, U150)" ]
+  [ "$(called '^t-job ui')" = 0 ]
+  validate "$result"
+
+  # A ledger line changed by hand is not settled: catch-up stops there.
+  printf '%s\n' '{"id": "E-made-up", "state": "open"}' >"$ledger"
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = escalation-ledger ]
+  [[ "$(field '.failures[0].message')" == *"differs from HEAD's by more than appended lines"* ]]
+  [ "$(git -C "$SB" show "HEAD:$rel" | jq -rs '.[0].id')" = "$id" ]
+}
+
 @test "catch-up refuses a queue it cannot read instead of reading it as empty" {
   local a="$BATS_TEST_TMPDIR/U150"
   fx ui queued

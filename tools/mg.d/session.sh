@@ -81,25 +81,11 @@ Session: $id"
 # (sessions, escalations). One lock for all of them: they commit in the same
 # checkouts. Same failure contract as mg_session_store.
 mg_ledger_store() {
-  local dir="$1" rel="$2" record="$3" message="$4" file="$1/$2" line lock waited=0 tries=0
+  local dir="$1" rel="$2" record="$3" message="$4" file="$1/$2" line tries=0
   MG_SESSION_FAILURE=session-ledger
   MG_SESSION_MESSAGE="could not append the record to $rel; see log.txt"
   line="$(jq -c . <<<"$record")" && [ -n "$line" ] || return 1
-  lock="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)/meguri-session.lock" || return 1
-  trap 'mg__session_unlock; exit 143' TERM
-  trap 'mg__session_unlock; exit 129' HUP
-  trap 'mg__session_unlock' EXIT
-  until mkdir "$lock" 2>/dev/null; do
-    if [ "$waited" -ge $((${MG_SESSION_LOCK_SECONDS:-60} * 10)) ]; then
-      trap - TERM HUP EXIT
-      MG_SESSION_FAILURE=session-lock
-      MG_SESSION_MESSAGE="$lock has been held for ${MG_SESSION_LOCK_SECONDS:-60} s; if no tools/mg session record, worktree new or escalation is running, remove that directory and run again"
-      return 1
-    fi
-    sleep 0.1
-    waited=$((waited + 1))
-  done
-  MG__SESSION_LOCK="$lock"
+  mg__ledger_lock "$dir" || return 1
   if ! { mkdir -p "$(dirname "$file")" && printf '%s\n' "$line" >>"$file"; }; then
     mg__session_unlock
     return 1
@@ -115,6 +101,95 @@ mg_ledger_store() {
     sleep 1
   done
   mg__session_unlock
+}
+
+# mg__ledger_lock <checkout>: takes the ledgers' lock, a mkdir lock in the
+# repository's common git dir, waiting at most MG_SESSION_LOCK_SECONDS;
+# mg__session_unlock gives it back. Returns 1 (MG_SESSION_FAILURE,
+# MG_SESSION_MESSAGE) when it stays held, or without setting them when the
+# git dir cannot be found.
+mg__ledger_lock() {
+  local lock waited=0
+  lock="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/meguri-session.lock" || return 1
+  trap 'mg__session_unlock; exit 143' TERM
+  trap 'mg__session_unlock; exit 129' HUP
+  trap 'mg__session_unlock' EXIT
+  until mkdir "$lock" 2>/dev/null; do
+    if [ "$waited" -ge $((${MG_SESSION_LOCK_SECONDS:-60} * 10)) ]; then
+      trap - TERM HUP EXIT
+      MG_SESSION_FAILURE=session-lock
+      MG_SESSION_MESSAGE="$lock has been held for ${MG_SESSION_LOCK_SECONDS:-60} s; if no tools/mg session record, worktree new or escalation is running, remove that directory and run again"
+      return 1
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  MG__SESSION_LOCK="$lock"
+}
+
+# mg_ledger_settle <checkout> <ledger path> <subject filter>: commits the lines
+# a mg_ledger_store appended to the checkout's ledger but could not commit (its
+# commit failed after the append), so that a caller counts a record only once
+# HEAD holds it. Under the ledgers' lock, so a store still running finishes
+# first. The lines past HEAD's ledger must be whole JSON lines; the jq
+# <subject filter>, given their records as an array, makes the commit's
+# subject. A ledger that differs from HEAD's otherwise (a line changed,
+# removed or cut short) is left alone. Returns 0 when HEAD's ledger then is
+# the working tree's, otherwise 1 (MG_SESSION_FAILURE, MG_SESSION_MESSAGE).
+mg_ledger_settle() {
+  local dir="$1" rel="$2" subject="$3" file="$1/$2" size=0 records message tries=0
+  mg__ledger_settled "$dir" "$rel" && return 0
+  MG_SESSION_FAILURE=ledger-unsettled
+  MG_SESSION_MESSAGE="could not settle $rel; see log.txt"
+  mg__ledger_lock "$dir" || return 1
+  if mg__ledger_settled "$dir" "$rel"; then
+    mg__session_unlock
+    return 0
+  fi
+  if git -C "$dir" rev-parse -q --verify "HEAD:$rel" >/dev/null 2>&1; then
+    size="$(git -C "$dir" show "HEAD:$rel" | wc -c | tr -d ' ')"
+  fi
+  if [ ! -f "$file" ] || ! head -c "$size" "$file" | cmp -s - <(git -C "$dir" show "HEAD:$rel" 2>/dev/null); then
+    mg__session_unlock
+    MG_SESSION_MESSAGE="$rel in $dir differs from HEAD's by more than appended lines; settle it by hand (git diff HEAD -- $rel)"
+    return 1
+  fi
+  if [ "$(tail -c 1 "$file" | od -An -tx1 | tr -d ' \n')" != 0a ] ||
+    ! records="$(tail -c +$((size + 1)) "$file" | jq -c -s 'if all(type == "object") then . else error("not a record") end' 2>/dev/null)" ||
+    ! message="$(jq -r "$subject" <<<"$records" 2>/dev/null)" || [ -z "$message" ]; then
+    mg__session_unlock
+    MG_SESSION_MESSAGE="the lines appended to $rel in $dir past HEAD's are not whole records; settle it by hand (git diff HEAD -- $rel)"
+    return 1
+  fi
+  message="$message
+
+Commit what was appended to $rel but not committed: the commit of the run
+that appended it failed. tools/mg $MG_JOB ${MG_RUN_ID:-} committed it.
+
+Role: infra"
+  until mg__ledger_commit "$dir" "$rel" "$message" || mg__ledger_settled "$dir" "$rel"; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+      mg__session_unlock
+      MG_SESSION_FAILURE=session-commit
+      MG_SESSION_MESSAGE="$rel in $dir has lines appended but not committed, and committing them failed again (see log.txt)"
+      return 1
+    fi
+    sleep 1
+  done
+  mg__session_unlock
+}
+
+# mg__ledger_settled <checkout> <ledger path>: whether HEAD's ledger is the
+# working tree's (both absent counts).
+mg__ledger_settled() {
+  local blob
+  blob="$(git -C "$1" rev-parse -q --verify "HEAD:$2" 2>/dev/null)"
+  if [ -f "$1/$2" ]; then
+    [ -n "$blob" ] && [ "$(git -C "$1" hash-object -- "$1/$2")" = "$blob" ]
+  else
+    [ -z "$blob" ]
+  fi
 }
 
 mg__session_unlock() {

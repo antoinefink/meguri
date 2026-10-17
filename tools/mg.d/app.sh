@@ -187,6 +187,46 @@ mg_app_mac_input_refused() {
   return 0
 }
 
+# mg_app_mac_input_result <xcresult> <result> <failure prefix>: the result of
+# a Mac XCUITest run whose input macOS dropped (mg_app_mac_input_refused said
+# so), from its xcodebuild result (0 passed, 1 failed): 3 (queued) when it
+# passed or when the drop explains every failing test, otherwise 1, with each
+# failure the drop does not explain recorded as <prefix>/<test id>. The drop
+# explains a failing test only when the test synthesized input (an activity
+# "Synthesize event") and its first failure (the earliest activity associated
+# with a failure) came at or after its first synthesized event, as for a
+# drive's steps from its first tap on. A failure
+# before it, a failing test that synthesized nothing (fixtures, dates,
+# configuration), a test whose activities cannot be read and a failed run
+# without a failing test tested the app regardless: they fail the run.
+mg_app_mac_input_result() {
+  local bundle="$1" prefix="$3" tests id n=0
+  [ "$2" -eq 1 ] || return 3
+  if ! tests="$(xcrun xcresulttool get test-results tests --path "$bundle" 2>/dev/null |
+    jq -c '[.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed") | {id: .nodeIdentifier,
+      message: ([.children[]? | select(.nodeType == "Failure Message") | .name] | join("; ") | .[0:800])}]')" ||
+    [ -z "$tests" ]; then
+    mg_failure "$prefix/xcresult" "the run failed and its failing tests cannot be read from $bundle: the input macOS dropped does not explain the failure"
+    return 1
+  fi
+  if [ "$tests" = '[]' ]; then
+    mg_failure "$prefix/xcresult" "the run failed, but $bundle lists no failing test: the input macOS dropped does not explain it; see the log"
+    return 1
+  fi
+  while IFS= read -r id; do
+    xcrun xcresulttool get test-results activities --test-id "$id" --path "$bundle" 2>/dev/null |
+      jq -e '[.testRuns[]? | [.activities[]? | .. | objects | select(has("startTime"))] as $a
+          | ([$a[] | select(.title == "Synthesize event") | .startTime] | min) as $input
+          | ([$a[] | select(.isAssociatedWithFailure == true) | .startTime] | min) as $failure
+          | select($failure != null) | $input != null and $failure >= $input]
+        | length > 0 and all' >/dev/null 2>&1 && continue
+    n=$((n + 1))
+    mg_failure "$prefix/$id" "$(jq -r --arg id "$id" 'first(.[] | select(.id == $id) | .message) // ""' <<<"$tests") (failed before or without the input macOS dropped)"
+  done < <(jq -r '.[].id' <<<"$tests")
+  [ "$n" -eq 0 ] && return 3
+  return 1
+}
+
 # mg_app_mac_input_path: where the last drop is recorded, beside the leases
 # every checkout shares (the main checkout's build/mg).
 mg_app_mac_input_path() { printf '%s/mac-input.json\n' "$(mvl_lease_base "$MG_ROOT")"; }

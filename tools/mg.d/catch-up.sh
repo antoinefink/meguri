@@ -15,7 +15,11 @@
 # merge queued it; units that do not depend on it go on) or queued (queued
 # again, with the steps it now waits for). An entry whose escalation could not
 # be recorded is escalation-pending, with the failed run's result: the next
-# catch-up records it before anything else. An error leaves the entries as
+# catch-up records it before anything else. An escalation counts as recorded
+# only once committed: one appended to the ledger but not committed (its
+# commit failed) is committed by the next catch-up, under its lock and before
+# its clean-tree check, and until then its entries stay escalation-pending.
+# An error leaves the entries as
 # they were. While a step is missing its entries wait, and the job passes.
 # The queue is append-only; the lines of an id, merged in order, are its
 # state, and a run's lines are appended as soon as it ends. One catch-up at a
@@ -116,20 +120,33 @@ mg_catch_up__lock() {
   done
 }
 
+# mg_catch_up__settle: commits what a store appended to the main checkout's
+# escalation ledger but could not commit (mg_ledger_settle): such lines would
+# keep every later catch-up at its clean-tree check, and an escalation counts
+# as recorded only once it is committed. Returns 1 (MG_SESSION_MESSAGE) when
+# that fails.
+mg_catch_up__settle() {
+  mg_ledger_settle "$MG_ROOT" "$MG_ESCALATIONS_FILE" \
+    'if length == 1 and .[0].state == "open" then "Record escalation \(.[0].id) (\(.[0].kind), \(.[0].unit))"
+     else "Record escalation lines \(map("\(.id) (\(.state))") | join(", "))" end'
+}
+
 # mg_catch_up__escalate <unit> <entries> <result> <head> <units>: the
 # blocked-red escalation of a re-run that failed, for one unit whose merge
 # queued it (<entries>: that unit's entries of the run, each with job, args
-# and user_steps; <units>: every unit that queued it). An escalation the
-# ledger already holds for that unit and result is reused: one appended but
-# not committed by an earlier run, then committed. Sets MG_ESCALATION_ID;
-# returns 1 (MG_SESSION_MESSAGE) when it could not be recorded. Call it as a
-# plain command.
+# and user_steps; <units>: every unit that queued it). An escalation HEAD's
+# ledger already holds for that unit and result is reused; one an earlier
+# run appended but could not commit is committed first (mg_catch_up__settle)
+# and never counts before. Sets MG_ESCALATION_ID; returns 1
+# (MG_SESSION_MESSAGE) when it could not be recorded. Call it as a plain
+# command.
 mg_catch_up__escalate() {
   local u="$1" entries="$2" result="$3" head="$4" units="$5" cmd existing
   MG_ESCALATION_ID=""
   cmd="tools/mg $(jq -r '.[0] | [.job] + .args | join(" ")' <<<"$entries")"
-  existing="$(mg_escalation__state "$MG_ROOT" 2>/dev/null | jq -r -s --arg u "$u" --arg r "$result" \
-    'map(select(.kind == "blocked-red" and .unit == $u and .detail.result == $r)) | .[0].id // empty')"
+  mg_catch_up__settle || return 1
+  existing="$(git -C "$MG_ROOT" show "HEAD:$MG_ESCALATIONS_FILE" 2>/dev/null | jq -r -s --arg u "$u" --arg r "$result" \
+    'map(select(.state == "open" and .kind == "blocked-red" and .unit == $u and .detail.result == $r)) | .[0].id // empty')"
   if [ -n "$existing" ]; then
     MG_ESCALATION_ID="$existing"
     return 0
@@ -160,15 +177,27 @@ mg_catch_up() {
     mg_catch_up__error not-main "tools/mg catch-up runs in the main checkout ($(mg_gate__main_checkout)), on the integration head"
     return 0
   fi
-  if ! git -C "$MG_ROOT" diff --quiet || ! git -C "$MG_ROOT" diff --cached --quiet; then
-    mg_catch_up__error main-dirty "the main checkout has uncommitted changes to tracked files: a run would not test the integration head" "git status"
-    return 0
-  fi
   # Selection, runs and state lines under one lock: two catch-ups at once
   # would run the same entries and escalate them twice.
   mg_catch_up__lock || return 0
-  mg_catch_up__work
+  mg_catch_up__checked && mg_catch_up__work
   mg__host_lease_release "$(mg_catch_up__lock_path)" $$
+}
+
+# mg_catch_up__checked: escalations an earlier run appended but could not
+# commit are committed first (mg_catch_up__settle); then the main checkout
+# must have no other uncommitted change to tracked files. Returns 1 after
+# recording the error.
+mg_catch_up__checked() {
+  if ! mg_catch_up__settle; then
+    mg_catch_up__error escalation-ledger "${MG_SESSION_MESSAGE:-the escalation ledger could not be settled}; nothing ran, and escalation-pending entries stay so" \
+      "git -C $MG_ROOT diff HEAD -- $MG_ESCALATIONS_FILE"
+    return 1
+  fi
+  if ! git -C "$MG_ROOT" diff --quiet || ! git -C "$MG_ROOT" diff --cached --quiet; then
+    mg_catch_up__error main-dirty "the main checkout has uncommitted changes to tracked files: a run would not test the integration head" "git status"
+    return 1
+  fi
 }
 
 mg_catch_up__work() {
