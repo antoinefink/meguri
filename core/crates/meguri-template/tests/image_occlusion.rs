@@ -230,8 +230,18 @@ fn ae38_preserves_whole_field_and_untouched_masks_f11() {
         );
     assert_eq!(doc.write(&edited, true, 100., 100.).unwrap(), expected);
     let switched = doc.write(&doc.shapes, false, 1000., 1000.).unwrap();
-    assert!(!switched.contains(":oi="));
-    assert!(switched.contains("{{c2::image-occlusion:rect:left=.3:top=.1:width=.2:height=.08}}"));
+    assert_eq!(
+        switched,
+        concat!(
+            "{{c1::image-occlusion:rect:left=.05:top=.1:width=.2:height=.08}}<br>",
+            "{{c2::image-occlusion:rect:left=.3:top=.1:width=.2:height=.08}}<br>",
+            "{{c3::image-occlusion:ellipse:left=.55:top=.1:rx=.1:ry=.04}}<br>",
+            "{{c4::image-occlusion:rect:left=.05:top=.3:width=.2:height=.08}}<br>",
+            "{{c5::image-occlusion:polygon:left=.3:top=.3:points=.3,.3 .5,.32 .4,.4}}<br>",
+            "{{c6::image-occlusion:rect:left=.55:top=.3:width=.2:height=.08}}<br>",
+            "{{c7::image-occlusion:rect:left=.05:top=.5:angle=833:width=.2:height=.08:fill=#cc3344}}<br>",
+        )
+    );
     assert_eq!(edited.iter().map(|s| s.number).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 7]);
 }
 
@@ -458,7 +468,44 @@ fn every_binary_exponent_writes_readable_finite_numbers_f8() {
 
 #[test]
 fn writer_ellipse_polygon_and_text_examples_f10() {
+    let mut label = Shape::new(
+        0,
+        0.5,
+        0.25,
+        ShapeKind::Text {
+            text: "Label".into(),
+            scale: 1.5,
+            fs: Some(0.05),
+        },
+    );
+    label.angle = 45.;
+    label.fill = Some("#1e90ff".into());
+    let mut negative_angle = Shape::new(4, 0., 1., ShapeKind::Rect { width: 1., height: 0.5 });
+    negative_angle.angle = -90.;
     for (shape, mode, expected) in [
+        (
+            label,
+            false,
+            "{{c0::image-occlusion:text:left=.5:top=.25:angle=1250:text=Label:scale=1.5:fs=.05:fill=#1e90ff}}",
+        ),
+        (
+            negative_angle,
+            false,
+            "{{c4::image-occlusion:rect:left=.0000:top=1.:angle=-2500:width=1.:height=.5}}",
+        ),
+        (
+            Shape::new(
+                5,
+                0.00004,
+                -0.00001,
+                ShapeKind::Rect {
+                    width: 0.03125,
+                    height: 0.96875,
+                },
+            ),
+            false,
+            "{{c5::image-occlusion:rect:left=.:top=-0.:width=.0313:height=.9688}}",
+        ),
         (
             Shape::new(2, 0.1, 0.2, ShapeKind::Ellipse { rx: 0.05, ry: 0.08 }),
             false,

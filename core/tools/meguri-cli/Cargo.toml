@@ -9,10 +9,12 @@ publish.workspace = true
 [dependencies]
 # Parsing --now and --tz for generate and profile-extract.
 jiff.workspace = true
+meguri-engine.workspace = true
+meguri-model.workspace = true
+meguri-storage.workspace = true
 meguri-testkit.workspace = true
 serde_json.workspace = true
 # fp-probe: the corpus digest (float-determinism.md F10.3).
 sha2.workspace = true
-
-[dev-dependencies]
+# Private checks open a scratch database to preserve the vault copy.
 tempfile.workspace = true

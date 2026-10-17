@@ -6,6 +6,7 @@ mod conformance;
 mod fp_probe;
 mod generate;
 mod private;
+mod private_suite;
 mod profile_extract;
 mod timing;
 

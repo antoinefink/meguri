@@ -34,6 +34,15 @@ A suite summary (`tools/mg private suite --record <name>`):
 
 A check that could not run is `{"error": true}`; its error text stays in `build/private/<run>/suite.log`.
 
+A check may also include `"breakdown": {"<fixed category>": <count>}`.
+These keys are program-defined identifiers, never collection text.
+`io-roundtrip` (U63, `render/image-occlusion-format#F16`) counts unchanged
+Occlusion saves under `round-tripped`, and strict-reader refusals under
+their ErrorKind names (such as `malformed_shape`). Refusals count as failed
+fields; `byte-mismatch`, `write-error` and `missing-field` count other failures.
+It reads all notes whose note types are detected as IO, including extended
+types, from a scratch database with its WAL; the vault copy is unchanged.
+
 ## The output guard
 
 `tools/mg private copy` rebuilds the token set from each copy: deck names, tags and media names whatever their length, and field words of four or more characters, minus anything already committed (the files at `HEAD`, never the working tree or the index, and never the results in `conformance/reports/private/`).

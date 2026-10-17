@@ -824,8 +824,22 @@ impl Check for Fixed {
 
 #[test]
 fn the_summary_holds_check_names_and_counts_only() {
-    let next_states = Fixed("next-states", Ok(CheckCounts { passed: 41, failed: 0 }));
-    let renders = Fixed("render", Ok(CheckCounts { passed: 9, failed: 2 }));
+    let next_states = Fixed(
+        "next-states",
+        Ok(CheckCounts {
+            passed: 41,
+            failed: 0,
+            ..CheckCounts::default()
+        }),
+    );
+    let renders = Fixed(
+        "render",
+        Ok(CheckCounts {
+            passed: 9,
+            failed: 2,
+            ..CheckCounts::default()
+        }),
+    );
     let broken = Fixed(
         "queues",
         Err("deck Japanisch::Hörverstehen could not be built".to_owned()),
@@ -858,7 +872,14 @@ fn the_summary_holds_check_names_and_counts_only() {
 
 #[test]
 fn a_suite_passes_when_no_check_failed() {
-    let a = Fixed("a", Ok(CheckCounts { passed: 3, failed: 0 }));
+    let a = Fixed(
+        "a",
+        Ok(CheckCounts {
+            passed: 3,
+            failed: 0,
+            ..CheckCounts::default()
+        }),
+    );
     let summary = suite::run(&[&a], Path::new("/nowhere"), &mut |_, _| {});
     assert!(summary.passed());
     assert!(suite::run(&[], Path::new("/nowhere"), &mut |_, _| {}).passed());
@@ -877,4 +898,39 @@ fn two_checks_with_one_name_are_refused() {
     let a = Fixed("a", Ok(CheckCounts::default()));
     let b = Fixed("a", Ok(CheckCounts::default()));
     suite::run(&[&a, &b], Path::new("/nowhere"), &mut |_, _| {});
+}
+
+#[test]
+fn check_breakdowns_hold_only_fixed_categories_and_numeric_counts() {
+    let check = Fixed(
+        "io-roundtrip",
+        Ok(CheckCounts {
+            passed: 4,
+            failed: 2,
+            breakdown: [("round-tripped", 4), ("malformed_shape", 2)].into(),
+        }),
+    );
+    let summary = suite::run(&[&check], Path::new("/nowhere"), &mut |_, _| {});
+    assert_eq!(
+        summary.to_json(),
+        serde_json::json!({
+            "report_version": 1, "checks": {"io-roundtrip": {
+                "passed": 4, "failed": 2, "breakdown": {"round-tripped": 4, "malformed_shape": 2}
+            }}
+        })
+    );
+    assert!(!summary.passed());
+}
+
+#[test]
+#[should_panic(expected = "is not [a-z0-9_-]+")]
+fn a_breakdown_key_with_other_characters_is_refused() {
+    let check = Fixed(
+        "io-roundtrip",
+        Ok(CheckCounts {
+            breakdown: [("Private Field Text", 1)].into(),
+            ..CheckCounts::default()
+        }),
+    );
+    suite::run(&[&check], Path::new("/nowhere"), &mut |_, _| {});
 }
