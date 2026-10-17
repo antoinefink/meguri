@@ -126,8 +126,13 @@
   --state-suspended: #fef9c3;
 }
 
-/* The Mac body's focus colour (C4.2). */
-:root .isMac {
+/*
+ * Mac focus colour (C4.2): every element classed isMac except the document
+ * element, so the Mac <body> and, by inheritance, the card in it. The
+ * :not(:root) part counts as a class, which gives the 0,2,0 that card CSS
+ * must match or beat to replace the value.
+ */
+.isMac:not(:root) {
   --focus-color: rgba(0 103 244 / 0.247);
 }
 

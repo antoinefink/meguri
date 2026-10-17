@@ -187,6 +187,32 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
+        /// C4.2: the override reaches every `isMac` element below the root,
+        /// never the root, at the specificity of `:root .isMac` (0,2,0):
+        /// card CSS replaces it only at that specificity or more (C4).
+        @Test func focusColourOverrideReachesIsMacElementsBelowTheRoot() async throws {
+            let mac = "rgba(0 103 244 / 0.247)"
+            try await WebTestHarness.withPage(platform: .iPhone, log: false) { _, page async throws in
+                try await page.showPresentedQuestion(#"<div id="m" class="isMac"><span id="in">x</span></div><p id="p">y</p>"#)
+                #expect(try await Self.computed(page, "#m", ["--focus-color"]) == ["--focus-color": mac])
+                #expect(try await Self.computed(page, "#in", ["--focus-color"]) == ["--focus-color": mac])
+                #expect(try await Self.computed(page, "#p", ["--focus-color"]) == ["--focus-color": "#6366f1"])
+                try await page.run(#"document.documentElement.classList.add("isMac");"#)
+                #expect(try await Self.computed(page, "html", ["--focus-color"]) == ["--focus-color": "#6366f1"])
+                #expect(try await Self.computed(page, "#p", ["--focus-color"]) == ["--focus-color": "#6366f1"])
+            }
+            try await WebTestHarness.withPage(platform: .mac, log: false) { _, page async throws in
+                for selector in [".isMac", "body.isMac", "html body.isMac"] {
+                    try await page.showPresentedQuestion("<style>\(selector) { --focus-color: red }</style><p>x</p>", bodyClass: "card card1 isMac")
+                    #expect(try await Self.computed(page, "body", ["--focus-color"]) == ["--focus-color": mac], "\(selector)")
+                }
+                for selector in [".card.isMac", "html .card.isMac"] {
+                    try await page.showPresentedQuestion("<style>\(selector) { --focus-color: red }</style><p>x</p>", bodyClass: "card card1 isMac")
+                    #expect(try await Self.computed(page, "body", ["--focus-color"]) == ["--focus-color": "red"], "\(selector)")
+                }
+            }
+        }
+
         // MARK: BC9, D1, D15
 
         @Test func htmlFontIsSystemStack() async throws {
