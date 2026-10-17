@@ -18,6 +18,7 @@ not kept).
 | `rslib/src/storage/sqlite.rs` | opening a schema-18 file and closing without the downgrade write nothing | N6.3 |
 | `rslib/src/sync/collection/status.rs`, `rslib/src/collection/timestamps.rs`, `rslib/src/storage/collection_timestamps.rs` | sync status from `mod`, `scm` and `ls`; a never-synced collection | N6.1 |
 | `rslib/src/collection/mod.rs` (preparing an upload) | which tables' pending usns a full upload clears (config is not among them) | N6.1, N9.3 |
+| `rslib/src/notetype/mod.rs` (preparing a note type for saving: renamed and removed fields), `rslib/src/template.rs` (renaming field references in template text), `rslib/src/storage/notetype/mod.rs` (a save deletes and inserts every field and template row) | a structure change rewrites the templates that name a renamed field and re-encodes every field and template row of the note type, dropping undeclared protobuf fields even on rows no edit touched | N10, N11.7 |
 | `pylib/tests/test_schedv3.py`, `rslib/src/scheduler/answering/preview.rs`, `rslib/src/scheduler/service/mod.rs` | the harvested filtered-deck tests classified preservation-only for AE83 (`conformance/catalog/harvest.csv`; ids in `oracle/harvest/links.csv`) | N10 |
 
 Black-box findings the recipe relies on (checked on the oracle):
@@ -32,6 +33,10 @@ Black-box findings the recipe relies on (checked on the oracle):
 - Opening and closing the recipe's collection 100 times over eight days, with
   rollovers between, writes nothing; 200 answers write no config key; a note
   edit changes only that note and `col.mod`.
+- `preservation/notetype/structure-changes`, recorded on the fixture file:
+  Vocab's three unknown fields occur in the fixture only at byte boundaries and
+  nowhere after the updates; template rows keep `mtime_secs` and `usn` 0; a
+  new template whose front names only a new, empty field makes no card.
 
 ## Notes for the oracle maintainer
 

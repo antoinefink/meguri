@@ -190,6 +190,16 @@ deviations:
     scenarios: [notetypes/records/preserve-on-edit]
     pointer: /steps/7/db_exec/rows
     transform: {replace: [[1, 1, 1]]}
+  # specs/conformance/normalized-dump.md N11.7: the same on the preservation
+  # fixture's Vocab after a field add, a field rename and a template add; the
+  # first field's row, which no edit changes, keeps its unknown field too.
+  - id: preservation-notetype-unknown-fields-kept
+    requirement: R1485
+    summary: After structure changes to the fixture's Vocab, its note type's, first field's and first template's config still hold the unknown protobuf fields the fixture gave them; Anki drops all three.
+    test: preservation/notetype/structure-changes
+    scenarios: [preservation/notetype/structure-changes]
+    pointer: /steps/9/db_exec/rows
+    transform: {replace: [[1, 1, 1]]}
   # specs/engine/undo.md A8: a redo whose rows changed outside the undo
   # history (here a trigger took the answer's review-log id) is refused by
   # Meguri's check (M4.2) and dropped; Anki applies it, keeps the other row

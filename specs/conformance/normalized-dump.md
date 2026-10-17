@@ -5,13 +5,13 @@ Requirements: R2017, R322, R323, R324, R582, R583, R1483, R1484, R1485, R1486, R
 Anki: 26.09.3
 Scenarios: conformance/scenarios/preservation/
 
-How the suite proves that data Meguri does not use survives open, edit, review, render and sync unchanged, and that Meguri creates no sync churn: the dump comparison rules (N2 to N4), the `adopt` op (N5), the pending-change check (N6), the dump differences Meguri's own tests use (N7), the kitchen-sink fixture (N8, N9), the scenarios (N10) and the legs that later units add (N11, N12). The observation `db_dump` is `observations.md` O8; scenario language and statuses are `dsl.md`; sync parties and `converge` are `sync-ops.md`.
+How the suite proves that data Meguri does not use survives open, edit, review, render and sync unchanged, and that Meguri creates no sync churn: the dump comparison rules (N2 to N4), the `adopt` op (N5), the pending-change check (N6), the dump differences Meguri's own tests use (N7), the kitchen-sink fixture (N8, N9), the scenarios (N10), the legs that later units add (N11) and Meguri's own churn tests (N12). The observation `db_dump` is `observations.md` O8; scenario language and statuses are `dsl.md`; sync parties and `converge` are `sync-ops.md`.
 
 ## N1. The suite
 
 - **Fixture.** One oracle-made collection, `conformance/fixtures/preservation/kitchen-sink.anki2`, holds every kind of data R2017 lists, in the state a completed sync leaves (N9). Its recipe is the scenario `preservation/recipe/kitchen-sink`, whose golden documents the content.
 - **Scenarios** (N10) open the fixture (the sync scenario builds its own collection), run the same steps on Meguri and on the oracle, and compare dumps at each observe step with the oracle's golden (T0), or run live with sync parties (T1). Zero differences after deviations is the R2017 comparison.
-- **Legs** (N11): the behavior that makes a leg pass belongs to the unit that implements it (review U43/U44, render U60/U62, sync U107/U117, device-local settings U160, optimizer U47, the Migaku startup path U137). Each leg's scenario becomes active, or its Meguri-only test lands, with that unit. U36 owns the fixture, these rules and the suite's wiring.
+- **Legs** (N11): the behavior that makes a leg pass belongs to the unit that implements it (review U43/U44, render U60/U62, sync U107/U117, device-local settings U160, optimizer U47, note type structure changes U34, the Migaku startup path U137). Each leg's scenario becomes active, or its Meguri-only test lands, with that unit. U36 owns the fixture, these rules and the suite's wiring.
 - **Meguri-only tests** (N7, N11, N12) compare two raw dumps of one Meguri collection where Anki has no counterpart (device-local settings, the 1,000-op run, the integration startup path).
 
 ## N2. Comparing dumps
@@ -28,9 +28,9 @@ A dump is the value of `db_dump` (O8): the twelve tables of the schema-18 file, 
 ## N3. What is masked
 
 - The plain `db_dump` (O8) hides the values Anki draws at random while a scenario runs: `notes.guid` reads `#random`, and the digests of `fields.config` and `templates.config` leave out the field and template ids. Scenarios that create notes or note types in their own run need this to have a stable golden.
-- Nothing else is ever hidden in a preservation comparison.
+- Nothing else is ever hidden in a preservation comparison, except the unknown-field bytes N11.7 takes out of Vocab's rows, whose presence that scenario checks on its own.
 - Across a sync, `converge` (sync-ops S7.3) excludes `col.mod`, `col.usn`, `col.ls` and config `mtime_secs` and `usn`, which record each party's sync history. That list is the only exclusion; the sync area pins those columns per party in its own scenarios (sync-ops S12).
-- Scenarios that start from the fixture use the raw form (N4): there every guid and id comes from the fixture file, so nothing needs hiding, and hiding it would let a rewritten guid or field id pass.
+- Scenarios that start from the fixture use the raw form (N4): there every guid and id comes from the fixture file, so nothing needs hiding, and hiding it would let a rewritten guid or field id pass. The one exception is N11.7: after adding a field and a template, whose ids are random, it dumps `notetypes`, `fields` and `templates` in the plain form, and reads the rows with fixture ids raw in a later step.
 
 ## N4. Raw dumps
 
@@ -110,7 +110,7 @@ Meguri's tests with no oracle counterpart (N11, N12) compare two raw dumps (N4) 
 | Deck data Meguri does not edit | `browserCollapsed`, `collapsed`, descriptions (one Markdown), limit and desired-retention overrides, Languages' legacy key `provenance` in `other`, Math's unknown protobuf fields (common field 9, kind field 3) | R322 |
 | Card and note states | flags 1 and 7, a suspended card, a card in learning, a card in the preview queue, `marked` and `leech` tags, hierarchical tags, a tag shown expanded | R2017 |
 
-The unknown protobuf fields sit only on records that no N10 scenario saves again, because Anki drops undeclared fields when it re-encodes a record and Meguri keeps them (`model/protobuf-records` P4; deviation `notetype-unknown-fields-kept` for note types). A leg that saves one of those records (the optimizer on Steady, N11.5) asserts Meguri's bytes in its own test, or adds a deviation under R1463 or R1486 whose expected digest is computed from P4.
+Anki drops undeclared protobuf fields when it re-encodes a record and Meguri keeps them (`model/protobuf-records` P4, P5; deviation `notetype-unknown-fields-kept` for note types), so the records that carry them are saved again by one scenario only, `preservation/notetype/structure-changes` (N11.7). It compares Vocab's rows without the unknown-field bytes and asks separately whether they are still there. A leg that saves another of those records (the optimizer on Steady, N11.5) asserts Meguri's bytes in its own test, or adds a deviation under R1463 or R1486 whose expected digest is computed from P4.
 
 ## N9. The kitchen-sink fixture
 
@@ -187,21 +187,23 @@ The recipe holds the template texts; `preservation/render/every-card` repeats th
 | Scenario | Covers | Meguri needs | Leg owner | Golden |
 |---|---|---|---|---|
 | `preservation/recipe/kitchen-sink` | the fixture's content (N9) | setup sections, `legacy_update`, `answer`, `edit_note`, `suspend`, `set_config`, `db_exec`, `legacy_json` | none: the oracle's recipe, never active | recorded |
-| `preservation/fixture/open` | Meguri reads every stored value of the fixture as Anki does | `open`, `db_dump`, `legacy_json` | U36 | oracle maintainer |
-| `preservation/churn/reopen-ten` | R2016, R2017: ten reopens write nothing | `open`, `reopen`, `schema_objects`, raw `db_dump` | U36 | oracle maintainer |
-| `preservation/churn/relaunch` | AE66 (the part Anki shares), R1586, R1590: 100 reopens over eight idle days leave nothing pending | `open`, `reopen`, `advance`, `db_exec`, raw `db_dump` | U36 (U137 adds the integration path, N11.6) | oracle maintainer |
-| `preservation/edit/unrelated-note` | AE83 (local part), R322, R323, R1483 to R1486: a note edit changes that note only | `open`, `adopt`, `edit_note`, raw `db_dump` | U36 with U27's `edit_note` | oracle maintainer |
-| `preservation/review/answers` | R582: 200 answers write no config key | `open`, `adopt`, `answer`, `advance`, raw `db_dump` | U43, U44 | oracle maintainer |
-| `preservation/render/every-card` | R583: rendering every card changes nothing | `open`, `adopt`, `template` card cases, raw `db_dump` | U60, U62 | oracle maintainer |
+| `preservation/fixture/open` | Meguri reads every stored value of the fixture as Anki does | `open`, `db_dump`, `legacy_json` | U36 | recorded |
+| `preservation/churn/reopen-ten` | R2016, R2017: ten reopens write nothing | `open`, `reopen`, `schema_objects`, raw `db_dump` | U36 | recorded |
+| `preservation/churn/relaunch` | AE66 (the part Anki shares), R1586, R1590: 100 reopens over eight idle days leave nothing pending | `open`, `reopen`, `advance`, `db_exec`, raw `db_dump` | U36 (U137 adds the integration path, N11.6) | recorded |
+| `preservation/edit/unrelated-note` | AE83 (local part), R322, R323, R1483 to R1486: a note edit changes that note only | `open`, `adopt`, `edit_note`, raw `db_dump` | U36 with U27's `edit_note` | recorded |
+| `preservation/review/answers` | R582: 200 answers write no config key | `open`, `adopt`, `answer`, `advance`, raw `db_dump` | U43, U44 | recorded |
+| `preservation/render/every-card` | R583: rendering every card changes nothing | `open`, `adopt`, `template` card cases, raw `db_dump` | U60, U62 | recorded |
 | `preservation/sync/filtered-deck` | AE83: filtered decks, their cards and type 3 entries survive a trip through Meguri and a sync | actor `meguri`, `sync`, `edit_note`, `db_dump` | U107, U117 (T1) | recorded |
+| `preservation/notetype/structure-changes` | R1485, R2017: a field add, a field rename and a template add change only what they change (N11.7) | `open`, `adopt`, `update_notetype` with the edits `add_field`, `rename_field` and `add_template` (`notetype-ops.md` T10.1), `db_exec`, raw and plain `db_dump`, `notetype_structure` | U34 | recorded |
 
-What the oracle does in each, confirmed by running each scenario's steps after the recipe's (so with the fixture's content, though not its file):
+What the oracle does in each, confirmed by running each scenario's steps after the recipe's (so with the fixture's content, though not its file), and `notetype/structure-changes` on the fixture file itself:
 
 - `churn/reopen-ten`, `churn/relaunch`: no difference at all; `sqlite_master` keeps its 30 objects (the twelve tables, sixteen indexes, `sqlite_stat1` and `sqlite_stat4`); the N6.1 query is clean before and after.
 - `edit/unrelated-note`: exactly four values change: `col.mod` (the edit's instant), and the edited note's `flds`, `mod` and `usn` (-1). Its sort field and checksum stay, since the edit leaves the first field alone. The note type's, fields' and templates' blobs, the filtered decks and every card keep every byte.
 - `review/answers`: config, presets, note types, notes and tags keep every byte; only `col.mod` and the two Languages decks' `common` (day counters), `mtime_secs` and `usn` (-1) change. No key of R582's list is written: they are written by Anki desktop's reviewer screens, not by answering.
 - `render/every-card`: no difference.
 - `sync/filtered-deck`: `converge` finds no difference on any party, the dumps after each sync show the filtered decks and their cards as client_a made them, and Meguri's edit travels as an incremental sync (`no_changes`, R1590).
+- `notetype/structure-changes`: each update changes its note type's `notetypes` row (`config`, `mtime_secs`, `usn` -1), the renamed field's `fields` row (`name`), each template that uses the renamed field (`config`: the reference in its text follows the rename), and adds one `fields` row and one `templates` row; template rows keep `mtime_secs` and `usn` 0 (`model/schema11-json` S6). Every note of the note type gets an empty last field (`flds`, `mod`, `usn` -1; sort field and checksum unchanged), and `col.mod` and `col.scm` take the update's instant. No card is made (each new template's front uses only the new, empty field), and no card, deck, preset, tag or config entry changes. Anki writes Vocab's note type, first field and first template without their unknown fields, the first field too although no edit touches it (a save rewrites every field and template row of the note type).
 
 `area.yaml` lists a scenario as active in the change that lands what Meguri needs for it (`dsl.md` D9.1).
 
@@ -234,6 +236,18 @@ Toggling every device-local setting through the UI test hook, with the fixture o
 ### N11.6 Integration startup (U137; a stub until it lands)
 
 100 relaunches of the fixture with the Migaku integration's startup path on (until U137: U31's static-media step with a fixture font set standing in for the integration's bundled files): the N6.1 query is clean and the raw dump is unchanged; in the media folder only the first launch may add a missing bundled file, and every later launch adds or rewrites none, since each bundled file is already present with the same SHA-1, so `media_pending` lists nothing after the first sync (R1586, R1587; AE66). A sync after the loop sends no note type, config or media (U117).
+
+### N11.7 Note type structure changes (U34)
+
+`preservation/notetype/structure-changes`, active once U34 declares the edits it uses (`notetype-ops.md` T10.1). On the fixture, a field add, a rename of a field the templates use and a template add on Formula (LaTeX header, footer and SVG option, `mathAddon` in `other`), then the same three on Vocab (LaTeX header and footer, browser templates, `originalStockKind`, `originalId`, field options, the unknown protobuf fields of N8). Each update is one `update_notetype` step, a checked save.
+
+- **Other tables.** After each update the raw dump of the nine tables that hold no note type blob (`col`, `notes`, `cards`, `revlog`, `graves`, `decks`, `deck_config`, `tags`, `config`) equals the oracle's: only that note type's notes and `col.mod` and `col.scm` change (N10).
+- **Formula, byte for byte.** After Formula's update the plain dump (O8) of `notetypes`, `fields` and `templates` equals the oracle's. Every R1485 value keeps its bytes apart from what the edits change: the field's name, the template text that names it, the new field and template, and `req`, which the save recomputes. The plain dump masks the new rows' random ids; every other id comes from the fixture.
+- **Vocab, without its unknown fields.** After Vocab's update, step 10 reads every row of those three tables: its key, `name`, `mtime_secs` and `usn`, and the digest of its `config` with Vocab's unknown-field bytes taken out: `A00107` (field 20 of the note type), `A20103616263` (field 20 of the first field) and `F00101` (field 30 of the first template), each removed where its hex text first occurs at a byte boundary, in the rows of its table. The rows the two updates added report `null` there, since their ids are random. Meguri's bytes minus those fields equal Anki's, whether Meguri wrote the row again (P4 puts each unknown field in field-number order) or kept the bytes it read (P5: no edit changes the first field, so its row may keep them).
+- **The unknown fields themselves.** Step 9 asks whether Vocab's note type, first field and first template each still hold their unknown field: Anki gives `[[0, 0, 0]]` (it drops them), Meguri `[[1, 1, 1]]` (deviation `preservation-notetype-unknown-fields-kept`, R1485).
+- **Structure.** `notetype_structure` of both note types equals the oracle's: field options, `original_stock_kind`, `original_id` and the card requirements, the new template's on the new field alone.
+
+Checked on the oracle: the three byte strings occur in the fixture only as those unknown fields, each at a byte boundary, and in no row after the updates; the first field's bytes minus its unknown field are the bytes Anki writes for it.
 
 ## N12. Meguri's own churn tests
 

@@ -1,0 +1,66 @@
+# R1485, R2017 (specs/conformance/normalized-dump.md N11.7; U34's leg): a
+# field add, a field rename and a template add on the fixture's note types
+# change what each edit changes, the notes' field lists, col.scm and the card
+# requirements, and nothing else. Formula (LaTeX settings, an add-on key in
+# `other`) is compared byte for byte, its new field and template with their
+# random ids masked (step 5). Vocab (LaTeX settings, browser templates,
+# original kind and id, field options, unknown protobuf fields on its
+# notetypes, first fields and first templates rows) is compared through step
+# 10: every config blob whose ids are fixed, with Vocab's unknown-field bytes
+# taken out wherever they sit, so Meguri's blobs, which keep them, digest as
+# Anki's, which drop them. Step 9 asks whether each still holds its unknown
+# field (deviation preservation-notetype-unknown-fields-kept). Renaming a
+# field that templates use rewrites those templates; the new templates use the
+# new, empty fields, so no card is made.
+id: preservation/notetype/structure-changes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: preservation/kitchen-sink.anki2}
+  - adopt: {}
+  - advance: 1h
+  - update_notetype:
+      notetype: Formula
+      edits:
+        - {add_field: Proof}
+        - {rename_field: {from: Source, to: Origin}}
+        - {add_template: {name: Derivation, front: "{{Proof}}", back: "{{FrontSide}}<hr id=answer>{{Back}}"}}
+  - observe:
+      - {db_dump: {raw: true, tables: [col, notes, cards, revlog, graves, decks, deck_config, tags, config]}}
+  # step 5: Formula's new field and template have random ids, masked here
+  - observe:
+      - {db_dump: {tables: [notetypes, fields, templates]}}
+      - {notetype_structure: {notetypes: [Formula]}}
+  - advance: 1h
+  - update_notetype:
+      notetype: Vocab
+      edits:
+        - {add_field: Example}
+        - {rename_field: {from: Reading, to: Kana}}
+        - {add_template: {name: Usage, front: "{{Example}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}"}}
+  - observe:
+      - {db_dump: {raw: true, tables: [col, notes, cards, revlog, graves, decks, deck_config, tags, config]}}
+  # step 9: deviation preservation-notetype-unknown-fields-kept
+  - db_exec:
+      sql: >-
+        SELECT instr(hex(n.config), 'A00107') % 2 = 1, instr(hex(f.config), 'A20103616263') % 2 = 1,
+        instr(hex(t.config), 'F00101') % 2 = 1
+        FROM notetypes n JOIN fields f ON f.ntid = n.id AND f.ord = 0
+        JOIN templates t ON t.ntid = n.id AND t.ord = 0 WHERE n.name = 'Vocab'
+  # step 10: every row of the three tables; config without Vocab's unknown
+  # field bytes (taken out at their first byte-aligned occurrence), and null
+  # for the four rows the two updates added, whose ids are random
+  - db_exec:
+      sql: >-
+        WITH r(tbl, k1, k2, name, mtime, usn, h, pat, fixed) AS (
+        SELECT 'notetypes', id, 0, name, mtime_secs, usn, hex(config), 'A00107', 1 FROM notetypes
+        UNION ALL SELECT 'fields', ntid, ord, name, NULL, NULL, hex(config), 'A20103616263',
+        NOT ((ntid = 1893488400006 AND ord >= 4) OR (ntid = 1893488400008 AND ord >= 3)) FROM fields
+        UNION ALL SELECT 'templates', ntid, ord, name, mtime_secs, usn, hex(config), 'F00101',
+        NOT ((ntid = 1893488400006 AND ord >= 2) OR (ntid = 1893488400008 AND ord >= 1)) FROM templates)
+        SELECT tbl, k1, k2, name, mtime, usn,
+        CASE WHEN NOT fixed THEN NULL
+        WHEN instr(h, pat) % 2 = 1 THEN unhex(substr(h, 1, instr(h, pat) - 1) || substr(h, instr(h, pat) + length(pat)))
+        ELSE unhex(h) END
+        FROM r ORDER BY tbl, k1, k2
+  - observe:
+      - {notetype_structure: {notetypes: [Vocab, Formula]}}
