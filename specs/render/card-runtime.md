@@ -550,10 +550,10 @@ U68 adds `anki.imageOcclusion` and `anki.setupImageCloze`. There are no other me
 | Name | Platforms | Value |
 |---|---|---|
 | `anki/packages` | all | `{require, listPackages, hasPackages}` |
-| `anki/bridgecommand` | Mac | `{bridgeCommand}`, a function that calls the page's current global `bridgeCommand` with the same arguments, looked up at call time |
+| `anki/bridgecommand` | Mac | `{bridgeCommand}`, a function `(command, callback)` that calls the page's current global `bridgeCommand`, looked up at call time, with those two arguments, and returns `undefined` (not the global's `false`) |
 | `anki/reviewer` | all | `{onUpdateHook, onShownHook}`: the same array objects as the globals (C6.4) |
 
-- `require(name)` returns the registered object itself (a plain, mutable object; the same object on every call). For any other name it throws an `Error` whose message is `Cannot require "` + name + `" at runtime.`. On iOS this includes `anki/bridgecommand`.
+- `require(name)` returns the registered object itself (a plain, mutable object; the same object on every call). For any other name it throws an `Error` whose message is `Cannot require "` + name + `" at runtime.`. On iOS this includes `anki/bridgecommand`. Names that every object inherits, such as `toString` or `constructor`, are not registered names: `require` throws for them and `hasPackages` returns `false` (C15).
 - `listPackages()` returns a new array of the registered names, in this order: `anki/packages`, then `anki/bridgecommand` (Mac only), then `anki/reviewer`.
 - `hasPackages(...names)` returns `true` when every given name is registered, including when no name is given.
 - `require("anki/packages").require` is the global `require`.
@@ -671,6 +671,8 @@ Each difference has its own test (R1889). The test names are suggestions in the 
 
 Also not reproduced, with no template-visible effect expected: Anki desktop's Backspace guard on `document`, its IME focus workaround (a temporary invisible button on `focusout`) and its drag-and-drop blocker on `document` (`ondragenter`, `ondragover`, `ondrop` set). Navigation on drop is U70's.
 
+Two edge cases also differ, with no template-visible effect expected: Anki desktop calls a `pycmd` callback that is truthy but not a function, which then throws in a later task, where Meguri ignores it (C10.5); and Anki's `require` and `hasPackages` treat names that every object inherits (`toString`, `constructor`, …) as registered, where Meguri throws and returns `false` (C10.7, case GS4c).
+
 ## C16. Verification cases
 
 Synthetic content only: no Anki templates or CSS (R1959, R1960), and no Migaku code or user content (R1915). Each case lists inputs and what the test observes. The side HTML is given as the test passes it to `_showQuestion` or `_showAnswer`. Media files are written into the test's media folder. `log(x)` stands for appending `x` to a page-world array the test reads, `window.__log`, created by the case's first script.
@@ -726,6 +728,8 @@ Synthetic content only: no Anki templates or CSS (R1959, R1960), and no Migaku c
 | GS2 | `typeof` each C9.2 name | `undefined` |
 | GS3 | card script `let $ = 1; log($)` on a later side; on Mac `let pycmd = 1` | `1`; on Mac a `SyntaxError` |
 | GS4 | `require("anki/reviewer").onShownHook === onShownHook`; `require("x")`; `require("anki/packages").listPackages()` | `true`; throws `Cannot require "x" at runtime.`; the C10.7 order |
+| GS4b | Mac, on a presented question: `require("anki/bridgecommand").bridgeCommand("ans", cb)`; then the card sets `window.bridgeCommand` to a function that logs its arguments and returns `7`, and calls the package function with `"x"` only | returns `undefined`, a `command` signal `ans`, `cb` called once, later, with `null`; returns `undefined`, and the card function logged `x` and `undefined` |
+| GS4c | `require("toString")`; `hasPackages("constructor")`; `hasPackages()` | throws `Cannot require "toString" at runtime.`; `false`; `true` |
 | GS5 | Mac: `pycmd("ans", cb)` on a presented question | returns `false`; a `command` signal `ans`; `cb` called once, later, with `null` |
 | GS6 | Mac: `pycmd("ease3")`, `pycmd("play:q:1")` | no exception; `command` signals passed to native, which ignores `ease3` |
 | GS7 | iPhone: `typeof pycmd`, `typeof bridgeCommand`, `typeof ankiPlatform`, `require("anki/bridgecommand")` | `undefined` ×3; throws |
