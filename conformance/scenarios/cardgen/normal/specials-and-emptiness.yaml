@@ -1,0 +1,37 @@
+# Special names and field emptiness in card generation (specs/notes/card-
+# generation.md G2, G3; text/field-emptiness E1, E2). Deck, Card and CardID
+# always count as non-empty, FrontSide never does unless a note field has
+# that name, and static text inside a section makes nothing. A field of only
+# <br>, <div> tags and whitespace is empty; &nbsp; and <span></span> are not.
+# Notes are named by their first field (the sort field), which no template
+# uses.
+id: cardgen/normal/specials-and-emptiness
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gen
+      fields: [Label, A, B]
+      templates:
+        - {name: T0, front: "{{A}}", back: ""}
+        - {name: T1, front: "{{Deck}}", back: ""}
+        - {name: T2, front: "{{FrontSide}}", back: "{{A}}"}
+        - {name: T3, front: "{{#A}}static{{/A}}", back: ""}
+        - {name: T4, front: "{{^A}}{{B}}{{/A}}", back: ""}
+        - {name: T5, front: "{{text:A}}", back: ""}
+        - {name: T6, front: "{{#B}}{{Card}}{{/B}}", back: ""}
+        - {name: T7, front: "{{#CardID}}{{B}}{{/CardID}}", back: ""}
+    - name: Mirror
+      fields: [Word, FrontSide]
+      templates:
+        - {name: Side, front: "{{FrontSide}}", back: "{{Word}}"}
+        - {name: Word, front: "{{Word}}", back: ""}
+  decks: [Inbox]
+steps:
+  - add_note: {notetype: Gen, deck: Inbox, fields: [nbsp, "&nbsp;", ""]}
+  - add_note: {notetype: Gen, deck: Inbox, fields: [br, "<br>", "x"]}
+  - add_note: {notetype: Gen, deck: Inbox, fields: [div-space, "<div> </div>\n", "<span></span>"]}
+  - add_note: {notetype: Gen, deck: Inbox, fields: [both-empty, "", ""]}
+  - add_note: {notetype: Gen, deck: Inbox, fields: [both-set, "a", "b"]}
+  - add_note: {notetype: Mirror, deck: Inbox, fields: [side-empty, ""]}
+  - add_note: {notetype: Mirror, deck: Inbox, fields: [side-set, "f"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}

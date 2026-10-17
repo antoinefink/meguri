@@ -15,6 +15,8 @@
 
 pub mod browser_config;
 pub mod cancel;
+pub mod cardgen;
+pub mod cards;
 pub mod changes;
 pub mod collection;
 pub mod derived_host;
@@ -25,6 +27,7 @@ pub mod jobs;
 pub mod lifecycle;
 pub mod marked;
 pub mod monotonic;
+pub mod notes;
 pub mod notetypes;
 pub mod ports;
 pub mod progress;

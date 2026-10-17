@@ -1,0 +1,108 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1", "#c2"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3", "#c4"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c6"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c7"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c8"],
+          "note": "#n6"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c9", "#c10"],
+          "note": "#n7"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["untagged", 1, 1],
+            ["untagged", 2, 1],
+            ["tagged", 0, 2],
+            ["tagged", 1, 2],
+            ["untagged-empty", 0, 3],
+            ["tagged-empty", 0, 4],
+            ["back-only", 1, 5],
+            ["field-empty", 1, 6],
+            ["field-set", 0, 7],
+            ["field-set", 1, 7]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["untagged", 0, 1, 1894705200],
+            ["untagged", 1, 1, 1894701600],
+            ["untagged", 2, 1, 1894701600],
+            ["tagged", 0, 2, 1894701600],
+            ["tagged", 1, 2, 1894701600],
+            ["tagged", 2, 2, 1894705200],
+            ["untagged-empty", 0, 3, 1894701600],
+            ["untagged-empty", 2, 3, 1894705200],
+            ["tagged-empty", 0, 4, 1894701600],
+            ["back-only", 1, 5, 1894701600],
+            ["field-empty", 0, 6, 1894705200],
+            ["field-empty", 1, 6, 1894701600],
+            ["field-set", 0, 7, 1894701600],
+            ["field-set", 1, 7, 1894701600]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/normal/conditionals",
+  "scenario_sha256": "124ab09e008fe2c138d100d318a1cf74e5938c23867a84c5d2f9ed8346f596e5",
+  "tz": "UTC"
+}

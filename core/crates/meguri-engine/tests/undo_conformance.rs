@@ -1,34 +1,6 @@
-//! Every undo scenario (`conformance/scenarios/undo/`; `specs/engine/undo.md`
-//! A1 to A10, `specs/conformance/undo-ops.md` V1 to V5) played on the
-//! engine's undo and redo and compared with the oracle's golden, the
-//! deviations of `conformance/deviations.yaml` applied (dsl.md D13).
-//!
-//! Meguri's executor runs them once its conformance session runs ops
-//! through the engine (U38's `CoreHost::open`) and has the new collection
-//! (U28) and the note, setup and answer adapters (U27, U29, U44): undo-ops
-//! V6, and the plan's U25 amendment A1. Until then this file reads each
-//! scenario and plays its steps here, as V1 to V3 say Meguri's adapters do,
-//! with stand-ins for what those units build:
-//!
-//! - **The new collection** (dsl.md D6): a copy of the schema-18 fixture
-//!   whose notes, cards, review log, graves and tags are removed and whose
-//!   `col` row is set as the goldens show a collection made at `clock.start`
-//!   (`crt` the 04:00 day start, `scm` the instant, `mod` 0).
-//! - **Setup**: decks are added as deck rows; note types live here only, and
-//!   notes name the id the goldens show (the instant plus 6: the six stock
-//!   note types of a new collection take the instants before it); notes are
-//!   added with meguri-text's sort field and checksum, their tags registered
-//!   and one card per template whose front shows a non-empty field, all at
-//!   the note's new position. Setup ops are skip-undo, so the history starts
-//!   empty, as each scenario's first `db_exec` leaves it (undo-ops V5).
-//! - **`edit_note`, `delete_notes`, `answer`**: ops that write the rows the
-//!   goldens show Anki writing (record-ops W2, W3; `sched/answering` A3 to
-//!   A5 for A8's new card answered Good; the deck counters of A6 are left
-//!   out, no observation reads them).
-//!
-//! What a stand-in writes is compared with the oracle's observations right
-//! after it; what undo and redo leave is the engine's own work. A step this
-//! file does not play fails the test.
+//! Undo scenarios through real U27 note add, update, generation and deletion.
+//! New collection/deck setup and the single answer remain test stand-ins
+//! until U28/U38/U44 provide the production executor adapters.
 
 mod common;
 
@@ -38,21 +10,17 @@ use std::time::Duration;
 
 use common::Harness;
 use meguri_engine::executor::catalog;
-use meguri_engine::undo::names::{ANSWER_CARD, DELETE_NOTE, UPDATE_CONFIG, UPDATE_NOTE};
-use meguri_engine::{
-    ClearCause, Collection, DisabledReason, EngineError, OpContext, OpSpec, StepKind, UndoScope, UndoStatus,
-};
-use meguri_model::card::{Card, CardQueue, CardType};
-use meguri_model::card_data::{CardData, MemoryState};
+use meguri_engine::undo::names::{ANSWER_CARD, UPDATE_CONFIG, UPDATE_NOTE};
+use meguri_engine::{ClearCause, Collection, DisabledReason, EngineError, OpSpec, StepKind, UndoScope, UndoStatus};
+use meguri_model::card::{CardQueue, CardType};
+use meguri_model::card_data::MemoryState;
 use meguri_model::changes::OpSource;
 use meguri_model::clock::Clock;
 use meguri_model::deck::Deck;
 use meguri_model::ids::{CardId, DeckId, NoteId, NotetypeId, RevlogId};
-use meguri_model::note::Note;
 use meguri_model::proto::ProtoBlob;
 use meguri_model::proto::deck::{DeckCommon, DeckKind, DeckKindMessage, NormalDeck};
 use meguri_model::revlog::{RevlogEntry, RevlogKind};
-use meguri_model::tag::Tag;
 use meguri_model::time::EpochSecs;
 use meguri_model::usn::Usn;
 use meguri_storage::raw::{RawRows, SqlValue};
@@ -64,8 +32,6 @@ use meguri_testkit::scenario::{
     ObservationArgs, ObservationKind, ObservationRequest, Rating, RefKind, SqlParam, Step,
 };
 use meguri_testkit::suite::Suite;
-use meguri_text::checksum::{note_checksum, sort_text_of};
-use meguri_text::field_empty::counts_as_empty;
 use meguri_text::normalize::field_as_saved;
 use serde_json::{Map, Value, json};
 
@@ -78,8 +44,6 @@ fn conformance() -> PathBuf {
 struct Notetype {
     id: NotetypeId,
     fields: Vec<String>,
-    /// Front template texts, in template order.
-    fronts: Vec<String>,
 }
 
 impl Notetype {
@@ -113,93 +77,6 @@ impl Notetype {
             .map(|value| field_as_saved(value, true).into_owned())
             .collect()
     }
-
-    /// The template ordinals whose front shows a non-empty field of
-    /// `values`: the cards a note with these values has.
-    fn card_ords(&self, values: &[String]) -> Vec<u16> {
-        (0..self.fronts.len())
-            .filter(|&ord| shows_a_field(&self.fronts[ord], &self.fields, values))
-            .map(|ord| u16::try_from(ord).unwrap())
-            .collect()
-    }
-}
-
-/// Whether a front template shows at least one non-empty field: a
-/// replacement `{{[filters:]Name}}` of a non-empty field, inside sections
-/// `{{#X}}` whose field is non-empty and `{{^X}}` whose field is empty. The
-/// scenarios' templates use nothing else.
-fn shows_a_field(template: &str, names: &[String], values: &[String]) -> bool {
-    let filled = |name: &str| {
-        names
-            .iter()
-            .position(|n| n == name)
-            .is_some_and(|i| !counts_as_empty(&values[i]))
-    };
-    let mut open: Vec<bool> = Vec::new();
-    let mut rest = template;
-    while let Some(start) = rest.find("{{") {
-        let Some(end) = rest[start..].find("}}") else { break };
-        let tag = rest[start + 2..start + end].trim();
-        rest = &rest[start + end + 2..];
-        if let Some(name) = tag.strip_prefix('#') {
-            open.push(filled(name.trim()));
-        } else if let Some(name) = tag.strip_prefix('^') {
-            open.push(!filled(name.trim()));
-        } else if tag.starts_with('/') {
-            open.pop();
-        } else if open.iter().all(|shown| *shown) && filled(tag.rsplit(':').next().unwrap_or(tag).trim()) {
-            return true;
-        }
-    }
-    false
-}
-
-/// A note's tags column: space-separated with a space at each end, or empty.
-fn tags_column(tags: &[String]) -> String {
-    if tags.is_empty() {
-        String::new()
-    } else {
-        format!(" {} ", tags.join(" "))
-    }
-}
-
-/// Registers every tag of `tags` that has no row yet, as the goldens show
-/// Anki's note saves do (`usn` -1, collapsed, no config).
-fn register_tags(ctx: &mut OpContext<'_, '_>, tags: &str) -> Result<(), EngineError> {
-    for name in tags.split_whitespace() {
-        if ctx.scope().tag(name)?.is_none() {
-            ctx.scope().put(&Tag {
-                name: name.to_owned(),
-                usn: Usn::PENDING,
-                collapsed: true,
-                config: None,
-            })?;
-        }
-    }
-    Ok(())
-}
-
-fn new_card(note_id: NoteId, deck_id: DeckId, ord: u16, position: i32) -> Card {
-    Card {
-        id: CardId(0),
-        note_id,
-        deck_id,
-        ord,
-        mtime: EpochSecs(0),
-        usn: Usn::PENDING,
-        card_type: CardType::New,
-        queue: CardQueue::New,
-        due: position,
-        interval: 0,
-        ease_factor: 0,
-        reps: 0,
-        lapses: 0,
-        remaining_steps: 0,
-        original_due: 0,
-        original_deck_id: DeckId(0),
-        flags: 0,
-        data: CardData::default(),
-    }
 }
 
 /// One scenario on one engine.
@@ -210,9 +87,6 @@ struct Player {
     notetypes: BTreeMap<String, Notetype>,
     notes: Vec<NoteId>,
     cards: Vec<CardId>,
-    /// The new-card position the next note gets (a new collection's
-    /// `nextPos` is 1).
-    next_position: i32,
 }
 
 impl Player {
@@ -226,7 +100,6 @@ impl Player {
             notetypes: BTreeMap::new(),
             notes: Vec::new(),
             cards: Vec::new(),
-            next_position: 1,
         }
     }
 
@@ -262,9 +135,36 @@ impl Player {
         if crt > now {
             crt -= 86_400;
         }
-        for table in ["notes", "cards", "revlog", "graves", "tags"] {
+        for table in [
+            "notes",
+            "cards",
+            "revlog",
+            "graves",
+            "tags",
+            "notetypes",
+            "fields",
+            "templates",
+        ] {
             self.db_exec(&format!("DELETE FROM {table}"), Vec::new());
         }
+        self.db_exec(
+            "DELETE FROM config WHERE substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_'",
+            Vec::new(),
+        );
+        self.c()
+            .run(
+                Player::setup_op().stamp(meguri_storage::StampMode::CallerSupplied),
+                |ctx| {
+                    let (scope, random) = ctx.scope_and_random();
+                    meguri_engine::notetypes::stock::add_to_new_collection(scope, random)?;
+                    scope.set_config("nextPos", &ConfigValue::from(1_i64))?;
+                    let mut preset = scope.deck_config(meguri_model::ids::DeckConfigId(1))?.unwrap();
+                    preset.config.new_card_insert_order = 0;
+                    scope.put(&preset)?;
+                    Ok(())
+                },
+            )
+            .unwrap();
         self.db_exec(
             "UPDATE col SET crt = ?, mod = 0, scm = ?, ver = 18, dty = 0, usn = 0, ls = 0, \
              conf = '', models = '', decks = '', dconf = '', tags = ''",
@@ -308,16 +208,38 @@ impl Player {
                 .value;
             self.decks.insert(name, id);
         }
-        // The six stock note types of a new collection take the instant and
-        // the five milliseconds after it.
-        let first = self.h.clock.now_ms() + 6;
-        for (i, notetype) in setup.notetypes.iter().flatten().enumerate() {
+        for notetype in setup.notetypes.iter().flatten() {
+            let new = meguri_engine::notetypes::NewNotetype {
+                name: notetype.name.clone(),
+                kind: match notetype.kind {
+                    scenario::NotetypeKind::Cloze => meguri_engine::notetypes::NotetypeKind::Cloze,
+                    _ => meguri_engine::notetypes::NotetypeKind::Standard,
+                },
+                fields: notetype.fields.clone(),
+                templates: notetype
+                    .templates
+                    .iter()
+                    .map(|t| meguri_engine::notetypes::NewTemplate {
+                        name: t.name.clone(),
+                        front: t.front.clone(),
+                        back: t.back.clone(),
+                    })
+                    .collect(),
+                css: Some(notetype.css.clone()),
+            };
+            let id = self
+                .c()
+                .run(Player::setup_op(), move |ctx| {
+                    let (scope, random) = ctx.scope_and_random();
+                    meguri_engine::notetypes::add_in(scope, random, &new).map(|a| a.id)
+                })
+                .unwrap()
+                .value;
             self.notetypes.insert(
                 notetype.name.clone(),
                 Notetype {
-                    id: NotetypeId(first + i64::try_from(i).unwrap()),
+                    id,
                     fields: notetype.fields.clone(),
-                    fronts: notetype.templates.iter().map(|t| t.front.clone()).collect(),
                 },
             );
         }
@@ -334,36 +256,18 @@ impl Player {
             .get(spec.deck.as_deref().unwrap_or("Default"))
             .expect("a setup deck");
         let values = notetype.apply(&[], &spec.fields);
-        let tags = tags_column(&spec.tags);
-        let position = self.next_position;
-        self.next_position += 1;
-        let guid = format!("u25-{}", self.notes.len() + 1);
-        let (nid, cids) = self
-            .c()
-            .run(Player::setup_op(), move |ctx| {
-                let note = Note {
-                    id: NoteId(0),
-                    guid,
-                    notetype_id: notetype.id,
-                    mtime: EpochSecs(0),
-                    usn: Usn::PENDING,
-                    tags: tags.clone(),
-                    fields: values.join("\u{1f}"),
-                    sort_field: sort_text_of(&values, 0).into_owned(),
-                    checksum: note_checksum(&values[0]),
-                    flags: 0,
-                    data: String::new(),
-                };
-                let nid = ctx.scope().add_note(&note)?;
-                let mut cids = Vec::new();
-                for ord in notetype.card_ords(&values) {
-                    cids.push(ctx.scope().add_card(&new_card(nid, deck, ord, position))?);
-                }
-                register_tags(ctx, &tags)?;
-                Ok((nid, cids))
-            })
+        let input = meguri_engine::notes::AddNote {
+            notetype_id: notetype.id,
+            fields: values,
+            tags: spec.tags.clone(),
+            deck_id: deck,
+            guid: None,
+            update_add_defaults: true,
+        };
+        let added = meguri_engine::notes::add(self.c(), input, OpSource::UserUndoable)
             .unwrap()
             .value;
+        let (nid, cids) = (added.id, added.cards);
         self.notes.push(nid);
         self.cards.extend(cids);
     }
@@ -412,33 +316,19 @@ impl Player {
             .run(
                 OpSpec::named("update_note", OpSource::UserUndoable).undo_step(UPDATE_NOTE, StepKind::Other),
                 move |ctx| {
-                    let mut note = ctx.scope().note(nid)?.expect("edit_note edits a note that exists");
-                    let notetype = notetypes
-                        .iter()
-                        .find(|t| t.id == note.notetype_id)
-                        .expect("a setup note type");
-                    let current: Vec<String> = note.field_values().map(str::to_owned).collect();
-                    let values = match &fields {
-                        Some(fields) => notetype.apply(&current, fields),
-                        None => current,
-                    };
-                    if let Some(tags) = &tags {
-                        note.tags = tags_column(tags);
-                    }
-                    note.fields = values.join("\u{1f}");
-                    note.sort_field = sort_text_of(&values, 0).into_owned();
-                    note.checksum = note_checksum(&values[0]);
-                    ctx.scope().put(&note)?;
-                    register_tags(ctx, &note.tags)?;
-                    let cards = ctx.scope().cards_of_note(nid)?;
-                    let first = cards.iter().min_by_key(|c| c.ord).expect("a note with a card");
-                    let (deck, position) = (first.deck_id, first.due);
-                    for ord in notetype.card_ords(&values) {
-                        if !cards.iter().any(|c| c.ord == ord) {
-                            ctx.scope().add_card(&new_card(nid, deck, ord, position))?;
-                        }
-                    }
-                    Ok(())
+                    let note = ctx.scope().note(nid)?.unwrap();
+                    let nt = notetypes.iter().find(|t| t.id == note.notetype_id).unwrap();
+                    let current = note.field_values().map(str::to_owned).collect::<Vec<_>>();
+                    let values = fields.as_ref().map_or(current.clone(), |f| nt.apply(&current, f));
+                    meguri_engine::notes::update_in(
+                        ctx.scope(),
+                        &meguri_engine::notes::UpdateNote {
+                            id: nid,
+                            fields: values,
+                            tags: tags.unwrap_or_else(|| note.tags.split_whitespace().map(str::to_owned).collect()),
+                        },
+                    )
+                    .map(|_| ())
                 },
             )
             .unwrap();
@@ -458,17 +348,7 @@ impl Player {
         if existing.is_empty() {
             return;
         }
-        self.c()
-            .run(
-                OpSpec::named("remove_notes", OpSource::UserUndoable).undo_step(DELETE_NOTE, StepKind::Other),
-                move |ctx| {
-                    for nid in existing {
-                        ctx.scope().remove_note_and_cards(nid)?;
-                    }
-                    Ok(())
-                },
-            )
-            .unwrap();
+        meguri_engine::notes::delete(self.c(), existing, OpSource::UserUndoable).unwrap();
     }
 
     /// `sched/answering` A2 to A5 for its A8 example, the only answer the
@@ -743,6 +623,12 @@ impl Player {
 
     fn step(&mut self, step: &Step) -> Value {
         match step {
+            Step::AddNote(spec) => {
+                let note = self.notes.len() + 1;
+                let first = self.cards.len() + 1;
+                self.add_note(spec);
+                json!({"add_note": {"note": format!("#n{note}"), "cards": (first..=self.cards.len()).map(|i| format!("#c{i}")).collect::<Vec<_>>()}})
+            }
             Step::Advance(duration) => {
                 self.h.clock.step_ms(duration.seconds() * 1000);
                 json!({})
@@ -792,7 +678,11 @@ impl Player {
 /// Plays `undo/<name>` and compares its observations with the golden's, as
 /// T0 does (dsl.md D10, observations.md O7).
 fn play(name: &str) {
-    let id = format!("undo/{name}");
+    let id = if name.contains("/") {
+        name.to_owned()
+    } else {
+        format!("undo/{name}")
+    };
     let loaded = scenario::load(&conformance().join(format!("scenarios/{id}.yaml"))).unwrap();
     let golden: Value = meguri_testkit::observe::parse_json(
         &std::fs::read_to_string(conformance().join(format!("goldens/{id}.json"))).unwrap(),
@@ -917,4 +807,9 @@ fn every_undo_scenario_is_played_here() {
     for name in names {
         assert!(this.contains(&format!("play(\"{name}\")")), "undo/{name} is not played");
     }
+}
+
+#[test]
+fn undo_add_note() {
+    play("notes/records/undo-add");
 }

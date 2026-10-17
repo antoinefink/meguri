@@ -111,6 +111,101 @@ deviations:
     scenarios: [decks/move/prefix-sibling]
     pointer: /steps/2/db_exec/rows
     transform: {replace: [["Default", 0], ["a", 1894701600], ["a::bc::b", 1894701660], ["a::bc", 1894701600]]}
+  # specs/notes/note-records.md U2: Meguri compares a note save after
+  # normalizing fields and tags; an edit that only differs before
+  # normalization writes nothing. Anki compares before and stamps the note.
+  - id: note-save-same-after-normalizing-nfd
+    requirement: R1472
+    summary: Saving decomposed text for a stored NFC field leaves the note's mod, usn and col.mod unchanged.
+    test: notes/save/same-after-normalizing
+    scenarios: [notes/save/same-after-normalizing]
+    pointer: /steps/4/db_exec/rows
+    transform: {replace: [["636166C3A91F78", " alpha beta ", 1894701600, 7, 1894701600000]]}
+  - id: note-save-same-after-normalizing-control
+    requirement: R1472
+    summary: Saving a field with a control character the save removes leaves the note's mod, usn and col.mod unchanged.
+    test: notes/save/same-after-normalizing
+    scenarios: [notes/save/same-after-normalizing]
+    pointer: /steps/8/db_exec/rows
+    transform: {replace: [["636166C3A91F78", " alpha beta ", 1894701600, 7, 1894701600000]]}
+  - id: note-save-same-after-normalizing-tag-order
+    requirement: R1472
+    summary: Saving the stored tags in another order leaves the note's mod, usn and col.mod unchanged.
+    test: notes/save/same-after-normalizing
+    scenarios: [notes/save/same-after-normalizing]
+    pointer: /steps/12/db_exec/rows
+    transform: {replace: [["636166C3A91F78", " alpha beta ", 1894701600, 7, 1894701600000]]}
+  - id: note-save-same-after-normalizing-tag-case
+    requirement: R1472
+    summary: Saving another letter case of a registered tag leaves the note's mod, usn and col.mod unchanged.
+    test: notes/save/same-after-normalizing
+    scenarios: [notes/save/same-after-normalizing]
+    pointer: /steps/16/db_exec/rows
+    transform: {replace: [["636166C3A91F78", " alpha beta ", 1894701600, 7, 1894701600000]]}
+  # specs/notes/card-generation.md G5: one card of ordinal 499 per
+  # generation, however many cloze numbers of 500 and above are new; Anki
+  # makes one per number.
+  - id: cloze-ordinal-499-once-cards
+    requirement: R786
+    summary: A note with c1, c500, c501 and c999 gets two cards (ordinals 0 and 499), not four.
+    test: cardgen/cloze/above-500
+    scenarios: [cardgen/cloze/above-500]
+    pointer: /steps/1/add_note/cards
+    transform: {replace: ["#c2", "#c3"]}
+  - id: cloze-ordinal-499-once-rows
+    requirement: R786
+    summary: The note with c1, c500, c501 and c999 has one card of ordinal 499.
+    test: cardgen/cloze/above-500
+    scenarios: [cardgen/cloze/above-500]
+    pointer: /steps/2/db_exec/rows
+    transform:
+      replace:
+        - ["{{c700::z}}", 499, 1]
+        - ["{{c1::a}} {{c500::p}} {{c501::q}} {{c999::r}}", 0, 2]
+        - ["{{c1::a}} {{c500::p}} {{c501::q}} {{c999::r}}", 499, 2]
+  - id: cloze-ordinal-499-once-rows-after-edit
+    requirement: R786
+    summary: After the edit the note with c1, c500, c501 and c999 still has one card of ordinal 499.
+    test: cardgen/cloze/above-500
+    scenarios: [cardgen/cloze/above-500]
+    pointer: /steps/5/db_exec/rows
+    transform:
+      replace:
+        - ["{{c700::z}} {{c800::y}} {{c2::b}}", 1, 1]
+        - ["{{c700::z}} {{c800::y}} {{c2::b}}", 499, 1]
+        - ["{{c1::a}} {{c500::p}} {{c501::q}} {{c999::r}}", 0, 2]
+        - ["{{c1::a}} {{c500::p}} {{c501::q}} {{c999::r}}", 499, 2]
+  # specs/notes/deck-placement-and-position.md D2, D3: Meguri walks the list
+  # of candidate decks (R791, R792, AE32); Anki 26.09.3 goes to Default as
+  # soon as its first pick is not a usable deck.
+  - id: deck-placement-chain-override-missing
+    requirement: R791
+    summary: A card whose template override names a deleted deck goes to the Add screen's deck Culture, not to Default (AE32).
+    test: cardgen/placement/new-note
+    scenarios: [cardgen/placement/new-note]
+    pointer: /steps/19/db_exec/rows/3/2
+    transform: {replace: Culture}
+  - id: deck-placement-chain-override-filtered
+    requirement: R791
+    summary: A card whose template override names a filtered deck goes to the Add screen's deck Culture, not to Default.
+    test: cardgen/placement/new-note
+    scenarios: [cardgen/placement/new-note]
+    pointer: /steps/19/db_exec/rows/5/2
+    transform: {replace: Culture}
+  - id: deck-placement-chain-existing-shared-missing
+    requirement: R792
+    summary: A card added to a note whose cards share a deleted deck goes to the note type's last deck Other, not to Default.
+    test: cardgen/placement/existing-note
+    scenarios: [cardgen/placement/existing-note]
+    pointer: /steps/25/db_exec/rows/8/2
+    transform: {replace: Other}
+  - id: deck-placement-chain-existing-override-missing
+    requirement: R792
+    summary: A card added to a note whose template override names a deleted deck goes to the deck its cards share, Inbox, not to Default.
+    test: cardgen/placement/existing-note
+    scenarios: [cardgen/placement/existing-note]
+    pointer: /steps/25/db_exec/rows/23/2
+    transform: {replace: Inbox}
   # specs/notetypes/records.md N3.1: saving a note type that did not change
   # writes nothing; Anki stamps it (mtime_secs now, usn -1) and moves col.mod.
   - id: notetype-unchanged-save

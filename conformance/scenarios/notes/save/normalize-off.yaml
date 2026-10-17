@@ -1,0 +1,27 @@
+# The collection key normalize_note_text (R775; specs/notes/note-records.md
+# A1). With it false, saves keep decomposed text as given (control
+# characters other than TAB and LF are still removed), and the sort field and
+# checksum are computed from that text. Turning it back on (or removing it,
+# which reads as true) makes the next save of the note normalize every field
+# to NFC, the untouched ones included.
+id: notes/save/normalize-off
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {normalize_note_text: false}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+steps:
+  - add_note: {notetype: Pair, deck: Inbox, fields: ["café\u0001", "Å"]}
+  - add_note: {notetype: Pair, deck: Inbox, fields: ["café", "Å"]}
+  - db_exec: {sql: "SELECT hex(flds), hex(sfld), csum FROM notes ORDER BY id"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: "Å again"}}
+  - db_exec: {sql: "SELECT hex(flds), hex(sfld), csum, mod FROM notes ORDER BY id"}
+  - set_config: {key: normalize_note_text, value: true}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: "Å once more"}}
+  - db_exec: {sql: "SELECT hex(flds), hex(sfld), csum, mod FROM notes ORDER BY id"}

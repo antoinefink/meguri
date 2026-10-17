@@ -1,0 +1,31 @@
+# AE31 (R782, R788, R792, R795). A note type with an optional second card:
+# the note is added to German::Mining with Add Reverse empty, so it has only
+# card 1. Another note of the type is then added to Other, which becomes the
+# type's last deck. Typing into Add Reverse creates card 2 in German::Mining,
+# the deck of card 1, with card 1's new-card position, and leaves the
+# position counter alone. Clearing Add Reverse later keeps card 2 (specs/
+# notes/card-generation.md G7, deck-placement-and-position.md D3, P2). The
+# card the edit adds has no logical id, so cards are read with db_exec.
+id: cardgen/normal/edits-only-add
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Optional Reverse
+      fields: [Front, Back, Add Reverse]
+      templates:
+        - {name: Card 1, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Card 2, front: "{{#Add Reverse}}{{Back}}{{/Add Reverse}}", back: "{{Front}}"}
+  decks: [German::Mining, Other]
+steps:
+  - add_note: {notetype: Optional Reverse, deck: German::Mining, fields: [Hund, dog, ""]}
+  - add_note: {notetype: Optional Reverse, deck: Other, fields: [Katze, cat, ""]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.type, c.queue, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Add Reverse: x}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.type, c.queue, c.due, c.mod, c.usn FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Add Reverse: ""}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.due, c.mod FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}

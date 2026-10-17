@@ -1,0 +1,34 @@
+# AE40, core half (R776, R777, R823; specs/notes/note-records.md U1-U3).
+# Saving a note whose fields and tags equal the stored ones writes nothing:
+# mod, usn and col.mod stay. Editing only Translation stamps the note and
+# rewrites Translation; Sentence, which holds markup an editor would not
+# write itself, is stored again byte for byte. The note's usn is set to a
+# server value first, as after a sync.
+id: notes/save/untouched-fields
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Sentence Card
+      fields: [Sentence, Translation, Notes]
+      templates:
+        - {name: Card, front: "{{Sentence}}", back: "{{Translation}}"}
+  decks: [Inbox]
+  notes:
+    - notetype: Sentence Card
+      deck: Inbox
+      fields:
+        - "<ruby>私<rt>わたし</rt></ruby>は<span style=\"color: rgb(255, 0, 0);\" data-x='1'>学生</span>です。<script>if (a < b && c > d) {}</script>&nbsp;<br/><!-- c --><img src=\"a b.jpg\" onerror=x><div><div></div></div>  end  "
+        - "I am a student."
+        - ""
+      tags: [migaku]
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - db_exec: {sql: "SELECT flds, tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1"}
+  - edit_note: {note: "#n1", fields: {Translation: "I am a student."}, tags: [migaku]}
+  - db_exec: {sql: "SELECT flds, tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Translation: "I'm a student."}}
+  - db_exec: {sql: "SELECT flds, tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - db_exec: {sql: "SELECT hex(substr(flds, 1, instr(flds, char(31)) - 1)) FROM notes"}
