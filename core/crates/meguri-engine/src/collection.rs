@@ -5,7 +5,7 @@
 
 use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use meguri_storage::{ReaderRole, Writer};
@@ -23,6 +23,9 @@ use crate::readers::{ReaderLease, Readers};
 pub(crate) struct CollectionCore {
     pub(crate) exec: Arc<ExecShared>,
     pub(crate) readers: Readers,
+    /// Attaches the derived store to readers (`storage/derived-store` D9),
+    /// once the store's open step ran.
+    pub(crate) derived: OnceLock<Arc<crate::derived_host::Attachment>>,
 }
 
 /// A handle to the open collection, for one generation. Cheap to clone.
@@ -140,11 +143,14 @@ impl Collection {
     fn reader_at(&self, role: ReaderRole, index: usize) -> Result<ReaderLease<'_>, EngineError> {
         #[cfg(test)]
         tests::before_lease();
-        let guard = self.core.readers.lease(role, index, || self.check_current())?;
+        let mut guard = self.core.readers.lease(role, index, || self.check_current())?;
+        if let (Some(attachment), Some(reader)) = (self.core.derived.get(), guard.as_mut()) {
+            attachment.ensure(reader, self.generation);
+        }
         Ok(ReaderLease::new(guard, &self.core.exec, self.generation))
     }
 
-    fn check_current(&self) -> Result<(), EngineError> {
+    pub(crate) fn check_current(&self) -> Result<(), EngineError> {
         let current = self.current_generation();
         if current == self.generation {
             Ok(())

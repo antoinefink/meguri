@@ -1,0 +1,58 @@
+# Note type objects as they travel in applyChanges `models`
+# (specs/sync/wire-format.md W6; specs/model/schema11-json.md S3-S6; R1464,
+# R1523): a standard note type with no add-on data, a standard note type
+# carrying synthetic add-on members at all three levels (note type, field,
+# template) in the style of a reading add-on, and a cloze note type. Field and
+# template ids are pinned first, since Anki gives new ones random ids. Each
+# object here is what a sender puts on the wire, except `usn`, which the
+# sender replaces with the server's USN (wire-format W6.2).
+id: sync/wire/notetypes
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+    - name: Reading
+      fields: [Expression, Meaning]
+      templates:
+        - {name: Recognize, front: "{{Expression}}", back: "{{FrontSide}}<hr id=answer>{{Meaning}}"}
+        - {name: Recall, front: "{{Meaning}}", back: "{{FrontSide}}<hr id=answer>{{Expression}}"}
+      css: ".card { font-family: serif; }"
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates: [{name: Cloze, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}]
+steps:
+  - legacy_update:
+      notetype: Pair
+      patch:
+        flds:
+          - {name: Front, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1101}
+          - {name: Back, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1102}
+        tmpls:
+          - {name: Forward, ord: 0, qfmt: "{{Front}}", afmt: "{{Back}}", id: 2101}
+  - legacy_update:
+      notetype: Reading
+      patch:
+        x_reader_lang: ja
+        x_reader_cfg: {voices: [kyoko, otoya], rate: 1.25, autoplay: false}
+        vers: []
+        tags: [vocab]
+        flds:
+          - {name: Expression, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1201, x_reader_role: word}
+          - {name: Meaning, ord: 1, sticky: true, rtl: false, font: Arial, size: 18, description: English gloss, id: 1202, x_reader_role: gloss, x_reader_order: 2}
+        tmpls:
+          - {name: Recognize, ord: 0, qfmt: "{{Expression}}", afmt: "{{FrontSide}}<hr id=answer>{{Meaning}}", id: 2201, x_reader_side: front}
+          - {name: Recall, ord: 1, qfmt: "{{Meaning}}", afmt: "{{FrontSide}}<hr id=answer>{{Expression}}", bqfmt: "{{Meaning}}?", id: 2202}
+  - legacy_update:
+      notetype: Gap
+      patch:
+        flds:
+          - {name: Text, ord: 0, sticky: false, rtl: false, font: Arial, size: 20, id: 1301}
+          - {name: Extra, ord: 1, sticky: false, rtl: false, font: Arial, size: 20, id: 1302}
+        tmpls:
+          - {name: Cloze, ord: 0, qfmt: "{{cloze:Text}}", afmt: "{{cloze:Text}}<br>{{Extra}}", id: 2301}
+  - observe:
+      - legacy_json: {notetypes: [Pair, Reading, Gap]}

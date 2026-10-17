@@ -9,8 +9,10 @@ import Testing
 /// Launch routes (U7, R1963), in the app process.
 @MainActor
 @Suite struct RouteRegistryTests {
-    @Test func theStandardRegistryHasTheSampleGalleryAndPerfRoutes() {
-        #expect(TestHooks.RouteRegistry.standard.routes.map(\.path) == ["designsystem/gallery", "perf/probe", "sample/alert", "sample/deck-overview/empty", "sample/deck-overview/error", "sample/deck-overview/loading", "sample/deck-overview/overflow", "sample/deck-overview/typical", "sample/defects", "sample/screen", "sample/sheet", "sample/touch-targets"])
+    static let standardRoutes = "designsystem/gallery, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets, shell/root/browse-pushed, shell/root/deck-page, shell/root/error, shell/root/loading, shell/root/review-answer, shell/root/typical, spike/card-swap, spike/card-swap/capture, spike/card-swap/typein, spike/media-seek, spike/media-seek/audio, spike/storage/read, spike/storage/write"
+
+    @Test func theStandardRegistryHasTheSampleGalleryPerfShellAndSpikeRoutes() {
+        #expect(TestHooks.RouteRegistry.standard.routes.map(\.path).joined(separator: ", ") == Self.standardRoutes)
     }
 
     @Test(arguments: [
@@ -22,6 +24,8 @@ import Testing
         ("sample/deck-overview/typical", .screen),
         ("sample/touch-targets", .screen),
         ("perf/probe", .screen),
+        ("spike/card-swap", .screen),
+        ("spike/media-seek/audio", .screen),
     ])
     func eachRouteHasItsPresentation(path: String, style: InitialPresentation.Style) throws {
         let presentation = try TestHooks.RouteRegistry.standard.presentation(for: TestHooks.Route(path), configuration: LaunchConfiguration())
@@ -30,9 +34,37 @@ import Testing
 
     @Test func anUnknownRouteNamesTheRegisteredOnes() throws {
         let route = try TestHooks.Route("review/answer")
-        #expect(throws: TestHookError("-MeguriRoute: no route 'review/answer'; registered: designsystem/gallery, perf/probe, sample/alert, sample/deck-overview/empty, sample/deck-overview/error, sample/deck-overview/loading, sample/deck-overview/overflow, sample/deck-overview/typical, sample/defects, sample/screen, sample/sheet, sample/touch-targets")) {
+        #expect(throws: TestHookError("-MeguriRoute: no route 'review/answer'; registered: \(Self.standardRoutes)")) {
             try TestHooks.RouteRegistry.standard.presentation(for: route, configuration: LaunchConfiguration())
         }
+    }
+
+    /// A shell route resolves to the shell's state, not to a presentation.
+    @Test func aShellRouteOpensTheShellInItsState() throws {
+        let route = try TestHooks.Route("shell/root/browse-pushed")
+        guard case let .shell(launch) = try TestHooks.RouteRegistry.standard.resolve(route, configuration: LaunchConfiguration()) else {
+            Issue.record("shell/root/browse-pushed is not a shell route")
+            return
+        }
+        #expect(launch.probe)
+        let navigation = AppNavigation()
+        launch.prepare(navigation)
+        #expect(navigation.section == .browse)
+        #expect(navigation.selectedDeck == TestHooks.ShellSample.spanishMining)
+        #expect(navigation.path(.browse) == [.noteTypes])
+        #expect(navigation.scrollPosition(for: .section(.browse)) == ScrollPosition(id: "row-20", anchor: .top))
+        #expect(throws: TestHookError("-MeguriRoute: 'shell/root/browse-pushed' opens the shell in a state; it presents nothing")) {
+            try TestHooks.RouteRegistry.standard.presentation(for: route, configuration: LaunchConfiguration())
+        }
+    }
+
+    @Test(arguments: ["typical", "loading", "error"])
+    func theShellStateRoutesShowNoProbe(state: String) throws {
+        guard case let .shell(launch) = try TestHooks.RouteRegistry.standard.resolve(TestHooks.Route("shell/root/\(state)"), configuration: LaunchConfiguration()) else {
+            Issue.record("shell/root/\(state) is not a shell route")
+            return
+        }
+        #expect(!launch.probe, "an audit or a snapshot of the shell would include the probe")
     }
 
     @Test func handlersSeeTheOtherOverrides() throws {

@@ -1,0 +1,181 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200, -1, 1894705200000, 1600000000000, 1700000000000]
+          ]
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894708800, -1, 1894708800000, 1600000000000, 1700000000000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894712400, -1, 1894712400000, 1600000000000, 1700000000000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894716000, -1, 1894716000000, 1600000000000, 1700000000000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Pair"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [1894719600, -1, 1894719600000, 1600000000000, 1700000000000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "update_notetype": {
+          "name": "Duo"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Duo", 1894723200, -1, 1894723200000, 1600000000000, 1700000000000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0, "Ahead", 0, 0]
+          ]
+        }
+      },
+      {
+        "notetype_structure": {
+          "Duo": {
+            "fields": [
+              {
+                "collapsed": false,
+                "description": "the word",
+                "exclude_from_search": true,
+                "font_name": "Arial",
+                "font_size": 28,
+                "name": "Front",
+                "plain_text": false,
+                "prevent_deletion": false,
+                "rtl": false,
+                "sticky": true,
+                "tag": null
+              },
+              {
+                "collapsed": true,
+                "description": "",
+                "exclude_from_search": false,
+                "font_name": "Georgia",
+                "font_size": 20,
+                "name": "Back",
+                "plain_text": true,
+                "prevent_deletion": false,
+                "rtl": true,
+                "sticky": false,
+                "tag": null
+              }
+            ],
+            "kind": "standard",
+            "original_id": null,
+            "original_stock_kind": 1,
+            "sort_field": 0,
+            "templates": [
+              {
+                "deck": "Words",
+                "name": "Ahead",
+                "requirement": {
+                  "fields": [0],
+                  "kind": "any"
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/stamps",
+  "scenario_sha256": "3123d4a12e469387203a3bfd122c89302a349bb9c404b329e53f4d6f46ecd7d7",
+  "tz": "UTC"
+}

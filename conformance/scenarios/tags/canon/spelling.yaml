@@ -1,0 +1,43 @@
+# Spelling and registration when notes are saved (specs/tags/tags.md T3, T4;
+# AE37's core half). A tag equal to a registered one takes its spelling; a
+# new tag takes the spelling of the longest leading part of it that the tag
+# tree shows: a registered ancestor, or an implicit parent (`Bar` from
+# `Bar::x`, `zz` from `zz::Q`, `X::Y` from `X::Y::q`, `German` from
+# `German::Verb`), spelled as the first row below it in case-folded order
+# spells it (`GEO::eu`, from two rows another client inserted). Anki takes
+# nothing from an implicit parent (deviations tags-implicit-parent-spelling,
+# two entries: the notes, then the registry). Within one save, tags
+# registered earlier lend their spelling to later ones. Tags are deduplicated
+# under full case folding and sorted. Registering other tags keeps an
+# existing row's collapsed and config; an edit that drops every tag leaves
+# the rows (T14).
+id: tags/canon/spelling
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Plain
+      fields: [Text]
+      templates: [{name: Card, front: "{{Text}}", back: "{{Text}}"}]
+steps:
+  - add_note: {notetype: Plain, fields: ["n1"], tags: ["German::Verb"]}
+  - db_exec: {sql: "UPDATE tags SET collapsed = 0, config = X'0102' WHERE tag = 'German::Verb'"}
+  - add_note: {notetype: Plain, fields: ["n2"], tags: ["german::verb::modal"]}
+  - add_note: {notetype: Plain, fields: ["n3"], tags: ["GERMAN::VERB"]}
+  - add_note: {notetype: Plain, fields: ["n4"], tags: ["Bar::x"]}
+  - add_note: {notetype: Plain, fields: ["n5"], tags: ["bar::y"]}
+  - add_note: {notetype: Plain, fields: ["n6"], tags: [b, A, a]}
+  - add_note: {notetype: Plain, fields: ["n7"], tags: ["Straße", "STRASSE"]}
+  - add_note: {notetype: Plain, fields: ["n8"], tags: [z, _x, "[", "Y"]}
+  - add_note: {notetype: Plain, fields: ["n9"], tags: ["LANG", "lang::DE", "lang::de::noun"]}
+  - add_note: {notetype: Plain, fields: ["n10"], tags: ["zz::Q", "ZZ"]}
+  - add_note: {notetype: Plain, fields: ["n11"], tags: ["X"]}
+  - add_note: {notetype: Plain, fields: ["n12"], tags: ["X::Y::q"]}
+  - add_note: {notetype: Plain, fields: ["n13"], tags: ["x::y::z"]}
+  - add_note: {notetype: Plain, fields: ["n14"], tags: ["german::noun"]}
+  - add_note: {notetype: Plain, fields: ["n15"], tags: ["BAR"]}
+  - db_exec: {sql: "INSERT INTO tags (tag, usn, collapsed, config) VALUES ('geo::EU::fr', 0, 1, NULL), ('GEO::eu::de', 0, 1, NULL)"}
+  - add_note: {notetype: Plain, fields: ["n16"], tags: ["Geo::Eu::it"]}
+  - edit_note: {note: "#n5", tags: ["BAR::X", "bar::Y"]}
+  - edit_note: {note: "#n1", tags: []}
+  - db_exec: {sql: "SELECT tags FROM notes ORDER BY id"}
+  - observe: [{db_dump: {tables: [tags]}}]

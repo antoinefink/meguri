@@ -222,7 +222,7 @@ fn the_typed_model_reads_every_v0_op_and_rejects_unknown_ones() {
     let text = r##"
 id: area/all-ops
 clock: {tz: UTC, start: "2030-01-15T10:00:00Z", mode: frozen}
-compare: {set: ["/steps/*/search/ids"]}
+compare: {set: ["/steps/*/search/*/ids"]}
 setup:
   config: {rollover: 4}
   presets: [{name: Default, learn_steps: [30s, 1d], leech_action: tag_only}]
@@ -257,7 +257,8 @@ steps:
       - timing
       - {next_states: ["#c1"]}
       - {fuzz_table: {card: "#c1", pairs: [[1, 0]], intervals: [3]}}
-      - {search: {query: "deck:A"}}
+      - {search: [{query: "deck:A"}]}
+      - {canonical_search: ["deck:A"]}
       - queue
       - deck_tree
       - render(#c1)
@@ -273,7 +274,16 @@ steps:
     let needs = parsed.needs();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["cards", "config", "decks", "notes", "notetypes", "presets", "revlog"]
+        [
+            "cards",
+            "config",
+            "decks",
+            "new_collection",
+            "notes",
+            "notetypes",
+            "presets",
+            "revlog"
+        ]
     );
     assert!(needs.ops.contains("build_filtered") && needs.ops.contains("reopen"));
     assert!(!needs.ops.contains("observe"));
@@ -433,8 +443,33 @@ fn the_model_enforces_the_schema_rules_beyond_types() {
         ),
         ("steps: [{observe: [{net_probe: {host: h}}]}]", "net_probe"),
         (
-            "steps: [{observe: [{search: {query: q, kind: decks}}]}]",
+            "steps: [{observe: [{search: [{query: q, kind: decks}]}]}]",
             "cards or notes",
+        ),
+        // search-ops.md S1, S2: non-empty lists of requests and of texts.
+        ("steps: [{observe: [{search: []}]}]", "at least one request"),
+        ("steps: [{observe: [{search: {query: q}}]}]", "does not take"),
+        ("steps: [{observe: [search]}]", "does not take"),
+        ("steps: [{observe: [{search: [{query: 1}]}]}]", "query string"),
+        ("steps: [{observe: [{search: [{query: q, order: id}]}]}]", "\"order\""),
+        ("steps: [{observe: [{search: [q]}]}]", "{query, kind?}"),
+        (
+            "steps: [{observe: [{canonical_search: []}]}]",
+            "at least one search text",
+        ),
+        (
+            "steps: [{observe: [{canonical_search: [q, 1]}]}]",
+            "every item is a string",
+        ),
+        ("steps: [{observe: [canonical_search]}]", "does not take"),
+        // observations.md O2: a kind whose value is a list, once per step.
+        (
+            "steps: [{observe: [{search: [{query: a}]}, {search: [{query: b}]}]}]",
+            "search is requested more than once",
+        ),
+        (
+            "steps: [{observe: [{canonical_search: [a]}, {canonical_search: [b]}]}]",
+            "canonical_search is requested more than once",
         ),
         ("steps: [{observe: [{queue: {deck: 1}}]}]", "deck"),
         ("steps: [{handoff: elsewhere}]", "unknown variant"),
@@ -671,6 +706,201 @@ fn deck_options_ops_follow_the_schema() {
             "[{observe: [{ignored_before_count: {preset: P, dates: [x]}}, {ignored_before_count: {preset: Q, dates: [y]}}]}]",
             "more than once",
         ),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// undo-ops.md V1-V3: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn undo_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: undo/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{undo: {}}, {redo: {}}, {remove_config: {key: k}}, {set_config: {key: k, value: 1, undoable: true}}, \
+         {set_config: {key: k, value: 1, undoable: false}}, {set_config: {key: k, value: 1}}, \
+         {observe: [undo_status, {undo_status: null}]}]",
+    )
+    .unwrap();
+    let undoable: Vec<bool> = parsed
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            Step::SetConfig(args) => Some(args.undoable),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(undoable, [true, false, false]);
+    assert!(matches!(&parsed.steps[2], Step::RemoveConfig(args) if args.key == "k"));
+    let needs = parsed.needs();
+    for op in ["undo", "redo", "remove_config", "set_config"] {
+        assert!(needs.ops.contains(op), "{op}");
+    }
+    assert!(needs.observations.contains("undo_status"));
+    for (bad, why) in [
+        ("[{undo: {steps: 1}}]", "unknown key"),
+        ("[{undo: null}]", "takes a mapping"),
+        ("[{redo: []}]", "takes a mapping"),
+        ("[{remove_config: {}}]", "key"),
+        ("[{remove_config: {key: \"\"}}]", "non-empty key"),
+        ("[{remove_config: {key: k, undoable: true}}]", "unknown field"),
+        ("[{remove_config: k}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: null}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: 1}}]", "invalid type"),
+        ("[{set_config: {key: k, value: 1, undoable: \"true\"}}]", "invalid type"),
+        ("[{observe: [\"undo_status(#c1)\"]}]", "does not take"),
+        ("[{observe: [{undo_status: {}}]}]", "undo_status"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// tag-ops.md G1-G9: the ops and the observation, with
+/// scenario.schema.json's shapes.
+#[test]
+fn tag_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: tags/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{add_note_tags: {notes: [\"#n1\", \"#n2\"], tags: \"a b\"}}, {remove_note_tags: {notes: [\"#n1\"], tags: \"\"}}, \
+         {delete_tags: {tags: \"x y\"}}, {rename_tag: {from: \"C++\", to: \"a b\"}}, \
+         {reparent_tags: {tags: [a, \"b::c\"], parent: \"\"}}, {clear_unused_tags: {}}, \
+         {set_tag_collapsed: {tags: [a], collapsed: false}}, {set_flag: {cards: [\"#c1\"], flag: 8}}, \
+         {observe: [tag_tree, {tag_tree: null}]}]",
+    )
+    .unwrap();
+    assert!(matches!(&parsed.steps[0], Step::AddNoteTags(args) if args.notes.len() == 2 && args.tags == "a b"));
+    assert!(matches!(&parsed.steps[3], Step::RenameTag(args) if args.from == "C++" && args.to == "a b"));
+    assert!(matches!(&parsed.steps[4], Step::ReparentTags(args) if args.parent.is_empty() && args.tags.len() == 2));
+    assert!(matches!(&parsed.steps[6], Step::SetTagCollapsed(args) if !args.collapsed));
+    assert!(matches!(&parsed.steps[7], Step::SetFlag(args) if args.flag == 8));
+    let needs = parsed.needs();
+    for op in [
+        "add_note_tags",
+        "remove_note_tags",
+        "delete_tags",
+        "rename_tag",
+        "reparent_tags",
+        "clear_unused_tags",
+        "set_tag_collapsed",
+        "set_flag",
+    ] {
+        assert!(needs.ops.contains(op), "{op}");
+        assert!(Step::NAMES.contains(&op), "{op}");
+    }
+    assert!(needs.observations.contains("tag_tree"));
+    assert!(parsed.starts_from_new_collection(), "tag_tree reads the collection");
+    for (bad, why) in [
+        ("[{add_note_tags: {notes: [], tags: a}}]", "at least one note"),
+        (
+            "[{remove_note_tags: {notes: [\"#c1\"], tags: a}}]",
+            "not a note reference",
+        ),
+        ("[{add_note_tags: {notes: [\"#n1\"]}}]", "tags"),
+        ("[{add_note_tags: {notes: [\"#n1\"], tags: 1}}]", "invalid type"),
+        ("[{delete_tags: {tags: [a]}}]", "invalid type"),
+        ("[{rename_tag: {from: \"\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: \"a b\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: \"a\u{3000}b\", to: b}}]", "non-empty from"),
+        ("[{rename_tag: {from: a}}]", "to"),
+        ("[{reparent_tags: {tags: [], parent: p}}]", "at least one tag"),
+        ("[{reparent_tags: {tags: [\"\"], parent: p}}]", "non-empty tag names"),
+        ("[{reparent_tags: {tags: [a]}}]", "parent"),
+        ("[{clear_unused_tags: {all: true}}]", "unknown key"),
+        ("[{set_tag_collapsed: {tags: [], collapsed: true}}]", "at least one tag"),
+        ("[{set_tag_collapsed: {tags: [a], collapsed: 1}}]", "invalid type"),
+        ("[{set_flag: {cards: [], flag: 1}}]", "at least one card"),
+        ("[{set_flag: {cards: [\"#c1\"], flag: -1}}]", "invalid value"),
+        ("[{set_flag: {cards: [\"#n1\"], flag: 1}}]", "not a card reference"),
+        ("[{observe: [{tag_tree: {}}]}]", "tag_tree"),
+        ("[{observe: [\"tag_tree(#c1)\"]}]", "does not take"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// browser-config-ops.md B1, B2: the op with scenario.schema.json's key
+/// list and value shapes, and the observation.
+#[test]
+fn browser_config_ops_follow_the_schema() {
+    let parse = |steps: &str| {
+        let text = format!("id: browser/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: {steps}\n");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "[{browser_config_set: {key: activeCols, value: [question, \"\", addonX]}}, \
+         {browser_config_set: {key: sortType, value: myAddonColumn}}, \
+         {browser_config_set: {key: collapseTags, value: true}}, \
+         {browser_config_set: {key: savedFilters, value: {a: \"is:due\"}}}, \
+         {browser_config_set: {key: flagLabels, value: {}}}, \
+         {observe: [browser_config, {browser_config: null}]}]",
+    )
+    .unwrap();
+    assert!(
+        matches!(&parsed.steps[0], Step::BrowserConfigSet(args) if args.key == "activeCols"
+        && args.value == serde_json::json!(["question", "", "addonX"]))
+    );
+    let needs = parsed.needs();
+    assert!(needs.ops.contains("browser_config_set"));
+    assert!(Step::NAMES.contains(&"browser_config_set"));
+    assert!(needs.observations.contains("browser_config"));
+    assert!(
+        parsed.starts_from_new_collection(),
+        "browser_config reads the collection"
+    );
+    for (bad, why) in [
+        (
+            "[{browser_config_set: {key: normalize_note_text, value: false}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: curDeck, value: 1}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: ActiveCols, value: []}}]",
+            "22 browser config keys",
+        ),
+        (
+            "[{browser_config_set: {key: collapseTags, value: 1}}]",
+            "takes a boolean",
+        ),
+        (
+            "[{browser_config_set: {key: setDueBrowser, value: 5}}]",
+            "takes a string",
+        ),
+        ("[{browser_config_set: {key: sortType, value: null}}]", "takes a string"),
+        (
+            "[{browser_config_set: {key: activeCols, value: [noteFld, 5]}}]",
+            "takes an array of strings",
+        ),
+        (
+            "[{browser_config_set: {key: activeCols, value: noteFld}}]",
+            "takes an array of strings",
+        ),
+        (
+            "[{browser_config_set: {key: savedFilters, value: {a: 3}}}]",
+            "takes an object of strings",
+        ),
+        (
+            "[{browser_config_set: {key: flagLabels, value: []}}]",
+            "takes an object of strings",
+        ),
+        ("[{browser_config_set: {key: flagLabels}}]", "value"),
+        (
+            "[{browser_config_set: {key: flagLabels, value: {}, undoable: true}}]",
+            "unknown field",
+        ),
+        ("[{observe: [{browser_config: {}}]}]", "browser_config"),
+        ("[{observe: [\"browser_config(#c1)\"]}]", "does not take"),
     ] {
         let err = parse(bad).expect_err(bad).to_string();
         assert!(err.contains(why), "{bad}: {err}");
@@ -970,10 +1200,85 @@ fn actor_scenarios_are_checked_when_they_load() {
 }
 
 #[test]
+fn a_login_says_how_it_derives_its_credentials() {
+    use meguri_testkit::scenario::{Credentials, SyncKind};
+
+    // sync-ops.md S4.5: after a login, a second sync step with these
+    // arguments; `account` is the default.
+    let second = |args: &str| {
+        actor_scenario(&format!(
+            "id: sync/creds\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nactors: [meguri]\n\
+             steps: [{{sync: {{kind: login}}}}, {{sync: {args}}}]\n"
+        ))
+    };
+    for (args, kind, credentials) in [
+        ("{kind: login}", SyncKind::Login, Credentials::Account),
+        (
+            "{kind: login, credentials: account}",
+            SyncKind::Login,
+            Credentials::Account,
+        ),
+        (
+            "{kind: login, credentials: wrong_password}",
+            SyncKind::Login,
+            Credentials::WrongPassword,
+        ),
+        ("{kind: normal}", SyncKind::Normal, Credentials::Account),
+        // S4.1: the sync status the client's indicator asks for (U106).
+        ("{kind: status}", SyncKind::Status, Credentials::Account),
+    ] {
+        let parsed = second(args).unwrap_or_else(|e| panic!("{args}: {e}"));
+        let Step::Sync(spec) = &parsed.steps[1] else {
+            panic!("{args}: not a sync step")
+        };
+        assert_eq!((spec.kind, spec.credentials), (kind, credentials), "{args}");
+    }
+    for (args, why) in [
+        ("{kind: normal, credentials: account}", "credentials"),
+        ("{kind: status, credentials: account}", "credentials"),
+        ("{kind: full_upload, credentials: wrong_password}", "credentials"),
+        ("{kind: login, credentials: other}", "other"),
+        ("{kind: login, credentials: null}", "credentials"),
+        ("{kind: login, credentials: 1}", "credentials"),
+        ("{kind: login, credentials: [account]}", "credentials"),
+        ("{kind: login, password: secret}", "password"),
+    ] {
+        let err = second(args).expect_err(args);
+        assert!(err.contains(why), "{args}: {err}");
+    }
+
+    // The committed scenario parses with the wrong password on its first login.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/transport/login-wrong-password.yaml")).unwrap();
+    assert!(matches!(
+        &loaded.scenario.steps[1],
+        Step::Sync(s) if s.kind == SyncKind::Login && s.credentials == Credentials::WrongPassword
+    ));
+
+    // The committed status scenario parses, its fourth step a status.
+    let loaded = scenario::load(&conformance_dir().join("scenarios/sync/meta/status.yaml")).unwrap();
+    assert!(matches!(&loaded.scenario.steps[3], Step::Sync(s) if s.kind == SyncKind::Status));
+}
+
+#[test]
+fn the_wrong_password_is_the_accounts_password_followed_by_wrong() {
+    use meguri_testkit::scenario::{Credentials, SyncSpec};
+
+    // sync-ops.md S4.5: every executor derives it the same way.
+    assert_eq!(Credentials::Account.password("meguri-test-a"), "meguri-test-a");
+    assert_eq!(
+        Credentials::WrongPassword.password("meguri-test-a"),
+        "meguri-test-a-wrong"
+    );
+    // S4.4: the closed list of rejections, auth_failed among them.
+    assert_eq!(SyncSpec::REJECTIONS, ["auth_failed", "clock_incorrect", "network"]);
+}
+
+#[test]
 fn meguri_actors_need_what_they_run_and_nothing_else() {
     let path = conformance_dir().join("scenarios/smoke/sync/meguri-downloads.yaml");
     let loaded = scenario::load(&path).unwrap();
-    // sync-ops.md S10.2: `actor`; no setup (client_a runs it); the ops and
+    // sync-ops.md S10.2: `actor`; the new collection it starts from (S2.2,
+    // dsl.md D8) but no setup section (client_a runs the setup); the ops and
     // observations of meguri's steps; advance (the scenario uses it); db_dump
     // for converge. client_a's full_upload is the oracle's business.
     let needs = loaded.scenario.needs_of_meguri_actors();
@@ -985,7 +1290,10 @@ fn meguri_actors_need_what_they_run_and_nothing_else() {
         needs.observations.iter().map(String::as_str).collect::<Vec<_>>(),
         ["card", "db_dump"]
     );
-    assert!(needs.setup.is_empty());
+    assert_eq!(
+        needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["new_collection"]
+    );
 
     // Without a Meguri actor, nothing.
     let two = scenario::load(&conformance_dir().join("scenarios/smoke/sync/two-party.yaml")).unwrap();
@@ -1011,13 +1319,89 @@ steps:
     let needs = actor_scenario(text).unwrap().needs_of_meguri_actors();
     assert_eq!(
         needs.setup.iter().map(String::as_str).collect::<Vec<_>>(),
-        ["decks", "notetypes"]
+        ["decks", "new_collection", "notetypes"]
     );
     assert_eq!(
         needs.ops.iter().map(String::as_str).collect::<Vec<_>>(),
         ["actor", "reopen", "set_clock", "sync"]
     );
     assert!(needs.observations.is_empty());
+}
+
+#[test]
+fn a_scenario_starts_from_the_new_collection_unless_it_opens_a_fixture_or_reads_none() {
+    // dsl.md D8: the new collection is the setup capability `new_collection`.
+    let load = |setup: &str, steps: &str| {
+        let text = format!("id: smoke/d8\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\n{setup}steps:\n{steps}");
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap()
+    };
+    let needs_it = |setup: &str, steps: &str| {
+        let parsed = load(setup, steps);
+        let needs = parsed.needs().setup.contains(scenario::NEW_COLLECTION);
+        assert_eq!(needs, parsed.starts_from_new_collection(), "{steps}");
+        needs
+    };
+    let template = |case: &str| {
+        format!(
+            "  - observe:\n      - template:\n          notetype: {{name: P, fields: [Front, Back]}}\n          cases: [{case}]\n"
+        )
+    };
+    let new_note = r#"{front: "{{Front}}", back: "{{Back}}", fields: [a, b]}"#;
+    // No setup and only steps that touch no collection: nothing.
+    for steps in [
+        " []\n".to_owned(),
+        "  - advance: 1d\n  - set_clock: \"2030-03-31T03:00:00\"\n".to_owned(),
+        "  - observe: [{text: {fns: [strip_markup], inputs: [\"<b>a</b>\"]}}]\n".to_owned(),
+        "  - observe: [{cloze: {fns: [numbers], inputs: [\"{{c1::a}}\"]}}]\n".to_owned(),
+        "  - observe: [{fsrs_next: {param_sets: {default: []}, inputs: [{id: 0, card_id: 1, reps: 1, s: 1.0, d: 5.0, elapsed_days: 1, scheduled_days: 1, dr: 0.9, params: default, max_ivl: 36500}]}}]\n".to_owned(),
+        "  - observe: [{canonical_search: [\"deck:a\", \"a or\"]}]\n".to_owned(),
+        template(new_note),
+    ] {
+        assert!(!needs_it("", &steps), "{steps}");
+    }
+    // A step that reads or writes a collection, or any setup section.
+    for steps in [
+        "  - observe: [timing]\n".to_owned(),
+        "  - db_exec: {sql: \"SELECT 1\"}\n".to_owned(),
+        "  - set_config: {key: k, value: 1}\n".to_owned(),
+        "  - advance: 1d\n  - observe: [undo_status]\n".to_owned(),
+        template(&format!(
+            r##"{new_note}, {{card: "#c1", front: "{{{{Front}}}}", back: "x"}}"##
+        )),
+    ] {
+        assert!(needs_it("", &steps), "{steps}");
+    }
+    assert!(needs_it("setup: {decks: [A]}\n", " []\n"));
+    // A scenario that opens a fixture first starts from that fixture.
+    assert!(!needs_it(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - db_exec: {sql: \"SELECT 1\"}\n"
+    ));
+
+    // A live scenario: the side that runs the first segment (D9.2).
+    let chain = load("", "  - advance: 1d\n  - handoff: oracle\n  - observe: [timing]\n");
+    assert!(
+        chain
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    assert!(
+        !chain
+            .needs_on(scenario::Side::Oracle)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
+    let opened = load(
+        "",
+        "  - open: {fixture: storage/schema-18.anki2}\n  - handoff: oracle\n  - observe: [timing]\n",
+    );
+    assert!(
+        !opened
+            .needs_on(scenario::Side::Meguri)
+            .setup
+            .contains(scenario::NEW_COLLECTION)
+    );
 }
 
 #[test]
@@ -1094,4 +1478,400 @@ fn open_scenarios_are_checked_when_they_load() {
     ] {
         assert!(load(bad).is_err(), "accepted {bad}");
     }
+}
+
+/// The ops of notetype-ops.md T2-T6.
+const NOTETYPE_OPS: [&str; 5] = [
+    "add_notetype",
+    "add_stock_notetype",
+    "clone_notetype",
+    "update_notetype",
+    "ensure_io_notetype",
+];
+
+/// A valid argument mapping for each note type op, every typed argument
+/// given.
+fn valid_notetype_args(op: &str) -> Value {
+    match op {
+        "add_notetype" => json!({
+            "name": "Pair",
+            "kind": "cloze",
+            "fields": ["Text"],
+            "templates": [{"name": "Cloze", "front": "{{cloze:Text}}", "back": ""}],
+            "css": ".card {}"
+        }),
+        "add_stock_notetype" => json!({"kind": "basic_typing", "name": "Typing"}),
+        "clone_notetype" => json!({"notetype": "Pair", "name": "Pair 2"}),
+        "update_notetype" => json!({"notetype": "Pair", "edits": [{"css": ".card {}"}], "skip_checks": true}),
+        "ensure_io_notetype" => json!({}),
+        other => panic!("no valid example for note type op {other}"),
+    }
+}
+
+/// A valid example of each note type edit (notetype-ops.md T5), every typed
+/// member given.
+fn valid_notetype_edit(key: &str) -> Value {
+    match key {
+        "rename" => json!("Q"),
+        "css" => json!(".card {}"),
+        "sort_field" => json!("Back"),
+        "add_field" => json!("Extra"),
+        "remove_field" => json!("Back"),
+        "rename_field" => json!({"from": "Back", "to": "Answer"}),
+        "move_field" => json!({"field": "Back", "to": 0}),
+        "field_options" => json!({
+            "field": "Back",
+            "sticky": true,
+            "rtl": false,
+            "font_name": "Arial",
+            "font_size": 20,
+            "description": "d",
+            "plain_text": true,
+            "collapsed": false,
+            "exclude_from_search": true
+        }),
+        "add_template" => json!({"name": "T", "front": "{{Front}}", "back": "{{Back}}"}),
+        "remove_template" => json!("T"),
+        "rename_template" => json!({"from": "T", "to": "U"}),
+        "move_template" => json!({"template": "T", "to": 1}),
+        "template" => json!({
+            "name": "T",
+            "front": "f",
+            "back": "b",
+            "browser_front": "bf",
+            "browser_back": "bb",
+            "browser_font_name": "Arial",
+            "browser_font_size": 12,
+            "deck": "Default"
+        }),
+        other => panic!("no valid example for note type edit {other}"),
+    }
+}
+
+fn scenario_schema() -> Value {
+    serde_json::from_str(&fs::read_to_string(conformance_dir().join("schema/scenario.schema.json")).unwrap()).unwrap()
+}
+
+/// A schema definition with its `$ref` (`#/$defs/<name>`) followed.
+fn resolved<'a>(schema: &'a Value, def: &'a Value) -> &'a Value {
+    match def["$ref"].as_str() {
+        Some(target) => &schema["$defs"][target.strip_prefix("#/$defs/").unwrap()],
+        None => def,
+    }
+}
+
+#[test]
+fn the_model_reads_the_notetype_ops_as_the_schema_types_them() {
+    let schema = scenario_schema();
+    let steps = schema["$defs"]["step"]["properties"].as_object().unwrap();
+    // Every op the schema cites notetype-ops.md for, and no other.
+    let mut cited: Vec<&str> = steps
+        .iter()
+        .filter(|(_, def)| {
+            def["description"]
+                .as_str()
+                .is_some_and(|d| d.starts_with("notetype-ops.md"))
+        })
+        .map(|(op, _)| op.as_str())
+        .collect();
+    cited.sort_unstable();
+    let mut ours = NOTETYPE_OPS.to_vec();
+    ours.sort_unstable();
+    assert_eq!(cited, ours);
+    for op in NOTETYPE_OPS {
+        assert!(Step::NAMES.contains(&op), "{op} is not in Step::NAMES");
+        let def = resolved(&schema, &steps[op]);
+        let valid = valid_notetype_args(op);
+        assert_eq!(model_accepts(json!({op: valid.clone()})), Ok(()), "{op}");
+        // A mapping, never the list of its values that serde's derive reads.
+        let as_list: Vec<Value> = valid.as_object().unwrap().values().cloned().collect();
+        assert!(model_accepts(json!({op: as_list})).is_err(), "{op} as a list");
+        assert!(model_accepts(json!({op: null})).is_err(), "{op}: null");
+        let mut extra = valid.clone();
+        extra["colour"] = json!("red");
+        assert!(model_accepts(json!({op: extra})).is_err(), "{op} with an unknown key");
+        for key in def["required"].as_array().into_iter().flatten() {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(key.as_str().unwrap());
+            assert!(model_accepts(json!({op: without})).is_err(), "{op} without {key}");
+        }
+        // No argument of these ops is nullable or a mapping.
+        for key in def["properties"].as_object().into_iter().flatten().map(|(k, _)| k) {
+            for wrong_value in [Value::Null, json!({"a": 1})] {
+                let mut wrong = valid.clone();
+                wrong[key.as_str()] = wrong_value.clone();
+                assert!(model_accepts(json!({op: wrong})).is_err(), "{op}.{key}: {wrong_value}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_model_reads_the_notetype_edits_as_the_schema_types_them() {
+    let schema = scenario_schema();
+    let edit_defs = schema["$defs"]["notetype_edit"]["properties"].as_object().unwrap();
+    assert_eq!(edit_defs.len(), 13, "T5 has 13 edits");
+    let update = |edits: Value| model_accepts(json!({"update_notetype": {"notetype": "Pair", "edits": edits}}));
+    assert_eq!(update(json!([])), Ok(()));
+    for (key, def) in edit_defs {
+        let def = resolved(&schema, def);
+        let valid = valid_notetype_edit(key);
+        assert_eq!(update(json!([{key.clone(): valid.clone()}])), Ok(()), "{key}");
+        // One key per edit, and only the edits of T5.
+        let other = if key == "css" { "rename" } else { "css" };
+        assert!(
+            update(json!([{key.clone(): valid.clone(), other: ""}])).is_err(),
+            "{key} and {other}"
+        );
+        assert!(update(json!([key])).is_err(), "{key} as a string");
+        let Some(members) = valid.as_object() else {
+            assert!(update(json!([{key.clone(): {"a": 1}}])).is_err(), "{key}: a mapping");
+            assert!(update(json!([{key.clone(): null}])).is_err(), "{key}: null");
+            continue;
+        };
+        let as_list: Vec<Value> = members.values().cloned().collect();
+        assert!(update(json!([{key.clone(): as_list}])).is_err(), "{key} as a list");
+        let mut extra = valid.clone();
+        extra["colour"] = json!("red");
+        assert!(
+            update(json!([{key.clone(): extra}])).is_err(),
+            "{key} with an unknown key"
+        );
+        for required in def["required"].as_array().unwrap() {
+            let mut without = valid.clone();
+            without.as_object_mut().unwrap().remove(required.as_str().unwrap());
+            assert!(
+                update(json!([{key.clone(): without}])).is_err(),
+                "{key} without {required}"
+            );
+        }
+        for (member, member_def) in def["properties"].as_object().unwrap() {
+            let nullable = member_def["type"]
+                .as_array()
+                .is_some_and(|t| t.contains(&json!("null")));
+            let mut wrongs = vec![json!({"a": 1}), json!(-1)];
+            if !nullable {
+                wrongs.push(Value::Null);
+            }
+            for wrong_value in wrongs {
+                let mut wrong = valid.clone();
+                wrong[member.as_str()] = wrong_value.clone();
+                assert!(
+                    update(json!([{key.clone(): wrong}])).is_err(),
+                    "{key}.{member}: {wrong_value}"
+                );
+            }
+        }
+    }
+    assert!(update(json!([{"rename_note": "Q"}])).is_err());
+    assert!(update(json!([{}])).is_err());
+}
+
+#[test]
+fn notetype_ops_read_their_arguments_and_load_time_rules() {
+    use meguri_testkit::scenario::{NotetypeEdit, NotetypeKind, StockKind};
+
+    let text = r##"
+id: notetypes/all-ops
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_notetype: {name: Pair, fields: [Front, Back], templates: [{name: Card 1, front: "{{Front}}"}]}
+  - add_stock_notetype: {kind: image_occlusion}
+  - add_stock_notetype: {kind: basic_and_reversed, name: Both}
+  - clone_notetype: {notetype: Pair}
+  - update_notetype:
+      notetype: Pair
+      edits:
+        - {rename_field: {from: Back, to: Answer}}
+        - {template: {name: Card 1, deck: null}}
+        - {template: {name: Card 1, deck: Default, browser_front: "{{Front}}"}}
+        - {template: {name: Card 1}}
+        - {move_field: {field: Answer, to: 0}}
+  - update_notetype: {notetype: Pair, edits: [], skip_checks: true}
+  - ensure_io_notetype: {}
+  - observe: [notetype_structure, {notetype_structure: null}, {notetype_structure: {notetypes: [Pair, Both]}}]
+"##;
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(matches!(
+        &parsed.steps[0],
+        Step::AddNotetype(spec) if spec.name == "Pair" && spec.kind == NotetypeKind::Standard
+            && spec.fields == ["Front", "Back"] && spec.css.is_empty()
+            && spec.templates.len() == 1 && spec.templates[0].back.is_empty()
+    ));
+    assert!(
+        matches!(&parsed.steps[1], Step::AddStockNotetype(a) if a.kind == StockKind::ImageOcclusion && a.name.is_none())
+    );
+    assert!(matches!(
+        &parsed.steps[2],
+        Step::AddStockNotetype(a) if a.kind == StockKind::BasicAndReversed && a.name.as_deref() == Some("Both")
+    ));
+    assert!(matches!(&parsed.steps[3], Step::CloneNotetype(a) if a.notetype == "Pair" && a.name.is_none()));
+    let Step::UpdateNotetype(update) = &parsed.steps[4] else {
+        panic!("{:?}", parsed.steps[4]);
+    };
+    assert_eq!(update.notetype, "Pair");
+    assert!(!update.skip_checks);
+    assert!(matches!(&update.edits[0], NotetypeEdit::RenameField(p) if p.from == "Back" && p.to == "Answer"));
+    // The deck override: null clears it, a name sets it, missing keeps it.
+    assert!(matches!(&update.edits[1], NotetypeEdit::Template(t) if t.deck == Some(None) && t.front.is_none()));
+    assert!(matches!(
+        &update.edits[2],
+        NotetypeEdit::Template(t) if t.deck == Some(Some("Default".to_owned())) && t.browser_front.as_deref() == Some("{{Front}}")
+    ));
+    assert!(matches!(&update.edits[3], NotetypeEdit::Template(t) if t.deck.is_none()));
+    assert!(matches!(&update.edits[4], NotetypeEdit::MoveField(m) if m.field == "Answer" && m.to == 0));
+    assert!(matches!(&parsed.steps[5], Step::UpdateNotetype(u) if u.skip_checks && u.edits.is_empty()));
+    assert!(matches!(&parsed.steps[6], Step::EnsureIoNotetype(_)));
+    assert!(parsed.needs().observations.contains("notetype_structure"));
+
+    for (bad, why) in [
+        // The schema's minLength and minItems, as for setup.notetypes.
+        (
+            "add_notetype: {name: \"\", fields: [F], templates: [{name: T}]}",
+            "note type name",
+        ),
+        (
+            "add_notetype: {name: Q, fields: [], templates: [{name: T}]}",
+            "field list",
+        ),
+        ("add_notetype: {name: Q, fields: [F], templates: []}", "template list"),
+        (
+            "add_notetype: {name: Q, kind: io, fields: [F], templates: [{name: T}]}",
+            "unknown variant",
+        ),
+        ("add_stock_notetype: {kind: basic, name: \"\"}", "note type name"),
+        ("add_stock_notetype: {kind: basic_reversed}", "unknown variant"),
+        ("clone_notetype: {notetype: \"\"}", "note type name"),
+        ("clone_notetype: {notetype: Pair, name: \"\"}", "note type name"),
+        ("update_notetype: {notetype: \"\", edits: []}", "note type name"),
+        (
+            "update_notetype: {notetype: Pair, edits: [{move_field: {field: F, to: 1.5}}]}",
+            "invalid type",
+        ),
+        ("ensure_io_notetype: {name: X}", "unknown key"),
+        ("observe: [\"notetype_structure(#c1)\"]", "does not take"),
+        ("observe: [{notetype_structure: {}}]", "notetypes"),
+        ("observe: [{notetype_structure: {notetypes: []}}]", "notetypes"),
+        ("observe: [{notetype_structure: {notetypes: [\"\"]}}]", "notetypes"),
+        ("observe: [{notetype_structure: {notetypes: Pair}}]", "notetypes"),
+        (
+            "observe: [{notetype_structure: {notetypes: [Pair], kind: x}}]",
+            "notetypes",
+        ),
+    ] {
+        let text =
+            format!("id: notetypes/bad\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{{bad}}}]\n");
+        let err = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+            .expect_err(bad)
+            .to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn update_notetype_needs_a_capability_per_kind_of_edit() {
+    let needs_of = |edits: &str| {
+        let text = format!(
+            "id: notetypes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps:\n  - update_notetype: {{notetype: Pair, edits: {edits}, skip_checks: true}}\n"
+        );
+        let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap();
+        parsed.needs().ops.into_iter().collect::<Vec<_>>()
+    };
+    // notetype-ops.md T10.1: the op, and one capability per kind of edit;
+    // skip_checks and an empty list add nothing.
+    assert_eq!(needs_of("[]"), ["update_notetype"]);
+    assert_eq!(
+        needs_of("[{css: a}, {css: b}, {rename: Q}]"),
+        ["update_notetype", "update_notetype.css", "update_notetype.rename"]
+    );
+    // A template edit that sets front or back needs template_text instead.
+    assert_eq!(
+        needs_of("[{template: {name: T, browser_front: x, deck: null}}]"),
+        ["update_notetype", "update_notetype.template"]
+    );
+    assert_eq!(
+        needs_of("[{template: {name: T, front: x}}]"),
+        ["update_notetype", "update_notetype.template_text"]
+    );
+    assert_eq!(
+        needs_of("[{template: {name: T, back: x}}, {template: {name: T}}]"),
+        [
+            "update_notetype",
+            "update_notetype.template",
+            "update_notetype.template_text"
+        ]
+    );
+    // Every other edit needs its own key.
+    let schema = scenario_schema();
+    for key in schema["$defs"]["notetype_edit"]["properties"]
+        .as_object()
+        .unwrap()
+        .keys()
+    {
+        if key == "template" {
+            continue;
+        }
+        let edit = serde_json::to_string(&json!([{key.clone(): valid_notetype_edit(key)}])).unwrap();
+        assert_eq!(
+            needs_of(&edit),
+            ["update_notetype".to_owned(), format!("update_notetype.{key}")],
+            "{key}"
+        );
+    }
+    // The same names in a live chain's and a Meguri actor's needs.
+    let text = "id: notetypes/live\nclock: {tz: UTC, start: \"2030-01-15T10:00:00\"}\nsteps:\n  - handoff: meguri\n  - update_notetype: {notetype: Pair, edits: [{add_field: F}]}\n";
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(text).unwrap()).unwrap();
+    assert!(
+        parsed
+            .needs_on(scenario::Side::Meguri)
+            .ops
+            .contains("update_notetype.add_field")
+    );
+}
+
+/// render-ops.md Q4.1: `render_status` takes card references or none, and
+/// reads the collection.
+#[test]
+fn render_status_requests_follow_the_schema() {
+    let parse = |request: &str| {
+        let text = format!(
+            "id: notetypes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    for good in [
+        "render_status",
+        "\"render_status(#c1, #c3)\"",
+        "{render_status: [\"#c2\"]}",
+        "\"render_status(#c1)\", {render_status: [\"#c2\"]}",
+    ] {
+        let parsed = parse(good).unwrap_or_else(|e| panic!("{good}: {e}"));
+        assert!(parsed.needs().observations.contains("render_status"), "{good}");
+        assert!(parsed.starts_from_new_collection(), "{good}");
+    }
+    for (bad, why) in [
+        ("\"render_status(#n1)\"", "does not take these arguments"),
+        ("{render_status: [\"#n1\"]}", "does not take these arguments"),
+        ("{render_status: {cards: [\"#c1\"]}}", "does not take these arguments"),
+        ("{render_status: []}", "at least one reference"),
+        ("{render_status: null}", "cannot take null"),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+}
+
+/// records.md N12: in notetypes/records/stock-render-handoff Meguri only makes
+/// its new collection and hands it over; the oracle adds and renders.
+#[test]
+fn stock_render_handoff_needs_only_the_new_collection_and_handoff_on_meguri() {
+    let path = conformance_dir().join("scenarios/notetypes/records/stock-render-handoff.yaml");
+    let text = fs::read_to_string(path).unwrap();
+    let parsed = scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap()).unwrap();
+    let meguri = parsed.needs_on(scenario::Side::Meguri);
+    assert_eq!(meguri.setup.iter().collect::<Vec<_>>(), [scenario::NEW_COLLECTION]);
+    assert_eq!(meguri.ops.iter().collect::<Vec<_>>(), ["handoff"]);
+    assert!(meguri.observations.is_empty(), "{}", meguri.summary());
+    let oracle = parsed.needs_on(scenario::Side::Oracle);
+    assert!(oracle.observations.contains("render_status"), "{}", oracle.summary());
 }

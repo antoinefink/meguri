@@ -1,0 +1,23 @@
+# Live (T1): a collection Meguri creates, with notes of the stock kinds, read
+# by the oracle (specs/notetypes/stock-kinds.md K2, K4, K9; plan U29 T1). The
+# first segment runs on Meguri (no setup: Meguri's own new collection); the
+# oracle then reports the stock structure it sees, the cards Meguri's stock
+# templates generated, and runs Check Database. The golden is the oracle
+# running both segments, so the chain passes only when Anki sees in Meguri's
+# collection what it sees in its own.
+id: notetypes/records/stock-handoff
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - add_note: {notetype: Basic, fields: [sun, sol]}
+  - add_note: {notetype: Basic (and reversed card), fields: [moon, luna]}
+  - add_note: {notetype: Basic (optional reversed card), fields: [star, stella, "y"]}
+  - add_note: {notetype: Basic (optional reversed card), fields: [sky, cielo]}
+  - add_note: {notetype: Basic (type in the answer), fields: [tree, arbor]}
+  - add_note: {notetype: Cloze, fields: ["{{c1::Paris}} is in {{c2::France}}", "capital"]}
+  - handoff: oracle
+  - observe: [notetype_structure]
+  - db_exec:
+      sql: >-
+        SELECT nt.name, c.ord FROM cards c JOIN notes n ON n.id = c.nid
+        JOIN notetypes nt ON nt.id = n.mid ORDER BY n.id, c.ord
+  - check_db: {}

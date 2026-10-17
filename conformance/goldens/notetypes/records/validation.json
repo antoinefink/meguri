@@ -1,0 +1,176 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_notetype": {
+          "error": "duplicate_front"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "DupCard"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "DupCardSpaced"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "no_front_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "no_front_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "no_front_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "SpecialFront"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "SectionFront"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "NegatedFront"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "FrontSideFront"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "EmptyKeyFront"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "unknown_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "unknown_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "unknown_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "ClozeSectionOk"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "EmptyKeyOk"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "template_parse_error"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "template_parse_error"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "template_parse_error"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "missing_cloze"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "missing_cloze"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "ClozeOk"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "ClozeChain"
+        }
+      },
+      {
+        "add_notetype": {
+          "name": "ClozeSecond"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "duplicate_front"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "no_front_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "unknown_field"
+        }
+      },
+      {
+        "add_notetype": {
+          "error": "template_parse_error"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["DupCard"],
+            ["DupCardSpaced"],
+            ["SpecialFront"],
+            ["SectionFront"],
+            ["NegatedFront"],
+            ["FrontSideFront"],
+            ["EmptyKeyFront"],
+            ["ClozeSectionOk"],
+            ["EmptyKeyOk"],
+            ["ClozeOk"],
+            ["ClozeChain"],
+            ["ClozeSecond"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "578103451ef8cd95e729d9a8e27a132f74bb730e4598811f9f17eea8df16dbc4",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notetypes/records/validation",
+  "scenario_sha256": "8a169c2ae2c7b0cc28e61c979ce25be18135046d026f52fe0a0d3e803fafd5b5",
+  "tz": "UTC"
+}

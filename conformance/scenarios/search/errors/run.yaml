@@ -1,0 +1,39 @@
+# specs/search/errors.md E3: searches that parse but cannot run fail with
+# search_failed (negated operator words, ids with non-ASCII digits); parse
+# errors come back from search as from canonical_search.
+# No setup (specs/conformance/storage-ops.md P1.3): the collection is the
+# schema-18 storage fixture with its notes and cards replaced by one note of
+# its first note type and that note's card, written with db_exec.
+id: search/errors/run
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: storage/schema-18.anki2}
+  - db_exec: {sql: "DELETE FROM cards"}
+  - db_exec: {sql: "DELETE FROM notes"}
+  - db_exec: {sql: "INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (1893456000001, 'mgRun1', (SELECT min(id) FROM notetypes), 1893456000, 0, '', 'otter' || char(31) || 'x', 'otter', 2256459996, 0, '')"}
+  - db_exec: {sql: "INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (1893456000101, 1893456000001, 1, 0, 1893456000, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, '{}')"}
+  - observe:
+      - canonical_search: ["-and", "-or", "a -and b", "nid:١", "cid:١,2", "did:٣"]
+      - search:
+          - {query: '-and'}
+          - {query: '-and', kind: notes}
+          - {query: '-OR'}
+          - {query: '-OR', kind: notes}
+          - {query: 'a -and b'}
+          - {query: 'a -and b', kind: notes}
+          - {query: '(-or)'}
+          - {query: '(-or)', kind: notes}
+          - {query: 'nid:١'}
+          - {query: 'nid:١', kind: notes}
+          - {query: 'cid:١,2'}
+          - {query: 'cid:١,2', kind: notes}
+          - {query: 'did:٣'}
+          - {query: 'did:٣', kind: notes}
+          - {query: '(a'}
+          - {query: '(a', kind: notes}
+          - {query: 'is:asleep'}
+          - {query: 'is:asleep', kind: notes}
+          - {query: 'prop:ivl>x'}
+          - {query: 'prop:ivl>x', kind: notes}
+          - {query: 'nid:1,a'}
+          - {query: 'nid:1,a', kind: notes}

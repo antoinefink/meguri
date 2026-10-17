@@ -1,0 +1,74 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894705200000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894708800000]
+          ]
+        }
+      },
+      {
+        "undo_status": {
+          "redo": null,
+          "undo": "update_note"
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1800000000000, "cat\u001fgato", -1, 1894708800, "1"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1894708800000, "cat\u001fgata", -1, 1894708800, "1"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1800000000000, "cat\u001fgato", -1, 1894708800, "1"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "e4c1e525d20b4b6615ce28dcba167e14dc7c9f333d0e811ba3adc9c81b7918d6",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "undo/col-mod",
+  "scenario_sha256": "1f50f048c0e0d81df193cbf55fbeb3ebe4f6b6a24a36aca17f190fafded9dbcb",
+  "tz": "UTC"
+}

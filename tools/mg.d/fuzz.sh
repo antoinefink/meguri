@@ -3,7 +3,7 @@
 # cargo-fuzz, whose toolchain is $MG_FUZZ_TOOLCHAIN).
 
 mg_job core-fuzz docker:fuzz mg_core_fuzz \
-  "cargo-fuzz targets in core/fuzz/fuzz_targets, seeded from the text corpus: [--seconds N] (per target, default 600) [target...]"
+  "cargo-fuzz targets in core/fuzz/fuzz_targets, seeded from the text corpus: [--seconds N] (per target, default 600) [--seed N] (libFuzzer's seed, logged; tools/mg nightly passes its own, R1937) [target...]"
 
 MG_CORE_FUZZ_SECONDS=600
 
@@ -50,12 +50,14 @@ print(len(seeds))
 PY
 }
 
-# tools/mg core-fuzz [--seconds N] [target...]: each target runs for N
-# seconds (libFuzzer -max_total_time) from the seeds and fails on any crash,
+# tools/mg core-fuzz [--seconds N] [--seed N] [target...]: each target runs for
+# N seconds (libFuzzer -max_total_time) from the seeds and fails on any crash,
 # panic, timeout or out-of-memory input it finds. Findings are saved under the
-# run directory; the target's log has the stack trace.
+# run directory; the target's log has the stack trace. --seed is libFuzzer's
+# -seed for every target: the run records it, and a failure's repro carries it
+# (R1937: `tools/mg nightly` logs one seed per night).
 mg_core_fuzz() {
-  local seconds="$MG_CORE_FUZZ_SECONDS" usage="usage: tools/mg core-fuzz [--seconds N] [target...]"
+  local seconds="$MG_CORE_FUZZ_SECONDS" seed="" usage="usage: tools/mg core-fuzz [--seconds N] [--seed N] [target...]"
   local targets=() known t
   known="$(mg__fuzz_targets)"
   while [ "$#" -gt 0 ]; do
@@ -68,6 +70,19 @@ mg_core_fuzz() {
           return 0
         fi
         seconds="$2"
+        shift 2
+        ;;
+      --seed)
+        # A positive whole number libFuzzer reads as an unsigned 32-bit seed.
+        case "${2:-}" in
+          '' | *[!0-9]* | 0) seed=invalid ;;
+          *) [ "${#2}" -le 10 ] && [ "$2" -le 4294967295 ] && seed="$2" || seed=invalid ;;
+        esac
+        if [ "$seed" = invalid ] || [ "$#" -lt 2 ]; then
+          mg_failure usage "--seed takes a whole number from 1 to 4294967295; $usage" "tools/mg core-fuzz"
+          mg_status error
+          return 0
+        fi
         shift 2
         ;;
       -*)
@@ -121,7 +136,12 @@ EOF
 
   # Release build with debug assertions, so overflow and other debug checks
   # count as findings.
-  local flags=(-O -a)
+  local flags=(-O -a) seed_args=() seed_repro=""
+  if [ -n "$seed" ]; then
+    seed_args=("-seed=$seed")
+    seed_repro=" --seed $seed"
+    mg_detail seed "$seed"
+  fi
   if ! (cd core && cargo "+$MG_FUZZ_TOOLCHAIN" fuzz build "${flags[@]}"); then
     mg_failure fuzz-build "building the fuzz targets failed; see log.txt"
     mg_count total "${#targets[@]}"
@@ -150,7 +170,7 @@ EOF
     (
       cd core &&
         cargo "+$MG_FUZZ_TOOLCHAIN" fuzz run "${flags[@]}" "$target" "$work" "$seeds" -- \
-          -max_total_time="$seconds" -artifact_prefix="$found/" -print_final_stats=1
+          -max_total_time="$seconds" ${seed_args[0]+"${seed_args[@]}"} -artifact_prefix="$found/" -print_final_stats=1
     ) >"$log" 2>&1
     rc=$?
     mg_artifact log "$log" "$target"
@@ -162,11 +182,11 @@ EOF
         mg_artifact finding "$t" "$target"
       done
       mg_failure "fuzz/$target" "$target found $(ls "$found" | wc -l | tr -d ' ') failing input(s) under ${found#"$MG_ROOT"/}; stack trace in ${log#"$MG_ROOT"/}" \
-        "tools/mg core-fuzz --seconds $seconds $target"
+        "tools/mg core-fuzz --seconds $seconds$seed_repro $target"
       failed=$((failed + 1))
     elif [ "$rc" -ne 0 ]; then
       mg_failure "fuzz/$target-exit-$rc" "cargo fuzz run $target exited with code $rc without a finding; see ${log#"$MG_ROOT"/}" \
-        "tools/mg core-fuzz --seconds $seconds $target"
+        "tools/mg core-fuzz --seconds $seconds$seed_repro $target"
       failed=$((failed + 1))
     else
       rmdir "$found"
@@ -179,10 +199,10 @@ EOF
   mg_count passed "$passed"
   mg_count failed "$failed"
   if [ "$failed" -eq 0 ]; then
-    mg_message "core-fuzz: ${#targets[@]} target(s) ran ${seconds}s each without a finding ($(jq -r 'map("\(.target) \(.runs) runs") | join(", ")' <<<"$stats"))"
+    mg_message "core-fuzz: ${#targets[@]} target(s) ran ${seconds}s each without a finding ($(jq -r 'map("\(.target) \(.runs) runs") | join(", ")' <<<"$stats"))${seed:+; seed $seed}"
     mg_status pass
   else
-    mg_message "core-fuzz: $failed of ${#targets[@]} target(s) failed"
+    mg_message "core-fuzz: $failed of ${#targets[@]} target(s) failed${seed:+; seed $seed}"
     mg_status fail
   fi
 }

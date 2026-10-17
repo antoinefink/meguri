@@ -1,0 +1,690 @@
+{
+  "clock": {
+    "mode": "step",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894856400,
+          "now": 1894856399,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 2,
+          "next_day_at": 1894942800,
+          "now": 1894856400,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 2,
+          "next_day_at": 1894942800,
+          "now": 1894856401,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 3,
+          "next_day_at": 1895032800,
+          "now": 1895032799,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 4,
+          "next_day_at": 1895119200,
+          "now": 1895032800,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 4,
+          "next_day_at": 1895119200,
+          "now": 1895032801,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 5,
+          "next_day_at": 1895209200,
+          "now": 1895209199,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1895295600,
+          "now": 1895209200,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 6,
+          "next_day_at": 1895295600,
+          "now": 1895209201,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 7,
+          "next_day_at": 1895385600,
+          "now": 1895385599,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 8,
+          "next_day_at": 1895472000,
+          "now": 1895385600,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 8,
+          "next_day_at": 1895472000,
+          "now": 1895385601,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 9,
+          "next_day_at": 1895562000,
+          "now": 1895561999,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 10,
+          "next_day_at": 1895648400,
+          "now": 1895562000,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 10,
+          "next_day_at": 1895648400,
+          "now": 1895562001,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 11,
+          "next_day_at": 1895738400,
+          "now": 1895738399,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 12,
+          "next_day_at": 1895824800,
+          "now": 1895738400,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 12,
+          "next_day_at": 1895824800,
+          "now": 1895738401,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 13,
+          "next_day_at": 1895914800,
+          "now": 1895914799,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 14,
+          "next_day_at": 1896001200,
+          "now": 1895914800,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 14,
+          "next_day_at": 1896001200,
+          "now": 1895914801,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 15,
+          "next_day_at": 1896091200,
+          "now": 1896091199,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 16,
+          "next_day_at": 1896177600,
+          "now": 1896091200,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 16,
+          "next_day_at": 1896177600,
+          "now": 1896091201,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 17,
+          "next_day_at": 1896267600,
+          "now": 1896267599,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 18,
+          "next_day_at": 1896354000,
+          "now": 1896267600,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 18,
+          "next_day_at": 1896354000,
+          "now": 1896267601,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 19,
+          "next_day_at": 1896444000,
+          "now": 1896443999,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 20,
+          "next_day_at": 1896530400,
+          "now": 1896444000,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 20,
+          "next_day_at": 1896530400,
+          "now": 1896444001,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 21,
+          "next_day_at": 1896620400,
+          "now": 1896620399,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 22,
+          "next_day_at": 1896706800,
+          "now": 1896620400,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 22,
+          "next_day_at": 1896706800,
+          "now": 1896620401,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 23,
+          "next_day_at": 1896796800,
+          "now": 1896796799,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 24,
+          "next_day_at": 1896883200,
+          "now": 1896796800,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 24,
+          "next_day_at": 1896883200,
+          "now": 1896796801,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 25,
+          "next_day_at": 1896973200,
+          "now": 1896973199,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 26,
+          "next_day_at": 1897059600,
+          "now": 1896973200,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 26,
+          "next_day_at": 1897059600,
+          "now": 1896973201,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 27,
+          "next_day_at": 1897149600,
+          "now": 1897149599,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 28,
+          "next_day_at": 1897236000,
+          "now": 1897149600,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 28,
+          "next_day_at": 1897236000,
+          "now": 1897149601,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 29,
+          "next_day_at": 1897326000,
+          "now": 1897325999,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 30,
+          "next_day_at": 1897412400,
+          "now": 1897326000,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 30,
+          "next_day_at": 1897412400,
+          "now": 1897326001,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 31,
+          "next_day_at": 1897502400,
+          "now": 1897502399,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 32,
+          "next_day_at": 1897588800,
+          "now": 1897502400,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 32,
+          "next_day_at": 1897588800,
+          "now": 1897502401,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 33,
+          "next_day_at": 1897678800,
+          "now": 1897678799,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 34,
+          "next_day_at": 1897765200,
+          "now": 1897678800,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 34,
+          "next_day_at": 1897765200,
+          "now": 1897678801,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 35,
+          "next_day_at": 1897855200,
+          "now": 1897855199,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 36,
+          "next_day_at": 1897941600,
+          "now": 1897855200,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 36,
+          "next_day_at": 1897941600,
+          "now": 1897855201,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 37,
+          "next_day_at": 1898031600,
+          "now": 1898031599,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 38,
+          "next_day_at": 1898118000,
+          "now": 1898031600,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 38,
+          "next_day_at": 1898118000,
+          "now": 1898031601,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 39,
+          "next_day_at": 1898208000,
+          "now": 1898207999,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 40,
+          "next_day_at": 1898294400,
+          "now": 1898208000,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 40,
+          "next_day_at": 1898294400,
+          "now": 1898208001,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 41,
+          "next_day_at": 1898384400,
+          "now": 1898384399,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 42,
+          "next_day_at": 1898470800,
+          "now": 1898384400,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 42,
+          "next_day_at": 1898470800,
+          "now": 1898384401,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 43,
+          "next_day_at": 1898560800,
+          "now": 1898560799,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 44,
+          "next_day_at": 1898647200,
+          "now": 1898560800,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 44,
+          "next_day_at": 1898647200,
+          "now": 1898560801,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 45,
+          "next_day_at": 1898737200,
+          "now": 1898737199,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 46,
+          "next_day_at": 1898823600,
+          "now": 1898737200,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 46,
+          "next_day_at": 1898823600,
+          "now": 1898737201,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {},
+      {
+        "timing": {
+          "days_elapsed": 47,
+          "next_day_at": 1898913600,
+          "now": 1898913599,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 48,
+          "next_day_at": 1899000000,
+          "now": 1898913600,
+          "utc_offset_secs": -18000
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 48,
+          "next_day_at": 1899000000,
+          "now": 1898913601,
+          "utc_offset_secs": -18000
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "42673b66d36a95ebe3e7e6b7a586aa876d2478a1710b602d8bdaad7b4db37e8f",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/day/matrix/america-new-york",
+  "scenario_sha256": "b2a33f02e54b949f06315ce8acfa2cf9d91d3010e74e19f2ee4dc98ebf4bcb36",
+  "tz": "America/New_York"
+}
