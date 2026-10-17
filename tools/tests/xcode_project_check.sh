@@ -458,7 +458,7 @@ if builds_phase; then
     # builds stay plain regular apps.
     case "$config" in
       Debug) check "mac-$config starts as a UI element (LSUIElement)" expect_info "$app" LSUIElement true ;;
-      *) check "mac-$config declares no LSUIElement" expect_info "$app" LSUIElement null ;;
+      *) check "mac-$config is a regular app (LSUIElement false)" expect_info "$app" LSUIElement false ;;
     esac
     # shellcheck disable=SC2046
     markers="$(hook_markers $(executables "$app/Contents/MacOS" Meguri))"

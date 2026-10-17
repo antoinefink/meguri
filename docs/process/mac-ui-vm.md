@@ -82,7 +82,7 @@ Two things still start the Mac app on this Mac: the app-hosted tests (Mac snapsh
 
 - The Debug app declares `LSUIElement`. LaunchServices registers a launch from the Info.plist before any app code runs, so a regular app is reported `Foreground`, with a Dock tile, from its first moment; a policy set at run time alone would come too late.
 - `MeguriApp.init` decides once, before the app finishes launching (`app/Meguri/TestHooks/BackgroundLaunch.swift`). A test host (`XCTestConfigurationFilePath` set) or a launch with `-MeguriBackgroundLaunch YES` stays accessory: no Dock tile, never active, and its windows still render off-screen and exist for `screencapture -l`. Any other launch, by hand or by XCUIApplication in the VM's Mac UI suites, takes the regular policy.
-- `tools/mg run` and `screenshot` pass the argument and fail if `lsappinfo` reports the app `Foreground` or in front. They launch only Debug on this Mac. Profile, Release and AppStore have neither the key nor the switch; Profile keeps Release's launch for performance runs (R1866).
+- `tools/mg run` and `screenshot` pass the argument and fail if `lsappinfo` reports the app `Foreground` or in front. They launch only Debug on this Mac. Profile, Release and AppStore have no switch and start as regular apps (`LSUIElement` false); Profile keeps Release's launch for performance runs (R1866).
 
 Verified on 2026-10-17 from the U8d worktree, with a watcher that polled `lsappinfo list` about three times a second for apps built there:
 

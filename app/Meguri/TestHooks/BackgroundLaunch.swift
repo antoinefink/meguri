@@ -17,8 +17,9 @@ extension TestHooks {
     /// launch by hand, or an XCUIApplication launch of the Mac UI suites
     /// (which pass no argument), takes the regular policy; the others stay
     /// accessory, which keeps windows (off-screen snapshots render, and
-    /// `screencapture -l` captures a hidden launch's window). Profile has
-    /// neither: it keeps Release's launch for performance runs (R1866).
+    /// `screencapture -l` captures a hidden launch's window). Profile starts
+    /// as a regular app and has no switch: it keeps Release's launch for
+    /// performance runs (R1866).
     enum BackgroundLaunch {
         static let argument = "-MeguriBackgroundLaunch"
         static let testHostVariable = "XCTestConfigurationFilePath"
