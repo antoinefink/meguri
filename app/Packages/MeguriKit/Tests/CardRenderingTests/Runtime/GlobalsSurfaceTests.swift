@@ -16,6 +16,12 @@ extension WebKitSuites.CardRuntimeSuites {
             return names
         }
 
+        /// C9.2 (R516, R517): other clients' globals, never defined.
+        static let neverDefined = [
+            "AnkiDroidJS", "showAnswer", "buttonAnswerEase1", "buttonAnswerEase2", "buttonAnswerEase3", "buttonAnswerEase4",
+            "study", "setInnerHTML", "_queueAction", "_emulateMobile", "_blockDefaultDragDropBehavior", "qt", "QWebChannel",
+        ]
+
         static let windowNames = "return JSON.stringify(Object.getOwnPropertyNames(window));"
 
         /// Five sides whose scripts use jQuery and the hooks and define no
@@ -111,13 +117,22 @@ extension WebKitSuites.CardRuntimeSuites {
         func otherClientsGlobalsAreNeverDefined(platform: CardRuntime.Platform) async throws {
             try await WebTestHarness.withPage(platform: platform, log: false) { harness, page async throws in
                 try await page.showPresentedQuestion("<p>x</p>")
-                let names = [
-                    "AnkiDroidJS", "showAnswer", "buttonAnswerEase1", "buttonAnswerEase2", "buttonAnswerEase3", "buttonAnswerEase4",
-                    "study", "setInnerHTML", "_queueAction", "_emulateMobile", "_blockDefaultDragDropBehavior", "qt", "QWebChannel",
-                ]
+                let names = Self.neverDefined
                 let types = try await page.json(
                     [String].self, "return JSON.stringify(names.map(function (n) { return typeof window[n]; }));", ["names": names])
                 #expect(types == Array(repeating: "undefined", count: names.count))
+            }
+        }
+
+        /// C9.2: Meguri's page scripts do not use these names even for their
+        /// own locals.
+        @Test func pageScriptsNeverNameOtherClientsGlobals() throws {
+            let runtime = String(decoding: try #require(CardRuntime.asset(at: "runtime.js")).data, as: UTF8.self)
+            for (script, source) in [("runtime.js", runtime), ("interaction.js", CardRuntime.interactionScript)] {
+                for name in Self.neverDefined {
+                    let pattern = try Regex("(^|[^A-Za-z0-9_$])" + NSRegularExpression.escapedPattern(for: name) + "([^A-Za-z0-9_$]|$)")
+                    #expect(!source.contains(pattern), "\(script) names \(name)")
+                }
             }
         }
 

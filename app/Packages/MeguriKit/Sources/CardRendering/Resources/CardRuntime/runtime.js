@@ -79,7 +79,7 @@
   const attributesOf = getter(Element.prototype, "attributes");
   const localNameOf = getter(Element.prototype, "localName");
   const scrollIntoView = Element.prototype.scrollIntoView;
-  const setInnerHTML = describeProperty(Element.prototype, "innerHTML").set;
+  const innerHTMLSetter = describeProperty(Element.prototype, "innerHTML").set;
   const cloneNode = Node.prototype.cloneNode;
   const replaceChild = Node.prototype.replaceChild;
   const appendChild = Node.prototype.appendChild;
@@ -646,7 +646,7 @@
     const loads = [];
     let budget = 0;
     const template = call(createElement, doc, "template");
-    call(setInnerHTML, template, StringCtor(html));
+    call(innerHTMLSetter, template, StringCtor(html));
     const content = call(templateContent, template);
 
     const images = call(fragmentQueryAll, content, "img[src]");
@@ -1018,7 +1018,7 @@
       releaseVideos(qa);
       // 5. Insert.
       held = [];
-      call(setInnerHTML, qa, StringCtor(update.html));
+      call(innerHTMLSetter, qa, StringCtor(update.html));
       // 6. Script walk.
       await walkScripts(qa);
       // 7. Update hooks.
