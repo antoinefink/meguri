@@ -426,7 +426,7 @@ hd3484a3787d3,python,tag,notetypes,not-applicable,Deprecated helpers of Anki's P
 he8993d36dc09,python,tag,notetypes,in-scope,Cloze rendering (U61),,deferred
 heb9c41d43b4a,python,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h0477377c20e5,rust,tag,notetypes,in-scope,A note type's field names in order,notetypes/records/stock-new-collection,done
-h147c5a8d09f4,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h147c5a8d09f4,rust,tag,notetypes,in-scope,"A card's field map holds the note fields and the special fields only, each with its value",render/special-fields/cards render/special-fields/new-note render/pipeline/specials,done
 h16006d8f10dd,rust,tag,notetypes,in-scope,Per-note-type config keys such as the last deck used (U27),,deferred
 h166c2f8e68af,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h1bd8d77a66bd,rust,tag,notetypes,in-scope,Renaming a note type is saved,notetypes/records/names,done
@@ -449,7 +449,7 @@ h5dab017523ab,rust,tag,notetypes,not-applicable,Errors of Anki's backend lookups
 h5f775d295960,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h5fa3b00a8f49,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
 h6288de9d6fb5,rust,tag,notetypes,in-scope,Empty Cards report (U131),,deferred
-h675f93f3e234,rust,tag,notetypes,in-scope,"Card rendering with special fields (U60, U62)",,deferred
+h675f93f3e234,rust,tag,notetypes,in-scope,"A card renders in full on both sides, FrontSide on the answer, and unknown filters do not stop it",render/pipeline/basic render/pipeline/read-only render/special-fields/new-note,done
 h68d09bf06f67,rust,tag,notetypes,in-scope,"Note type list with note counts for the Note Types screen (U37, U200)",,deferred
 h6ac9613310a8,rust,tag,notetypes,in-scope,"Note type structure changes: fields, templates, renames and deletion with their notes and cards (U34)",,deferred
 h6df8b626e405,rust,tag,notetypes,in-scope,Merging note types on package import (U121),,deferred
@@ -609,15 +609,15 @@ hff5fae693296,rust,tag,package,unclassified,,,open
 h095feffe1089,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 h2a067e44c2ac,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 h2dc9493eef0e,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
-h3ce253a641a9,python,tag,render,unclassified,,,open
+h3ce253a641a9,python,tag,render,not-applicable,Desktop playback of a path with folders outside the media folder; card audio entries play base names only,,done
 h550f70cfd497,python,tag,render,in-scope,FrontSide on the answer after an unknown filter on the question,render/filters/chains render/special-fields/new-note,done
 h7f11536c09e7,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 h7f342d9e2c48,python,tag,render,unclassified,,,open
-ha45c328241fe,python,tag,render,unclassified,,,open
-ha7fabd60b085,python,tag,render,unclassified,,,open
+ha45c328241fe,python,tag,render,not-applicable,Add-on hook that renames a played media file; Meguri has no add-on hooks,,done
+ha7fabd60b085,python,tag,render,not-applicable,Desktop playback of an absolute file path for add-ons; card audio entries play base names only,,done
 hb2bdcde89b3a,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
 hf42c35381599,python,tag,render,in-scope,"Play-marker pattern and hidden play buttons: display transform (U62), checked by Meguri's display tests; no oracle observation",,deferred
-hf55fc72cd71b,python,tag,render,unclassified,,,open
+hf55fc72cd71b,python,tag,render,in-scope,"Card audio plays an entry's base name from the media folder (render/av-tags A6): U67's player, checked by Meguri's tests; no oracle observation",,deferred
 h012e392276c1,rust,tag,render,unclassified,,,open
 h03d7c32a8571,rust,supplementary,render,not-applicable,Main-branch test of MathJax-aware cloze parsing; at 26.09.3 cloze parsing ignores MathJax (render/cloze C8),,done
 h04f16e0d77d0,rust,tag,render,not-applicable,Argument checking of a backend call Meguri does not expose,,done
@@ -688,7 +688,7 @@ hcd3a8431fb29,rust,tag,render,in-scope,Text before a replacement that an unknown
 hd3092e9a68c4,rust,tag,render,in-scope,Built-in filter applied in a preview render,render/filters/text,done
 hd575b853e8bf,rust,tag,render,in-scope,One-line text of field HTML (text area),text/strip/text-line,done
 hdff9a98c5773,rust,tag,render,in-scope,Ruby filters,render/filters/furigana,done
-he0d5169d5e60,rust,tag,render,in-scope,Card render of a cloze note through the render pipeline (U62),,deferred
+he0d5169d5e60,rust,tag,render,in-scope,"Card render of a cloze note: the question hides the active cloze, the answer shows it",render/pipeline/blank render/av-tags/cloze render/cloze/templates,done
 he406938dc7f7,rust,tag,render,in-scope,Nested clozes with number lists,render/cloze/multi-number render/cloze/nesting,done
 he505c5cfe56e,rust,tag,render,in-scope,Blank question in a preview render,render/template/blank,done
 he79db754bc77,rust,tag,render,unclassified,,,open

@@ -46,6 +46,7 @@ Consequences:
 
 - The answer of `{{FrontSide}}<hr id=answer>{{Back}}` starts with the question text exactly, play markers included, and without any style block (R469; the style block is added later, `display-transform.md` D9).
 - The answer's FrontSide part keeps the question's `[anki:play:q:N]` markers, and the answer AV list holds only the answer's own tags (R528, R961, `av-tags.md` A8).
+- Type-in markers (`filters.md` F7) stay in both texts exactly as the template engine wrote them, the answer's FrontSide part included; U64 turns them into the box and the comparison (`display-transform.md` D2 step 3), and the `render` observation compares them as text (R1908). The same holds for the K5 texts.
 - A blank card still has its question audio: a question template made of `Listen [sound:x.mp3]{{#Extra}}{{Extra}}{{/Extra}}` with Extra empty is blank, its question text is `Listen [anki:play:q:0]`, and `x.mp3` is its question entry.
 
 The display HTML for a host is built from these outputs by `display-transform.md` (R470, R526, R527, R531, R564).
@@ -109,6 +110,7 @@ For `_drawFlag` and `_drawMark` (R478, U66):
 - `render/pipeline/specials`: K3 through stored templates: nested decks, `Subdeck`, a card with `odid` set showing its original deck, flags, tags, the template name (R960).
 - `render/pipeline/blank`: K4 step 2 and K5 step 3: an empty front in review but not in browser mode, a blank question that keeps its text and audio, a missing cloze in both modes (R976).
 - `render/pipeline/browser`: K5 step 1 and 4: browser formats, the fallback per side, a white-space-only format, FrontSide empty, errors only in browser formats (R935).
+- `render/pipeline/type-in`: type-in markers through K4 and K5: standard, `nc` and cloze markers kept as text, FrontSide carrying the question's marker, audio around them still extracted (R1908).
 - `render/pipeline/read-only`: K7: the notes and cards tables before and after rendering MathJax, `{{tts}}`, `{{hint}}` and an unknown filter (R583).
 - `render/errors/stored`: K6 through stored templates: errors on each side, a blank question that hides an answer error in review but not in browser mode, a missing cloze that hides it in both.
 - `render/av-tags/*`: `av-tags.md` A12.

@@ -1,0 +1,26 @@
+# Type-in markers through the pipeline (specs/render/card-render-pipeline.md
+# K4, K5, filters.md F7, R1908): the markers stay in the question and answer
+# texts as the template engine wrote them, FrontSide carries the question's
+# marker into the answer, audio around them is still extracted in review, and
+# browser mode keeps them too.
+id: render/pipeline/type-in
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Typed Word
+      fields: [Front, Back]
+      templates:
+        - name: Type Back
+          front: "{{Front}}[sound:prompt.mp3]<br>{{type:Back}}"
+          back: "{{FrontSide}}<hr id=answer>{{Back}}{{type:nc:Back}}"
+          browser_front: "{{Front}} {{type:Back}}"
+    - name: Typed Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap Card, front: "{{cloze:Text}}{{type:cloze:Text}}", back: "{{cloze:Text}}<br>{{type:cloze:Text}}{{Extra}}"}
+  notes:
+    - {notetype: Typed Word, fields: ["der Hund", "dog [sound:dog.mp3]"]}
+    - {notetype: Typed Gap, fields: ["{{c1::Berlin}} is in {{c2::Germany}}", ""]}
+steps:
+  - observe: [render]

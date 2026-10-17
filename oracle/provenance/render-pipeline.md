@@ -62,3 +62,14 @@ extraction, parser and writer tests (scenarios linked), the pylib play-marker
 and strip tests (display transform, deferred: no oracle observation), and the
 unknown-card-id service test (not applicable). The test names behind them are
 in `oracle/harvest/links.csv` only.
+
+A completion pass (2026-10-17) linked the three rows deferred to U62 (the
+uncommitted cloze card render in `rslib/src/card_rendering/service.rs`, and
+the full-render and special-field-map tests in `rslib/src/notetype/render.rs`)
+to the pipeline, av-tags, cloze and special-fields scenarios, and classified
+the `pylib/tests/test_sound.py` path tests: the media-folder join is in scope
+(av-tags A6, U67's player, no oracle observation); the absolute-path,
+folder-path and `media_file_filter` hook cases are add-on playback paths that
+Meguri does not have (`pylib/anki/template.py` reduces card tags to base names
+before `SoundOrVideoTag.path` sees them). `render/pipeline/type-in` checks the
+K4 statement that type-in markers pass through as text.

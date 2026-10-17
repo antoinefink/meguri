@@ -1,0 +1,72 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "render": {
+          "#c1": {
+            "browser": {
+              "answer": "<hr id=answer>dog [sound:dog.mp3][[type:nc:Back]]",
+              "blank": null,
+              "question": "der Hund [[type:Back]]"
+            },
+            "review": {
+              "answer": "der Hund[anki:play:q:0]<br>[[type:Back]]<hr id=answer>dog [anki:play:a:0][[type:nc:Back]]",
+              "answer_av": [
+                {
+                  "sound": "dog.mp3"
+                }
+              ],
+              "blank": null,
+              "question": "der Hund[anki:play:q:0]<br>[[type:Back]]",
+              "question_av": [
+                {
+                  "sound": "prompt.mp3"
+                }
+              ]
+            }
+          },
+          "#c2": {
+            "browser": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span><br>[[type:cloze:Text]]",
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"1\">[...]</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span>[[type:cloze:Text]]"
+            },
+            "review": {
+              "answer": "<span class=\"cloze\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span><br>[[type:cloze:Text]]",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze\" data-cloze=\"Berlin\" data-ordinal=\"1\">[...]</span> is in <span class=\"cloze-inactive\" data-ordinal=\"2\">Germany</span>[[type:cloze:Text]]",
+              "question_av": []
+            }
+          },
+          "#c3": {
+            "browser": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-ordinal=\"2\">Germany</span><br>[[type:cloze:Text]]",
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-cloze=\"Germany\" data-ordinal=\"2\">[...]</span>[[type:cloze:Text]]"
+            },
+            "review": {
+              "answer": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-ordinal=\"2\">Germany</span><br>[[type:cloze:Text]]",
+              "answer_av": [],
+              "blank": null,
+              "question": "<span class=\"cloze-inactive\" data-ordinal=\"1\">Berlin</span> is in <span class=\"cloze\" data-cloze=\"Germany\" data-ordinal=\"2\">[...]</span>[[type:cloze:Text]]",
+              "question_av": []
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "a4e573bf7bfc89f364aa610cf779c5ff1cb18eaace49951f30ccca8bf4fd1404",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "render/pipeline/type-in",
+  "scenario_sha256": "7e56e50c2102a962f80312483879dfcdc74252a33f03aad0a0f280b56113e722",
+  "tz": "UTC"
+}
