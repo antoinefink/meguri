@@ -36,6 +36,7 @@ A package is a zip archive (PKWARE APPNOTE 6.3.x, zip64 included). Three formats
 
 - A stored entry that holds one protobuf message, read with the wire rules of `model/protobuf-records#P2`. Its one known field is field 1, the package version: a varint read as an `int32` (the low 32 bits, two's complement). Other fields are skipped by their wire type. When field 1 occurs more than once, the last value counts. A missing field 1, and an empty entry, give 0.
 - Field 1 with a wire type other than varint, a truncated or otherwise invalid message, or an entry larger than its limit (P8): `Corrupt` (Anki: a protobuf decode error).
+- A `meta` entry that cannot be read at all (a compression method other than 0 or 8, encryption, a CRC-32 mismatch): `Corrupt`. Anki 26.9.3 instead treats such an entry as absent and falls back to the legacy detection below, which in a latest-format package finds the placeholder (P7). Meguri never imports a placeholder in place of the collection. No scenario observes this case, and only a crafted file reaches it.
 - Version to format:
 
   | Version | Format |
@@ -137,10 +138,12 @@ Meguri's own limits (Anki 26.9.3 has none). Each is checked while reading; the r
 
 ## P9. Staging and temporary files
 
-- Staging root: `<collection directory>/meguri-staging/`. Each operation (inspect, a writer's snapshot, a caller's download) uses a fresh subdirectory named by 16 random lower-case hex digits. A candidate collection there is always named `collection.anki2`; SQLite and the open gate put their own files next to it (`-wal`, `-shm`, `-journal`, `collection.anki2.pre-upgrade-v<V>`, `storage/schema-upgrade#U2`). A writer's snapshot is `snapshot.anki2`.
-- The root sits inside the collection directory so that a staged file and the collection are on one file system and the swap is one rename (`engine/collection-replace#R5`).
-- A package being written is the temporary file `<destination file name>.<16 random hex digits>.meguri-tmp` in the destination's directory.
-- The operation removes its subdirectory and its temporary file when it ends, whatever the outcome. After a kill, U32's leftover sweep removes them at the next launch (R1493): this unit registers the whole `meguri-staging/` directory (removed before the collection opens) and files ending in `.meguri-tmp` in the collection and backups directories. Nothing ever reads a leftover as data.
+Both kinds of name come from U32's namespace for unpublished work (`storage/durability-and-files#F4`). This unit invents no name and adds no leftover pattern of its own.
+
+- **Staging directory.** Each operation (inspect, a writer's snapshot, a caller's download) gets its own fresh staging directory from U32's staging-directory primitive, made in the collection directory (U32 names it `.meguri-stage-` and a random suffix). A candidate collection there is always named `collection.anki2`; SQLite and the open gate put their own files next to it (`-wal`, `-shm`, `-journal`, `collection.anki2.pre-upgrade-v<V>`, `storage/schema-upgrade#U2`). A writer's snapshot is `snapshot.anki2`.
+- The staging directory sits in the collection directory so that a staged file and the collection are on one file system and the swap is one rename (`engine/collection-replace#R5`).
+- **Temporary package file.** A package being written is U32's atomic file in the destination's directory (U32 names it `.meguri-tmp-<purpose>-` and a random suffix). The caller names the purpose: `backup` for U126's backups, `export` for U109's server copy and U124's export.
+- The operation removes its staging directory and its temporary file when it ends, whatever the outcome; U32's handles do so when they are dropped. After a kill, U32's launch sweep removes both at the next launch (R1493): it sweeps exactly these names in the collection and backups directories. Nothing ever reads a leftover as data.
 
 ## P10. Disk preflight (R2015)
 
@@ -154,7 +157,7 @@ Before an operation writes anything, U32's free-space check runs on the file sys
 | inspect, after extraction, when the extracted file is below schema 18 | the extracted file's size again (the pre-upgrade copy) |
 
 - A restore adds its safety backup to the first check (U127).
-- A write that still fails for lack of space (another app filled the disk): `DiskFull`, with the same cleanup as any failure.
+- A write that still fails for lack of space (another app filled the disk): `DiskFull`, with the same cleanup as any failure. U32 reports that failure as its own `InsufficientSpace` (`storage/durability-and-files#F4`, `#F5`). Once this preflight has passed, the package error for it is `DiskFull`, so a message can tell "not enough space to start" from "the disk filled during the write".
 
 ## P11. The collection-only writer
 
@@ -163,7 +166,7 @@ Writes a whole collection as a collection-only package (R1619's latest format wi
 - **Sources.**
   - The live collection: a snapshot made with `VACUUM INTO` on the shared maintenance reader (`storage/open-and-connections#C6`, KTD3). It is one read transaction: it never closes the collection, never holds the writer (answers keep committing, R1635), runs while a sync holds the sync reader, and contains every commit made before its first read.
   - A standalone file the caller has verified (U109's server copy): a closed collection file with no `-wal` or `-journal` file next to it, else `SourceNotFinalised`. It is snapshotted the same way through a read-only connection with `unicase` registered (`storage/open-and-connections#C5`).
-- **The snapshot** is `snapshot.anki2` in a fresh staging subdirectory (P9).
+- **The snapshot** is `snapshot.anki2` in a fresh staging directory (P9).
   Required header bytes: 18 = 2; 19 = 2 (WAL).
   Close it without `-wal` or `-shm` files.
   This matches the package format even when `VACUUM INTO` produces rollback mode.
@@ -175,9 +178,9 @@ Writes a whole collection as a collection-only package (R1619's latest format wi
   4. `media`: the zstd encoding of zero bytes, with the same frame settings.
 
   Zip64 records are written when an entry or the archive needs them (4 GiB or more). Entry times are free.
-- **Output.** Written to the temporary file (P9), then read back with the reader of this spec: latest format, the four entries, `collection.anki21b` decoding to exactly the snapshot's bytes (length and SHA-256, both computed while compressing), an empty media map, a placeholder that starts with the SQLite header. Then the temporary file gets a full sync, the caller's finalisation runs, and the directory gets a full sync. A full sync is `F_FULLFSYNC` on Apple platforms (`storage/open-and-connections#C9.2`).
-- **Finalisation**, chosen by the caller: `ExclusiveCreate` (U126's backup names: the rename fails with `DestinationExists` when the name is taken) or `Replace` (U109's server copy name). The name and its rules are the caller's.
-- **Failure or cancel** at any point: nothing appears at the destination (with `Replace`, a file already there keeps its bytes), the temporary file and the staging subdirectory are removed, and a typed error is returned (P13). The collection itself never changes.
+- **Output.** Written to the temporary package file (P9) and published through U32's atomic-file sequence (`storage/durability-and-files#F4`): full sync of the file, the verification below, the rename, full sync of the directory. A full sync is `F_FULLFSYNC` on Apple platforms (`storage/open-and-connections#C9.2`). The verification reads the file back with the reader of this spec: latest format, the four entries, `collection.anki21b` decoding to exactly the snapshot's bytes (length and SHA-256, both computed while compressing), an empty media map, a placeholder that starts with the SQLite header. It closes every handle on the file before the rename.
+- **Finalisation**, chosen by the caller: `ExclusiveCreate` (U126's backup names; U32's exclusive publication, which fails with `DestinationExists` when the name is taken and leaves that file alone) or `Replace` (U109's server copy name; U32's ordinary publication). The name and its rules are the caller's.
+- **Failure or cancel** at any point: nothing appears at the destination (with `Replace`, a file already there keeps its bytes), the temporary file and the staging directory are removed, and a typed error is returned (P13). The collection itself never changes.
 
 ## P12. Inspect
 
@@ -185,13 +188,13 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 
 - Steps, in this order. The first failure ends the inspect with its error (P13):
   1. Read the archive (P2) and `meta` (P3), and find `collection.anki21b` (P4).
-  2. Preflight (P10), then extract `collection.anki21b` into a fresh staging subdirectory as `collection.anki2`, within the limits (P8).
+  2. Preflight (P10), then extract `collection.anki21b` into a fresh staging directory as `collection.anki2`, within the limits (P8).
   3. Run the open gate on it (`storage/open-and-connections#C2`): the probe, the refusals of R1479, R1482 and R2013, the upgrade of schemas 11 and 14 to 17 (R1478, on this staging copy only, after the second preflight of P10), and the expected-object check (R2016).
   4. Run `PRAGMA integrity_check` on it, with `unicase` registered: anything but the single row `ok` is `Corrupt`.
   5. Read the media map (P5).
-- Result: a staged-collection handle and the facts `ver_found` (the `col.ver` read before any upgrade), the counts of `notes`, `cards` and `revlog` rows, `scm` and `mod` as the staged file holds them after the gate, and the number of media entries. The handle owns the staging subdirectory: dropping it removes the subdirectory; handing it to the replace primitive (`engine/collection-replace#R2`) passes the file on.
+- Result: a staged-collection handle and the facts `ver_found` (the `col.ver` read before any upgrade), the counts of `notes`, `cards` and `revlog` rows, `scm` and `mod` as the staged file holds them after the gate, and the number of media entries. The handle owns the staging directory: dropping it removes the directory; handing it to the replace primitive (`engine/collection-replace#R2`) passes the file on.
 - Anki checks the same things in a different order (the media map after the collection). Only the error kind is observable, and every fault but an unknown version gives the same kind (P13), so the order cannot be told apart.
-- Any failure removes the staging subdirectory. Inspect writes nothing outside it: the live collection, its `-wal`, the backups and the media folder keep their bytes (R1638, data side). Inspect needs no exclusive phase and runs while the collection is open and used.
+- Any failure removes the staging directory. Inspect writes nothing outside it: the live collection, its `-wal`, the backups and the media folder keep their bytes (R1638, data side). Inspect needs no exclusive phase and runs while the collection is open and used.
 
 ## P13. Errors
 
@@ -225,7 +228,7 @@ Checks a collection package before a restore (U127), and later before a `.colpkg
 | Media map with `../x.jpg`, `con.jpg`, a 19-byte SHA-1 | `package/collection-package/refused-media-map` |
 | No `media` entry: Meguri imports, Anki refuses | `package/collection-package/missing-media-map` (deviation `package-latest-missing-media-map`) |
 | Inspect of the backup fixture: counts equal those of the `restore-backup` golden's `db_dump`, `ver_found` 18 | `core/crates/meguri-package/tests/collection_package.rs` |
-| Every refusal: no staging subdirectory left, live collection and directory listing unchanged (SHA-256) | same file |
+| Every refusal: no staging directory left, live collection and directory listing unchanged (SHA-256) | same file |
 | A stored 1 KiB `collection.anki21b` that decodes past 16 MiB: `Corrupt`, peak memory bounded, staging removed | same file |
 | Legacy package (no `meta`, or version 1 or 2): `UnsupportedFormat`, nothing written | same file |
 | Writer on a standalone file: inspects and restores to that file's rows | same file |

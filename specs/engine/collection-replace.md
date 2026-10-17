@@ -20,7 +20,7 @@ The package stamps are Anki's behavior (R7), so the primitive applies them itsel
 
 ## R2. Input
 
-- **The staged file**: `collection.anki2` in a subdirectory of `<collection directory>/meguri-staging/` (`package/container#P9`), handed over as an inspect handle or by the caller that wrote it there. It must be on the collection's file system (same device), else `CrossDevice`. No connection other than the primitive's own may be open on it.
+- **The staged file**: `collection.anki2` in a staging directory that U32's staging-directory primitive made in the collection directory (`package/container#P9`), handed over as an inspect handle or by the caller that wrote it there. It must be on the collection's file system (same device), else `CrossDevice`. No connection other than the primitive's own may be open on it.
 - **The reason**, and the caller's change if any: a function the primitive runs inside the R3 step 3 transaction on the staged file.
 - **The exclusive phase.** The caller holds the long-operation slot and runs the phase's `Working` step with its privileged handle (`engine/lifecycle#L5`, `#L7`); otherwise `NotExclusive`, and nothing is touched. With no collection open (a first download, a recovery from `Failed`), holding the slot is enough (L5).
 - The process keeps its advisory lock on the collection (R2014) through the whole replacement.
@@ -29,7 +29,7 @@ The package stamps are Anki's behavior (R7), so the primitive applies them itsel
 
 For every reason, in this order, before the live collection is touched:
 
-1. The open gate on the staged file, every phase (`storage/open-and-connections#C2`): the refusals of R1479, R1482 and R2013 (`StagingRefused{gate}`), the upgrade of schemas 11 and 14 to 17 applied to this file only (R1478; its pre-upgrade copy lands in the staging subdirectory and goes with it), and the expected-object check (R2016).
+1. The open gate on the staged file, every phase (`storage/open-and-connections#C2`): the refusals of R1479, R1482 and R2013 (`StagingRefused{gate}`), the upgrade of schemas 11 and 14 to 17 applied to this file only (R1478; its pre-upgrade copy lands in the staging directory and goes with it), and the expected-object check (R2016).
 2. `PRAGMA integrity_check` on the gate's writer, `unicase` registered: anything but the single row `ok` is `StagingCorrupt`.
 3. The change of R1, as one `IMMEDIATE` transaction on that writer: the package stamps first for `Restore` and `ColpkgImport`, then the caller's change. A failure is `CallerChangeFailed` and rolls back.
 
@@ -39,7 +39,7 @@ A file that inspect has already checked is checked again: what is swapped in mus
 
 1. On the staged file's writer: `PRAGMA wal_checkpoint(TRUNCATE)`, which must report "not busy", then `PRAGMA journal_mode=DELETE`, which must return `delete`.
 2. Close every connection to the staged file.
-3. No `collection.anki2-wal`, `-shm` or `-journal` may remain in the staging subdirectory; otherwise `StagingNotFinalised`.
+3. No `collection.anki2-wal`, `-shm` or `-journal` may remain in the staging directory; otherwise `StagingNotFinalised`.
 4. `PRAGMA integrity_check` again, on a read-only connection opened with `mode=ro&immutable=1` (so no file appears next to it) and `unicase` registered: `ok`, else `StagingCorrupt`.
 5. A full sync of the staged file (`F_FULLFSYNC` on Apple platforms, `storage/open-and-connections#C9.2`).
 
@@ -54,15 +54,17 @@ Runs as the swap of `engine/lifecycle#L8` (step 2), after L8 step 1 has set the 
 3. Remove the live `collection.anki2-shm` and `collection.anki2-wal`. They hold nothing (step 1); a stale `-wal` left next to the new file would be applied to it by SQLite.
 4. Rename the staged file over `collection.anki2`: one `rename`, on one file system.
 5. A full sync of the collection directory.
-6. Remove the staging subdirectory (best effort; the leftover sweep removes what a kill leaves, `package/container#P9`).
+6. Remove the staging directory (best effort; the leftover sweep removes what a kill leaves, `package/container#P9`).
 
 Then L8 steps 3 to 5 run as written there: the open through the gate, the undo history cleared, the generation plus one, `CollectionReplaced{generation}` published once, the day clock restarted, readers reopened lazily, and every `GenerationListener` told, so the derived store binds to the new file and rebuilds (R1489, `storage/derived-store`). With no collection open before, R5 has no live file to check, and step 4 creates `collection.anki2`.
+
+That reopen is not an external change (R1453). U32's open compares the file's `mod` and `scm` with the last values it saw (`storage/durability-and-files#F3`), and a replaced file always differs. At L8's reopen the replace itself is the change, and L8 step 4 already handles it. So that reopen reports no external change: no `ChangedExternally` undo clear and no whole-collection change set besides `CollectionReplaced`. The sidecar's last-seen `mod` and `scm` become the new file's, as at any open. At a relaunch after a kill, the ordinary open check applies.
 
 ## R6. Device-only state (R1548, R2010, R2019)
 
 ### R6.1 Where it lives
 
-One member `deviceState` of U32's sidecar `meguri-sidecar.json` in the collection directory (KTD12). It is never synced and never written into the collection (R1468), and there is no other copy. It is written through U32's atomic sidecar write (temporary file, full sync, rename). A missing or unreadable member reads as the defaults below; the pause flag then reads as off, which is safe because a replaced collection carries a new `scm` (R7), so its next sync is a one-way sync anyway.
+One member `deviceState` of U32's sidecar `meguri-sidecar.json` in the collection directory (KTD12). It is never synced and never written into the collection (R1468), and there is no other copy. It is written through U32's atomic sidecar write (temporary file, full sync, rename). U32's own members (`storage/durability-and-files#F3`) share the file, and each writer rewrites the whole file. So every sidecar write, U32's and this accessor's, reads, changes and saves the file under one in-process lock: neither can lose the other's members. A missing or unreadable member reads as the defaults below; the pause flag then reads as off, which is safe because a replaced collection carries a new `scm` (R7), so its next sync is a one-way sync anyway.
 
 | Field | Default | Written by | Read by |
 |---|---|---|---|
@@ -102,7 +104,7 @@ When the flag is on with no `pauseBeforeReplace` and the live `scm` differs from
 
 ## R8. Failures and kills
 
-- **Before the rename** (R3, R4 and R5 steps 1 to 3): the old collection file, its generation and every handle stay as they were; the staging subdirectory is removed (or swept at the next launch after a kill); the pause is as R6.2 and R6.3 say. R3 and R4 run before L8's `Replacing` step, so a refused file never closes the live collection.
+- **Before the rename** (R3, R4 and R5 steps 1 to 3): the old collection file, its generation and every handle stay as they were; the staging directory is removed (or swept at the next launch after a kill); the pause is as R6.2 and R6.3 say. R3 and R4 run before L8's `Replacing` step, so a refused file never closes the live collection.
 - **After the rename**: the new file stands. After a kill, the next launch opens it, and it passes the integrity check (R2003, the restore analogue of AE86).
 - A failed open after the swap: L8 sets `Failed{reason}`.
 - Fault points (U21's `faultpoint!`, cataloged by U250): `replace.after_check` (after R3), `replace.after_finalise` (after R4), `replace.after_pause_recorded` (R5 step 2), `replace.after_live_wal_removed` (R5 step 3), `replace.after_rename` (R5 step 4) and `replace.after_dir_sync` (R5 step 5).
@@ -128,6 +130,7 @@ The lifecycle's own errors (`CollectionUnavailable`, `StaleGeneration`, `engine/
 |---|---|
 | `Restore` of the backup fixture: the dump equals the oracle's restore of it | `package/collection-package/restore-backup` (Meguri's `import` adapter runs inspect, then this primitive with `Restore`) |
 | After a `Restore`: `CollectionReplaced(generation + 1)` once, older readers closed and their handles failing with `StaleGeneration`, the derived store rebuilding, `oneWayChoicePending` on with `pendingScm` equal to the new `scm` | `core/crates/meguri-engine/tests/replace.rs` |
+| After a `Restore` and after a `FullDownload`: no external change reported at the reopen (no `ChangedExternally`, no whole-collection change set besides `CollectionReplaced`), the sidecar's last-seen `mod` and `scm` are the new file's, and U32's sidecar members and `deviceState` are both still present | same file |
 | Kill at `replace.after_pause_recorded` (and every fault point before it): the relaunch opens the old file unchanged (SHA-256), the pause is back to its value before the replace; a cancel before the rename does the same at once | same file |
 | A pause from an earlier restore survives a second restore killed before its rename | same file |
 | Kill at `replace.after_rename` and `replace.after_dir_sync`: the relaunch opens the new file, `integrity_check` `ok`, the pause on | same file |

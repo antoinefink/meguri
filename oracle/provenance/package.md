@@ -25,6 +25,7 @@ oracle maintainer has added the ops and fixtures.
 | Spec section | Anki file | Read for |
 |---|---|---|
 | container P1, P3 | `proto/anki/import_export.proto` (package metadata message), `rslib/src/import_export/package/meta.rs` | the three versions, their entry names and schemas; legacy detection without `meta`; an unknown version (prost's enum getter maps any other number to the unknown variant) refused as too new; `meta` decoded with prost (malformed: protobuf decode error) |
+| container P3 (a `meta` entry that cannot be read) | `rslib/src/import_export/package/meta.rs` | read errors on `meta` (lookup or read) are dropped, so the package goes through the no-`meta` legacy detection; spec-side reading only, not probed (Meguri refuses it as corrupt) |
 | container P2 | `Cargo.toml` (workspace `zip` 4.1 with `deflate` and `time` only), `rslib/src/error/network.rs` (zip errors become sync errors) | methods Anki reads; what a non-zip file raises |
 | container P4 | `rslib/src/import_export/package/colpkg/import.rs` (collection copy), `colpkg/export.rs` (stored entry, streaming encoder at level 0, multithreading above 10 MB) | stored zstd collection entry; missing entry refused as corrupt |
 | container P5, P6 | `proto/anki/import_export.proto` (media entries message, fields 1, 2, 3, 255), `rslib/src/import_export/package/media.rs` | the media map, its zstd payload, the per-entry checks (20-byte SHA-1, safe and already-normalized name); a missing `media` entry replaced by the legacy `{}` text even for the latest format, which prost cannot decode |
