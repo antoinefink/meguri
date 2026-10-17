@@ -97,7 +97,7 @@ class Sandbox(unittest.TestCase):
         self.config["runs"].append(run_def(rid, **kw))
 
     def result(self, job, args=(), status="pass", sha=None, dirty=False, details=None, summary=None,
-               failures=None, dry_run=False, artifacts=()):
+               failures=None, dry_run=False, artifacts=(), user_steps=()):
         """Writes a result; `artifacts` are file names written into its run
         directory and listed as its artifacts."""
         self.seq += 1
@@ -117,7 +117,8 @@ class Sandbox(unittest.TestCase):
                        "duration_ms": 1000, "commit": {"sha": sha or self.git("rev-parse", "HEAD"), "dirty": dirty},
                        "message": "%s %s" % (job, status),
                        "summary": summary or {"total": 3, "passed": 3, "failed": 0, "skipped": 0},
-                       "failures": failures or [], "artifacts": listed, "user_steps": [], "details": details or {}}, f)
+                       "failures": failures or [], "artifacts": listed, "user_steps": list(user_steps),
+                       "details": details or {}}, f)
         return path
 
     def evaluate(self, man, milestone, doctor=None, extra=()):
@@ -277,13 +278,36 @@ class SuiteTests(Sandbox):
         self.assertEqual(rc, 1)
         self.assertIn("core/x.rs", self.failure(ev, "after-gate"))
 
-    def test_queued_result_fails(self):
+    def test_queued_result_awaits_its_user_step_and_never_passes(self):
+        # U19b: a run the locked host blocked (xcode-check's devices phase)
+        # is queued; the gate treats it as missing until the step clears.
         self.run_("ui", job="xcode-check")
-        self.result("xcode-check", status="warn", details={"queued": True})
-        man = manifest(M0={"suites": [{"id": "ui", "run": "ui"}]})
+        self.run_("unit", job="core-test")
+        self.result("core-test")
+        step = {"id": "host-session", "state": "missing", "required": True, "title": "Unlock the Mac",
+                "how": "unlock it", "doc": "docs/process/one-time-setup.md#host-session"}
+        self.result("xcode-check", status="warn", user_steps=[step], details={
+            "queued": True, "blocked": "host",
+            "queued_parts": [{"user_step": "host-session", "part": "the devices phase", "reason": "host (locked)"}]})
+        man = manifest(M0={"suites": [{"id": "unit", "run": "unit"}, {"id": "ui", "run": "ui"}]})
         rc, ev = self.evaluate(man, "M0")
-        self.assertEqual(rc, 1)
-        self.assertEqual(ev["suites"][0]["outcome"], "queued")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        ui = [x for x in ev["suites"] if x["id"] == "ui"][0]
+        self.assertEqual(ui["outcome"], "awaiting_user")
+        self.assertIn("host-session", ui["message"])
+        self.assertIn("the devices phase", ui["message"])
+        self.assertEqual([a["id"] for a in ev["awaiting"]], ["suite:ui"])
+        self.assertIn("host-session", ev["awaiting"][0]["message"])
+        self.assertIsNone(ev["record"])
+        # A queued run from before U19b names its step only in user_steps.
+        self.result("xcode-check", status="warn", details={"queued": True}, user_steps=[dict(step, id="mac-vm")])
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual((rc, ev["outcome"]), (3, "awaiting_user"), ev["failures"])
+        self.assertIn("mac-vm", ev["awaiting"][0]["message"])
+        # Beside a failing suite it is still not a pass.
+        self.result("core-test", status="fail")
+        rc, ev = self.evaluate(man, "M0")
+        self.assertEqual((rc, ev["outcome"]), (1, "fail"))
 
     def test_suite_awaiting_user_counts_as_awaiting(self):
         self.run_("release-gate", tier="T3", cls="static")

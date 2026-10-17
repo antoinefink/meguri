@@ -11,7 +11,19 @@
    - the `deferred-tip` and `needs-oracle-tree` runs in a full checkout of the tip at `build/mg/merge-tip`: the branch's own tools and `oracle/`, and the main checkout's similarity corpus (`MG_SIMILARITY_REFS`). That checkout is removed when the merge ends; their results are copied to `build/mg/merge/<run>/tip/`. One merge at a time: an existing `build/mg/merge-tip` is refused (`git worktree remove --force` it once no merge runs).
 4. Checks that the worktree is still clean at the tip and that no run changed the main checkout or the tip checkout.
 5. Evaluates one receipt for the tip with the branch's gate (`build/mg/merge/<run>/receipt.json`), keeping the worktree receipt's own blockers (`tree-changed`).
-6. Fast-forwards the integration branch to the tip only when that receipt passes, is complete and is for a clean tree, and only when neither branch moved meanwhile. Otherwise the integration branch does not move and the result says why.
+6. Fast-forwards the integration branch to the tip only when that receipt passes, is complete and is for a clean tree, and only when neither branch moved meanwhile. Otherwise the integration branch does not move and the result says why. A queued run does not block (docs/process/tiers.md, "Queued runs").
+7. After the fast-forward, appends each queued run of the receipt to `build/mg/catch-up/queue.jsonl` in the main checkout: its job, the arguments its result ran with, the tip commit, the user steps it waits for, the parts that did not run, the unit and the branch.
+
+## Catching up queued runs
+
+`tools/mg catch-up` runs in the main checkout, on a clean tree; the orchestrator's watcher runs it on its schedule. It reads the queue, runs `tools/mg doctor`, and leaves every entry whose user step doctor still lists as missing (`host-session` while the Mac is locked, `mac-input` while the Mac UI runner still has the macOS and Xcode builds that dropped input, `mac-vm` without the VM); while a step holds, it runs nothing for it and passes. Every other entry is run again once on the integration head, one run per job and arguments, and gets a line with its new state:
+
+- the run passes: `done`;
+- it fails: `failed`, and a `blocked-red` escalation for each unit whose merge queued it, with the run's directory. Units that do not depend on that unit go on: it is not a pause;
+- it is queued again (another state now holds it): it stays `queued`, waiting for the steps the new result names;
+- it errs: the entries stay as they were, and catch-up ends `error`.
+
+The queue is append-only; the lines of an entry's id, merged in order, are its state.
 
 ## Oracle runs
 
@@ -26,7 +38,7 @@ From a sparse role worktree, an oracle-image run uses the main checkout's `oracl
 
 | Kind | When |
 |---|---|
-| `blocked-red` | a unit has no green gate after six review rounds |
+| `blocked-red` | a unit has no green gate after six review rounds, or `tools/mg catch-up` found a run its merge queued failing |
 | `approval` | a change needs a similarity-allowlist, quarantine or approved-baseline entry |
 | `behavior-gap` | a spec or the oracle cannot settle a behavior |
 | `stop-condition` | a Goal Capsule stop condition |

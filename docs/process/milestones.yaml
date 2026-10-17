@@ -58,8 +58,9 @@
 #   why      what it proves (the plan's closing-gate text)
 # A suite may not run a job that requires its own milestone's gate (or a
 # later one's). A result counts only when its status is pass (or warn awaiting
-# Antoine); a queued, unavailable or other warn result fails, unless a
-# deferral that holds covers it and every cell it does not defer passes.
+# Antoine); a queued result counts as missing, awaiting the user step it names
+# (U19b); an unavailable or other warn result fails, unless a deferral that
+# holds covers it and every cell it does not defer passes.
 #
 # Plan excerpts (`plan` on suites, user steps and global conditions; checked
 # by --check and before every evaluation): each excerpt occurs exactly once in

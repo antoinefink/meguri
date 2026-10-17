@@ -1,11 +1,13 @@
 #!/usr/bin/env bats
 # Self-tests for the test tiers, merge gate, quarantine and scheduled runs
-# (U19: R1950-R1953, R1880, R1876, R1937, R1991; AE82 ordering). Each test
-# runs a sandbox repository with the gate's own families (gate, merge,
+# (U19: R1950-R1953, R1880, R1876, R1937, R1991; AE82 ordering) and the
+# catch-up of runs the machine's state queued (U19b). Each test runs a
+# sandbox repository with the gate's own families (gate, merge, catch-up,
 # quarantine, nightly, milestone, session, and host, oracle and conformance
 # for their helpers) and a tiers.yaml of made-up runs: `t-job <name>` reports
 # what $FX/<name>.* says (status, a status sequence, failure ids, counts,
-# details), a fake `similarity` scan flags a file on demand, the fake oracle
+# details, queued parts), a fake doctor lists $FX/doctor.missing as missing
+# user steps, a fake `similarity` scan flags a file on demand, the fake oracle
 # jobs pick their oracle/ with the real mg_oracle__tree and
 # mg_oracle__own_tree, and the fake oracle metadata check finds its oracle/
 # file with the real mg_conf__oracle_file.
@@ -28,7 +30,7 @@ setup_file() {
   cp "$REPO_ROOT/.gitignore" "$t/"
   for f in "$t"/tools/mg.d/*.sh; do
     case "$(basename "$f")" in
-      gate.sh | merge.sh | quarantine.sh | nightly.sh | milestone.sh | milestone-gate.sh | session.sh | host.sh | oracle.sh | conformance.sh) ;;
+      gate.sh | merge.sh | catch-up.sh | quarantine.sh | nightly.sh | milestone.sh | milestone-gate.sh | session.sh | host.sh | oracle.sh | conformance.sh) ;;
       *) rm -f "$f" ;;
     esac
   done
@@ -149,6 +151,8 @@ utilities:
   - {job: harvest-report, why: conformance.sh}
   - {job: harvest-inventory, why: conformance.sh}
   - {job: mac-ui, why: host.sh}
+  - {job: catch-up, why: re-runs queued runs}
+  - {job: doctor, why: reads host state}
 EOF
   cat >"$t/tools/mg.d/zz-fakes.sh" <<'EOF'
 mg_job t-job host t_job "fake run: t-job <name> [args...]; reports what \$FX/<name>.* says"
@@ -157,6 +161,17 @@ mg_job t-oracle host t_oracle "fake oracle-image run (conformance --live): t-ora
 mg_job t-oracle-own host t_oracle_own "fake oracle test: t-oracle-own <name> [args...]"
 mg_job t-scan-selftest host t_scan_selftest "fake similarity-selftest"
 mg_job t-oracle-files host t_oracle_files "fake oracle metadata check: t-oracle-files <name> <file under oracle/> <its conformance side>"
+mg_job doctor host t_doctor "fake doctor: lists \$FX/doctor.missing as missing user steps"
+t_doctor() {
+  local s
+  echo "doctor @$(basename "$MG_ROOT")" >>"$STUB_LOG"
+  if [ -f "$FX/doctor.missing" ]; then
+    while read -r s; do mg_user_step "$s" missing true "made-up $s" "made-up"; done <"$FX/doctor.missing"
+  fi
+  # Steps doctor cannot verify are listed too; they hold nothing back.
+  mg_user_step uitest-automation unverified true "made-up" "made-up"
+  mg_status "$(cat "$FX/doctor.status" 2>/dev/null || echo pass)"
+}
 # $FX/<name>@<checkout basename>.* overrides $FX/<name>.* in that checkout.
 t_job() {
   local name="$1" root f status=pass line
@@ -197,7 +212,18 @@ t_job() {
     mg_count unclassified "$(jq '[.[] | select(.classification == "unclassified")] | length' "$FX/$name.rows")"
   fi
   case "$status" in
-    queued) mg_detail queued true; status=warn ;;
+    queued)
+      # $FX/<name>.queued: "<user step> <part>" lines, recorded the way a job
+      # blocked by the machine's state records them (mg_queued_part).
+      if [ -f "$FX/$name.queued" ]; then
+        while read -r line; do
+          mg_user_step "${line%% *}" missing true "made-up ${line%% *}" "made-up"
+          mg_queued_part "${line%% *}" "${line#* }" "made-up: ${line%% *}"
+        done <"$FX/$name.queued"
+      fi
+      mg_detail queued true
+      status=warn
+      ;;
     fail | error)
       if [ -f "$FX/$name.failures" ]; then
         while IFS= read -r line; do mg_failure "$line" "made-up failure $line"; done <"$FX/$name.failures"
@@ -706,6 +732,9 @@ $TRAILERS"
   [ "$(outcome sim)" = pass ]
   [ "$(outcome static-tree)" = pass ]
   [ "$(rq .merge_ready)" = true ]
+  # Nothing was queued, so nothing waits for catch-up.
+  [ "$(rq '.queued | length')" = 0 ]
+  [ ! -e "$SB/build/mg/catch-up/queue.jsonl" ]
   validate "$result"
 }
 
@@ -839,6 +868,173 @@ $TRAILERS"
   [ "$status" -eq 2 ]
   [ "$(field '.failures[0].id')" = escalation-ledger ]
   [ "$(git -C "$SB" rev-parse trunk)" = "$BASE0" ]
+}
+
+# --- runs queued by the machine's state, and their catch-up (U19b) ----------
+
+QUEUE=build/mg/catch-up/queue.jsonl
+
+# queue_merge <dir> <unit>: a unit whose app/ change runs `ui`, merged from a
+# new worktree on trunk. Whatever $FX/ui.* says decides the run.
+queue_merge() {
+  worktree "$1" "unit/$2" implementer
+  commit_in "$1" "app/Meguri/$2.swift" "struct V {}" "Change a view
+
+$TRAILERS"
+  mg merge "unit/$2"
+}
+
+# queue_states: each queue entry's state, in the order the entries came.
+queue_states() {
+  jq -rs 'reduce .[] as $l ({order: [], by: {}}; (if .by[$l.id] then . else .order += [$l.id] end) | .by[$l.id] += $l)
+    | [.order[] as $id | .by[$id].state] | join(" ")' "$SB/$QUEUE"
+}
+
+# entry <n> <jq filter>: the filter on the n-th queue entry (from 0), its
+# lines merged in order.
+entry() {
+  jq -rs --argjson n "$1" "reduce .[] as \$l ({order: [], by: {}}; (if .by[\$l.id] then . else .order += [\$l.id] end) | .by[\$l.id] += \$l)
+    | .by[.order[\$n]] | $2" "$SB/$QUEUE"
+}
+
+@test "a run the locked host blocked is queued: its receipt names the user step and the parts, does not block, and the merge queues it for catch-up" {
+  local wt="$BATS_TEST_TMPDIR/U150" tip
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$wt" U150
+  [ "$status" -eq 0 ] || { jq . "$(receipt)"; return 1; }
+  tip="$(git -C "$wt" rev-parse HEAD)"
+  [ "$(git -C "$SB" rev-parse trunk)" = "$tip" ]
+  [ "$(field .status)" = warn ]
+  [ "$(outcome ui)" = queued ]
+  [ "$(rq '.blocking | length')" = 0 ]
+  [ "$(rq '.runs[] | select(.id == "ui") | "\(.user_steps | join(",")) \([.queued_parts[].part] | join(","))"')" = "host-session the devices phase" ]
+  [ "$(rq '.queued[] | "\(.id) \(.job) \(.args | join(" ")) \(.user_steps | join(",")) \([.parts[].part] | join(","))"')" = "ui t-job ui host-session the devices phase" ]
+  [[ "$(field .message)" == *"queued: ui (host-session)"* ]]
+
+  # One entry, with what catch-up needs to run it again and whom it concerns.
+  [ "$(jq -s length "$SB/$QUEUE")" = 1 ]
+  [ "$(entry 0 '"\(.state) \(.job) \(.args | join(" ")) \(.unit) \(.branch) \(.user_steps | join(",")) \([.parts[].part] | join(","))"')" = \
+    "queued t-job ui U150 unit/U150 host-session the devices phase" ]
+  [ "$(entry 0 .commit)" = "$tip" ]
+  [ "$(entry 0 .merge)" = "$(field .run_id)" ]
+  [ "$(jq -r .status "$(entry 0 .result)")" = warn ]
+  validate "$result"
+}
+
+@test "catch-up waits while doctor lists the user step, then runs each queued run once on the head for every unit that queued it" {
+  local a="$BATS_TEST_TMPDIR/U150" b="$BATS_TEST_TMPDIR/U241" head
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+  queue_merge "$b" U241
+  [ "$status" -eq 0 ]
+  [ "$(queue_states)" = "queued queued" ]
+  head="$(git -C "$SB" rev-parse trunk)"
+
+  # The Mac is still locked: nothing runs and the entries stay.
+  printf 'host-session\n' >"$FX/doctor.missing"
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(called '^doctor @main$')" = 1 ]
+  [ "$(called '^t-job ui')" = 0 ]
+  [ "$(queue_states)" = "queued queued" ]
+  [ "$(field '[.details.waiting[] | "\(.unit):\(.user_steps | join(","))"] | join(" ")')" = "U150:host-session U241:host-session" ]
+
+  # Unlocked: one run on the head for both entries, which are done.
+  rm "$FX/doctor.missing"
+  fx ui pass
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = pass ]
+  [ "$(called '^t-job ui @main$')" = 1 ]
+  [ "$(queue_states)" = "done done" ]
+  [ "$(field '.details.runs | length')" = 1 ]
+  [ "$(field '.details.runs[0] | "\(.job) \(.args | join(" ")) \(.status) \(.entries | length)"')" = "t-job ui pass 2" ]
+  [ "$(jq -r .commit.sha "$(field '.details.runs[0].result')")" = "$head" ]
+  [ "$(entry 1 .head)" = "$head" ]
+  [ "$(entry 1 .catch_up)" = "$(field .run_id)" ]
+
+  # Nothing is left to run.
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui @main$')" = 1 ]
+  validate "$result"
+}
+
+@test "a caught-up run that fails records a blocked-red escalation for the unit that queued it; other units still merge" {
+  local a="$BATS_TEST_TMPDIR/U150" b="$BATS_TEST_TMPDIR/U91" ledger="$SB/docs/process/provenance/escalations.jsonl"
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+  fx ui fail "ui-broke"
+  mg catch-up
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(queue_states)" = failed ]
+  [ "$(jq -s '[.[] | select(.kind == "blocked-red" and .unit == "U150" and .state == "open")] | length' "$ledger")" = 1 ]
+  [ "$(entry 0 .escalation)" = "$(jq -rs '.[0].id' "$ledger")" ]
+  [ "$(jq -rs '.[0].detail.run_dir' "$ledger")" = "$(dirname "$(field '.details.runs[0].result')")" ]
+  [ "$(jq -rs '.[0].detail.job' "$ledger")" = t-job ]
+  jq -e '.failures[] | select(.id == "rerun:t-job ui" and (.message | contains("U150")))' "$result"
+  # The escalation is committed on trunk.
+  [ "$(git -C "$SB" log -1 --format=%s trunk)" = "Record escalation $(jq -rs '.[0].id' "$ledger") (blocked-red, U150)" ]
+
+  # Not a pause: a unit that does not depend on it merges, and the failed
+  # entry does not run again.
+  worktree "$b" unit/U91 implementer
+  commit_in "$b" docs/b.md "b"
+  mg merge unit/U91
+  [ "$status" -eq 0 ]
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui')" = 0 ]
+}
+
+@test "a caught-up run queued again waits for its new user step; catch-up runs only in the main checkout, on a clean tree, after doctor" {
+  local a="$BATS_TEST_TMPDIR/U150"
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$a" U150
+  [ "$status" -eq 0 ]
+
+  # Unlocked, the run gets further and is blocked by macOS's dropped input.
+  printf 'mac-input test-hooks\n' >"$FX/ui.queued"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(queue_states)" = queued ]
+  [ "$(entry 0 '"\(.user_steps | join(",")) \([.parts[].part] | join(","))"')" = "mac-input test-hooks" ]
+  printf 'mac-input\n' >"$FX/doctor.missing"
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui')" = 0 ]
+
+  # Doctor that could not run decides nothing.
+  rm "$FX/doctor.missing"
+  printf 'error\n' >"$FX/doctor.status"
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = doctor ]
+  [ "$(called '^t-job ui')" = 0 ]
+  rm "$FX/doctor.status"
+
+  # A tracked change in the main checkout: the run would not test a commit.
+  printf 'changed\n' >>"$SB/docs/notes.md"
+  mg catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = main-dirty ]
+  git -C "$SB" checkout -q -- docs/notes.md
+  mg_in "$a" catch-up
+  [ "$status" -eq 2 ]
+  [ "$(field '.failures[0].id')" = not-main ]
+  [ "$(called '^t-job ui')" = 0 ]
+  [ "$(queue_states)" = queued ]
 }
 
 # wt_outcome <run id>: the run's outcome in the worktree gate a merge ran.

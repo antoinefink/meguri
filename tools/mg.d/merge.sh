@@ -13,7 +13,8 @@
 # build/mg/merge-tip, removed afterwards. It evaluates everything with the
 # branch's gate, the worktree receipt's own blockers included, checks the
 # worktree again, and fast-forwards only when that receipt passes and is
-# complete.
+# complete. A run the machine's state queued does not block (U19b); after the
+# fast-forward it goes to tools/mg catch-up's queue (catch-up.sh).
 #
 # docs/process/provenance/escalations.jsonl is append-only: an `add` line per
 # escalation and a `resolve` line when Antoine settles it; the last line of an
@@ -462,4 +463,10 @@ mg_merge() {
   fi
   mg_detail merged true
   mg_message "merge: $target fast-forwarded to $branch ($(git -C "$MG_ROOT" rev-parse --short "$tip")); ${summary#merge: }"
+  # Runs the machine's state queued wait for tools/mg catch-up (U19b).
+  if ! mg_catch_up_enqueue "$receipt" "$branch" "$unit" "$tip"; then
+    mg_failure catch-up-queue "merged, but the queued runs could not be added to $(mg_catch_up_queue_path); add them, or run them again by hand: $(jq -r '[.queued[].id] | join(", ")' "$receipt")" \
+      "jq -c '.queued[]' $receipt"
+    mg_status error
+  fi
 }

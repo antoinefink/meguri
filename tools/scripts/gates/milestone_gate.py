@@ -1180,10 +1180,27 @@ def cell_status(value):
     return value if isinstance(value, str) else (value.get("status") if isinstance(value, dict) else None)
 
 
+def queued_steps(r):
+    """The user steps a queued result waits for, and the parts it did not
+    run (U19b): details.queued_parts, or without parts its missing user
+    steps."""
+    details = r.get("details") if isinstance(r.get("details"), dict) else {}
+    parts = [p for p in details.get("queued_parts") or [] if isinstance(p, dict) and p.get("user_step")]
+    steps = []
+    for p in parts:
+        if p["user_step"] not in steps:
+            steps.append(p["user_step"])
+    if not steps:
+        steps = [u.get("id") for u in r.get("user_steps") or []
+                 if isinstance(u, dict) and u.get("state") == "missing" and u.get("id")]
+    return steps, [p.get("part") for p in parts if p.get("part")]
+
+
 def judge(r, rules, scope, waiver=None):
     """(outcome, message) of one result under the pass rules: pass,
-    awaiting_user, deferred, or a failing queued, unavailable, warn, dirty or
-    fail.
+    awaiting_user, deferred, or a failing unavailable, warn, dirty or fail.
+    A queued result (the machine's state kept it from testing, U19b) never
+    passes: it counts as missing, awaiting the user step it names.
 
     waiver: the deferrals that hold for the result's run (Waiver), or None.
     They waive their cells and nothing else. A warn of the unavailable lane
@@ -1202,7 +1219,9 @@ def judge(r, rules, scope, waiver=None):
     message = r.get("message") or ""
     covered = status == "warn" and waiver is not None and waiver.covers
     if status == "warn" and details.get("queued") is True:
-        return "queued", "queued, it did not run: %s" % message
+        steps, parts = queued_steps(r)
+        return "awaiting_user", "queued until user step %s clears (tools/mg catch-up runs it again); not tested: %s; %s" % (
+            ", ".join(steps) or "(none named)", ", ".join(parts) or "the run", message)
     if status == "warn" and details.get("outcome") == "awaiting_user":
         return "awaiting_user", message or "awaiting Antoine"
     if status == "warn" and not covered:

@@ -417,25 +417,30 @@ EOF
   [ ! -e "$SB/build/mg/host.lock" ]
 }
 
-@test "a locked session makes the job report blocked: host, not fail, and frees the lease" {
+# bats test_tags=gate
+@test "a locked session queues the job (user step host-session), neither fail nor error, and frees the lease" {
   add_fixture_jobs
   STUB_LOCKED=1 mg fx-lease a
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '.failures[0].id')" = blocked-host ]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
   [ "$(field .details.blocked)" = host ]
   [ "$(field .details.host_session)" = locked ]
-  [ "$(field '.user_steps[0].id')" = host-session ]
-  [[ "$(field .message)" == *"blocked: host (locked)"* ]]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part) \(.reason)"')" = "host-session fx-lease host (locked)" ]
+  [ "$(field '.user_steps[0] | "\(.id) \(.state)"')" = "host-session missing" ]
+  [[ "$(field .message)" == *"queued: host (locked)"*"(user step host-session)"* ]]
   [ ! -s "$FX_LOG" ]
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
-@test "a sleeping display blocks the job the same way" {
+@test "a sleeping display queues the job the same way" {
   add_fixture_jobs
   STUB_ASLEEP=1 mg fx-lease a
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 0 ]
+  [ "$(field .details.queued)" = true ]
   [ "$(field .details.host_session)" = display-asleep ]
+  [ "$(field '.details.queued_parts[0].user_step')" = host-session ]
   [ ! -s "$FX_LOG" ]
 }
 
@@ -499,6 +504,7 @@ done
 echo "phase $phase from $first" >>"$FX_LOG"
 if [ "$phase" = builds ]; then
   echo "ok 1 mac-Debug builds"
+  if [ -n "${FX_BUILDS_PASS:-}" ]; then echo "ok 2 mac-Profile builds" && exit 0; fi
   echo "not ok 2 mac-Profile builds"
   exit 1
 fi
@@ -518,13 +524,42 @@ EOF
   [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "3 2 1" ]
   [ "$(field '.failures[0].id')" = "mac-Profile builds" ]
 
-  # A Mac that cannot take the lease keeps the builds' results.
+  # A locked Mac keeps the builds' results: a failing build is a failure.
   : >"$FX_LOG"
   STUB_LOCKED=1 mg xcode-check
-  [ "$status" -eq 2 ]
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
   [ "$(cat "$FX_LOG")" = "phase builds from 0" ]
-  [ "$(field '[.failures[].id] | sort | join(" ")')" = "blocked-host mac-Profile builds" ]
+  [ "$(field '[.failures[].id] | sort | join(" ")')" = "mac-Profile builds" ]
   [ "$(field '.summary.total')" = 2 ]
+  [ "$(field .details.queued)" = false ]
+}
+
+# bats test_tags=gate
+@test "xcode-check whose builds pass while the Mac is locked is queued, naming host-session and the devices phase (U19b)" {
+  add_fixture_jobs
+  cat >>"$SB/tools/mg.d/zz-fixture.sh" <<'EOF'
+mg_lint_ui_first() { return 0; }
+mg__xcframework() { return 0; }
+EOF
+  cat >"$SB/tools/tests/xcode_project_check.sh" <<'EOF'
+#!/bin/bash
+echo "phase $*" >>"$FX_LOG"
+echo "ok 1 mac-Debug builds"
+echo "ok 2 mac-Profile builds"
+EOF
+  STUB_LOCKED=1 mg xcode-check
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(grep -c phase "$FX_LOG")" = 1 ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed)"')" = "2 2 0" ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '[.details.queued_parts[] | "\(.user_step): \(.part)"] | join("; ")')" = \
+    "host-session: the devices phase (hidden Mac launches, simulators, test runs)" ]
+  [ "$(field '.user_steps[] | select(.id == "host-session") | .state')" = missing ]
+  [[ "$(field .message)" == *"the builds passed"*"queued"*"host-session"* ]]
+  [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
 }
 
 # --- Mac UI gate ----------------------------------------------------------------
@@ -631,8 +666,9 @@ EOF
   local u
   u="$(lease_in_sandbox iphone)"
   STUB_LOCKED=1 mg record start --device "$u"
-  [ "$status" -eq 2 ]
-  [ "$(field '.failures[0].id')" = blocked-host ]
+  [ "$status" -eq 0 ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.details.queued_parts[0].user_step')" = host-session ]
   [ "$(field .details.blocked)" = host ]
   not_called "recordVideo"
   [ ! -e "$MEGURI_HOST_LEASE_DIR" ]
@@ -1062,18 +1098,23 @@ EOF
   [ "$(field '[.artifacts[] | select(.path | contains("/frames/"))] | length')" = 0 ]
 }
 
-@test "a Mac drive or mac-ui run whose synthesized input macOS dropped is blocked (error), not fail" {
+# bats test_tags=gate
+@test "a Mac drive or mac-ui run whose synthesized input macOS dropped is queued (mac-input), neither fail nor error" {
   add_drive_fakes
   export MEGURI_MAC_UI_INTERVAL_MINUTES=0
   # The unified log of testmanagerd when WindowServer refuses its input.
   stub log 'echo "log $*" >>"$STUB_LOG"; [ -z "${STUB_INPUT_DROPPED:-}" ] || echo "2026-10-14 08:21:19.336 E  testmanagerd[21945:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."'
   STUB_INPUT_DROPPED=1 FX_STEP2_STATUS=failed mg drive "$SB/tools/drive-scripts/examples/sample-transition.json" --platform mac
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '.failures[0].id')" = blocked-mac-input ]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  # The failed step is the dropped input's doing, not the app's.
+  [ "$(field '.failures | length')" = 0 ]
   [ "$(field .details.blocked)" = mac-input ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-input sample-transition.json" ]
+  [[ "$(field '.details.queued_parts[0].repro')" == "log show --start "* ]]
   [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
-  [[ "$(field .message)" == *"blocked: macOS dropped the input"* ]]
+  [[ "$(field .message)" == *"queued: macOS dropped the input"* ]]
   [ -f "$(dirname "$result")/manifest.json" ]
   called "^log show --style compact --start [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} --predicate process == \"testmanagerd\" AND eventMessage CONTAINS \"Recap playback\"\$"
 
@@ -1083,9 +1124,11 @@ EOF
   [ -z "$(field '.user_steps[] | select(.id == "mac-input") | .id')" ]
 
   STUB_INPUT_DROPPED=1 mg mac-ui --suite test-hooks
-  [ "$status" -eq 2 ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "blocked-mac-input suite/test-hooks" ]
-  [[ "$(field .message)" == *"mac-ui: blocked: macOS dropped the input"* ]]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '[.details.queued_parts[] | "\(.user_step) \(.part)"] | join(", ")')" = "mac-input test-hooks" ]
+  [[ "$(field .message)" == *"mac-ui: 0 passed; 1 of 1 suite(s) queued"*"test-hooks (user step mac-input)"* ]]
 }
 
 @test "mac-ui runs the agent driver's resize test as a suite of its own" {

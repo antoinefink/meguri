@@ -624,6 +624,7 @@ runs:
 utilities:
   - {job: gate, why: "runs the tiers"}
   - {job: merge, why: "runs the gate for a branch and fast-forwards the integration branch"}
+  - {job: catch-up, why: "re-runs the runs merges queued because of the machine's state, once tools/mg doctor reports their user step clear (U19b)"}
   - {job: nightly, why: "runs T2"}
   - {job: milestone, why: "runs a milestone's T0, T1, T3 and T4 runs, or all of them at release"}
   - {job: quarantine, why: "edits and checks tools/gate/quarantine.yaml"}

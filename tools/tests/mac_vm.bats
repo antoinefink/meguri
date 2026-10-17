@@ -150,10 +150,17 @@ sig=TERM
 pids="$(pgrep -f "${!#}")" || exit 1
 kill -s "$sig" $pids 2>/dev/null
 exit 0'
+  # FAKE_VM_INPUT_DROPPED=1: macOS dropped the input of every run;
+  # FAKE_VM_INPUT_DROPPED_RE: of the runs whose arguments (with the drive
+  # script) match the ERE, as xcodebuild noted them in $FAKE_VM/last-run.
   stub "$FAKE_VM_BIN/log" '
 s="$*"
 echo "vm-log ${s//"$FAKE_VM_FS"/}" >>"$STUB_LOG"
-[ "${FAKE_VM_INPUT_DROPPED:-}" != 1 ] || echo "2026-10-15 12:21:19.336 E  testmanagerd[2194:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."'
+if [ "${FAKE_VM_INPUT_DROPPED:-}" = 1 ] ||
+  { [ -n "${FAKE_VM_INPUT_DROPPED_RE:-}" ] && grep -Eq -- "$FAKE_VM_INPUT_DROPPED_RE" "$FAKE_VM/last-run" 2>/dev/null; }; then
+  echo "2026-10-15 12:21:19.336 E  testmanagerd[2194:bfc28d] [com.apple.dt.xctest:GesturePerformer] Timed out after waiting 5.0s for Recap playback, implicitly confirming."
+fi'
+  stub "$FAKE_VM_BIN/sw_vers" 'case "$1" in -productVersion) echo "${FAKE_VM_MACOS:-27.0.1}" ;; -buildVersion) echo "${FAKE_VM_MACOS_BUILD:-26A434}" ;; *) exit 1 ;; esac'
   stub "$FAKE_VM_BIN/stat" '
 if [ "$*" = "-f %Su /dev/console" ]; then
   n=$(($(cat "$FAKE_VM/console.calls" 2>/dev/null || echo 0) + 1))
@@ -166,6 +173,8 @@ exec '"$(command -v stat)"' "$@"'
 unmap() { local s="$*"; printf "%s" "${s//"$FAKE_VM_FS"/}"; }
 if [ "${1:-}" = -version ]; then printf "Xcode 27.0\nBuild version 27A266a\n"; exit 0; fi
 echo "vm-xcodebuild $(unmap "$@")" >>"$STUB_LOG"
+what="$(unmap "$@") ${TEST_RUNNER_MEGURI_DRIVE_SCRIPT:-}"
+printf "%s\n" "$what" >"$FAKE_VM/last-run"
 other="$(pgrep -f "xcodebuild[ ]test-without-building")" && echo "vm-overlap with $other" >>"$STUB_LOG"
 echo "$$" >>"$FAKE_VM/tests.pids"
 [ "${FAKE_VM_IGNORE_TERM:-}" != 1 ] || trap "" TERM
@@ -193,6 +202,8 @@ if [ -n "${FAKE_VM_SSH_DROP:-}" ] && [ ! -e "$FAKE_VM/ssh-dropped" ]; then
   exit 0
 fi
 rc="${FAKE_VM_XCODEBUILD_RC:-0}"
+# FAKE_VM_FAIL_RE: the runs whose arguments (with the drive script) match fail.
+[ -z "${FAKE_VM_FAIL_RE:-}" ] || ! printf "%s\n" "$what" | grep -Eq -- "$FAKE_VM_FAIL_RE" || rc=65
 [ "${FAKE_VM_NO_BUNDLE:-}" != 1 ] || { echo "** TEST SUCCEEDED **"; exit 0; }
 mkdir -p "$bundle"
 jq -n --argjson f "$([ "$rc" = 0 ] && echo 0 || echo 1)" \
@@ -482,19 +493,49 @@ vm_tests_running() { FAKE_VM="$FAKE_VM_DIR/$1" "$FAKE_VM_BIN/pgrep" -f 'xcodebui
   [ -f "$(vm_fs meguri-mac "$SB/tools/drive-scripts/examples/sample-routes.json")" ]
 }
 
-@test "the VM's log showing the Recap playback timeout makes the run blocked (mac-input), not failed" {
+# bats test_tags=gate
+@test "the VM's log showing the Recap playback timeout queues the run (mac-input) and records the VM's macOS and Xcode" {
   FAKE_VM_INPUT_DROPPED=1 mg mac-ui --suite test-hooks
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '[.failures[].id] | join(" ")')" = "blocked-mac-input suite/test-hooks" ]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-input test-hooks" ]
   [ "$(field .details.blocked)" = mac-input ]
   [ "$(field '.user_steps[] | select(.id == "mac-input") | .state')" = missing ]
   called "^vm-log show --style compact --start [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8} --predicate process == \"testmanagerd\" AND eventMessage CONTAINS \"Recap playback\"\$"
   not_called "^host-log"
+  # Where it was seen, for doctor: the runner and its macOS and Xcode builds,
+  # beside the leases that every checkout shares.
+  local seen
+  seen="$(dirname "$MEGURI_HOST_LEASE_DIR")/mac-input.json"
+  [ "$(jq -r '"\(.runner) \(.vm) \(.macos) \(.macos_build) \(.xcode) \(.job)"' "$seen")" = "vm meguri-mac 27.0.1 26A434 27.0 (27A266a) mac-ui" ]
+  [ "$(jq -r .run_id "$seen")" = "$(field .run_id)" ]
 
   # The same run with the input delivered passes.
   mg mac-ui --suite test-hooks
   [ "$(field .status)" = pass ]
+}
+
+# bats test_tags=gate
+@test "mac-ui with 4 suites passed and 3 blocked by mac-input is queued naming the 3; with 1 failed and 2 blocked it fails (U19b)" {
+  FAKE_VM_INPUT_DROPPED_RE='TestHooksTests|open-sample-sheet|sample-transition' mg mac-ui
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued) \(.errors)"')" = "7 4 0 3 0" ]
+  [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "test-hooks drive-open-sample-sheet drive-sample-transition" ]
+  [ "$(field '[.details.queued_parts[] | .user_step] | unique | join(" ")')" = mac-input ]
+  [ "$(field '.failures | length')" = 0 ]
+  [[ "$(field .message)" == *"4 passed"*"3 of 7 suite(s) queued"*"test-hooks, drive-open-sample-sheet, drive-sample-transition"* ]]
+
+  FAKE_VM_INPUT_DROPPED_RE='open-sample-sheet|sample-transition' FAKE_VM_FAIL_RE='TestHooksTests' mg mac-ui
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '.summary | "\(.total) \(.passed) \(.failed) \(.queued)"')" = "7 4 1 2" ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "suite/test-hooks" ]
+  [ "$(field '[.details.queued_parts[] | .part] | join(" ")')" = "drive-open-sample-sheet drive-sample-transition" ]
 }
 
 @test "a failing suite in the VM is a test failure, not an error" {
