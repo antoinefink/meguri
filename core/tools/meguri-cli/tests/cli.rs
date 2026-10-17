@@ -71,6 +71,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "cloze",
             "db_dump",
             "fsrs_next",
+            "image_occlusion",
             "notetype_structure",
             "schema_objects",
             "search",

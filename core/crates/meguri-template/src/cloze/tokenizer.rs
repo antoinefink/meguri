@@ -17,24 +17,27 @@ const CLOSE: &str = "}}";
 
 /// A top-level item, or a child of a cloze.
 #[derive(Debug)]
-pub(super) enum Item<'a> {
+pub(crate) enum Item<'a> {
     Text(&'a str),
     Cloze(Cloze<'a>),
 }
 
 /// A finished cloze (C4).
 #[derive(Debug)]
-pub(super) struct Cloze<'a> {
+pub(crate) struct Cloze<'a> {
     /// Ascending and distinct (C2); 0 is kept.
     pub numbers: Vec<u16>,
+    /// Byte span including the opening and closing markers.
+    pub source: std::ops::Range<usize>,
     pub items: Vec<Item<'a>>,
     pub hint: Option<&'a str>,
 }
 
 impl<'a> Cloze<'a> {
-    fn new(numbers: Vec<u16>) -> Cloze<'a> {
+    fn new(numbers: Vec<u16>, start: usize) -> Cloze<'a> {
         Cloze {
             numbers,
+            source: start..start,
             items: Vec::new(),
             hint: None,
         }
@@ -181,14 +184,17 @@ fn tokens(text: &str) -> Tokens<'_> {
 
 /// C4: the top-level items of `text`. Clozes still open at the end are
 /// discarded with everything inside them.
-pub(super) fn parse(text: &str) -> Vec<Item<'_>> {
+pub(crate) fn parse(text: &str) -> Vec<Item<'_>> {
     let mut top: Vec<Item<'_>> = Vec::new();
     let mut open: Vec<Cloze<'_>> = Vec::new();
-    for token in tokens(text) {
+    let mut tokens = tokens(text);
+    loop {
+        let start = tokens.at;
+        let Some(token) = tokens.next() else { break };
         match token {
             Token::Open(numbers) => {
                 if open.len() < MAX_OPEN {
-                    open.push(Cloze::new(numbers));
+                    open.push(Cloze::new(numbers, start));
                 }
             }
             Token::Text(run) => match open.last_mut() {
@@ -196,10 +202,13 @@ pub(super) fn parse(text: &str) -> Vec<Item<'_>> {
                 None => top.push(Item::Text(run)),
             },
             Token::Close => match open.pop() {
-                Some(finished) => match open.last_mut() {
-                    Some(parent) => parent.items.push(Item::Cloze(finished)),
-                    None => top.push(Item::Cloze(finished)),
-                },
+                Some(mut finished) => {
+                    finished.source.end = tokens.at;
+                    match open.last_mut() {
+                        Some(parent) => parent.items.push(Item::Cloze(finished)),
+                        None => top.push(Item::Cloze(finished)),
+                    }
+                }
                 None => top.push(Item::Text(CLOSE)),
             },
         }
@@ -208,7 +217,7 @@ pub(super) fn parse(text: &str) -> Vec<Item<'_>> {
 }
 
 /// Every cloze of the tree, a cloze before the clozes nested in it.
-pub(super) fn for_each_cloze<'t, 'a>(items: &'t [Item<'a>], f: &mut impl FnMut(&'t Cloze<'a>)) {
+pub(crate) fn for_each_cloze<'t, 'a>(items: &'t [Item<'a>], f: &mut impl FnMut(&'t Cloze<'a>)) {
     for item in items {
         if let Item::Cloze(cloze) = item {
             f(cloze);

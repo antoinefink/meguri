@@ -19,3 +19,12 @@ active:
   - "template/errors"
   - "template/names"
   - "template/tags"
+
+# U63 F16; cards awaits U27 cloze card generation.
+  - "image-occlusion/format/parse-basic"
+  - "image-occlusion/format/parse-escapes"
+  - "image-occlusion/format/parse-numbers"
+  - "image-occlusion/format/parse-malformed"
+  - "image-occlusion/format/parse-structure"
+  - "image-occlusion/format/written"
+  - "image-occlusion/format/fields"

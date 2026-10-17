@@ -1533,6 +1533,8 @@ pub enum ObservationKind {
     UndoStatus,
     /// cloze-ops.md Z1.
     Cloze,
+    /// image-occlusion-ops.md J1.
+    ImageOcclusion,
     /// float-determinism.md F5.
     FsrsNext,
     /// tag-ops.md G9.
@@ -1561,7 +1563,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 28] = [
+    pub const ALL: [ObservationKind; 29] = [
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1586,6 +1588,7 @@ impl ObservationKind {
         ObservationKind::Text,
         ObservationKind::UndoStatus,
         ObservationKind::Cloze,
+        ObservationKind::ImageOcclusion,
         ObservationKind::FsrsNext,
         ObservationKind::TagTree,
         ObservationKind::BrowserConfig,
@@ -1618,6 +1621,7 @@ impl ObservationKind {
             ObservationKind::Text => "text",
             ObservationKind::UndoStatus => "undo_status",
             ObservationKind::Cloze => "cloze",
+            ObservationKind::ImageOcclusion => "image_occlusion",
             ObservationKind::FsrsNext => "fsrs_next",
             ObservationKind::TagTree => "tag_tree",
             ObservationKind::BrowserConfig => "browser_config",
@@ -1652,6 +1656,7 @@ impl ObservationKind {
             | ObservationKind::Template
             | ObservationKind::Text
             | ObservationKind::Cloze
+            | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext => ArgShape::Mapping,
             ObservationKind::Queue
             | ObservationKind::DbDump
@@ -1688,6 +1693,7 @@ impl ObservationRequest {
         match self.kind {
             ObservationKind::Text
             | ObservationKind::Cloze
+            | ObservationKind::ImageOcclusion
             | ObservationKind::FsrsNext
             | ObservationKind::CanonicalSearch => true,
             ObservationKind::Template => match &self.args {

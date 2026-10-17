@@ -529,6 +529,9 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
             TextRequest::from_mapping(map)?;
         }
         // cloze-ops.md Z1.
+        ObservationKind::ImageOcclusion => {
+            super::ImageOcclusionRequest::from_mapping(map)?;
+        }
         ObservationKind::Cloze => {
             ClozeRequest::from_mapping(map)?;
         }
