@@ -1174,9 +1174,10 @@
   packages["anki/packages"] = { require: require, listPackages: listPackages, hasPackages: hasPackages };
   packages["anki/reviewer"] = { onUpdateHook: updateHooks, onShownHook: shownHooks };
   if (isMac) {
+    // The global is looked up at each call; its result is not passed on.
     packages["anki/bridgecommand"] = {
-      bridgeCommand: function bridgeCommand() {
-        return apply(win.bridgeCommand, win, arguments);
+      bridgeCommand: function bridgeCommand(command, callback) {
+        apply(win.bridgeCommand, win, [command, callback]);
       },
     };
   }

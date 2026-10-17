@@ -200,18 +200,72 @@ extension WebKitSuites.CardRuntimeSuites {
             }
         }
 
-        /// C10.7: `require("anki/bridgecommand").bridgeCommand` calls the
-        /// page's current `bridgeCommand`, looked up at call time.
+        // MARK: GS4b, C10.7
+
+        /// `require("anki/bridgecommand").bridgeCommand(command, callback)`
+        /// calls the page's current global `bridgeCommand`, looked up at call
+        /// time, with exactly those two arguments, and returns `undefined`.
         @Test func bridgecommandPackageCallsTheCurrentGlobal() async throws {
             try await WebTestHarness.withPage(platform: .mac) { harness, page async throws in
-                let result = try await page.run(
+                try await page.announce(card: 8, generation: 1)
+                try await page.showPresentedQuestion("<p>q</p>")
+                let returned = try await page.run(
                     """
-                    var bc = require("anki/bridgecommand").bridgeCommand;
-                    window.bridgeCommand = function (cmd) { log("replaced:" + cmd); return "r"; };
-                    return bc("hello");
+                    var r = require("anki/bridgecommand").bridgeCommand("ans", function () { log("cb:" + arguments.length + ":" + arguments[0]); });
+                    log("after");
+                    return typeof r;
                     """)
-                #expect(result as? String == "r")
-                #expect(try await page.log() == ["replaced:hello"])
+                #expect(returned as? String == "undefined")
+                #expect(try await page.log(count: 2) == ["after", "cb:1:null"])
+                try await Task.sleep(for: .milliseconds(100))
+                #expect(try await page.log().count == 2)
+                let command = try await harness.signal("command", from: page)
+                #expect(command["command"] as? String == "ans" && command.side == "question" && command.card == 8)
+
+                let replaced = try await page.run(
+                    """
+                    window.__log = [];
+                    var bc = require("anki/bridgecommand").bridgeCommand;
+                    window.bridgeCommand = function () {
+                      for (var i = 0; i < arguments.length; i++) log(arguments[i]);
+                      return 7;
+                    };
+                    return typeof bc("x");
+                    """)
+                #expect(replaced as? String == "undefined")
+                #expect(try await page.log() == ["x", "undefined"])
+                #expect(harness.signals("command").count == 1)
+            }
+        }
+
+        // MARK: GS4c, C10.7, C15
+
+        /// Names every object inherits are not packages.
+        @Test(arguments: CardRuntime.Platform.allCases)
+        func inheritedNamesAreNotPackages(platform: CardRuntime.Platform) async throws {
+            try await WebTestHarness.withPage(platform: platform, log: false) { harness, page async throws in
+                struct Result: Decodable {
+                    let required: [String]
+                    let has: [Bool]
+                }
+                let result = try await page.json(
+                    Result.self,
+                    """
+                    function attempt(name) {
+                      try { require(name); return "no error"; } catch (e) { return e.constructor.name + ": " + e.message; }
+                    }
+                    var p = require("anki/packages");
+                    return JSON.stringify({
+                      required: [attempt("toString"), attempt("constructor"), attempt("__proto__")],
+                      has: [p.hasPackages("constructor"), p.hasPackages("toString"), p.hasPackages("anki/reviewer", "__proto__"), p.hasPackages()],
+                    });
+                    """)
+                #expect(result.required == [
+                    #"Error: Cannot require "toString" at runtime."#,
+                    #"Error: Cannot require "constructor" at runtime."#,
+                    #"Error: Cannot require "__proto__" at runtime."#,
+                ])
+                #expect(result.has == [false, false, false, true])
             }
         }
 
