@@ -56,9 +56,15 @@ case "$name $*" in
   "open "*"-MeguriRoute stub/quits"*) ;;
   "open "*)
     while [ "$#" -gt 0 ] && [ "$1" != --args ]; do app="$1"; shift; done
+    [ "${STUB_APP_INFO:-}" != no-pid ] || exec sleep 30
     exec -a "$app/Contents/MacOS/Meguri" sleep 30
     ;;
-  "lsappinfo "*) printf '[ NULL ]  ASN:0x0-0x1a01a: \n !cgsConnection !signalled type="%s" flavor=[ NULL ]\n' "${STUB_APP_TYPE:-UIElement}" ;;
+  "lsappinfo "*)
+    [ "${STUB_APP_INFO:-}" != empty ] || exit 0
+    [ "${STUB_APP_INFO:-}" != malformed ] || { echo "ApplicationType unavailable"; exit 0; }
+    printf '[ NULL ]  ASN:0x0-0x1a01a:%s\n !cgsConnection !signalled type="%s" flavor=[ NULL ]\n' "${STUB_APP_FRONT:+ (in front)}" "${STUB_APP_TYPE:-UIElement}"
+    [ "${STUB_APP_INFO:-}" != failed ] || exit 1
+    ;;
 esac
 exit 0
 EOF
@@ -276,6 +282,47 @@ SWIFT
   STUB_BUILD_OK=1 STUB_APP_TYPE=Foreground check_project --no-ui --iphone PHONE-1 --ipad PAD-1
   tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
   tap_line '# the app showed on this Mac \(pid [0-9]+; a Dock tile or the active app\): lsappinfo:.*type="Foreground".*'
+}
+
+assert_project_presence_missing() {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line '# cannot verify the Mac app stays out of sight.*'
+}
+
+@test "failed lsappinfo fails xcode-check even when it prints a safe type" {
+  STUB_APP_INFO=failed assert_project_presence_missing
+}
+
+@test "empty lsappinfo fails xcode-check" {
+  STUB_APP_INFO=empty assert_project_presence_missing
+}
+
+@test "unrecognized lsappinfo type fails xcode-check" {
+  STUB_APP_TYPE=Unknown assert_project_presence_missing
+}
+
+@test "malformed lsappinfo output fails xcode-check" {
+  STUB_APP_INFO=malformed assert_project_presence_missing
+}
+
+@test "no known Mac app pid fails xcode-check" {
+  STUB_APP_INFO=no-pid assert_project_presence_missing
+  not_called '^lsappinfo '
+}
+
+@test "BackgroundOnly lsappinfo passes xcode-check" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 STUB_APP_TYPE=BackgroundOnly check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'ok [0-9]+ mac-Debug launched hidden stays up: Home'
+}
+
+@test "a UIElement in front fails xcode-check" {
+  mkdir -p "$SB/app/Meguri/TestHooks"
+  STUB_BUILD_OK=1 STUB_APP_FRONT=1 check_project --no-ui --iphone PHONE-1 --ipad PAD-1
+  tap_line 'not ok [0-9]+ mac-Debug launched hidden stays up: Home'
+  tap_line '# the app showed on this Mac .*'
 }
 
 @test "the builds phase builds and checks, but launches, leases and tests nothing, and prints no plan" {

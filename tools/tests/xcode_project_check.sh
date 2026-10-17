@@ -395,7 +395,7 @@ entitlements_are() { # entitlements_are <bundle> <expected keys...>
 # alert presented while the app is hidden closes the window, and the app quits
 # (app/AGENTS.md).
 stays_up() {
-  local app="$1" opener rc=0 pid shown
+  local app="$1" opener rc=0 pids pid shown type
   shift
   open -g -j -n -W "$app" --args -MeguriBackgroundLaunch YES -ApplePersistenceIgnoreState YES "$@" >/dev/null 2>&1 &
   opener=$!
@@ -405,12 +405,32 @@ stays_up() {
     echo "the app quit within 3 s of a hidden launch (open -W exit $?)"
     rc=1
   fi
-  for pid in $(running "$app/Contents/MacOS/Meguri"); do
-    shown="$(lsappinfo info -only ApplicationType "$pid" 2>/dev/null | tr -s '\n ' '  ')"
+  pids="$(running "$app/Contents/MacOS/Meguri")"
+  if [ -z "$pids" ]; then
+    echo "cannot verify the Mac app stays out of sight: no known pid"
+    rc=1
+  fi
+  for pid in $pids; do
+    if ! shown="$(lsappinfo info -only ApplicationType "$pid" 2>/dev/null)"; then
+      echo "cannot verify the Mac app stays out of sight (pid $pid): lsappinfo failed"
+      rc=1
+      continue
+    fi
+    type="$(printf '%s\n' "$shown" | sed -nE 's/.*type="([A-Za-z]+)".*/\1/p' | head -n 1)"
+    shown="$(printf '%s\n' "$shown" | tr -s '\n ' '  ')"
     case "$shown" in
       *'type="Foreground"'* | *"(in front)"*)
         echo "the app showed on this Mac (pid $pid; a Dock tile or the active app): lsappinfo:$shown"
         rc=1
+        ;;
+      *)
+        case "$type" in
+          UIElement | BackgroundOnly) ;;
+          *)
+            echo "cannot verify the Mac app stays out of sight (pid $pid; expected UIElement or BackgroundOnly): lsappinfo:${shown:-empty}"
+            rc=1
+            ;;
+        esac
         ;;
     esac
   done

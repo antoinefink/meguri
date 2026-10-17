@@ -434,11 +434,12 @@ mg_app_open_mac() {
 
 # mg_app_mac_presence <pid>: how LaunchServices shows the process (lsappinfo):
 # its application type (Foreground: a Dock tile; UIElement; BackgroundOnly),
-# followed by "front" while it is the active app. Empty when LaunchServices
-# does not know the process.
+# followed by "front" while it is the active app. A failed query returns 1;
+# empty or unknown types are not evidence of an out-of-sight launch.
 mg_app_mac_presence() {
   local info type
-  info="$(lsappinfo info -only ApplicationType "$1" 2>/dev/null)" || return 0
+  case "$1" in "" | 0 | *[!0-9]*) return 1 ;; esac
+  info="$(lsappinfo info -only ApplicationType "$1" 2>/dev/null)" || return 1
   type="$(printf '%s\n' "$info" | sed -nE 's/.*type="([A-Za-z]+)".*/\1/p' | head -n 1)"
   case "$info" in *"(in front)"*) type="${type:+$type }front" ;; esac
   printf '%s\n' "$type"
@@ -448,14 +449,17 @@ mg_app_mac_presence() {
 # never becomes the active app (U8d). Sets MG_APP_MAC_PRESENCE; otherwise
 # records the failure and returns 1.
 mg_app_mac_out_of_sight() {
-  MG_APP_MAC_PRESENCE="$(mg_app_mac_presence "$1")"
-  case " $MG_APP_MAC_PRESENCE " in
-    *" Foreground "* | *" front "*)
-      mg_failure in-sight "the Mac app (pid $1) showed on this Mac $2 (lsappinfo: $MG_APP_MAC_PRESENCE): a hidden tools/mg launch must get no Dock tile and never be the active app (U8d, -MeguriBackgroundLaunch YES)"
-      return 1
-      ;;
-  esac
-  return 0
+  if MG_APP_MAC_PRESENCE="$(mg_app_mac_presence "$1")"; then
+    case "$MG_APP_MAC_PRESENCE" in
+      UIElement | BackgroundOnly) return 0 ;;
+      Foreground | *" front" | front)
+        mg_failure in-sight "the Mac app (pid $1) showed on this Mac $2 (lsappinfo: $MG_APP_MAC_PRESENCE): a hidden tools/mg launch must get no Dock tile and never be the active app (U8d, -MeguriBackgroundLaunch YES)"
+        return 1
+        ;;
+    esac
+  fi
+  mg_failure no-evidence "cannot verify the Mac app stays out of sight (pid ${1:-unknown}) $2 (lsappinfo: ${MG_APP_MAC_PRESENCE:-empty or failed}): expected UIElement or BackgroundOnly for a known pid (U8d)"
+  return 1
 }
 
 # mg_app_quit_mac <app>: terminates the app (SIGKILL after 10 s).
@@ -611,7 +615,7 @@ mg_run__mac() {
       return 0
     fi
     if ! mg_app_mac_out_of_sight "$pid" "$i s after a hidden launch"; then
-      mg_message "run: the Mac app showed on this Mac after $i s (lsappinfo: $MG_APP_MAC_PRESENCE)"
+      mg_message "run: could not verify the Mac app stays out of sight after $i s (lsappinfo: ${MG_APP_MAC_PRESENCE:-empty or failed})"
       mg_status fail
       return 0
     fi

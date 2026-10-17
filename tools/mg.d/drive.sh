@@ -699,7 +699,7 @@ mg_screenshot__mac() {
   fi
   mg_sleep 1
   if ! mg_app_mac_out_of_sight "$pid" "before the capture"; then
-    mg_message "screenshot: the Mac app showed on this Mac (lsappinfo: $MG_APP_MAC_PRESENCE)"
+    mg_message "screenshot: could not verify the Mac app stays out of sight (lsappinfo: ${MG_APP_MAC_PRESENCE:-empty or failed})"
     mg_status fail
     return 0
   fi
