@@ -61,13 +61,13 @@ It never runs by itself: the app runs it after its sheet (U51). Opening a collec
 
 ## E2. The cards it computes
 
-A card is computed when all of these hold:
+The computation is U46's bulk recompute (`sched/memory-state#M4`, caller `#M7.4`); this unit chooses the card set and the source (E4). The set is the cards whose home deck (`sched/presets#V1`: `odid` when it is not 0, else `did`) exists and is a normal deck. Of the set, M4.1 processes ("computes") a card when all of these hold:
 
 - it is not new (`type` is not 0); suspended and buried cards are computed;
 - it has at least one review-log row, of any type;
-- its home deck exists and is a normal deck. A card in a filtered deck is computed through its home deck (`odid`).
+- its home preset is not unsupported (U1, U2; M4.3).
 
-Every other card keeps its bytes: new cards, cards with no review-log row, cards whose home deck is missing or is itself a filtered deck.
+Every other card keeps its bytes: new cards, cards with no review-log row, cards of unsupported presets, and cards whose home deck is missing or is itself a filtered deck (they are not in the set).
 
 The card's home preset gives the inputs:
 
@@ -79,9 +79,11 @@ The card's home preset gives the inputs:
 
 ## E3. What it writes on a computed card
 
-- U46 computes the card's memory state from its review log with these inputs (`sched/memory-state`). It gives a memory state (stability, difficulty) or none (for example when the only rows are Set Due Date rows).
+`sched/memory-state#M4.1` and `#M4.2` are the authority; in short:
+
+- U46 computes the card's memory state from its review log with these inputs (its memory item, `sched/fsrs-items`). It gives a memory state (stability, difficulty) or none (for example when the only rows are Set Due Date rows). The card's own `factor` and `ivl` are not used when there is no item.
 - The card data then holds: `s` and `d` from the memory state, or neither when there is none; `dr` = the desired retention in force; `decay` = the decay of the parameter list. `pos`, `lrt`, `cd` and unknown keys stay. The text is written per `model/card-data-json` C4.
-- A card whose data text does not change keeps its row: `mod` and `usn` stay (R687). A card whose data changes gets `mod` = now (seconds) and `usn` -1.
+- A card whose `s`, `d`, `dr` and `decay` compare equal to its stored ones, as M4.2 compares them, keeps its row: `data`, `mod` and `usn` stay (R687). A changed card gets its data rebuilt, `mod` = now (seconds) and the local `usn` (-1).
 - Nothing else on the card changes: `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `odid`, `did`, `flags`, `ord`, `nid`.
 
 Examples from `sched/compat/enable-fsrs` (FSRS turned on at 2030-03-01 10:01 UTC, day 59; the golden is the authority):
@@ -116,17 +118,17 @@ In Anki the user turns FSRS on in the deck options screen and saves. The oracle'
 - Anki saves the presets the screen sends: the screen fills an empty FSRS-6 list from the older lists when it loads, and the save clears the older lists of a preset sent with an empty FSRS-6 list. Meguri writes no preset.
 - Anki gives a deck whose preset is missing the preset of the deck the screen was opened for, and computes its cards with that preset. Meguri leaves the deck as it is and computes with the built-in defaults (E2).
 - Anki fails the whole save when the parameter list of a preset it sends or computes with cannot be built. Meguri skips those presets (U4).
-- Anki writes every computed card, changed or not. Meguri writes only changed cards (R687).
+- Anki writes every computed card, changed or not. Meguri writes only changed cards (R687, `sched/memory-state#M4.2`). No golden of this unit has a computed card whose values stay the same, so it needs no deviation entry; a scenario that has one joins the deviations `memory-recompute-unchanged-mod` and `memory-recompute-unchanged-usn`.
 - Anki lets the user keep FSRS off. Meguri turns it on, and that change syncs to the other clients (R702).
 
-## U1. Presets Meguri cannot schedule: lists the crate refuses (R704)
+## U1. Presets Meguri cannot schedule (R704)
 
-A preset is unsupported when its parameter list (`sched/presets#V6`: the first non-empty one of `fsrs_params_6`, `fsrs_params_5`, `fsrs_params_4`) is refused by the crate's model constructor at 6.6.2 (U45 turns the refusal into `UnsupportedParams`). The crate refuses a list when:
+A preset is unsupported when U45's check refuses it: U45 returns `UnsupportedParams` for its cards (`sched/fsrs-transitions#T13`). That is the one check U45, U46, U47 and this unit share; this unit never decides with a rule of its own, and T13 is the authority where this section and T13 differ. The check refuses a preset for either of two reasons:
 
-- its length is not 0, 17, 19 or 21; or
-- after the crate fills a short list to 21 values, any value is not finite.
+- its parameter list (`sched/presets#V6`: the first non-empty one of `fsrs_params_6`, `fsrs_params_5`, `fsrs_params_4`) is one that the crate's model constructor at 6.6.2 refuses (`sched/fsrs-transitions#T1`): a length other than 0, 17, 19 or 21, or a value that is not finite once the crate has filled a short list to 21 values;
+- it holds an FSRS list later than `fsrs_params_6` (U2).
 
-The list is used as stored: Meguri never fills, clips or converts it to decide, it asks the crate. Out-of-range but finite values (a negative value, 100.0) are accepted by the constructor.
+The list is used as stored: Meguri never fills, clips or converts it to decide. Out-of-range but finite values (a negative value, 100.0) are accepted by the constructor.
 
 | List used | Supported |
 |---|---|
@@ -141,27 +143,31 @@ The list is used as stored: Meguri never fills, clips or converts it to decide, 
 
 ## U2. Presets with a later FSRS list (R704)
 
-A preset is also unsupported when its `other` bytes (`model/protobuf-records#P7`: the schema-11 members beyond the known keys, `model/schema11-json#S3`) hold a JSON object with a member that:
+A later Anki release may store a list after `fsrs_params_6` in either of two places, and both make the preset unsupported (`sched/fsrs-transitions#T13` item 3):
 
-- is named `fsrsParams` followed by a decimal integer of at least 7 with no leading zero; and
-- has a JSON array with at least one element as its value.
+- **The deck config blob.** An unknown field (`model/protobuf-records#P4`) with number 7 or 8, the numbers Anki 26.09.3 reserves for later parameter lists (`model/protobuf-records#P6.6`), unless it is a length-delimited field of length 0. Meguri keeps such a field as read (`sched/presets#V8`), so it survives in the blob.
+- **`other`.** The preset's `other` bytes (`model/protobuf-records#P7`: the schema-11 members beyond the known keys, `model/schema11-json#S3`) hold a JSON object with a top-level member whose name is `fsrsParams` followed by a decimal number of at least 7 (`fsrsParams7`, `fsrsParams8`, ...) and whose value is a JSON array with at least one element. A later Anki that sends its list through sync's schema-11 JSON lands there: Anki 26.09.3 and Meguri keep unknown members in `other` (`model/schema11-json#S10`).
 
-A later Anki that adds an FSRS list sends it through sync's schema-11 JSON, and Anki 26.09.3 and Meguri keep it in `other` (`model/schema11-json#S10`). Scheduling that preset with its FSRS-6 list would use parameters the user's newer client no longer uses.
+Scheduling that preset with its FSRS-6 list would use parameters the user's newer client no longer uses.
 
-| `other` | Unsupported |
+| Preset holds (next to a valid `fsrs_params_6`) | Unsupported |
 |---|---|
-| `{"fsrsParams7":[0.2,1.3]}` | yes |
-| `{"x":1,"fsrsParams12":[1]}` | yes |
-| `{"fsrsParams7":[]}` | no |
-| `{"fsrsParams7":"0.2,1.3"}` | no |
-| `{"fsrsParams07":[1]}`, `{"fsrsparams7":[1]}`, `{"fsrsParams6":[1]}` | no |
-| empty, not valid JSON, or JSON that is not an object | no |
+| unknown field 7: a packed float list `[4.0]` | yes |
+| unknown field 8 as a varint | yes |
+| unknown field 7 as a length-delimited field of length 0 | no |
+| unknown field 39 (reserved by Anki, not for parameter lists) or any other unknown number | no |
+| `other` = `{"fsrsParams7":[0.2,1.3]}` | yes |
+| `other` = `{"x":1,"fsrsParams12":[1]}` | yes |
+| `other` = `{"fsrsParams7":[]}` | no |
+| `other` = `{"fsrsParams7":"0.2,1.3"}` | no |
+| `other` = `{"fsrsparams7":[1]}` or `{"fsrsParams6":[1]}` | no |
+| `other` empty, not valid JSON, or JSON that is not an object | no |
 
-When an object repeats a member name, the last occurrence counts (`storage/config-table#C3`'s rule for JSON objects).
+Anki 26.09.3 reads neither place: it ignores such a field or member and schedules with `fsrs_params_6`. The oracle at the pin cannot make such a preset schedule differently, so these rows are Meguri-only tests (T2), and the scenario `sched/compat/unsupported-preset-kept` shows only that Anki keeps an `other` list and its preset's bytes.
 
 ## U3. What is not detected
 
-- An unknown field of the deck config protobuf message (`model/protobuf-records#P4`) is never read as a later list. No Anki release up to 26.09.3 defines one, so nothing tells such a field from any other later option; refusing study for every preset that carries a later option would be wrong more often than right. Anki 26.09.3 ignores such a field in the same way. When an oracle bump brings a release that defines a later list field, its field number joins U2 (R2022).
+- An unknown field with a number other than 7 or 8, and an `other` member with any other name, may be any later option: it does not make a preset unsupported.
 - Out-of-range bounded options (`sched/presets#V3`) do not make a preset unsupported; reads replace them.
 - A missing preset is not unsupported: its cards use the built-in defaults (`sched/presets#V1`).
 
@@ -172,8 +178,9 @@ When an object repeats a member name, the last occurrence counts (`storage/confi
 - Grade Now on a selection that holds such a card refuses with `PresetUnsupported` and writes nothing (U48). Answering such a card on any path fails with U45's `UnsupportedParams` and writes nothing.
 - Nothing automatic writes the preset or its cards: `enableFsrs` (E2), U46's bulk recomputes and U47's optimizer skip it. The preset row keeps its bytes, `mtime_secs` and `usn` through open, saves of other presets and sync (`sched/presets#V8`); its cards keep their rows. Only an explicit edit of that preset writes it; U49 decides whether its editor offers one.
 - The study message ("This preset needs a newer Meguri") is U51's.
+- A preset can become unsupported while a review session is open, when a sync brings a 34-value list or a later list. U1 and U2 are the test behind U43's `PresetUnsupported` session event; when the session emits it and what it does next are U43's (`sched/review-session`).
 
-Anki 26.09.3 with such presets: it counts their decks, and it fails with an error when it computes answer states for a card of a U1 preset (its study screen cannot show the card). It ignores a U2 list and schedules with `fsrs_params_6`; Meguri refuses instead (R704).
+Anki 26.09.3 with such presets: it counts their decks, and it fails with an error when it computes answer states for a card of a preset whose list the crate refuses (its study screen cannot show the card). It ignores a later list (U2) and schedules with `fsrs_params_6`; Meguri refuses instead (R704).
 
 ## V1. The scheduler version (R705)
 
@@ -216,17 +223,19 @@ These keep their bytes through every Meguri operation (answers, day rollovers, `
 
 ## K3. The preservation test
 
-`core/crates/meguri-engine/tests/fsrs_policy.rs` holds the cross-cutting preservation test (R763, T0). It builds a collection in which every K1 value is set to a value other than its default, plus an unknown config key, an unknown deck-config field, a 34-value preset (U1) and a preset with a later list (U2). After each of these steps it compares a digest with the digest taken before the step:
+`core/crates/meguri-engine/tests/fsrs_policy.rs` holds the cross-cutting preservation test (R763, T0). It builds a collection in which every K1 value is set to a value other than its default, plus an unknown config key, an unknown field on a normal preset (a number other than 7 and 8), a 34-value preset (U1), a preset with a later list in `other` and one with an unknown field 7 (U2). After each of these steps it compares a digest with the digest taken before the step:
 
 1. a day of answers on a normal preset, across a day rollover;
 2. `enableFsrs` from FSRS off;
 3. a bulk recompute over all cards (U46);
 4. an optimizer commit for a normal preset (U47);
 5. a save of another preset;
-6. a `SyncIncoming` merge that changes other keys and cards;
+6. a `SyncIncoming` op that changes other keys and cards (`engine/op-model`; it needs no real sync);
 7. close and open.
 
-The digest covers: the K1 config rows (`KEY`, `usn`, `mtime_secs`, `val` bytes), the unknown config key's row, the whole rows of the two unsupported presets and of their cards, the Easy Days field bytes and unknown fields of the normal presets, and the `extend_new` and `extend_review` values of the decks. Equal digests mean the test passes.
+The digest covers: the K1 config rows (`KEY`, `usn`, `mtime_secs`, `val` bytes), the unknown config key's row, the whole rows of the three unsupported presets and of their cards, the Easy Days field bytes and unknown fields of the normal presets, and the `extend_new` and `extend_review` values of the decks. Equal digests mean the test passes.
+
+A step whose op has not landed when this unit does is added by the unit that lands it (T3): U47 (the optimizer) is in milestone M1, after this unit (M1R in the reviews-first plan of 2026-10-17), and U44 (answers) is not among this unit's dependencies.
 
 ## T1. Scenarios
 
@@ -247,9 +256,23 @@ Goldens are recorded by the oracle maintainer with the driver ops of `conformanc
 
 `core/crates/meguri-engine/tests/fsrs_policy.rs` asserts what no oracle can show:
 
-- S1, S2: the status for each `fsrs` value of S1; `needsReEnable` after a `SyncIncoming` change of `fsrs` from on to off, also after close and open; `needsEnable` with no mark; the mark kept across a collection replacement.
-- S3: a sync during an open session turns `fsrs` off; answers go on; `enableFsrs` refuses with `SessionActive`; the newest answer stays undoable; after `endSession`, `enableFsrs` succeeds and due dates are unchanged. `startSession` refuses with `FsrsPolicyPending` before `PresetUnsupported`.
+- S1, S2: the status for each `fsrs` value of S1; `needsReEnable` after a `SyncIncoming` op (`engine/op-model`) changes `fsrs` from on to off, also after close and open; `needsEnable` with no mark; the mark kept across a collection replacement.
 - E1 to E4: a collection with a 34-value preset: `enableFsrs` skips its cards (bytes unchanged) and computes the others; a deck whose preset is missing is computed with the built-in defaults and keeps its preset id; a cancelled `enableFsrs` writes nothing and leaves `fsrs` off; undo history cleared after it.
-- U1 to U4: the tables of U1 and U2; `startSession` returns `PresetUnsupported` with the preset ids; Grade Now refuses; counts are reported for the deck.
+- U1 to U4: a preset of each row of the U1 and U2 tables is reported unsupported or not, through U45's check; the deck-tree query that U43's `startSession` uses returns the unsupported home presets' ids, ascending, and none for a tree without such a card; the preset row and its cards keep their bytes through open, a save of another preset and a `SyncIncoming` op.
 - V2: a `schedVer` 2 collection without `sched2021` opens with it on, `creationOffset` untouched (also when missing); the test named by the deviation, `v3_switch_at_open`.
 - K3: the preservation test.
+
+## T3. Tests that land with later units
+
+U43 and U48 depend on this unit, and U41, U44, U47 and U107 are not among its dependencies, so some of the plan's U50 scenarios can only run once those units land. This unit provides what they call: `fsrsPolicyStatus()`, the deck-tree query of unsupported home presets, and `enableFsrs`'s `SessionActive` refusal, which reads U43's open-session state (before U43 no session can be open, so the refusal is never taken). The later unit's implementer adds the test to this file when it lands:
+
+| Unit | Test |
+|---|---|
+| U43 | `startSession` refuses with `FsrsPolicyPending` before `PresetUnsupported{presetIds}`, writing nothing (S3, U4). A `SyncIncoming` op during an open session turns `fsrs` off: answers go on, `enableFsrs` refuses with `SessionActive`, the newest answer stays undoable; after `endSession`, `enableFsrs` succeeds and due dates are unchanged (S3). |
+| U48 | Grade Now on a selection holding a card of a 34-value preset refuses with `PresetUnsupported` and writes nothing (U4). |
+| U41 | the deck of a 34-value preset reports its counts (U4), when U41 lands after this unit; otherwise this unit's implementer writes it. |
+| U44 | K3 step 1, when U44 lands after this unit; otherwise this unit's implementer writes it. |
+| U47 | K3 step 4: an optimizer run that adopts parameters for a normal preset leaves the unsupported presets and their cards' `data` byte-identical (U4). |
+| U107 | the 34-value preset's row and its cards unchanged through a real normal sync (U4). |
+
+Scenarios: this unit adds the typed model entries and adapters of `enable_fsrs` and `enable_v3` (`conformance/fsrs-policy-ops#F5`) and marks a `sched/compat/` scenario active in `conformance/scenarios/sched/area.yaml` when every op it uses has a Meguri adapter; the unit that lands the last missing adapter (answers U44, actor sync U107) activates the rest. Until then this unit's tests may play a scenario's steps on the engine against its golden, as `day_conformance.rs` does for the day scenarios.
