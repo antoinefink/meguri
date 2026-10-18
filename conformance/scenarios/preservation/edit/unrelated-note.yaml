@@ -1,0 +1,15 @@
+# AE83 (local part), R322, R323, R1483-R1486, R2017 (normalized-dump.md
+# N10): editing a note that no filtered deck holds, of the note type that
+# carries unknown protobuf fields, changes that note row and col.mod and
+# nothing else: filtered decks, their cards, the review log, presets, config
+# keys and the note type, field and template blobs keep every byte.
+id: preservation/edit/unrelated-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: preservation/kitchen-sink.anki2}
+  - adopt: {}
+  - observe:
+      - {db_dump: {raw: true}}
+  - edit_note: {note: "#n2", fields: {Meaning: "to drink; to swallow"}}
+  - observe:
+      - {db_dump: {raw: true}}

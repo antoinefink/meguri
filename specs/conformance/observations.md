@@ -53,7 +53,7 @@ Kinds marked *draft* have no driver support yet; the owning area defines their v
 | `fields_check` | `{cases: [{notetype, fields} \| {note: #nN, fields?}, ...]}`, at most one request per step | `[{state, duplicates?}, ...]`, one per case: the field check of `specs/notes/field-check.md` on unsaved drafts, `duplicates` (logical note ids) only with the state `duplicate` (`note-ops.md` N4); never changes the collection |
 | `search` | list of `{query, kind?: cards \| notes}` | `search-ops.md` S1: one output per search, `{ids: [#cN or #nN, ...]}` in logical-id order, or an error `{error: <kind>, provided?, context?}` |
 | `canonical_search` | list of search texts | `search-ops.md` S2: one output per text, `{text: <canonical text>}` or a parse error; never reads or changes the scenario's collection |
-| `db_dump` | none or `{tables: [...]}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8) |
+| `db_dump` | none or `{tables?: [...], raw?: bool}` | `{<table>: {<key>: <row>}}`: the stored rows of the collection's tables, normalized (O8), or raw (`normalized-dump.md` N4) |
 | `stats` | arguments defined by the stats area | draft (stats) |
 | `digest` | none | draft: a hash over all card rows, for fuzzing |
 | `legacy_json` | `{notetypes?, decks?, presets?}`: lists of names | `{notetypes?: {<name>: <object>}, decks?: {...}, presets?: {...}}`, the schema-11 objects of the records as stored now (`model-ops.md` L1) |
@@ -137,6 +137,8 @@ The runner compares the golden's observations (expected) with the executor's (ac
   - the digest of `fields.config` covers the stored bytes without the field's random id, top-level protobuf field 9, and the digest of `templates.config` covers them without the template's random id, top-level protobuf field 8. Removing a field removes every occurrence of that top-level field number, tag and value, and keeps the other bytes in their order. The blob parses when it is a sequence of fields, each a varint tag with a field number of at least 1 and a wire type of 0 (varint), 1 (8 bytes), 2 (a varint length, then that many bytes) or 5 (4 bytes), that ends exactly at the blob's end. A blob that does not parse is digested as stored.
 
   `converge` compares the raw values instead (`sync-ops.md` S7.2), so actors that disagree on a random value still differ there.
+
+  `{db_dump: {raw: true}}` reports the raw values too (`normalized-dump.md` N4): scenarios that start from a fixture, whose values are fixed, use it to show that they survive byte for byte.
 - Real ids appear as stored. Meguri allocates ids as Anki does (`specs/storage/ids-usn-mtime.md` I2), so a Meguri collection's dump has the same ids as the oracle's, except where Meguri's one-day cap applies (I3, with its deviations).
 
 ## O9. Text functions

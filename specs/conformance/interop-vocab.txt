@@ -173,3 +173,18 @@ too_deep
 under_descendant
 default_preset
 filtered_deck
+# Preservation suite (normalized-dump.md, U36): the adopt op and the config
+# keys, preset key and fixture name the suite names.
+adopt
+kitchen-sink
+setDueReviewer
+restorePositionReviewer
+resetCountsReviewer
+customStudyIncludeTags
+customStudyExcludeTags
+fsrsLegacyEvaluate
+renderLatex
+fsrsParams7
+lastFsrsOptimize
+dueCounts
+estTimes

@@ -1,0 +1,23 @@
+# R2016, R2017 (specs/conformance/normalized-dump.md N10): ten closes and
+# opens of the kitchen-sink fixture write nothing. sqlite_master and every
+# stored value, compared raw, are as the first open left them.
+id: preservation/churn/reopen-ten
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: preservation/kitchen-sink.anki2}
+  - observe:
+      - schema_objects
+      - {db_dump: {raw: true}}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - reopen: {}
+  - observe:
+      - schema_objects
+      - {db_dump: {raw: true}}

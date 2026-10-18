@@ -4,44 +4,95 @@
   "$comment": "SPDX-License-Identifier: MPL-2.0. Meguri-owned protocol between Meguri tooling and oracle workers.",
   "title": "Meguri oracle worker protocol, version 1",
   "description": "A worker is one long-lived process serving exactly one time zone (its TZ) with a frozen clock that only scenarios move. Transport: one JSON request per line on stdin, one JSON response per line on stdout, in request order; no ports. A failed request gets ok=false and the worker keeps serving. Start a worker with `tools/mg oracle build`, whose result.json gives the image as details.image.tag (meguri-oracle:<tag>), then `MEGURI_ORACLE_TAG=<tag> docker compose -f docker/compose.yml run --rm -T --no-deps -e TZ=<zone> oracle`. A checkout without oracle/ (an implementer worktree) works the same way: tools/mg builds the image from the main worktree's oracle/, and the run needs only the built image. Goldens written by `tools/mg oracle record` are {scenario_id, scenario_sha256, oracle: {anki_version, lock_sha256, driver_sha256}, tz, clock: {start, mode}, observations}, sorted keys, LF, one file per scenario at the scenario's relative path with a .json suffix; scenario_sha256 is the lower-case hex sha256 of the RFC 8785 (JCS) text of the parsed scenario value (YAML read with the 1.2 core schema), so comments, key order and layout never change it. golden.schema.json and scenario.schema.json (U4) are authoritative for those formats. Actor scenarios (specs/conformance/sync-ops.md) also read ORACLE_SYNC_FAULTS (host:port of the toxiproxy API on oracle-internal; needed for runs with a fault proxy) and ORACLE_SYNC_RECORDER (host:port of the recorder, an HTTP forward proxy; set only for recording runs). The worker removes http_proxy, https_proxy, all_proxy and no_proxy (any case) from its environment at start. Scenarios with an open step (specs/conformance/storage-ops.md P1.4) also read ORACLE_FIXTURES: the checkout's conformance/fixtures directory, mounted read-only into the worker; open copies <ORACLE_FIXTURES>/<fixture> into the session and never writes the fixture itself. A check request (tools/mg oracle check, specs/conformance/collection-check.md) checks a copy of a collection directory outside any scenario. A time request (tools/mg oracle time, specs/conformance/timed-operations.md) times the T6 operations on copies of one; only a timing worker serves it: one started with ORACLE_CLOCK_CACHE=1 after its clock file was written with the request's now (libfaketime then reads that file once, so its clock stays there; T2.3). On an arm64 Mac, `oracle/macos/run-native.sh` starts the same driver as a native worker (platform macos-arm64) from the host venv build/oracle-macos-venv/, with the same environment variables, stdio and requests (specs/conformance/float-determinism.md F6); tools/mg reaches it through `tools/mg oracle hello|record|compare --platform apple`.",
-  "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/response" }],
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    }
+  ],
   "$defs": {
     "id": {
       "description": "Optional correlation value, echoed unchanged in the response."
     },
     "request": {
       "oneOf": [
-        { "$ref": "#/$defs/hello_request" },
-        { "$ref": "#/$defs/run_request" },
-        { "$ref": "#/$defs/begin_request" },
-        { "$ref": "#/$defs/step_request" },
-        { "$ref": "#/$defs/end_request" },
-        { "$ref": "#/$defs/check_request" },
-        { "$ref": "#/$defs/time_request" }
+        {
+          "$ref": "#/$defs/hello_request"
+        },
+        {
+          "$ref": "#/$defs/run_request"
+        },
+        {
+          "$ref": "#/$defs/begin_request"
+        },
+        {
+          "$ref": "#/$defs/step_request"
+        },
+        {
+          "$ref": "#/$defs/end_request"
+        },
+        {
+          "$ref": "#/$defs/check_request"
+        },
+        {
+          "$ref": "#/$defs/time_request"
+        }
       ]
     },
     "hello_request": {
       "type": "object",
-      "required": ["cmd"],
-      "properties": { "cmd": { "const": "hello" }, "id": { "$ref": "#/$defs/id" } },
+      "required": [
+        "cmd"
+      ],
+      "properties": {
+        "cmd": {
+          "const": "hello"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
       "additionalProperties": false
     },
     "run_request": {
       "description": "Batch mode: run one scenario on a fresh collection and return every step's output; a handoff step only closes and reopens the collection there. With steps, resume or handoff it runs one segment of a live chain (dsl.md D9.2) instead: needs a worker started with ORACLE_HANDOFF (the handoff directory it shares with the runner). An actor scenario (specs/conformance/sync-ops.md) runs whole, the oracle playing every actor, with its sync server and, when the scenario has a net_fault step, its fault proxy (needs ORACLE_SYNC_FAULTS); steps, resume or handoff with an actor scenario is invalid_scenario.",
       "type": "object",
-      "required": ["cmd", "scenario"],
+      "required": [
+        "cmd",
+        "scenario"
+      ],
       "properties": {
-        "cmd": { "const": "run" },
-        "id": { "$ref": "#/$defs/id" },
-        "scenario": { "$ref": "#/$defs/scenario" },
+        "cmd": {
+          "const": "run"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "scenario": {
+          "$ref": "#/$defs/scenario"
+        },
         "steps": {
           "description": "[first, end): run only these scenario steps; observations.steps then holds their outputs, and error.step stays the scenario's step index.",
           "type": "array",
-          "prefixItems": [{ "type": "integer", "minimum": 0 }, { "type": "integer", "minimum": 0 }],
+          "prefixItems": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ],
           "minItems": 2,
           "maxItems": 2
         },
-        "resume": { "$ref": "#/$defs/handoff_state", "description": "Start from this handoff instead of a fresh collection and the setup." },
+        "resume": {
+          "$ref": "#/$defs/handoff_state",
+          "description": "Start from this handoff instead of a fresh collection and the setup."
+        },
         "handoff": {
           "type": "string",
           "description": "After the last step, close the collection, copy the session directory to this directory (relative to ORACLE_HANDOFF; it must not exist) and return state. The runner names it <scenario id>@<handoff step index> (dsl.md D9.2), so chains of different scenarios never share or nest directories and may run at the same time."
@@ -56,16 +107,27 @@
     "begin_request": {
       "description": "Interactive mode: set up the scenario (clock, collection, setup) without running its steps. For an actor scenario (sync-ops.md S10.4): create the collections of the actors the worker plays, run the setup when it plays the first actor, start the sync server and, when the run needs one, the fault proxy; connect nothing before the first step request.",
       "type": "object",
-      "required": ["cmd", "scenario"],
+      "required": [
+        "cmd",
+        "scenario"
+      ],
       "properties": {
-        "cmd": { "const": "begin" },
-        "id": { "$ref": "#/$defs/id" },
-        "scenario": { "$ref": "#/$defs/scenario" },
+        "cmd": {
+          "const": "begin"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "scenario": {
+          "$ref": "#/$defs/scenario"
+        },
         "caller_actors": {
           "description": "Actor scenarios: the Meguri actors the caller plays (none when missing). The worker makes no collection for them; their steps come as step requests with done. A run with caller actors always has a fault proxy.",
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/actor_name" }
+          "items": {
+            "$ref": "#/$defs/actor_name"
+          }
         },
         "ids": {
           "description": "Actor scenarios whose first actor the caller plays: the real ids the caller's setup created, in creation order.",
@@ -77,34 +139,77 @@
     "step_request": {
       "description": "Interactive mode: without step, run the scenario's next step (no_more_steps after the last; a failed step stays next); with step, run that ad-hoc step, which does not move the scenario's next step. Actor scenarios (sync-ops.md S10.4): with done, the next step belongs to a caller-played actor and the caller ran it; with dumps, the next step is converge and these are the caller-played actors' raw dumps. protocol_error when a step the worker runs comes with done, a caller-played step comes without it, or dumps does not name exactly the caller-played actors.",
       "type": "object",
-      "required": ["cmd"],
+      "required": [
+        "cmd"
+      ],
       "properties": {
-        "cmd": { "const": "step" },
-        "id": { "$ref": "#/$defs/id" },
-        "step": { "$ref": "#/$defs/step" },
+        "cmd": {
+          "const": "step"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "step": {
+          "$ref": "#/$defs/step"
+        },
         "done": {
           "description": "The output of a step a caller-played actor ran, and the real ids it created, in creation order; the worker records them as that step's.",
           "type": "object",
-          "required": ["output", "notes", "cards"],
+          "required": [
+            "output",
+            "notes",
+            "cards"
+          ],
           "properties": {
-            "output": { "$ref": "#/$defs/step_output" },
-            "notes": { "type": "array", "items": { "type": "integer" } },
-            "cards": { "type": "array", "items": { "type": "integer" } }
+            "output": {
+              "$ref": "#/$defs/step_output"
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "cards": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
           },
           "additionalProperties": false
         },
         "dumps": {
           "description": "converge with caller-played actors: each one's raw dump (sync-ops.md S7.2).",
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/actor_name" },
-          "additionalProperties": { "$ref": "#/$defs/raw_dump" }
+          "propertyNames": {
+            "$ref": "#/$defs/actor_name"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/raw_dump"
+          }
         }
       },
       "not": {
         "anyOf": [
-          { "required": ["step", "done"] },
-          { "required": ["step", "dumps"] },
-          { "required": ["done", "dumps"] }
+          {
+            "required": [
+              "step",
+              "done"
+            ]
+          },
+          {
+            "required": [
+              "step",
+              "dumps"
+            ]
+          },
+          {
+            "required": [
+              "done",
+              "dumps"
+            ]
+          }
         ]
       },
       "additionalProperties": false
@@ -112,91 +217,253 @@
     "end_request": {
       "description": "Interactive mode: close and delete the session's collection and return the outputs of the steps run.",
       "type": "object",
-      "required": ["cmd"],
-      "properties": { "cmd": { "const": "end" }, "id": { "$ref": "#/$defs/id" } },
+      "required": [
+        "cmd"
+      ],
+      "properties": {
+        "cmd": {
+          "const": "end"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
       "additionalProperties": false
     },
     "check_request": {
       "description": "specs/conformance/collection-check.md K2-K8 and K11, outside any scenario, in the worker's zone (its TZ): copy <dir>/collection.anki2 and <dir>/collection.anki2-wal when present into scratch, freeze the clock at now, open the copy with Anki's Python layer in English and report. The worker never writes dir (tools/mg mounts it read-only). Errors: no_collection when dir holds no collection.anki2 file, open_failed when Anki cannot open the copy, session_open while an interactive session is open; any other failure is anki_error or internal_error.",
       "type": "object",
-      "required": ["cmd", "dir", "now"],
+      "required": [
+        "cmd",
+        "dir",
+        "now"
+      ],
       "properties": {
-        "cmd": { "const": "check" },
-        "id": { "$ref": "#/$defs/id" },
-        "dir": { "type": "string", "minLength": 1, "description": "A directory the worker can read." },
-        "now": { "type": "integer", "minimum": 0, "description": "The instant the clock is frozen at, epoch seconds." },
-        "decks": { "type": "array", "items": { "type": "string" }, "description": "K6: deck names, components joined by ::." },
-        "render_notes": { "type": "array", "items": { "type": "integer" }, "description": "K8: note ids." },
-        "schedule": { "type": "boolean", "description": "K11: when true, the response's check has schedule." }
+        "cmd": {
+          "const": "check"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A directory the worker can read."
+        },
+        "now": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The instant the clock is frozen at, epoch seconds."
+        },
+        "decks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "K6: deck names, components joined by ::."
+        },
+        "render_notes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "K8: note ids."
+        },
+        "schedule": {
+          "type": "boolean",
+          "description": "K11: when true, the response's check has schedule."
+        }
       },
       "additionalProperties": false
     },
     "check_response": {
       "type": "object",
-      "required": ["ok", "check", "elapsed_ms"],
+      "required": [
+        "ok",
+        "check",
+        "elapsed_ms"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
         "check": {
           "description": "The members of the collection-check.schema.json report that the worker knows: all but report_version, oracle and dir, which the harness adds (hello gives oracle).",
           "type": "object",
-          "required": ["now", "tz", "timing", "counts", "decks", "render", "check_db", "changed_tables"],
+          "required": [
+            "now",
+            "tz",
+            "timing",
+            "counts",
+            "decks",
+            "render",
+            "check_db",
+            "changed_tables"
+          ],
           "properties": {
-            "now": { "type": "integer" },
-            "tz": { "type": "string" },
-            "timing": { "type": "object" },
-            "counts": { "type": "object" },
-            "decks": { "type": "object" },
-            "render": { "type": "object" },
-            "check_db": { "type": "object" },
-            "changed_tables": { "type": "array", "items": { "type": "string" } },
-            "schedule": { "type": "object", "description": "K11: present exactly when the request had schedule true." }
+            "now": {
+              "type": "integer"
+            },
+            "tz": {
+              "type": "string"
+            },
+            "timing": {
+              "type": "object"
+            },
+            "counts": {
+              "type": "object"
+            },
+            "decks": {
+              "type": "object"
+            },
+            "render": {
+              "type": "object"
+            },
+            "check_db": {
+              "type": "object"
+            },
+            "changed_tables": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "schedule": {
+              "type": "object",
+              "description": "K11: present exactly when the request had schedule true."
+            }
           },
           "additionalProperties": false
         },
-        "elapsed_ms": { "type": "number", "minimum": 0, "description": "Wall time inside the worker; never part of a report." }
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Wall time inside the worker; never part of a report."
+        }
       },
       "additionalProperties": false
     },
     "time_request": {
       "description": "specs/conformance/timed-operations.md T2-T7, outside any scenario, in the worker's zone (its TZ). Only a timing worker serves it (ORACLE_CLOCK_CACHE=1, its clock at now); any other worker, or another now, answers protocol_error. The worker copies <dir>/collection.anki2 (and <dir>/collection.anki2-wal when present) into scratch and folds the WAL in with SQLite (the image, T2.1), counts the rows of a copy (T2.2), then runs each named operation in catalogue order: one warm-up and `repeat` timed runs, each on a fresh copy of the image (T3.2). The worker never writes dir (tools/mg mounts it read-only). Errors: no_collection when dir holds no collection.anki2 file, open_failed when SQLite cannot read that file or Anki cannot open a copy of the image, session_open while an interactive session is open; any other failure of the run is anki_error or internal_error. An operation that fails is an entry with status error in the response, never an error response.",
       "type": "object",
-      "required": ["cmd", "dir", "now", "ops", "repeat"],
+      "required": [
+        "cmd",
+        "dir",
+        "now",
+        "ops",
+        "repeat"
+      ],
       "properties": {
-        "cmd": { "const": "time" },
-        "id": { "$ref": "#/$defs/id" },
-        "dir": { "type": "string", "minLength": 1, "description": "A directory the worker can read." },
-        "now": { "type": "integer", "minimum": 0, "description": "The frozen instant, epoch seconds: what the worker's clock file held when it started." },
+        "cmd": {
+          "const": "time"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "dir": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A directory the worker can read."
+        },
+        "now": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The frozen instant, epoch seconds: what the worker's clock file held when it started."
+        },
         "ops": {
           "type": "array",
           "minItems": 1,
-          "items": { "enum": ["collection.open", "decks.counts", "queue.build", "review.answer", "search.deck", "search.state", "search.tag", "search.text", "search.regex", "search.prop", "search.rated", "search.combined", "browser.sort_field", "browser.sort_due", "stats.graphs", "maintenance.check_db", "package.apkg_export", "package.colpkg_export", "package.apkg_import", "sync.full_upload", "sync.full_download", "fsrs.recompute_memory_states"] },
+          "items": {
+            "enum": [
+              "collection.open",
+              "decks.counts",
+              "queue.build",
+              "review.answer",
+              "search.deck",
+              "search.state",
+              "search.tag",
+              "search.text",
+              "search.regex",
+              "search.prop",
+              "search.rated",
+              "search.combined",
+              "browser.sort_field",
+              "browser.sort_due",
+              "stats.graphs",
+              "maintenance.check_db",
+              "package.apkg_export",
+              "package.colpkg_export",
+              "package.apkg_import",
+              "sync.full_upload",
+              "sync.full_download",
+              "fsrs.recompute_memory_states"
+            ]
+          },
           "description": "T6 names. They run, and are reported, once each in catalogue order, whatever their order here."
         },
-        "repeat": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Timed runs per operation, after one warm-up run." }
+        "repeat": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Timed runs per operation, after one warm-up run."
+        }
       },
       "additionalProperties": false
     },
     "time_response": {
       "type": "object",
-      "required": ["ok", "timing", "elapsed_ms"],
+      "required": [
+        "ok",
+        "timing",
+        "elapsed_ms"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
         "timing": {
           "description": "The members of the timing.schema.json report that the worker knows: all but report_version, side, platform and oracle, which the harness adds (side anki; hello gives platform and oracle).",
           "type": "object",
-          "required": ["now", "tz", "protocol", "collection", "operations"],
+          "required": [
+            "now",
+            "tz",
+            "protocol",
+            "collection",
+            "operations"
+          ],
           "properties": {
-            "now": { "type": "integer" },
-            "tz": { "type": "string" },
-            "protocol": { "type": "object" },
-            "collection": { "type": "object" },
-            "operations": { "type": "array", "items": { "type": "object" } }
+            "now": {
+              "type": "integer"
+            },
+            "tz": {
+              "type": "string"
+            },
+            "protocol": {
+              "type": "object"
+            },
+            "collection": {
+              "type": "object"
+            },
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
           },
           "additionalProperties": false
         },
-        "elapsed_ms": { "type": "number", "minimum": 0, "description": "Wall time inside the worker; never part of a report." }
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Wall time inside the worker; never part of a report."
+        }
       },
       "additionalProperties": false
     },
@@ -204,39 +471,98 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["ok"],
-          "properties": { "ok": { "const": true } },
+          "required": [
+            "ok"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          },
           "anyOf": [
-            { "$ref": "#/$defs/hello_response" },
-            { "$ref": "#/$defs/run_response" },
-            { "$ref": "#/$defs/begin_response" },
-            { "$ref": "#/$defs/step_response" },
-            { "$ref": "#/$defs/end_response" },
-            { "$ref": "#/$defs/check_response" },
-            { "$ref": "#/$defs/time_response" }
+            {
+              "$ref": "#/$defs/hello_response"
+            },
+            {
+              "$ref": "#/$defs/run_response"
+            },
+            {
+              "$ref": "#/$defs/begin_response"
+            },
+            {
+              "$ref": "#/$defs/step_response"
+            },
+            {
+              "$ref": "#/$defs/end_response"
+            },
+            {
+              "$ref": "#/$defs/check_response"
+            },
+            {
+              "$ref": "#/$defs/time_response"
+            }
           ]
         },
-        { "$ref": "#/$defs/error_response" }
+        {
+          "$ref": "#/$defs/error_response"
+        }
       ]
     },
-    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "hello_response": {
       "type": "object",
-      "required": ["ok", "protocol", "anki_version", "lock_sha256", "driver_sha256", "tz", "platform", "time_control"],
+      "required": [
+        "ok",
+        "protocol",
+        "anki_version",
+        "lock_sha256",
+        "driver_sha256",
+        "tz",
+        "platform",
+        "time_control"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
-        "protocol": { "const": 1 },
-        "anki_version": { "type": "string", "description": "The pinned distribution version, e.g. 26.9.3." },
-        "lock_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 of the lock file the worker was installed from: oracle/requirements.lock (pins the per-architecture Linux wheel hashes) on linux-* platforms, oracle/macos/requirements-macos.lock on macos-arm64 (float-determinism.md F6.2)." },
-        "driver_sha256": { "$ref": "#/$defs/sha256", "description": "sha256 over the driver's source files (tests excluded)." },
-        "tz": { "type": "string", "description": "The worker's IANA time zone." },
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "protocol": {
+          "const": 1
+        },
+        "anki_version": {
+          "type": "string",
+          "description": "The pinned distribution version, e.g. 26.9.3."
+        },
+        "lock_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "sha256 of the lock file the worker was installed from: oracle/requirements.lock (pins the per-architecture Linux wheel hashes) on linux-* platforms, oracle/macos/requirements-macos.lock on macos-arm64 (float-determinism.md F6.2)."
+        },
+        "driver_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "sha256 over the driver's source files (tests excluded)."
+        },
+        "tz": {
+          "type": "string",
+          "description": "The worker's IANA time zone."
+        },
         "platform": {
-          "enum": ["linux-arm64", "linux-x86_64", "macos-arm64"],
+          "enum": [
+            "linux-arm64",
+            "linux-x86_64",
+            "macos-arm64"
+          ],
           "description": "Where the worker runs: an oracle container (linux-*, by CPU architecture) or the macOS native lane (float-determinism.md F6)."
         },
         "time_control": {
-          "enum": ["faketime", "none"],
+          "enum": [
+            "faketime",
+            "none"
+          ],
           "description": "faketime: the clock is frozen and moved by scenarios (libfaketime; always on linux-*). none: a native worker on the real clock, which tools use only for scenarios tagged clock-free (float-determinism.md F6.3)."
         }
       },
@@ -244,25 +570,54 @@
     },
     "run_response": {
       "type": "object",
-      "required": ["ok", "scenario_id", "observations", "elapsed_ms"],
+      "required": [
+        "ok",
+        "scenario_id",
+        "observations",
+        "elapsed_ms"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
-        "scenario_id": { "type": "string" },
-        "observations": { "$ref": "#/$defs/observations" },
-        "elapsed_ms": { "type": "number", "minimum": 0, "description": "Wall time inside the worker; never part of a golden." },
-        "state": { "$ref": "#/$defs/handoff_state", "description": "Present when the request asked for a handoff." },
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "scenario_id": {
+          "type": "string"
+        },
+        "observations": {
+          "$ref": "#/$defs/observations"
+        },
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Wall time inside the worker; never part of a golden."
+        },
+        "state": {
+          "$ref": "#/$defs/handoff_state",
+          "description": "Present when the request asked for a handoff."
+        },
         "fsrs_context": {
           "description": "Present when the request set fsrs_context: keyed by the pointer of each card's next_states object (/steps/<i>/next_states/#cN), the home deck's effective desired retention and the decay the FSRS model used for it (sched/fsrs-transitions T2.1, T2.2), both as f32 (shortest decimals). Cards whose states were computed without FSRS are absent.",
           "type": "object",
-          "propertyNames": { "pattern": "^/steps/(0|[1-9][0-9]*)/next_states/#c[1-9][0-9]*$" },
+          "propertyNames": {
+            "pattern": "^/steps/(0|[1-9][0-9]*)/next_states/#c[1-9][0-9]*$"
+          },
           "additionalProperties": {
             "type": "object",
-            "required": ["desired_retention", "decay"],
+            "required": [
+              "desired_retention",
+              "decay"
+            ],
             "additionalProperties": false,
             "properties": {
-              "desired_retention": { "type": "number" },
-              "decay": { "type": "number" }
+              "desired_retention": {
+                "type": "number"
+              },
+              "decay": {
+                "type": "number"
+              }
             }
           }
         }
@@ -272,39 +627,90 @@
     "handoff_state": {
       "description": "What crosses a handoff (dsl.md D9.2): the session directory (collection.anki2, its media, files ops wrote) at dir, relative to the handoff directory; the clock in epoch seconds; the real ids behind #n1, #n2... and #c1, #c2... in order.",
       "type": "object",
-      "required": ["dir", "now", "notes", "cards"],
+      "required": [
+        "dir",
+        "now",
+        "notes",
+        "cards"
+      ],
       "properties": {
-        "dir": { "type": "string", "minLength": 1 },
-        "now": { "type": "integer", "minimum": 0 },
-        "notes": { "type": "array", "items": { "type": "integer" } },
-        "cards": { "type": "array", "items": { "type": "integer" } }
+        "dir": {
+          "type": "string",
+          "minLength": 1
+        },
+        "now": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
       },
       "additionalProperties": false
     },
     "begin_response": {
       "type": "object",
-      "required": ["ok", "scenario_id", "steps"],
+      "required": [
+        "ok",
+        "scenario_id",
+        "steps"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
-        "scenario_id": { "type": "string" },
-        "steps": { "type": "integer", "minimum": 0, "description": "Number of steps in the scenario." },
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "scenario_id": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of steps in the scenario."
+        },
         "ids": {
           "description": "Actor scenarios: the real ids the worker's setup created (empty when the caller ran the setup).",
           "$ref": "#/$defs/new_ids"
         },
-        "sync": { "$ref": "#/$defs/sync_info" }
+        "sync": {
+          "$ref": "#/$defs/sync_info"
+        }
       },
       "additionalProperties": false
     },
     "step_response": {
       "type": "object",
-      "required": ["ok", "index", "observation"],
+      "required": [
+        "ok",
+        "index",
+        "observation"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
-        "index": { "type": "integer", "minimum": 0, "description": "The step's position in the output that end returns, ad-hoc steps included; a failed step request reports the same position as error.step." },
-        "observation": { "$ref": "#/$defs/step_output" },
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The step's position in the output that end returns, ad-hoc steps included; a failed step request reports the same position as error.step."
+        },
+        "observation": {
+          "$ref": "#/$defs/step_output"
+        },
         "ids": {
           "description": "Actor scenarios: the real ids this step created, in creation order (those of done included).",
           "$ref": "#/$defs/new_ids"
@@ -315,68 +721,143 @@
     "new_ids": {
       "description": "Real ids appended to the logical tables, in creation order: notes become the next #nN, cards the next #cN.",
       "type": "object",
-      "required": ["notes", "cards"],
+      "required": [
+        "notes",
+        "cards"
+      ],
       "properties": {
-        "notes": { "type": "array", "items": { "type": "integer" } },
-        "cards": { "type": "array", "items": { "type": "integer" } }
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        }
       },
       "additionalProperties": false
     },
     "sync_info": {
       "description": "Actor scenarios (sync-ops.md S8.3, S10.4): the run's endpoints, which the caller checks with check_endpoint before the first step, and the scenario's account, with which caller-played actors log in. Test credentials only.",
       "type": "object",
-      "required": ["endpoints", "account"],
+      "required": [
+        "endpoints",
+        "account"
+      ],
       "properties": {
         "endpoints": {
           "type": "object",
-          "required": ["actors", "converge", "upstream", "recorder"],
+          "required": [
+            "actors",
+            "converge",
+            "upstream",
+            "recorder"
+          ],
           "properties": {
-            "actors": { "type": "string", "description": "Base URL the oracle actors sync with: the fault proxy when the run has one, else the server directly." },
-            "converge": { "type": "string", "description": "Base URL of the converge client: the server directly, on loopback." },
-            "upstream": { "type": ["string", "null"], "description": "host:port of the server on oracle-internal, the fault proxy's upstream; null without a fault proxy." },
-            "recorder": { "type": ["string", "null"], "description": "host:port of the recorder in a recording run, else null." }
+            "actors": {
+              "type": "string",
+              "description": "Base URL the oracle actors sync with: the fault proxy when the run has one, else the server directly."
+            },
+            "converge": {
+              "type": "string",
+              "description": "Base URL of the converge client: the server directly, on loopback."
+            },
+            "upstream": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "host:port of the server on oracle-internal, the fault proxy's upstream; null without a fault proxy."
+            },
+            "recorder": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "host:port of the recorder in a recording run, else null."
+            }
           },
           "additionalProperties": false
         },
         "account": {
           "type": "object",
-          "required": ["username", "password"],
-          "properties": { "username": { "type": "string" }, "password": { "type": "string" } },
+          "required": [
+            "username",
+            "password"
+          ],
+          "properties": {
+            "username": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         }
       },
       "additionalProperties": false
     },
-    "actor_name": { "type": "string", "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$" },
+    "actor_name": {
+      "type": "string",
+      "pattern": "^(meguri(_([2-9]|[1-9][0-9]+))?|client_[a-z])$"
+    },
     "raw_dump": {
       "description": "A collection's raw dump (sync-ops.md S7.2): the db_dump value of all twelve tables (observations.md O8) without its normalization of random values.",
       "type": "object"
     },
     "end_response": {
       "type": "object",
-      "required": ["ok", "scenario_id", "observations"],
+      "required": [
+        "ok",
+        "scenario_id",
+        "observations"
+      ],
       "properties": {
-        "ok": { "const": true },
-        "id": { "$ref": "#/$defs/id" },
-        "scenario_id": { "type": "string" },
-        "observations": { "$ref": "#/$defs/observations" }
+        "ok": {
+          "const": true
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "scenario_id": {
+          "type": "string"
+        },
+        "observations": {
+          "$ref": "#/$defs/observations"
+        }
       },
       "additionalProperties": false
     },
     "error_response": {
       "type": "object",
-      "required": ["ok", "error"],
+      "required": [
+        "ok",
+        "error"
+      ],
       "properties": {
-        "ok": { "const": false },
-        "id": { "$ref": "#/$defs/id" },
-        "error": { "$ref": "#/$defs/error" }
+        "ok": {
+          "const": false
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       },
       "additionalProperties": false
     },
     "error": {
       "description": "Driver-authored fields only: never Anki's (localized) message text.",
       "type": "object",
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
         "kind": {
           "enum": [
@@ -401,25 +882,63 @@
           ],
           "description": "unsupported_op/_observation/_setup: the driver has no such op, observation or setup section (the scenario needs a newer driver); protocol_error: the line is not a JSON request (NaN and Infinity are not JSON), or a run request's segment fields are malformed, or a step request's done or dumps do not fit the next step (sync-ops.md S10.4), or a time request reached a worker that is not a timing worker or whose clock stands at another instant, or a request would move a timing worker's clock; anki_error: Anki raised outside an op's rejection kinds (exception names its class; a refusal in the op's list is an output, dsl.md D7.3); handoff_error: no ORACLE_HANDOFF, or a handoff directory that is missing, already there or outside it; sync_unavailable: an actor scenario's sync server did not start or accept connections within 10 s, or its fault proxy could not be created (no ORACLE_SYNC_FAULTS, API unreachable or refusing; sync-ops.md S10.5); fixture_error: an open step in a worker without ORACLE_FIXTURES, or whose fixture is not a regular file under it (storage-ops.md P1.4), checked before the session's collection is closed; no_collection, open_failed: a check or time request's directory holds no collection.anki2 file, or Anki could not open the copy (collection-check.md K7, timed-operations.md T8); internal_error: a driver bug, including a response JSON cannot carry (then id is echoed only if it can be)."
         },
-        "step": { "type": "integer", "minimum": 0, "description": "Index of the failing step." },
-        "op": { "type": "string" },
-        "observation": { "type": "string" },
-        "sections": { "type": "array", "items": { "type": "string" } },
-        "exception": { "type": "string", "description": "Exception class name." },
-        "ref": { "type": "string" },
-        "scenario_tz": { "type": "string" },
-        "worker_tz": { "type": "string" },
-        "cmd": { "type": "string" },
-        "steps": { "type": "integer" },
-        "detail": { "type": "string", "description": "Driver-authored English, for people; never compare it." }
+        "step": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Index of the failing step."
+        },
+        "op": {
+          "type": "string"
+        },
+        "observation": {
+          "type": "string"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exception": {
+          "type": "string",
+          "description": "Exception class name."
+        },
+        "ref": {
+          "type": "string"
+        },
+        "scenario_tz": {
+          "type": "string"
+        },
+        "worker_tz": {
+          "type": "string"
+        },
+        "cmd": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string",
+          "description": "Driver-authored English, for people; never compare it."
+        }
       },
       "additionalProperties": false
     },
     "observations": {
       "description": "One output per scenario step, in step order, so /steps/<i>/... points into step i.",
       "type": "object",
-      "required": ["steps"],
-      "properties": { "steps": { "type": "array", "items": { "$ref": "#/$defs/step_output" } } },
+      "required": [
+        "steps"
+      ],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step_output"
+          }
+        }
+      },
       "additionalProperties": false
     },
     "step_output": {
@@ -430,50 +949,117 @@
     "scenario": {
       "description": "Driver vocabulary v0; scenario.schema.json (U4) is authoritative for the file format. Logical ids: notes #n1, #n2... and cards #c1, #c2... in creation order (a note's cards in template order), across all actors of an actor scenario. Setup sections run in this order: config, presets, decks, notetypes, notes, media_files.",
       "type": "object",
-      "required": ["id", "clock"],
+      "required": [
+        "id",
+        "clock"
+      ],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "description": { "type": "string" },
-        "tags": { "type": "array", "items": { "type": "string" } },
-        "compare": { "description": "Comparison hints for the runner; the driver ignores them." },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "compare": {
+          "description": "Comparison hints for the runner; the driver ignores them."
+        },
         "clock": {
           "type": "object",
-          "required": ["tz", "start"],
+          "required": [
+            "tz",
+            "start"
+          ],
           "properties": {
-            "tz": { "type": "string", "description": "IANA zone; must equal the worker's zone." },
-            "start": { "type": "string", "description": "ISO 8601 date-time in whole seconds: wall time in tz, or with an offset. A wall time inside a DST gap is invalid; a repeated one means its first occurrence." },
-            "mode": { "enum": ["frozen", "step"], "description": "Recorded in the golden. The clock is frozen in both; it moves only through advance and set_clock." }
+            "tz": {
+              "type": "string",
+              "description": "IANA zone; must equal the worker's zone."
+            },
+            "start": {
+              "type": "string",
+              "description": "ISO 8601 date-time in whole seconds: wall time in tz, or with an offset. A wall time inside a DST gap is invalid; a repeated one means its first occurrence."
+            },
+            "mode": {
+              "enum": [
+                "frozen",
+                "step"
+              ],
+              "description": "Recorded in the golden. The clock is frozen in both; it moves only through advance and set_clock."
+            }
           },
           "additionalProperties": false
         },
         "setup": {
           "type": "object",
           "properties": {
-            "config": { "type": "object", "description": "Collection config keys and JSON values (e.g. fsrs, loadBalancerEnabled, rollover), written in sorted key order." },
+            "config": {
+              "type": "object",
+              "description": "Collection config keys and JSON values (e.g. fsrs, loadBalancerEnabled, rollover), written in sorted key order."
+            },
             "presets": {
               "type": "array",
               "description": "Deck option presets. A preset named Default edits the default preset. Options: learn_steps, relearn_steps (durations), graduating_interval_days, easy_interval_days, new_per_day, reviews_per_day, max_interval_days, min_lapse_interval_days, starting_ease, easy_bonus, hard_interval, interval_modifier, lapse_new_interval, leech_threshold, leech_action (suspend|tag_only), bury_new, bury_reviews, bury_interday_learning, desired_retention, fsrs_params.",
-              "items": { "type": "object", "required": ["name"] }
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ]
+              }
             },
             "decks": {
               "type": "array",
               "description": "Deck names ('::' nests) or {name, preset}.",
-              "items": { "anyOf": [{ "type": "string" }, { "type": "object", "required": ["name"] }] }
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ]
+                  }
+                ]
+              }
             },
             "notetypes": {
               "type": "array",
               "description": "{name, kind?: standard|cloze, fields: [names], templates: [{name, front, back}], css?}. Scenarios define their own note types and CSS.",
-              "items": { "type": "object", "required": ["name", "fields", "templates"] }
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "fields",
+                  "templates"
+                ]
+              }
             },
             "notes": {
               "type": "array",
               "description": "{notetype, deck?, fields: [string] | {field: string}, tags?: [string]}, as add_note. Field values and tags are strings: quote numbers, booleans and null.",
-              "items": { "type": "object", "required": ["notetype"] }
+              "items": {
+                "type": "object",
+                "required": [
+                  "notetype"
+                ]
+              }
             },
             "media_files": {
               "type": "array",
               "description": "media-ops.md F3: {name, text} | {name, fill: {size, byte?}} | {name, dir: true}, written into the media folder through the file system after every other section, then stamped with the clock's instant (F12). Names differ after NFC under unicase.",
-              "items": { "type": "object", "required": ["name"] }
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ]
+              }
             }
           },
           "additionalProperties": false
@@ -481,20 +1067,31 @@
         "actors": {
           "type": "array",
           "description": "Actor scenarios (sync-ops.md S2): the clients, each with its own collection; the first runs the setup. Meguri actors meguri, meguri_2...; oracle actors client_a ... client_z. The worker plays every actor except the begin request's caller_actors.",
-          "items": { "$ref": "#/$defs/actor_name" }
+          "items": {
+            "$ref": "#/$defs/actor_name"
+          }
         },
         "server": {
           "type": "object",
           "description": "The scenario's sync server (sync-ops.md S3): clock_offset_secs, the server clock's offset from the scenario clock (default 0).",
-          "properties": { "clock_offset_secs": { "type": "integer" } },
+          "properties": {
+            "clock_offset_secs": {
+              "type": "integer"
+            }
+          },
           "additionalProperties": false
         },
-        "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } }
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        }
       },
       "additionalProperties": false
     },
     "step": {
-      "description": "One key. Ops v0: advance <duration: 20m, 1d, 23h40m; a day is 86400 s>; set_clock <date-time as clock.start>; add_note <note, as setup.notes; output {note, cards}>; answer {card, rating: again|hard|good|easy, time_ms?}; handoff <meguri|oracle> (live scenarios; in a whole run it closes and reopens the collection). observe [<kind> | '<kind>(#ref, ...)' | {<kind>: args}]: ids, timing {days_elapsed, next_day_at, now, utc_offset_secs}, card (cards row: nid as #nN, did/odid as deck names, data parsed), revlog (rows by id, cid as #cN), next_states ({current, again, hard, good, easy}: {kind, ...fields, memory_state?}), fuzz_table {card, pairs: [[card_id, reps]], intervals} -> {intervals, rows: [[card_id, reps, delta...]]} (fuzz when answering a card with that id and review count), net_probe {host, port, timeout_ms?} -> {connected, error}, text {fns, inputs} -> {fn: [output per input]} (pure text functions, observations.md O9; never touches the scenario's collection), cloze {fns, inputs} -> {fn: [output per input]} (pure cloze functions, specs/conformance/cloze-ops.md Z1-Z2: numbers on strings, alone in its request; front, back, only_front, only_back, typing on [text, card] pairs, card an integer 1-65535; never touches the scenario's collection), fsrs_next {param_sets: {name: [0, 17, 19 or 21 numbers]}, inputs: [{id, card_id, reps, s, d, elapsed_days, scheduled_days, dr, params, max_ivl}] (1 to 1,000)} -> {rows: [[again days, again S, again D, hard days, hard S, hard D, good days, good S, good D, easy days, easy S, easy D]]} (the FSRS next states of a stored review card per input, evaluated on a per-worker scratch collection with FSRS on and the load balancer off, the input's lrt placed from the scheduler's next_day_at and the input evaluated again when the day changes meanwhile; never touches the scenario's collection; specs/conformance/float-determinism.md F3, F5), db_dump [{tables}] -> {table: {key: {column: value}}} (observations.md O8). reopen {} (close and reopen the collection). Actor scenarios (specs/conformance/sync-ops.md): actor <name> (the actor that runs the next steps); sync {kind: login|normal|status|full_upload|full_download, credentials?: account|wrong_password (login only; wrong_password is the account's password followed by -wrong)} -> {result} or {error: auth_failed|clock_incorrect|network}; status -> {result: no_changes|normal_sync|full_sync}, the client's sync status check (offline stamps, the answer remembered 300 s, then meta), changing nothing; net_fault {kind: reset, direction: to_client|to_server} | {kind: clear}; converge {} -> {differences, dump}. Model ops (specs/conformance/model-ops.md): observe legacy_json {notetypes?, decks?, presets?: [name]} -> {<list>: {<name>: schema-11 object}}, read from the collection file; observe blob_decode {notetypes?, decks?, presets?: [name]} -> {<list>: {<name>: ok|invalid_blob}}, whether the record's protobuf blobs decode (invalid_blob: Anki's protobuf decode error; any other read failure is anki_error), read from the collection file; legacy_update {notetype|deck|preset: name, patch} merge-patches (RFC 7396) that object and saves it, rejection invalid_json; suspend {cards} with Anki's suspend operation. export {format: apkg, name: <file>.apkg, legacy: true} -> {notes} writes the whole collection as a legacy package (meta version 2, schema-11 collection.anki21; scheduling and presets included, no media) to that file in the session directory; observe package_col {name, columns: [ver|conf|models|decks|dconf|tags]} -> {<column>: value}, the col row of that package's collection entry read with SQLite (never opened by Anki), ver an integer and the JSON columns parsed (model-ops.md L6, L7). Storage ops (specs/conformance/storage-ops.md): open {fixture: <path under conformance/fixtures/>} replaces the session's collection with a copy of that file and opens it with Anki's collection open, upgrade included; output {}, rejections file_too_old|file_too_new (v1_scheduler is Meguri's only); only in scenarios with no setup whose first step is open, and after a rejection only another open may follow; observe schema_objects -> [{type, name, tbl_name, sql}] for every sqlite_master row of the main database, sorted by type then name, sql with -- comments removed and white space runs collapsed to one space, then trimmed (null when SQLite stores none). Record ops (specs/conformance/record-ops.md): db_exec {sql, params?} -> {rows: [[value...]]}, one statement outside any op, values by storage class with BLOBs as {sha256}; edit_note {note, fields?, tags?} saved with the editor's note update; delete_notes {notes}, missing notes skipped; set_config {key, value, undoable?} through the config API, without an undo entry unless undoable is true. Undo ops (specs/conformance/undo-ops.md V1-V4): undo {} and redo {} apply the top step of the undo or redo history, output none, rejections nothing_to_undo and nothing_to_redo (changed_externally is Meguri's only; the oracle never records it); set_config with undoable: true and remove_config {key} (the key removed through the config API, a missing key changing nothing) record an Update Config step when they write; observe undo_status -> {undo, redo}: the V4 step id an undo and a redo would apply now, or null, the backend's step name mapped to its id through the backend's own translations (a name V4 does not list is internal_error). Maintenance (specs/conformance/collection-check.md K10): check_db {} -> {<K5 kind>: count} from Anki's Check Database, rejection corrupt. Render (specs/conformance/render-ops.md Q1, Q4): observe template {notetype?: {name, kind?: standard|cloze, fields}, cases: [{front, back?, ord?, name?, fields?, tags?} | {card, front, back?}]} -> [{question, answer, empty} | {error: {kind, side}}], one result per case: the template engine's output for the given template texts on a note not yet added (new-note cases: a card at ordinal ord, deck (Deck), flag0, id 0) or on an existing card with its real note, note type, deck, flags and id (card cases); FrontSide on the answer side is the question output; blank questions give answer null and empty true; error kinds unclosed_conditional|unopened_conditional|mismatched_conditional|unknown_field|unknown_conditional and side question|answer; no audio extraction, LaTeX or message text; never changes the collection; at most one template request per observe step; observe render_status or 'render_status(#cN, ...)' -> {#cN: {ord, status: ok|empty|template_error} | null} (Q4): each card rendered for review from its stored templates, never the browser's, the status the first of: a question-side error (template_error), a blank question (empty), an answer-side error (template_error), else ok; no text, length, error kind or side; null for a card that no longer exists; never changes the collection. Notes (specs/conformance/note-ops.md N4): observe fields_check {cases: [{notetype, fields} | {note, fields?}]} -> [{state} | {state: duplicate, duplicates: [#nN...]}], one result per case: the field check of specs/notes/field-check.md on an unsaved draft, a new note of the note type with exactly that stored name (fields as add_note sets them) or the stored note with fields replaced as edit_note replaces them; state normal|empty|duplicate|missing_cloze|notetype_not_cloze|field_not_cloze; duplicates only with duplicate: the notes of field-check.md K4 (other notes of the draft's note type whose stored first field matches it), in ascending note id order; malformed requests, unknown field names and too many field values are invalid_scenario, an unknown note type name or note (also a deleted one) unknown_ref; never changes the collection; at most one fields_check request per observe step. Search (specs/conformance/search-ops.md S1-S3): observe search [{query, kind?: cards|notes}] -> one output per request in order: {ids: [#cN or #nN by number, then the real ids of rows no logical id names, ascending]} from Anki's card or note search with no order, or an error {error, provided?, context?} (specs/search/errors.md E1, E2; invalid_regex, and search_failed for a database error while the search runs); observe canonical_search [text] -> one output per text: {text: <Anki's normalized search text>} or a parse error; it never reads or changes the collection. Search errors carry no message text; any other Anki failure is anki_error. Tag ops (specs/conformance/tag-ops.md): add_note_tags {notes, tags: <text>} -> {count} and remove_note_tags {notes, tags: <text>} -> {count} with the collection's bulk tag add and removal on those notes; delete_tags {tags: <text>} -> {count} removes the tags and their descendants from every note and from the tag list; rename_tag {from, to} -> {count}, rejection invalid_name; reparent_tags {tags: [name], parent: <name or empty for the top level>} -> {count}; clear_unused_tags {} -> {count} of tag rows removed; set_tag_collapsed {tags: [name], collapsed} sets each name in order, no output; set_flag {cards, flag} -> {count} of cards written, rejection invalid_flag; observe tag_tree -> [{name, collapsed, children}] from the collection's tag tree. Browser config (specs/conformance/browser-config-ops.md): browser_config_set {key, value} sets one of the 22 browser keys to a whole value of its shape (boolean, string, array of strings or object of strings) with the collection's typed boolean or string setter where Anki has one, else the config setter, without an undo entry; observe browser_config -> {key: value} for the 23 keys: Anki's typed boolean and string reads with their defaults, and for the column, sort, savedFilters and flagLabels keys the stored JSON value or the browser's default when the key is unreadable. Note types (specs/conformance/notetype-ops.md): add_note and these ops name note types by their exact stored names (unknown_ref otherwise); add_notetype {name, kind?: standard|cloze, fields, templates: [{name, front?, back?}], css?} -> {name}, the stored name, after a checked save; add_stock_notetype {kind: basic|basic_and_reversed|basic_optional_reversed|basic_typing|cloze|image_occlusion, name?} -> {name}; clone_notetype {notetype, name?} -> {name}, name '<notetype> copy' when missing; update_notetype {notetype, edits, skip_checks?} -> {name}: edits (one key each: rename, css, sort_field, add_field, remove_field, rename_field, move_field, field_options, add_template, remove_template, rename_template, move_template, template) applied in order to a draft that keeps field and template identity, saved once, without the template checks when skip_checks; these four record {error: invalid_notetype|template_parse_error|duplicate_front|no_front_field|unknown_field|missing_cloze} when the save refuses, nothing changed; ensure_io_notetype {} -> {name} of the Image Occlusion note type, Anki's stock one added when the collection has none; observe notetype_structure or {notetype_structure: {notetypes: [name]}} -> {<name>: {kind, original_stock_kind, original_id, sort_field, fields, templates}}, read from the collection file, without template text, CSS, LaTeX or ids. Deck ops (specs/conformance/deck-ops.md; decks and presets named by their stored human names): add_deck {name} -> {name} creates a deck from a typed name or returns the existing one, rejections filtered_parent|too_deep; rename_deck {deck, name} -> {name}, rejections filtered_parent|too_deep (under_descendant is Meguri's only); reparent_decks {decks, parent: <name or empty for the top level>} -> {count}, rejection filtered_parent; delete_decks {decks} -> {count} of cards removed; set_deck_collapsed {decks, scope: study|browser, collapsed}, one collapse per deck in order; set_current_deck {deck}; add_preset {name}, clone_preset {preset, name} and rename_preset {preset, name} through the deck-config storage calls, never the deck options save; remove_preset {preset, fallback}, confirmed, moves the decks of the removed preset or of a missing one to fallback, rejection default_preset; set_deck_preset {deck, preset, subtree?}, rejection filtered_deck; observe decks -> {<name>: {id, filtered, config_id, study_collapsed, browser_collapsed, mtime_secs, usn}}; observe deck_tree -> [{name, children}] without counts. add_note's deck may name any deck the collection holds. Media (specs/conformance/media-ops.md): the media folder is collection.media beside the collection file, the trash Anki's media.trash beside the folder. media_outside [{name, text | fill: {size, byte?}} | {name, dir: true} | {name, remove: true}] changes the folder in order through the file system, bypassing Anki, then stamps every entry it wrote and then the folder with the clock's instant in whole seconds, as setup.media_files does; a name that is a case or NFC variant (unicase) of another entry present, a remove of an entry not present, a file over a subdirectory and a subdirectory over a file are invalid_scenario. add_media {name, text | fill} -> {name: the stored name} through Anki's add-media-file call; no rejection is recorded (invalid_name and ignored_name are Meguri's only), so a name Anki cannot store is anki_error. trash_media {names} through Anki's trash call; names are distinct and each a regular file present under exactly that name, else invalid_scenario. restore_media_trash {} and empty_media_trash {} through Anki's restore-trash and empty-trash calls. observe media_dir -> {<name>: {sha1, size} | {dir: true}}, the folder's entries as listed; media_trash -> [{name, sha1, size}] sorted by UTF-8 name, then sha1, [] when there is no trash folder; media_pending -> {<name>: <sha1> | null}: Anki's own registration of folder changes (the first step of a media sync), with the folder-change marker reset so that it compares every file, then the entries pending for the next media sync, null for a deletion.",
+      "description": "One key. Ops v0: advance <duration: 20m, 1d, 23h40m; a day is 86400 s>; set_clock <date-time as clock.start>; add_note <note, as setup.notes; output {note, cards}>; answer {card, rating: again|hard|good|easy, time_ms?}; handoff <meguri|oracle> (live scenarios; in a whole run it closes and reopens the collection). observe [<kind> | '<kind>(#ref, ...)' | {<kind>: args}]: ids, timing {days_elapsed, next_day_at, now, utc_offset_secs}, card (cards row: nid as #nN, did/odid as deck names, data parsed), revlog (rows by id, cid as #cN), next_states ({current, again, hard, good, easy}: {kind, ...fields, memory_state?}), fuzz_table {card, pairs: [[card_id, reps]], intervals} -> {intervals, rows: [[card_id, reps, delta...]]} (fuzz when answering a card with that id and review count), net_probe {host, port, timeout_ms?} -> {connected, error}, text {fns, inputs} -> {fn: [output per input]} (pure text functions, observations.md O9; never touches the scenario's collection), cloze {fns, inputs} -> {fn: [output per input]} (pure cloze functions, specs/conformance/cloze-ops.md Z1-Z2: numbers on strings, alone in its request; front, back, only_front, only_back, typing on [text, card] pairs, card an integer 1-65535; never touches the scenario's collection), fsrs_next {param_sets: {name: [0, 17, 19 or 21 numbers]}, inputs: [{id, card_id, reps, s, d, elapsed_days, scheduled_days, dr, params, max_ivl}] (1 to 1,000)} -> {rows: [[again days, again S, again D, hard days, hard S, hard D, good days, good S, good D, easy days, easy S, easy D]]} (the FSRS next states of a stored review card per input, evaluated on a per-worker scratch collection with FSRS on and the load balancer off, the input's lrt placed from the scheduler's next_day_at and the input evaluated again when the day changes meanwhile; never touches the scenario's collection; specs/conformance/float-determinism.md F3, F5), db_dump [{tables?, raw?}] -> {table: {key: {column: value}}} (observations.md O8; raw true keeps notes.guid and digests BLOBs over their stored bytes, as sync-ops.md S7.2's raw dump, specs/conformance/normalized-dump.md N4). reopen {} (close and reopen the collection). adopt {} -> {notes, cards}: the collection's notes, then its cards, that have no logical id get the next #nN and #cN in ascending id order (normalized-dump.md N5; not in actor scenarios). Actor scenarios (specs/conformance/sync-ops.md): actor <name> (the actor that runs the next steps); sync {kind: login|normal|status|full_upload|full_download, credentials?: account|wrong_password (login only; wrong_password is the account's password followed by -wrong)} -> {result} or {error: auth_failed|clock_incorrect|network}; status -> {result: no_changes|normal_sync|full_sync}, the client's sync status check (offline stamps, the answer remembered 300 s, then meta), changing nothing; net_fault {kind: reset, direction: to_client|to_server} | {kind: clear}; converge {} -> {differences, dump}. Model ops (specs/conformance/model-ops.md): observe legacy_json {notetypes?, decks?, presets?: [name]} -> {<list>: {<name>: schema-11 object}}, read from the collection file; observe blob_decode {notetypes?, decks?, presets?: [name]} -> {<list>: {<name>: ok|invalid_blob}}, whether the record's protobuf blobs decode (invalid_blob: Anki's protobuf decode error; any other read failure is anki_error), read from the collection file; legacy_update {notetype|deck|preset: name, patch} merge-patches (RFC 7396) that object and saves it, rejection invalid_json; suspend {cards} with Anki's suspend operation. export {format: apkg, name: <file>.apkg, legacy: true} -> {notes} writes the whole collection as a legacy package (meta version 2, schema-11 collection.anki21; scheduling and presets included, no media) to that file in the session directory; observe package_col {name, columns: [ver|conf|models|decks|dconf|tags]} -> {<column>: value}, the col row of that package's collection entry read with SQLite (never opened by Anki), ver an integer and the JSON columns parsed (model-ops.md L6, L7). Storage ops (specs/conformance/storage-ops.md): open {fixture: <path under conformance/fixtures/>} replaces the session's collection with a copy of that file and opens it with Anki's collection open, upgrade included; output {}, rejections file_too_old|file_too_new (v1_scheduler is Meguri's only); only in scenarios with no setup whose first step is open, and after a rejection only another open may follow; observe schema_objects -> [{type, name, tbl_name, sql}] for every sqlite_master row of the main database, sorted by type then name, sql with -- comments removed and white space runs collapsed to one space, then trimmed (null when SQLite stores none). Record ops (specs/conformance/record-ops.md): db_exec {sql, params?} -> {rows: [[value...]]}, one statement outside any op, values by storage class with BLOBs as {sha256}; edit_note {note, fields?, tags?} saved with the editor's note update; delete_notes {notes}, missing notes skipped; set_config {key, value, undoable?} through the config API, without an undo entry unless undoable is true. Undo ops (specs/conformance/undo-ops.md V1-V4): undo {} and redo {} apply the top step of the undo or redo history, output none, rejections nothing_to_undo and nothing_to_redo (changed_externally is Meguri's only; the oracle never records it); set_config with undoable: true and remove_config {key} (the key removed through the config API, a missing key changing nothing) record an Update Config step when they write; observe undo_status -> {undo, redo}: the V4 step id an undo and a redo would apply now, or null, the backend's step name mapped to its id through the backend's own translations (a name V4 does not list is internal_error). Maintenance (specs/conformance/collection-check.md K10): check_db {} -> {<K5 kind>: count} from Anki's Check Database, rejection corrupt. Render (specs/conformance/render-ops.md Q1, Q4): observe template {notetype?: {name, kind?: standard|cloze, fields}, cases: [{front, back?, ord?, name?, fields?, tags?} | {card, front, back?}]} -> [{question, answer, empty} | {error: {kind, side}}], one result per case: the template engine's output for the given template texts on a note not yet added (new-note cases: a card at ordinal ord, deck (Deck), flag0, id 0) or on an existing card with its real note, note type, deck, flags and id (card cases); FrontSide on the answer side is the question output; blank questions give answer null and empty true; error kinds unclosed_conditional|unopened_conditional|mismatched_conditional|unknown_field|unknown_conditional and side question|answer; no audio extraction, LaTeX or message text; never changes the collection; at most one template request per observe step; observe render_status or 'render_status(#cN, ...)' -> {#cN: {ord, status: ok|empty|template_error} | null} (Q4): each card rendered for review from its stored templates, never the browser's, the status the first of: a question-side error (template_error), a blank question (empty), an answer-side error (template_error), else ok; no text, length, error kind or side; null for a card that no longer exists; never changes the collection. Notes (specs/conformance/note-ops.md N4): observe fields_check {cases: [{notetype, fields} | {note, fields?}]} -> [{state} | {state: duplicate, duplicates: [#nN...]}], one result per case: the field check of specs/notes/field-check.md on an unsaved draft, a new note of the note type with exactly that stored name (fields as add_note sets them) or the stored note with fields replaced as edit_note replaces them; state normal|empty|duplicate|missing_cloze|notetype_not_cloze|field_not_cloze; duplicates only with duplicate: the notes of field-check.md K4 (other notes of the draft's note type whose stored first field matches it), in ascending note id order; malformed requests, unknown field names and too many field values are invalid_scenario, an unknown note type name or note (also a deleted one) unknown_ref; never changes the collection; at most one fields_check request per observe step. Search (specs/conformance/search-ops.md S1-S3): observe search [{query, kind?: cards|notes}] -> one output per request in order: {ids: [#cN or #nN by number, then the real ids of rows no logical id names, ascending]} from Anki's card or note search with no order, or an error {error, provided?, context?} (specs/search/errors.md E1, E2; invalid_regex, and search_failed for a database error while the search runs); observe canonical_search [text] -> one output per text: {text: <Anki's normalized search text>} or a parse error; it never reads or changes the collection. Search errors carry no message text; any other Anki failure is anki_error. Tag ops (specs/conformance/tag-ops.md): add_note_tags {notes, tags: <text>} -> {count} and remove_note_tags {notes, tags: <text>} -> {count} with the collection's bulk tag add and removal on those notes; delete_tags {tags: <text>} -> {count} removes the tags and their descendants from every note and from the tag list; rename_tag {from, to} -> {count}, rejection invalid_name; reparent_tags {tags: [name], parent: <name or empty for the top level>} -> {count}; clear_unused_tags {} -> {count} of tag rows removed; set_tag_collapsed {tags: [name], collapsed} sets each name in order, no output; set_flag {cards, flag} -> {count} of cards written, rejection invalid_flag; observe tag_tree -> [{name, collapsed, children}] from the collection's tag tree. Browser config (specs/conformance/browser-config-ops.md): browser_config_set {key, value} sets one of the 22 browser keys to a whole value of its shape (boolean, string, array of strings or object of strings) with the collection's typed boolean or string setter where Anki has one, else the config setter, without an undo entry; observe browser_config -> {key: value} for the 23 keys: Anki's typed boolean and string reads with their defaults, and for the column, sort, savedFilters and flagLabels keys the stored JSON value or the browser's default when the key is unreadable. Note types (specs/conformance/notetype-ops.md): add_note and these ops name note types by their exact stored names (unknown_ref otherwise); add_notetype {name, kind?: standard|cloze, fields, templates: [{name, front?, back?}], css?} -> {name}, the stored name, after a checked save; add_stock_notetype {kind: basic|basic_and_reversed|basic_optional_reversed|basic_typing|cloze|image_occlusion, name?} -> {name}; clone_notetype {notetype, name?} -> {name}, name '<notetype> copy' when missing; update_notetype {notetype, edits, skip_checks?} -> {name}: edits (one key each: rename, css, sort_field, add_field, remove_field, rename_field, move_field, field_options, add_template, remove_template, rename_template, move_template, template) applied in order to a draft that keeps field and template identity, saved once, without the template checks when skip_checks; these four record {error: invalid_notetype|template_parse_error|duplicate_front|no_front_field|unknown_field|missing_cloze} when the save refuses, nothing changed; ensure_io_notetype {} -> {name} of the Image Occlusion note type, Anki's stock one added when the collection has none; observe notetype_structure or {notetype_structure: {notetypes: [name]}} -> {<name>: {kind, original_stock_kind, original_id, sort_field, fields, templates}}, read from the collection file, without template text, CSS, LaTeX or ids. Deck ops (specs/conformance/deck-ops.md; decks and presets named by their stored human names): add_deck {name} -> {name} creates a deck from a typed name or returns the existing one, rejections filtered_parent|too_deep; rename_deck {deck, name} -> {name}, rejections filtered_parent|too_deep (under_descendant is Meguri's only); reparent_decks {decks, parent: <name or empty for the top level>} -> {count}, rejection filtered_parent; delete_decks {decks} -> {count} of cards removed; set_deck_collapsed {decks, scope: study|browser, collapsed}, one collapse per deck in order; set_current_deck {deck}; add_preset {name}, clone_preset {preset, name} and rename_preset {preset, name} through the deck-config storage calls, never the deck options save; remove_preset {preset, fallback}, confirmed, moves the decks of the removed preset or of a missing one to fallback, rejection default_preset; set_deck_preset {deck, preset, subtree?}, rejection filtered_deck; observe decks -> {<name>: {id, filtered, config_id, study_collapsed, browser_collapsed, mtime_secs, usn}}; observe deck_tree -> [{name, children}] without counts. add_note's deck may name any deck the collection holds. Media (specs/conformance/media-ops.md): the media folder is collection.media beside the collection file, the trash Anki's media.trash beside the folder. media_outside [{name, text | fill: {size, byte?}} | {name, dir: true} | {name, remove: true}] changes the folder in order through the file system, bypassing Anki, then stamps every entry it wrote and then the folder with the clock's instant in whole seconds, as setup.media_files does; a name that is a case or NFC variant (unicase) of another entry present, a remove of an entry not present, a file over a subdirectory and a subdirectory over a file are invalid_scenario. add_media {name, text | fill} -> {name: the stored name} through Anki's add-media-file call; no rejection is recorded (invalid_name and ignored_name are Meguri's only), so a name Anki cannot store is anki_error. trash_media {names} through Anki's trash call; names are distinct and each a regular file present under exactly that name, else invalid_scenario. restore_media_trash {} and empty_media_trash {} through Anki's restore-trash and empty-trash calls. observe media_dir -> {<name>: {sha1, size} | {dir: true}}, the folder's entries as listed; media_trash -> [{name, sha1, size}] sorted by UTF-8 name, then sha1, [] when there is no trash folder; media_pending -> {<name>: <sha1> | null}: Anki's own registration of folder changes (the first step of a media sync), with the folder-change marker reset so that it compares every file, then the entries pending for the next media sync, null for a deletion.",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1

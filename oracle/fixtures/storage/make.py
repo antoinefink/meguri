@@ -640,12 +640,12 @@ def _pieces(blob: bytes, n: int) -> set:
     return {blob[i : i + n] for i in range(len(blob) - n + 1)}
 
 
-def no_stock_left(paths, texts) -> None:
+def no_stock_left(paths, texts, own_text=OWN_TEXT) -> None:
     """Fail when any file still holds a piece of stock text anywhere in its
     bytes, free pages and unused space inside pages included (U16). Pieces that
-    the standard content's own note types also hold ({{Front}}, {{cloze:Text}})
-    are not Anki's and are skipped."""
-    own = b"\0".join(e for t in OWN_TEXT for e in _encodings(t))
+    the content's own note types also hold (own_text: {{Front}}, {{cloze:Text}}
+    in the standard content) are not Anki's and are skipped."""
+    own = b"\0".join(e for t in own_text for e in _encodings(t))
     needles = {}
     for label, text in texts:
         for enc in _encodings(text):
@@ -665,9 +665,10 @@ def no_stock_left(paths, texts) -> None:
         raise SystemExit("stock note type text left in a fixture:\n  " + "\n  ".join(failed))
 
 
-def stock_check(paths) -> None:
+def stock_check(paths, own_text=OWN_TEXT) -> None:
     """(26.09.3 only) no_stock_left for finished fixtures, against the stock
-    note types this release creates, read from a scratch collection."""
+    note types this release creates, read from a scratch collection. Other
+    makers (oracle/fixtures/preservation) pass their own note types' text."""
     work = tempfile.mkdtemp(prefix="stock-")
     col = open_col(os.path.join(work, "collection.anki2"))
     texts = stock_texts(col.models.all())
@@ -675,7 +676,7 @@ def stock_check(paths) -> None:
     shutil.rmtree(work)
     if not texts:
         raise SystemExit("this release created no stock note type")
-    no_stock_left(paths, texts)
+    no_stock_left(paths, texts, own_text)
     print(json.dumps({"stock_check": [os.path.basename(p) for p in paths]}))
 
 

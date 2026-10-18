@@ -1,0 +1,37 @@
+# R583, R2017 (specs/conformance/normalized-dump.md N10, N11.2): every card
+# of the kitchen-sink fixture rendered with its stored templates, which use
+# add-on filters (sparkle, mathpretty), TTS, furigana, kana, type-in and hint
+# filters on fields holding MathJax, LaTeX, TTS and sound tags. Rendering
+# changes nothing: the raw dump after equals the one before. The template
+# texts below are the fixture's (N9.4); U62 adds the stored-template render.
+id: preservation/render/every-card
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+steps:
+  - open: {fixture: preservation/kitchen-sink.anki2}
+  - adopt: {}
+  - observe:
+      - {db_dump: {raw: true}}
+  - observe:
+      - template:
+          cases:
+            - {card: "#c1", front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'}
+            - {card: "#c2", front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'}
+            - {card: "#c3", front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'}
+            - {card: "#c4", front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'}
+            - {card: "#c5", front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'}
+            - {card: "#c6", front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'}
+            - {card: "#c7", front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'}
+            - {card: "#c8", front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'}
+            - {card: "#c9", front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'}
+            - {card: "#c10", front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'}
+            - {card: "#c11", front: '<div class="word">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}', back: '{{FrontSide}}<hr id=answer>{{Meaning}}<div class="reading">{{furigana:Reading}}</div>{{Audio}}'}
+            - {card: "#c12", front: '{{#Meaning}}<div class="meaning">{{Meaning}}</div>{{/Meaning}}{{type:Word}}', back: '{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class="fx">{{sparkle:Word}}</div>'}
+            - {card: "#c13", front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{hint:Extra}}"}
+            - {card: "#c14", front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{hint:Extra}}"}
+            - {card: "#c15", front: "{{Front}}", back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'}
+            - {card: "#c16", front: "{{Front}}", back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'}
+            - {card: "#c17", front: "{{Front}}", back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'}
+            - {card: "#c18", front: "{{Front}}", back: '{{FrontSide}}<hr id=answer>{{Back}}<div class="src">{{mathpretty:Source}}</div>'}
+            - {card: "#c19", front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{hint:Extra}}"}
+  - observe:
+      - {db_dump: {raw: true}}

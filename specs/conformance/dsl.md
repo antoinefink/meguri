@@ -184,6 +184,7 @@ Ops marked *draft* have no driver support yet. Their arguments are the v0 shape;
 | `empty_media_trash` | `{}` | none | stable (`media-ops.md` F8) |
 | `db_exec` | `{sql, params?: [...]}`: one raw SQL statement on the schema-18 tables, to prepare stored states and read rows | `{rows: [[...], ...]}`, `[]` when it returns none | stable (`record-ops.md` W1) |
 | `reopen` | `{}`: close the collection and open it again from its file | none | stable (`sync-ops.md` S6) |
+| `adopt` | `{}`: the collection's notes and cards that have no logical id get the next `#nN` and `#cN`, in ascending id order; not in actor scenarios | `{notes, cards}`: how many got one | stable (`normalized-dump.md` N5) |
 | `actor` | a name from `actors`: the actor that runs the next steps | none | stable (actor scenarios, `sync-ops.md` S2.3) |
 | `sync` | `{kind: login \| normal \| status \| full_upload \| full_download, credentials?: account \| wrong_password}`; `credentials` only with `login` | `{result: <result>}`: `ok`, for `normal` one of `no_changes`, `full_sync`, `full_upload`, `full_download`, for `status` one of `no_changes`, `normal_sync`, `full_sync`; rejections `auth_failed`, `clock_incorrect`, `network` | stable (actor scenarios, `sync-ops.md` S4) |
 | `net_fault` | `{kind: reset, direction: to_client \| to_server}` or `{kind: clear}` | none | stable (actor scenarios, `sync-ops.md` S5) |

@@ -1,0 +1,97 @@
+# AE83, R1483, R2017 (specs/conformance/normalized-dump.md N10): a collection
+# holding two filtered decks, one rescheduling and one previewing, their cards
+# with odid and odue, and review-log type 3 entries from an early review and a
+# preview, travels client_a -> server -> meguri. Meguri edits a note no
+# filtered deck holds and syncs incrementally; client_a receives the edit.
+# converge's fresh client downloads the server's collection: every party
+# holds the filtered decks, their cards and the review log unchanged.
+# Filtered decks are inserted the way model/proto/deck-filtered-bytes does
+# and their cards moved in as Anki's build moves them (positions from
+# -100000); the clock advances before each actor's block (sync-ops.md S4.3).
+id: preservation/sync/filtered-deck
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+actors: [client_a, meguri]
+setup:
+  config: {fsrs: true, loadBalancerEnabled: false}
+  presets:
+    - {name: Steady, learn_steps: [1m, 10m], relearn_steps: [10m], desired_retention: 0.9}
+  decks:
+    - {name: Home, preset: Steady}
+    - {name: Other, preset: Steady}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { font-family: serif; }\n"
+  notes:
+    - {notetype: Pair, deck: Home, fields: [sun, sol]}
+    - {notetype: Pair, deck: Home, fields: [moon, luna]}
+    - {notetype: Pair, deck: Home, fields: [star, estrella]}
+    - {notetype: Pair, deck: Home, fields: [sky, cielo]}
+    - {notetype: Pair, deck: Other, fields: [river, río]}
+steps:
+  # client_a: three cards become review cards, then two filtered decks.
+  - answer: {card: "#c1", rating: good, time_ms: 3000}
+  - answer: {card: "#c2", rating: good, time_ms: 3000}
+  - answer: {card: "#c3", rating: easy, time_ms: 2000}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good, time_ms: 2500}
+  - answer: {card: "#c2", rating: good, time_ms: 2500}
+  - advance: 1d
+  - db_exec:
+      sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1894788600000, 'Cram', 1894788600, -1, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c'), (1894788600001, 'Preview', 1894788600, -1, X'08011001', X'12150801120c0a0669733a6475651032180628d804383c')"
+  - legacy_update:
+      deck: Cram
+      patch:
+        collapsed: false
+        browserCollapsed: false
+        resched: true
+        terms: [["deck:Home is:review", 50, 6], ["deck:Home prop:ivl>=3", 10, 2]]
+        delays: [1.5, 10.0]
+        previewDelay: 10
+        previewAgainSecs: 60
+        previewHardSecs: 600
+        previewGoodSecs: 0
+  - legacy_update:
+      deck: Preview
+      patch:
+        collapsed: false
+        browserCollapsed: false
+        resched: false
+        terms: [["deck:Home is:new", 100, 5]]
+        delays: null
+        previewDelay: 0
+        previewAgainSecs: 60
+        previewHardSecs: 600
+        previewGoodSecs: 0
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894788600000, odue = due, due = -100000, mod = 1894788600, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 0)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894788600000, odue = due, due = -99999, mod = 1894788600, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 2)"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, did = 1894788600001, odue = due, due = -100000, queue = 2, mod = 1894788600, usn = -1 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 3)"}
+  - answer: {card: "#c3", rating: good, time_ms: 1800}
+  - answer: {card: "#c4", rating: again, time_ms: 5000}
+  - observe:
+      - {db_dump: {tables: [decks, cards, revlog]}}
+  - advance: 1m
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_upload}
+  # meguri: download, edit the note in Other, sync incrementally.
+  - advance: 1m
+  - actor: meguri
+  - sync: {kind: login}
+  - sync: {kind: normal}
+  - sync: {kind: full_download}
+  - observe:
+      - {db_dump: {tables: [decks, cards, revlog]}}
+  - advance: 1m
+  - edit_note: {note: "#n5", fields: [river, "río; arroyo"]}
+  - sync: {kind: normal}
+  - observe:
+      - {db_dump: {tables: [decks, cards, revlog]}}
+  # client_a receives the edit; every party ends with the same collection.
+  - advance: 1m
+  - actor: client_a
+  - sync: {kind: normal}
+  - observe:
+      - {db_dump: {tables: [decks, cards, revlog, notes]}}
+  - converge: {}

@@ -722,8 +722,8 @@ h1b8a7b774a45,python,tag,sched,unclassified,,,open
 h1f57b66e6c57,python,tag,sched,unclassified,,,open
 h2112a6880d74,python,tag,sched,unclassified,,,open
 h25bc326d314f,python,tag,sched,unclassified,,,open
-h381d4b819a8e,python,tag,sched,unclassified,,,open
-h3ec3f77f5c5c,python,tag,sched,unclassified,,,open
+h381d4b819a8e,python,tag,sched,preservation-only,Learning state inside a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
+h3ec3f77f5c5c,python,tag,sched,preservation-only,Previewing in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 h5566e8764422,python,tag,sched,unclassified,,,open
 h55746f87d38f,python,tag,sched,unclassified,,,open
 h56c0cea0f0c6,python,tag,sched,unclassified,,,open
@@ -746,7 +746,7 @@ hdf5598f4cd0f,python,tag,sched,unclassified,,,open
 he3a4a3e5014c,python,tag,sched,unclassified,,,open
 head34b2562fb,python,tag,sched,unclassified,,,open
 hee69ed088c05,python,tag,sched,unclassified,,,open
-hf03d0a912671,python,tag,sched,unclassified,,,open
+hf03d0a912671,python,tag,sched,preservation-only,Reviewing early in a filtered deck is out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 hf248f368b2b9,python,tag,sched,unclassified,,,open
 hf44d25b35e71,python,tag,sched,unclassified,,,open
 hf76a58bb5a76,python,tag,sched,unclassified,,,open
@@ -815,7 +815,7 @@ h72885e1b6734,rust,tag,sched,unclassified,,,open
 h72fe93fb7887,rust,supplementary,sched,unclassified,,,open
 h74c71d98d02e,rust,tag,sched,unclassified,,,open
 h77ff41ec7a24,rust,tag,sched,unclassified,,,open
-h78e12bdba938,rust,tag,sched,unclassified,,,open
+h78e12bdba938,rust,tag,sched,preservation-only,Building filtered decks is out of scope; existing ones and their cards are only preserved,preservation/sync/filtered-deck,done
 h78eed3fe65c6,rust,tag,sched,unclassified,,,open
 h7ae0194021c8,rust,tag,sched,unclassified,,,open
 h7b1a4d17232a,rust,tag,sched,unclassified,,,open
@@ -847,7 +847,7 @@ hb7be1ced7f3a,rust,tag,sched,unclassified,,,open
 hb8dcf303d0e0,rust,tag,sched,unclassified,,,open
 hbafc4dc77cce,rust,tag,sched,unclassified,,,open
 hbc3d71afcb34,rust,tag,sched,unclassified,,,open
-hc05411e145f1,rust,tag,sched,unclassified,,,open
+hc05411e145f1,rust,tag,sched,preservation-only,Preview states in a filtered deck are out of scope; the deck and its cards are only preserved,preservation/sync/filtered-deck,done
 hc3bd9890e06a,rust,tag,sched,unclassified,,,open
 hc67d7d3b1875,rust,tag,sched,unclassified,,,open
 hc96dda7dd94f,rust,tag,sched,unclassified,,,open

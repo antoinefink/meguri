@@ -1,0 +1,2084 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_dump": {
+          "cards": {
+            "1893488400000": {
+              "data": "{\"pos\":1,\"s\":13.5448,\"d\":3.628,\"dr\":0.92,\"decay\":0.131,\"lrt\":1893834000,\"cd\":\"{\\\"streak\\\":3,\\\"v\\\":\\\"a\\\"}\"}",
+              "did": 1894093200000,
+              "due": -100000,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1893488400000,
+              "ivl": 10,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894266000,
+              "nid": 1893488400000,
+              "odid": 1893488400001,
+              "odue": 14,
+              "ord": 0,
+              "queue": 2,
+              "reps": 3,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400001": {
+              "data": "{}",
+              "did": 1893488400001,
+              "due": 1,
+              "factor": 0,
+              "flags": 1,
+              "id": 1893488400001,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894266000,
+              "nid": 1893488400000,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400002": {
+              "data": "{\"pos\":2,\"s\":0.9285,\"d\":7.313,\"dr\":0.92,\"decay\":0.131,\"lrt\":1893834600}",
+              "did": 1893488400001,
+              "due": 5,
+              "factor": 2300,
+              "flags": 0,
+              "id": 1893488400002,
+              "ivl": 1,
+              "lapses": 1,
+              "left": 0,
+              "mod": 1893834600,
+              "nid": 1893488400001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 4,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400003": {
+              "data": "{}",
+              "did": 1893488400001,
+              "due": 2,
+              "factor": 0,
+              "flags": 7,
+              "id": 1893488400003,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894266000,
+              "nid": 1893488400001,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400004": {
+              "data": "{\"pos\":3,\"s\":8.3372,\"d\":5.491,\"dr\":0.92,\"decay\":0.131,\"lrt\":1893834000}",
+              "did": 1894093200000,
+              "due": -99999,
+              "factor": 2350,
+              "flags": 0,
+              "id": 1893488400004,
+              "ivl": 4,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894093200,
+              "nid": 1893488400002,
+              "odid": 1893488400001,
+              "odue": 8,
+              "ord": 0,
+              "queue": 2,
+              "reps": 3,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400005": {
+              "data": "{\"cd\":\"{\\\"seen\\\":true}\"}",
+              "did": 1893488400001,
+              "due": 3,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400005,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894266000,
+              "nid": 1893488400002,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400006": {
+              "data": "{\"pos\":4,\"s\":35.7406,\"d\":1.753,\"dr\":0.92,\"decay\":0.131,\"lrt\":1894093200}",
+              "did": 1893488400001,
+              "due": 36,
+              "factor": 2650,
+              "flags": 0,
+              "id": 1893488400006,
+              "ivl": 29,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894093200,
+              "nid": 1893488400003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 4,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400007": {
+              "data": "{}",
+              "did": 1893488400001,
+              "due": 4,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400007,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893488400,
+              "nid": 1893488400003,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400008": {
+              "data": "{\"decay\":0.131}",
+              "did": 1894093200001,
+              "due": 1894093270,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400008,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894093200,
+              "nid": 1893488400004,
+              "odid": 1893488400001,
+              "odue": 5,
+              "ord": 0,
+              "queue": 4,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400009": {
+              "data": "{}",
+              "did": 1893488400001,
+              "due": 5,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400009,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893488400,
+              "nid": 1893488400004,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400010": {
+              "data": "{\"pos\":6,\"s\":0.1544,\"d\":6.811,\"dr\":0.92,\"decay\":0.131,\"lrt\":1893488400}",
+              "did": 1893488400001,
+              "due": 1893488473,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400010,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 2,
+              "mod": 1893488400,
+              "nid": 1893488400005,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 1,
+              "reps": 1,
+              "type": 1,
+              "usn": 9
+            },
+            "1893488400011": {
+              "data": "{}",
+              "did": 1894093200001,
+              "due": -99999,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400011,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894093200,
+              "nid": 1893488400005,
+              "odid": 1893488400001,
+              "odue": 6,
+              "ord": 1,
+              "queue": 2,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400012": {
+              "data": "{\"pos\":7,\"s\":13.5448,\"d\":3.628,\"dr\":0.9,\"decay\":0.131,\"lrt\":1893834000}",
+              "did": 1893488400000,
+              "due": 18,
+              "factor": 2500,
+              "flags": 0,
+              "id": 1893488400012,
+              "ivl": 14,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893834000,
+              "nid": 1893488400006,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 3,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400013": {
+              "data": "{}",
+              "did": 1893488400000,
+              "due": 8,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400013,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893488400,
+              "nid": 1893488400007,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400014": {
+              "data": "{\"pos\":9,\"s\":14.4793,\"d\":5.029,\"dr\":0.85,\"decay\":0.5,\"lrt\":1893834000}",
+              "did": 1893488400002,
+              "due": 25,
+              "factor": 2300,
+              "flags": 0,
+              "id": 1893488400014,
+              "ivl": 21,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893834000,
+              "nid": 1893488400008,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 3,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400015": {
+              "data": "{\"pos\":10,\"s\":7.008,\"d\":5.62,\"dr\":0.85,\"decay\":0.5,\"lrt\":1893834000}",
+              "did": 1893488400002,
+              "due": 18,
+              "factor": 2150,
+              "flags": 0,
+              "id": 1893488400015,
+              "ivl": 14,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893834000,
+              "nid": 1893488400009,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 2,
+              "reps": 3,
+              "type": 2,
+              "usn": 9
+            },
+            "1893488400016": {
+              "data": "{}",
+              "did": 1893488400002,
+              "due": 11,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400016,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893488400,
+              "nid": 1893488400010,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400017": {
+              "data": "{}",
+              "did": 1893488400002,
+              "due": 12,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400017,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1894266000,
+              "nid": 1893488400011,
+              "odid": 0,
+              "odue": 0,
+              "ord": 0,
+              "queue": -1,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400018": {
+              "data": "{}",
+              "did": 1893488400000,
+              "due": 7,
+              "factor": 0,
+              "flags": 0,
+              "id": 1893488400018,
+              "ivl": 0,
+              "lapses": 0,
+              "left": 0,
+              "mod": 1893488400,
+              "nid": 1893488400006,
+              "odid": 0,
+              "odue": 0,
+              "ord": 1,
+              "queue": 0,
+              "reps": 0,
+              "type": 0,
+              "usn": 9
+            }
+          },
+          "col": {
+            "1": {
+              "conf": "",
+              "crt": 1893470400,
+              "dconf": "",
+              "decks": "",
+              "dty": 0,
+              "id": 1,
+              "ls": 1894644000000,
+              "mod": 1894644000000,
+              "models": "",
+              "scm": 1893488400000,
+              "tags": "",
+              "usn": 10,
+              "ver": 18
+            }
+          },
+          "config": {
+            "_deck_1893488400000_lastNotetype": {
+              "KEY": "_deck_1893488400000_lastNotetype",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "b451cd4c3359c6c4b232f6e6d1c3526a7dbf09c50bf356522a63f075a77c9c07"
+              }
+            },
+            "_deck_1893488400001_customStudyExcludeTags": {
+              "KEY": "_deck_1893488400001_customStudyExcludeTags",
+              "mtime_secs": 1894093200,
+              "usn": 0,
+              "val": {
+                "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+              }
+            },
+            "_deck_1893488400001_customStudyIncludeTags": {
+              "KEY": "_deck_1893488400001_customStudyIncludeTags",
+              "mtime_secs": 1894093200,
+              "usn": 0,
+              "val": {
+                "sha256": "c1ea48cd170c79088c1ef01d625795747c1651aae3107152c6d6342a4a3067c6"
+              }
+            },
+            "_deck_1893488400001_lastNotetype": {
+              "KEY": "_deck_1893488400001_lastNotetype",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "3d16ec8e015caecbe3e1ceb26b9571e4172a67629063f51d6edca8a760886f6c"
+              }
+            },
+            "_deck_1893488400002_lastNotetype": {
+              "KEY": "_deck_1893488400002_lastNotetype",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "00de5c70e0a7ce0fcc1392bafa6188ca7e241472e216f6a1fde9b013ee2eeec6"
+              }
+            },
+            "_nt_1893488400006_lastDeck": {
+              "KEY": "_nt_1893488400006_lastDeck",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "ae64c8398a2a473ada3d7191ad08bf0f843da95cc0febd6a194108964f52d8f8"
+              }
+            },
+            "_nt_1893488400007_lastDeck": {
+              "KEY": "_nt_1893488400007_lastDeck",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "ef93ebaae62e74d3d0cf7c0de00e49bd758597010c21413818c4af895b3bdd66"
+              }
+            },
+            "_nt_1893488400008_lastDeck": {
+              "KEY": "_nt_1893488400008_lastDeck",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "95c9e89544f63f7d90407f39d66d45a8196bb46b1f044a5c628ea52b6bd1f033"
+              }
+            },
+            "activeDecks": {
+              "KEY": "activeDecks",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "cf5f205e700cd01b9077801e987fb4d42c71a95fd27268d465b95cf4a7edf433"
+              }
+            },
+            "addToCur": {
+              "KEY": "addToCur",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "addon_big": {
+              "KEY": "addon_big",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "2cdb26265b4dc65e3b44d694f121fd6de99b9e4b8ae7f08d84bfa9537635ae43"
+              }
+            },
+            "addon_float": {
+              "KEY": "addon_float",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "06bad31060c1212ae832de4c031f7b31e3b48aed57858294478cb19450cf34ca"
+              }
+            },
+            "addon_nested": {
+              "KEY": "addon_nested",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "33115ef1c9a52ae7128236affb875072be7c761f280ad9afc9fc8cc281b8cc3a"
+              }
+            },
+            "cardStateCustomizer": {
+              "KEY": "cardStateCustomizer",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "05e863c57dc33d2af123bf231666e09af3be65208773611e7571e6c009bb0dc2"
+              }
+            },
+            "collapseTime": {
+              "KEY": "collapseTime",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "15197cf7214b58e67cae565e573ffd9aa44bcb81f8ee5d7185dfe8da0a16ef43"
+              }
+            },
+            "creationOffset": {
+              "KEY": "creationOffset",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "curDeck": {
+              "KEY": "curDeck",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "ae64c8398a2a473ada3d7191ad08bf0f843da95cc0febd6a194108964f52d8f8"
+              }
+            },
+            "curModel": {
+              "KEY": "curModel",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "3d16ec8e015caecbe3e1ceb26b9571e4172a67629063f51d6edca8a760886f6c"
+              }
+            },
+            "dayLearnFirst": {
+              "KEY": "dayLearnFirst",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "dueCounts": {
+              "KEY": "dueCounts",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "estTimes": {
+              "KEY": "estTimes",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "fsrs": {
+              "KEY": "fsrs",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "fsrsLegacyEvaluate": {
+              "KEY": "fsrsLegacyEvaluate",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "heatmap": {
+              "KEY": "heatmap",
+              "mtime_secs": 1700000000,
+              "usn": 0,
+              "val": {
+                "sha256": "80992261bcddfcabc723a7864b769c286b9f9ac04b9b087857262cdc00736fec"
+              }
+            },
+            "loadBalancerEnabled": {
+              "KEY": "loadBalancerEnabled",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "newSpread": {
+              "KEY": "newSpread",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            },
+            "nextPos": {
+              "KEY": "nextPos",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278"
+              }
+            },
+            "onigiri_sidebar_collapsed": {
+              "KEY": "onigiri_sidebar_collapsed",
+              "mtime_secs": 1700000500,
+              "usn": 4,
+              "val": {
+                "sha256": "0de6018b6528122bac8e42f606682e8a774b6854d52744e80d5fb42feef59e79"
+              }
+            },
+            "renderLatex": {
+              "KEY": "renderLatex",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "resetCountsReviewer": {
+              "KEY": "resetCountsReviewer",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "restorePositionReviewer": {
+              "KEY": "restorePositionReviewer",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "rollover": {
+              "KEY": "rollover",
+              "mtime_secs": 1893488400,
+              "usn": 0,
+              "val": {
+                "sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a"
+              }
+            },
+            "sched2021": {
+              "KEY": "sched2021",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+              }
+            },
+            "schedVer": {
+              "KEY": "schedVer",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+              }
+            },
+            "setDueReviewer": {
+              "KEY": "setDueReviewer",
+              "mtime_secs": 1894438800,
+              "usn": 0,
+              "val": {
+                "sha256": "263dcf04916ddb0332f266f0b1e09e12c7fb2abac51711e36d51bb26f502dbac"
+              }
+            },
+            "sortBackwards": {
+              "KEY": "sortBackwards",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+              }
+            },
+            "sortType": {
+              "KEY": "sortType",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "1c19b6eac0880ca94f71879df838392e837aef4738f4d1000e15e48e65df61dc"
+              }
+            },
+            "timeLim": {
+              "KEY": "timeLim",
+              "mtime_secs": 0,
+              "usn": 0,
+              "val": {
+                "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+              }
+            }
+          },
+          "deck_config": {
+            "1": {
+              "config": {
+                "sha256": "b2d3a13378af8601b372cc76113debc42f7b2c4c669788ee98c3705a7af51d94"
+              },
+              "id": 1,
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1893488400000": {
+              "config": {
+                "sha256": "fc4dd37699364e6fbad5e835fb47200f9c8f69c0b9dff78a9ec21a609be24051"
+              },
+              "id": 1893488400000,
+              "mtime_secs": 1893488400,
+              "name": "Steady",
+              "usn": 9
+            },
+            "1893488400001": {
+              "config": {
+                "sha256": "3367fe801c00c88292f08aad86f36f4b0f064dac6ac63fa6e32c257ce867b4f7"
+              },
+              "id": 1893488400001,
+              "mtime_secs": 1893488400,
+              "name": "Legacy",
+              "usn": 9
+            }
+          },
+          "decks": {
+            "1": {
+              "common": {
+                "sha256": "8fe546efcd4214f28b1f61e7af7c4556c71fb30268334100adffe877796bf150"
+              },
+              "id": 1,
+              "kind": {
+                "sha256": "59948439065f29619ef41280cbb932be52c56d99c5966b65e0111239f098bbef"
+              },
+              "mtime_secs": 0,
+              "name": "Default",
+              "usn": 0
+            },
+            "1893488400000": {
+              "common": {
+                "sha256": "0dd4b12b810c49dd905ea413c3cd4ea53f4227f87f8629d527bd9140a6ca0d79"
+              },
+              "id": 1893488400000,
+              "kind": {
+                "sha256": "e15d1fe214b5531bc56781a069efde27af6c133814328c5f864e2e8770e602ca"
+              },
+              "mtime_secs": 1893834600,
+              "name": "Languages",
+              "usn": 9
+            },
+            "1893488400001": {
+              "common": {
+                "sha256": "1f74d0fecfd8d07452a9ead2d620ae6d14a1a43ce9b3cbb8dc25b55e1a343fb1"
+              },
+              "id": 1893488400001,
+              "kind": {
+                "sha256": "ccb9ce33c8abf34bd9c6f1439ad2652042702223d6b25c1860db1c805c6516f1"
+              },
+              "mtime_secs": 1893834600,
+              "name": "Languages\u001fJapanese",
+              "usn": 9
+            },
+            "1893488400002": {
+              "common": {
+                "sha256": "88a567b725730266dbf4574e35dce97961bea4aeeb697795fcc179b07e584ec7"
+              },
+              "id": 1893488400002,
+              "kind": {
+                "sha256": "33a3d3ab5bc489641a021e6998192916f1ce89278cbb32faa2c387ecf024f85f"
+              },
+              "mtime_secs": 1893834000,
+              "name": "Math",
+              "usn": 9
+            },
+            "1894093200000": {
+              "common": {
+                "sha256": "7cb8ec89d9520584d01f38ac49007f1373387b65420ef75959569e8858d04f95"
+              },
+              "id": 1894093200000,
+              "kind": {
+                "sha256": "53f07e800d7842a758e9a676f8f3164c4e200d78d7aa2dc4714b151906b565a3"
+              },
+              "mtime_secs": 1894093200,
+              "name": "Cram",
+              "usn": 9
+            },
+            "1894093200001": {
+              "common": {
+                "sha256": "f5189031506985f03249f799b4fa8d0ad39156444f36c60fc950959b66d52aee"
+              },
+              "id": 1894093200001,
+              "kind": {
+                "sha256": "2cc1254de6b214bc96d0354a913855b8775495fd27f0f0d44a9e3d220dc785a7"
+              },
+              "mtime_secs": 1894093200,
+              "name": "Custom Study Session",
+              "usn": 9
+            }
+          },
+          "fields": {
+            "1893488400006,0": {
+              "config": {
+                "sha256": "2d77bcc42f28b463a03f61328714da5012b3881a3bca43c8602738c68cdc5396"
+              },
+              "name": "Word",
+              "ntid": 1893488400006,
+              "ord": 0
+            },
+            "1893488400006,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Meaning",
+              "ntid": 1893488400006,
+              "ord": 1
+            },
+            "1893488400006,2": {
+              "config": {
+                "sha256": "de57f5decb45166f1d5bedf45fffa866215b7f61b4f12b3fd39ad5f6e97edbc8"
+              },
+              "name": "Reading",
+              "ntid": 1893488400006,
+              "ord": 2
+            },
+            "1893488400006,3": {
+              "config": {
+                "sha256": "943cadaef011ee778f65bef2c1bc3023a34eb8e622219ae1a8790aaa47538807"
+              },
+              "name": "Audio",
+              "ntid": 1893488400006,
+              "ord": 3
+            },
+            "1893488400007,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Text",
+              "ntid": 1893488400007,
+              "ord": 0
+            },
+            "1893488400007,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Extra",
+              "ntid": 1893488400007,
+              "ord": 1
+            },
+            "1893488400008,0": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Front",
+              "ntid": 1893488400008,
+              "ord": 0
+            },
+            "1893488400008,1": {
+              "config": {
+                "sha256": "c6e736800abfa815c60c4e960854596a915fc52e358d0f6143e70d36950f937f"
+              },
+              "name": "Back",
+              "ntid": 1893488400008,
+              "ord": 1
+            },
+            "1893488400008,2": {
+              "config": {
+                "sha256": "b6486d57f0f721d393cd07fc86890aa3ac8ae5ebeeb2e086156d75d6acacf315"
+              },
+              "name": "Source",
+              "ntid": 1893488400008,
+              "ord": 2
+            }
+          },
+          "graves": {},
+          "notes": {
+            "1893488400000": {
+              "csum": 567984260,
+              "data": "",
+              "flags": 0,
+              "flds": "食べる\u001fto eat\u001f食[た]べる\u001f[sound:taberu.mp3]",
+              "guid": "#random",
+              "id": 1893488400000,
+              "mid": 1893488400006,
+              "mod": 1893488400,
+              "sfld": "食べる",
+              "tags": " jlpt::n5 verb ",
+              "usn": 9
+            },
+            "1893488400001": {
+              "csum": 2712420579,
+              "data": "",
+              "flags": 0,
+              "flds": "飲む\u001fto drink\u001f飲[の]む\u001f",
+              "guid": "#random",
+              "id": 1893488400001,
+              "mid": 1893488400006,
+              "mod": 1894266000,
+              "sfld": "飲む",
+              "tags": " jlpt::n5 marked verb ",
+              "usn": 9
+            },
+            "1893488400002": {
+              "csum": 3553365163,
+              "data": "",
+              "flags": 0,
+              "flds": "本\u001fbook\u001f本[ほん]\u001f",
+              "guid": "#random",
+              "id": 1893488400002,
+              "mid": 1893488400006,
+              "mod": 1893488400,
+              "sfld": "本",
+              "tags": " jlpt::n5 noun ",
+              "usn": 9
+            },
+            "1893488400003": {
+              "csum": 2415653266,
+              "data": "",
+              "flags": 0,
+              "flds": "水\u001fwater\u001f水[みず]\u001f[anki:tts lang=ja_JP]みず[/anki:tts]",
+              "guid": "#random",
+              "id": 1893488400003,
+              "mid": 1893488400006,
+              "mod": 1894266000,
+              "sfld": "水",
+              "tags": " leech noun ",
+              "usn": 9
+            },
+            "1893488400004": {
+              "csum": 140577413,
+              "data": "",
+              "flags": 0,
+              "flds": "学校\u001fschool\u001f学校[がっこう]\u001f",
+              "guid": "#random",
+              "id": 1893488400004,
+              "mid": 1893488400006,
+              "mod": 1893488400,
+              "sfld": "学校",
+              "tags": " jlpt::n4 noun ",
+              "usn": 9
+            },
+            "1893488400005": {
+              "csum": 3384733976,
+              "data": "",
+              "flags": 0,
+              "flds": "静か\u001fquiet\u001f静[しず]か\u001f",
+              "guid": "#random",
+              "id": 1893488400005,
+              "mid": 1893488400006,
+              "mod": 1893488400,
+              "sfld": "静か",
+              "tags": " adjective ",
+              "usn": 9
+            },
+            "1893488400006": {
+              "csum": 605574144,
+              "data": "",
+              "flags": 0,
+              "flds": "{{c1::Paris}} is the capital of {{c2::France}}.\u001fgeography",
+              "guid": "#random",
+              "id": 1893488400006,
+              "mid": 1893488400007,
+              "mod": 1893488400,
+              "sfld": "{{c1::Paris}} is the capital of {{c2::France}}.",
+              "tags": "",
+              "usn": 9
+            },
+            "1893488400007": {
+              "csum": 707445572,
+              "data": "",
+              "flags": 0,
+              "flds": "Water boils at {{c1::100 °C::temperature}} at sea level, \\(T_b = 373.15\\,\\mathrm{K}\\).\u001f",
+              "guid": "#random",
+              "id": 1893488400007,
+              "mid": 1893488400007,
+              "mod": 1893488400,
+              "sfld": "Water boils at {{c1::100 °C::temperature}} at sea level, \\(T_b = 373.15\\,\\mathrm{K}\\).",
+              "tags": "",
+              "usn": 9
+            },
+            "1893488400008": {
+              "csum": 3329914011,
+              "data": "",
+              "flags": 0,
+              "flds": "Area of a circle\u001f\\(A = \\pi r^2\\)\u001f[$]A=\\pi r^2[/$]",
+              "guid": "#random",
+              "id": 1893488400008,
+              "mid": 1893488400008,
+              "mod": 1893488400,
+              "sfld": "Area of a circle",
+              "tags": "",
+              "usn": 9
+            },
+            "1893488400009": {
+              "csum": 1162336069,
+              "data": "",
+              "flags": 0,
+              "flds": "Euler's identity\u001f\\[e^{i\\pi} + 1 = 0\\]\u001f[latex]$e^{i\\pi}+1=0$[/latex]",
+              "guid": "#random",
+              "id": 1893488400009,
+              "mid": 1893488400008,
+              "mod": 1893488400,
+              "sfld": "Euler's identity",
+              "tags": "",
+              "usn": 9
+            },
+            "1893488400010": {
+              "csum": 4103569018,
+              "data": "",
+              "flags": 0,
+              "flds": "Quadratic formula\u001f\\(x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\\)\u001f[$$]x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}[/$$]",
+              "guid": "#random",
+              "id": 1893488400010,
+              "mid": 1893488400008,
+              "mod": 1893488400,
+              "sfld": "Quadratic formula",
+              "tags": " algebra ",
+              "usn": 9
+            },
+            "1893488400011": {
+              "csum": 2131796869,
+              "data": "",
+              "flags": 0,
+              "flds": "Derivative of sine\u001f\\(\\cos x\\)\u001f",
+              "guid": "#random",
+              "id": 1893488400011,
+              "mid": 1893488400008,
+              "mod": 1893488400,
+              "sfld": "Derivative of sine",
+              "tags": " skip ",
+              "usn": 9
+            }
+          },
+          "notetypes": {
+            "1893488400006": {
+              "config": {
+                "sha256": "31b35483ae04562b9c60b579a63d26abc6263c3b99f6e9ec647948d292a21055"
+              },
+              "id": 1893488400006,
+              "mtime_secs": 1893488400,
+              "name": "Vocab",
+              "usn": 9
+            },
+            "1893488400007": {
+              "config": {
+                "sha256": "7adbfa919f076c283e04106e2955d98a3c6e8dcefc7f594f6bf153ca5037dc78"
+              },
+              "id": 1893488400007,
+              "mtime_secs": 1893488400,
+              "name": "Gaps",
+              "usn": 9
+            },
+            "1893488400008": {
+              "config": {
+                "sha256": "f1026974123f86cc6cf168a2a04951d9788d85a15ecd3b1bc5834ae60a140c63"
+              },
+              "id": 1893488400008,
+              "mtime_secs": 1893488400,
+              "name": "Formula",
+              "usn": 9
+            }
+          },
+          "revlog": {
+            "1893488400000": {
+              "cid": 1893488400000,
+              "ease": 3,
+              "factor": 397,
+              "id": 1893488400000,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 4100,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400001": {
+              "cid": 1893488400002,
+              "ease": 3,
+              "factor": 397,
+              "id": 1893488400001,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 3900,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400002": {
+              "cid": 1893488400004,
+              "ease": 3,
+              "factor": 397,
+              "id": 1893488400002,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 5200,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400003": {
+              "cid": 1893488400006,
+              "ease": 3,
+              "factor": 397,
+              "id": 1893488400003,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 2800,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400004": {
+              "cid": 1893488400012,
+              "ease": 3,
+              "factor": 397,
+              "id": 1893488400004,
+              "ivl": -600,
+              "lastIvl": 0,
+              "time": 6100,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400005": {
+              "cid": 1893488400014,
+              "ease": 3,
+              "factor": 557,
+              "id": 1893488400005,
+              "ivl": 5,
+              "lastIvl": 0,
+              "time": 7300,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400006": {
+              "cid": 1893488400015,
+              "ease": 3,
+              "factor": 557,
+              "id": 1893488400006,
+              "ivl": 6,
+              "lastIvl": 0,
+              "time": 6600,
+              "type": 0,
+              "usn": 9
+            },
+            "1893488400007": {
+              "cid": 1893488400010,
+              "ease": 1,
+              "factor": 746,
+              "id": 1893488400007,
+              "ivl": -60,
+              "lastIvl": 0,
+              "time": 9000,
+              "type": 0,
+              "usn": 9
+            },
+            "1893489000000": {
+              "cid": 1893488400000,
+              "ease": 3,
+              "factor": 394,
+              "id": 1893489000000,
+              "ivl": 2,
+              "lastIvl": -600,
+              "time": 3000,
+              "type": 0,
+              "usn": 9
+            },
+            "1893489000001": {
+              "cid": 1893488400002,
+              "ease": 3,
+              "factor": 394,
+              "id": 1893489000001,
+              "ivl": 2,
+              "lastIvl": -600,
+              "time": 2500,
+              "type": 0,
+              "usn": 9
+            },
+            "1893489000002": {
+              "cid": 1893488400004,
+              "ease": 3,
+              "factor": 394,
+              "id": 1893489000002,
+              "ivl": 2,
+              "lastIvl": -600,
+              "time": 3500,
+              "type": 0,
+              "usn": 9
+            },
+            "1893489000003": {
+              "cid": 1893488400006,
+              "ease": 3,
+              "factor": 394,
+              "id": 1893489000003,
+              "ivl": 2,
+              "lastIvl": -600,
+              "time": 2000,
+              "type": 0,
+              "usn": 9
+            },
+            "1893489000004": {
+              "cid": 1893488400012,
+              "ease": 3,
+              "factor": 394,
+              "id": 1893489000004,
+              "ivl": 4,
+              "lastIvl": -600,
+              "time": 4000,
+              "type": 0,
+              "usn": 9
+            },
+            "1893489000005": {
+              "cid": 1893488400014,
+              "ease": 3,
+              "factor": 552,
+              "id": 1893489000005,
+              "ivl": 10,
+              "lastIvl": 5,
+              "time": 5000,
+              "type": 1,
+              "usn": 9
+            },
+            "1893489000006": {
+              "cid": 1893488400015,
+              "ease": 3,
+              "factor": 552,
+              "id": 1893489000006,
+              "ivl": 7,
+              "lastIvl": 6,
+              "time": 4500,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000000": {
+              "cid": 1893488400000,
+              "ease": 3,
+              "factor": 392,
+              "id": 1893834000000,
+              "ivl": 10,
+              "lastIvl": 2,
+              "time": 3300,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000001": {
+              "cid": 1893488400002,
+              "ease": 1,
+              "factor": 806,
+              "id": 1893834000001,
+              "ivl": -600,
+              "lastIvl": 2,
+              "time": 8000,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000002": {
+              "cid": 1893488400004,
+              "ease": 2,
+              "factor": 599,
+              "id": 1893834000002,
+              "ivl": 4,
+              "lastIvl": 2,
+              "time": 6000,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000003": {
+              "cid": 1893488400006,
+              "ease": 4,
+              "factor": 185,
+              "id": 1893834000003,
+              "ivl": 20,
+              "lastIvl": 2,
+              "time": 1500,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000004": {
+              "cid": 1893488400012,
+              "ease": 3,
+              "factor": 392,
+              "id": 1893834000004,
+              "ivl": 14,
+              "lastIvl": 4,
+              "time": 3700,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000005": {
+              "cid": 1893488400014,
+              "ease": 3,
+              "factor": 548,
+              "id": 1893834000005,
+              "ivl": 21,
+              "lastIvl": 10,
+              "time": 4200,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834000006": {
+              "cid": 1893488400015,
+              "ease": 2,
+              "factor": 613,
+              "id": 1893834000006,
+              "ivl": 14,
+              "lastIvl": 7,
+              "time": 9100,
+              "type": 1,
+              "usn": 9
+            },
+            "1893834600000": {
+              "cid": 1893488400002,
+              "ease": 3,
+              "factor": 801,
+              "id": 1893834600000,
+              "ivl": 1,
+              "lastIvl": -600,
+              "time": 2600,
+              "type": 2,
+              "usn": 9
+            },
+            "1894093200000": {
+              "cid": 1893488400006,
+              "ease": 3,
+              "factor": 184,
+              "id": 1894093200000,
+              "ivl": 29,
+              "lastIvl": 20,
+              "time": 2200,
+              "type": 3,
+              "usn": 9
+            },
+            "1894093200001": {
+              "cid": 1893488400008,
+              "ease": 1,
+              "factor": 0,
+              "id": 1894093200001,
+              "ivl": -60,
+              "lastIvl": -60,
+              "time": 7000,
+              "type": 3,
+              "usn": 9
+            },
+            "1894266000000": {
+              "cid": 1893488400012,
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894266000000,
+              "ivl": 7,
+              "lastIvl": 3,
+              "time": 0,
+              "type": 4,
+              "usn": 9
+            },
+            "1894266000001": {
+              "cid": 1893488400015,
+              "ease": 0,
+              "factor": 2500,
+              "id": 1894266000001,
+              "ivl": 5,
+              "lastIvl": 4,
+              "time": 0,
+              "type": 5,
+              "usn": 9
+            }
+          },
+          "tags": {
+            "adjective": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "adjective",
+              "usn": 9
+            },
+            "algebra": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "algebra",
+              "usn": 9
+            },
+            "jlpt::n4": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "jlpt::n4",
+              "usn": 9
+            },
+            "jlpt::n5": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "jlpt::n5",
+              "usn": 9
+            },
+            "leech": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "leech",
+              "usn": 9
+            },
+            "marked": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "marked",
+              "usn": 9
+            },
+            "noun": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "noun",
+              "usn": 9
+            },
+            "skip": {
+              "collapsed": 1,
+              "config": null,
+              "tag": "skip",
+              "usn": 9
+            },
+            "verb": {
+              "collapsed": 0,
+              "config": null,
+              "tag": "verb",
+              "usn": 9
+            }
+          },
+          "templates": {
+            "1893488400006,0": {
+              "config": {
+                "sha256": "93842f0cf9e477cf22f10a290697d05605d03f85a154231250711c29de4f8d48"
+              },
+              "mtime_secs": 0,
+              "name": "Recognize",
+              "ntid": 1893488400006,
+              "ord": 0,
+              "usn": 0
+            },
+            "1893488400006,1": {
+              "config": {
+                "sha256": "fc04bc3f08370da79bf3f6dd99bab924698f231ce6d3f05ab3048e6fba488afb"
+              },
+              "mtime_secs": 0,
+              "name": "Recall",
+              "ntid": 1893488400006,
+              "ord": 1,
+              "usn": 0
+            },
+            "1893488400007,0": {
+              "config": {
+                "sha256": "0f78f0c08dafc735f218ee2ad19787d91d3a1cd92c94bdeb3853cd56ca0499cd"
+              },
+              "mtime_secs": 0,
+              "name": "Cloze",
+              "ntid": 1893488400007,
+              "ord": 0,
+              "usn": 0
+            },
+            "1893488400008,0": {
+              "config": {
+                "sha256": "ff8108b8003024d034287ea64eb0ca6581e6bacb9c75ed722e145d16c204175d"
+              },
+              "mtime_secs": 0,
+              "name": "Statement",
+              "ntid": 1893488400008,
+              "ord": 0,
+              "usn": 0
+            }
+          }
+        },
+        "legacy_json": {
+          "decks": {
+            "Cram": {
+              "browserCollapsed": false,
+              "collapsed": false,
+              "delays": [1.5, 10.0],
+              "desc": "",
+              "dyn": 1,
+              "id": 1894093200000,
+              "lrnToday": [7, 0],
+              "mod": 1894093200,
+              "name": "Cram",
+              "newToday": [7, 0],
+              "previewAgainSecs": 60,
+              "previewDelay": 10,
+              "previewGoodSecs": 0,
+              "previewHardSecs": 600,
+              "resched": true,
+              "revToday": [7, 1],
+              "separate": true,
+              "terms": [
+                ["deck:Languages* is:review", 50, 6],
+                ["tag:verb", 20, 1]
+              ],
+              "timeToday": [7, 2200],
+              "usn": 9
+            },
+            "Custom Study Session": {
+              "browserCollapsed": false,
+              "collapsed": false,
+              "delays": null,
+              "desc": "",
+              "dyn": 1,
+              "id": 1894093200001,
+              "lrnToday": [7, 0],
+              "mod": 1894093200,
+              "name": "Custom Study Session",
+              "newToday": [7, 0],
+              "previewAgainSecs": 60,
+              "previewDelay": 0,
+              "previewGoodSecs": 0,
+              "previewHardSecs": 600,
+              "resched": false,
+              "revToday": [7, 1],
+              "separate": true,
+              "terms": [
+                ["deck:\"Languages::Japanese\" is:new", 100, 5]
+              ],
+              "timeToday": [7, 7000],
+              "usn": 9
+            },
+            "Default": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1,
+              "lrnToday": [0, 0],
+              "mod": 0,
+              "name": "Default",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": 0
+            },
+            "Languages": {
+              "browserCollapsed": true,
+              "collapsed": false,
+              "conf": 1893488400000,
+              "desc": "<b>Languages</b> shared deck",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 5,
+              "extendRev": 10,
+              "id": 1893488400000,
+              "lrnToday": [4, 0],
+              "mod": 1893834600,
+              "name": "Languages",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [4, 0],
+              "provenance": {
+                "id": 1234567890,
+                "kind": "shared",
+                "title": "Core"
+              },
+              "revToday": [4, 5],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [4, 25100],
+              "usn": 9
+            },
+            "Languages::Japanese": {
+              "browserCollapsed": false,
+              "collapsed": true,
+              "conf": 1893488400000,
+              "desc": "",
+              "desiredRetention": 92,
+              "dyn": 0,
+              "extendNew": 3,
+              "extendRev": 0,
+              "id": 1893488400001,
+              "lrnToday": [7, 0],
+              "mod": 1893834600,
+              "name": "Languages::Japanese",
+              "newLimit": 15,
+              "newLimitToday": null,
+              "newToday": [7, -5],
+              "revToday": [7, 0],
+              "reviewLimit": 150,
+              "reviewLimitToday": null,
+              "timeToday": [7, 21400],
+              "usn": 9
+            },
+            "Math": {
+              "browserCollapsed": false,
+              "collapsed": false,
+              "conf": 1893488400001,
+              "desc": "Formulas, *Markdown* text",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1893488400002,
+              "lrnToday": [4, 0],
+              "md": true,
+              "mod": 1893834000,
+              "name": "Math",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [4, 0],
+              "revToday": [4, 2],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [4, 13300],
+              "usn": 9
+            }
+          },
+          "notetypes": {
+            "Formula": {
+              "css": ".card { font-family: serif; }\n.src { font-size: 12px; }\n",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 7001,
+                  "name": "Front",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 7002,
+                  "name": "Back",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "LaTeX",
+                  "excludeFromSearch": true,
+                  "font": "Courier",
+                  "id": 7003,
+                  "name": "Source",
+                  "ord": 2,
+                  "plainText": true,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 16,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1893488400008,
+              "latexPost": "\\end{document}",
+              "latexPre": "\\documentclass[11pt]{article}\n\\usepackage{amsmath,amssymb}\n\\begin{document}\n",
+              "latexsvg": true,
+              "mathAddon": {
+                "engine": "mathjax3",
+                "macros": {
+                  "RR": "\\mathbb{R}"
+                },
+                "version": 2
+              },
+              "mod": 1893488400,
+              "name": "Formula",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{FrontSide}}<hr id=answer>{{Back}}<div class=\"src\">{{mathpretty:Source}}</div>",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 8001,
+                  "name": "Statement",
+                  "ord": 0,
+                  "qfmt": "{{Front}}"
+                }
+              ],
+              "type": 0,
+              "usn": 9
+            },
+            "Gaps": {
+              "css": ".card { font-family: sans-serif; }\n.cloze { font-weight: bold; color: teal; }\n",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 5001,
+                  "name": "Text",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 5002,
+                  "name": "Extra",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1893488400007,
+              "latexPost": "\\end{document}\n",
+              "latexPre": "\\documentclass{article}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1893488400,
+              "name": "Gaps",
+              "originalStockKind": 1,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{cloze:Text}}<br>{{hint:Extra}}",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 6001,
+                  "name": "Cloze",
+                  "ord": 0,
+                  "qfmt": "{{cloze:Text}}"
+                }
+              ],
+              "type": 1,
+              "usn": 9
+            },
+            "Vocab": {
+              "css": ".card { font-family: serif; font-size: 22px; text-align: center; }\n.word { font-size: 40px; }\n.reading rt { color: gray; }\n",
+              "did": null,
+              "flds": [
+                {
+                  "collapsed": false,
+                  "description": "the word",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 3001,
+                  "name": "Word",
+                  "ord": 0,
+                  "plainText": false,
+                  "preventDeletion": true,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Arial",
+                  "id": 3002,
+                  "name": "Meaning",
+                  "ord": 1,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 20,
+                  "sticky": false,
+                  "tag": null
+                },
+                {
+                  "collapsed": false,
+                  "description": "",
+                  "excludeFromSearch": false,
+                  "font": "Noto Sans JP",
+                  "id": 3003,
+                  "name": "Reading",
+                  "ord": 2,
+                  "plainText": true,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 24,
+                  "sticky": true,
+                  "tag": null
+                },
+                {
+                  "collapsed": true,
+                  "description": "",
+                  "excludeFromSearch": true,
+                  "font": "Arial",
+                  "id": 3004,
+                  "name": "Audio",
+                  "ord": 3,
+                  "plainText": false,
+                  "preventDeletion": false,
+                  "rtl": false,
+                  "size": 14,
+                  "sticky": false,
+                  "tag": null
+                }
+              ],
+              "id": 1893488400006,
+              "latexPost": "\\end{document}\n",
+              "latexPre": "\\documentclass{article}\n\\usepackage{CJKutf8}\n\\begin{document}\n",
+              "latexsvg": false,
+              "mod": 1893488400,
+              "name": "Vocab",
+              "originalId": 1700000000000,
+              "originalStockKind": 2,
+              "req": [
+                [
+                  0,
+                  "any",
+                  [0]
+                ],
+                [
+                  1,
+                  "any",
+                  [0, 1]
+                ]
+              ],
+              "sortf": 0,
+              "tmpls": [
+                {
+                  "afmt": "{{FrontSide}}<hr id=answer>{{Meaning}}<div class=\"reading\">{{furigana:Reading}}</div>{{Audio}}",
+                  "bafmt": "{{Meaning}}",
+                  "bfont": "Arial",
+                  "bqfmt": "{{Word}}",
+                  "bsize": 14,
+                  "did": null,
+                  "id": 4001,
+                  "name": "Recognize",
+                  "ord": 0,
+                  "qfmt": "<div class=\"word\">{{Word}}</div>{{tts ja_JP speed=0.9:Word}}"
+                },
+                {
+                  "afmt": "{{FrontSide}}<hr id=answer>{{kana:Reading}}<div class=\"fx\">{{sparkle:Word}}</div>",
+                  "bafmt": "",
+                  "bfont": "",
+                  "bqfmt": "",
+                  "bsize": 0,
+                  "did": null,
+                  "id": 4002,
+                  "name": "Recall",
+                  "ord": 1,
+                  "qfmt": "{{#Meaning}}<div class=\"meaning\">{{Meaning}}</div>{{/Meaning}}{{type:Word}}"
+                }
+              ],
+              "type": 0,
+              "usn": 9
+            }
+          },
+          "presets": {
+            "Default": {
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.9,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+              "fsrsParams5": [],
+              "fsrsParams6": [],
+              "fsrsWeights": [],
+              "id": 1,
+              "ignoreRevlogsBeforeDate": "",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.0
+              },
+              "maxTaken": 60,
+              "mod": 0,
+              "name": "Default",
+              "new": {
+                "bury": false,
+                "delays": [1.0, 10.0],
+                "initialFactor": 2500,
+                "ints": [1, 4, 0],
+                "order": 1,
+                "perDay": 20
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 0,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.3,
+                "hardFactor": 1.2,
+                "ivlFct": 1.0,
+                "maxIvl": 36500,
+                "perDay": 200
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.9,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": 0,
+              "waitForAudio": true,
+              "weightSearch": ""
+            },
+            "Legacy": {
+              "addonLegacy": {
+                "enabled": true,
+                "intervals": [1, 3, 7],
+                "label": "週末",
+                "ratio": 0.5
+              },
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.85,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0],
+              "fsrsParams5": [0.3891, 1.2207, 3.3014, 14.9056, 7.1213, 0.5502, 1.1024, 0.0201, 1.5809, 0.1611, 1.0457, 1.9102, 0.0899, 0.3108, 2.1503, 0.2602, 2.8104, 0.4703, 0.6012],
+              "fsrsParams6": [],
+              "fsrsWeights": [],
+              "id": 1893488400001,
+              "ignoreRevlogsBeforeDate": "",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.2
+              },
+              "maxTaken": 60,
+              "mod": 1893488400,
+              "name": "Legacy",
+              "new": {
+                "bury": false,
+                "delays": [10.0],
+                "initialFactor": 2300,
+                "ints": [1, 4, 0],
+                "order": 1,
+                "perDay": 10
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 0,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.4,
+                "hardFactor": 1.1,
+                "ivlFct": 0.95,
+                "maxIvl": 36500,
+                "perDay": 100
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.9,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": 9,
+              "waitForAudio": true,
+              "weightSearch": ""
+            },
+            "Steady": {
+              "answerAction": 0,
+              "autoplay": true,
+              "buryInterdayLearning": false,
+              "desiredRetention": 0.9,
+              "dyn": false,
+              "easyDaysPercentages": [1.0, 1.0, 1.0, 1.0, 1.0, 0.5, 0.0],
+              "fsrsParams5": [0.3891, 1.2207, 3.3014, 14.9056, 7.1213, 0.5502, 1.1024, 0.0201, 1.5809, 0.1611, 1.0457, 1.9102, 0.0899, 0.3108, 2.1503, 0.2602, 2.8104, 0.4703, 0.6012],
+              "fsrsParams6": [0.1544, 0.8813, 2.9105, 11.2071, 6.8114, 0.7103, 2.6541, 0.0052, 1.6812, 0.1801, 0.8724, 1.5932, 0.0712, 0.2891, 1.7524, 0.5103, 2.0542, 0.4817, 0.1123, 0.0841, 0.1305],
+              "fsrsParams7": [0.25, 1.5, 3.75],
+              "fsrsWeights": [0.5512, 1.3904, 4.2051, 11.3107, 5.2209, 1.1503, 0.9102, 0.0405, 1.5903, 0.1407, 0.9908, 2.0511, 0.0802, 0.3311, 1.5102, 0.2304, 2.7509],
+              "id": 1893488400000,
+              "ignoreRevlogsBeforeDate": "2029-12-01",
+              "interdayLearningMix": 0,
+              "lapse": {
+                "delays": [10.0],
+                "leechAction": 1,
+                "leechFails": 8,
+                "minInt": 1,
+                "mult": 0.0
+              },
+              "maxTaken": 60,
+              "mod": 1893488400,
+              "name": "Steady",
+              "new": {
+                "bury": false,
+                "delays": [1.0, 10.0],
+                "initialFactor": 2500,
+                "ints": [1, 4, 0],
+                "order": 1,
+                "perDay": 20
+              },
+              "newGatherPriority": 0,
+              "newMix": 0,
+              "newPerDayMinimum": 0,
+              "newSortOrder": 0,
+              "questionAction": 0,
+              "replayq": true,
+              "rev": {
+                "bury": false,
+                "ease4": 1.3,
+                "hardFactor": 1.2,
+                "ivlFct": 1.0,
+                "maxIvl": 36500,
+                "perDay": 200
+              },
+              "reviewOrder": 0,
+              "secondsToShowAnswer": 0.0,
+              "secondsToShowQuestion": 0.0,
+              "sm2Retention": 0.85,
+              "stopTimerOnAnswer": false,
+              "timer": 0,
+              "usn": 9,
+              "waitForAudio": true,
+              "weightSearch": "deck:Languages*"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "bcab61c009004f7722d333a8f10d8065f4582526675135b1e55ae9e4520186eb",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "preservation/fixture/open",
+  "scenario_sha256": "599933095797446f42a36c6b054f4fe74c12a66cd609a780b3dbe4e6272fda24",
+  "tz": "UTC"
+}
