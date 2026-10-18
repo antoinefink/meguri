@@ -4,6 +4,8 @@
 //! floating-point probe (`conformance/float-determinism`). U45 adds learning
 //! steps, the other card kinds, short-term scheduling and labels.
 
+pub mod fsrs_glue;
 pub mod fuzz;
+pub mod labels;
 pub mod review;
 pub mod steps;

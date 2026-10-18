@@ -71,6 +71,15 @@ pub struct DeckConfigMessage {
 }
 
 impl DeckConfigMessage {
+    /// sched/fsrs-transitions T13: expose only the support marker; callers
+    /// never interpret opaque legacy or future protobuf payloads.
+    pub fn has_later_fsrs_parameters(&self) -> bool {
+        self.unknown
+            .iter()
+            .any(|field| matches!(field.number(), 7 | 8) && !field.is_empty_length_delimited())
+            || crate::schema11::deck_config::has_later_fsrs_parameters(&self.other)
+    }
+
     /// FSRS-4 parameters (schema-11 `fsrsWeights`); read-only.
     pub fn fsrs_params_4(&self) -> &[f32] {
         &self.fsrs_params_4

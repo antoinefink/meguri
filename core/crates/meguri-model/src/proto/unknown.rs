@@ -19,6 +19,15 @@ impl UnknownField {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+
+    /// Metadata of the already validated field (including noncanonical
+    /// tag/length varints); payloads and nested fields remain opaque.
+    pub fn is_empty_length_delimited(&self) -> bool {
+        let mut reader = super::Reader::new(&self.bytes, 0);
+        matches!(reader.varint(), Ok(tag) if tag & 7 == 2)
+            && matches!(reader.varint(), Ok(0))
+            && reader.pos == self.bytes.len()
+    }
 }
 
 /// The unknown fields of one message, in read order.

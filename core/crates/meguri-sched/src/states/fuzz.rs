@@ -35,7 +35,7 @@ pub fn learning_delay(seconds: u32, seed: u64) -> u32 {
         if count == 1 {
             seconds
         } else {
-            seconds + rng.random_range(0..count)
+            (u64::from(seconds) + u64::from(rng.random_range(0..count))) as u32
         }
     }
 }

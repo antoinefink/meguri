@@ -14,6 +14,30 @@ use crate::usn::Usn;
 
 const ITEM: Schema11Item = Schema11Item::DeckConfig;
 
+/// T13 inspects every stored member, before last-wins reduction. It never
+/// edits `other` or decodes a guessed future parameter payload.
+pub(crate) fn has_later_fsrs_parameters(bytes: &[u8]) -> bool {
+    let Some(raw) = std::str::from_utf8(bytes).ok().and_then(json::parse_value) else {
+        return false;
+    };
+    if json::kind(raw) != json::Kind::Object {
+        return false;
+    }
+    json::parse_members(raw.get()).is_some_and(|members| {
+        members.into_iter().any(|(key, value)| {
+            let Some(version) = key.strip_prefix("fsrsParams") else {
+                return false;
+            };
+            if version.is_empty() || !version.bytes().all(|b| b.is_ascii_digit()) {
+                return false;
+            }
+            let version = version.trim_start_matches('0');
+            let later = version.len() > 1 || version.as_bytes().first().is_some_and(|digit| *digit >= b'7');
+            later && json::array(value).is_some_and(|values| !values.is_empty())
+        })
+    })
+}
+
 /// The top-level keys, in output order. They are also the reserved keys
 /// (S3), with `new`, `rev` and `lapse`.
 const TOP_KEYS: [&str; 33] = [

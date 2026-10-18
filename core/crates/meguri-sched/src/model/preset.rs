@@ -62,6 +62,7 @@ option_enum!(AnswerAction, Bury, Again = 1, Good = 2, Hard = 3, ShowReminder = 4
 pub struct PresetView {
     source: DeckConfig,
     fields: DeckConfigMessage,
+    later_parameters: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +99,7 @@ impl PresetView {
         Self {
             source: source.clone(),
             fields: source.config.for_use(),
+            later_parameters: source.config.has_later_fsrs_parameters(),
         }
     }
     /// Bounded numeric values; enum storage codes remain intact (V4).
@@ -106,6 +108,9 @@ impl PresetView {
     }
     pub fn source(&self) -> &DeckConfig {
         &self.source
+    }
+    pub fn has_later_fsrs_parameters(&self) -> bool {
+        self.later_parameters
     }
     pub fn insert_order(&self) -> InsertOrder {
         InsertOrder::from_stored(self.fields.new_card_insert_order)
