@@ -1,6 +1,8 @@
 # U45 adds pure next-state, label and fuzz cases. U44 owns answer cases:
 # day/legacy-timing-after-answer, fsrs/ae23-answer, fsrs/input-boundaries
 # and steps/rollover-answer. Matrix cases are generated; list the family.
+# U46 adds complete memory resolver/count cases. Mixed memory cases remain
+# pending: on-the-fly (U44), lrt-repair (U128), recompute (U49).
 area: sched
 active:
   - "day/ae84-kathmandu"
@@ -35,6 +37,14 @@ active:
   - "labels/review"
   - "labels/rollover"
   - "labels/units"
+  - "memory/crafted-rows"
+  - "memory/ignore-before-boundary"
+  - "memory/ignore-before-count"
+  - "memory/ignore-before"
+  - "memory/no-history"
+  - "memory/reset"
+  - "memory/skipped-rows"
+  - "memory/sm2-history"
   - "steps/hard-delays"
   - "steps/interday"
   - "steps/learning-fuzz"
