@@ -43,6 +43,44 @@ fn media_op_files_are_available_inside_the_commit_observer() {
 }
 
 #[test]
+fn media_occupied_hash_destinations_refuse_the_note_before_commit() {
+    for symlink in [false, true] {
+        let h = Harness::open();
+        let media = MediaService::open(&h.collection, h.clock.clone()).unwrap();
+        media.add("image.png", b"original").unwrap();
+        let hashed = media.add("image.png", b"attachment").unwrap();
+        media.store().trash(&["image.png".into(), hashed.clone()]).unwrap();
+        fs::create_dir(media.store().media_dir().join("image.png")).unwrap();
+        let target = media.store().media_dir().join(&hashed);
+        if symlink {
+            std::os::unix::fs::symlink(media.store().trash_dir(), &target).unwrap();
+        } else {
+            fs::create_dir(&target).unwrap();
+        }
+        let initial_notes = common::query_int(&h.collection, "SELECT count(*) FROM notes");
+        let mut stage = media.begin_staging().unwrap();
+        let result = h
+            .collection
+            .run(OpSpec::named("blocked_media", OpSource::UserNonUndoable), move |ctx| {
+                let id = ctx.scope().add_note(&note(&[&format!("<img src='{hashed}'>")]))?;
+                stage.add("image.png", b"attachment").map_err(EngineError::Media)?;
+                ctx.commit_media(stage, &[id])
+            });
+        assert!(matches!(
+            result,
+            Err(EngineError::Media(meguri_storage::media::MediaError::NameTaken))
+        ));
+        assert_eq!(
+            common::query_int(&h.collection, "SELECT count(*) FROM notes"),
+            initial_notes
+        );
+        assert_eq!(fs::read_dir(media.store().staging_dir()).unwrap().count(), 0);
+        assert_eq!(media.store().trash_summary().unwrap().entries, 2);
+        assert!(target.symlink_metadata().is_ok());
+    }
+}
+
+#[test]
 fn media_recovery_uses_final_stored_note_rows_after_all_op_steps() {
     use meguri_storage::ReadRows;
     let h = Harness::open();

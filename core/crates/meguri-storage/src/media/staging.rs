@@ -129,6 +129,9 @@ impl StagedOp {
         if target.symlink_metadata().is_ok() && folder::regular(&target)?.is_none() {
             name = hash_name.clone();
             target = self.store.media_dir().join(&name);
+            if target.symlink_metadata().is_ok() && folder::regular(&target)?.is_none() {
+                return Err(MediaError::NameTaken);
+            }
         }
         if name == hash_name {
             let variants = self.store.candidates(&mut db, &name)?;
