@@ -55,6 +55,7 @@ pub struct Storage {
     dir: Option<TempDir>,
     host_data: Option<TempDir>,
     backup: std::sync::Arc<super::BackupWitness>,
+    fixture_backup_witness: bool,
     record_changes: bool,
     changes: Vec<std::sync::Arc<meguri_engine::Event>>,
     subscription: Option<meguri_engine::Subscription>,
@@ -188,8 +189,12 @@ impl Storage {
             clock,
             random,
             std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
-        )
-        .with_backup_for_testing(self.backup.clone());
+        );
+        let config = if self.fixture_backup_witness {
+            config.with_backup_for_testing(self.backup.clone())
+        } else {
+            config
+        };
         let host = CoreHost::open(config).map_err(core)?;
         let collection = host.collection().map_err(core)?;
         self.backup.bind(collection.clone());
@@ -232,6 +237,9 @@ impl Storage {
     pub(super) fn record_changes(&mut self) {
         self.record_changes = true;
         self.backup.record_checks();
+    }
+    pub(super) fn fixture_backup_witness(&mut self) {
+        self.fixture_backup_witness = true;
     }
     fn collect_changes(&mut self) {
         if let Some(subscription) = &self.subscription {

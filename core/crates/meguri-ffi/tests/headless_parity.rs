@@ -52,6 +52,7 @@ fn testkit_and_ffi_host_harness_call_the_backup_before_the_same_deletion_changes
     std::fs::write(&scenario_path, "id: host/parity\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup:\n  decks: [Parity]\n  notes: [{notetype: Basic, deck: Parity, fields: [front, back]}]\nsteps:\n  - delete_decks: {decks: [Parity]}\n").unwrap();
     let loaded = scenario::load(&scenario_path).unwrap();
     let mut registry = MeguriExecutor::core_registry();
+    registry.fixture_backup_witness();
     registry.record_changes();
     registry.finish(capture);
     MeguriExecutor::with(registry).run(&loaded).unwrap();

@@ -18,7 +18,7 @@ fn suite() -> &'static (Suite, MeguriExecutor) {
     static SUITE: OnceLock<(Suite, MeguriExecutor)> = OnceLock::new();
     SUITE.get_or_init(|| {
         let suite = Suite::open(&conformance_dir()).unwrap_or_else(|e| panic!("{e}"));
-        (suite, MeguriExecutor::new())
+        (suite, MeguriExecutor::fixture_harness())
     })
 }
 

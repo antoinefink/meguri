@@ -195,7 +195,7 @@ fn run(options: &Options) -> Result<i32, String> {
         .lane
         .clone()
         .unwrap_or_else(|| format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH));
-    let meguri = MeguriExecutor::new();
+    let meguri = MeguriExecutor::fixture_harness();
     let (report, hello) = if options.live {
         let oracle = oracle(options)?.expecting(suite.pin.clone());
         let live = LiveRun {
@@ -248,7 +248,7 @@ fn exec(options: &Options) -> Result<i32, String> {
     let result = if options.live {
         oracle(options)?.run(&loaded)
     } else {
-        let executor = MeguriExecutor::new();
+        let executor = MeguriExecutor::fixture_harness();
         let missing = executor.missing(&loaded.scenario.needs());
         if !missing.is_empty() {
             eprintln!("{}: pending (needs {})", loaded.scenario.id, missing.summary());
@@ -271,7 +271,7 @@ fn exec(options: &Options) -> Result<i32, String> {
 fn diff(options: &Options) -> Result<i32, String> {
     let path = single_scenario(options)?;
     let suite = open_suite(options)?;
-    let meguri = MeguriExecutor::new();
+    let meguri = MeguriExecutor::fixture_harness();
     if !options.live {
         let outcome = suite.check_path(&path, &meguri);
         print!("{}", outcome.render_text());

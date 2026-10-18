@@ -74,9 +74,16 @@ pub struct Registry {
     actor: Option<RawDumpFn>,
     finish: Vec<FinishFn>,
     record_changes: bool,
+    fixture_backup_witness: bool,
 }
 
 impl Registry {
+    /// Use a counted test witness on isolated fixture copies, never user data.
+    /// This proves hook invocation, not production backup safety (host H6).
+    pub fn fixture_backup_witness(&mut self) {
+        self.fixture_backup_witness = true;
+    }
+
     /// Capture engine changes and backup-hook witnesses for parity tests.
     pub fn record_changes(&mut self) {
         self.record_changes = true;
@@ -282,6 +289,14 @@ impl MeguriExecutor {
         MeguriExecutor::with(MeguriExecutor::core_registry())
     }
 
+    /// Explicit harness for generated/copied conformance fixtures. The default
+    /// executor instead retains CoreHost's real or unavailable backup provider.
+    pub fn fixture_harness() -> MeguriExecutor {
+        let mut registry = Self::core_registry();
+        registry.fixture_backup_witness();
+        Self::with(registry)
+    }
+
     /// The areas that have adapters, by name.
     pub const AREAS: [&'static str; 15] = [
         "undo",
@@ -365,6 +380,9 @@ impl MeguriExecutor {
             storage: Default::default(),
             day: Default::default(),
         };
+        if self.registry.fixture_backup_witness {
+            session.storage.fixture_backup_witness();
+        }
         if self.registry.record_changes {
             session.storage.record_changes();
         }
@@ -524,6 +542,9 @@ impl MeguriExecutor {
                 storage: Default::default(),
                 day: Default::default(),
             };
+            if self.registry.fixture_backup_witness {
+                session.storage.fixture_backup_witness();
+            }
             if self.registry.record_changes {
                 session.storage.record_changes();
             }
@@ -611,6 +632,43 @@ impl<'a> Actors<'a> {
 impl Default for MeguriExecutor {
     fn default() -> MeguriExecutor {
         MeguriExecutor::new()
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+    use meguri_engine::UndoScope;
+
+    #[test]
+    fn default_executor_refuses_unavailable_backup_without_mutation_or_history_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("refusal.yaml");
+        std::fs::write(&path, "id: host/refusal\nclock: {tz: UTC, start: '2030-01-15T10:00:00'}\nsetup:\n  decks: [Protected]\n  notes: [{notetype: Basic, deck: Protected, fields: [front, back]}]\nsteps:\n  - delete_decks: {decks: [Protected]}\n").unwrap();
+        let loaded = crate::scenario::load(&path).unwrap();
+        let mut executor = MeguriExecutor::new();
+        executor.registry.record_changes();
+        let mut session = executor.session(&loaded, None).unwrap();
+        executor.new_collection(&mut session).unwrap();
+        executor.run_setup(&mut session).unwrap();
+        let collection = session.engine_collection().unwrap();
+        let data = |session: &Session<'_>| {
+            let reader = session.storage.collection().unwrap().reader().unwrap();
+            ["col", "decks", "notes", "cards", "graves"].map(|table| {
+                reader
+                    .execute_raw(&format!("SELECT * FROM {table} ORDER BY 1"), &[])
+                    .unwrap()
+            })
+        };
+        let before = data(&session);
+        let undo = collection.peek_undo(UndoScope::Global).unwrap();
+        session.storage.take_changes();
+        let error = executor.step(&mut session, &loaded.scenario.steps[0]).unwrap_err();
+        assert_eq!(error.kind, "core_error");
+        assert_eq!(data(&session), before);
+        assert_eq!(collection.peek_undo(UndoScope::Global).unwrap(), undo);
+        assert!(session.storage.take_changes().is_empty());
+        assert_eq!(session.storage.backup_calls(), 0);
     }
 }
 

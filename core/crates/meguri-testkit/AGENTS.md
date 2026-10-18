@@ -38,5 +38,5 @@
 
 - U28 owns `exec/decks.rs` and the full new collection in `exec/storage.rs` (`storage/new-collection` B11): no note-type bootstrap stand-in. Setup deck aliases retain their ids, but add_note resolves a live stored human name first (K1, K15). `exec/model.rs` supplies legacy JSON reads/patches and `exec/cards.rs` the raw card observation needed by deck deletions. Undo still needs U38's engine session (undo-ops V6); never register a no-op undo adapter.
 
-- `Registry::record_changes` opts parity tests into exact engine ChangeSet events and pre-delete backup witnesses; normal runs retain no event trace. Test-only backup witnesses never satisfy the production wiring catalog. U127 must replace the unavailable provider with its package service and revisit the harness override.
+- The default executor keeps CoreHost's real or unavailable backup provider. Only explicit `fixture_harness` / `Registry::fixture_backup_witness` uses a counted witness on isolated fixture copies; it never proves backup safety or satisfies U127. `Registry::record_changes` records exact events and pre-delete checks without enabling the witness. Normal runs retain no event trace. U127 must revisit the harness override.
 - After a hosted sync replaces the generation, refresh with `Session::engine_collection` before observations (U117); it rebinds the cached reader handle and backup witness.
