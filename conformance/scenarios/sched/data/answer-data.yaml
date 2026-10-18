@@ -1,0 +1,74 @@
+# The card data an answer writes with FSRS on (specs/sched/card-data.md K5,
+# K6; specs/sched/presets.md V6, V7): which parameter list of the home preset
+# is used, the decay that follows from its length (written as stored, not
+# clamped to the model's range), the preset's desired retention, the new
+# position saved in pos, and lrt. One new card per preset, each answered Good
+# once; the data text is read back byte for byte.
+#   P21    fsrsParams6 with 21 values, the last 0.3, desired retention 0.85
+#   P21low fsrsParams6 with 21 values, the last 0.05 (below the model's 0.1)
+#   P19    fsrsParams5 only (19 values)
+#   P17    fsrsWeights only (17 values)
+#   P19w   fsrsParams5 and fsrsWeights: the 19 values win
+#   P21w   fsrsParams6 and fsrsParams5: the 21 values win
+#   none   no list: the crate's defaults, decay 0.1542
+id: sched/data/answer-data
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets:
+    - name: P21
+      desired_retention: 0.85
+      fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.3]
+    - name: P21low
+      fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.05]
+    - {name: P19}
+    - {name: P17}
+    - {name: P19w}
+    - name: P21w
+      fsrs_params: [0.212, 1.2931, 2.3065, 8.2956, 6.4133, 0.8334, 3.0194, 0.001, 1.8722, 0.1666, 0.796, 1.4835, 0.0614, 0.2629, 1.6483, 0.6014, 1.8729, 0.5425, 0.0912, 0.0658, 0.3]
+    - {name: none}
+  decks:
+    - {name: D21, preset: P21}
+    - {name: D21low, preset: P21low}
+    - {name: D19, preset: P19}
+    - {name: D17, preset: P17}
+    - {name: D19w, preset: P19w}
+    - {name: D21w, preset: P21w}
+    - {name: Dnone, preset: none}
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: D21, fields: [one, back]}
+    - {notetype: Pair, deck: D21low, fields: [two, back]}
+    - {notetype: Pair, deck: D19, fields: [three, back]}
+    - {notetype: Pair, deck: D17, fields: [four, back]}
+    - {notetype: Pair, deck: D19w, fields: [five, back]}
+    - {notetype: Pair, deck: D21w, fields: [six, back]}
+    - {notetype: Pair, deck: Dnone, fields: [seven, back]}
+steps:
+  - legacy_update:
+      preset: P19
+      patch: {fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]}
+  - legacy_update:
+      preset: P17
+      patch: {fsrsWeights: [0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.031, 1.6474, 0.1367, 1.0461, 2.1072, 0.0793, 0.3246, 1.587, 0.2272, 2.8755]}
+  - legacy_update:
+      preset: P19w
+      patch:
+        fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]
+        fsrsWeights: [0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.031, 1.6474, 0.1367, 1.0461, 2.1072, 0.0793, 0.3246, 1.587, 0.2272, 2.8755]
+  - legacy_update:
+      preset: P21w
+      patch: {fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]}
+  - db_exec: {sql: "SELECT type, queue, due, data FROM cards ORDER BY id"}
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c2", rating: good}
+  - answer: {card: "#c3", rating: good}
+  - answer: {card: "#c4", rating: good}
+  - answer: {card: "#c5", rating: good}
+  - answer: {card: "#c6", rating: good}
+  - answer: {card: "#c7", rating: good}
+  - db_exec: {sql: "SELECT type, queue, data FROM cards ORDER BY id"}

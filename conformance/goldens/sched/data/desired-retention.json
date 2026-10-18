@@ -1,0 +1,54 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["0A0C08809A90A89237559A99593F"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["0A0C08809A90A89237550000003F"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["0A0708809A90A89237"]
+          ]
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{\"pos\":1,\"s\":2.3065,\"d\":2.118,\"dr\":0.85,\"decay\":0.154,\"lrt\":1894701600}"],
+            ["{\"pos\":2,\"s\":2.3065,\"d\":2.118,\"dr\":0.5,\"decay\":0.154,\"lrt\":1894701600}"],
+            ["{\"pos\":3,\"s\":2.3065,\"d\":2.118,\"dr\":0.9,\"decay\":0.154,\"lrt\":1894701600}"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/data/desired-retention",
+  "scenario_sha256": "0a8b5c030c4c5ab33ded54282ffd38bf18462ebafc518d45dd1b09fb7d1d98b5",
+  "tz": "UTC"
+}

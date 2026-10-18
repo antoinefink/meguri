@@ -28,6 +28,15 @@ deviations:
         - ['{"pos":5,"zz":1e400}']
         - ['{"pos":5,"s":1.5,"d":2.0,"zz":1e400}']
         - ['{"pos":5,"s":1.0,"d":2.0,"zz":[1,{"b":-1e400}]}']
+  - id: card-data-unknown-keys-answer
+    requirement: R1461
+    summary: An answer rewrites the scheduling keys of the card data and keeps every unknown key with its value; Anki drops them (specs/sched/card-data.md K5, specs/model/card-data-json.md C3 rule 7).
+    test: core/crates/meguri-sched/tests/card_data_roundtrip.rs unknown_keys_survive_answer
+    scenarios: [sched/data/answer-keeps-cd]
+    pointer: /steps/7/db_exec/rows
+    transform:
+      replace:
+        - [4, '{"k":true}', '[1,2]', 'x']
   - id: storage-v1-scheduler-refused
     requirement: R1482
     summary: Meguri refuses to open a collection still on the v1 scheduler (specs/storage/open-and-connections.md C2.2); Anki opens it and upgrades the scheduler in place.

@@ -1,0 +1,31 @@
+# Desired retention of an answer (specs/sched/presets.md V7, R648): the home
+# deck's own value when it has one, otherwise its preset's. The deck value has
+# no read bounds (0.5 is used as it is). Lang uses the preset Ninety (0.9, the
+# default); its deck override is set to 85, then 50, then cleared. Each answer
+# writes the retention it used into dr.
+id: sched/data/desired-retention
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets: [{name: Ninety}]
+  decks: [{name: Lang, preset: Ninety}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: Lang, fields: [one, back]}
+    - {notetype: Pair, deck: Lang, fields: [two, back]}
+    - {notetype: Pair, deck: Lang, fields: [three, back]}
+steps:
+  - legacy_update: {deck: Lang, patch: {desiredRetention: 85}}
+  - db_exec: {sql: "SELECT hex(kind) FROM decks WHERE name = 'Lang'"}
+  - answer: {card: "#c1", rating: good}
+  - legacy_update: {deck: Lang, patch: {desiredRetention: 50}}
+  - db_exec: {sql: "SELECT hex(kind) FROM decks WHERE name = 'Lang'"}
+  - answer: {card: "#c2", rating: good}
+  - legacy_update: {deck: Lang, patch: {desiredRetention: null}}
+  - db_exec: {sql: "SELECT hex(kind) FROM decks WHERE name = 'Lang'"}
+  - answer: {card: "#c3", rating: good}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}

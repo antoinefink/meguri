@@ -1,0 +1,371 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "legacy_json": {
+          "decks": {
+            "Default": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1,
+              "lrnToday": [0, 0],
+              "mod": 0,
+              "name": "Default",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": 0
+            },
+            "Parent": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701600,
+              "name": "Parent",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            },
+            "Parent::Child": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 5],
+              "mod": 1894701600,
+              "name": "Parent::Child",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "legacy_json": {
+          "decks": {
+            "Default": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1,
+              "lrnToday": [0, 0],
+              "mod": 0,
+              "name": "Default",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 0],
+              "revToday": [0, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 0],
+              "usn": 0
+            },
+            "Parent": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701610,
+              "name": "Parent",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 1],
+              "revToday": [0, 2],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 73000],
+              "usn": -1
+            },
+            "Parent::Child": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 5],
+              "mod": 1894701610,
+              "name": "Parent::Child",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 1],
+              "revToday": [0, 2],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 73000],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0, 0],
+            ["Parent", 1894701610, -1],
+            ["Parent\u001fChild", 1894701610, -1]
+          ]
+        }
+      },
+      {},
+      {
+        "timing": {
+          "days_elapsed": 1,
+          "next_day_at": 1894852800,
+          "now": 1894788000,
+          "utc_offset_secs": 0
+        }
+      },
+      {
+        "legacy_json": {
+          "decks": {
+            "Parent": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [0, 0],
+              "mod": 1894701610,
+              "name": "Parent",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 1],
+              "revToday": [0, 2],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 73000],
+              "usn": -1
+            },
+            "Parent::Child": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [0, 5],
+              "mod": 1894701610,
+              "name": "Parent::Child",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [0, 1],
+              "revToday": [0, 2],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [0, 73000],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0, 0],
+            ["Parent", 1894701610, -1],
+            ["Parent\u001fChild", 1894701610, -1]
+          ]
+        }
+      },
+      {},
+      {
+        "legacy_json": {
+          "decks": {
+            "Parent": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [1, 0],
+              "mod": 1894788000,
+              "name": "Parent",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [1, 1],
+              "revToday": [1, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [1, 2000],
+              "usn": -1
+            },
+            "Parent::Child": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [1, 0],
+              "mod": 1894788000,
+              "name": "Parent::Child",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [1, 1],
+              "revToday": [1, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [1, 2000],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {},
+      {
+        "legacy_json": {
+          "decks": {
+            "Parent": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600000,
+              "lrnToday": [1, 0],
+              "mod": 1894788000,
+              "name": "Parent",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [1, 2],
+              "revToday": [1, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [1, 5000],
+              "usn": -1
+            },
+            "Parent::Child": {
+              "browserCollapsed": true,
+              "collapsed": true,
+              "conf": 1,
+              "desc": "",
+              "desiredRetention": null,
+              "dyn": 0,
+              "extendNew": 0,
+              "extendRev": 0,
+              "id": 1894701600001,
+              "lrnToday": [1, 0],
+              "mod": 1894788000,
+              "name": "Parent::Child",
+              "newLimit": null,
+              "newLimitToday": null,
+              "newToday": [1, 1],
+              "revToday": [1, 0],
+              "reviewLimit": null,
+              "reviewLimitToday": null,
+              "timeToday": [1, 2000],
+              "usn": -1
+            }
+          }
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Default", 0, 0],
+            ["Parent", 1894788000, -1],
+            ["Parent\u001fChild", 1894788000, -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "sched/data/deck-counters",
+  "scenario_sha256": "0fb899621aae5604ecf99a61b9e720f680dae1a770c7f47473a1ff090e63b72b",
+  "tz": "UTC"
+}

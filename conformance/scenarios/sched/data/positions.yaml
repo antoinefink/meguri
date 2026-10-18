@@ -1,0 +1,41 @@
+# New-card positions and pos (specs/sched/card-data.md K6; specs/sched/
+# config-keys.md G3, R589, R590). The cards of one added note share the
+# position nextPos held, and nextPos moves on by one, wrapping after
+# 4294967295; a value that is not an unsigned 32-bit integer reads as 0. An
+# answer that takes a new card out of the new state saves its position in pos:
+# its due, 0 when due is negative, or its original due while it sits in a
+# filtered deck. Answering a card that is no longer new keeps pos.
+# c1, c2: nextPos 41. c3, c4: nextPos 4294967295 (stored due -1). c5, c6:
+# nextPos "x". c5 is then moved by hand into the filtered deck Cram (rescheduling
+# on) with original due 7 before it is answered.
+id: sched/data/positions
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  notetypes:
+    - name: Both
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+      css: ".card { margin: 0; }"
+steps:
+  - set_config: {key: nextPos, value: 41}
+  - add_note: {notetype: Both, fields: [one, uno]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: 4294967295}
+  - add_note: {notetype: Both, fields: [two, dos]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: "x"}
+  - add_note: {notetype: Both, fields: [three, tres]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT ord, type, queue, due, data FROM cards ORDER BY id"}
+  - db_exec: {sql: "INSERT INTO decks (id, name, mtime_secs, usn, common, kind) VALUES (1700000000000, 'Cram', 1700000000, 0, X'08011001', X'1206080112021064')"}
+  - db_exec: {sql: "UPDATE cards SET did = 1700000000000, odid = 1, odue = 7, due = -100000 WHERE id = (SELECT id FROM cards ORDER BY id LIMIT 1 OFFSET 4)"}
+  - answer: {card: "#c1", rating: good}
+  - answer: {card: "#c3", rating: good}
+  - answer: {card: "#c5", rating: good}
+  - db_exec: {sql: "SELECT ord, did, odid, odue, type, queue, data FROM cards ORDER BY id"}
+  - advance: 10m
+  - answer: {card: "#c1", rating: good}
+  - db_exec: {sql: "SELECT type, queue, data FROM cards ORDER BY id LIMIT 1"}

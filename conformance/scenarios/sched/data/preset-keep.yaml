@@ -1,0 +1,41 @@
+# A desired-retention edit keeps what the scheduler does not use (specs/sched/
+# presets.md V8, V9; R653, R762): SM-2 options with non-default values, Easy
+# Days, the historical retention, the optimizer search, new_per_day_minimum,
+# an FSRS-5 parameter list and an add-on's legacy key in other. Only the
+# desired retention changes in the stored blob; the next answer uses it and
+# the FSRS-5 list (decay 0.5). One top-level other member, so the blob bytes
+# are stable.
+id: sched/data/preset-keep
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  config: {fsrs: true}
+  presets: [{name: Keep}]
+  decks: [{name: K, preset: Keep}]
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates: [{name: Forward, front: "{{Front}}", back: "{{Back}}"}]
+      css: ".card { margin: 0; }"
+  notes:
+    - {notetype: Pair, deck: K, fields: [one, back]}
+steps:
+  - legacy_update:
+      preset: Keep
+      patch:
+        new: {initialFactor: 2300, ints: [2, 5, 0]}
+        rev: {ease4: 1.4, ivlFct: 0.9, hardFactor: 1.1}
+        lapse: {mult: 0.2}
+        easyDaysPercentages: [1.0, 0.5, 1.0, 1.0, 1.0, 0.0, 1.0]
+        fsrsParams5: [0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046, 1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315, 2.9898, 0.51655, 0.6621]
+        sm2Retention: 0.88
+        weightSearch: "deck:K"
+        newPerDayMinimum: 3
+        x_addon_sched: {enabled: true, levels: [1, 2, 3]}
+  - db_exec: {sql: "SELECT hex(config) FROM deck_config WHERE name = 'Keep'"}
+  - advance: 10s
+  - legacy_update: {preset: Keep, patch: {desiredRetention: 0.85}}
+  - db_exec: {sql: "SELECT mtime_secs, usn, hex(config) FROM deck_config WHERE name = 'Keep'"}
+  - observe:
+      - legacy_json: {presets: [Keep]}
+  - answer: {card: "#c1", rating: good}
+  - db_exec: {sql: "SELECT data FROM cards ORDER BY id"}
