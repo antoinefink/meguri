@@ -79,6 +79,46 @@ pub trait ReadRows: sealed::Connected {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }
 
+    /// Indexed candidates for the editor's duplicate check (field-check K4).
+    fn notes_with_checksum(&self, notetype: NotetypeId, checksum: u32) -> Result<Vec<Note>, StorageError> {
+        rows::select_where(
+            self.connection(),
+            Table::Notes,
+            "csum = ?1 AND mid = ?2",
+            &[Cell::Integer(i64::from(checksum)), Cell::Integer(notetype.0)],
+        )?
+        .iter()
+        .map(|cells| Note::from_cells(cells).map_err(StorageError::from))
+        .collect()
+    }
+
+    /// How many notes one type has, for regeneration progress.
+    fn notetype_note_count(&self, notetype: NotetypeId) -> Result<u64, StorageError> {
+        Ok(self
+            .connection()
+            .query_row("SELECT count(*) FROM notes WHERE mid = ?1", [notetype.0], |row| {
+                row.get::<_, i64>(0)
+            })? as u64)
+    }
+
+    /// Notes of one type, in id order, for cancellable regeneration.
+    fn notetype_notes_after(
+        &self,
+        notetype: NotetypeId,
+        after: Option<NoteId>,
+        limit: usize,
+    ) -> Result<Vec<Note>, StorageError> {
+        let mut statement = self.connection().prepare_cached(
+            "SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data FROM notes WHERE mid = ?1 AND id > ?2 ORDER BY id LIMIT ?3")?;
+        let found = statement.query_map(
+            (notetype.0, after.map_or(i64::MIN, |id| id.0), limit_value(limit)),
+            |row| rows::row_image(row, Table::Notes),
+        )?;
+        found
+            .map(|cells| Note::from_cells(&cells?).map_err(StorageError::from))
+            .collect()
+    }
+
     fn card(&self, id: CardId) -> Result<Option<Card>, StorageError> {
         rows::get(self.connection(), &RowKey::Id(id.0))
     }

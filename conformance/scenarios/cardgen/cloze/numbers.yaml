@@ -1,0 +1,40 @@
+# Cards of a cloze note type (specs/notes/card-generation.md G4, G5, G6):
+# one card per distinct cloze number of any field, ordinal = number - 1;
+# c0 makes no card; numbers above 500 all map to ordinal 499 (AE33). A note
+# with no cloze number gets the card of ordinal 0. Edits only add cards: the
+# cards of numbers that disappear stay (G7). The cards an edit adds have no
+# logical id, so the cards are read with db_exec: one row per card, the note
+# by its first field (the sort field), in note, ordinal and id order.
+id: cardgen/cloze/numbers
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  decks: [Inbox]
+steps:
+  # AE33: ordinals 0, 2 and 499.
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c1::a}} {{c3::b}} {{c0::label}} {{c700::z}}", ""]}
+  # A cloze in a field no {{cloze:}} uses still makes its card.
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["only extra", "{{c2::in Extra}}"]}
+  # Nested clozes and number lists.
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", ""]}
+  # c0 alone: no cloze number, so the card of ordinal 0.
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c0::only zero}}", ""]}
+  # No cloze markup at all.
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["plain", ""]}
+  # Unclosed markup is no cloze.
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c1::open", "{{c2::x}"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
+  - advance: 1h
+  # The first note loses c1, c3 and c700 and gains c2: one card added, none removed.
+  - edit_note: {note: "#n1", fields: ["{{c2::two}}"]}
+  # The c0 note gains c1: its ordinal-0 card already exists, nothing added.
+  - edit_note: {note: "#n4", fields: ["{{c0::only zero}} {{c1::one}}"]}
+  # The plain note gains c3: ordinal 2 added next to the ordinal-0 card.
+  - edit_note: {note: "#n5", fields: ["plain {{c3::three}}"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due, c.mod FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT count(*) FROM graves"}

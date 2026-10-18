@@ -1,0 +1,88 @@
+# Decks of the cards an edit adds to an existing note (R792, R793, R794;
+# specs/notes/deck-placement-and-position.md D3, D4): the template's deck
+# override when it names a normal deck; otherwise the deck all the note's
+# cards share (the original deck of a card in a filtered deck) when it is a
+# normal deck; otherwise the deck the note type was last added to when it is
+# a normal deck; otherwise Default. Cloze note types have no override. Anki
+# 26.09.3 checks only the first candidate it picks and falls back to Default
+# (override set but missing; shared deck missing); Meguri walks the whole
+# chain (deviation deck-placement-chain-existing-note). The new cards take
+# their siblings' new-card position (P2).
+#
+# Cards are moved with db_exec, and Cram becomes a filtered deck by its kind
+# blob; overrides are written as in cardgen/placement/new-note. The last
+# setup note of each type goes to Other, which becomes the type's last deck.
+# The cards an edit adds have no logical id, so cards are read with db_exec.
+id: cardgen/placement/existing-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Trio
+      fields: [Label, A, B, C]
+      templates:
+        - {name: TA, front: "{{A}}", back: ""}
+        - {name: TB, front: "{{B}}", back: ""}
+        - {name: TC, front: "{{C}}", back: ""}
+    - name: TrioTarget
+      fields: [Label, A, B, C]
+      templates:
+        - {name: TA, front: "{{A}}", back: ""}
+        - {name: TB, front: "{{B}}", back: ""}
+        - {name: TC, front: "{{C}}", back: ""}
+    - name: TrioGone
+      fields: [Label, A, B, C]
+      templates:
+        - {name: TA, front: "{{A}}", back: ""}
+        - {name: TB, front: "{{B}}", back: ""}
+        - {name: TC, front: "{{C}}", back: ""}
+    - name: Gap
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}
+  decks: [Inbox, Other, Elsewhere, Target, Gone, Cram]
+  notes:
+    - {notetype: Trio, deck: Inbox, fields: [shared, a]}
+    - {notetype: Trio, deck: Inbox, fields: [split, a, b]}
+    - {notetype: Trio, deck: Inbox, fields: [in-filtered, a]}
+    - {notetype: Trio, deck: Inbox, fields: [shared-missing, a]}
+    - {notetype: Trio, deck: Inbox, fields: [last-missing, a, b]}
+    - {notetype: Trio, deck: Inbox, fields: [last-filtered, a, b]}
+    - {notetype: Trio, deck: Inbox, fields: [no-last, a, b]}
+    - {notetype: Trio, deck: Other, fields: [last-add, a]}
+    - {notetype: TrioTarget, deck: Inbox, fields: [override, a]}
+    - {notetype: TrioTarget, deck: Other, fields: [override-last-add, a]}
+    - {notetype: TrioGone, deck: Inbox, fields: [override-missing, a]}
+    - {notetype: TrioGone, deck: Other, fields: [override-missing-last-add, a]}
+    - {notetype: Gap, deck: Inbox, fields: ["{{c1::shared}}"]}
+    - {notetype: Gap, deck: Inbox, fields: ["{{c1::split}} {{c2::two}}"]}
+    - {notetype: Gap, deck: Other, fields: ["{{c1::last add}}"]}
+steps:
+  - db_exec: {sql: "UPDATE cards SET did = (SELECT id FROM decks WHERE name = 'Elsewhere') WHERE ord = 1 AND nid IN (SELECT id FROM notes WHERE sfld IN ('split', 'last-missing', 'last-filtered', 'no-last', '{{c1::split}} {{c2::two}}'))"}
+  - db_exec: {sql: "UPDATE cards SET odid = did, odue = due, due = -100000, did = (SELECT id FROM decks WHERE name = 'Cram') WHERE nid = (SELECT id FROM notes WHERE sfld = 'in-filtered')"}
+  - db_exec: {sql: "UPDATE cards SET did = 999 WHERE nid = (SELECT id FROM notes WHERE sfld = 'shared-missing')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Target')) AS BLOB) WHERE ord = 2 AND ntid = (SELECT id FROM notetypes WHERE name = 'TrioTarget')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Gone')) AS BLOB) WHERE ord = 2 AND ntid = (SELECT id FROM notetypes WHERE name = 'TrioGone')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Target')) AS BLOB) WHERE ord = 0 AND ntid = (SELECT id FROM notetypes WHERE name = 'Gap')"}
+  - db_exec: {sql: "UPDATE decks SET kind = X'12150801120c0a0669733a6475651032180628d804383c' WHERE name = 'Cram'"}
+  - db_exec: {sql: "DELETE FROM decks WHERE name = 'Gone'"}
+  - reopen: {}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.odid != 0, c.due, c.odue FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {B: b}}
+  - edit_note: {note: "#n2", fields: {C: c}}
+  - edit_note: {note: "#n3", fields: {B: b}}
+  - edit_note: {note: "#n4", fields: {B: b}}
+  - edit_note: {note: "#n9", fields: {C: c}}
+  - edit_note: {note: "#n11", fields: {C: c}}
+  - edit_note: {note: "#n13", fields: ["{{c1::shared}} {{c2::more}}"]}
+  - edit_note: {note: "#n14", fields: ["{{c1::split}} {{c2::two}} {{c3::three}}"]}
+  # Trio's last deck: a missing deck, then the filtered Cram, then no key.
+  - db_exec: {sql: "UPDATE config SET val = CAST('999' AS BLOB) WHERE KEY = '_nt_' || (SELECT id FROM notetypes WHERE name = 'Trio') || '_lastDeck'"}
+  - edit_note: {note: "#n5", fields: {C: c}}
+  - db_exec: {sql: "UPDATE config SET val = CAST((SELECT id FROM decks WHERE name = 'Cram') AS BLOB) WHERE KEY = '_nt_' || (SELECT id FROM notetypes WHERE name = 'Trio') || '_lastDeck'"}
+  - edit_note: {note: "#n6", fields: {C: c}}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = '_nt_' || (SELECT id FROM notetypes WHERE name = 'Trio') || '_lastDeck'"}
+  - edit_note: {note: "#n7", fields: {C: c}}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.odid != 0, c.due, c.odue, c.mod FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}

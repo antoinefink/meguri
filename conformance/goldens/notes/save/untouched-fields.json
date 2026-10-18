@@ -1,0 +1,56 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["<ruby>私<rt>わたし</rt></ruby>は<span style=\"color: rgb(255, 0, 0);\" data-x='1'>学生</span>です。<script>if (a < b && c > d) {}</script>&nbsp;<br/><!-- c --><img src=\"a b.jpg\" onerror=x><div><div></div></div>  end  \u001fI am a student.\u001f", " migaku ", 1894701600, 7, 1894701600000]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["<ruby>私<rt>わたし</rt></ruby>は<span style=\"color: rgb(255, 0, 0);\" data-x='1'>学生</span>です。<script>if (a < b && c > d) {}</script>&nbsp;<br/><!-- c --><img src=\"a b.jpg\" onerror=x><div><div></div></div>  end  \u001fI am a student.\u001f", " migaku ", 1894701600, 7, 1894701600000]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["<ruby>私<rt>わたし</rt></ruby>は<span style=\"color: rgb(255, 0, 0);\" data-x='1'>学生</span>です。<script>if (a < b && c > d) {}</script>&nbsp;<br/><!-- c --><img src=\"a b.jpg\" onerror=x><div><div></div></div>  end  \u001fI'm a student.\u001f", " migaku ", 1894708800, -1, 1894708800000]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["3C727562793EE7A7813C72743EE3828FE3819FE381973C2F72743E3C2F727562793EE381AF3C7370616E207374796C653D22636F6C6F723A20726762283235352C20302C2030293B2220646174612D783D2731273EE5ADA6E7949F3C2F7370616E3EE381A7E38199E380823C7363726970743E6966202861203C20622026262063203E206429207B7D3C2F7363726970743E266E6273703B3C62722F3E3C212D2D2063202D2D3E3C696D67207372633D226120622E6A706722206F6E6572726F723D783E3C6469763E3C6469763E3C2F6469763E3C2F6469763E2020656E642020"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/save/untouched-fields",
+  "scenario_sha256": "96ae9cf596564470c2d4174dcbd5e51944dd0d53013cf3d7d8b516aca87d7f33",
+  "tz": "UTC"
+}
