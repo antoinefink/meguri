@@ -1,0 +1,6 @@
+# All eight scenarios have engine golden tests (tests/notes.rs and
+# tests/undo_conformance.rs). Production activation needs U28's deck setup
+# and bootstrap; records/add also legacy_update (U36), fields/count-repair
+# Check Database (U128), and records/undo-add the U38 undo adapter.
+area: notes
+active: []

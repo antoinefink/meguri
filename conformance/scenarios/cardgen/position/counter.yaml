@@ -1,0 +1,57 @@
+# New-card positions from the collection's counter (R795; specs/notes/deck-
+# placement-and-position.md P1, P2, P3). A new collection's nextPos is 1.
+# All new cards of one note take one position, the counter's value, and the
+# counter moves on by one per note. A card added to a note that has a new
+# card (type 0) takes that card's position instead (never below 0) and leaves
+# the counter alone; a reviewed sibling gives no position. A counter value
+# that is missing or not an integer from 0 to 4294967295 counts as 0; after
+# 4294967295 comes 0. A position stored in cards.due keeps its low 32 bits as
+# a signed number. The cards an edit adds have no logical id, so cards are
+# read with db_exec.
+id: cardgen/position/counter
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Duo
+      fields: [Label, A, B]
+      templates:
+        - {name: TA, front: "{{A}}", back: ""}
+        - {name: TB, front: "{{B}}", back: ""}
+  decks: [Inbox]
+steps:
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [both, a, b]}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [reviewed, a]}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [negative, a]}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [suspended, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - answer: {card: "#c3", rating: good}
+  - db_exec: {sql: "UPDATE cards SET due = -5 WHERE nid = (SELECT id FROM notes WHERE sfld = 'negative')"}
+  - db_exec: {sql: "UPDATE cards SET queue = -1 WHERE nid = (SELECT id FROM notes WHERE sfld = 'suspended')"}
+  - advance: 1h
+  - edit_note: {note: "#n2", fields: {B: b}}
+  - edit_note: {note: "#n3", fields: {B: b}}
+  - edit_note: {note: "#n4", fields: {B: b}}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: 4294967295}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [max-u32, a, b]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: 2147483648}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [above-i32, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: 4294967296}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [above-u32, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: -3}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [negative-counter, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: 7.0}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [float-counter, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - set_config: {key: nextPos, value: "12"}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [string-counter, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT) FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "DELETE FROM config WHERE KEY = 'nextPos'"}
+  - add_note: {notetype: Duo, deck: Inbox, fields: [no-counter, a]}
+  - db_exec: {sql: "SELECT CAST(val AS TEXT), usn FROM config WHERE KEY = 'nextPos'"}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.type, c.queue, c.due FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}

@@ -827,6 +827,132 @@ fn text_requests_follow_the_schema() {
     }
 }
 
+/// note-ops.md N4: the request shape of scenario.schema.json's
+/// `fields_check_request`, read into the typed request both executors use.
+#[test]
+fn fields_check_requests_follow_the_schema() {
+    use meguri_testkit::scenario::{Fields, FieldsCheckCase, FieldsCheckRequest, ObservationArgs, ObservationKind};
+
+    let parse = |request: &str| {
+        let text = format!(
+            "id: notes/x\nclock: {{tz: UTC, start: \"2030-01-15T10:00:00\"}}\nsteps: [{{observe: [{request}]}}]\n"
+        );
+        scenario::Scenario::from_value(&scenario::parse_yaml(&text).unwrap())
+    };
+    let parsed = parse(
+        "{fields_check: {cases: [{notetype: Std, fields: [x, \"\"]}, {notetype: Std, fields: {Back: y}}, \
+         {note: \"#n2\"}, {note: \"#n1\", fields: [a]}, {note: \"#n1\", fields: {Back: b}}]}}",
+    )
+    .unwrap();
+    assert!(parsed.needs().observations.contains("fields_check"));
+    let Step::Observe(requests) = &parsed.steps[0] else {
+        panic!("not an observe step")
+    };
+    assert_eq!(requests[0].kind, ObservationKind::FieldsCheck);
+    let ObservationArgs::Mapping(map) = &requests[0].args else {
+        panic!("not a mapping")
+    };
+    let request = FieldsCheckRequest::from_mapping(map).unwrap();
+    let note = |n: u32| scenario::NoteRef(format!("#n{n}").parse().unwrap());
+    let map_of = |name: &str, value: &str| Fields::Map([(name.to_owned(), value.to_owned())].into());
+    assert_eq!(
+        request.cases,
+        [
+            FieldsCheckCase::NewNote {
+                notetype: "Std".to_owned(),
+                fields: Fields::List(vec!["x".to_owned(), String::new()]),
+            },
+            FieldsCheckCase::NewNote {
+                notetype: "Std".to_owned(),
+                fields: map_of("Back", "y"),
+            },
+            FieldsCheckCase::StoredNote {
+                note: note(2),
+                fields: None,
+            },
+            FieldsCheckCase::StoredNote {
+                note: note(1),
+                fields: Some(Fields::List(vec!["a".to_owned()])),
+            },
+            FieldsCheckCase::StoredNote {
+                note: note(1),
+                fields: Some(map_of("Back", "b")),
+            },
+        ]
+    );
+    for (bad, why) in [
+        ("fields_check", "does not take these arguments"),
+        ("{fields_check: null}", "cannot take null"),
+        ("{fields_check: [\"#n1\"]}", "does not take these arguments"),
+        ("{fields_check: {}}", "cases is a non-empty list"),
+        ("{fields_check: {cases: []}}", "cases is a non-empty list"),
+        (
+            "{fields_check: {cases: {notetype: Std, fields: [x]}}}",
+            "cases is a non-empty list",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: Std, fields: [x]}], extra: 1}}",
+            "takes {cases}",
+        ),
+        ("{fields_check: {cases: [Std]}}", "must be a mapping"),
+        ("{fields_check: {cases: [{notetype: Std}]}}", "needs fields"),
+        ("{fields_check: {cases: [{fields: [x]}]}}", "names a notetype or a note"),
+        (
+            "{fields_check: {cases: [{notetype: \"\", fields: [x]}]}}",
+            "non-empty note type name",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: 1, fields: [x]}]}}",
+            "non-empty note type name",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: Std, fields: [x], tags: []}]}}",
+            "not \"tags\"",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: Std, note: \"#n1\", fields: [x]}]}}",
+            "not \"notetype\"",
+        ),
+        ("{fields_check: {cases: [{note: \"#c1\"}]}}", "not a note reference"),
+        ("{fields_check: {cases: [{note: \"#n0\"}]}}", "#n0"),
+        ("{fields_check: {cases: [{note: 1}]}}", "#nN reference"),
+        ("{fields_check: {cases: [{note: \"#n1\", deck: A}]}}", "not \"deck\""),
+        (
+            "{fields_check: {cases: [{notetype: Std, fields: [1]}]}}",
+            "field values are strings",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: Std, fields: [null]}]}}",
+            "field values are strings",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: Std, fields: {Front: true}}]}}",
+            "field values are strings",
+        ),
+        (
+            "{fields_check: {cases: [{notetype: Std, fields: x}]}}",
+            "list of values or a mapping",
+        ),
+        (
+            "{fields_check: {cases: [{note: \"#n1\", fields: null}]}}",
+            "list of values or a mapping",
+        ),
+        (
+            "{fields_check: {cases: [{note: \"#n1\"}]}}, {fields_check: {cases: [{note: \"#n2\"}]}}",
+            "more than once in one step",
+        ),
+    ] {
+        let err = parse(bad).expect_err(bad).to_string();
+        assert!(err.contains(why), "{bad}: {err}");
+    }
+    // The two scenarios of specs/notes/field-check.md K6 load.
+    for id in ["notes/fields-check/states", "notes/fields-check/duplicates"] {
+        let loaded = scenario::load(&conformance_dir().join(format!("scenarios/{id}.yaml")))
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        assert!(loaded.scenario.needs().observations.contains("fields_check"), "{id}");
+    }
+}
+
 #[test]
 fn the_text_functions_are_the_schemas() {
     let schema: Value =
