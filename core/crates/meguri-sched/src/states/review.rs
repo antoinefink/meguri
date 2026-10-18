@@ -1,9 +1,8 @@
-//! FSRS answer states of a review card with the load balancer off
-//! (specs/sched/fsrs-transitions.md T1, T4, T5): the days and memory state
-//! each rating gives. U45 adds the rest of each state (ease factor, lapses,
-//! leech, the relearning step) around these values.
+//! Review-only projection for the floating-point probe (F5). The full
+//! engine uses the same interval rules; both carry the model memory value.
 
-use fsrs::{FSRS, FSRSError, MemoryState};
+use fsrs::{FSRS, FSRSError};
+use meguri_model::card_data::MemoryState;
 
 use super::{
     fuzz,
@@ -14,8 +13,7 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReviewCard {
     /// The card data's memory state (T2.4).
-    pub stability: f32,
-    pub difficulty: f32,
+    pub memory_state: MemoryState,
     /// T2.3: whole days from the last review to the next day boundary.
     pub days_elapsed: u32,
     /// The card's current interval, `cards.ivl` (T3).
@@ -35,8 +33,7 @@ pub struct Answer {
     /// Again: the review part's `scheduled_days` (T4); otherwise the new
     /// interval (T5).
     pub days: u32,
-    pub stability: f32,
-    pub difficulty: f32,
+    pub memory_state: MemoryState,
     /// The rating's unrounded FSRS interval, `u_r` (T1).
     pub unrounded: f32,
 }
@@ -53,15 +50,17 @@ pub struct ReviewAnswers {
 /// T1, T4 and T5 for a review card, with `model` built by `FSRS::new` from
 /// the home preset's parameter list (T2.1). Errors are the crate's.
 pub fn answers(model: &FSRS, card: &ReviewCard) -> Result<ReviewAnswers, FSRSError> {
-    let memory = MemoryState {
-        stability: card.stability,
-        difficulty: card.difficulty,
+    let memory = fsrs::MemoryState {
+        stability: card.memory_state.stability,
+        difficulty: card.memory_state.difficulty,
     };
     let next = model.next_states(Some(memory), card.desired_retention, card.days_elapsed)?;
     let rated = |state: &fsrs::ItemState, days: u32| Answer {
         days,
-        stability: state.memory.stability,
-        difficulty: state.memory.difficulty,
+        memory_state: MemoryState {
+            stability: state.memory.stability,
+            difficulty: state.memory.difficulty,
+        },
         unrounded: state.interval,
     };
 

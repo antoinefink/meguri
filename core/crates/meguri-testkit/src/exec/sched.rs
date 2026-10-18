@@ -220,8 +220,10 @@ impl FsrsModels {
             .get(&input.params)
             .ok_or_else(|| invalid(format!("input {}: no parameter set {:?}", input.id, input.params)))?;
         let card = ReviewCard {
-            stability: input.s,
-            difficulty: input.d,
+            memory_state: meguri_model::card_data::MemoryState {
+                stability: input.s,
+                difficulty: input.d,
+            },
             days_elapsed: input.elapsed_days,
             interval: input.scheduled_days,
             desired_retention: input.dr,
@@ -239,7 +241,7 @@ pub fn row(answers: &ReviewAnswers) -> Result<Value, ExecError> {
     let mut values = Vec::with_capacity(observe::FSRS_NEXT_COLUMNS);
     for answer in [answers.again, answers.hard, answers.good, answers.easy] {
         values.push(json!(answer.days));
-        for x in [answer.stability, answer.difficulty] {
+        for x in [answer.memory_state.stability, answer.memory_state.difficulty] {
             values.push(observe::f32_value(x).map_err(|e| ExecError::new("core_error", e.to_string()))?);
         }
     }
