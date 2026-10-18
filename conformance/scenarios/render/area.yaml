@@ -6,6 +6,9 @@
 # (template card cases on stored notes and cards) and template/legacy-req by
 # U36 (legacy_update and legacy_json). Until then meguri-template's
 # tests/golden_pairs.rs checks the engine against both goldens.
+# Also pending: image-occlusion/format/* except cards, added by U63 with the
+# testkit's image_occlusion observation (image-occlusion-ops.md J3), and
+# image-occlusion/format/cards, added by the unit that adds the card observation.
 area: render
 active:
   - "cloze/*"
