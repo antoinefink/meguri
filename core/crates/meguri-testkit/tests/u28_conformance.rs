@@ -9,7 +9,7 @@ use std::path::Path;
 fn decks_and_new_collection_match_recorded_goldens() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance");
     let suite = Suite::open(&root).unwrap();
-    let executor = MeguriExecutor::new();
+    let executor = MeguriExecutor::fixture_harness();
     let mut failures = Vec::new();
     for file in suite
         .discover(&[
@@ -35,7 +35,7 @@ fn decks_and_new_collection_match_recorded_goldens() {
 #[test]
 fn setup_presets_match_schema11_goldens_on_both_lanes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../conformance");
-    let executor = MeguriExecutor::new();
+    let executor = MeguriExecutor::fixture_harness();
     let filters = [
         "preset-values",
         "preset-rejections",
