@@ -1,0 +1,37 @@
+# Edits whose fields and tags differ from the stored ones only until the
+# save normalizes them (specs/notes/note-records.md U2): decomposed text
+# for a stored NFC field, a control character the save removes, tags in
+# another order or another case of a registered tag. The stored row ends up
+# identical. Anki compares before normalizing, so it stamps the note (usn
+# -1, mod and col.mod now) each time; Meguri compares the normalized row and
+# writes nothing (deviation note-save-same-after-normalizing, R776, R1472).
+# The note's usn is set to a server value first, as after a sync.
+id: notes/save/same-after-normalizing
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Pair, deck: Inbox, fields: ["café", "x"], tags: [alpha, beta]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: ["café"]}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: {Back: "x\u0001"}}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  - edit_note: {note: "#n1", tags: [beta, alpha]}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}
+  - db_exec: {sql: "UPDATE notes SET usn = 7"}
+  - advance: 1h
+  - edit_note: {note: "#n1", tags: [ALPHA, beta]}
+  - db_exec: {sql: "SELECT hex(flds), tags, mod, usn, (SELECT mod FROM col) FROM notes"}

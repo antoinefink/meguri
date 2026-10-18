@@ -8,6 +8,9 @@
 # (plan, U25 Verification as amended 2026-10-16, docs/process/review-log/U25.md
 # A1). Meanwhile core/crates/meguri-engine/tests/undo_conformance.rs plays
 # every undo scenario on the engine's undo against its golden, with stand-ins
-# for the new collection, the setup and those ops.
+# for the new collection, deck setup and answer. U27 replaces its note
+# add/edit/delete stand-ins with real engine operations and also plays
+# notes/records/undo-add. No scenario is completed on the production
+# executor by U27 alone: U28 and U38 remain missing, so none is active here.
 area: undo
 active: []
