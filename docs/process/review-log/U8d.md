@@ -21,3 +21,19 @@ None.
 
 - No spec/U8d branch exists.
 - unit/U8d already contained feat/meguri-v1, so `git merge feat/meguri-v1` was a no-op.
+
+## Resumed integration (2026-10-18)
+
+Antoine changed the execution policy to Codex only, with implementation,
+review and fixes performed directly. The earlier completed review rounds above
+remain the evidence for the original change; no Claude or Opus review was
+started for this resumption.
+
+- Incorporated `feat/meguri-v1` at `c2e8e834`. Only `AGENTS.md` and
+  `tools/AGENTS.md` conflicted: retained U8d's hidden-launch checks together
+  with U19c's VM-unreachable queueing rules.
+- Rechecked the combined launch-policy and LaunchServices checks, the Debug-only
+  configuration, and the shared TestHooks test. The macOS native `clickOrTap()`
+  repair is preserved. No new P0-P2 finding remains from this integration review.
+- The merge gate supplies fresh verification for the combined tree. The existing
+  host-session checks remain queued while Antoine's host is locked.
