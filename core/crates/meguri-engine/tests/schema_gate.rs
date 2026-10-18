@@ -140,13 +140,21 @@ fn ae39_after_a_sync_only_the_first_schema_change_asks() {
 
     // Adding a field asks first and writes nothing: no row, no `col.mod`,
     // no undo step, no change set.
+    h.clock.step_ms(1_000);
+    // Earlier col writes enqueue Rollover ops on the same FIFO writer queue.
+    // Settle those before asserting that this refusal commits no new seq.
+    h.collection
+        .run(
+            OpSpec::named("test_schema_refusal_barrier", OpSource::Rollover).stamp(StampMode::Raw),
+            |_| Ok(()),
+        )
+        .unwrap();
     let events = h.engine.stream().subscribe();
     let before = (
         col(&h),
         h.collection.last_seq(),
         h.collection.peek_undo(UndoScope::Global).unwrap(),
     );
-    h.clock.step_ms(1_000);
     let refused = structure_op(&h, id, FIELDS, false, add_field);
     assert_eq!(
         refused,
