@@ -1,8 +1,7 @@
 # R705 (specs/sched/fsrs-policy.md V1-V3): sched2021 missing.
-# Step 4 reads the row right after the reopen: Meguri has already switched
-# (deviation sched-v3-switch-at-open), Anki has not. enable_v3 is Anki's
-# scheduler update, which Meguri does not have (fsrs-policy-ops.md F3): from
-# step 6 on, both sides must hold what Anki's update wrote.
+# Raw reopen leaves the row unchanged on both sides. enable_v3 promotes
+# Meguri through CoreHost and runs the real open-time normalization; the
+# oracle accepts its scheduler update. Subsequent rows must agree.
 id: sched/compat/v3-switch/missing
 description: A v2 collection without sched2021 opens with sched2021 true, as Anki's scheduler update writes it.
 clock: {tz: UTC, start: "2030-06-01T10:00:00"}

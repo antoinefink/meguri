@@ -114,6 +114,7 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 | `sync_incoming_merge` (a large `SyncIncoming` merge) | U107 | not destructive | yes | yes |
 | `notetype_structure_change` (on large note types) | U34 | undoable | yes | no |
 | `memory_recompute` (`sched/memory-state` M4) | U46 | undoable | yes | yes |
+| `enable_fsrs` (`sched/fsrs-policy` E1-E4) | U50 | not destructive, not undoable | yes | yes |
 | `bulk_op` (bulk ops over large selections) | U86 | undoable | yes | no |
 | `undo` (`engine/undo` M4) | U25 | undoable | no | |
 | `redo` (`engine/undo` M5) | U25 | undoable | no | |
@@ -126,6 +127,8 @@ The list of named engine ops with their undo class (`engine/undo` M11, R2020), t
 A destructive op that is not undoable is confirmed first and preceded by U127's pre-op backup. U37 exports the catalog's names and undo classes.
 
 `memory_recompute` checks cancellation between batches inside its one transaction; cancellation rolls back the entire operation. Its caller supplies `UserUndoable` and the undo name for a user action, or `Optimizer` or `Maintenance` for those callers (`sched/memory-state` M4.3). It uses its own catalog entry, since `bulk_op` does not permit cancellation during writes.
+
+`enable_fsrs` uses `UserNonUndoable` and owns one transaction containing the global flag and all recomputed card writes. Cancellation between batches rolls back both; only a successful commit clears undo. It does not inherit `memory_recompute`'s undo class or commit that work as a second operation (`sched/fsrs-policy` E4).
 
 ## O10. Timing and budgets
 

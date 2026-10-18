@@ -1035,7 +1035,7 @@
           "maxProperties": 0
         },
         "enable_v3": {
-          "description": "Stable (specs/conformance/fsrs-policy-ops.md F3): Anki's scheduler update to the current scheduler. Meguri does nothing: it switches when it opens a collection.",
+          "description": "Stable (specs/conformance/fsrs-policy-ops.md F3): Anki's scheduler update to the current scheduler. Meguri ensures the session is Hosted, running its real engine-open normalization on promotion.",
           "type": "object",
           "maxProperties": 0
         },

@@ -42,3 +42,21 @@ Probes (oracle image, `anki` 26.9.3; throwaway scripts outside the repository):
   oracle with a throwaway driver extension implementing
   `fsrs-policy-ops.md` F2 and F3 (not committed: the oracle maintainer writes
   the driver ops and records the goldens).
+
+## 2026-10-18 prepared-spec intake
+
+Resumed the prepared U50 history and its committed policy adapters without
+new Anki source research. Both pinned oracle lanes replayed all 11 compatibility
+scenarios successfully; the Apple lane used no overlays. Receipts:
+
+- Linux: `build/mg/oracle/20261018T203541Z-87114/result.json`.
+- Apple: `build/mg/oracle/20261018T203543Z-87640/result.json`.
+
+The intake aligns Meguri-owned lifecycle details with the accepted host and
+memory contracts: raw reopen does not run policy, hosted promotion runs the
+real open, bulk enable uses M4/I5 rather than M2's card fallback, a distinct
+cancellable policy op owns the flag and card transaction, and the durable
+device-only mark affects wording without turning a committed enable into a
+failure. No observation or golden was changed. The obsolete raw-reopen
+transform was removed; direct engine tests still require R705's automatic
+production-open normalization.

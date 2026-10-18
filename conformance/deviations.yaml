@@ -44,17 +44,6 @@ deviations:
     scenarios: [storage/open/v1-scheduler]
     pointer: /steps/*
     transform: {replace: {open: {error: v1_scheduler}}}
-  # specs/sched/fsrs-policy.md V2 (R705): Meguri turns the current scheduler
-  # on when it opens a v2 collection; Anki writes the same row only when the
-  # user accepts its scheduler update (enable_v3 in these scenarios), so right
-  # after the reopen Anki's row is still the old one.
-  - id: sched-v3-switch-at-open
-    requirement: R705
-    summary: Meguri writes sched2021 true when it opens a collection still on the v2 scheduler; Anki writes the same row only when the user accepts its scheduler update.
-    test: core/crates/meguri-engine/tests/fsrs_policy.rs v3_switch_at_open
-    scenarios: [sched/compat/v3-switch/missing, sched/compat/v3-switch/false, sched/compat/v3-switch/number, sched/compat/v3-switch/string]
-    pointer: /steps/4/db_exec/rows
-    transform: {replace: [[sched2021, -1, 1906538460, "true"]]}
   # specs/storage/ids-usn-mtime.md I3: no id more than one day ahead. Where
   # Anki's largest-plus-one passes now + 1 day, Meguri takes the smallest free
   # id above now.

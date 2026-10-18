@@ -30,6 +30,7 @@ Terms and readers come from other specs:
 - Reading the status writes nothing, at open or at any other time.
 - The status does not look at presets. A collection with FSRS on and an unsupported preset (U1, U2) is `ok`.
 - A new collection holds no `fsrs` key, as in Anki (U28), so its status is `needsEnable`.
+- `needsEnable`'s `firstTime` is true: this device has no seen-on mark. A repeat enable is `needsReEnable`; card history and a different device's state do not decide the wording.
 
 ## S2. The seen-on mark (R703)
 
@@ -39,6 +40,7 @@ The mark records that this device has seen FSRS on in this collection, so that M
 - It is device-only state (KTD12, `storage/config-table` C8): never in the collection file, never synced, exported or backed up with it. It belongs to the collection's place on the device, so it survives a replacement of the collection file (one-way download, restore, `.colpkg` import). It is removed only with the collection.
 - In Meguri's own collection, `fsrs` changes only through `enableFsrs`, syncs and replacements. So `needsReEnable` means that another client turned FSRS off after this device saw it on.
 - A lost mark only changes the wording: the next status is `needsEnable` instead of `needsReEnable`.
+- The mark is durable device state, loaded on open and retained across process restarts. A read failure is treated as a lost mark and reported diagnostically; it does not refuse the collection. A write failure keeps the in-memory seen-on state for this host, reports a diagnostic and can be retried at the next S2 lifecycle check. It must not fail or roll back an already committed collection operation, or report that `enableFsrs` left FSRS off. Loss of the mark after restart still has only the wording consequence above.
 
 ## S3. Study while the status is not `ok`
 
@@ -47,6 +49,7 @@ The mark records that this device has seen FSRS on in this collection, so that M
 - The app runs `enableFsrs` after `endSession`. When the app ends first, the next open finds `needsReEnable` (S2) and the app runs it then.
 - `enableFsrs` refuses with `SessionActive` while a review session is open (E4), so nothing clears the session's undo history.
 - The engine has no timer for the policy and publishes no event for it. The app reads the status after every open and after every sync (U51).
+- Review-session admission and `enableFsrs` use the same collection-owned admission state, serialized on the writer. `enableFsrs` checks it when its write begins, not just before submission. U43 must atomically check the current policy and reserve that state before exposing a session, then release it only after `endSession` drains the session's writes. An earlier admission makes enable refuse; an earlier enable completes before admission checks the resulting policy. A caller-supplied boolean is not evidence that no session exists. Until U43 lands, the guard admits no review session; U43 owns the real acquire/release path and its race tests.
 
 ## E1. `enableFsrs(cancel, progress)` (R702)
 
@@ -82,6 +85,7 @@ The card's home preset gives the inputs:
 `sched/memory-state#M4.1` and `#M4.2` are the authority; in short:
 
 - U46 computes the card's memory state from its review log with these inputs (its memory item, `sched/fsrs-items`). It gives a memory state (stability, difficulty) or none (for example when the only rows are Set Due Date rows). The card's own `factor` and `ivl` are not used when there is no item.
+- The plan's SM-2 fallback here is the incomplete-history start of `sched/fsrs-items` I5, including historical retention. It is not the single-card M2 fallback from the card's own interval and ease; a no-history card remains untouched and a processed card without an item has no `s` or `d`.
 - The card data then holds: `s` and `d` from the memory state, or neither when there is none; `dr` = the desired retention in force; `decay` = the decay of the parameter list. `pos`, `lrt`, `cd` and unknown keys stay. The text is written per `model/card-data-json` C4.
 - A card whose `s`, `d`, `dr` and `decay` compare equal to its stored ones, as M4.2 compares them, keeps its row: `data`, `mod` and `usn` stay (R687). A changed card gets its data rebuilt, `mod` = now (seconds) and the local `usn` (-1).
 - Nothing else on the card changes: `type`, `queue`, `due`, `ivl`, `factor`, `reps`, `lapses`, `left`, `odue`, `odid`, `did`, `flags`, `ord`, `nid`.
@@ -106,8 +110,9 @@ Examples from `sched/compat/enable-fsrs` (FSRS turned on at 2030-03-01 10:01 UTC
 - It never changes a due date, an interval, a queue or a card type (R702), and never adds, changes or removes a review-log row: there is no rescheduling and no Rescheduled entry.
 - It never writes a deck, a preset, a note, a note type, a tag, a grave or any config key other than `fsrs`.
 - It is one op and one transaction, with source `UserNonUndoable`: it commits whole or not at all, and it clears the undo history (U25).
+- Its distinct `enable_fsrs` catalog entry (`engine/op-model` O9) permits a long, cancellable write. The flag write and U46 card writes share that transaction; it does not invoke a separate committed recompute or U49's deck-options save.
 - Cancel: the token is checked between batches. A cancelled op rolls back: `fsrs` is still off, no card changed, and the status is what it was.
-- Progress: cards computed out of the number of cards E2 selects.
+- Progress: selected cards visited out of the number E2 selects; visits include cards skipped without a write, so a completed traversal reaches its total.
 - While a review session is open it refuses with `SessionActive` and writes nothing (S3).
 
 ## E5. Differences from Anki's switch
@@ -147,6 +152,8 @@ A later Anki release may store a list after `fsrs_params_6` in either of two pla
 
 - **The deck config blob.** An unknown field (`model/protobuf-records#P4`) with number 7 or 8, the numbers Anki 26.09.3 reserves for later parameter lists (`model/protobuf-records#P6.6`), unless it is a length-delimited field of length 0. Meguri keeps such a field as read (`sched/presets#V8`), so it survives in the blob.
 - **`other`.** The preset's `other` bytes (`model/protobuf-records#P7`: the schema-11 members beyond the known keys, `model/schema11-json#S3`) hold a JSON object with a top-level member whose name is `fsrsParams` followed by a decimal number of at least 7 (`fsrsParams7`, `fsrsParams8`, ...) and whose value is a JSON array with at least one element. A later Anki that sends its list through sync's schema-11 JSON lands there: Anki 26.09.3 and Meguri keep unknown members in `other` (`model/schema11-json#S10`).
+
+T13 defines the exact detection boundaries, including repeated unknown fields, ASCII key matching, leading zeros, unbounded decimal suffixes and malformed `other`. U50 consumes that shared result; it never reparses opaque preset bytes in the scheduler or defines a more permissive fallback.
 
 Scheduling that preset with its FSRS-6 list would use parameters the user's newer client no longer uses.
 
@@ -192,12 +199,14 @@ Anki 26.09.3 with such presets: it counts their decks, and it fails with an erro
 - An open step of every engine open (`engine/lifecycle` L2 step 3), after the gate and its upgrade, before the collection is `Ready`: when `sched2021` reads off, write `sched2021` = `true` (config write: BLOB `true`, `usn` -1, `mtime_secs` now, `col.mod` now in milliseconds), as one op without an undo entry. When it reads on, nothing.
 - Nothing else: no other config key, no card, no deck. In particular no `creationOffset`: Anki's desktop adds that key when the current scheduler loads without it, Meguri never does (`sched/day-clock#D12.3`).
 - Silent: no event, no message (R705).
-- Anki writes exactly this when the user accepts its scheduler update: `sched2021` = `true`, a local change, `col.mod` moved, nothing else when `creationOffset` is present (scenarios `sched/compat/v3-switch/*`). Meguri writes it at open instead of waiting for the user: deviation `sched-v3-switch-at-open`.
+- Anki writes exactly this when the user accepts its scheduler update: `sched2021` = `true`, a local change, `col.mod` moved, nothing else when `creationOffset` is present (scenarios `sched/compat/v3-switch/*`). Meguri writes it at engine open instead of waiting for the user. This R705 timing difference is proved by the direct `v3_switch_at_open` engine test; it requires no transform of a raw-storage observation (V3).
 - Only at the engine's open. A sync that brings `sched2021` off, or a replaced collection that has it off, keeps it so until the next open. Meguri's scheduler never reads the key, so nothing depends on it in between.
 
 ## V3. Where the open steps run in scenarios
 
-The switch (V2) and the seen-on mark (S2) run whenever Meguri's engine opens a collection: the new collection of a scenario's setup, `reopen`, and handing a collection in at a handoff. The storage area's `open` step uses the storage open gate alone and runs neither, so the upgrade goldens keep their schema-14 to 17 files without `sched2021` (`conformance/storage-ops` P1, as for the day clock in `sched/day-clock#D14.2`).
+The switch (V2) and the seen-on mark (S2) run at every real engine open through `CoreHost`. Scenario sessions follow `engine/host` H4: storage `open`, raw setup and protocol `reopen` run the storage gate alone and run neither policy step. Reads do not promote a Raw session. The first engine operation promotes it and runs the complete hosted open; an engine-owned setup operation can do so earlier. A handoff closes the backend and the next segment follows the same boundary.
+
+In `sched/compat/v3-switch/*`, the observation immediately after raw `reopen` therefore retains the old `sched2021` row on both sides. `enable_v3` then promotes Meguri through its real engine open, and the oracle accepts the scheduler update. The subsequent rows agree without a deviation transform. Raw storage-upgrade and preservation goldens retain their existing contract; separate engine tests prove V2 at production open.
 
 ## K1. Data Meguri keeps but never uses (R763)
 
@@ -259,7 +268,7 @@ Goldens are recorded by the oracle maintainer with the driver ops of `conformanc
 - S1, S2: the status for each `fsrs` value of S1; `needsReEnable` after a `SyncIncoming` op (`engine/op-model`) changes `fsrs` from on to off, also after close and open; `needsEnable` with no mark; the mark kept across a collection replacement.
 - E1 to E4: a collection with a 34-value preset: `enableFsrs` skips its cards (bytes unchanged) and computes the others; a deck whose preset is missing is computed with the built-in defaults and keeps its preset id; a cancelled `enableFsrs` writes nothing and leaves `fsrs` off; undo history cleared after it.
 - U1 to U4: a preset of each row of the U1 and U2 tables is reported unsupported or not, through U45's check; the deck-tree query that U43's `startSession` uses returns the unsupported home presets' ids, ascending, and none for a tree without such a card; the preset row and its cards keep their bytes through open, a save of another preset and a `SyncIncoming` op.
-- V2: a `schedVer` 2 collection without `sched2021` opens with it on, `creationOffset` untouched (also when missing); the test named by the deviation, `v3_switch_at_open`.
+- V2: a `schedVer` 2 collection without `sched2021` opens with it on, `creationOffset` untouched (also when missing); direct test `v3_switch_at_open`. Raw reopen remains unchanged until an engine operation promotes it (V3).
 - K3: the preservation test.
 
 ## T3. Tests that land with later units
