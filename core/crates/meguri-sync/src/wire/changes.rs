@@ -65,7 +65,7 @@ pub fn encode_apply_changes(changes: &OutgoingChanges<'_>, server_usn: Usn) -> R
         if index > 0 {
             out.push(',');
         }
-        let mut sent = preset.clone();
+        let mut sent = preset.for_use();
         sent.usn = server_usn;
         out.push_str(&deck_config_to_json(&sent));
     }

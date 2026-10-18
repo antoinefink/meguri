@@ -10,4 +10,9 @@ publish.workspace = true
 fsrs.workspace = true
 # The clock seam's offsets (UtcOffset, Clock) for the day clock (timing/).
 meguri-model.workspace = true
+meguri-storage.workspace = true
 rand.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

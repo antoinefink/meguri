@@ -9,6 +9,110 @@ use meguri_model::{
 use meguri_storage::{ReadRows, ReaderRole};
 
 #[test]
+fn scheduling_missing_preset_uses_factory_values_and_filtered_cards_use_their_home() {
+    let h = common::fresh();
+    let home = decks::add(&h.collection, "Home".into()).unwrap().value.id;
+    let orphan = decks::add(&h.collection, "Orphan".into()).unwrap().value.id;
+    h.collection
+        .run(
+            OpSpec::named("imported_presets", OpSource::UserNonUndoable),
+            move |ctx| {
+                let mut preset = ctx.scope().deck_config(DeckConfigId(1))?.unwrap();
+                preset.config.desired_retention = 0.8;
+                preset.config.cap_answer_time_to_secs = 10;
+                preset.config.set_fsrs_params_6(vec![0.3; 21]);
+                ctx.scope().put(&preset)?;
+                let mut deck = ctx.scope().deck(orphan)?.unwrap();
+                if let meguri_model::proto::deck::DeckKind::Normal(ref mut normal) = deck.kind.kind {
+                    normal.config_id = 999;
+                }
+                ctx.scope().put(&deck)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let rows = h.collection.reader(ReaderRole::Query).unwrap();
+    let mut card = common::card(meguri_model::ids::NoteId(1), 0);
+    card.deck_id = orphan;
+    let view = meguri_sched::model::preset::PresetView::for_card(&*rows, &card)
+        .unwrap()
+        .unwrap();
+    assert_eq!(view.fields().desired_retention, 0.9);
+    assert_eq!(view.fields().cap_answer_time_to_secs, 60);
+    assert!(view.parameters().is_empty());
+    // The options editor's P3 fallback differs from scheduling's V1.
+    assert_eq!(
+        deck_config::for_deck(&*rows, orphan)
+            .unwrap()
+            .unwrap()
+            .config
+            .desired_retention,
+        0.8
+    );
+    card.deck_id = DeckId(987654);
+    card.original_deck_id = home;
+    let view = meguri_sched::model::preset::PresetView::for_card(&*rows, &card)
+        .unwrap()
+        .unwrap();
+    assert_eq!(view.fields().desired_retention, 0.8);
+    assert_eq!(view.decay(), 0.3);
+    card.original_deck_id = DeckId(0);
+    assert!(
+        meguri_sched::model::preset::PresetView::for_card(&*rows, &card)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn equal_bounded_preset_edit_keeps_invalid_blob_and_stamps_until_a_real_change() {
+    let h = common::fresh();
+    h.collection
+        .run(
+            OpSpec::named("imported_invalid_preset", OpSource::UserNonUndoable),
+            |ctx| {
+                let mut preset = ctx.scope().deck_config(DeckConfigId(1))?.unwrap();
+                preset.config.desired_retention = f32::NAN;
+                preset.config.maximum_review_interval = 0;
+                ctx.scope().put(&preset)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+    let read = || {
+        h.collection
+            .reader(ReaderRole::Query)
+            .unwrap()
+            .deck_config(DeckConfigId(1))
+            .unwrap()
+            .unwrap()
+    };
+    let before = read();
+    let modified = col_mod(&h.collection);
+    h.clock.step_ms(60000);
+    let result = h
+        .collection
+        .run(OpSpec::named("unchanged_preset", OpSource::UserUndoable), |ctx| {
+            deck_config::update_in(ctx.scope(), DeckConfigId(1), |m| m.desired_retention = 0.9)
+        })
+        .unwrap();
+    assert!(result.changes.deck_configs.is_empty());
+    let after = read();
+    assert_eq!(after.config.to_bytes(), before.config.to_bytes());
+    assert_eq!((after.mtime, after.usn), (before.mtime, before.usn));
+    assert_eq!(col_mod(&h.collection), modified);
+    h.collection
+        .run(OpSpec::named("changed_preset", OpSource::UserUndoable), |ctx| {
+            deck_config::update_in(ctx.scope(), DeckConfigId(1), |m| m.desired_retention = 0.85)
+        })
+        .unwrap();
+    let after = read();
+    assert_eq!(after.config.maximum_review_interval, 36500);
+    assert_eq!(after.config.desired_retention, 0.85);
+    assert_ne!(after.mtime, before.mtime);
+}
+
+#[test]
 fn removal_requires_confirmation_and_undo_restores_schema_and_rows() {
     let h = common::fresh();
     let a = decks::add(&h.collection, "A::B".into()).unwrap().value.id;

@@ -14,26 +14,7 @@ use meguri_storage::ReadRows;
 
 /// P2, B5: built-in defaults, without FSRS parameter lists.
 pub fn defaults() -> DeckConfig {
-    let mut config = DeckConfigMessage::default();
-    config.learn_steps = vec![1.0, 10.0];
-    config.relearn_steps = vec![10.0];
-    config.easy_days_percentages = vec![1.0; 7];
-    config.new_per_day = 20;
-    config.reviews_per_day = 200;
-    config.initial_ease = 2.5;
-    config.easy_multiplier = 1.3;
-    config.hard_multiplier = 1.2;
-    config.interval_multiplier = 1.0;
-    config.maximum_review_interval = 36500;
-    config.minimum_lapse_interval = 1;
-    config.graduating_interval_good = 1;
-    config.graduating_interval_easy = 4;
-    config.leech_action = 1;
-    config.leech_threshold = 8;
-    config.cap_answer_time_to_secs = 60;
-    config.desired_retention = 0.9;
-    config.historical_retention = 0.9;
-    config.wait_for_audio = true;
+    let config = DeckConfigMessage::builtin_defaults();
     DeckConfig {
         id: DeckConfigId(1),
         name: "Default".into(),
@@ -56,10 +37,13 @@ pub fn for_deck(rows: &impl ReadRows, id: DeckId) -> Result<Option<DeckConfig>, 
     let DeckKind::Normal(normal) = &deck.kind.kind else {
         return Ok(None);
     };
-    Ok(Some(match rows.deck_config(DeckConfigId(normal.config_id))? {
-        Some(config) => config,
-        None => rows.deck_config(DeckConfigId(1))?.unwrap_or_else(defaults),
-    }))
+    Ok(Some(
+        match rows.deck_config(DeckConfigId(normal.config_id))? {
+            Some(config) => config,
+            None => rows.deck_config(DeckConfigId(1))?.unwrap_or_else(defaults),
+        }
+        .for_use(),
+    ))
 }
 pub fn use_count(rows: &impl ReadRows, id: DeckConfigId) -> Result<usize, EngineError> {
     Ok(rows

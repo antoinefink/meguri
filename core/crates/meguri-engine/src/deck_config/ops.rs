@@ -38,22 +38,13 @@ pub fn update_in(
     id: DeckConfigId,
     edit: impl FnOnce(&mut meguri_model::proto::deck_config::DeckConfigMessage),
 ) -> Result<(), EngineError> {
-    let mut preset = require(scope, id)?;
-    // Keep these from the original even if a caller replaces the message.
-    let before = preset.config.clone();
-    edit(&mut preset.config);
-    let same_floats =
-        |a: &[f32], b: &[f32]| a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits());
-    if !same_floats(preset.config.fsrs_params_4(), before.fsrs_params_4())
-        || !same_floats(preset.config.fsrs_params_5(), before.fsrs_params_5())
-        || preset.config.other() != before.other()
-        || preset.config.unknown_fields() != before.unknown_fields()
-    {
-        return Err(EngineError::InvalidArgument {
-            message: "older FSRS lists and opaque preset fields are read-only".into(),
-        });
+    let preset = require(scope, id)?;
+    let view = meguri_sched::model::preset::PresetView::new(&preset);
+    if let Some(changed) = view.edit(edit).map_err(|error| EngineError::InvalidArgument {
+        message: error.to_string(),
+    })? {
+        scope.put(&changed)?;
     }
-    scope.put(&preset)?;
     Ok(())
 }
 

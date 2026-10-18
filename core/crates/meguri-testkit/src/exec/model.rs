@@ -58,7 +58,7 @@ fn object<R: ReadRows>(rows: &R, kind: &str, name: &str) -> Result<Value, ExecEr
             if matches.next().is_some() {
                 return Err(ExecError::new("invalid_scenario", "ambiguous preset"));
             }
-            schema11::deck_config_to_json(&p)
+            schema11::deck_config_to_json(&p.for_use())
         }
         "notetypes" => schema11::notetype_to_json(
             &meguri_engine::notetypes::read::by_name(rows, name)
