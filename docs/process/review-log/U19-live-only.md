@@ -20,6 +20,11 @@ Docker-lane rejection and T0/T1 trigger pairing. Two cases first failed RED
 on the missing mode/old gate arguments. The report-schema fixture was fixed
 to include its required integer pending count.
 
-Remaining: independent review, a full clean gate against the start commit
-and comparison of the actual T1 case/status set with the U38 baseline.
+Round 1 at `3fd5248b`: no P0–P2 findings. The reviewer confirmed fresh T1,
+strict golden rejection, unchanged standalone modes and complete T0 trigger
+coverage. No excluded sources were accessed.
+
+Acceptance requires `tools/mg gate --base e129c7ed5e958528fe5cfde4b6b25db1e61ffcd9`
+and comparison of the actual T1 case/status set with the U38 baseline. The
+receipt, timing and comparison result are recorded in orchestration state.
 No clean-room excluded sources were read; no UI change is involved.
