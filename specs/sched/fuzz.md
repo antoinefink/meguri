@@ -108,6 +108,8 @@ Given the delay `s` in whole seconds (an unsigned 32-bit integer) and a seed:
 2. When `w` is 0 (delays under 4 seconds), the fuzzed delay is `s`.
 3. Otherwise the fuzzed delay is the first value that the `rand` crate, version 0.9.4 exactly (as Z2), returns for `Rng::random_range(s..s + w)`, a half-open range of `u32`, on a generator made by `StdRng::seed_from_u64(seed)`. It lies in `[s, s + w − 1]`. This is a fresh generator, not the one that gave Z2's factor, and the draw is an integer range, not Z2's float, so it is the same on every platform.
 
+For an imported step whose mathematical exclusive upper bound `s + w` exceeds 4,294,967,295, Meguri clips the candidate set to representable delays. Compute `n = min(w, 4,294,967,295 − s + 1)` with widened arithmetic. When `n` is 1, return `s`; otherwise use the same freshly seeded generator to draw a `u32` offset from `0..n`, then add it to `s` with widened arithmetic. Thus `s` = 4,294,967,295 returns itself, and `s` = 4,294,967,294 draws one of those final two seconds. This is Meguri's explicit overflow rule, not an oracle measurement. The ordinary range above stays unchanged whenever its exclusive upper bound fits `u32`. No imported step may cause a wrapped range or panic.
+
 Seeds:
 
 - An answer uses the seed of Z1 (card id plus `reps` before the answer); its `due` is the answer second plus the fuzzed delay.
@@ -157,4 +159,4 @@ The engine takes an optional fuzzed-day chooser. At each point above it first of
 | `sched/steps/learning-fuzz`, `sched/steps/rollover-answer`, `sched/answer/*` | Z7 |
 | `sched/fsrs/*`, `sched/steps/*` | Z4, Z5 and Z8 inside the transitions |
 
-All goldens are recorded. Z4's table, the widening of step 5 and Z1's negative ids are unit tests.
+All goldens are recorded. Z4's table, the widening of step 5 and Z1's negative ids are unit tests. The stored-card `fuzz_table` observation accepts integer intervals and review counts at most 4,294,967,294. The existing 10,000-pair corpus covers twenty integer intervals, including every integral interval in U45's test list. Test the fractional 2.5-day threshold and its adjacent `f32` values directly through Z3/Z4; never truncate 2.5 into a table request. Likewise, arbitrary `u64` seed-addition wrap is a direct Z1 test; it is not a stored-card review count. Z7 adds unit tests at the largest representable delays, including both sides of the exclusive-upper-bound limit.
