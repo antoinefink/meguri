@@ -97,6 +97,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
     assert_eq!(
         json["supports"]["observations"],
         serde_json::json!([
+            "answer_labels",
             "blob_decode",
             "browser_config",
             "canonical_search",
@@ -107,11 +108,13 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "decks",
             "fields_check",
             "fsrs_next",
+            "fuzz_table",
             "ids",
             "legacy_json",
             "media_dir",
             "media_pending",
             "media_trash",
+            "next_states",
             "notetype_structure",
             "schema_objects",
             "search",
