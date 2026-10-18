@@ -1,0 +1,46 @@
+# Undoing a note add (specs/notes/note-records.md A5; specs/engine/undo.md).
+# The add is one "Add Note" step. Undo removes the note and its two cards,
+# the tag it registered and its Add-screen config writes (A4: the note
+# type's last deck added, the deck's last note type and curModel set back to
+# Solo, nextPos back), adds no grave and sets col.mod back. Redo adds the
+# same rows again with the same ids and stamps; a second undo removes them
+# again. The setup note (note type Solo) gives the config keys a value
+# before the add. Needs db_exec, add_note, undo, redo and undo_status
+# (specs/conformance/record-ops.md W1; specs/conformance/undo-ops.md).
+id: notes/records/undo-add
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Solo
+      fields: [Text]
+      templates:
+        - {name: Card, front: "{{Text}}", back: "{{Text}}"}
+    - name: Pair
+      fields: [Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Reverse, front: "{{Back}}", back: "{{Front}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Solo, deck: Inbox, fields: [lake], tags: [geo]}
+steps:
+  # Empties both histories (undo-ops.md V5).
+  - db_exec: {sql: "UPDATE notes SET usn = usn WHERE 0"}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves, tags]}}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('curModel', 'nextPos') OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - advance: 1h
+  - add_note: {notetype: Pair, deck: Inbox, fields: [river, rio], tags: [water]}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves, tags]}}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('curModel', 'nextPos') OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - advance: 1h
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves, tags]}}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('curModel', 'nextPos') OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - advance: 1h
+  - redo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves, tags]}}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('curModel', 'nextPos') OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - advance: 1h
+  - undo: {}
+  - observe: [undo_status, {db_dump: {tables: [col, notes, cards, graves, tags]}}]
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('curModel', 'nextPos') OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}

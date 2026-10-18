@@ -306,6 +306,31 @@
             ]
           }
         },
+        "fields_check": {
+          "description": "specs/conformance/note-ops.md N4: one result per case, in case order; duplicates only with the state duplicate.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["state"],
+                "additionalProperties": false,
+                "properties": {
+                  "state": { "enum": ["normal", "empty", "missing_cloze", "notetype_not_cloze", "field_not_cloze"] }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["state", "duplicates"],
+                "additionalProperties": false,
+                "properties": {
+                  "state": { "const": "duplicate" },
+                  "duplicates": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/note_key" } }
+                }
+              }
+            ]
+          }
+        },
         "db_dump": { "$ref": "#/$defs/db_dump" },
         "browser_config": {
           "description": "specs/conformance/browser-config-ops.md B2: the 23 browser and search config keys as Anki's own reads give them; the last eight are stored JSON values of any shape.",

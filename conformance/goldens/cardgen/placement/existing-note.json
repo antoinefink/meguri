@@ -1,0 +1,156 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["shared", 0, "Inbox", 0, 1, 0],
+            ["split", 0, "Inbox", 0, 2, 0],
+            ["split", 1, "Elsewhere", 0, 2, 0],
+            ["in-filtered", 0, "Cram", 1, -100000, 3],
+            ["shared-missing", 0, null, 0, 4, 0],
+            ["last-missing", 0, "Inbox", 0, 5, 0],
+            ["last-missing", 1, "Elsewhere", 0, 5, 0],
+            ["last-filtered", 0, "Inbox", 0, 6, 0],
+            ["last-filtered", 1, "Elsewhere", 0, 6, 0],
+            ["no-last", 0, "Inbox", 0, 7, 0],
+            ["no-last", 1, "Elsewhere", 0, 7, 0],
+            ["last-add", 0, "Other", 0, 8, 0],
+            ["override", 0, "Inbox", 0, 9, 0],
+            ["override-last-add", 0, "Other", 0, 10, 0],
+            ["override-missing", 0, "Inbox", 0, 11, 0],
+            ["override-missing-last-add", 0, "Other", 0, 12, 0],
+            ["{{c1::shared}}", 0, "Inbox", 0, 13, 0],
+            ["{{c1::split}} {{c2::two}}", 0, "Inbox", 0, 14, 0],
+            ["{{c1::split}} {{c2::two}}", 1, "Elsewhere", 0, 14, 0],
+            ["{{c1::last add}}", 0, "Other", 0, 15, 0]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["shared", 0, "Inbox", 0, 1, 0, 1894701600],
+            ["shared", 1, "Inbox", 0, 1, 0, 1894705200],
+            ["split", 0, "Inbox", 0, 2, 0, 1894701600],
+            ["split", 1, "Elsewhere", 0, 2, 0, 1894701600],
+            ["split", 2, "Other", 0, 2, 0, 1894705200],
+            ["in-filtered", 0, "Cram", 1, -100000, 3, 1894701600],
+            ["in-filtered", 1, "Inbox", 0, 3, 0, 1894705200],
+            ["shared-missing", 0, null, 0, 4, 0, 1894701600],
+            ["shared-missing", 1, "Default", 0, 4, 0, 1894705200],
+            ["last-missing", 0, "Inbox", 0, 5, 0, 1894701600],
+            ["last-missing", 1, "Elsewhere", 0, 5, 0, 1894701600],
+            ["last-missing", 2, "Default", 0, 5, 0, 1894705200],
+            ["last-filtered", 0, "Inbox", 0, 6, 0, 1894701600],
+            ["last-filtered", 1, "Elsewhere", 0, 6, 0, 1894701600],
+            ["last-filtered", 2, "Default", 0, 6, 0, 1894705200],
+            ["no-last", 0, "Inbox", 0, 7, 0, 1894701600],
+            ["no-last", 1, "Elsewhere", 0, 7, 0, 1894701600],
+            ["no-last", 2, "Default", 0, 7, 0, 1894705200],
+            ["last-add", 0, "Other", 0, 8, 0, 1894701600],
+            ["override", 0, "Inbox", 0, 9, 0, 1894701600],
+            ["override", 2, "Target", 0, 9, 0, 1894705200],
+            ["override-last-add", 0, "Other", 0, 10, 0, 1894701600],
+            ["override-missing", 0, "Inbox", 0, 11, 0, 1894701600],
+            ["override-missing", 2, "Default", 0, 11, 0, 1894705200],
+            ["override-missing-last-add", 0, "Other", 0, 12, 0, 1894701600],
+            ["{{c1::shared}} {{c2::more}}", 0, "Inbox", 0, 13, 0, 1894701600],
+            ["{{c1::shared}} {{c2::more}}", 1, "Inbox", 0, 13, 0, 1894705200],
+            ["{{c1::split}} {{c2::two}} {{c3::three}}", 0, "Inbox", 0, 14, 0, 1894701600],
+            ["{{c1::split}} {{c2::two}} {{c3::three}}", 1, "Elsewhere", 0, 14, 0, 1894701600],
+            ["{{c1::split}} {{c2::two}} {{c3::three}}", 2, "Other", 0, 14, 0, 1894705200],
+            ["{{c1::last add}}", 0, "Other", 0, 15, 0, 1894701600]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["16"]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/placement/existing-note",
+  "scenario_sha256": "f5d2281f380f4cdcd0bf1808bbc64ec13f5d9de2f934d08369902927c55d1b16",
+  "tz": "UTC"
+}

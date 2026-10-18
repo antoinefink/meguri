@@ -491,7 +491,8 @@
               "then": { "properties": { "fns": { "maxItems": 1 }, "inputs": { "items": { "type": "array" } } } },
               "else": { "properties": { "inputs": { "items": { "type": "string" } } } }
             },
-            "template": { "$ref": "#/$defs/template_request" }
+            "template": { "$ref": "#/$defs/template_request" },
+            "fields_check": { "$ref": "#/$defs/fields_check_request" }
           },
           "additionalProperties": false
         }
@@ -518,6 +519,40 @@
     "draft_args": {
       "description": "Draft op arguments (dsl.md D7.2): the owning area fixes them with the driver op.",
       "type": "object"
+    },
+    "fields_check_request": {
+      "description": "specs/conformance/note-ops.md N4: the field check on new-note drafts (notetype, fields) or existing-note drafts (note, fields?). Field names and counts are checked when the step runs.",
+      "type": "object",
+      "required": ["cases"],
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["notetype", "fields"],
+                "additionalProperties": false,
+                "properties": {
+                  "notetype": { "type": "string", "minLength": 1 },
+                  "fields": { "$ref": "#/$defs/fields" }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["note"],
+                "additionalProperties": false,
+                "properties": {
+                  "note": { "$ref": "#/$defs/note_ref" },
+                  "fields": { "$ref": "#/$defs/fields" }
+                }
+              }
+            ]
+          }
+        }
+      }
     },
     "template_request": {
       "description": "render-ops.md Q1.1: the template engine on given template texts. notetype is required when a case has no card and not allowed otherwise. Field name rules (Q1.1), ord and field-mapping checks are made when the scenario loads.",

@@ -1,0 +1,164 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            [1, "Default"],
+            [1894701600000, "Culture"],
+            [1894701600001, "Target"],
+            [1894701600003, "Cram"]
+          ]
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c1", "#c2"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c3", "#c4"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5", "#c6"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c7", "#c8"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c9", "#c10"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c11", "#c12"],
+          "note": "#n6"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c13", "#c14"],
+          "note": "#n7"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c15"],
+          "note": "#n8"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c16"],
+          "note": "#n9"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c17", "#c18"],
+          "note": "#n10"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["target-valid", 0, "Culture", 1],
+            ["target-valid", 1, "Target", 1],
+            ["target-missing", 0, "Culture", 2],
+            ["target-missing", 1, "Default", 2],
+            ["target-filtered", 0, "Culture", 3],
+            ["target-filtered", 1, "Default", 3],
+            ["add-deck", 0, "Culture", 4],
+            ["add-deck", 1, "Culture", 4],
+            ["add-deck-filtered", 0, "Default", 5],
+            ["add-deck-filtered", 1, "Default", 5],
+            ["add-deck-missing", 0, "Default", 6],
+            ["add-deck-missing", 1, "Default", 6],
+            ["target-valid-add-filtered", 0, "Default", 7],
+            ["target-valid-add-filtered", 1, "Target", 7],
+            ["fallback-card", 0, "Culture", 8],
+            ["first-target", 0, "Target", 9],
+            ["{{c1::cloze}} {{c2::two}}", 0, "Culture", 10],
+            ["{{c1::cloze}} {{c2::two}}", 1, "Culture", 10]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["_deck_1894701600000_lastNotetype", "1894701600011", -1],
+            ["_deck_1894701600002_lastNotetype", "1894701600010", -1],
+            ["_deck_1894701600003_lastNotetype", "1894701600006", -1],
+            ["_nt_1894701600006_lastDeck", "1894701600003", -1],
+            ["_nt_1894701600007_lastDeck", "1894701600000", -1],
+            ["_nt_1894701600008_lastDeck", "1894701600000", -1],
+            ["_nt_1894701600009_lastDeck", "1894701600000", -1],
+            ["_nt_1894701600010_lastDeck", "1894701600002", -1],
+            ["_nt_1894701600011_lastDeck", "1894701600000", -1],
+            ["curModel", "1894701600011", -1]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/placement/new-note",
+  "scenario_sha256": "d7063ae5471fe9c329624b6c444e99a22c62c19df53d220d2849c0156e0b7fd4",
+  "tz": "UTC"
+}
