@@ -919,6 +919,34 @@ EOF
     expect "lease released" "$([ -e "$MEGURI_HOST_LEASE_DIR" ] && echo held || echo free)" free
 }
 
+t_catch_up_reuses_passing_results_on_macos_bash() {
+  local dir="$SB/reuse-check" proof caught
+  mkdir -p "$dir/tools" || return 1
+  cp -R "$REPO/tools/." "$dir/tools/" || return 1
+  cp "$REPO/.gitignore" "$dir/" || return 1
+  export TEST_REUSE_LOG="$SB/reuse-count.log"
+  : >"$TEST_REUSE_LOG"
+  cat >"$dir/tools/mg.d/zz-reuse-test.sh" <<'EOF'
+mg_job reuse-proof host t_reuse_proof "passing result reuse test"
+t_reuse_proof() { echo called >>"$TEST_REUSE_LOG"; mg_count passed 1; mg_status pass; }
+mg_doctor() { mg_user_step host-session missing true "locked" "test"; mg_status pass; }
+EOF
+  git -C "$dir" init -q &&
+    git -C "$dir" config user.name selftest &&
+    git -C "$dir" config user.email selftest@localhost &&
+    git -C "$dir" add -A && git -C "$dir" commit -qm 'reuse test' || return 1
+  proof="$(/bin/bash "$dir/tools/mg" reuse-proof 'argument with spaces')" || return 1
+  mkdir -p "$dir/build/mg/catch-up"
+  jq -nc '{id:"host-reuse",state:"queued",job:"reuse-proof",args:["argument with spaces"],unit:"U19",user_steps:["host-session"]}' \
+    >"$dir/build/mg/catch-up/queue.jsonl"
+  caught="$(/bin/bash "$dir/tools/mg" catch-up)" || return 1
+  expect "only initial proof ran" "$(wc -l <"$TEST_REUSE_LOG" | tr -d ' ')" 1 &&
+    expect "reuse counted" "$(jq -r .summary.reused "$caught")" 1 &&
+    expect "same proof" "$(jq -r '.details.runs[0].result' "$caught")" "$proof" &&
+    expect "no waiting" "$(jq -r .summary.waiting "$caught")" 0 &&
+    expect "queue done" "$(tail -n 1 "$dir/build/mg/catch-up/queue.jsonl" | jq -r .state)" done
+}
+
 t_results_validate_against_schema() {
   [ -n "$RESULTS" ] || { echo "no results collected"; return 1; }
   # shellcheck disable=SC2086 # RESULTS is a space-separated list of relative paths
@@ -935,7 +963,7 @@ t_similarity_nightly_runs_jplag t_sync_rig_publishes_on_loopback_only_and_down_r
 t_sync_rig_probes_ignore_proxy_variables t_sync_rig_records_decoded_exchanges
 t_sync_rig_up_fails_when_the_recording_is_unwritable t_actor_scenario_proxies_are_internal_only
 t_recorder_attributes_exchanges_to_actors_and_steps t_sim_pool_on_macos_bash t_host_lease_gate_and_sim_setup_on_macos_bash
-t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_results_validate_against_schema"
+t_fixtures_check_on_macos_bash t_bench_mac_on_macos_bash t_catch_up_reuses_passing_results_on_macos_bash t_results_validate_against_schema"
 
 echo "1..$(echo "$TESTS" | wc -w | tr -d ' ')"
 if ! setup_sandbox >"$SB/setup.log" 2>&1; then

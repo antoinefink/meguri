@@ -39,6 +39,15 @@ do not save acceptance work. Keep `Unit:` on the completed unit's tip commit.
 
 The queue is append-only; the lines of an entry's id, merged in order, are its state. A run's lines are appended as soon as it ends.
 
+Before rerunning a queued job, catch-up checks its latest result. A real,
+successful result for the same clean commit, checkout and exact arguments
+settles the entry without another run, even when the machine is now locked.
+Dirty, dry, queued, warning, failed, malformed and older-commit results are
+never reused. The result path and `reused: true` remain in the queue and the
+catch-up report. Catch-up does not search past a newer failed result.
+Full unit and milestone gates still execute their checks normally. Running
+the job directly always requests fresh verification of code or setup.
+
 ## Oracle runs
 
 From a sparse role worktree, an oracle-image run uses the main checkout's `oracle/` when that is exactly the branch's (same tree id, nothing changed under it). When the branch changes `oracle/` (a spec side's driver change or an oracle bump), the worktree's gate leaves the run to the merge (`deferred-tip`), and with it goldens-check and harvest-report, which compare the branch with the lock and the harvest inventory under `oracle/` (`oracle_files`); a job that refuses its tree anyway (`oracle test` always does without its own `oracle/`) reports `needs-oracle-tree`. The merge runs both kinds in its tip checkout, against the branch's exact tree.

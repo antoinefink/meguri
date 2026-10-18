@@ -44,6 +44,31 @@ mg_catch_up__append() {
 # mg_catch_up__now: UTC now (MG_GATE_NOW in the self-tests).
 mg_catch_up__now() { printf '%s\n' "${MG_GATE_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; }
 
+# The latest real run may already prove this exact clean head and argument
+# list (for example, a full unit gate just ran a formerly queued check).
+# Resolve latest once: another run can replace the link while we work.
+mg_catch_up__passing_result() {
+  local job="$1" args="$2" dir head dirty
+  case "$job" in "" | *[!a-z0-9-]*) return 1 ;; esac
+  head="$(git -C "$MG_ROOT" rev-parse --verify HEAD)" || return 1
+  dirty="$(git -C "$MG_ROOT" status --porcelain --untracked-files=all)" || return 1
+  [ -z "$dirty" ] || return 1
+  dir="$(cd "$MG_ROOT/build/mg/$job/latest" 2>/dev/null && pwd -P)" || return 1
+  case "$dir" in "$MG_ROOT/build/mg/$job/"*) ;; *) return 1 ;; esac
+  jq -e --arg job "$job" --arg root "$MG_ROOT" --arg head "$head" --argjson args "$args" '
+    .schema_version == 1 and .job == $job and .root == $root and .args == $args
+    and .commit.sha == $head and .commit.dirty == false and .dry_run == false
+    and .status == "pass" and .exit_code == 0 and .failures == []
+    and .summary.failed == 0 and (.summary.errors // 0) == 0
+    and (.finished_at | type == "string" and length > 0)
+    and (.details | type == "object")
+    and (.details.queued // false) == false and (.details.blocked // false) == false
+    and (.details.queued_parts // []) == []
+    and (.user_steps | type == "array" and all(.[]; .required != true or .state != "missing"))
+  ' "$dir/result.json" >/dev/null 2>&1 || return 1
+  printf '%s/result.json\n' "$dir"
+}
+
 # mg_catch_up_enqueue <receipt> <branch> <unit> <tip>: after a merge, one
 # queue entry per queued run of its receipt, with the arguments its result
 # ran with. Returns 1 when the queue cannot be written.
@@ -209,7 +234,7 @@ mg_catch_up__work() {
     return 0
   fi
 
-  local passed=0 failed=0 errors=0 requeued=0 escalated=0 unrecorded=0 runs='[]' escalations='[]'
+  local passed=0 failed=0 errors=0 requeued=0 reused_count=0 escalated=0 unrecorded=0 runs='[]' escalations='[]'
   local group u ids lines=() id result head units record
   # Escalations an earlier run could not record: recorded first, without a
   # re-run (the failed run's result is in the entry).
@@ -239,10 +264,10 @@ mg_catch_up__work() {
 
   local pending
   pending="$(jq -c 'select(.state == "queued")' <<<"$entries")"
-  local waiting='[]' groups=""
+  local waiting='[]' groups="" missing='[]'
   if [ -n "$pending" ]; then
     # Which user steps are still missing.
-    local doctor missing
+    local doctor
     doctor="$("$MG_TOOLS/mg" doctor </dev/null 2>/dev/null | tail -n 1)"
     if [ ! -f "$doctor" ] || [ "$(jq -r .status "$doctor" 2>/dev/null)" = error ] ||
       ! missing="$(jq -c '[.user_steps[] | select(.state == "missing") | .id] | unique' "$doctor" 2>/dev/null)"; then
@@ -251,25 +276,37 @@ mg_catch_up__work() {
     fi
     mg_artifact doctor "$doctor" "tools/mg doctor"
     waiting="$(jq -c -s --argjson m "$missing" '[.[] | select(any(.user_steps[]?; . as $s | $m | index($s) != null))]' <<<"$pending")"
-    groups="$(jq -c -s --argjson m "$missing" '[.[] | select(any(.user_steps[]?; . as $s | $m | index($s) != null) | not)]
+    groups="$(jq -c -s '[.[]]
       | reduce .[] as $e ({order: [], by: {}}; ([$e.job, $e.args] | tojson) as $k
           | (if .by[$k] then . else .order += [$k] end) | .by[$k] += [$e])
       | . as $g | $g.order[] | $g.by[.]' <<<"$pending")"
-    mg_detail waiting "$(jq -c 'map({id, unit, job, args, user_steps})' <<<"$waiting")"
   fi
 
-  local job args=() a out status queued failed_units
+  local job args=() a out status queued failed_units reused
   # The groups come on fd 3, so nothing a run reads from stdin can take them.
   while IFS= read -r group <&3; do
     [ -n "$group" ] || continue
     job="$(jq -r '.[0].job' <<<"$group")"
+    reused=false
+    if result="$(mg_catch_up__passing_result "$job" "$(jq -c '.[0].args' <<<"$group")")"; then
+      reused=true
+      reused_count=$((reused_count + 1))
+      waiting="$(jq -c --argjson ids "$(jq -c 'map(.id)' <<<"$group")" 'map(select(.id as $id | $ids | index($id) == null))' <<<"$waiting")"
+    else
+      group="$(jq -c --argjson m "$missing" 'map(select(any(.user_steps[]?; . as $s | $m | index($s) != null) | not))' <<<"$group")"
+      [ "$(jq length <<<"$group")" -gt 0 ] || continue
+    fi
     args=()
     while IFS= read -r -d '' a; do args[${#args[@]}]="$a"; done < <(jq -j '.[0].args[] | . + "\u0000"' <<<"$group")
     ids="$(jq -c 'map(.id)' <<<"$group")"
     units="$(jq -c 'map(.unit) | unique' <<<"$group")"
-    echo "catch-up: tools/mg $job${args[0]+ ${args[*]}} (queued by $(jq -r 'join(", ")' <<<"$units"))" >&2
-    out="$("$MG_TOOLS/mg" "$job" ${args[0]+"${args[@]}"} </dev/null)"
-    result="$(printf '%s\n' "$out" | tail -n 1)"
+    if [ "$reused" = true ]; then
+      echo "catch-up: reuse passing tools/mg $job${args[0]+ ${args[*]}} result $result (queued by $(jq -r 'join(", ")' <<<"$units"))" >&2
+    else
+      echo "catch-up: tools/mg $job${args[0]+ ${args[*]}} (queued by $(jq -r 'join(", ")' <<<"$units"))" >&2
+      out="$("$MG_TOOLS/mg" "$job" ${args[0]+"${args[@]}"} </dev/null)"
+      result="$(printf '%s\n' "$out" | tail -n 1)"
+    fi
     [ -f "$result" ] || result=""
     status="$( [ -n "$result" ] && jq -r .status "$result" 2>/dev/null)"
     queued="$( [ -n "$result" ] && jq -r '.details.queued == true' "$result" 2>/dev/null)"
@@ -277,8 +314,8 @@ mg_catch_up__work() {
     [ -n "$head" ] || head="$(git -C "$MG_ROOT" rev-parse -q --verify HEAD)"
     echo "catch-up: ${status:-no result}" >&2
     [ -z "$result" ] || mg_artifact result "$result" "tools/mg $job${args[0]+ ${args[*]}}"
-    record="$(jq -nc --arg r "$result" --arg st "${status:-}" --arg head "$head" --arg run "$MG_RUN_ID" --arg at "$(mg_catch_up__now)" \
-      '{at: $at, catch_up: $run, head: $head, rerun: (if $r == "" then null else $r end), rerun_status: (if $st == "" then null else $st end)}')"
+    record="$(jq -nc --arg r "$result" --arg st "${status:-}" --arg head "$head" --arg run "$MG_RUN_ID" --arg at "$(mg_catch_up__now)" --argjson reused "$reused" \
+      '{at: $at, catch_up: $run, head: $head, rerun: (if $r == "" then null else $r end), rerun_status: (if $st == "" then null else $st end), reused: $reused}')"
     lines=()
     case "$status:$queued" in
       pass:* | warn:false)
@@ -331,26 +368,28 @@ mg_catch_up__work() {
         ;;
     esac
     runs="$(jq -c --arg job "$job" --argjson args "$(jq -c '.[0].args' <<<"$group")" --arg st "${status:-}" --arg r "$result" \
-      --arg head "$head" --argjson ids "$ids" --argjson units "$units" \
+      --arg head "$head" --argjson ids "$ids" --argjson units "$units" --argjson reused "$reused" \
       '. + [{job: $job, args: $args, status: (if $st == "" then null else $st end), result: (if $r == "" then null else $r end),
-        commit: $head, entries: $ids, units: $units}]' <<<"$runs")"
+        commit: $head, entries: $ids, units: $units, reused: $reused}]' <<<"$runs")"
     mg_catch_up__record ${lines[0]+"${lines[@]}"} || return 0
   done 3<<<"$groups"
 
   mg_detail runs "$runs"
+  mg_detail waiting "$(jq -c 'map({id, unit, job, args, user_steps})' <<<"$waiting")"
   [ "$escalations" = '[]' ] || mg_detail escalations "$escalations"
   mg_count total "$(jq length <<<"$runs")"
   mg_count passed "$passed"
   mg_count failed "$failed"
   mg_count errors "$errors"
   mg_count queued "$requeued"
+  mg_count reused "$reused_count"
   mg_count waiting "$(jq length <<<"$waiting")"
   mg_count escalations "$escalated"
   mg_count escalation_errors "$unrecorded"
   if [ -z "$pending" ] && [ "$escalated" -eq 0 ] && [ "$unrecorded" -eq 0 ]; then
     mg_message "catch-up: nothing is queued"
   else
-    mg_message "catch-up: $(jq length <<<"$runs") run(s): $passed passed, $failed failed, $requeued queued again, $errors error(s); waiting: $(jq -r 'if length == 0 then "none" else "\(length) (\([.[].user_steps[]] | unique | join(", ")))" end' <<<"$waiting"); escalations recorded: $escalated$([ "$unrecorded" -eq 0 ] || echo "; not recorded: $unrecorded (escalation-pending)")"
+    mg_message "catch-up: $(jq length <<<"$runs") run(s): $passed passed ($reused_count reused), $failed failed, $requeued queued again, $errors error(s); waiting: $(jq -r 'if length == 0 then "none" else "\(length) (\([.[].user_steps[]] | unique | join(", ")))" end' <<<"$waiting"); escalations recorded: $escalated$([ "$unrecorded" -eq 0 ] || echo "; not recorded: $unrecorded (escalation-pending)")"
   fi
   # A blocked-red escalation this run recorded fails it, also one an earlier
   # run could not record; one still unrecorded is an error.

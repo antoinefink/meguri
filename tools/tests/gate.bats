@@ -999,6 +999,95 @@ entry() {
   validate "$result"
 }
 
+@test "catch-up reuses a passing clean head result even when its former user step is missing again" {
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$BATS_TEST_TMPDIR/U150" U150
+  [ "$status" -eq 0 ]
+  fx ui pass
+  mg t-job ui
+  [ "$status" -eq 0 ]
+  local proof="$result"
+  printf 'host-session\n' >"$FX/doctor.missing"
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui')" = 0 ]
+  [ "$(queue_states)" = done ]
+  [ "$(field '.details.runs[0].result')" = "$proof" ]
+  [ "$(field '.details.runs[0].reused')" = true ]
+  [ "$(field '.summary.reused')" = 1 ]
+  [ "$(field '.summary.waiting')" = 0 ]
+  [ "$(entry 0 .reused)" = true ]
+}
+
+@test "catch-up reruns after the head changes rather than reusing an older passing result" {
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$BATS_TEST_TMPDIR/U150" U150
+  fx ui pass
+  mg t-job ui
+  [ "$status" -eq 0 ]
+  commit_in "$SB" docs/next.md 'a different commit'
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui')" = 1 ]
+  [ "$(queue_states)" = done ]
+  [ "$(field '.details.runs[0].reused')" = false ]
+}
+
+@test "catch-up does not reuse a result with different arguments or a later failed run" {
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$BATS_TEST_TMPDIR/U150" U150
+  cp "$SB/$QUEUE" "$FX/queued.original"
+  fx ui pass
+  mg t-job ui
+  mg t-job other
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui')" = 1 ]
+  [ "$(field '.details.runs[0].reused')" = false ]
+  cp "$FX/queued.original" "$SB/$QUEUE"
+  fx ui fail
+  mg t-job ui
+  [ "$status" -eq 1 ]
+  fx ui pass
+  : >"$STUB_LOG"
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(called '^t-job ui')" = 1 ]
+  [ "$(field '.details.runs[0].reused')" = false ]
+}
+
+@test "catch-up refuses dirty dry queued foreign-root or malformed passing evidence" {
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$BATS_TEST_TMPDIR/U150" U150
+  cp "$SB/$QUEUE" "$FX/queued.original"
+  fx ui pass
+  mg t-job ui
+  [ "$status" -eq 0 ]
+  local proof="$result" pristine mutation
+  pristine="$(cat "$proof")"
+  for mutation in '.commit.dirty = true' '.dry_run = true' '.details.queued = true' \
+    '.details.queued_parts = [{user_step:"host-session"}]' '.root = "/elsewhere"' \
+    '.status = "warn"' '.failures = [{id:"broken",message:"broken",repro:"tools/mg t-job ui"}]' \
+    'del(.commit)' 'null'; do
+    cp "$FX/queued.original" "$SB/$QUEUE"
+    printf '%s\n' "$pristine" | jq "$mutation" >"$proof"
+    ln -sfn "$(basename "$(dirname "$proof")")" "$SB/build/mg/t-job/latest"
+    : >"$STUB_LOG"
+    mg catch-up
+    [ "$status" -eq 0 ]
+    [ "$(called '^t-job ui')" = 1 ]
+    [ "$(queue_states)" = done ]
+    [ "$(field '.details.runs[0].reused')" = false ]
+  done
+}
+
 @test "a caught-up run that fails records a blocked-red escalation for the unit that queued it; other units still merge" {
   local a="$BATS_TEST_TMPDIR/U150" b="$BATS_TEST_TMPDIR/U91" ledger="$SB/docs/process/provenance/escalations.jsonl"
   fx ui queued
