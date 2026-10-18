@@ -1,0 +1,50 @@
+# Interface names the notes specs use: note and card columns, collection
+# config keys, note type and preset fields (protobuf and schema-11), the
+# deleted-notes log's file name and header words, the field check's state
+# names, the Check Database tag, the dupe search keyword, and the rand crate
+# interface that defines random insertion positions.
+notes
+cards
+templates
+decks
+config
+nid
+mid
+did
+odid
+odue
+due
+ord
+mod
+usn
+queue
+guid
+flds
+sfld
+csum
+tags
+flags
+nextPos
+curModel
+lastDeck
+lastNotetype
+normalize_note_text
+target_deck_id
+new_card_insert_order
+NEW_CARD_INSERT_ORDER_RANDOM
+sortf
+deleted.txt
+notetype
+missing_cloze
+notetype_not_cloze
+field_not_cloze
+fields_check
+db-check
+field_counts
+dupe
+rand_chacha
+StdRng
+ChaCha12
+SeedableRng
+seed_from_u64
+random_range

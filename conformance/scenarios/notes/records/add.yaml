@@ -1,0 +1,33 @@
+# What adding a note stores (R769-R778, R1457, R1458; specs/notes/note-
+# records.md A1-A4). Fields are saved after removing ASCII control
+# characters other than TAB and LF and normalizing to NFC; the sort field
+# column holds the stripped text of the sort field (an integer when it looks
+# like a number) and the checksum is taken from the first field whatever the
+# sort field is. Tags are stored as U30 spells them. New notes get flags 0
+# and data empty, stamps now and -1, a random GUID (db_dump hides it). The
+# note type Numbered sorts by its second field (set through its schema-11
+# object before any note exists). Adding records the deck and note type in
+# config and moves nextPos (R801, deck-placement-and-position.md P1).
+id: notes/records/add
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Vocab
+      fields: [Word, Reading, Meaning]
+      templates:
+        - {name: Recognize, front: "{{Word}}", back: "{{Reading}}<br>{{Meaning}}"}
+    - name: Numbered
+      fields: [Label, Number]
+      templates:
+        - {name: N, front: "{{Number}}", back: "{{Label}}"}
+  decks: [Inbox]
+steps:
+  - legacy_update: {notetype: Numbered, patch: {sortf: 1}}
+  - add_note: {notetype: Vocab, deck: Inbox, fields: ["<b>食べる</b>", "たべる", "to eat\r\nline two\u0001\u0007\ttab"], tags: [verb, JLPT::N5, Verb]}
+  - add_note: {notetype: Vocab, deck: Inbox, fields: ["café", "", "Å"]}
+  - add_note: {notetype: Numbered, deck: Inbox, fields: ["<i>seven</i>", " 007 "]}
+  - add_note: {notetype: Numbered, deck: Inbox, fields: ["text", "12abc"]}
+  - observe: [{db_dump: {tables: [notes, cards]}}]
+  - db_exec: {sql: "SELECT hex(flds), typeof(sfld), sfld, csum FROM notes ORDER BY id"}
+  - db_exec: {sql: "SELECT KEY, CAST(val AS TEXT), usn, mtime_secs FROM config WHERE KEY IN ('curModel', 'nextPos') OR substr(KEY, 1, 4) = '_nt_' OR substr(KEY, 1, 6) = '_deck_' ORDER BY KEY"}
+  - db_exec: {sql: "SELECT mod FROM col"}

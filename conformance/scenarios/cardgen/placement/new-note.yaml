@@ -1,0 +1,76 @@
+# Decks of the cards of a new note (R791, R793, R794; AE32; specs/notes/
+# deck-placement-and-position.md D2, D4). A template's deck override wins
+# when it names a normal deck. Anki checks the chosen deck only once: an
+# override that names a missing or filtered deck sends the card to the
+# Default deck, not to the Add screen's deck. With no override the card goes
+# to the Add screen's deck, or to Default when that deck is missing or
+# filtered. Cloze note types ignore overrides, and the card of ordinal 0 that
+# a note gets when nothing else is required ignores the override of
+# template 0. Adding also records the deck, the note type and the current
+# note type in config (R801), whatever deck the cards went to.
+#
+# Overrides are written with db_exec: protobuf field 5 (the override deck
+# id) appended to templates.config, built from the deck's id with printf and
+# unhex (6-byte varint, valid for ids from 2^35 to 2^42). Cram is turned into
+# a filtered deck by replacing its kind blob (model/proto/deck-filtered-
+# bytes), and Gone is deleted after ToGone's override points to it. Anki
+# caches decks and note types, so the collection is reopened (specs/
+# conformance/note-ops.md N2). add_note's deck names the deck setup made, by
+# the id it got then (N1), so `deck: Gone` passes the deleted deck's id.
+id: cardgen/placement/new-note
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: ToTarget
+      fields: [Label, Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+    - name: ToGone
+      fields: [Label, Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+    - name: ToCram
+      fields: [Label, Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+    - name: FirstToTarget
+      fields: [Label, Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+    - name: NoOverride
+      fields: [Label, Front, Back]
+      templates:
+        - {name: Forward, front: "{{Front}}", back: "{{Back}}"}
+        - {name: Backward, front: "{{Back}}", back: "{{Front}}"}
+    - name: Gap
+      kind: cloze
+      fields: [Text]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}
+  decks: [Culture, Target, Gone, Cram]
+steps:
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Target')) AS BLOB) WHERE ord = 1 AND ntid = (SELECT id FROM notetypes WHERE name = 'ToTarget')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Gone')) AS BLOB) WHERE ord = 1 AND ntid = (SELECT id FROM notetypes WHERE name = 'ToGone')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Cram')) AS BLOB) WHERE ord = 1 AND ntid = (SELECT id FROM notetypes WHERE name = 'ToCram')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Target')) AS BLOB) WHERE ord = 0 AND ntid = (SELECT id FROM notetypes WHERE name = 'FirstToTarget')"}
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || unhex('28' || (SELECT printf('%02x%02x%02x%02x%02x%02x', (id & 127) | 128, ((id >> 7) & 127) | 128, ((id >> 14) & 127) | 128, ((id >> 21) & 127) | 128, ((id >> 28) & 127) | 128, id >> 35) FROM decks WHERE name = 'Target')) AS BLOB) WHERE ord = 0 AND ntid = (SELECT id FROM notetypes WHERE name = 'Gap')"}
+  - db_exec: {sql: "UPDATE decks SET kind = X'12150801120c0a0669733a6475651032180628d804383c' WHERE name = 'Cram'"}
+  - db_exec: {sql: "DELETE FROM decks WHERE name = 'Gone'"}
+  - reopen: {}
+  - db_exec: {sql: "SELECT id, name FROM decks ORDER BY id"}
+  - add_note: {notetype: ToTarget, deck: Culture, fields: [target-valid, f, b]}
+  - add_note: {notetype: ToGone, deck: Culture, fields: [target-missing, f, b]}
+  - add_note: {notetype: ToCram, deck: Culture, fields: [target-filtered, f, b]}
+  - add_note: {notetype: NoOverride, deck: Culture, fields: [add-deck, f, b]}
+  - add_note: {notetype: NoOverride, deck: Cram, fields: [add-deck-filtered, f, b]}
+  - add_note: {notetype: NoOverride, deck: Gone, fields: [add-deck-missing, f, b]}
+  - add_note: {notetype: ToTarget, deck: Cram, fields: [target-valid-add-filtered, f, b]}
+  - add_note: {notetype: FirstToTarget, deck: Culture, fields: [fallback-card, "", ""]}
+  - add_note: {notetype: FirstToTarget, deck: Culture, fields: [first-target, f, ""]}
+  - add_note: {notetype: Gap, deck: Culture, fields: ["{{c1::cloze}} {{c2::two}}"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, replace(d.name, char(31), '::'), c.due FROM cards c JOIN notes n ON n.id = c.nid LEFT JOIN decks d ON d.id = c.did ORDER BY n.id, c.ord, c.id"}
+  - db_exec: {sql: "SELECT c.KEY, CAST(c.val AS TEXT), c.usn FROM config c WHERE c.KEY = 'curModel' OR substr(c.KEY, 1, 4) = '_nt_' OR substr(c.KEY, 1, 6) = '_deck_' ORDER BY c.KEY"}

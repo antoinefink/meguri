@@ -1,0 +1,81 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c2"],
+          "note": "#n2"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["Hund", 0, "German::Mining", 0, 0, 1, 1894701600, -1],
+            ["Katze", 0, "Other", 0, 0, 2, 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["3"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Hund", 0, "German::Mining", 0, 0, 1, 1894701600, -1],
+            ["Hund", 1, "German::Mining", 0, 0, 1, 1894705200, -1],
+            ["Katze", 0, "Other", 0, 0, 2, 1894701600, -1]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["3"]
+          ]
+        }
+      },
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["Hund", 0, "German::Mining", 1, 1894701600],
+            ["Hund", 1, "German::Mining", 1, 1894705200],
+            ["Katze", 0, "Other", 2, 1894701600]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/normal/edits-only-add",
+  "scenario_sha256": "90f504032a9df2ab17f04d97739099335989e50e3b31d763f4e72bff7c860946",
+  "tz": "UTC"
+}

@@ -1,0 +1,105 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "db_exec": {
+          "rows": []
+        }
+      },
+      {},
+      {
+        "fields_check": [
+          {
+            "state": "normal"
+          },
+          {
+            "state": "empty"
+          },
+          {
+            "state": "empty"
+          },
+          {
+            "state": "empty"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "notetype_not_cloze"
+          },
+          {
+            "state": "notetype_not_cloze"
+          },
+          {
+            "state": "empty"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "notetype_not_cloze"
+          },
+          {
+            "duplicates": ["#n1"],
+            "state": "duplicate"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "missing_cloze"
+          },
+          {
+            "state": "empty"
+          },
+          {
+            "state": "field_not_cloze"
+          },
+          {
+            "state": "field_not_cloze"
+          },
+          {
+            "state": "field_not_cloze"
+          },
+          {
+            "state": "missing_cloze"
+          },
+          {
+            "state": "missing_cloze"
+          },
+          {
+            "duplicates": ["#n2"],
+            "state": "duplicate"
+          },
+          {
+            "state": "normal"
+          },
+          {
+            "state": "empty"
+          },
+          {
+            "state": "field_not_cloze"
+          },
+          {
+            "state": "missing_cloze"
+          }
+        ]
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "50210d1d4bd9b2ab0d4536832998e23ac3d314d44a38c56a81804b8102c3b9ef",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "notes/fields-check/states",
+  "scenario_sha256": "68d90abb85cc006ac2504d53af8d9d523d9b08cc360a28332254586820b6ccdf",
+  "tz": "UTC"
+}
