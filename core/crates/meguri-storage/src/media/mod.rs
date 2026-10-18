@@ -64,7 +64,8 @@ pub type Result<T> = std::result::Result<T, MediaError>;
 
 #[derive(Debug)]
 struct Inner {
-    db: Mutex<Connection>,
+    db: Mutex<Option<Connection>>,
+    journal: PathBuf,
     // Access while holding db: registration and recovery share one boundary.
     active_stages: Mutex<BTreeMap<i64, Weak<()>>>,
     media: PathBuf,
@@ -111,7 +112,8 @@ impl MediaStore {
         let case_sensitive = folder::probe_case_sensitivity(&staging)?;
         let store = Self {
             inner: Arc::new(Inner {
-                db: Mutex::new(db),
+                db: Mutex::new(Some(db)),
+                journal,
                 active_stages: Mutex::new(BTreeMap::new()),
                 media,
                 trash,
@@ -125,11 +127,49 @@ impl MediaStore {
         store.reconcile_trash()?;
         Ok(store)
     }
-    fn db(&self) -> Result<MutexGuard<'_, Connection>> {
-        self.inner
+    fn db(&self) -> Result<JournalGuard<'_>> {
+        let guard = self
+            .inner
             .db
             .lock()
-            .map_err(|_| MediaError::Database("media mutex poisoned".into()))
+            .map_err(|_| MediaError::Database("media mutex poisoned".into()))?;
+        if guard.is_none() {
+            return Err(MediaError::Database("media journal is closed".into()));
+        }
+        Ok(JournalGuard(guard))
+    }
+
+    /// Close the shared connection only when no operation holds its guard.
+    /// The engine supplies the deadline and waits outside the mutex.
+    pub fn try_close(&self) -> Result<bool> {
+        let mut guard = match self.inner.db.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+            Err(_) => return Err(MediaError::Database("media mutex poisoned".into())),
+        };
+        if let Some(db) = guard.take()
+            && let Err((db, error)) = db.close()
+        {
+            *guard = Some(db);
+            return Err(error.into());
+        }
+        Ok(true)
+    }
+
+    /// Rebind every clone after the engine has reopened the collection.
+    pub fn resume(&self) -> Result<()> {
+        let mut guard = self
+            .inner
+            .db
+            .lock()
+            .map_err(|_| MediaError::Database("media mutex poisoned".into()))?;
+        if guard.is_none() {
+            if std::fs::symlink_metadata(&self.inner.journal).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err(MediaError::InvalidName);
+            }
+            *guard = Some(journal_db::open(&self.inner.journal)?);
+        }
+        Ok(())
     }
     pub fn media_dir(&self) -> &Path {
         &self.inner.media
@@ -161,5 +201,41 @@ impl MediaStore {
     }
     pub fn entries(&self) -> Result<Vec<MediaEntry>> {
         journal_db::entries(&*self.db()?)
+    }
+}
+
+struct JournalGuard<'a>(MutexGuard<'a, Option<Connection>>);
+impl std::ops::Deref for JournalGuard<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.0.as_ref().expect("an open journal guard")
+    }
+}
+impl std::ops::DerefMut for JournalGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        self.0.as_mut().expect("an open journal guard")
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn release_never_waits_on_an_active_journal_operation_and_resume_preserves_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(meguri_model::clock::FixedClock::new(
+            0,
+            meguri_model::clock::UtcOffset::UTC,
+        ));
+        let store = MediaStore::open(&dir.path().join("collection.anki2"), clock).unwrap();
+        store.add("owned.txt", b"synthetic").unwrap();
+        let before = store.pending().unwrap();
+        let held = store.db().unwrap();
+        assert!(!store.try_close().unwrap());
+        drop(held);
+        assert!(store.try_close().unwrap());
+        assert!(store.clone().pending().is_err());
+        store.resume().unwrap();
+        assert_eq!(store.pending().unwrap(), before);
     }
 }

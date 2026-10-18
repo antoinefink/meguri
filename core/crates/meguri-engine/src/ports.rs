@@ -164,3 +164,51 @@ pub use meguri_storage::space::SpaceProvider as DiskSpaceProvider;
 pub trait BackupService: Send + Sync {
     fn before_deck_delete(&self) -> Result<(), EngineError>;
 }
+
+/// Semantic bindings owned by the composition root. Several bindings may
+/// implement the same trait; counting `PortKind` alone cannot detect omissions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ServicePort {
+    DerivedStore,
+    Media,
+    Backup,
+    DeckCounts,
+    Review,
+    Sync,
+    Statistics,
+    Widgets,
+}
+
+impl ServicePort {
+    pub const ALL: [Self; 8] = [
+        Self::DerivedStore,
+        Self::Media,
+        Self::Backup,
+        Self::DeckCounts,
+        Self::Review,
+        Self::Sync,
+        Self::Statistics,
+        Self::Widgets,
+    ];
+}
+
+/// A future provider is explicit and refuses calls; it never acknowledges work.
+#[derive(Clone, Copy, Debug)]
+pub struct Unavailable {
+    pub feature: &'static str,
+    pub provider_unit: &'static str,
+}
+
+impl Unavailable {
+    pub fn require(&self) -> Result<(), EngineError> {
+        Err(EngineError::CollectionUnavailable {
+            reason: format!("{} requires provider {}", self.feature, self.provider_unit),
+        })
+    }
+}
+
+impl BackupService for Unavailable {
+    fn before_deck_delete(&self) -> Result<(), EngineError> {
+        self.require()
+    }
+}

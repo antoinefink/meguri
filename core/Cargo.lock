@@ -1664,6 +1664,13 @@ dependencies = [
 [[package]]
 name = "meguri-host"
 version = "0.0.0"
+dependencies = [
+ "meguri-engine",
+ "meguri-model",
+ "meguri-storage",
+ "tempfile",
+ "tracing",
+]
 
 [[package]]
 name = "meguri-model"

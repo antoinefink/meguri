@@ -5,3 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+
+[dependencies]
+meguri-engine.workspace = true
+meguri-model.workspace = true
+meguri-storage.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+meguri-engine = { workspace = true, features = ["test-hooks"] }
+meguri-model = { workspace = true, features = ["test-hooks"] }
+tempfile.workspace = true
