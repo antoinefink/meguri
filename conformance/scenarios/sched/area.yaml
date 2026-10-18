@@ -1,5 +1,6 @@
-# U28 bootstrap completes the day and unbury adapters. U44 owns
-# day/legacy-timing-after-answer. Matrix cases are generated; list the family.
+# U45 adds pure next-state, label and fuzz cases. U44 owns answer cases:
+# day/legacy-timing-after-answer, fsrs/ae23-answer, fsrs/input-boundaries
+# and steps/rollover-answer. Matrix cases are generated; list the family.
 area: sched
 active:
   - "day/ae84-kathmandu"
@@ -24,3 +25,19 @@ active:
   - "day/rollover-change-recompute"
   - "day/matrix/*"
   - "unbury-on-rollover/*"
+  - "fsrs/elapsed-days"
+  - "fsrs/max-interval"
+  - "fsrs/review-again"
+  - "fsrs/review-buttons"
+  - "fsrs/short-term"
+  - "fuzz/table-bounds"
+  - "labels/less-than"
+  - "labels/review"
+  - "labels/rollover"
+  - "labels/units"
+  - "steps/hard-delays"
+  - "steps/interday"
+  - "steps/learning-fuzz"
+  - "steps/learning-progress"
+  - "steps/new-card-buttons"
+  - "steps/relearning"

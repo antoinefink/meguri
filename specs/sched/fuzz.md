@@ -154,7 +154,7 @@ The engine takes an optional fuzzed-day chooser. At each point above it first of
 
 | Scenario | Covers |
 |---|---|
-| `fp-probe/corpus/fuzz-table` | Z1 to Z4 and Z6 on 10,000 (card id, reps) pairs at 20 intervals with maximum 36,500 (R1892); U45 activates it with its `fuzz_table` adapter |
+| `fp-probe/corpus/fuzz-table` | Z1 to Z4 and Z6 on 10,000 (card id, reps) pairs at 20 intervals with maximum 36,500 (R1892); active with U45's real `fuzz_table` adapter |
 | `sched/fuzz/table-bounds` | Z1 (shared seeds, the largest ids and review counts), Z4 clamping under maximums 36,500, 100, 3 and 1 |
 | `sched/steps/learning-fuzz`, `sched/steps/rollover-answer`, `sched/answer/*` | Z7 |
 | `sched/fsrs/*`, `sched/steps/*` | Z4, Z5 and Z8 inside the transitions |

@@ -232,7 +232,7 @@ Review-log day intervals retain their low 32 bits as a signed integer. This appl
 | `sched/steps/*` | T7, T8, T9 with `sched/steps` |
 | `fp-probe/*` | T1 to T5 on many inputs (`conformance/float-determinism`) |
 
-All goldens are recorded. T13 and the `InFilteredDeck` refusal are unit tests only.
+All goldens are recorded. U45 activates the five pure FSRS scenarios. `ae23-answer` and `input-boundaries` remain pending until U44's answer adapter exists; U45's direct tests already consume their next-state snapshots. T13 and the `InFilteredDeck` refusal are unit tests only.
 
 ## T16. Where the plan's wording differs from Anki
 

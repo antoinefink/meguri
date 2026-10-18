@@ -136,4 +136,4 @@ The `answer_labels` observation (`specs/conformance/observations.md` O10) report
 | `sched/labels/rollover` | A1 near the start of the next day (AE30) |
 | `sched/labels/review` | review and relearning states, months and years |
 
-All goldens are recorded. Meguri's testkit must know the `answer_labels` kind (O10) before these scenarios load; until then they are invalid. Meguri's unit tests add the boundaries no scenario reaches: 3,570 s (`60m`), 86,399 s (`24h`), and `s` stopping at 4,294,967,295 (`136.2y`).
+All goldens are recorded. U45 registers the typed `answer_labels` kind (O10) and its real adapter; all four label scenarios are active. Meguri's unit tests add the boundaries no scenario reaches: 3,570 s (`60m`), 86,399 s (`24h`), and `s` stopping at 4,294,967,295 (`136.2y`).

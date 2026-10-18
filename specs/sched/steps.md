@@ -161,4 +161,4 @@ So a relearning card on its first step of `10m 1h`, 680 s after its due-time rec
 | `sched/steps/relearning` | L9, L10, `sched/fsrs-transitions#T9` |
 | `sched/steps/rollover-answer` | L7 and the learning-step fuzz through answers (AE30; needs the `answer` op, U44) |
 
-All goldens are recorded. Meguri's unit tests add L1's conversion table and L4's arithmetic on lists no scenario has (a sum above 4,294,967,295, NaN steps).
+All goldens are recorded. U45 activates the six pure step scenarios; `rollover-answer` remains pending until U44's answer adapter exists. Meguri's unit tests add L1's conversion table and L4's arithmetic on lists no scenario has (a sum above 4,294,967,295, NaN steps).
