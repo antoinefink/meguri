@@ -33,7 +33,9 @@ fn open_wires_derived_and_media_and_close_releases_retained_journal_handles() {
     let host = CoreHost::open(config(dir.path())).unwrap();
     let collection = host.collection().unwrap();
     assert!(collection.reader(ReaderRole::Query).unwrap().col().is_ok());
-    assert!(host.derived().path().unwrap().is_file());
+    // D5 queues binding on the derived writer; collection Ready does not wait for its file.
+    assert!(host.derived().wait_idle(std::time::Duration::from_secs(5)));
+    assert!(host.derived().path().expect("derived writer bound its file").is_file());
     let media = host.media().unwrap();
     media.add("owned.txt", b"synthetic media").unwrap();
     assert_eq!(media.store().pending().unwrap().len(), 1);
