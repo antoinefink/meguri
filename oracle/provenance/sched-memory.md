@@ -6,7 +6,18 @@ and `specs/conformance/deck-options-ops.md`. Read at tag 26.09.3
 scenarios under `conformance/scenarios/sched/memory/`; nine have goldens
 recorded with `tools/mg oracle record`, and black-box probes of the oracle
 image (the backend's deck options save and ignored-before count, called from
-a throwaway script) confirmed the rest before the specs were written.
+a throwaway script) confirmed the rest before the specs were written. At U46
+intake on 2026-10-18, all eleven prepared cases replayed on both Linux and
+Apple, without re-recording their goldens.
+
+The intake also rechecked `rslib/src/storage/revlog/time_of_last_review.sql`,
+`rslib/src/timestamp.rs` and
+`rslib/src/scheduler/fsrs/memory_state.rs` at 26.09.3 for millisecond-to-second
+conversion. Both the fallback and the repair truncate toward zero, including
+negative ids. `rslib/src/scheduler/fsrs/params.rs` supplies whole-day `u32`
+values and differences; Meguri makes overflow explicitly wrapping at those
+boundaries, consistent with the U45 contract, without a panic-inducing oracle
+fixture.
 
 | Spec section | Anki files read | Read for |
 |---|---|---|

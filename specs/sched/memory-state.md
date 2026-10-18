@@ -22,6 +22,7 @@ When U45 computes a card's next states (for the buttons, and again when U44 appl
 3. otherwise (no item and `ivl` 0) none: FSRS computes the states of a new card.
 
 - Nothing is written. The state is only an input of the next states; the answer stores the state it leads to, with `dr`, `decay` and `lrt` (`sched/card-data#K5`). Computing the states again gives the same state.
+- A new card or a card with a stored memory state needs no history resolution or cutoff parse here. It keeps that absence or state; U45 still validates its preset's parameter support. A malformed unused cutoff must not make this resolver fail.
 - When the home preset's cutoff date is refused (`sched/fsrs-items#I1.3`) or the crate fails, the states cannot be computed and the card cannot be answered (Anki shows an error). A home preset reporting `UnsupportedParams` is U45's case (R704).
 - A card in a filtered deck uses its home deck's preset (`sched/presets#V1`).
 
@@ -40,7 +41,7 @@ When U45 computes a card's next states (for the buttons, and again when U44 appl
 
 ## M3. Elapsed days when `lrt` is missing (R649)
 
-`sched/fsrs-transitions#T2.3` counts FSRS's elapsed days from the card data's `lrt`. When the card data has no `lrt`, the instant of the card's last review stands in for it: the `id` of the card's latest review-log row whose `ease` is 1 to 4 and that is not a cram row (`type` 3 with `factor` 0), divided by 1000 and rounded down. Reset markers do not matter here: a row before the last marker counts. When the card has no such row, the elapsed days are 0.
+`sched/fsrs-transitions#T2.3` counts FSRS's elapsed days from the card data's `lrt`. When the card data has no `lrt`, the instant of the card's last review stands in for it: the `id` of the card's latest review-log row whose `ease` is 1 to 4 and that is not a cram row (`type` 3 with `factor` 0), divided by 1000 with truncation toward zero. Reset markers do not matter here: a row before the last marker counts. When the card has no such row, the elapsed days are 0. For a negative imported row id, -1999 ms gives -1 s, not -2 s.
 
 | Golden `sched/memory/…` | Card | Elapsed days (`next_day_at` 2026-03-03 04:00 UTC) |
 |---|---|---|
@@ -103,7 +104,7 @@ Golden `sched/memory/ignore-before-count` (recorded with the observation `ignore
 A pure rule over a card and its review-log rows (in `id` order), which Check Database applies to every card (U128):
 
 - It applies to cards that are not new and have at least one review-log row. Other cards are left alone, whatever their `lrt`.
-- The expected `lrt` is the second (`id` / 1000, rounded down) of the card's latest graded row (`sched/fsrs-items#I2`; a Reset marker that has a button counts as graded here), unless a Reset marker without a button comes after that row; then there is none.
+- The expected `lrt` is the second (`id` / 1000, truncated toward zero) of the card's latest graded row (`sched/fsrs-items#I2`; a Reset marker that has a button counts as graded here), unless a Reset marker without a button comes after that row; then there is none.
 - When the stored `lrt` differs from the expected one (in value, or present on one side only), the card data gets the expected value, or loses `lrt` when there is none. Only `lrt` changes; the data is rebuilt (`model/card-data-json#C4`) but the row keeps its `mod` and `usn`.
 - The number of cards changed is Check Database's `card_last_review_time` count (`conformance/collection-check#K5`). U128 marks the schema as modified (a full sync) when the count is above 0.
 - This is not M3's lookup: M3 ignores Reset markers and requires an `ease` from 1 to 4.
@@ -173,7 +174,7 @@ Check Database runs M6 on every card; it runs no M4 recompute.
 | `sched/memory/recompute` | M4, M7.1 | recorded (op `save_deck_options`) |
 | `sched/memory/ignore-before-count` | M5, `sched/fsrs-items#I1.3` | recorded (observation `ignored_before_count`) |
 
-- The scenarios observe through `next_states` (memory states compare with the 1e-5 tolerance of `conformance/observations#O7`), `card`, `db_exec` and `check_db`. Meguri runs them once its executor has U45's next states, U44's answer, U128's `check_db` and U49's `save_deck_options`; until then they are `pending`, and U46's tests read their goldens directly: the stored rows and review logs as input, the memory states, card rows and counts as expected output.
+- The scenarios observe through `next_states` (memory states compare with the 1e-5 tolerance of `conformance/observations#O7`), `card`, `db_exec` and `check_db`. Each becomes active only when its own complete set of real adapters exists. U46 can complete the eight pure resolver/count cases. `on-the-fly` remains pending for U44's answer, `lrt-repair` for U128's `check_db`, and `recompute` for U49's full `save_deck_options`. U46's direct tests use their stored rows and review logs as input and their memory states, card rows and counts as expected output; a prefix replay does not make the whole mixed scenario active.
 - Many cards come in pairs whose memory states must be equal (the scenario comments say which); the pairs pin down the start rules without depending on the crate's numbers.
 - Meguri-only tests (no oracle): a recompute cancelled half way writes nothing; a user-initiated recompute is one undo step that restores `s`, `d`, `dr`, `decay`, `mod` and `usn`; presets with `UnsupportedParams` are skipped; the op reads the review log once per preset; the R1849 bench.
 - Training items (`sched/fsrs-items#I7`) are checked by U47's optimizer scenarios.

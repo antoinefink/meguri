@@ -36,3 +36,4 @@ The scenario op and the observation kind that the memory-state scenarios need (U
 
 - The oracle driver implements `save_deck_options` and `ignored_before_count`; `protocol.json` and the testkit's scenario model describe both, and the goldens of `sched/memory/recompute` and `sched/memory/ignore-before-count` are recorded on the Linux and Apple oracles.
 - Meguri's executor implements `ignored_before_count` with U46's adapter, and `save_deck_options` with U49's.
+- U46's shared recompute engine operation does not by itself implement E1. Keep `save_deck_options` unavailable until the real save also performs its preset, deck, step-remapping and insertion-order effects. U46 tests its real recompute, undo and cancellation directly against the golden's input/output pairs; it must not advertise a fixture-only or partial Save adapter. The count observation is independent and can become active with its real U46 query.
