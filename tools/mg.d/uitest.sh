@@ -43,7 +43,10 @@ mg_ui_test() {
     since="$(mg_app_log_now)"
     mg_app_xcodebuild_test "$MG_RUN_DIR/mac" mac "platform=macOS,arch=arm64" Debug "${only[@]}"
     result=$?
-    [ "$result" -gt 1 ] || ! mg_app_mac_input_refused "$since" || result=2
+    if [ "$result" -le 1 ] && mg_app_mac_input_refused "$since" "$(printf '%s' "${suites# }" | tr ' ' ',')"; then
+      mg_app_mac_input_result "$MG_RUN_DIR/mac.xcresult" "$result" test
+      result=$?
+    fi
     mg_ui_test__report "$MG_RUN_DIR/mac" "$result"
     return 0
   fi
@@ -67,9 +70,10 @@ mg_ui_test() {
   mg_ui_test__report "$MG_RUN_DIR/$platform" "$result"
 }
 
-# mg_ui_test__report <prefix> <test result 0|1|2|4>: counts and failing tests
-# from the result bundle, then the status. 4: the test VM could not be
-# reached (queued, mac-vm).
+# mg_ui_test__report <prefix> <test result 0|1|2|3|4>: counts and failing tests
+# from the result bundle, then the status. 3: dropped input (queued,
+# mac-input; independent failures were already recorded). 4: the test VM
+# could not be reached (queued, mac-vm).
 mg_ui_test__report() {
   local prefix="$1" result="$2" summary f
   if [ "$result" -eq 4 ]; then
@@ -84,7 +88,7 @@ mg_ui_test__report() {
     mg_count failed "$(jq .failed <<<"$summary")"
     mg_count skipped "$(jq .skipped <<<"$summary")"
     mg_count total "$(jq '.passed + .failed + .skipped' <<<"$summary")"
-    xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null | jq -c '
+    [ "$result" -eq 3 ] || [ -n "${MG_MAC_INPUT_REFUSED:-}" ] || xcrun xcresulttool get test-results tests --path "$prefix.xcresult" 2>/dev/null | jq -c '
       [.. | objects | select(.nodeType? == "Test Case" and .result? == "Failed")
         | {id: .nodeIdentifier, message: ([.children[]? | select(.nodeType == "Failure Message") | .name] | join("; ") | .[0:800])}] | .[]' |
       while IFS= read -r f; do mg_failure "test/$(jq -r .id <<<"$f")" "$(jq -r .message <<<"$f")"; done
@@ -98,6 +102,12 @@ mg_ui_test__report() {
     1)
       mg_message "ui-test: $(jq -r '.failed' <<<"${summary:-{\"failed\":\"some\"\}}") test(s) failed"
       mg_status fail
+      mg_queued_settle
+      ;;
+    3)
+      mg_message "ui-test: queued: macOS dropped the input XCUITest synthesized in $(mg_queued_parts_text); the suites did not test the app"
+      mg_status pass
+      mg_queued_settle
       ;;
     *)
       mg_message "ui-test: the suites could not run; see log.txt"

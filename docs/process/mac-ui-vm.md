@@ -84,3 +84,7 @@ All runs went through the VM with `details.sim_runner: "vm"` and no host lease. 
 - The VM has 6 CPUs and 12 GB of memory. Pool devices stay booted (five on 2026-10-15), and a device's first boots load the VM for several minutes: a suite that runs meanwhile can time out. More CPUs and memory (`tart set meguri-mac --cpu … --memory …`, with the VM stopped) would give simulators more room.
 - The host cannot record the VM's screen: Mac `drive --record` in the VM makes its contact sheets from screenshots the test runner samples.
 - Input-driving Mac tests fail in the VM until Apple fixes the macOS 27.0.1 bug, exactly as on the host.
+
+### Mac input repair (2026-10-18)
+
+The earlier mac-input diagnosis applied to touch events: `.tap()` and coordinate `.press()` took Recap's touch path. The VM's `/usr/libexec/testmanagerd` has `com.apple.private.hid.client.event-dispatch.internal`, which WindowServer rejects on a non-internal build. Automation Mode does enable during XCTest, and no OS update was available. Native mouse events work on the same VM and OS/Xcode pair. Shared UI tests and the agent driver now use `clickOrTap()` (mouse on macOS, touch on iOS), and Mac drags use `click(forDuration:thenDragTo:)`. The alert-dismiss test passed with a real click (ui-test 20261018T065638Z-65888); the six-step sheet driver passed with screenshots and hierarchy checks (drive 20261018T065901Z-70138). No host input was driven and no security setting was weakened.

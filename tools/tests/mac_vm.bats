@@ -929,3 +929,32 @@ test_results() {
   ! vm_tests_running meguri-mac
   [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
 }
+
+# bats test_tags=gate
+@test "ui-test on the Mac queues only failures explained by dropped input and preserves independent failures" {
+  local r="$BATS_TEST_TMPDIR/results"
+  export FAKE_VM_INPUT_DROPPED=1 FAKE_VM_FAIL_RE=NavigationLayoutTests FAKE_VM_RESULTS="$r"
+
+  test_results "$r" NavigationLayoutTests tap
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+
+  test_results "$r" NavigationLayoutTests free tap
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 1 ]
+  [ "$(field .status)" = fail ]
+  [ "$(field .details.queued)" = false ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/NavigationLayoutTests/testChecksWithoutInput()" ]
+
+  test_results "$r" NavigationLayoutTests early
+  mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/NavigationLayoutTests/testTapsCancel()" ]
+
+  FAKE_VM_RESULTS="" mg ui-test --platform mac --suite NavigationLayoutTests
+  [ "$status" -eq 1 ]
+  [ "$(field '[.failures[].id] | join(" ")')" = "test/xcresult" ]
+}

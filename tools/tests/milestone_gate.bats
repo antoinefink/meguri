@@ -183,7 +183,7 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 ($m1r | .user_steps[] | select(.id == "first-sync") | .validator) = {"type": "report"};;which asks for a first-sync step
 ($m1r | .user_steps[] | select(.id == "first-sync") | .validator.results) -= ["u248-soak"];;binds u248-soak, which its results lacks
 ($m1r | .suites[] | select(.id == "u251-safety-app") | .scope.items) -= ["background-suspend"];;binds background-suspend, which its scope lacks
-($m1r).suites |= map(select(.id != "perf-gate"));;gated by U241 against the review-loop budgets (R1807–R1817)
+($m1r).suites |= map(select(.id != "perf-ui-gate"));;gated by U241 against the review-loop budgets (R1807–R1817)
 ($m1) |= del(.cumulative);;Cumulative over M1R: the full daily-driver gate
 .milestones |= map(select(.id != "M1R"));;the plan's table has a row M1R that the manifest lacks
 .milestones |= [.[0], .[2], .[1]] + .[3:];;the plan's table orders them M0, M1R, M1, M2, M3, M4, M5
@@ -304,4 +304,36 @@ EOF
   [ "$status" -eq 1 ]
   [ "$(field '[.details.suites[].id] | join(" ")')" = "unit milestones review" ]
   validate "$result"
+}
+
+@test "real milestone runs provide every performance job their budget gate requires" {
+  local d="$BATS_TEST_TMPDIR" m
+  "$REPO_ROOT/tools/mg" --list >"$d/registry.tsv"
+  python3 -B -I "$REPO_ROOT/tools/gate/gate.py" load --tiers "$REPO_ROOT/tools/gate/tiers.yaml" \
+    --quarantine "$REPO_ROOT/tools/gate/quarantine.yaml" --registry "$d/registry.tsv" \
+    --conformance "$REPO_ROOT/conformance" --out "$d/config.json"
+  python3 -B -I "$REPO_ROOT/tools/scripts/gates/milestone_gate.py" load \
+    --manifest "$REPO_ROOT/docs/process/milestones.yaml" --out "$d/manifest.json"
+  for m in $(jq -r '.milestones[].id' "$d/manifest.json"); do
+    python3 -B -I "$REPO_ROOT/tools/scripts/gates/milestone_gate.py" runs \
+      --manifest "$d/manifest.json" --config "$d/config.json" --milestone "$m" >"$d/runs.json"
+    run python3 - "$d/config.json" "$d/runs.json" "$m" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as source:
+    config = json.load(source)
+with open(sys.argv[2]) as source:
+    selected = set(json.load(source)["runs"])
+runs = [run for run in config["runs"] if run["id"] in selected]
+jobs = {run["job"] for run in runs}
+for run in runs:
+    if run["job"] == "perf-gate":
+        for index, arg in enumerate(run["args"]):
+            if arg == "--require":
+                required = run["args"][index + 1]
+                assert required in jobs, f'{sys.argv[3]}: {run["id"]} requires unscheduled {required}'
+PY
+    [ "$status" -eq 0 ] || { printf '%s\n' "$output"; return 1; }
+  done
 }

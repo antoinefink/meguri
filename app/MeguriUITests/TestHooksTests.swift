@@ -93,7 +93,7 @@ final class TestHooksTests: XCTestCase {
         XCTAssertEqual(Set(alert.buttons.allElementsBoundByIndex.map(\.label)), ["Try Again", "Cancel"])
         // On the Mac a click on a window that is not key only activates it.
         try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
-        alert.buttons["Cancel"].tap()
+        alert.buttons["Cancel"].clickOrTap()
         XCTAssert(alert.waitForNonExistence(timeout: 5), "Cancel did not dismiss the alert")
     }
 

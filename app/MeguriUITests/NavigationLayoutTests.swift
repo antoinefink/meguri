@@ -73,12 +73,12 @@ final class NavigationLayoutTests: XCTestCase {
         XCTAssert(element(app, "testhooks.shell.noteTypesRow.1").waitForExistence(timeout: 15), "Note Types is not pushed on Browse")
         let browseTab = element(app, "shell.root.tab.browse")
         XCTAssert(browseTab.waitForExistence(timeout: 5), "no Browse tab")
-        browseTab.tap()
+        browseTab.clickOrTap()
         XCTAssert(element(app, "testhooks.shell.browseRow.20").waitForExistence(timeout: 5), "the first reselect did not pop to Browse")
         keepScreen(app, "reselect-first")
         XCTAssertTrue(probe(app).contains("browse= "), probe(app))
         XCTAssertFalse(element(app, "testhooks.shell.browseRow.1").isHittable, "the first reselect also scrolled to the top")
-        browseTab.tap()
+        browseTab.clickOrTap()
         XCTAssert(waitUntil { self.element(app, "testhooks.shell.browseRow.1").isHittable }, "the second reselect did not scroll to the top")
         #endif
     }
@@ -114,7 +114,7 @@ final class NavigationLayoutTests: XCTestCase {
         XCTAssert(waitUntil { browseTab.exists && browseTab.isSelected }, "the Browse tab is not selected")
 
         // Back on Browse's root: still at row 20.
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.navigationBars.buttons.element(boundBy: 0).clickOrTap()
         XCTAssert(element(app, "testhooks.shell.browseRow.20").waitForExistence(timeout: 5))
         XCTAssertTrue(element(app, "testhooks.shell.browseRow.20").isHittable)
         XCTAssertFalse(element(app, "testhooks.shell.browseRow.1").isHittable, "Browse's root lost its scroll position")
@@ -141,7 +141,7 @@ final class NavigationLayoutTests: XCTestCase {
         assertReview(app, card: "Card 1001", side: "Answer", answers: "Answers: 0")
 
         // The stand-in is live: an answer moves it on, and a switch keeps that.
-        element(app, "testhooks.shell.review.good").tap()
+        element(app, "testhooks.shell.review.good").clickOrTap()
         assertReview(app, card: "Card 1002", side: "Question", answers: "Answers: 1")
         toggleSizeClass()
         assertReview(app, card: "Card 1002", side: "Question", answers: "Answers: 1")
@@ -161,12 +161,12 @@ final class NavigationLayoutTests: XCTestCase {
         let study = element(app, "testhooks.shell.deckPage.study")
         XCTAssert(study.waitForExistence(timeout: 15))
         XCTAssertTrue(element(app, "shell.root.sidebar.home").isHittable, "the sidebar is hidden before the review")
-        study.tap()
+        study.clickOrTap()
         assertReview(app, card: "Card 1001", side: "Question", answers: "Answers: 0")
         XCTAssert(waitUntil { !self.element(app, "shell.root.sidebar.home").isHittable }, "the sidebar stayed during the review")
         XCTAssertTrue(probe(app).contains("columns=detailOnly"), probe(app))
 
-        element(app, "testhooks.shell.review.close").tap()
+        element(app, "testhooks.shell.review.close").clickOrTap()
         XCTAssert(element(app, "testhooks.shell.deckPage.title").waitForExistence(timeout: 5), "the deck page did not come back")
         XCTAssert(waitUntil { self.element(app, "shell.root.sidebar.home").isHittable }, "the sidebar was not restored")
         XCTAssertTrue(probe(app).contains("review=none"), probe(app))
@@ -196,7 +196,7 @@ final class NavigationLayoutTests: XCTestCase {
         post("presentAdd")
         let cancel = element(app, "shell.sheet.cancel")
         XCTAssert(cancel.waitForExistence(timeout: 10), "Add did not open")
-        cancel.tap()
+        cancel.clickOrTap()
         XCTAssert(cancel.waitForNonExistence(timeout: 5), "Add did not close")
         XCTAssertTrue(element(app, "testhooks.shell.deckPage.title").exists || row.exists, "the deck page is gone")
         XCTAssertEqual(row.frame.minY, frame.minY, accuracy: 1, "the deck page did not keep its scroll position")
@@ -235,7 +235,7 @@ final class NavigationLayoutTests: XCTestCase {
         let alert = app.alerts.firstMatch
         XCTAssert(alert.waitForExistence(timeout: 10), "no message for a missing deck (R320)")
         XCTAssertTrue(alert.staticTexts["No deck has the ID 999."].exists, alert.debugDescription)
-        alert.buttons["OK"].tap()
+        alert.buttons["OK"].clickOrTap()
         XCTAssert(alert.waitForNonExistence(timeout: 5))
         XCTAssertEqual(probe(app), state, "a link to a missing deck changed the navigation")
         #endif
