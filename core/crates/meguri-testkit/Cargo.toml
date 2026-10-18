@@ -89,3 +89,7 @@ harness = false
 name = "icount_open"
 path = "benches/icount/open.rs"
 harness = false
+
+[[bench]]
+name = "next_states"
+harness = false

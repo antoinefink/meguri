@@ -1707,6 +1707,7 @@ pub enum ObservationKind {
     Card,
     Revlog,
     NextStates,
+    AnswerLabels,
     FuzzTable,
     NetProbe,
     Queue,
@@ -1766,7 +1767,7 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 33] = [
+    pub const ALL: [ObservationKind; 34] = [
         ObservationKind::MediaDir,
         ObservationKind::MediaTrash,
         ObservationKind::MediaPending,
@@ -1775,6 +1776,7 @@ impl ObservationKind {
         ObservationKind::Card,
         ObservationKind::Revlog,
         ObservationKind::NextStates,
+        ObservationKind::AnswerLabels,
         ObservationKind::FuzzTable,
         ObservationKind::NetProbe,
         ObservationKind::Queue,
@@ -1812,6 +1814,7 @@ impl ObservationKind {
             ObservationKind::Card => "card",
             ObservationKind::Revlog => "revlog",
             ObservationKind::NextStates => "next_states",
+            ObservationKind::AnswerLabels => "answer_labels",
             ObservationKind::FuzzTable => "fuzz_table",
             ObservationKind::NetProbe => "net_probe",
             ObservationKind::Queue => "queue",
@@ -1861,6 +1864,7 @@ impl ObservationKind {
             ObservationKind::Card
             | ObservationKind::Revlog
             | ObservationKind::NextStates
+            | ObservationKind::AnswerLabels
             | ObservationKind::Render
             | ObservationKind::RenderStatus => ArgShape::CardRefs,
             ObservationKind::FuzzTable

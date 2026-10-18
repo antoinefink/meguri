@@ -23,6 +23,13 @@ impl<'a> Steps<'a> {
             remaining: left % 1000,
         }
     }
+    /// New cards start before the first step, without the stored-left encoding.
+    pub fn unseen(minutes: &'a [f32]) -> Self {
+        Self {
+            minutes,
+            remaining: minutes.len() as u32,
+        }
+    }
     pub fn count(&self) -> u32 {
         self.minutes.len() as u32
     }

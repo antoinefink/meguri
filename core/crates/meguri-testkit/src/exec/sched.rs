@@ -27,6 +27,8 @@ pub(super) fn register(registry: &mut Registry) {
     registry.observation("fsrs_next", observe);
     registry.observation("timing", timing);
     registry.observation("fuzz_table", fuzz_table);
+    registry.observation("next_states", scheduling_states);
+    registry.observation("answer_labels", scheduling_states);
     registry.op("reopen", reopen);
 }
 
@@ -260,4 +262,120 @@ pub fn fuzz_table_rows(pairs: &[(u64, u64)], intervals: &[u32], maximum: u32) ->
             Value::Array(row)
         })
         .collect()
+}
+
+/// O5/O10 share the pure engine; no answer or review-log writes occur here.
+fn scheduling_states(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    use meguri_model::{ids::CardId, proto::deck::DeckKind};
+    use meguri_sched::{
+        model::{deck_sched::DeckSched, preset::PresetView, sched_config::SchedConfig},
+        states::{
+            engine::{StateInput, next_states},
+            fsrs_glue::FsrsCache,
+        },
+    };
+    let collection = session.engine_collection()?;
+    let day = day_query_now(session)?.day;
+    let now = session.clock.now_ms().div_euclid(1000);
+    let rows = collection
+        .reader(meguri_storage::ReaderRole::Interactive)
+        .map_err(|e| ExecError::new("core_error", e.to_string()))?;
+    let config = SchedConfig::new(&*rows);
+    let core = |e: StorageError| ExecError::new("core_error", e.to_string());
+    let learn_ahead = config.collapse_time().map_err(core)?;
+    let short_term_with_steps = config.fsrs_short_term_with_steps().map_err(core)?;
+    let references = match &request.args {
+        ObservationArgs::Refs(refs) => refs.clone(),
+        _ => (0..session.cards.len())
+            .map(|i| LogicalRef {
+                kind: RefKind::Card,
+                n: i as u32 + 1,
+            })
+            .collect(),
+    };
+    let mut cache = FsrsCache::default();
+    let mut out = serde_json::Map::new();
+    for reference in references {
+        let id = *session
+            .cards
+            .get(reference.index())
+            .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))?;
+        let card = rows
+            .card(CardId(id))
+            .map_err(core)?
+            .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))?;
+        let preset = PresetView::for_card(&*rows, &card)
+            .map_err(core)?
+            .ok_or_else(|| invalid("next states need a normal home deck"))?;
+        let deck = rows
+            .deck(meguri_sched::model::card_sched::CardSched::new(&card).home_deck())
+            .map_err(core)?
+            .ok_or_else(|| invalid("missing home deck"))?;
+        let normal = match &deck.kind.kind {
+            DeckKind::Normal(n) => Some(n),
+            _ => None,
+        };
+        let desired_retention = DeckSched::new(normal, &deck.common).retention(preset.fields().desired_retention);
+        let input = StateInput {
+            card: &card,
+            preset: &preset,
+            memory_state: card.data.memory_state,
+            last_review_time: card.data.last_review_secs,
+            desired_retention,
+            today: day.today,
+            next_day_at: day.next_day_at,
+            now,
+            short_term_with_steps,
+            learn_ahead,
+        };
+        let states = next_states(&mut cache, &input, None).map_err(|e| ExecError::new("core_error", e.to_string()))?;
+        let value = if request.kind.name() == "answer_labels" {
+            let label = |l: &meguri_sched::states::labels::AnswerLabel| json!({"amount":l.amount,"less_than":l.less_than,"unit":l.unit.name()});
+            json!({"again":label(&states.again.label),"hard":label(&states.hard.label),"good":label(&states.good.label),"easy":label(&states.easy.label)})
+        } else {
+            json!({"current":state_value(states.current)?,"again":state_value(states.again.state)?,"hard":state_value(states.hard.state)?,"good":state_value(states.good.state)?,"easy":state_value(states.easy.state)?})
+        };
+        out.insert(reference.to_string(), value);
+    }
+    Ok(Value::Object(out))
+}
+fn state_value(state: meguri_sched::states::engine::State) -> Result<Value, ExecError> {
+    use meguri_sched::states::engine::State;
+    let (kind, mut value) = match state {
+        State::New { position } => ("new", json!({"position":position})),
+        State::Learning(l) => ("learning", learning_value(l)?),
+        State::Review(r) => ("review", review_value(r)?),
+        State::Relearning { learning, review } => (
+            "relearning",
+            json!({"learning":learning_value(learning)?,"review":review_value(review)?}),
+        ),
+    };
+    value
+        .as_object_mut()
+        .expect("state object")
+        .insert("kind".into(), json!(kind));
+    Ok(value)
+}
+fn memory_value(value: &mut Value, memory: Option<meguri_model::card_data::MemoryState>) -> Result<(), ExecError> {
+    if let Some(memory) = memory {
+        value.as_object_mut().expect("state object").insert(
+            "memory_state".into(),
+            json!({"stability":state_float(memory.stability)?,"difficulty":state_float(memory.difficulty)?}),
+        );
+    }
+    Ok(())
+}
+fn state_float(value: f32) -> Result<Value, ExecError> {
+    observe::f32_value(value).map_err(|e| ExecError::new("core_error", e.to_string()))
+}
+fn learning_value(l: meguri_sched::states::learning::LearningState) -> Result<Value, ExecError> {
+    let mut value =
+        json!({"remaining_steps":l.remaining_steps,"scheduled_secs":l.scheduled_secs,"elapsed_secs":l.elapsed_secs});
+    memory_value(&mut value, l.memory_state)?;
+    Ok(value)
+}
+fn review_value(r: meguri_sched::states::engine::ReviewState) -> Result<Value, ExecError> {
+    let mut value = json!({"scheduled_days":r.scheduled_days,"elapsed_days":r.elapsed_days,"ease_factor":state_float(r.ease_factor)?,"lapses":r.lapses,"leeched":r.leeched});
+    memory_value(&mut value, r.memory_state)?;
+    Ok(value)
 }
