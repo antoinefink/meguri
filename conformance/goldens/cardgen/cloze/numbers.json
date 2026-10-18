@@ -1,0 +1,101 @@
+{
+  "clock": {
+    "mode": "frozen",
+    "start": "2030-01-15T10:00:00"
+  },
+  "observations": {
+    "steps": [
+      {
+        "add_note": {
+          "cards": ["#c1", "#c2", "#c3"],
+          "note": "#n1"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c4"],
+          "note": "#n2"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c5", "#c6", "#c7", "#c8"],
+          "note": "#n3"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c9"],
+          "note": "#n4"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c10"],
+          "note": "#n5"
+        }
+      },
+      {
+        "add_note": {
+          "cards": ["#c11"],
+          "note": "#n6"
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            ["{{c1::a}} {{c3::b}} {{c0::label}} {{c700::z}}", 0, 1],
+            ["{{c1::a}} {{c3::b}} {{c0::label}} {{c700::z}}", 2, 1],
+            ["{{c1::a}} {{c3::b}} {{c0::label}} {{c700::z}}", 499, 1],
+            ["only extra", 1, 2],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 0, 3],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 1, 3],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 2, 3],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 3, 3],
+            ["{{c0::only zero}}", 0, 4],
+            ["plain", 0, 5],
+            ["{{c1::open", 0, 6]
+          ]
+        }
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        "db_exec": {
+          "rows": [
+            ["{{c2::two}}", 0, 1, 1894701600],
+            ["{{c2::two}}", 1, 1, 1894705200],
+            ["{{c2::two}}", 2, 1, 1894701600],
+            ["{{c2::two}}", 499, 1, 1894701600],
+            ["only extra", 1, 2, 1894701600],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 0, 3, 1894701600],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 1, 3, 1894701600],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 2, 3, 1894701600],
+            ["{{c2::a {{c4::nested}}}} {{c1,3::list}}", 3, 3, 1894701600],
+            ["{{c0::only zero}} {{c1::one}}", 0, 4, 1894701600],
+            ["plain {{c3::three}}", 0, 5, 1894701600],
+            ["plain {{c3::three}}", 2, 5, 1894705200],
+            ["{{c1::open", 0, 6, 1894701600]
+          ]
+        }
+      },
+      {
+        "db_exec": {
+          "rows": [
+            [0]
+          ]
+        }
+      }
+    ]
+  },
+  "oracle": {
+    "anki_version": "26.9.3",
+    "driver_sha256": "dc86b6d07214ba204b030a9f8b87327875a4f537e7ac1eafedcac2e0bdfe17b5",
+    "lock_sha256": "232216513595610b19dc4e6a419bfdb4cd449aa313320882ffc766eec17a8dd7"
+  },
+  "scenario_id": "cardgen/cloze/numbers",
+  "scenario_sha256": "b1f2007c9bfc322a1e58cd38c908dcfd9a6aa99714034ea1e740f05658dc03e3",
+  "tz": "UTC"
+}

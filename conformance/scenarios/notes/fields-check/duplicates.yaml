@@ -1,0 +1,59 @@
+# AE34, check half (R774, R807, R808; specs/notes/field-check.md K3, K4).
+# A first field is a duplicate when another note of the same note type has
+# the checksum of its stripped text and the same stripped first field. The
+# check reads the draft as typed: NFC when normalize_note_text is on, no
+# control-character removal. The checked note itself is never its own
+# duplicate, a note of another type never is, and the lookup goes through
+# the stored checksum (a note whose stored csum is stale is not found).
+# Duplicates never block adding: the second Kaishi note is added. Needs the
+# fields_check observation (specs/conformance/note-ops.md N4).
+id: notes/fields-check/duplicates
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Kaishi
+      fields: [Word, Meaning]
+      templates:
+        - {name: Recognize, front: "{{Word}}", back: "{{Meaning}}"}
+    - name: Other
+      fields: [Word, Meaning]
+      templates:
+        - {name: Recognize, front: "{{Word}}", back: "{{Meaning}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Kaishi, deck: Inbox, fields: ["私", I]}
+    - {notetype: Other, deck: Inbox, fields: ["私", I]}
+    - {notetype: Kaishi, deck: Inbox, fields: ["私 ", I]}
+    - {notetype: Kaishi, deck: Inbox, fields: ["café", coffee]}
+    - {notetype: Kaishi, deck: Inbox, fields: [stale, old]}
+steps:
+  - db_exec: {sql: "UPDATE notes SET csum = 1 WHERE sfld = 'stale'"}
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Kaishi, fields: ["<b>私</b>", I]}
+            - {notetype: Other, fields: ["<b>私</b>", I]}
+            - {notetype: Kaishi, fields: ["&#31169;"]}
+            - {notetype: Kaishi, fields: ["私 "]}
+            - {notetype: Kaishi, fields: ["私\u0001"]}
+            - {notetype: Kaishi, fields: ["café"]}
+            - {notetype: Kaishi, fields: ["Café"]}
+            - {notetype: Kaishi, fields: [stale]}
+            - {notetype: Kaishi, fields: [unique]}
+            - {note: "#n1"}
+            - {note: "#n3"}
+            - {note: "#n1", fields: {Meaning: me}}
+  - add_note: {notetype: Kaishi, deck: Inbox, fields: ["<b>私</b>", me]}
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Kaishi, fields: ["私"]}
+            - {note: "#n1"}
+            - {note: "#n6"}
+            - {note: "#n6", fields: ["new word"]}
+  - set_config: {key: normalize_note_text, value: false}
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Kaishi, fields: ["café"]}
+            - {notetype: Kaishi, fields: ["café"]}
