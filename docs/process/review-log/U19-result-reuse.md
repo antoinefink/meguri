@@ -5,7 +5,8 @@ Session: `s-20261018T131028Z-b9f766d3` (Codex, infra).
 
 Antoine approved avoiding duplicate verification on 2026-10-18.
 U31's full gate passed Xcode check in 945,205 ms. Its following catch-up
-then reran the same matrix on the same clean commit and arguments.
+then reran the same matrix in 835,003 ms on the same clean commit, checkout
+and arguments. Reuse avoids that second run.
 Snapshot and Xcode catch-up both passed, clearing the old queue.
 
 Catch-up now checks the latest completed result before rerunning a job.
@@ -25,4 +26,16 @@ changed commits, arguments, newer failures, dirty/dry/queued results, wrong
 checkout and malformed metadata. A macOS bash 3.2 integration case exercises
 reuse with an argument containing spaces and a now-locked host.
 
-Focused tests, full tooling checks, review and the full gate remain pending.
+Round 1 (Codex, frozen `22b4a771`): two P2 findings. The proof predicate
+accepted missing standard metadata, and it did not recheck HEAD and
+cleanliness after validation. Both received failing regression tests, then
+fixes: validate the required standard fields and their shapes with jq, and
+recheck the sampled clean HEAD before returning proof. The regression
+injects both a commit and a tracked edit during proof validation. All three
+focused cases pass, including 22 invalid-evidence variants.
+
+Before those fixes, all 442 Bats tests and all 27 macOS host tests passed
+(`selftest/20261018T131551Z-28855` and
+`selftest-host/20261018T131551Z-28856`; exact paths in orchestration output).
+The full gate will verify the final corrected source. Round 2 and that gate
+remain pending.

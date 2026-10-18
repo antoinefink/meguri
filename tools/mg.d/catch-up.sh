@@ -55,17 +55,46 @@ mg_catch_up__passing_result() {
   [ -z "$dirty" ] || return 1
   dir="$(cd "$MG_ROOT/build/mg/$job/latest" 2>/dev/null && pwd -P)" || return 1
   case "$dir" in "$MG_ROOT/build/mg/$job/"*) ;; *) return 1 ;; esac
-  jq -e --arg job "$job" --arg root "$MG_ROOT" --arg head "$head" --argjson args "$args" '
-    .schema_version == 1 and .job == $job and .root == $root and .args == $args
+  jq -e --arg job "$job" --arg root "$MG_ROOT" --arg head "$head" --arg run "$(basename "$dir")" --argjson args "$args" '
+    # Standard metadata is part of the proof, not just the passing status.
+    def count: type == "number" and . >= 0 and floor == .;
+    def stamp: type == "string" and (try (fromdateiso8601 | type == "number") catch false);
+    def only($allowed): (keys - $allowed) == [];
+    (keys == (["schema_version", "job", "run_id", "status", "exit_code", "placement", "service",
+      "dry_run", "args", "root", "started_at", "finished_at", "duration_ms", "commit",
+      "message", "summary", "failures", "artifacts", "user_steps", "details"] | sort))
+    and .schema_version == 1 and .job == $job and .root == $root and .args == $args
+    and (.args | type == "array" and all(.[]; type == "string"))
+    and .run_id == $run and (.run_id | test("^[0-9]{8}T[0-9]{6}Z-[0-9]+$"))
+    and (.placement == "host" or .placement == "docker" or .placement == "none")
+    and (.service | type == "string" or type == "null")
+    and (.started_at | stamp) and (.finished_at | stamp) and (.duration_ms | count)
+    and (.message | type == "string")
+    and (.commit | type == "object" and keys == ["dirty", "sha"])
     and .commit.sha == $head and .commit.dirty == false and .dry_run == false
     and .status == "pass" and .exit_code == 0 and .failures == []
+    and (.summary | type == "object" and has("total") and has("passed") and has("failed") and has("skipped")
+      and all(.[]; count))
     and .summary.failed == 0 and (.summary.errors // 0) == 0
-    and (.finished_at | type == "string" and length > 0)
+    and (.artifacts | type == "array" and all(.[];
+      type == "object" and only(["kind", "path", "label"])
+      and (.kind | type == "string" and length > 0)
+      and (.path | type == "string" and startswith("/"))
+      and (if has("label") then (.label | type == "string") else true end)))
     and (.details | type == "object")
     and (.details.queued // false) == false and (.details.blocked // false) == false
     and (.details.queued_parts // []) == []
-    and (.user_steps | type == "array" and all(.[]; .required != true or .state != "missing"))
+    and (.user_steps | type == "array" and all(.[];
+      type == "object" and only(["id", "state", "required", "title", "how", "doc"])
+      and (.id | type == "string" and test("^[a-z0-9-]+$"))
+      and (.state == "missing" or .state == "unverified") and (.required | type == "boolean")
+      and (.title | type == "string") and (.how | type == "string") and (.doc | type == "string")
+      and (.required != true or .state != "missing")))
   ' "$dir/result.json" >/dev/null 2>&1 || return 1
+  # A commit or edit during validation invalidates the sampled clean HEAD.
+  [ "$(git -C "$MG_ROOT" rev-parse --verify HEAD)" = "$head" ] || return 1
+  dirty="$(git -C "$MG_ROOT" status --porcelain --untracked-files=all)" || return 1
+  [ -z "$dirty" ] || return 1
   printf '%s/result.json\n' "$dir"
 }
 

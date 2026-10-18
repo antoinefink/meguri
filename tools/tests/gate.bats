@@ -1021,6 +1021,46 @@ entry() {
   [ "$(entry 0 .reused)" = true ]
 }
 
+@test "catch-up refuses reuse if HEAD or cleanliness changes during evidence validation" {
+  cat >>"$SB/tools/mg.d/zz-fakes.sh" <<'EOF'
+jq() {
+  local rc last="${!#}"
+  command jq "$@"
+  rc=$?
+  if [ -f "$FX/race-proof" ] && [ "$last" = "$(cat "$FX/race-proof")" ]; then
+    rm "$FX/race-proof"
+    case "$(cat "$FX/race-mode")" in
+      commit) git -C "$MG_ROOT" -c core.hooksPath=/dev/null commit -q --allow-empty -m 'Concurrent commit' ;;
+      dirty) printf 'concurrent change\n' >>"$MG_ROOT/docs/notes.md" ;;
+    esac
+  fi
+  return "$rc"
+}
+EOF
+  git -C "$SB" add tools/mg.d/zz-fakes.sh
+  git -C "$SB" commit -q -m 'Install validation race fixture'
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  queue_merge "$BATS_TEST_TMPDIR/U150" U150
+  cp "$SB/$QUEUE" "$FX/queued.original"
+  local mode
+  for mode in commit dirty; do
+    cp "$FX/queued.original" "$SB/$QUEUE"
+    fx ui pass
+    mg t-job ui
+    [ "$status" -eq 0 ]
+    printf '%s\n' "$result" >"$FX/race-proof"
+    printf '%s\n' "$mode" >"$FX/race-mode"
+    : >"$STUB_LOG"
+    mg catch-up
+    [ "$status" -eq 0 ]
+    [ ! -f "$FX/race-proof" ]
+    [ "$(called '^t-job ui')" = 1 ]
+    [ "$(field '.details.runs[0].reused')" = false ]
+    git -C "$SB" checkout -q -- docs/notes.md
+  done
+}
+
 @test "catch-up reruns after the head changes rather than reusing an older passing result" {
   fx ui queued
   printf 'host-session the devices phase\n' >"$FX/ui.queued"
@@ -1075,7 +1115,10 @@ entry() {
   for mutation in '.commit.dirty = true' '.dry_run = true' '.details.queued = true' \
     '.details.queued_parts = [{user_step:"host-session"}]' '.root = "/elsewhere"' \
     '.status = "warn"' '.failures = [{id:"broken",message:"broken",repro:"tools/mg t-job ui"}]' \
-    'del(.commit)' 'null'; do
+    'del(.commit)' 'null' 'del(.run_id)' 'del(.started_at)' 'del(.duration_ms)' \
+    'del(.placement)' 'del(.service)' 'del(.message)' 'del(.artifacts)' \
+    '.user_steps = [{}]' '.summary.total = -1' '.summary.passed = 1.5' \
+    '.run_id = "invalid"' '.started_at = "yesterday"' '.artifacts = [{kind: 1, path: "relative"}]'; do
     cp "$FX/queued.original" "$SB/$QUEUE"
     printf '%s\n' "$pristine" | jq "$mutation" >"$proof"
     ln -sfn "$(basename "$(dirname "$proof")")" "$SB/build/mg/t-job/latest"
