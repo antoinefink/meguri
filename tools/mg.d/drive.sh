@@ -14,7 +14,7 @@ mg_job drive host mg_drive \
 mg_job ui-tree host mg_ui_tree \
   "Launch on a route and export the UI hierarchy (and a screenshot): --route <route> [--platform ...] [--device <udid>] [--config ...] [-- launch args]"
 mg_job screenshot host mg_screenshot \
-  "Screenshot: --route <route> [--platform ...] [--device <udid>] [-- launch args] launches and captures (simulators: with the hierarchy; mac: hidden launch and screencapture -l, needs Screen Recording); --device <udid> alone captures that simulator's screen as it is"
+  "Screenshot: --route <route> [--platform ...] [--device <udid>] [-- launch args] launches and captures (simulators: with the hierarchy; mac: Debug only, hidden launch out of the Dock and screencapture -l, needs Screen Recording); --device <udid> alone captures that simulator's screen as it is"
 mg_job hierarchy-check host mg_hierarchy_check \
   "Layout and identifier checks over hierarchy exports (tools/scripts/hierarchy-check), in the image-tools container: <hierarchy.json>..."
 
@@ -190,8 +190,9 @@ mg_drive__motion_inputs() {
 # queued (macOS dropped the input the drive synthesized, and nothing the drop
 # cannot explain went wrong: its captures and manifest are kept, and its
 # failed step from the first input step on is not the app's and is not
-# recorded). A pass needs every listed capture exported and non-empty, and
-# the hierarchy check run over them.
+# recorded), 4 queued (the test VM could not be reached: mac-vm, recorded
+# by mg__mac_vm_unreachable). A pass needs every listed capture exported and
+# non-empty, and the hierarchy check run over them.
 mg_drive_run() {
   local script="$1" platform="$2" udid="$3" config="$4" record="$5" out="$6"
   local dest name abs_script rc capture="" video="" rec_start="" rec_log recorder="" capture_error=0
@@ -255,7 +256,8 @@ mg_drive_run() {
       if [ "$form" = fixture ]; then
         case "$fixture" in /*) ;; *) fixture="$MG_ROOT/$fixture" ;; esac
       fi
-      mg_vm_fixture "$fixture" || return 2
+      mg_vm_fixture "$fixture"
+      case $? in 0) ;; 2) return 4 ;; *) return 2 ;; esac
       [ "$MG_VM_FIXTURE" = "$fixture" ] || moved="$(jq -c --arg h "$fixture" --arg v "$MG_VM_FIXTURE" '. + {($h): $v}' <<<"$moved")"
     done < <(jq -r '.steps[] | objects | .launch? | objects | (.fixture? | strings | "fixture\t\(.)"),
       (.arguments? | arrays | . as $a | range(1; length) as $i | select($a[$i - 1] == "-MeguriFixture") | $a[$i] | strings | "argument\t\(.)")' "$abs_script")
@@ -267,7 +269,8 @@ mg_drive_run() {
               | if $i > 0 and $a[$i - 1] == "-MeguriFixture" and ($a[$i] | type) == "string" and $m[$a[$i]] != null
                 then $m[$a[$i]] else $a[$i] end]) else . end)) else . end)' "$abs_script" >"$run_script" || return 2
     fi
-    mg_mac_vm_copy_in "$run_script" || return 2
+    mg_mac_vm_copy_in "$run_script"
+    case $? in 0) ;; 2) return 4 ;; *) return 2 ;; esac
   fi
 
   echo "drive: running $script on $([ "$platform" = mac ] && echo "the Mac${MG_MAC_RUNNER:+ ($MG_MAC_RUNNER)}" || echo "$udid${MG_SIM_RUNNER:+ ($MG_SIM_RUNNER)}") ($config)${capture:+, capturing motion: $capture}" >&2
@@ -280,7 +283,7 @@ mg_drive_run() {
   # app: its captures are kept, and it ends queued (mac-input), not fail.
   local part="$name"
   [ "$out" != "$MG_RUN_DIR" ] || part="$(basename "$script")"
-  if [ "$platform" = mac ] && [ "$rc" -ne 2 ] && mg_app_mac_input_refused "$since" "$part"; then
+  if [ "$platform" = mac ] && [ "$rc" -le 1 ] && mg_app_mac_input_refused "$since" "$part"; then
     refused=1
   fi
   case "$capture" in
@@ -303,6 +306,7 @@ mg_drive_run() {
     capture_error=1
   fi
   [ "$rc" -ne 2 ] || return 2
+  [ "$rc" -ne 4 ] || return 4
 
   # Attachments: XCTest names each export <name>_<n>_<UUID>.<ext>.
   local raw="$out/attachments" log
@@ -546,6 +550,9 @@ mg_drive__job() {
       mg_message "$MG_JOB: queued: macOS dropped the input the drive synthesized (user step mac-input); its steps did not test the app; manifest: $manifest"
       mg_status pass
       ;;
+    # The test VM could not be reached: queued (mg__mac_vm_unreachable wrote
+    # the message).
+    4) mg_status pass ;;
     *)
       if [ -f "$manifest" ]; then
         mg_message "$MG_JOB: the drive ran, but a capture or check it asked for could not be made; see the failures and log.txt"
@@ -665,10 +672,12 @@ mg__mac_window_id() {
     w.length ? String(w[0].kCGWindowNumber) : ''" 2>/dev/null
 }
 
-# The Mac: a hidden background launch on the route, then screencapture -l of
-# its window (root AGENTS.md); never takes over the screen.
+# The Mac: a hidden background launch on the route (mg_app_open_mac: out of
+# the Dock, never active), then screencapture -l of its window (root
+# AGENTS.md); never takes over the screen.
 mg_screenshot__mac() {
   local route="$1" config="$2" app pid="" wid="" png="$MG_RUN_DIR/mac-$(printf '%s' "$1" | tr '/' '-').png" i
+  mg_app_mac_launchable "$config" || return 0
   mg_app_build mac "$config" || return 0
   mg_host_lease || return 0
   mg_app_mac_guard || return 0
@@ -682,7 +691,7 @@ mg_screenshot__mac() {
     return 0
   fi
   app="$(mg_app_products mac "$config")/Meguri.app"
-  open -g -j -n "$app" --args -ApplePersistenceIgnoreState YES -MeguriAnimations off -MeguriRoute "$route" ${MG_D_REST[0]+"${MG_D_REST[@]}"} >&2
+  mg_app_open_mac "$app" -ApplePersistenceIgnoreState YES -MeguriAnimations off -MeguriRoute "$route" ${MG_D_REST[0]+"${MG_D_REST[@]}"}
   mg_on_exit "mg_app_quit_mac '$app'"
   for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     pid="$(mg_app_mac_pids "$app" | head -n 1)"
@@ -696,6 +705,11 @@ mg_screenshot__mac() {
     return 0
   fi
   mg_sleep 1
+  if ! mg_app_mac_out_of_sight "$pid" "before the capture"; then
+    mg_message "screenshot: could not verify the Mac app stays out of sight (lsappinfo: ${MG_APP_MAC_PRESENCE:-empty or failed})"
+    mg_status fail
+    return 0
+  fi
   if ! screencapture -x -o -l "$wid" "$png" || [ ! -s "$png" ]; then
     mg_failure screencapture "screencapture -l $wid failed"
     mg_status error

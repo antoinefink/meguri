@@ -3,8 +3,9 @@
 # tools/scripts/sim-pool.sh keeps Meguri-Pool-<kind>-<n> simulators booted and
 # leases them out (see its header); the pool lives in the macOS test VM (U8c,
 # mac-vm.sh), and sim-pool.sh runs itself there. This host job wraps it for
-# agents: details.sim_runner says where the pool is; without a VM the job is
-# queued (warn, user step mac-vm). acquire and gc (but gc --list) change the
+# agents: details.sim_runner says where the pool is; without a VM, or with
+# one that cannot be reached (U19c), the job is queued (warn, user step
+# mac-vm). acquire and gc (but gc --list) change the
 # VM's pool: they hold its lease (mg_sim_pool_take), as sim-setup does, so
 # nothing is created, booted or deleted there while another job runs in it.
 # Scripts call sim-pool.sh directly; its own acquire and gc come here when
@@ -53,7 +54,7 @@ mg_sim() {
     acquire) mg_sim_pool_take || return 0 ;;
     gc) mg_word_in --list "$*" || mg_sim_pool_take || return 0 ;;
   esac
-  out="$("$MG_TOOLS/scripts/sim-pool.sh" "$sub" "$@")"
+  out="$(mg_sim_pool_run "$MG_RUN_DIR/sim-pool.err" "$sub" "$@")"
   rc=$?
   [ "$sub" = status ] || mg_detail pool "$(jq -n --argjson rc "$rc" --arg out "$out" '{exit: $rc, output: $out}')"
   case "$rc" in
@@ -71,7 +72,11 @@ mg_sim() {
       mg_status error
       return 0
       ;;
-    5 | 6)
+    5)
+      mg__mac_vm_unreachable "sim-pool.sh $sub: $(mg_sim_pool_queued_reason "$MG_RUN_DIR/sim-pool.err")" "sim $sub"
+      return 0
+      ;;
+    6)
       mg_failure sim-vm "sim-pool.sh $sub: the test VM could not run the pool (exit $rc); see log.txt" "tools/mg doctor"
       mg_message "sim: $sub: the test VM could not run the pool"
       mg_status error
@@ -196,8 +201,13 @@ mg_sim_setup() {
     udids="$(jq -c --arg k "$kind" '[.devices[] | select(.kind == $k and .current_runtime and .available) | .udid]' <<<"$status_json")"
     if [ "$(jq length <<<"$udids")" -eq 0 ]; then
       echo "sim-setup: no $kind pool device on the pinned runtime; creating one through the pool" >&2
-      udid="$("$MG_TOOLS/scripts/sim-pool.sh" acquire "$kind" --holder sim-setup)"
+      udid="$(mg_sim_pool_run "$MG_RUN_DIR/sim-pool-$kind.err" acquire "$kind" --holder sim-setup)"
       rc=$?
+      if [ "$rc" -eq 5 ]; then
+        # The test VM could not be reached: the rest waits for it.
+        mg__mac_vm_unreachable "sim-pool.sh acquire $kind: $(mg_sim_pool_queued_reason "$MG_RUN_DIR/sim-pool-$kind.err")" "creating the $kind pool device"
+        return 0
+      fi
       if [ "$rc" -ne 0 ] || [ -z "$udid" ]; then
         mg_failure "create/$kind" "sim-pool.sh acquire $kind exited with code $rc; see log.txt" "tools/mg sim-setup --kinds $kind"
         continue

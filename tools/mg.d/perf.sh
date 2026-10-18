@@ -419,12 +419,19 @@ mg_perf_ui() {
   # explain it (mg_app_mac_input_result records those tests). Its numbers
   # measured taps that did not happen: no perf result either way.
   local refused=""
-  if [ "$platform" = mac ] && [ "$rc" -ne 2 ] && mg_app_mac_input_refused "$since" "$(printf '%s,' "${suites[@]}" | sed 's/,$//')"; then
+  if [ "$platform" = mac ] && [ "$rc" -le 1 ] && mg_app_mac_input_refused "$since" "$(printf '%s,' "${suites[@]}" | sed 's/,$//')"; then
     refused=1
     mg_app_mac_input_result "$prefix.xcresult" "$rc" test
     rc=$?
   fi
   [ ! -d "$prefix.xcresult" ] || mg_artifact xcresult "$prefix.xcresult" "Performance plan result bundle"
+  if [ "$rc" -eq 4 ]; then
+    # The test VM could not be reached (mg__mac_vm_unreachable): queued, no
+    # perf result.
+    mg_status pass
+    mg_queued_settle
+    return 0
+  fi
   if [ "$rc" -eq 3 ]; then
     mg_message "perf-ui: queued: macOS dropped the input XCUITest synthesized (user step mac-input); the taps did not reach the app"
     mg_status pass
@@ -724,11 +731,22 @@ mg_metrics() {
   fi
 
   mg_drive_run "$script" ios "$udid" "$MG_D_CONFIG" no "$MG_RUN_DIR/drive"
-  local rc=$?
+  local rc=$? fetch=0
   mg__metrics_stop "$MG_METRICS_PID" "$trace" "$note"
+  # The test VM could not be reached (mg__mac_vm_unreachable): queued.
+  if [ "$rc" -eq 4 ]; then
+    mg_status pass
+    mg_queued_settle
+    return 0
+  fi
   # From the VM the trace comes back here, where it is read and kept; the VM
   # keeps no copy.
-  if [ "$MG_SIM_RUNNER" = vm ] && ! mg_sim_fetch "$trace"; then
+  [ "$MG_SIM_RUNNER" != vm ] || mg_sim_fetch "$trace" || fetch=$?
+  if [ "$fetch" -eq 2 ]; then
+    mg_status pass
+    mg_queued_settle
+    return 0
+  elif [ "$fetch" -ne 0 ]; then
     mg_message "metrics: the trace did not come back from the test VM; see the failures and $log"
     mg_status error
     return 0

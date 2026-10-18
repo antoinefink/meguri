@@ -12,8 +12,11 @@
 # default. A VM that is not running,
 # or $FAKE_VM_DIR/ssh-down, refuses the connection (exit 255). A command that
 # matches the ERE in FAKE_VM_SSH_FAIL loses its connection (exit 255); one
-# that matches FAKE_VM_SSH_EMPTY_TAR prints an empty tar archive and exits 0.
-# Every call is logged to $STUB_LOG.
+# that matches FAKE_VM_SSH_REFUSE is refused as sshd refuses a session at the
+# user's process limit (exit 255); one that matches FAKE_VM_FORK_FAIL starts,
+# but its shell cannot fork (zsh's message, exit 1); one that matches
+# FAKE_VM_SSH_EMPTY_TAR prints an empty tar archive and exits 0. Every call is
+# logged to $STUB_LOG.
 set -u
 vm="$FAKE_VM_DIR/$FAKE_VM_NAME"
 printf 'ssh %s %s\n' "$FAKE_VM_NAME" "$*" >>"${STUB_LOG:-/dev/null}"
@@ -24,6 +27,14 @@ fi
 if [ -n "${FAKE_VM_SSH_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$FAKE_VM_SSH_FAIL"; then
   echo "Connection to 192.168.64.2 closed by remote host." >&2
   exit 255
+fi
+if [ -n "${FAKE_VM_SSH_REFUSE:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$FAKE_VM_SSH_REFUSE"; then
+  echo "exec request failed on channel 0" >&2
+  exit 255
+fi
+if [ -n "${FAKE_VM_FORK_FAIL:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$FAKE_VM_FORK_FAIL"; then
+  echo "zsh:2: fork failed: resource temporarily unavailable" >&2
+  exit 1
 fi
 if [ -n "${FAKE_VM_SSH_EMPTY_TAR:-}" ] && printf '%s\n' "$*" | grep -Eq -- "$FAKE_VM_SSH_EMPTY_TAR"; then
   exec tar -cf - -T /dev/null

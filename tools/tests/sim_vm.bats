@@ -135,6 +135,9 @@ esac'
 # logged as the VM sees them (without the fake file system's prefix).
 vm_stubs() {
   stub "$FAKE_VM_BIN/sudo" 'exec "$@"'
+  # The process check jobs make before they start work there (U19c).
+  ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/sysctl"
+  ln -s "$REPO_ROOT/tools/tests/mac_vm_fake_procs.sh" "$FAKE_VM_BIN/ps"
   stub "$FAKE_VM_BIN/pgrep" '
 rc=1
 for pid in $(cat "$FAKE_VM/tests.pids" 2>/dev/null); do
@@ -152,10 +155,17 @@ exit 0'
   stub "$FAKE_VM_BIN/stat" '
 if [ "$*" = "-f %Su /dev/console" ]; then echo meguri; exit 0; fi
 exec '"$(command -v stat)"' "$@"'
+  # FAKE_VM_SIMCTL_FORK_FAIL=1: simctl cannot be forked there (the VM's user
+  # at its process limit, as on 2026-10-17).
   stub "$FAKE_VM_BIN/xcrun" '
 s="$*"
 case "$1" in
-  simctl) exec "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" "$@" ;;
+  simctl)
+    if [ "${FAKE_VM_SIMCTL_FORK_FAIL:-}" = 1 ]; then
+      echo "/Applications/Xcode.app/Contents/Developer/usr/bin/simctl: fork: Resource temporarily unavailable" >&2
+      exit 1
+    fi
+    exec "'"$REPO_ROOT"'/tools/tests/sim_pool_fake_xcrun.sh" "$@" ;;
   devicectl) s="${*:2}"; echo "vm-devicectl ${s//"$FAKE_VM_FS"/}" >>"$STUB_LOG" ;;
   *) echo "vm-xcrun $s" >>"$STUB_LOG"; exit 97 ;;
 esac'
@@ -758,20 +768,104 @@ EOF
 
 # --- the VM is missing or fails ------------------------------------------------------
 
-@test "a VM that does not answer is an error with the reason, and no simulator boots on this Mac" {
+# bats test_tags=gate
+@test "a VM that does not answer queues simulator jobs with the mac-vm step and the reason, and no simulator boots on this Mac (U19c)" {
   touch "$FAKE_VM_DIR/ssh-down"
   MEGURI_MAC_VM_BOOT_SECONDS=2 mg a11y --platform iphone
-  [ "$status" -eq 2 ]
-  [ "$(field .status)" = error ]
-  [ "$(field '.failures[0].id')" = mac-vm-ssh ]
-  [[ "$(field '.failures[0].message')" == *"meguri-mac did not answer over SSH in a logged-in session within 2 s"*"Connection refused"* ]]
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the simulator runs" ]
+  [[ "$(field '.details.queued_parts[0].reason')" == *"meguri-mac did not answer over SSH in a logged-in session within 2 s"*"Connection refused"* ]]
+  [ "$(field '.user_steps[] | select(.id == "mac-vm") | "\(.state) \(.required)"')" = "missing true" ]
+  validate "$result"
+  # It queues before building: nothing more goes to the VM.
   not_called '^fake build'
-  MEGURI_MAC_VM_BOOT_SECONDS=2 mg sim acquire iphone
-  [ "$(field .status)" = error ]
+  local args
+  for args in "sim acquire iphone" "sim-setup" "run --platform iphone" "snapshots --platform iphone" "perf-ui" \
+    "drive $SB/tools/drive-scripts/examples/open-sample-sheet.json --platform iphone"; do
+    # shellcheck disable=SC2086
+    MEGURI_MAC_VM_BOOT_SECONDS=2 mg $args
+    [ "$status" -eq 0 ] || { echo "tools/mg $args exited $status"; return 1; }
+    [ "$(field .details.queued)" = true ] || { echo "tools/mg $args: $(field -c '{status, message}')"; return 1; }
+    [[ "$(field '.details.queued_parts[0].reason')" == *"did not answer over SSH"* ]]
+  done
+  # The pool script, called directly: exit 5 (queued), with the reason.
   MEGURI_MAC_VM_BOOT_SECONDS=2 run --separate-stderr "$SB/tools/scripts/sim-pool.sh" acquire iphone
-  [ "$status" -eq 6 ]
-  [[ "$stderr" == *"the test VM could not run the pool"* ]]
+  [ "$status" -eq 5 ]
+  [[ "$stderr" == *"sim-pool: queued: "*"meguri-mac did not answer over SSH"* ]]
+  MEGURI_MAC_VM_BOOT_SECONDS=2 run --separate-stderr "$SB/tools/scripts/sim-pool.sh" status
+  [ "$status" -eq 5 ]
+  [[ "$stderr" == *"sim-pool: queued: meguri-mac did not answer over SSH"* ]]
   assert_host_untouched
+}
+
+# bats test_tags=gate
+@test "a pool whose simctl cannot fork in the VM queues the simulator job, not an error (U19c: U28's merge)" {
+  FAKE_VM_SIMCTL_FORK_FAIL=1 mg a11y --platform iphone
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the simulator runs" ]
+  [ "$(field '.details.queued_parts[0].reason')" = "sim-pool.sh acquire iphone: the test VM meguri-mac could not be reached or could not start the pool's commands (exit 1: /Applications/Xcode.app/Contents/Developer/usr/bin/simctl: fork: Resource temporarily unavailable)" ]
+  not_called '^vm-xcodebuild '
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+
+  FAKE_VM_SIMCTL_FORK_FAIL=1 mg sim acquire iphone
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field .details.pool.exit)" = 5 ]
+  FAKE_VM_SIMCTL_FORK_FAIL=1 run --separate-stderr "$SB/tools/scripts/sim-pool.sh" acquire iphone
+  [ "$status" -eq 5 ]
+  [[ "$stderr" == *"fork: Resource temporarily unavailable"* ]]
+  assert_host_untouched
+}
+
+# bats test_tags=gate
+@test "xcode-check with the VM near its process limit keeps its builds and Mac launches and queues its simulator runs; runs the VM drops mid-phase are queued by name (U19c)" {
+  # The checks script is a fake: it logs its phases and arguments, and in its
+  # devices phase lists what $FAKE_XCODE_CHECK_QUEUED names as a run the VM
+  # could not take, as the real one does.
+  cat >"$SB/tools/tests/xcode_project_check.sh" <<'FAKE'
+#!/bin/bash
+work="$1"
+shift
+mkdir -p "$work"
+echo "fake xcode_project_check $*" >>"$STUB_LOG"
+case " $* " in
+  *" --phase builds "*) echo "ok 1 builds" ;;
+  *)
+    if [ -n "${FAKE_XCODE_CHECK_QUEUED:-}" ]; then
+      printf '%s\t%s\n' "$FAKE_XCODE_CHECK_QUEUED" "meguri-mac refused the run's SSH session" >"$work/vm-queued.tsv"
+      echo "ok 2 $FAKE_XCODE_CHECK_QUEUED # SKIP queued: meguri-mac refused the run's SSH session (user step mac-vm)"
+    else
+      echo "ok 2 devices"
+    fi
+    echo "1..2" ;;
+esac
+FAKE
+  FAKE_VM_PROCS=2800 MEGURI_MAC_VM_PROCS_POLL_SECONDS=1 MEGURI_MAC_VM_PROCS_WAIT_SECONDS=1 mg xcode-check
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.failures | length')" = 0 ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part)"')" = "mac-vm the simulator runs" ]
+  [[ "$(field .message)" == "xcode-check: passed without the simulator runs, which are queued: meguri-mac is near its process limit"*"(user step mac-vm)" ]]
+  # The devices phase ran without simulators, under the host lease alone.
+  called '^fake xcode_project_check --phase devices --continue-from 1 --no-sims$'
+  [ "$(field .details.host_lease.job)" = xcode-check ]
+  [ -z "$(ls -d "$BATS_TEST_TMPDIR"/mac-vm.*.lock 2>/dev/null)" ]
+
+  : >"$STUB_LOG"
+  FAKE_XCODE_CHECK_QUEUED=iphone-Debug-TestHooksTests mg xcode-check
+  [ "$status" -eq 0 ]
+  [ "$(field .status)" = warn ]
+  [ "$(field .details.queued)" = true ]
+  [ "$(field '.details.queued_parts[] | "\(.user_step) \(.part): \(.reason)"')" = "mac-vm iphone-Debug-TestHooksTests: meguri-mac refused the run's SSH session" ]
+  called '^fake xcode_project_check --phase devices --continue-from 1 --vm-ssh '
 }
 
 @test "without the VM, simulator jobs are queued with the mac-vm step; MEGURI_SIM_ALLOW_HOST=1 uses this Mac's pool" {

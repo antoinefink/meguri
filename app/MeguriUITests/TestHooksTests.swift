@@ -1,5 +1,8 @@
 import Foundation
 import XCTest
+#if os(macOS)
+import AppKit
+#endif
 
 /// The launch-option test hooks (U7, R1963, R1967). Debug and Profile builds
 /// open any registered route with the requested overrides; Release and
@@ -93,7 +96,7 @@ final class TestHooksTests: XCTestCase {
         XCTAssertEqual(Set(alert.buttons.allElementsBoundByIndex.map(\.label)), ["Try Again", "Cancel"])
         // On the Mac a click on a window that is not key only activates it.
         try app.bringToFront(bundleIdentifier: try build.bundleIdentifier)
-        alert.buttons["Cancel"].tap()
+        alert.buttons["Cancel"].clickOrTap()
         XCTAssert(alert.waitForNonExistence(timeout: 5), "Cancel did not dismiss the alert")
     }
 
@@ -139,6 +142,30 @@ final class TestHooksTests: XCTestCase {
         #endif
     }
 
+    /// U8d. A launch without `-MeguriBackgroundLaunch`, as by hand or by
+    /// these suites, takes the regular policy: a Dock tile. With it, a Debug
+    /// build stays a UI element (no Dock tile), as `tools/mg` launches it
+    /// hidden on Antoine's Mac; Profile has no switch (R1866).
+    func testOnlyABackgroundLaunchStaysOutOfTheDock() throws {
+        #if os(macOS)
+        let build = try requireHooks()
+        let app = try launch(MeguriLaunch(animations: false, route: "sample/screen"), build)
+        XCTAssert(app.staticTexts["sample.screen.title"].waitForExistence(timeout: 15), "the sample screen is not on screen")
+        XCTAssertEqual(try running(build).activationPolicy, .regular, "a launch without the argument has no Dock tile")
+        app.terminate()
+
+        let background = try launch(MeguriLaunch(animations: false, route: "sample/screen", extra: ["-MeguriBackgroundLaunch", "YES"]), build)
+        XCTAssert(background.staticTexts["sample.screen.title"].waitForExistence(timeout: 15), "the sample screen is not on screen")
+        if build.configuration == .debug {
+            XCTAssertEqual(try running(build).activationPolicy, .accessory, "a Debug background launch has a Dock tile")
+        } else {
+            XCTAssertEqual(try running(build).activationPolicy, .regular, "Profile took the background launch, which only Debug has")
+        }
+        #else
+        throw XCTSkip("the background launch is Mac only")
+        #endif
+    }
+
     // MARK: Builds without hooks (Release, AppStore)
 
     func testLaunchOptionsAreIgnoredWithoutHooks() throws {
@@ -173,7 +200,7 @@ final class TestHooksTests: XCTestCase {
         func contains(_ marker: String) -> Bool {
             binaries.contains { $0.range(of: Data(marker.utf8)) != nil }
         }
-        let swiftNames = ["TestHooks", "LaunchOptions", "FixtureInstaller", "RouteRegistry", "AppearanceOverrides", "TestHookError"]
+        let swiftNames = ["TestHooks", "LaunchOptions", "FixtureInstaller", "RouteRegistry", "AppearanceOverrides", "BackgroundLaunch", "TestHookError"]
         let rustExports = "_uniffi_meguri_ffi_fn_func_test_"
         let names = files.map(\.lastPathComponent)
         if build.hasHooks {
@@ -214,6 +241,15 @@ final class TestHooksTests: XCTestCase {
         addTeardownBlock { @MainActor in app.terminate() }
         return app
     }
+
+    #if os(macOS)
+    /// The running app under test, as AppKit sees it from this runner.
+    private func running(_ build: BuildUnderTest) throws -> NSRunningApplication {
+        let identifier = try build.bundleIdentifier
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first { !$0.isTerminated }
+        return try XCTUnwrap(running, "\(identifier) is not running")
+    }
+    #endif
 
     private func text(_ app: XCUIApplication, _ identifier: String) -> String {
         let element = app.staticTexts[identifier]
