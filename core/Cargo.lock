@@ -1645,6 +1645,7 @@ dependencies = [
  "meguri-template",
  "meguri-testkit",
  "meguri-text",
+ "rand 0.9.4",
  "regex",
  "serde_json",
  "tempfile",

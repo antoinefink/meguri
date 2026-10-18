@@ -652,6 +652,7 @@ mod tests {
         .unwrap();
         let loaded = crate::scenario::load(&path).unwrap();
         let mut session = Session {
+            decks: Default::default(),
             scenario: &loaded,
             clock: Arc::new(ScenarioClock::new("Europe/Paris", "2030-01-20T10:00:00").unwrap()),
             random: Arc::new(SeededRandom::new(1)),

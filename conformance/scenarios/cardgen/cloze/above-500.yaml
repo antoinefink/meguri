@@ -1,0 +1,23 @@
+# Several cloze numbers of 500 and above in one note (specs/notes/card-
+# generation.md G5). They all map to ordinal 499. Anki makes one card per
+# distinct number, so a note with c500, c501 and c999 gets three cards of
+# ordinal 499; Meguri makes one (deviation cloze-ordinal-499-once, R786). A
+# later edit adds nothing for ordinal 499 once a card of it exists. The
+# cards an edit adds have no logical id, so cards are read with db_exec.
+id: cardgen/cloze/above-500
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+  decks: [Inbox]
+steps:
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c700::z}}", ""]}
+  - add_note: {notetype: Gap, deck: Inbox, fields: ["{{c1::a}} {{c500::p}} {{c501::q}} {{c999::r}}", ""]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
+  - advance: 1h
+  - edit_note: {note: "#n1", fields: ["{{c700::z}} {{c800::y}} {{c2::b}}"]}
+  - db_exec: {sql: "SELECT n.sfld, c.ord, c.due FROM cards c JOIN notes n ON n.id = c.nid ORDER BY n.id, c.ord, c.id"}
