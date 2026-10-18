@@ -178,7 +178,7 @@ validate() { python3 "$SB/tools/tests/validate_result.py" "$@"; }
 (.milestones[] | select(.id == "M5")).user_steps |= map(select(.id != "device-run-mac"));;no device-run user step on mac
 (.global[] | select(.id == "native-oracle")) |= del(.plan);;the macOS-native oracle check (KTD24)
 (.global[] | select(.id == "native-oracle") | .from) = "M1";;M1R: the closing gate text 'plus the macOS-native oracle check (KTD24)'
-($m1r).user_steps |= map(select(.id != "first-sync"));;The first real sync with AnkiWeb
+($m1r).user_steps |= map(select(.id != "first-sync"));;The first real sync with CloudKit
 ($m1r).user_steps |= map(select(.id != "device-run-mac"));;M1R: the plan asks for device runs on iPhone, iPad, Mac; there is no device-run user step on mac
 ($m1r | .user_steps[] | select(.id == "first-sync") | .validator) = {"type": "report"};;which asks for a first-sync step
 ($m1r | .user_steps[] | select(.id == "first-sync") | .validator.results) -= ["u248-soak"];;binds u248-soak, which its results lacks
