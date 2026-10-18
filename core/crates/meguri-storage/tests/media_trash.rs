@@ -1,6 +1,19 @@
 mod common;
 use meguri_storage::media::MediaStore;
 use std::{fs, sync::Arc};
+
+#[test]
+fn media_restore_never_discards_bytes_owned_only_by_an_uncommitted_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let media = store(dir.path());
+    media.add("a.png", b"recoverable").unwrap();
+    media.trash(&["a.png".into()]).unwrap();
+    let mut stage = media.begin_staging().unwrap();
+    stage.add("a.png", b"recoverable").unwrap();
+    media.restore().unwrap();
+    drop(stage);
+    assert_eq!(fs::read(media.media_dir().join("a.png")).unwrap(), b"recoverable");
+}
 fn store(dir: &std::path::Path) -> MediaStore {
     MediaStore::open(&dir.join("collection.anki2"), Arc::new(common::clock())).unwrap()
 }

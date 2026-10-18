@@ -18,6 +18,9 @@ A global counter orders changes. Metadata holds the folder marker and last media
 Partial indexes cover dirty records and pending downloads. Clean tombstones do not affect pending queries.
 A dirty non-syncable record represents a deletion, even when an empty or oversized local file remains.
 Acknowledgement clears a dirty flag only when the change counter still matches.
+The journal identifies its own format with SQLite application id `0x4d47524d`
+and schema version `1`. Open refuses foreign formats and unsupported versions
+before making any writes; it never silently replaces their contents.
 
 ## J2. Registration and writes
 
@@ -44,6 +47,11 @@ Only an explicit empty-trash call permanently removes trash bytes.
 
 A staged operation records its files and expected note post-images in the journal before the collection commit.
 Each reference holds a note id, post-op modification time and field digest.
+The engine reads these from the final stored rows. Every witness must change
+its identity, modification time or field digest in the operation, and the
+witnesses must reference every staged name. An unchanged pre-existing row
+cannot prove that an operation committed. Attachments without a note change
+use the immediate-add path.
 Staged names participate in subsequent naming decisions until the operation ends.
 Stage bytes are synchronized before their manifest becomes usable.
 An ordinary rollback removes that operation's files and manifest; it never publishes them.

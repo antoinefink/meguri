@@ -9,6 +9,7 @@ mod cards;
 pub mod clock;
 mod decks;
 pub mod live;
+mod media;
 mod meguri;
 mod model;
 mod notes;

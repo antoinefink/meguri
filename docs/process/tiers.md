@@ -37,6 +37,10 @@ A test VM that is there but cannot be reached is the machine's state too (U19c, 
 
 A queued run does not block. The receipt names, per run, its `user_steps` and `queued_parts`, and lists the queued runs under `queued`; the gate's message names them (`pass with notes (...); queued: xcode-check (host-session)`). After a merge, `tools/mg merge` appends each queued run to the catch-up queue, and `tools/mg catch-up` runs it again on the integration branch once `tools/mg doctor` reports its user step clear (docs/process/merge.md). A milestone gate never accepts a queued result: it counts as missing, awaiting the user step it names, so the Mac checks must pass before M1R closes.
 
+For direct work on `master`, a full `tools/mg gate --base <unit-start-commit>`
+also appends queued checks to catch-up when its receipt is complete and clean
+and the tip commit carries `Unit:`. Local, partial and dirty runs do not.
+
 ## Quarantine
 
 A flaky test fails the gate until it is fixed or quarantined (R1953). `tools/gate/quarantine.yaml` lists quarantined tests: the tiers run and the failure id its job reports, a class, an owner, a reason, a deadline, `approved_by: antoine` and evidence. A quarantined test still runs and is reported; its failure does not block until the deadline. After the deadline the gate fails, whether the test failed or not.

@@ -139,13 +139,13 @@ impl MediaStore {
                 continue;
             }
             let marker = folder::stamp(&fs::metadata(self.media_dir())?);
-            let (name, write) = if self.candidates(&mut db, &entry.name)?.is_empty() {
+            let (name, _write) = if self.candidates(&mut db, &entry.name)?.is_empty() {
                 (entry.name.clone(), true)
             } else {
                 self.choose(&mut db, &entry.name, &entry.sha1)?
             };
             let target = self.media_dir().join(&name);
-            if !write || (folder::regular(&target)?.is_some() && folder::hash_file(&target)? == entry.sha1) {
+            if folder::regular(&target)?.is_some() && folder::hash_file(&target)? == entry.sha1 {
                 fs::remove_file(&source)?;
             } else {
                 let mut variants = self.candidates(&mut db, &name)?;

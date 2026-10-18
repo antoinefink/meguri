@@ -44,6 +44,7 @@ const COLLECTION: &str = "collection.anki2";
 pub struct Storage {
     // Fields drop in order: the collection closes before its directory goes.
     collection: Option<OpenedCollection>,
+    media: Option<meguri_storage::media::MediaStore>,
     /// `sqlite_master` after the last open or `db_exec`, which every later
     /// Meguri operation must leave as it is.
     baseline: Objects,
@@ -51,6 +52,19 @@ pub struct Storage {
 }
 
 impl Storage {
+    pub(super) fn media(
+        &mut self,
+        clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+    ) -> Result<meguri_storage::media::MediaStore, ExecError> {
+        if self.media.is_none() {
+            let path = self
+                .collection()
+                .ok_or_else(|| invalid("no collection is open"))?
+                .path();
+            self.media = Some(meguri_storage::media::MediaStore::open(path, clock).map_err(core)?);
+        }
+        Ok(self.media.as_ref().expect("media store was initialized").clone())
+    }
     pub fn is_open(&self) -> bool {
         self.collection.is_some()
     }
@@ -74,6 +88,7 @@ impl Storage {
     /// Closes the collection as at a handoff (`storage/open-and-connections`
     /// C10).
     fn close(&mut self) -> Result<(), ExecError> {
+        self.media = None;
         if let Some(collection) = self.collection.take() {
             collection
                 .close()

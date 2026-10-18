@@ -353,6 +353,19 @@ mg_gate() {
     return 0
   fi
   mg_gate__record "$receipt" "$mode"
+  # Direct commits on master have no merge job to preserve queued checks.
+  # Only a full, clean unit receipt with an explicit base is acceptance.
+  if [ "$mode" = full ] && [ -n "$base" ] && [ -z "$only" ] && mg_gate__in_main &&
+      jq -e '.merge_ready' "$receipt" >/dev/null; then
+    local unit branch
+    unit="$(git -C "$MG_ROOT" log -1 --format='%(trailers:key=Unit,valueonly)' "$tip" | sed -n '1p')"
+    branch="$(git -C "$MG_ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null)" || branch=""
+    if [ -n "$unit" ] && [ -n "$branch" ] && ! mg_catch_up_enqueue "$receipt" "$branch" "$unit" "$tip"; then
+      mg_failure catch-up-queue "unit gate passed, but its queued checks could not be saved for catch-up"
+      mg_message "gate: could not save queued checks for $unit"
+      mg_status error
+    fi
+  fi
 }
 
 # mg_gate__tree_blocker <id> <who> [<checkout>]: the receipt-level blocker

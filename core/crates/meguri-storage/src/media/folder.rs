@@ -44,10 +44,7 @@ pub(super) fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha1::digest(bytes))
 }
 pub(super) fn hash_file(path: &Path) -> Result<String> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
+    let mut file = open_regular(path)?;
     let mut hash = Sha1::new();
     let mut bytes = [0_u8; 65_536];
     loop {
@@ -58,6 +55,16 @@ pub(super) fn hash_file(path: &Path) -> Result<String> {
         hash.update(&bytes[..n]);
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+fn open_regular(path: &Path) -> Result<fs::File> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(MediaError::InvalidName);
+    }
+    Ok(file)
 }
 fn same_stat(entry: &MediaEntry, m: &Metadata) -> bool {
     entry.live
@@ -153,8 +160,7 @@ impl MediaStore {
             if !normalized(&name) || ignored(&name) {
                 continue;
             }
-            // The mutex yields between files, so adds can proceed during a long scan.
-            let mut db = self.db()?;
+            let db = self.db()?;
             let Some(m) = regular(&file.path())? else {
                 continue;
             };
@@ -163,13 +169,23 @@ impl MediaStore {
             if old.as_ref().is_some_and(|o| same_stat(o, &m)) {
                 continue;
             }
+            // Hashing can take seconds for a large outside file. No journal
+            // lock is held, and a concurrent writer's newer record wins.
+            drop(db);
             self.inner.hashes.fetch_add(1, Ordering::Relaxed);
+            meguri_model::faultpoint!("media.scan.before_hash")?;
             let hash = hash_file(&file.path())?;
             let Some(after) = regular(&file.path())? else {
                 stable = false;
                 continue;
             };
-            if stamp(&after) != stamp(&m) || after.len() != m.len() {
+            if stamp(&after) != stamp(&m) || after.len() != m.len() || after.ino() != m.ino() || after.dev() != m.dev()
+            {
+                stable = false;
+                continue;
+            }
+            let mut db = self.db()?;
+            if journal_db::entry(&db, &name)? != old {
                 stable = false;
                 continue;
             }
@@ -199,13 +215,25 @@ impl MediaStore {
             return Ok(Some(name.into_owned()));
         }
         let db = self.db()?;
-        let variants = journal_db::variants(&db, &name)?;
+        let mut variants = Vec::new();
+        for entry in journal_db::variants(&db, &name)? {
+            if regular(&self.media_dir().join(&entry.name))?.is_some() {
+                variants.push(entry);
+            }
+        }
         let key = case_key(&name);
         Ok(variants
             .iter()
             .find(|e| e.name == key)
             .or_else(|| variants.first())
             .map(|e| e.name.clone()))
+    }
+    /// Renderers read the returned descriptor, never reopen the resolved path.
+    /// Symlinks and non-regular files swapped in after lookup are refused.
+    pub fn open_file(&self, name: &str) -> Result<Option<fs::File>> {
+        self.lookup(name)?
+            .map(|name| open_regular(&self.media_dir().join(name)))
+            .transpose()
     }
     pub(super) fn candidates(&self, db: &mut Connection, name: &str) -> Result<Vec<(String, String)>> {
         let mut files = journal_db::variants(db, name)?;
@@ -341,7 +369,7 @@ impl MediaStore {
                 }
                 publication.publish(&target)?;
                 live(db, name, hash.clone(), &fs::symlink_metadata(&target)?, true)?;
-                self.advance_marker(db, &marker)?;
+                self.advance_marker(db, marker)?;
                 Ok(())
             })();
             match result {
@@ -416,10 +444,9 @@ impl MediaStore {
                         .iter()
                         .filter(|(_, h)| h == &hash)
                         .min_by_key(|(n, _)| (n != &name, n.as_bytes()))
+                        && regular(&self.media_dir().join(found))?.is_some()
                     {
-                        if regular(&self.media_dir().join(found))?.is_some() {
-                            return Ok(found.clone());
-                        }
+                        return Ok(found.clone());
                     }
                     replacements = variants.into_iter().filter(|(_, h)| h != &hash).collect();
                 }
@@ -443,10 +470,10 @@ impl MediaStore {
         let mut db = self.db()?;
         let hash = hash_bytes(bytes);
         let candidates = self.candidates(&mut db, name)?;
-        if let Some((found, _)) = candidates.iter().find(|(_, h)| h == &hash) {
-            if regular(&self.media_dir().join(found))?.is_some() {
-                return Ok(found.clone());
-            }
+        if let Some((found, _)) = candidates.iter().find(|(_, h)| h == &hash)
+            && regular(&self.media_dir().join(found))?.is_some()
+        {
+            return Ok(found.clone());
         }
         if candidates
             .iter()

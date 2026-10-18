@@ -1,5 +1,5 @@
 use super::{Result, case_fold::case_key};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use std::path::Path;
 
 pub(super) const COLUMNS: &str = "name,sha1,size,mtime_secs,mtime_nanos,live,dirty,change_counter,pending_download";
@@ -27,10 +27,27 @@ pub struct PendingChange {
     pub change_counter: u64,
 }
 pub(super) fn open(path: &Path) -> Result<Connection> {
+    const APPLICATION_ID: i64 = 0x4d47524d;
+    const VERSION: i64 = 1;
+    if path.try_exists()? {
+        // Refusals must not switch journal mode, recover a foreign database,
+        // or add our tables to a file owned by another application.
+        let probe = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let application_id: i64 = probe.pragma_query_value(None, "application_id", |row| row.get(0))?;
+        let version: i64 = probe.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if application_id != APPLICATION_ID || version != VERSION {
+            return Err(super::MediaError::Database(
+                "unsupported media journal format or version".into(),
+            ));
+        }
+    }
     let db = Connection::open(path)?;
     db.busy_timeout(std::time::Duration::from_secs(5))?;
+    #[cfg(target_vendor = "apple")]
+    db.execute_batch("PRAGMA fullfsync=ON; PRAGMA checkpoint_fullfsync=ON;")?;
     db.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+        BEGIN IMMEDIATE;
         CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         INSERT OR IGNORE INTO meta VALUES('counter','0'),('last_usn','0');
         CREATE TABLE IF NOT EXISTS media(
@@ -45,7 +62,10 @@ pub(super) fn open(path: &Path) -> Result<Connection> {
             sha1 TEXT NOT NULL,size INTEGER NOT NULL,path TEXT NOT NULL,replace_existing INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(op_id,idx));
         CREATE INDEX IF NOT EXISTS staged_name ON staged_files(name);
         CREATE TABLE IF NOT EXISTS trash_entries(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,
-            sha1 TEXT NOT NULL,size INTEGER NOT NULL,trashed_ms INTEGER NOT NULL,path TEXT UNIQUE);",
+            sha1 TEXT NOT NULL,size INTEGER NOT NULL,trashed_ms INTEGER NOT NULL,path TEXT UNIQUE);
+        PRAGMA application_id=1296519757;
+        PRAGMA user_version=1;
+        COMMIT;",
     )?;
     Ok(db)
 }
@@ -63,12 +83,11 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaEntry> {
     })
 }
 pub(super) fn counter(db: &Connection) -> Result<u64> {
-    Ok(db
-        .query_row("SELECT value FROM meta WHERE key='counter'", [], |r| {
-            r.get::<_, String>(0)
-        })?
-        .parse()
-        .map_err(|_| super::MediaError::Database("invalid media change counter".into()))?)
+    db.query_row("SELECT value FROM meta WHERE key='counter'", [], |r| {
+        r.get::<_, String>(0)
+    })?
+    .parse()
+    .map_err(|_| super::MediaError::Database("invalid media change counter".into()))
 }
 pub(super) fn entry(db: &Connection, name: &str) -> Result<Option<MediaEntry>> {
     Ok(db

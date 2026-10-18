@@ -380,11 +380,22 @@ pub struct Setup {
     pub cards: Option<Vec<CardOverride>>,
     #[serde(default, deserialize_with = "present")]
     pub revlog: Option<Vec<RevlogRow>>,
+    #[serde(default, deserialize_with = "present")]
+    pub media_files: Option<Vec<MediaFileSpec>>,
 }
 
 impl Setup {
     /// Section names in the order setup runs them (D6).
-    pub const ORDER: [&'static str; 7] = ["config", "presets", "decks", "notetypes", "notes", "cards", "revlog"];
+    pub const ORDER: [&'static str; 8] = [
+        "config",
+        "presets",
+        "decks",
+        "notetypes",
+        "notes",
+        "cards",
+        "revlog",
+        "media_files",
+    ];
 
     /// The sections present, in run order.
     pub fn sections(&self) -> Vec<&'static str> {
@@ -396,6 +407,7 @@ impl Setup {
             self.notes.is_some(),
             self.cards.is_some(),
             self.revlog.is_some(),
+            self.media_files.is_some(),
         ];
         Setup::ORDER
             .iter()
@@ -854,6 +866,13 @@ impl FromStr for FixturePath {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
+    MediaOutside(Vec<MediaFileSpec>),
+    #[serde(deserialize_with = "op_mapping")]
+    AddMedia(MediaFileSpec),
+    #[serde(deserialize_with = "op_mapping")]
+    TrashMedia(MediaNames),
+    RestoreMediaTrash(NoArgs),
+    EmptyMediaTrash(NoArgs),
     Advance(Duration),
     SetClock(DateTimeText),
     AddNote(NoteSpec),
@@ -970,10 +989,15 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 55] = [
+    pub const NAMES: [&'static str; 60] = [
         "advance",
         "set_clock",
         "add_note",
+        "media_outside",
+        "add_media",
+        "trash_media",
+        "restore_media_trash",
+        "empty_media_trash",
         "answer",
         "observe",
         "edit_note",
@@ -1034,6 +1058,11 @@ impl Step {
     /// The op name as written in scenarios.
     pub fn name(&self) -> &'static str {
         match self {
+            Step::MediaOutside(_) => "media_outside",
+            Step::AddMedia(_) => "add_media",
+            Step::TrashMedia(_) => "trash_media",
+            Step::RestoreMediaTrash(_) => "restore_media_trash",
+            Step::EmptyMediaTrash(_) => "empty_media_trash",
             Step::Advance(_) => "advance",
             Step::SetClock(_) => "set_clock",
             Step::AddNote(_) => "add_note",
@@ -1648,6 +1677,9 @@ pub const DUMP_TABLES: [&str; 12] = [
 /// Observation kinds (observations.md O4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ObservationKind {
+    MediaDir,
+    MediaTrash,
+    MediaPending,
     Ids,
     Timing,
     Card,
@@ -1712,7 +1744,10 @@ pub(super) enum ArgShape {
 }
 
 impl ObservationKind {
-    pub const ALL: [ObservationKind; 30] = [
+    pub const ALL: [ObservationKind; 33] = [
+        ObservationKind::MediaDir,
+        ObservationKind::MediaTrash,
+        ObservationKind::MediaPending,
         ObservationKind::Ids,
         ObservationKind::Timing,
         ObservationKind::Card,
@@ -1747,6 +1782,9 @@ impl ObservationKind {
 
     pub fn name(self) -> &'static str {
         match self {
+            ObservationKind::MediaDir => "media_dir",
+            ObservationKind::MediaTrash => "media_trash",
+            ObservationKind::MediaPending => "media_pending",
             ObservationKind::Ids => "ids",
             ObservationKind::Timing => "timing",
             ObservationKind::Card => "card",
@@ -1787,7 +1825,10 @@ impl ObservationKind {
     pub(super) fn shape(self) -> ArgShape {
         match self {
             ObservationKind::Ids => ArgShape::AnyRefs,
-            ObservationKind::Timing
+            ObservationKind::MediaDir
+            | ObservationKind::MediaTrash
+            | ObservationKind::MediaPending
+            | ObservationKind::Timing
             | ObservationKind::DeckTree
             | ObservationKind::Decks
             | ObservationKind::Digest
@@ -2974,4 +3015,31 @@ fn add_step_needs(needs: &mut Needs, steps: &[Step]) {
             }
         }
     }
+}
+
+/// Media file forms (conformance/media-ops F2-F5); validation selects exactly one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaFileSpec {
+    pub name: String,
+    #[serde(default, deserialize_with = "present")]
+    pub text: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub fill: Option<MediaFill>,
+    #[serde(default, deserialize_with = "present")]
+    pub dir: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    pub remove: Option<bool>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaFill {
+    pub size: u64,
+    #[serde(default)]
+    pub byte: u8,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MediaNames {
+    pub names: Vec<String>,
 }

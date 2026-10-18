@@ -72,3 +72,35 @@ fn media_staging_same_content_in_another_op_survives_the_first_rollback() {
     second.publish().unwrap();
     assert_eq!(fs::read(store.media_dir().join("photo.jpg")).unwrap(), b"shared");
 }
+
+#[test]
+fn media_staging_reuses_a_hash_named_case_variant_without_rewriting() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    store.add("a.png", b"a").unwrap();
+    let hash_name = store.add("a.png", b"b").unwrap();
+    let upper = hash_name.to_uppercase();
+    fs::rename(store.media_dir().join(&hash_name), store.media_dir().join(&upper)).unwrap();
+    store.register_full(|_, _| true).unwrap();
+    let mut stage = store.begin_staging().unwrap();
+    assert_eq!(stage.add("a.png", b"b").unwrap(), upper);
+    assert!(stage.names().unwrap().is_empty());
+}
+
+#[test]
+fn media_staging_preserves_a_conflicting_hash_case_variant_in_trash() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    store.add("a.png", b"a").unwrap();
+    let hash_name = store.add("a.png", b"b").unwrap();
+    fs::remove_file(store.media_dir().join(&hash_name)).unwrap();
+    fs::write(store.media_dir().join(hash_name.to_uppercase()), b"outside").unwrap();
+    store.register_full(|_, _| true).unwrap();
+    let mut stage = store.begin_staging().unwrap();
+    assert_eq!(stage.add("a.png", b"b").unwrap(), hash_name);
+    stage.set_references(&[reference()]).unwrap();
+    stage.publish().unwrap();
+    assert_eq!(store.trash_summary().unwrap().entries, 1);
+    assert_eq!(fs::read(store.media_dir().join(&hash_name)).unwrap(), b"b");
+    assert!(!store.media_dir().join(hash_name.to_uppercase()).exists());
+}

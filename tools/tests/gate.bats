@@ -890,6 +890,40 @@ queue_states() {
     | [.order[] as $id | .by[$id].state] | join(" ")' "$SB/$QUEUE"
 }
 
+@test "a complete clean direct-master unit gate queues blocked runs for catch-up" {
+  commit_in "$SB" app/view.swift 'struct View {}' $'direct unit\n\nRole: infra\nUnit: U150'
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(rq .merge_ready)" = true ]
+  [ -f "$SB/$QUEUE" ]
+  [ "$(queue_states)" = queued ]
+  [ "$(entry 0 .unit)" = U150 ]
+  [ "$(entry 0 .commit)" = "$(git -C "$SB" rev-parse HEAD)" ]
+  fx ui pass
+  mg catch-up
+  [ "$status" -eq 0 ]
+  [ "$(queue_states)" = done ]
+}
+
+@test "partial local and dirty direct-master gates never enqueue acceptance work" {
+  commit_in "$SB" app/view.swift 'struct View {}' $'direct unit\n\nRole: infra\nUnit: U150'
+  fx ui queued
+  printf 'host-session the devices phase\n' >"$FX/ui.queued"
+  mg gate --base "$BASE0" --only ui
+  [ "$status" -eq 0 ]
+  [ ! -f "$SB/$QUEUE" ]
+  mg gate --base "$BASE0" --local
+  [ "$status" -eq 0 ]
+  [ ! -f "$SB/$QUEUE" ]
+  printf '\n// WIP\n' >>"$SB/app/view.swift"
+  mg gate --base "$BASE0"
+  [ "$status" -eq 0 ]
+  [ "$(rq .dirty)" = true ]
+  [ ! -f "$SB/$QUEUE" ]
+}
+
 # entry <n> <jq filter>: the filter on the n-th queue entry (from 0), its
 # lines merged in order.
 entry() {

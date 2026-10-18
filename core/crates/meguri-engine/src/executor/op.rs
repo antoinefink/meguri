@@ -157,6 +157,8 @@ pub struct OpContext<'s, 'c> {
     pub(crate) progress: Option<ProgressSink>,
     pub(crate) media_added: Vec<String>,
     pub(crate) media_removed: Vec<String>,
+    pub(crate) pending_media: Vec<crate::media::PendingMedia>,
+    pub(crate) collection_path: std::path::PathBuf,
     pub(crate) undo: &'c UndoManager,
     pub(crate) undo_notes: UndoNotes,
     /// For an undo or redo op, the step the writer resolved for it (M4.1).
@@ -235,6 +237,7 @@ impl<'c> OpContext<'_, 'c> {
         let savepoint = self.scope.savepoint()?;
         let media = (self.media_added.len(), self.media_removed.len());
         let hooks = self.on_commit.len();
+        let staged = self.pending_media.len();
         // The step notes into an empty set, kept only when it commits.
         let before = std::mem::take(&mut self.undo_notes);
         let outcome = step(self);
@@ -250,6 +253,7 @@ impl<'c> OpContext<'_, 'c> {
                 self.media_added.truncate(media.0);
                 self.media_removed.truncate(media.1);
                 self.on_commit.truncate(hooks);
+                self.pending_media.truncate(staged);
                 Err(error)
             }
         }
@@ -264,6 +268,26 @@ impl<'c> OpContext<'_, 'c> {
     /// Reports a media file the op added (U31 stages media inside the op).
     pub fn media_added(&mut self, name: impl Into<String>) {
         self.media_added.push(name.into());
+    }
+
+    /// Bind staged files to this op. Its final stored note rows witness the
+    /// commit during crash recovery. Rollback drops the unpublished files.
+    pub fn commit_media(
+        &mut self,
+        stage: meguri_storage::media::StagedOp,
+        notes: &[meguri_model::ids::NoteId],
+    ) -> Result<(), EngineError> {
+        if Some(stage.collection_directory()) != self.collection_path.parent() || notes.is_empty() {
+            return Err(EngineError::InvalidArgument {
+                message: "staged media must belong to this collection and reference notes".into(),
+            });
+        }
+        self.media_added.extend(stage.names().map_err(crate::media::error)?);
+        self.pending_media.push(crate::media::PendingMedia {
+            stage,
+            notes: notes.to_vec(),
+        });
+        Ok(())
     }
 
     /// Reports a media file the op removed.

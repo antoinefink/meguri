@@ -30,6 +30,7 @@ pub mod flags;
 pub mod jobs;
 pub mod lifecycle;
 pub mod marked;
+pub mod media;
 pub mod monotonic;
 pub mod notes;
 pub mod notetypes;

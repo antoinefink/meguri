@@ -1,5 +1,4 @@
 use super::{MediaError, MediaStore, Result, case_fold::*, folder, journal_db};
-use crate::atomic_file::move_new;
 use meguri_model::note::Note;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -79,6 +78,9 @@ fn delete_manifest(db: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 impl StagedOp {
+    pub fn collection_directory(&self) -> &std::path::Path {
+        self.store.media_dir().parent().expect("media root has a parent")
+    }
     pub fn add(&mut self, desired: &str, bytes: &[u8]) -> Result<String> {
         let mut db = self.store.db()?;
         let hash = folder::hash_bytes(bytes);
@@ -104,17 +106,23 @@ impl StagedOp {
             name = hash_name.clone();
             target = self.store.media_dir().join(&name);
         }
-        let replace_existing = if folder::regular(&target)?.is_some() {
+        if name == hash_name {
+            let variants = self.store.candidates(&mut db, &name)?;
+            for (candidate, candidate_hash) in variants {
+                if candidate_hash == hash && folder::regular(&self.store.media_dir().join(&candidate))?.is_some() {
+                    return Ok(candidate);
+                }
+            }
+        }
+        let replace_existing = name == hash_name;
+        if folder::regular(&target)?.is_some() {
             if folder::hash_file(&target)? == hash {
                 return Ok(name);
             }
             if name != hash_name {
                 return Err(MediaError::NameTaken);
             }
-            true
-        } else {
-            false
-        };
+        }
         let index: i64 = db.query_row(
             "SELECT COALESCE(MAX(idx),0)+1 FROM staged_files WHERE op_id=?1",
             [self.id],
@@ -220,20 +228,27 @@ impl MediaStore {
             let target = self.media_dir().join(&file.name);
             let already_present = folder::regular(&target)?.is_some() && folder::hash_file(&target)? == file.sha1;
             if !already_present {
-                let Some(m) = folder::regular(&source)? else {
+                let Some(_) = folder::regular(&source)? else {
                     return Err(MediaError::InvalidManifest("staged media bytes are missing".into()));
                 };
                 if folder::hash_file(&source)? != file.sha1 {
                     return Err(MediaError::InvalidManifest("staged media digest mismatch".into()));
                 }
-                if let Some(old) = folder::regular(&target)? {
-                    if !file.replace_existing {
-                        return Err(MediaError::NameTaken);
-                    }
-                    self.trash_one_locked(&mut db, &file.name, &folder::hash_file(&target)?, &old)?;
+                let mut replacements = if file.replace_existing {
+                    self.candidates(&mut db, &file.name)?
+                        .into_iter()
+                        .filter(|(_, h)| h != &file.sha1)
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+                if file.replace_existing
+                    && folder::regular(&target)?.is_some()
+                    && !replacements.iter().any(|(name, _)| name == &file.name)
+                {
+                    replacements.push((file.name.clone(), folder::hash_file(&target)?));
                 }
-                let _ = m;
-                move_new(&source, &target)?;
+                self.install_existing_locked(&mut db, &file.name, &source, &file.sha1, &replacements)?;
                 meguri_model::faultpoint!("media.stage.after_publish")?;
             } else if folder::regular(&source)?.is_some() {
                 fs::remove_file(&source)?;

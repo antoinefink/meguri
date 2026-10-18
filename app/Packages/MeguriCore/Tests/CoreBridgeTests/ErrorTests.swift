@@ -11,6 +11,8 @@ import Testing
         (.Unsupported(feature: "servers"), .unsupported(feature: "servers")),
         (.InvalidArgument(message: "deck id 0"), .invalidArgument("deck id 0")),
         (.Internal(message: "invariant"), .internal("invariant")),
+        (.MediaCommitPending(seq: 17, message: "recover attachments"), .mediaCommitPending(sequence: 17, message: "recover attachments")),
+        (.CommitCompleted(seq: 18, message: "refresh state"), .commitCompleted(sequence: 18, message: "refresh state")),
     ]
 
     @Test(arguments: cases)

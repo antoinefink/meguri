@@ -17,6 +17,10 @@ public enum BridgeError: Error, Sendable, Hashable {
     case invalidArgument(String)
     /// A core bug or a caught Rust panic. The message is for logs only.
     case `internal`(String)
+    /// The note write committed. Recover its media without repeating it.
+    case mediaCommitPending(sequence: UInt64, message: String)
+    /// The write committed. Refresh its state without repeating it.
+    case commitCompleted(sequence: UInt64, message: String)
 }
 
 extension BridgeError {
@@ -43,6 +47,8 @@ extension BridgeError {
         case .Unsupported(let feature): self = .unsupported(feature: feature)
         case .InvalidArgument(let message): self = .invalidArgument(message)
         case .Internal(let message): self = .internal(message)
+        case .MediaCommitPending(let seq, let message): self = .mediaCommitPending(sequence: seq, message: message)
+        case .CommitCompleted(let seq, let message): self = .commitCompleted(sequence: seq, message: message)
         }
     }
 }

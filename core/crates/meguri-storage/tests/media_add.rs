@@ -35,6 +35,18 @@ fn media_lookup_preserves_existing_spelling_and_rejects_paths() {
 }
 
 #[test]
+fn media_lookup_never_resolves_a_stale_case_variant_to_a_symlink() {
+    let (dir, store) = store();
+    fs::write(store.media_dir().join("Mixed.PNG"), b"original").unwrap();
+    store.register_full(|_, _| true).unwrap();
+    fs::remove_file(store.media_dir().join("Mixed.PNG")).unwrap();
+    let outside = dir.path().join("outside");
+    fs::write(&outside, b"outside").unwrap();
+    std::os::unix::fs::symlink(&outside, store.media_dir().join("Mixed.PNG")).unwrap();
+    assert_eq!(store.lookup("mixed.png").unwrap(), None);
+}
+
+#[test]
 fn media_ignored_names_empty_names_and_symlinks_never_enter_index() {
     let (dir, store) = store();
     assert_eq!(store.add("???", b"a"), Err(MediaError::InvalidName));

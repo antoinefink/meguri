@@ -71,6 +71,17 @@ pub enum EngineError {
     /// The open gate refused or failed (`storage/open-and-connections` C8).
     Open(OpenError),
     Storage(StorageError),
+    Media(meguri_storage::media::MediaError),
+    /// The write committed and its changes were published. Never repeat it.
+    CommitCompleted {
+        seq: crate::Seq,
+        message: String,
+    },
+    /// The note operation committed. Recover media; never repeat the op.
+    MediaCommitPending {
+        seq: crate::Seq,
+        message: String,
+    },
     /// The op panicked; its transaction was rolled back.
     Panicked {
         message: String,
@@ -159,6 +170,13 @@ impl fmt::Display for EngineError {
             EngineError::NotetypeRefused(refusal) => write!(f, "note type refused: {refusal}"),
             EngineError::Open(error) => write!(f, "open: {error}"),
             EngineError::Storage(error) => write!(f, "storage: {error}"),
+            EngineError::Media(error) => write!(f, "media: {error}"),
+            EngineError::CommitCompleted { seq, message } => {
+                write!(f, "operation {} committed; post-commit failure: {message}", seq.0)
+            }
+            EngineError::MediaCommitPending { seq, message } => {
+                write!(f, "operation {} committed; media recovery pending: {message}", seq.0)
+            }
             EngineError::Panicked { message } => write!(f, "panic: {message}"),
             EngineError::InvalidArgument { message } => write!(f, "invalid argument: {message}"),
             EngineError::Unsupported { feature } => write!(f, "unsupported: {feature}"),

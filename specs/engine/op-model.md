@@ -51,6 +51,12 @@ What each source does to the undo history (recorded, cleared, truncated, the syn
 
 ## O4. Sequence numbers and the result
 
+An error after SQLite's successful `COMMIT` cannot roll the operation back.
+The executor still applies its history and publishes its changes. It reports
+`CommitCompleted` with the committed sequence, or `MediaCommitPending` when
+staged attachment publication needs recovery. Callers refresh committed state
+and recover attachments as needed; they never repeat the note operation.
+
 - Every op that commits takes the next value of the engine's sequence counter at its commit, under the commit lock (O6). The counter is the change stream's (`engine/change-stream` S3): op seqs and event seqs are one strictly increasing sequence, from 1, for the life of the engine. An op that changed nothing still takes a seq, but publishes no event.
 - The result: `seq`; the change set (`engine/change-stream` S1), shared, empty when nothing changed; `undo`, the name and source of the undo step the op recorded (`engine/undo` M1: a `UserUndoable` op that changed something, or a redo; the step's id is the op's seq), applied on the writer before the result is returned; `generation`; the op's own value; `past_cancel_point` (O5); timing (O10).
 - An op that writes nothing gets an empty change set, `col.mod` stays unchanged (a scope without a change does not stamp it), and no event is published.

@@ -22,6 +22,10 @@ pub enum CoreError {
     InvalidArgument { message: String },
     /// A failure the caller cannot act on: a bug, or a caught panic.
     Internal { message: String },
+    /// The note write committed; recover attachments without repeating it.
+    MediaCommitPending { seq: u64, message: String },
+    /// The write committed. Refresh its state without repeating it.
+    CommitCompleted { seq: u64, message: String },
 }
 
 impl fmt::Display for CoreError {
@@ -33,6 +37,12 @@ impl fmt::Display for CoreError {
             CoreError::Unsupported { feature } => write!(f, "unsupported: {feature}"),
             CoreError::InvalidArgument { message } => write!(f, "invalid argument: {message}"),
             CoreError::Internal { message } => write!(f, "internal error: {message}"),
+            CoreError::MediaCommitPending { seq, message } => {
+                write!(f, "operation {seq} committed; media recovery pending: {message}")
+            }
+            CoreError::CommitCompleted { seq, message } => {
+                write!(f, "operation {seq} committed; post-commit failure: {message}")
+            }
         }
     }
 }
@@ -52,6 +62,8 @@ impl From<EngineError> for CoreError {
             EngineError::SuspendDeadline { .. } => CoreError::Unavailable {
                 reason: error.to_string(),
             },
+            EngineError::MediaCommitPending { seq, message } => CoreError::MediaCommitPending { seq: seq.0, message },
+            EngineError::CommitCompleted { seq, message } => CoreError::CommitCompleted { seq: seq.0, message },
             EngineError::StaleGeneration { .. }
             | EngineError::UndoUnavailable { .. }
             | EngineError::NeedsSchemaConfirmation { .. } => CoreError::Unavailable {
@@ -70,6 +82,7 @@ impl From<EngineError> for CoreError {
             | EngineError::SchemaNotMarked { .. }
             | EngineError::Open(_)
             | EngineError::Storage(_)
+            | EngineError::Media(_)
             | EngineError::Panicked { .. } => CoreError::Internal {
                 message: error.to_string(),
             },
@@ -88,6 +101,14 @@ impl From<CoreError> for EngineError {
             CoreError::Unsupported { feature } => EngineError::Unsupported { feature },
             CoreError::InvalidArgument { message } => EngineError::InvalidArgument { message },
             CoreError::Internal { message } => EngineError::Internal { message },
+            CoreError::MediaCommitPending { seq, message } => EngineError::MediaCommitPending {
+                seq: meguri_engine::Seq(seq),
+                message,
+            },
+            CoreError::CommitCompleted { seq, message } => EngineError::CommitCompleted {
+                seq: meguri_engine::Seq(seq),
+                message,
+            },
         }
     }
 }

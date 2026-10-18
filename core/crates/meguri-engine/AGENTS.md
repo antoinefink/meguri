@@ -1,6 +1,7 @@
 # meguri-engine
 
 - Every write to `collection.anki2` is an op on the executor (`Collection::submit`/`run`; `specs/engine/op-model.md`). Only the writer thread holds the writer connection. Open collections only through `Engine::open_raw` from meguri-host (this crate's tests and benches may name it).
+- Media: prepare attachments and run scans off the writer; bind staged files with `OpContext::commit_media`. Final changed note post-images witness the commit. `MediaCommitPending` and `CommitCompleted` mean the note operation committed: recover/refresh, never repeat it. U38 owns media open/recovery and suspend wiring.
 - Op closures and `ChangeObserver`s run on the writer thread: never submit an op and wait for it there (deadlock), never call Swift, keep them short. A write phase past ~200 ms must be a catalog op (`executor/catalog.rs` and spec O9 together).
 - A write phase never writes a snapshot value over a row that may have changed: re-derive inside the op or use a `Precondition` (O7). Never mtime or `usn`: `Local` stamping has one-second resolution.
 - Op seqs and event seqs are one counter. An op reserves its seq at commit and fills it after the observers; an unfilled `Reservation` holds back every later event, so let it drop (never `mem::forget`).

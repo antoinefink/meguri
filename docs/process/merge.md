@@ -8,6 +8,10 @@ Record the unit's starting commit before bringing in its work. Keep the spec, im
 
 The branch-merge procedure below remains available for historical receipts and existing tooling. Queued runs remain incomplete verification: run `tools/mg catch-up` between units and require passing results at milestone gates.
 
+A full, clean main-checkout gate with an explicit base saves its queued checks
+for catch-up when the tip commit carries `Unit:`. Local, partial and dirty gates
+do not save acceptance work. Keep `Unit:` on the completed unit's tip commit.
+
 ## Earlier workflow: role branches
 
 `tools/mg merge <branch>` checks and fast-forwards the integration branch in the main checkout (`master`). The origin remote uses `master` as its default branch. The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).

@@ -1,6 +1,7 @@
 # meguri-storage
 
 - Only this crate issues SQL against `collection.anki2`. Never keep a statement or a read transaction open across FFI calls: an open read transaction stops checkpoints and the `-wal` grows.
+- Media has its own versioned journal, never collection schema objects. Hash long scans without its mutex; recheck the record before saving. A staging candidate is not a durable published copy: add/restore must retain independent bytes until commit. Renderers use `MediaStore::open_file` and read its descriptor rather than reopening a lookup path.
 - Every connection registers `unicase` first (`conn_init`), with `meguri_text::fold::compare_folded` (the `=2.6.0` pin; another `unicase` reorders the name indexes). The probe registers nothing else; writer and readers then run the initializers.
 - The open gate writes nothing before phase 4: the probe and the pre-upgrade copy open with `immutable=1` unless a `-wal` or a non-empty `-journal` lies next to the file (`schema/version.rs`). Never open a file that may be refused read-write, and never set a pragma before the refusals. A hot rollback journal is rolled back on a temporary copy first; the original is rolled back in place only once the copy has passed the refusals.
 - Never add a schema object to the collection (R2016). Statement texts are `schema/ddl18.sql` (the normalized tokens of `specs/storage/schema-18.md`, interop facts); step 14's `tags` is the only DDL outside it. Compare `sqlite_master` names case-insensitively: schema-17 files store `FIELDS`, schemas 14 to 16 config's `key`.

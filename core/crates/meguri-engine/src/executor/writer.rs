@@ -374,6 +374,8 @@ fn run_op<T>(
         progress: spec.progress.clone(),
         media_added: Vec::new(),
         media_removed: Vec::new(),
+        pending_media: Vec::new(),
+        collection_path: collection.path().to_path_buf(),
         undo: &shared.undo,
         undo_notes: UndoNotes::default(),
         restore: meta.restore,
@@ -381,7 +383,14 @@ fn run_op<T>(
         on_commit: Vec::new(),
         random: Arc::clone(&env.reopen.random),
     };
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| op(&mut context)));
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let value = op(&mut context)?;
+        for pending in &mut context.pending_media {
+            pending.prepare(context.scope)?;
+        }
+        Ok(value)
+    }));
+    let pending_media = std::mem::take(&mut context.pending_media);
     let media = MediaNotes {
         added: std::mem::take(&mut context.media_added),
         removed: std::mem::take(&mut context.media_removed),
@@ -421,6 +430,17 @@ fn run_op<T>(
         (committed, reservation)
     };
     let seq = reservation.seq();
+    let post_commit_error = committed.post_commit_error.clone();
+    // The collection commit stands. Publish every staged operation before
+    // observers, retaining each failed manifest for row-based recovery.
+    let mut media_failures = Vec::new();
+    for pending in pending_media {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| pending.stage.publish())) {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => media_failures.push(error.to_string()),
+            Err(payload) => media_failures.push(crate::error::panic_message(payload.as_ref())),
+        }
+    }
     let observing = !shared.observers.is_empty();
     let derived = changes::derive(committed.journal.as_ref(), spec.source, media, observing);
     if let Some(journal) = &committed.journal {
@@ -509,6 +529,18 @@ fn run_op<T>(
         }),
         Applied::Restored { .. } | Applied::Nothing => None,
     };
+    if !media_failures.is_empty() {
+        return Err(EngineError::MediaCommitPending {
+            seq,
+            message: media_failures.join("; "),
+        });
+    }
+    if let Some(error) = post_commit_error {
+        return Err(EngineError::CommitCompleted {
+            seq,
+            message: error.to_string(),
+        });
+    }
     Ok(OpResult {
         value,
         seq,

@@ -60,6 +60,9 @@ impl Written {
 /// What a committed scope leaves.
 #[derive(Debug)]
 pub struct Committed {
+    /// A failure after SQLite committed never implies rollback. Callers
+    /// still publish the journal and must not repeat the operation.
+    pub post_commit_error: Option<StorageError>,
     /// Every real change, `col.mod` included; `None` when the scope kept no
     /// journal.
     pub journal: Option<Journal>,
@@ -578,8 +581,11 @@ impl<'c> WriteScope<'c> {
         meguri_model::faultpoint!("storage.commit.before")?;
         self.conn.execute_batch("COMMIT")?;
         self.open = false;
-        meguri_model::faultpoint!("storage.commit.after")?;
+        let post_commit_error = meguri_model::faultpoint!("storage.commit.after")
+            .err()
+            .map(StorageError::from);
         Ok(Committed {
+            post_commit_error,
             journal: self.journal.take(),
             changed: self.changed,
             col_mod,

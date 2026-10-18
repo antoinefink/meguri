@@ -85,6 +85,9 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
     for notetype in s.setup.notetypes.iter().flatten() {
         notetype_spec(notetype)?;
     }
+    if let Some(files) = &s.setup.media_files {
+        media_files(files, false)?;
+    }
     actors(s)?;
     opens(s)?;
     let mut side: Option<Side> = None;
@@ -101,6 +104,19 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
         deck_op(step).map_err(at)?;
         tag_op(step).map_err(at)?;
         browser_config_op(step).map_err(at)?;
+        match step {
+            Step::MediaOutside(files) => {
+                if files.is_empty() {
+                    return Err(at(empty("media_outside")));
+                }
+                media_files(files, true).map_err(at)?;
+            }
+            Step::AddMedia(file) => media_file(file, true, false).map_err(at)?,
+            Step::TrashMedia(args) if args.names.is_empty() || args.names.iter().any(|n| !media_component(n)) => {
+                return Err(at(FormatError::new("trash_media needs non-empty file names")));
+            }
+            _ => {}
+        }
         if let Step::Observe(requests) = step {
             once_per_step(requests).map_err(at)?;
         }
@@ -124,6 +140,46 @@ pub(super) fn scenario(s: &Scenario) -> Result<(), FormatError> {
             }
             side = Some(*to);
         }
+    }
+    Ok(())
+}
+
+pub(super) fn media_component(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 255 && !name.contains(['/', '\0']) && !matches!(name, "." | "..")
+}
+fn media_file(file: &super::MediaFileSpec, add: bool, remove: bool) -> Result<(), FormatError> {
+    let forms = [
+        file.text.is_some(),
+        file.fill.is_some(),
+        file.dir.is_some(),
+        file.remove.is_some(),
+    ];
+    if forms.iter().filter(|p| **p).count() != 1
+        || file.dir == Some(false)
+        || file.remove == Some(false)
+        || (add && (file.dir.is_some() || file.remove.is_some()))
+        || (!remove && file.remove.is_some())
+        || (!add && !media_component(&file.name))
+        || file.fill.as_ref().is_some_and(|fill| fill.size > 209_715_200)
+    {
+        return Err(FormatError::new("invalid media file name or content form"));
+    }
+    Ok(())
+}
+fn media_files(files: &[super::MediaFileSpec], remove: bool) -> Result<(), FormatError> {
+    let mut names = Vec::<String>::new();
+    for file in files {
+        media_file(file, false, remove)?;
+        let name = meguri_text::normalize::nfc(&file.name).into_owned();
+        if names
+            .iter()
+            .any(|other| meguri_text::fold::compare_folded(other, &name).is_eq())
+        {
+            return Err(FormatError::new(
+                "media names must be distinct after NFC and unicase comparison",
+            ));
+        }
+        names.push(name);
     }
     Ok(())
 }
