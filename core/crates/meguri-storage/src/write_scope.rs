@@ -338,6 +338,42 @@ impl<'c> WriteScope<'c> {
         self.put_cells(Table::Cards, image, false)
     }
 
+    /// M4's memory-only update. Read once, compare as stored, and name only
+    /// data/stamps in UPDATE so unrelated scheduling indexes stay untouched.
+    /// Journal the exact before-image and the actual stored after-image.
+    pub fn update_card_memory(
+        &mut self,
+        id: CardId,
+        memory: Option<meguri_model::card_data::MemoryState>,
+        retention: f32,
+        decay: f32,
+    ) -> Result<Written, StorageError> {
+        let key = RowKey::Id(id.0);
+        let Some(before) = rows::select_image(self.conn, Table::Cards, &key)? else {
+            return Ok(Written::Unchanged);
+        };
+        let mut data = Card::from_cells(&before)?.data;
+        let mut desired = meguri_model::card_data::CardData::default();
+        desired.memory_state = memory;
+        desired.desired_retention = Some(retention);
+        desired.decay = Some(decay);
+        if data.same_memory_values(&desired) {
+            return Ok(Written::Unchanged);
+        }
+        data.memory_state = memory;
+        data.desired_retention = Some(retention);
+        data.decay = Some(decay);
+        let mut after = before.clone();
+        after[17] = Cell::text(data.to_text());
+        self.mode.stamp(Table::Cards, &mut after, self.now());
+        self.conn
+            .prepare_cached("UPDATE cards SET mod=?1,usn=?2,data=?3 WHERE id=?4")?
+            .execute(rusqlite::params![after[4], after[5], after[17], id.0])?;
+        let after = rows::stored(self.conn, Table::Cards, &[Cell::Integer(id.0)])?;
+        self.journal_change(Table::Cards, key, Some(before), Some(after))?;
+        Ok(Written::Updated)
+    }
+
     fn add<R: Record>(&mut self, record: &R) -> Result<i64, StorageError> {
         let id = ids::allocate(self.conn, R::TABLE, self.now().0)?;
         let mut cells = record.to_cells();

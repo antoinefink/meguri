@@ -1,6 +1,24 @@
 //! Memory-only recompute: plan on one snapshot, then stamp compact updates
 //! in one cancellable transaction. No scheduling column or revlog is written.
 
+use meguri_model::{
+    card::CardType,
+    card_data::MemoryState,
+    changes::OpSource,
+    ids::{CardId, DeckConfigId, DeckId},
+    proto::deck::DeckKind,
+};
+use meguri_sched::{
+    memory::{
+        items::{History, HistoryForm},
+        resolve::{MemoryError, preset_cutoff},
+    },
+    model::{card_sched::CardSched, deck_sched::DeckSched, preset::PresetView},
+    states::fsrs_glue::FsrsCache,
+};
+use meguri_storage::{ReadRows, ReaderRole, Table, Written, queries::revlog_fsrs::HistorySelection};
+use std::{collections::BTreeMap, time::Duration};
+
 use crate::{
     Collection, EngineError, OpResult, OpSpec,
     executor::{
@@ -100,23 +118,6 @@ pub fn training_items(
     check()?;
     Ok(training)
 }
-use meguri_model::{
-    card::CardType,
-    card_data::MemoryState,
-    changes::OpSource,
-    ids::{CardId, DeckConfigId, DeckId},
-    proto::deck::DeckKind,
-};
-use meguri_sched::{
-    memory::{
-        items::{History, HistoryForm},
-        resolve::{MemoryError, preset_cutoff},
-    },
-    model::{card_sched::CardSched, deck_sched::DeckSched, preset::PresetView},
-    states::fsrs_glue::FsrsCache,
-};
-use meguri_storage::{ReadRows, ReaderRole, Table, Written, queries::revlog_fsrs::HistorySelection};
-use std::{collections::BTreeMap, time::Duration};
 
 #[derive(Clone, Debug)]
 pub enum Target {
@@ -229,7 +230,7 @@ pub fn plan(
                 .map_err(MemoryError::from)
                 .map_err(error)?;
             let retention = retentions[&CardSched::new(&card).home_deck()];
-            let mut desired = card.data.clone();
+            let mut desired = meguri_model::card_data::CardData::default();
             desired.memory_state = memory;
             desired.desired_retention = Some(retention);
             desired.decay = Some(preset.decay());
@@ -264,13 +265,11 @@ pub fn apply_in(context: &mut OpContext<'_, '_>, planned: MemoryPlan) -> Result<
                 progress.report(index as u64, Some(total));
             }
         }
-        let Some(mut card) = context.scope().card(update.id)? else {
-            continue;
-        };
-        card.data.memory_state = update.memory;
-        card.data.desired_retention = Some(update.retention);
-        card.data.decay = Some(update.decay);
-        if context.scope().put_card_data(update.id, &card.data)? == Written::Updated {
+        if context
+            .scope()
+            .update_card_memory(update.id, update.memory, update.retention, update.decay)?
+            == Written::Updated
+        {
             report.changed += 1;
         }
     }
