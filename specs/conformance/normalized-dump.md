@@ -75,16 +75,17 @@ Nothing pending for media means `media_pending` (`media-ops.md` F11) is `{}`. Th
 
 ### N6.3 What opening a collection writes
 
-Observed on the oracle and stated here so that Meguri's open path can be held to it:
+Observed on the oracle and stated here so that Meguri's storage-level open path can be held to it. The real engine's automatic day check follows `sched/day-clock` D8; an explicit compatibility timing query has the separate writes of D5/D7.
 
-- Opening and closing a schema-18 collection writes nothing, after any idle time, outside the three cases below. `preservation/churn/reopen-ten` and `churn/relaunch` show it on the fixture: the raw dump and `sqlite_master` after ten reopens, and after 100 reopens spread over eight days with day rollovers between them, equal those after the first open, and the N6.1 query stays clean.
-- Anki writes on its own in three cases, none of which the fixture triggers:
+- Opening and closing a schema-18 collection writes nothing, after any idle time, outside the cases below. `preservation/churn/reopen-ten` and `churn/relaunch` show it on the fixture: the raw dump and `sqlite_master` after ten reopens, and after 100 reopens spread over eight days with day rollovers between them, equal those after the first open, and the N6.1 query stays clean.
+- Anki's open and day computation have these writes:
   - the Python layer adds `creationOffset` at open when the v3 scheduler is on and the key is missing (`storage-ops.md` P1.1);
   - the scheduler's first day computation writes `rollover` (4) when it is missing;
-  - the same computation writes `localOffset` when the device's UTC offset differs from the stored one, a missing key reading as 0 (`sched/day-clock`, U40).
+  - the same computation writes `localOffset` when the device's UTC offset differs from the stored one, a missing key reading as 0 (`sched/day-clock`, U40);
+  - the unbury check writes `lastUnburied` when D7's day condition holds, even when no cards are buried.
 
-  The last two happen when the scheduler computes "today" (answering, building a queue), never at open itself. The fixture has `creationOffset` and `rollover`, was made at UTC and is used at UTC.
-- Meguri writes nothing when it opens, closes, or sits idle (R1586, R1590). A Meguri feature that needs a write at launch (bundled media, R1587) writes only when the content differs (N11.6).
+  The last three happen when the scheduler computes "today" (answering, building a queue), never at storage open itself. The fixture has `creationOffset` and `rollover`, was made at UTC and is used at UTC; its raw reopen scenarios request no timing query.
+- With no actual unbury or offset change, Meguri writes nothing when it opens, closes, or sits idle (R1586, R1590), including when idle time crosses days (N12). The automatic day clock never stamps an empty unbury check or repairs missing rollover config (D8). A Meguri feature that needs a write at launch (bundled media, R1587) writes only when the content differs (N11.6).
 
 ## N7. Dump differences (Meguri's own tests)
 
@@ -256,4 +257,4 @@ Checked on the oracle: the three byte strings occur in the fixture only as those
 - Ten open and close cycles, then a run of 1,000 operations of every kind the engine has (adds, edits, deletes, answers, tag, deck and preset operations, undo and redo), then ten more cycles: `sqlite_master` equals `storage/schema-18` S6's expected objects, statistics tables allowed (R2016).
 - 100 open and close cycles with idle periods between them (the engine running its scheduled jobs and crossing day rollovers with no user action): the N6.1 query is clean and the raw dump is unchanged (R1586, R1590).
 
-U40 composition obligation: attaching the real day clock must keep this invariant and AE66 passing. `sched/day-clock` D8 currently requires a launch-time check whose D5/D7 rules can stamp timing-key rows, including `lastUnburied` even with no buried cards. That conflicts with an unconditional clean pending-change query across idle day rollovers. U36's storage-level reopen runs no day query (D14.2); this does not resolve the future engine-lifecycle conflict. U40 must reconcile it with R1590 and AE66 before composing those paths; this suite grants no exception for config writes and no masking of timing keys.
+The automatic engine day clock follows `sched/day-clock` D8: an empty unbury check records its day only in memory, and a missing rollover uses the effective default without repairing config. Explicit compatibility timing observations retain D5/D7's observed writes; they are not launch/idle operations. The fixture has no buried cards and runs at unchanged UTC, so the real automatic lifecycle must preserve this invariant and AE66 exactly across days. Actual buried-card restoration and real offset changes retain their specific R598/R594 tests. Later U40, U43/U44, lifecycle and integration changes must keep both sets of assertions passing; no config-write waiver, timing-key mask or golden deviation is granted.

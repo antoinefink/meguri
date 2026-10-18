@@ -56,7 +56,7 @@ Sixteen keys, each value stored as a BLOB in the compact form of `storage/config
 | `sortType` | `"noteFld"` | 0 | 0 |
 | `timeLim` | `0` | 0 | 0 |
 
-- No other key. In particular there is no `rollover`, `localOffset` or `lastUnburied`: the first day query, which runs when the collection is opened (`sched/day-clock` D5, D8), writes `rollover` = `4`, and `localOffset` unless the device is at UTC, each with `usn` -1 and `mtime_secs` `now_s`, without moving `col.mod` (oracle: Europe/Paris gives `localOffset` `-60`). On the creation day it writes no `lastUnburied`: today is day 0 and a missing `lastUnburied` reads as 0, so the unbury check does nothing (`sched/day-clock` D2, D7). The key first appears at a day query on a later day.
+- No other key in the factory output. In particular there is no `rollover`, `localOffset` or `lastUnburied`. An explicit compatibility day query (`sched/day-clock` D5, D7), on Meguri or the oracle, writes `rollover` = `4`, and `localOffset` unless the device is at UTC, each with `usn` -1 and `mtime_secs` `now_s`, without moving `col.mod` (oracle: Europe/Paris gives `localOffset` `-60`). On the creation day it writes no `lastUnburied`: today is day 0 and a missing key reads as 0; on a later day that query writes the key even with no buried cards. Meguri's automatic engine open instead follows D8: it uses the effective rollover default 4 without storing it, writes `localOffset` only for a real offset difference (R594), and leaves `lastUnburied` absent when no cards are restored. These post-bootstrap policies do not change the sixteen factory keys or the explicit-query golden comparisons.
 - `curModel` is the only key written as a local change; it still leaves `col.mod` at 0.
 
 ## B5. The default preset

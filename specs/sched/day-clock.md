@@ -101,7 +101,9 @@ Examples, Europe/Paris in January, `crt` 2030-01-16 02:00 +01:00 (1894755600), s
 
 ## D5. The day query
 
-A day query returns today and `next_day_at` for `now`:
+D5 and D7 describe Anki's observed day query and Meguri's explicit compatibility query, including the conformance `timing` observation. Meguri's automatic engine checks use D8's no-churn policy instead; the day math is identical.
+
+A compatibility day query returns today and `next_day_at` for `now`:
 
 1. When the cached result is still valid (D6), it returns that result and skips step 2.
 2. Otherwise it computes afresh:
@@ -165,23 +167,31 @@ Example (AE24): Paris, rollover 4, cards buried on day 5 (`lastUnburied` 5). At 
 
 ## D8. Meguri's day clock
 
-The engine keeps one day clock per open collection: the cached result (D6) and the last day, `next_day_at` and IANA zone id it reported. It exposes:
+The engine keeps one day clock per open collection: the cached result (D6), the last day, `next_day_at` and IANA zone id it reported, and an effective unbury-check day with the timing inputs and stored `lastUnburied` value on which it depends. The effective check day is device-local memory, never a new synced key or sidecar. It exposes:
 
-- `checkRollover()`: runs the day query and reports what changed (below). Idempotent and cheap: a second call in the same state writes nothing and emits nothing.
+- `checkRollover()`: runs the automatic day check and reports what changed (below). Idempotent and cheap: a second call in the same state writes nothing and emits nothing.
 - `today` and `nextDayAt`: the values of a day query run at the time of the read. Every core path that needs the day gets it through these or `checkRollover()`. A read that finds no valid cached result (D6) runs `checkRollover()` first, so its writes, unbury and events follow the steps below.
 - Code running inside an op on the writer thread never runs the day query itself: it would have to submit the `Rollover` op and wait for the writer it occupies. Its caller runs `checkRollover()` before submitting the op and passes the day in (U43 does so before every answer).
 
 Each `checkRollover()`:
 
-1. Runs the day query (D5, D6, D7). When today differs from the last day seen (either way), the query's writes commit in the rollover op (D9); otherwise, when it wrote anything, in a plain op with source `Rollover` (D10).
+1. Computes the day (D5, D6) and checks unburying (D7), with the automatic policy below. When today differs from the last day seen (either way), its writes commit in the rollover op (D9); otherwise, when it wrote anything, in a plain op with source `Rollover` (D10).
 2. When the clock's zone id differs from the last one seen, emits `TimeZoneChanged{zoneId}` on the change stream, even when the day and the offset did not change (Europe/Paris to Africa/Ceuta).
 3. When today differs from the last day seen, emits `RolledOver{oldDay, newDay}` once the rollover op has committed. A day change caused by an offset change (travel, DST) takes the same path (R464).
 4. When `next_day_at` differs from the last one seen, emits `NextDayAtChanged{nextDayAt}`.
 5. Records the reported values.
 
-The first `checkRollover()` after the collection opens records the values and emits nothing; it still writes and unburies as D5 and D7 say. It is an open-time step of the lifecycle (U24): it runs before the collection is `Ready`.
+Automatic checks preserve data when no semantic maintenance is needed (R1590, AE66):
 
-A generation change (`engine/lifecycle` L8: one-way sync, restore, `.colpkg` import) counts as an open: the day clock drops its cached result and the values it reported, and the first `checkRollover()` on the new generation records, emits nothing, writes and unburies. It runs before anything reads counts on the new generation, as at open, so a downloaded collection's cards buried on an earlier day are restored first. The app reads `today` and `nextDayAt` again on `CollectionReplaced`, as after an open. `engine/lifecycle` L8 runs no open steps today; U40 adds this step there or registers the day clock as a `GenerationListener` whose check runs once the state is `Ready`.
+- A missing or unreadable `rollover` supplies the effective default 4 without writing or repairing the config row. Only an explicit compatibility query performs D5's repair.
+- A real change of UTC offset still writes `localOffset` exactly as D5 says (R594). Automatic checks must not suppress a required offset change to pass a preservation test.
+- Start with the persisted `lastUnburied` day, interpreted by D2. While that value and the relevant timing inputs remain unchanged, use the effective checked day to avoid repeating an already completed unbury check. Apply D7's condition and restore eligible buried cards with only their queue changed. When at least one card is restored, record today in synced `lastUnburied` as R598 requires, preserving card mtime/usn and `col.mod`. When none is restored, write no `lastUnburied` row; remember the completed check day only in memory. A changed persisted `lastUnburied`, generation replacement or external raw mutation invalidates the corresponding remembered basis, so it cannot hide incoming state.
+- Real bury operations, whether a user action, sibling burying or a generic queue-write API, establish today's `lastUnburied` marker in the same user/scheduler transaction before storing buried queues. This prevents both another check and a same-day reopen from restoring newly buried cards when an earlier empty automatic check left no synced marker. U43/U44 and every later bury entry point must preserve this rule; an untracked raw fixture write does not stand in for a valid bury operation.
+- No other config write is permitted by this policy. Required offset changes and actual unburying have their specific R594/R598 assertions; empty launch or idle bookkeeping is not an exception to N12's unchanged raw dump and clean pending-change query.
+
+The first `checkRollover()` after the collection opens records the values and emits nothing; it still restores eligible buried cards before anything reads counts, using this automatic policy. It is an open-time step of the lifecycle (U24): it runs before the collection is `Ready`.
+
+A generation change (`engine/lifecycle` L8: one-way sync, restore, `.colpkg` import) counts as an open: the day clock drops its cached result, effective unbury-check state and the values it reported, and the first `checkRollover()` on the new generation records, emits nothing and applies the automatic policy. It runs before anything reads counts on the new generation, as at open, so a downloaded collection's cards buried on an earlier day are restored first. The app reads `today` and `nextDayAt` again on `CollectionReplaced`, as after an open. `engine/lifecycle` L8 runs no open steps today; U40 adds this step there or registers the day clock as a `GenerationListener` whose check runs once the state is `Ready`.
 
 Callers: the open-time step; the app on foreground, on its timer at `next_day_at` and on a system time, zone or clock change (U51); the sync preflight before every sync (U107), whose `Rollover` op commits before the sync applies incoming data (D7); the study session before every answer (U43). A change set that touches `rollover`, `creationOffset` or `crt`, from any source, makes the day clock compute afresh and report at once. U107 also calls `checkRollover()` after each sync (R597).
 
@@ -189,7 +199,7 @@ The core runs no timer (R1854). In legacy timing `next_day_at` equals `now` for 
 
 ## D9. The rollover op
 
-When `checkRollover()` sees the day change, the writes of its day query (D5, D7: the unbury of the new day among them) and these effects form one op with source `Rollover`:
+When `checkRollover()` sees the day change, its writes under D8's automatic policy (D5, D7: the unbury of the new day among them) and these effects form one op with source `Rollover`:
 
 1. Clear undo and redo (U25) with reason `ClearedByRollover` (R598, R462).
 2. Mark the study queues stale; the session rebuilds them as R461 says (U43).
@@ -201,7 +211,7 @@ When `checkRollover()` sees the day change, the writes of its day query (D5, D7:
 
 ## D10. Writes of the day clock
 
-All writes of D5 and D7 commit through ops with source `Rollover`, also when no day change is seen (a first query after an open, a new offset, a `lastUnburied` more than 7 days ahead). That source neither records undo entries nor clears the undo history; only D9 step 1 clears it. So a new `localOffset` (offset change without a day change) or a restored `rollover` never empties the back button (coverage note sched #7).
+Writes of the explicit compatibility query (D5, D7) and the narrower automatic policy (D8) commit through ops with source `Rollover`, also when no day change is seen (a first query after an open, a new offset, a `lastUnburied` more than 7 days ahead). That source neither records undo entries nor clears the undo history; only D9 step 1 clears it. So a new `localOffset` (offset change without a day change) or a `rollover` restored by an explicit query never empties the back button (coverage note sched #7).
 
 ## D11. New collections (R596)
 
@@ -212,7 +222,7 @@ The bootstrap of a new collection (U28) takes `crt` and the creation offset from
 3. `crt` = `F` when `F` is at or before `t`, else `F` - 86,400.
 4. Creation offset = the offset in effect **at the instant `crt`**, in minutes west. It differs from `o` when the zone changed its offset between `crt` and `t`.
 
-The collection stores `crt` in the `col` row and `creationOffset` among the config keys a new collection starts with (`usn` 0, `mtime_secs` 0, like those keys). It has no `rollover`, `localOffset` or `lastUnburied` key; the first day query writes them (D5, D7). R596's rollover 4 comes from that first query.
+The collection stores `crt` in the `col` row and `creationOffset` among the config keys a new collection starts with (`usn` 0, `mtime_secs` 0, like those keys). It has no `rollover`, `localOffset` or `lastUnburied` key. An explicit compatibility query writes them as D5/D7 say; an automatic engine check follows D8 and can use rollover 4 without storing the key.
 
 | Zone | Created at (local) | `crt` | `creationOffset` |
 |---|---|---|---|
@@ -271,8 +281,8 @@ All have goldens. The unbury scenarios write their notes and cards with `db_exec
 
 ### D14.2 Where the day query runs in scenarios
 
-- The `timing` observation (`specs/conformance/observations.md` O4) is one `checkRollover()` on Meguri and one day query with its unbury check on the oracle. It can write the timing keys and restore cards.
-- Meguri runs it too whenever the real engine lifecycle opens a collection (scenario setup and handoffs may do so), before an answer, and right after a `set_config` of `rollover` or `creationOffset` (D8). The protocol's storage-level `open` step (`specs/conformance/storage-ops.md` P1) and `reopen: {}` run none: `reopen` closes and opens the file, discards cached timing, and leaves the first day query to a later `timing` observation or scheduler operation. The oracle runs a day query without the unbury check inside `answer` and `next_states`, and none when it opens a collection or writes config. `card`, `db_exec`, `set_clock` and `advance` run none on either side; a `db_exec` that writes drops Meguri's cached day (D6).
+- The `timing` observation (`specs/conformance/observations.md` O4) is one explicit compatibility day query (D5, D7) on each side. It can write the timing keys and restore cards, including the observed empty-unbury marker write. It is distinct from the automatic engine policy; its existing goldens stay unchanged.
+- The real engine lifecycle runs D8's automatic check at open (scenario setup and handoffs may use that lifecycle). Meguri's scenario adapters also run explicit compatibility queries before an answer and right after a `set_config` of `rollover` or `creationOffset`; these queries preserve the timing scenarios' observation contract. The protocol's storage-level `open` step (`specs/conformance/storage-ops.md` P1) and `reopen: {}` run none: `reopen` closes and opens the file, discards cached timing, and leaves the first day query to a later `timing` observation or scheduler operation. The oracle runs a day query without the unbury check inside `answer` and `next_states`, and none when it opens a collection or writes config. `card`, `db_exec`, `set_clock` and `advance` run none on either side; a `db_exec` that writes drops Meguri's cached day (D6).
 - In actor scenarios (`specs/conformance/sync-ops.md`), an oracle actor's `sync: {kind: normal}` runs a day query with the unbury check only when the status check calls for an incremental sync; Meguri actors run `checkRollover()` before every sync (D7, D8). The scenario's sync server, Anki's own (`sync-ops.md` S3.1), runs one on its collection when a sync starts. A one-way sync reopens the actor's collection, which adds `creationOffset` to a legacy collection on the oracle (D12.3).
 - A timing scenario that expects day-query writes or unburying aligns both sides as follows (raw storage preservation scenarios intentionally request no timing):
   - starts with `observe: [timing]`;
@@ -287,3 +297,4 @@ All have goldens. The unbury scenarios write their notes and cards with `db_exec
 - Meguri's executor needs the `timing` observation and the `reopen` op (U40 implements both adapters).
 - The sync half of U40's legacy-timing test ("keeps its timing mode after a sync") has no scenario: actor scenarios are live, Meguri actors need the sync units (U106, U107), and an actor's first sync of a collection that holds cards is a one-way sync, which reopens the collection, after which the oracle's collection is no longer legacy (D12.3). U40 checks it with engine tests: a `SyncIncoming` op whose change set leaves `creationOffset` absent keeps legacy timing (today unchanged, no `creationOffset` row), and one that adds it switches the count at once (D12.3).
 - Meguri-only behavior has no scenario and is checked by U40's engine tests: D8's events (`TimeZoneChanged` for Europe/Paris to Africa/Ceuta without `RolledOver`; one event for two calls on the same day; one recompute and at most one event for a `SyncIncoming` change of `rollover` from 4 to 6), D9 (undo cleared with `ClearedByRollover`, a refused or parked `Rollover` op run once the state is `Ready`), D8's generation change, and the absence of core timers (R1854).
+- Engine day-conformance tests replay explicit compatibility queries through the real writer and assert that the automatic day clock reports the same day and next boundary. They must not make a compatibility replay stand in for actual automatic lifecycle verification. Preservation and rollover tests exercise that automatic policy directly: unchanged raw dumps and clean pending queries through 100 launch/idle cycles across days, correct day events without empty marker writes, actual next-day unbury of both kinds with stamps preserved, same-day bury/reopen staying buried, and an offset change writing only the required `localOffset` when nothing needs unburying. No new dump masks or golden deviations are introduced for this distinction.
