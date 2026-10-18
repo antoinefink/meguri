@@ -231,6 +231,17 @@ impl ExecShared {
         }
     }
 
+    /// Sidecar mutations hold a reader lease while touching files; they obey
+    /// the same admission tokens as writer operations.
+    pub(crate) fn require_admission(&self, privilege: Option<Privilege>) -> Result<(), EngineError> {
+        let queue = self.lock_queue();
+        match queue.admission.decide(privilege, false) {
+            Decision::Queue if !queue.stop => Ok(()),
+            Decision::Refuse(error) => Err(error),
+            _ => Err(EngineError::unavailable("the collection cannot admit sidecar work")),
+        }
+    }
+
     /// Sleeps indefinitely when clean, or until the pending WAL flush is due.
     /// Check the deadline even with queued tasks so traffic cannot starve it.
     pub(crate) fn next_task(&self, flush_at: Option<Duration>) -> WriterWake {

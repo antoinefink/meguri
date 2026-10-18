@@ -156,9 +156,28 @@ impl Collection {
     /// a replacement that completed in between would otherwise hand this
     /// handle a reader of the new file (L3).
     fn reader_at(&self, role: ReaderRole, index: usize) -> Result<ReaderLease<'_>, EngineError> {
+        self.reader_checked(role, index, false)
+    }
+
+    pub(crate) fn operation_reader(&self, role: ReaderRole) -> Result<ReaderLease<'_>, EngineError> {
+        self.reader_checked(role, 0, true)
+    }
+
+    fn reader_checked(
+        &self,
+        role: ReaderRole,
+        index: usize,
+        require_admission: bool,
+    ) -> Result<ReaderLease<'_>, EngineError> {
         #[cfg(test)]
         tests::before_lease();
-        let mut guard = self.core.readers.lease(role, index, || self.check_current())?;
+        let mut guard = self.core.readers.lease(role, index, || {
+            self.check_current()?;
+            if require_admission {
+                self.core.exec.require_admission(self.privilege)?;
+            }
+            Ok(())
+        })?;
         if let (Some(attachment), Some(reader)) = (self.core.derived.get(), guard.as_mut()) {
             attachment.ensure(reader, self.generation);
         }

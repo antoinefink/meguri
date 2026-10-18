@@ -8,6 +8,7 @@ mod browser;
 mod cards;
 pub mod clock;
 mod decks;
+mod host_audit;
 pub mod live;
 mod media;
 mod meguri;
@@ -23,6 +24,7 @@ mod storage;
 pub mod sync_guard;
 mod tags;
 mod text;
+mod undo;
 
 use std::fmt;
 use std::ops::Range;
@@ -33,6 +35,7 @@ use serde_json::Value;
 
 use crate::scenario::LoadedScenario;
 pub use crate::scenario::Needs;
+pub use host_audit::BackupWitness;
 pub use meguri::{
     FinishFn, HandoffFn, MeguriExecutor, NewCollectionFn, NewIds, ObserveFn, OpFn, OpResult, RawDumpFn, Registry, Seat,
     Session, SetupFn, SyncAccount, actor_seed,

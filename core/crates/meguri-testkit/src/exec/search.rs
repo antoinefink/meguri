@@ -70,7 +70,7 @@ fn config(session: &Session<'_>, key: &str) -> Result<Option<ConfigValue>, ExecE
         .collection()
         .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
     collection
-        .writer()
+        .reader()?
         .config_value(key)
         .map_err(|e| ExecError::new("core_error", e.to_string()))
 }
@@ -174,7 +174,7 @@ fn run(session: &Session<'_>, plan: &Plan, mode: SearchMode) -> Result<Value, Ex
             Param::Text(v) => SqlValue::Text(v.clone()),
         })
         .collect();
-    let rows = match collection.writer().execute_raw(plan.sql(), &params) {
+    let rows = match collection.reader()?.execute_raw(plan.sql(), &params) {
         Ok(rows) => rows,
         Err(_) => return Ok(json!({"error": "search_failed"})),
     };

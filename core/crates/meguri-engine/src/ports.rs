@@ -64,6 +64,11 @@ pub trait SuspendParticipant: Send + Sync {
     fn resume(&self) -> Result<(), EngineError> {
         Ok(())
     }
+    /// Rebind using the current, privileged collection before public admission.
+    /// Existing participants need only their connection-level resume.
+    fn resume_with_collection(&self, _collection: &Collection) -> Result<(), EngineError> {
+        self.resume()
+    }
 }
 
 /// Runs while the collection opens, before it is `Ready` (`engine/lifecycle`

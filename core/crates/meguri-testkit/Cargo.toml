@@ -21,6 +21,7 @@ jiff.workspace = true
 # test-hooks: the executor's WAL-flush observations (storage C9.2), so the
 # engine's own tests get them in a plain workspace run.
 meguri-engine = { workspace = true, features = ["test-hooks"] }
+meguri-host = { workspace = true, features = ["test-hooks"] }
 # test-hooks: armed fault points and the steppable clock (KTD18).
 meguri-model = { workspace = true, features = ["test-hooks"] }
 # The scheduler area's adapters (exec/sched.rs): fsrs_next and the fuzz table.

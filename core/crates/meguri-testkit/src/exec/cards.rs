@@ -9,6 +9,29 @@ use meguri_storage::{
 use serde_json::{Map, Value, json};
 pub(super) fn register(r: &mut Registry) {
     r.observation("card", observe);
+    r.observation("ids", observe_ids);
+}
+
+fn observe_ids(s: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
+    let refs: Vec<_> = match &request.args {
+        ObservationArgs::Refs(refs) => refs.clone(),
+        _ => [(RefKind::Note, s.notes.len()), (RefKind::Card, s.cards.len())]
+            .into_iter()
+            .flat_map(|(kind, count)| (0..count).map(move |i| LogicalRef { kind, n: i as u32 + 1 }))
+            .collect(),
+    };
+    let mut out = Map::new();
+    for reference in refs {
+        let ids = match reference.kind {
+            RefKind::Note => &s.notes,
+            RefKind::Card => &s.cards,
+        };
+        let id = ids
+            .get(reference.index())
+            .ok_or_else(|| ExecError::new("unknown_ref", reference.to_string()))?;
+        out.insert(reference.to_string(), json!(id));
+    }
+    Ok(out.into())
 }
 fn core(e: impl std::fmt::Display) -> ExecError {
     ExecError::new("core_error", e.to_string())
@@ -46,7 +69,7 @@ pub(super) fn card_value(rows: &impl ReadRows, s: &Session<'_>, raw: &RawRows) -
     Ok(out.into())
 }
 fn observe(s: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
-    let writer = s.storage.collection().ok_or_else(|| core("no collection"))?.writer();
+    let writer = s.storage.collection().ok_or_else(|| core("no collection"))?.reader()?;
     let refs: Vec<_> = match &request.args {
         ObservationArgs::Refs(refs) => refs.clone(),
         _ => (0..s.cards.len())
@@ -65,7 +88,7 @@ fn observe(s: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, E
         let raw = writer
             .execute_raw("SELECT * FROM cards WHERE id = ?", &[SqlValue::Integer(*id)])
             .map_err(core)?;
-        out.insert(r.to_string(), card_value(writer, s, &raw)?);
+        out.insert(r.to_string(), card_value(&*writer, s, &raw)?);
     }
     Ok(out.into())
 }

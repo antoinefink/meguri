@@ -38,3 +38,5 @@
 - Whole-collection change sets (U32 external edits) invalidate every cache: they have no row deltas. Derived observers advance `sent` before queueing invalidation, so older attached rows cannot pass `is_current` while invalidation is pending.
 
 - `start_job` and `start_continued_job` share the control lane: reentrant calls from an op, observer or suspend participant are refused while control is running. Never wait for a job there. Open holds the lane only for state transitions; close during Opening/Upgrading is refused. Suspend includes lane acquisition in its budget; resume bounds lane acquisition to five seconds.
+
+- Media operations use `Collection::operation_reader`, which checks admission under the held reader lease, rather than a read-only lease. Read-only readers may reopen during resume before providers succeed. Media recovery uses the privileged current collection through `resume_with_collection` and closes its journal on failure.

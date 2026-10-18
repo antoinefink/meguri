@@ -5,7 +5,7 @@
 
 use rusqlite::Connection;
 
-use crate::connections::Writer;
+use crate::connections::{Reader, Writer};
 use crate::error::StorageError;
 
 /// The twelve tables of S2.
@@ -136,6 +136,13 @@ pub fn check(objects: &[SchemaObject]) -> ExpectedObjects {
 impl Writer {
     /// The rows of the collection file's `sqlite_master` (temporary objects
     /// are not in it).
+    pub fn schema_objects(&self) -> Result<Vec<SchemaObject>, StorageError> {
+        Ok(read(&self.conn)?)
+    }
+}
+
+impl Reader {
+    /// The collection schema on a query connection, including foreign objects.
     pub fn schema_objects(&self) -> Result<Vec<SchemaObject>, StorageError> {
         Ok(read(&self.conn)?)
     }

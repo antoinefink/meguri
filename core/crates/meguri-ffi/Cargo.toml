@@ -26,3 +26,10 @@ ankiweb = []
 # Test-only exports (KTD18, R1967): on for Debug and Profile, never in Release
 # or AppStore. Never on by default.
 test-hooks = []
+
+[dev-dependencies]
+meguri-host = { workspace = true, features = ["test-hooks"] }
+meguri-model = { workspace = true, features = ["test-hooks"] }
+meguri-storage = { workspace = true, features = ["test-hooks"] }
+meguri-testkit.workspace = true
+tempfile.workspace = true

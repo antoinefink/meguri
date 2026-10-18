@@ -639,6 +639,20 @@ runs:
     budget_s: 300
   # The milestone evaluation (U240's perf-gate suites): after bench-mac, so the
   # Mac benches and the simulator smoke are judged on one commit.
+  - id: u38-wiring
+    job: u38-wiring
+    args: [--milestone, M1R]
+    tier: T3
+    placement: docker:dev
+    class: unit
+    budget_s: 900
+  - id: u38-wiring-m1
+    job: u38-wiring
+    args: [--milestone, M1]
+    tier: T3
+    placement: docker:dev
+    class: unit
+    budget_s: 900
   - id: perf-gate-milestone
     job: perf-gate
     args: [--require, perf-ui, --require, bench-mac]

@@ -1,5 +1,4 @@
-//! U27's adapters. The storage session records no history until U38; undo
-//! scenarios remain pending, as conformance/undo-ops V6 requires.
+//! U27 note adapters through the hosted engine (engine/host H4, H5).
 use super::{ExecError, OpResult, Registry, Session};
 use crate::scenario::{
     Fields, FieldsCheckCase, FieldsCheckRequest, NoteSpec, ObservationArgs, ObservationRequest, Setup, Step,
@@ -9,7 +8,7 @@ use meguri_model::{
     ids::{DeckId, NoteId},
     notetype::Notetype,
 };
-use meguri_storage::{ReadRows, StampMode, Table};
+use meguri_storage::{ReadRows, ReaderRole, Table};
 use serde_json::{Value, json};
 
 pub(super) fn register(registry: &mut Registry) {
@@ -28,7 +27,7 @@ fn unknown(e: impl Into<String>) -> ExecError {
 fn invalid(e: impl Into<String>) -> ExecError {
     ExecError::new("invalid_scenario", e)
 }
-fn collection<'s>(session: &'s Session<'_>) -> Result<&'s meguri_storage::OpenedCollection, ExecError> {
+fn collection<'s>(session: &'s Session<'_>) -> Result<&'s super::storage::SessionCollection, ExecError> {
     session
         .storage
         .collection()
@@ -64,9 +63,9 @@ fn values(nt: &Notetype, mut values: Vec<String>, fields: &Fields) -> Result<Vec
 }
 
 fn add(session: &mut Session<'_>, spec: &NoteSpec) -> Result<notes::Added, ExecError> {
-    let collection = collection(session)?;
-    let writer = collection.writer();
-    let nt = find(writer, &spec.notetype)?;
+    let collection = session.engine_collection()?;
+    let writer = collection.reader(ReaderRole::Query).map_err(core)?;
+    let nt = find(&*writer, &spec.notetype)?;
     let deck = match &spec.deck {
         None => DeckId(1),
         Some(name) => writer
@@ -86,11 +85,10 @@ fn add(session: &mut Session<'_>, spec: &NoteSpec) -> Result<notes::Added, ExecE
         guid: None,
         update_add_defaults: true,
     };
-    let mut scope = writer
-        .begin_write(StampMode::Local, session.clock.as_ref(), None)
-        .map_err(core)?;
-    let added = notes::add_in(&mut scope, session.random.as_ref(), &input).map_err(core)?;
-    scope.commit().map_err(core)?;
+    drop(writer);
+    let added = notes::add(&collection, input, meguri_engine::OpSource::UserUndoable)
+        .map_err(core)?
+        .value;
     session.notes.push(added.id.0);
     session.cards.extend(added.cards.iter().map(|id| id.0));
     Ok(added)
@@ -99,7 +97,7 @@ fn add(session: &mut Session<'_>, spec: &NoteSpec) -> Result<notes::Added, ExecE
 fn cache_decks(session: &mut Session<'_>) -> Result<(), ExecError> {
     let mut found = Vec::new();
     let mut after = None;
-    let writer = collection(session)?.writer();
+    let writer = collection(session)?.reader()?;
     loop {
         let ids = writer.ids_after(Table::Decks, after, 1000).map_err(core)?;
         let Some(last) = ids.last().copied() else { break };
@@ -110,6 +108,7 @@ fn cache_decks(session: &mut Session<'_>) -> Result<(), ExecError> {
             }
         }
     }
+    drop(writer);
     session.decks.extend(found);
     Ok(())
 }
@@ -138,7 +137,7 @@ fn stored(session: &Session<'_>, index: usize) -> Result<meguri_model::note::Not
         .get(index)
         .ok_or_else(|| unknown("note was not created"))?;
     collection(session)?
-        .writer()
+        .reader()?
         .note(NoteId(id))
         .map_err(core)?
         .ok_or_else(|| unknown("note no longer exists"))
@@ -147,9 +146,9 @@ fn edit_note(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
     let Step::EditNote(args) = step else {
         return Err(invalid("expected edit_note"));
     };
+    let collection = session.engine_collection()?;
     let note = stored(session, args.note.0.index())?;
-    let collection = collection(session)?;
-    let writer = collection.writer();
+    let writer = collection.reader(ReaderRole::Query).map_err(core)?;
     let nt = writer
         .notetype(note.notetype_id)
         .map_err(core)?
@@ -166,11 +165,8 @@ fn edit_note(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecErr
             .clone()
             .unwrap_or_else(|| note.tags.split_whitespace().map(str::to_owned).collect()),
     };
-    let mut scope = writer
-        .begin_write(StampMode::Local, session.clock.as_ref(), None)
-        .map_err(core)?;
-    notes::update_in(&mut scope, &input).map_err(core)?;
-    scope.commit().map_err(core)?;
+    drop(writer);
+    notes::update(&collection, input, meguri_engine::OpSource::UserUndoable).map_err(core)?;
     Ok(OpResult::Done)
 }
 fn delete_notes(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
@@ -189,13 +185,8 @@ fn delete_notes(session: &mut Session<'_>, step: &Step) -> Result<OpResult, Exec
                 .ok_or_else(|| unknown("note was not created"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let collection = collection(session)?;
-    let mut scope = collection
-        .writer()
-        .begin_write(StampMode::Local, session.clock.as_ref(), None)
-        .map_err(core)?;
-    notes::delete_in(&mut scope, collection.path(), &ids).map_err(core)?;
-    scope.commit().map_err(core)?;
+    let collection = session.engine_collection()?;
+    notes::delete(&collection, ids, meguri_engine::OpSource::UserUndoable).map_err(core)?;
     Ok(OpResult::Done)
 }
 fn fields_check(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {
@@ -203,19 +194,26 @@ fn fields_check(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
         return Err(invalid("fields_check expects cases"));
     };
     let cases = FieldsCheckRequest::from_mapping(map).map_err(|e| invalid(e.to_string()))?;
-    let reader = collection(session)?.writer();
+    let reader = collection(session)?.reader()?;
     cases
         .cases
         .iter()
         .map(|case| {
             let (nt, fields, own) = match case {
                 FieldsCheckCase::NewNote { notetype, fields } => {
-                    let nt = find(reader, notetype)?;
+                    let nt = find(&*reader, notetype)?;
                     let fields = values(&nt, vec![String::new(); nt.fields.len()], fields)?;
                     (nt, fields, None)
                 }
                 FieldsCheckCase::StoredNote { note, fields } => {
-                    let note = stored(session, note.0.index())?;
+                    let id = *session
+                        .notes
+                        .get(note.0.index())
+                        .ok_or_else(|| unknown("note was not created"))?;
+                    let note = reader
+                        .note(NoteId(id))
+                        .map_err(core)?
+                        .ok_or_else(|| unknown("note no longer exists"))?;
                     let nt = reader
                         .notetype(note.notetype_id)
                         .map_err(core)?
@@ -227,7 +225,7 @@ fn fields_check(session: &mut Session<'_>, request: &ObservationRequest) -> Resu
                     (nt, draft, Some(note.id))
                 }
             };
-            let checked = notes::check(reader, &nt, &fields, own).map_err(core)?;
+            let checked = notes::check(&*reader, &nt, &fields, own).map_err(core)?;
             let mut value = json!({ "state": checked.state.name() });
             if checked.state == notes::FieldState::Duplicate {
                 value["duplicates"] = Value::Array(

@@ -73,9 +73,14 @@ pub struct Registry {
     handoff: Option<(HandoffFn, HandoffFn)>,
     actor: Option<RawDumpFn>,
     finish: Vec<FinishFn>,
+    record_changes: bool,
 }
 
 impl Registry {
+    /// Capture engine changes and backup-hook witnesses for parity tests.
+    pub fn record_changes(&mut self) {
+        self.record_changes = true;
+    }
     /// What makes the new collection a scenario starts from (dsl.md D8):
     /// U28's bootstrap, or before it an area's stand-in. It counts as the
     /// setup capability `new_collection`.
@@ -217,6 +222,16 @@ pub struct Session<'a> {
     pub day: meguri_engine::DayCache,
 }
 
+impl Session<'_> {
+    /// Promote to the normal hosted engine before an engine-owned adapter runs.
+    pub fn engine_collection(&mut self) -> Result<meguri_engine::Collection, ExecError> {
+        if self.storage.promote(self.clock.clone(), self.random.clone())? {
+            self.day.clear();
+        }
+        self.storage.current_collection()
+    }
+}
+
 /// A Meguri actor's place in a mixed run (sync-ops.md S10.4): its name, the
 /// endpoint it syncs with (the Meguri edge, S8.1; `None` while the runner
 /// has none) and the scenario's account, test credentials the worker
@@ -268,7 +283,8 @@ impl MeguriExecutor {
     }
 
     /// The areas that have adapters, by name.
-    pub const AREAS: [&'static str; 14] = [
+    pub const AREAS: [&'static str; 15] = [
+        "undo",
         "media",
         "browser",
         "decks",
@@ -300,6 +316,7 @@ impl MeguriExecutor {
         let mut registry = Registry::default();
         for area in areas {
             match *area {
+                "undo" => super::undo::register(&mut registry),
                 "media" => super::media::register(&mut registry),
                 "cards" => super::cards::register(&mut registry),
                 "model" => super::model::register(&mut registry),
@@ -337,7 +354,7 @@ impl MeguriExecutor {
         if let Some(handoff) = resume {
             clock.set_secs(handoff.now);
         }
-        Ok(Session {
+        let mut session = Session {
             scenario: loaded,
             clock: Arc::new(clock),
             random: Arc::new(SeededRandom::new(seed(loaded))),
@@ -347,7 +364,11 @@ impl MeguriExecutor {
             actor: None,
             storage: Default::default(),
             day: Default::default(),
-        })
+        };
+        if self.registry.record_changes {
+            session.storage.record_changes();
+        }
+        Ok(session)
     }
 
     /// D8: the new collection, when the scenario starts from one and an
@@ -503,6 +524,9 @@ impl MeguriExecutor {
                 storage: Default::default(),
                 day: Default::default(),
             };
+            if self.registry.record_changes {
+                session.storage.record_changes();
+            }
             self.new_collection(&mut session)?;
             sessions.insert(name.clone(), session);
         }

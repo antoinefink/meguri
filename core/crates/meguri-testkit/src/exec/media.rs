@@ -129,6 +129,7 @@ fn outside(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
     Ok(OpResult::Done)
 }
 fn add(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    session.engine_collection()?;
     let Step::AddMedia(entry) = step else {
         return Err(invalid("wrong add_media step"));
     };
@@ -149,6 +150,7 @@ fn add(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     }
 }
 fn trash(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    session.engine_collection()?;
     let Step::TrashMedia(args) = step else {
         return Err(invalid("wrong trash_media step"));
     };
@@ -156,10 +158,12 @@ fn trash(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> 
     Ok(OpResult::Done)
 }
 fn restore(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    session.engine_collection()?;
     store(session)?.restore().map_err(core)?;
     Ok(OpResult::Done)
 }
 fn empty(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
+    session.engine_collection()?;
     store(session)?.empty_trash().map_err(core)?;
     Ok(OpResult::Done)
 }

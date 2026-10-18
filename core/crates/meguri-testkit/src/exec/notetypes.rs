@@ -2,9 +2,7 @@
 //! `setup.notetypes` (dsl.md D6.4, each entry added as `add_notetype` adds
 //! it), the ops `add_notetype`, `add_stock_notetype`, `clone_notetype`,
 //! `ensure_io_notetype` and the plain-save part of `update_notetype`
-//! (T10.1), and the `notetype_structure` observation (T8). Each op runs
-//! meguri-engine's `notetypes` code in one local write scope on the
-//! session's writer, until the session runs the engine (U38).
+//! (T10.1), and the `notetype_structure` observation (T8). Each op uses the public hosted engine API, including undo and stale-draft checks.
 
 use meguri_engine::EngineError;
 use meguri_engine::notetypes::{
@@ -13,7 +11,7 @@ use meguri_engine::notetypes::{
 use meguri_model::deck::{human_name, native_name};
 use meguri_model::ids::DeckId;
 use meguri_model::notetype::Notetype;
-use meguri_storage::{ReadRows, StampMode, StorageError, Table, WriteScope};
+use meguri_storage::{ReadRows, StorageError, Table};
 use serde_json::{Map, Value, json};
 
 use super::{ExecError, OpResult, Registry, Session};
@@ -70,23 +68,9 @@ fn unknown_ref(detail: impl Into<String>) -> ExecError {
 
 /// Runs `f` in one local write scope on the session's writer and commits
 /// it; a refused save rolls back and is recorded as T7's kind.
-fn in_scope<T>(
-    session: &mut Session<'_>,
-    f: impl FnOnce(&mut WriteScope<'_>, &Session<'_>) -> Result<T, EngineError>,
-) -> Result<Result<T, &'static str>, ExecError> {
-    let collection = session
-        .storage
-        .collection()
-        .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
-    let mut scope = collection
-        .writer()
-        .begin_write(StampMode::Local, session.clock.as_ref(), None)
-        .map_err(core)?;
-    match f(&mut scope, session) {
-        Ok(value) => {
-            scope.commit().map_err(core)?;
-            Ok(Ok(value))
-        }
+fn outcome<T>(value: Result<meguri_engine::OpResult<T>, EngineError>) -> Result<Result<T, &'static str>, ExecError> {
+    match value {
+        Ok(result) => Ok(Ok(result.value)),
         Err(EngineError::NotetypeRefused(refusal)) => Ok(Err(refusal.kind())),
         Err(other) => Err(core(other)),
     }
@@ -126,11 +110,8 @@ fn new_notetype(spec: &NotetypeSpec) -> NewNotetype {
 /// scenario invalid.
 fn setup_notetypes(session: &mut Session<'_>, setup: &Setup) -> Result<(), ExecError> {
     for spec in setup.notetypes.iter().flatten() {
-        let new = new_notetype(spec);
-        let added = in_scope(session, |scope, session| {
-            notetypes::add_in(scope, session.random.as_ref(), &new)
-        })?;
-        if let Err(kind) = added {
+        let collection = session.engine_collection()?;
+        if let Err(kind) = outcome(notetypes::add(&collection, new_notetype(spec)))? {
             return Err(invalid(format!("setup note type {:?} refused: {kind}", spec.name)));
         }
     }
@@ -140,16 +121,12 @@ fn setup_notetypes(session: &mut Session<'_>, setup: &Setup) -> Result<(), ExecE
 /// T2.
 fn add_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     let Step::AddNotetype(spec) = step else {
-        return Err(ExecError::new(
-            "internal_error",
-            "add_notetype adapter called for another op",
-        ));
+        return Err(invalid("expected add_notetype"));
     };
-    let new = new_notetype(spec);
-    let added = in_scope(session, |scope, session| {
-        notetypes::add_in(scope, session.random.as_ref(), &new).map(|a| a.name)
-    })?;
-    Ok(named(added))
+    let collection = session.engine_collection()?;
+    Ok(named(
+        outcome(notetypes::add(&collection, new_notetype(spec)))?.map(|a| a.name),
+    ))
 }
 
 /// T3.
@@ -168,49 +145,37 @@ fn add_stock_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult
         scenario::StockKind::Cloze => StockKind::Cloze,
         scenario::StockKind::ImageOcclusion => StockKind::ImageOcclusion,
     };
-    let added = in_scope(session, |scope, session| {
-        notetypes::add_stock_in(scope, session.random.as_ref(), kind, args.name.as_deref()).map(|a| a.name)
-    })?;
-    Ok(named(added))
+    let collection = session.engine_collection()?;
+    Ok(named(
+        outcome(notetypes::add_stock(&collection, kind, args.name.clone()))?.map(|a| a.name),
+    ))
 }
 
 /// The note type stored under exactly `name` (T1).
-fn find(scope: &WriteScope<'_>, name: &str) -> Result<Result<Notetype, String>, StorageError> {
+fn find(scope: &impl ReadRows, name: &str) -> Result<Result<Notetype, String>, StorageError> {
     Ok(notetypes::read::by_name(scope, name)?.ok_or_else(|| format!("no note type is named {name:?} (T1)")))
 }
 
 /// T4.
 fn clone_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     let Step::CloneNotetype(args) = step else {
-        return Err(ExecError::new(
-            "internal_error",
-            "clone_notetype adapter called for another op",
-        ));
+        return Err(invalid("expected clone_notetype"));
     };
-    let mut missing = None;
-    let added = in_scope(session, |scope, _| {
-        let source = match find(scope, &args.notetype)? {
-            Ok(source) => source,
-            Err(detail) => {
-                missing = Some(detail);
-                return Ok(String::new());
-            }
-        };
-        notetypes::clone_in(scope, source.id, args.name.as_deref()).map(|a| a.name)
-    })?;
-    match missing {
-        Some(detail) => Err(unknown_ref(detail)),
-        None => Ok(named(added)),
-    }
+    let collection = session.engine_collection()?;
+    let source = {
+        let reader = collection.reader(meguri_storage::ReaderRole::Query).map_err(core)?;
+        find(&*reader, &args.notetype).map_err(core)?.map_err(unknown_ref)?
+    };
+    Ok(named(
+        outcome(notetypes::clone_notetype(&collection, source.id, args.name.clone()))?.map(|a| a.name),
+    ))
 }
 
 /// T6.
 fn ensure_io_notetype(session: &mut Session<'_>, _step: &Step) -> Result<OpResult, ExecError> {
-    let ensured = in_scope(session, |scope, session| {
-        notetypes::ensure_image_occlusion_in(scope, session.random.as_ref()).map(|a| a.name)
-    })?;
-    match ensured {
-        Ok(name) => Ok(OpResult::Output(json!({ "name": name }))),
+    let collection = session.engine_collection()?;
+    match outcome(notetypes::ensure_image_occlusion(&collection))? {
+        Ok(value) => Ok(OpResult::Output(json!({ "name": value.name }))),
         Err(kind) => Err(core(format!("ensure_io_notetype refused: {kind}"))),
     }
 }
@@ -219,41 +184,32 @@ fn ensure_io_notetype(session: &mut Session<'_>, _step: &Step) -> Result<OpResul
 /// note type, saved once (checked unless `skip_checks`).
 fn update_notetype(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     let Step::UpdateNotetype(args) = step else {
-        return Err(ExecError::new(
-            "internal_error",
-            "update_notetype adapter called for another op",
-        ));
+        return Err(invalid("expected update_notetype"));
     };
-    let mut failed = None;
-    let saved = in_scope(session, |scope, _| {
-        let draft = match find(scope, &args.notetype)? {
-            Ok(stored) => {
-                let base = AggregateDigest::of(&stored);
-                apply_edits(scope, stored, &args.edits).map(|notetype| Draft { notetype, base })
-            }
-            Err(detail) => Err(unknown_ref(detail)),
-        };
-        match draft {
-            Ok(draft) => {
-                let options = SaveOptions {
-                    skip_checks: args.skip_checks,
-                };
-                notetypes::save_in(scope, &draft, options).map(|s| s.name)
-            }
-            Err(error) => {
-                failed = Some(error);
-                Ok(String::new())
-            }
+    let collection = session.engine_collection()?;
+    let draft = {
+        let reader = collection.reader(meguri_storage::ReaderRole::Query).map_err(core)?;
+        let stored = find(&*reader, &args.notetype).map_err(core)?.map_err(unknown_ref)?;
+        let base = AggregateDigest::of(&stored);
+        Draft {
+            notetype: apply_edits(&*reader, stored, &args.edits)?,
+            base,
         }
-    })?;
-    match failed {
-        Some(error) => Err(error),
-        None => Ok(named(saved)),
-    }
+    };
+    Ok(named(
+        outcome(notetypes::save(
+            &collection,
+            draft,
+            SaveOptions {
+                skip_checks: args.skip_checks,
+            },
+        ))?
+        .map(|s| s.name),
+    ))
 }
 
 /// T5's plain edits on a draft; any other edit is U34's.
-fn apply_edits(scope: &WriteScope<'_>, mut draft: Notetype, edits: &[NotetypeEdit]) -> Result<Notetype, ExecError> {
+fn apply_edits(scope: &impl ReadRows, mut draft: Notetype, edits: &[NotetypeEdit]) -> Result<Notetype, ExecError> {
     for edit in edits {
         match edit {
             NotetypeEdit::Rename(name) => name.clone_into(&mut draft.name),
@@ -315,7 +271,7 @@ fn apply_edits(scope: &WriteScope<'_>, mut draft: Notetype, edits: &[NotetypeEdi
 
 /// A `template` edit without `front` or `back`: browser appearance and the
 /// deck override.
-fn apply_template_edit(scope: &WriteScope<'_>, draft: &mut Notetype, edit: &TemplateEdit) -> Result<(), ExecError> {
+fn apply_template_edit(scope: &impl ReadRows, draft: &mut Notetype, edit: &TemplateEdit) -> Result<(), ExecError> {
     let deck = match &edit.deck {
         None => None,
         Some(None) => Some(DeckId(0)),
@@ -347,7 +303,7 @@ fn apply_template_edit(scope: &WriteScope<'_>, draft: &mut Notetype, edit: &Temp
 }
 
 /// The id of the deck with this human name.
-fn deck_id(scope: &WriteScope<'_>, name: &str) -> Result<DeckId, ExecError> {
+fn deck_id(scope: &impl ReadRows, name: &str) -> Result<DeckId, ExecError> {
     let native = native_name(name);
     let mut after = None;
     loop {
@@ -370,8 +326,8 @@ fn notetype_structure(session: &mut Session<'_>, request: &ObservationRequest) -
         .storage
         .collection()
         .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
-    let writer = collection.writer();
-    let all = notetypes::read::all(writer).map_err(core)?;
+    let writer = collection.reader()?;
+    let all = notetypes::read::all(&*writer).map_err(core)?;
     let chosen: Vec<&Notetype> = match &request.args {
         ObservationArgs::None => all.iter().collect(),
         ObservationArgs::Mapping(map) => map
@@ -390,7 +346,7 @@ fn notetype_structure(session: &mut Session<'_>, request: &ObservationRequest) -
     };
     let mut out = Map::new();
     for notetype in chosen {
-        out.insert(notetype.name.clone(), structure(writer, notetype)?);
+        out.insert(notetype.name.clone(), structure(&*writer, notetype)?);
     }
     Ok(Value::Object(out))
 }

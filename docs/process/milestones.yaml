@@ -332,7 +332,7 @@ milestones:
           - text: "U251's M1R legs: kill during review, during a sync and during the first full download (AE86), background suspend, the corrupt-collection screen, and restore through Settings (U163a); its later legs wire in with the units U251 names"
             items: [kill-review, kill-sync, kill-first-full-download, background-suspend, corrupt-collection, restore]
         why: U251's M1R legs (AE86), restore through Settings (U163a)
-      - {id: u38-wiring, run: u38-wiring, pending: U38, plan: ["U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check)"], why: "U38's wiring/pending.rs lists only ports of units outside M1R"}
+      - {id: u38-wiring, run: u38-wiring, plan: ["U38's `wiring/pending.rs` lists only ports whose provider units are outside M1R (U38's gate check)"], why: "pending providers must belong to later milestones"}
       - {id: u176-fallback, run: u176-fallback, pending: U176, plan: ["U176's snapshot-swap fallback exists behind its flag"], why: "U176's snapshot-swap fallback exists behind its flag"}
     # Device-run budgets by group (U241 keys them); a milestone's device runs
     # cover its groups and every earlier milestone's.
@@ -454,7 +454,7 @@ milestones:
         scope: {detail: screens, items: [home.deckList, home.deckPage, review.question, review.answer]}
         plan: [U254, {text: "for Home, deck page and review", items: [home.deckList, home.deckPage, review.question, review.answer]}]
         why: U254 critic loop; the screens are verified
-      - {id: u38-wiring, run: u38-wiring, pending: U38, plan: ["U38's `wiring/pending.rs` is empty"], why: "U38's wiring/pending.rs is empty"}
+      - {id: u38-wiring-m1, run: u38-wiring-m1, plan: ["U38's `wiring/pending.rs` is empty"], why: "no pending provider belongs after M1"}
       - {id: u176-fallback, run: u176-fallback, pending: U176, plan: ["U176's snapshot-swap fallback exists behind its flag"], why: "U176's snapshot-swap fallback exists behind its flag"}
     budgets:
       launch-home: [R1818, R1819, R1820, R1821, R1822]

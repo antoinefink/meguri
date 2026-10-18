@@ -222,7 +222,7 @@ impl Engine {
         collection.privilege = Some(privilege);
         let day = collection.check_rollover()?;
         for participant in self.ports().suspend_participants {
-            participant.resume()?;
+            participant.resume_with_collection(&collection)?;
         }
         self.jobs().pause(false);
         exec.set_admission(Admission::Open);

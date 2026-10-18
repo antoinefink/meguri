@@ -53,6 +53,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "legacy_update",
             "media_outside",
             "open",
+            "redo",
+            "remove_config",
             "remove_note_tags",
             "remove_preset",
             "rename_deck",
@@ -70,6 +72,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "set_flag",
             "set_tag_collapsed",
             "trash_media",
+            "undo",
             "update_notetype",
             "update_notetype.css",
             "update_notetype.field_options",
@@ -104,6 +107,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "decks",
             "fields_check",
             "fsrs_next",
+            "ids",
             "legacy_json",
             "media_dir",
             "media_pending",
@@ -115,6 +119,7 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "template",
             "text",
             "timing",
+            "undo_status",
         ])
     );
     // dsl.md D7.2: 60 ops besides observe, the actor ops of sync-ops.md, the

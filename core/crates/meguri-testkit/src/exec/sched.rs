@@ -41,13 +41,34 @@ pub(super) fn day_query_now(session: &mut Session<'_>) -> Result<DayQuery, ExecE
         .ok_or_else(|| invalid("no collection is open (storage-ops.md P1.2)"))?;
     let now_ms = clock.now_ms();
     let core = |e: StorageError| ExecError::new("core_error", e.to_string());
-    let mut scope = collection
-        .writer()
-        .begin_write(StampMode::Raw, clock.as_ref(), None)
-        .map_err(core)?;
-    let query = day_query(&mut scope, day, now_ms.div_euclid(1000), clock.utc_offset_at(now_ms)).map_err(core)?;
-    scope.commit().map_err(core)?;
-    Ok(query)
+    match collection {
+        super::storage::SessionCollection::Raw(raw) => {
+            let mut scope = raw
+                .writer()
+                .begin_write(StampMode::Raw, clock.as_ref(), None)
+                .map_err(core)?;
+            let query =
+                day_query(&mut scope, day, now_ms.div_euclid(1000), clock.utc_offset_at(now_ms)).map_err(core)?;
+            scope.commit().map_err(core)?;
+            Ok(query)
+        }
+        super::storage::SessionCollection::Hosted { collection, .. } => {
+            let mut cache = day.clone();
+            let offset = clock.utc_offset_at(now_ms);
+            let (query, cache) = collection
+                .run(
+                    meguri_engine::OpSpec::named("timing", meguri_engine::OpSource::Rollover).stamp(StampMode::Raw),
+                    move |ctx| {
+                        let query = day_query(ctx.scope(), &mut cache, now_ms.div_euclid(1000), offset)?;
+                        Ok((query, cache))
+                    },
+                )
+                .map_err(|e| ExecError::new("core_error", e.to_string()))?
+                .value;
+            *day = cache;
+            Ok(query)
+        }
+    }
 }
 
 /// observations.md O4: the day number, the next boundary, now and the

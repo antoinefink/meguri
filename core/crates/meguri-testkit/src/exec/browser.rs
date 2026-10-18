@@ -8,7 +8,7 @@
 use meguri_engine::browser_config;
 use meguri_search::SearchMode;
 use meguri_search::config::{BrowserConfig, Key, Shape, default_columns};
-use meguri_storage::{ConfigValue, OpenedCollection, StampMode};
+use meguri_storage::ConfigValue;
 use serde_json::{Map, Number, Value};
 
 use super::storage::config_value;
@@ -29,7 +29,7 @@ fn invalid(detail: impl Into<String>) -> ExecError {
     ExecError::new("invalid_scenario", detail)
 }
 
-fn collection<'s>(session: &'s Session<'_>) -> Result<&'s OpenedCollection, ExecError> {
+fn collection<'s>(session: &'s Session<'_>) -> Result<&'s super::storage::SessionCollection, ExecError> {
     session
         .storage
         .collection()
@@ -52,14 +52,8 @@ fn browser_config_set(session: &mut Session<'_>, step: &Step) -> Result<OpResult
     if !key.shape().accepts(&value) {
         return Err(invalid(format!("{key} takes no value {}", args.value)));
     }
-    let clock = session.clock.clone();
-    let collection = collection(session)?;
-    let mut scope = collection
-        .writer()
-        .begin_write(StampMode::Local, &*clock, None)
-        .map_err(core)?;
-    browser_config::set_value_in(&mut scope, key, &value).map_err(core)?;
-    scope.commit().map_err(core)?;
+    let collection = session.engine_collection()?;
+    browser_config::set_value(&collection, key, &value).map_err(core)?;
     Ok(OpResult::Done)
 }
 
@@ -121,7 +115,7 @@ fn json_value(value: &ConfigValue) -> Value {
 
 /// B2: the 23 keys; reading writes nothing (R1138).
 fn browser_config(session: &mut Session<'_>, _request: &ObservationRequest) -> Result<Value, ExecError> {
-    let config = BrowserConfig::read(collection(session)?.writer()).map_err(core)?;
+    let config = BrowserConfig::read(&*collection(session)?.reader()?).map_err(core)?;
     Ok(Value::Object(
         Key::ALL
             .into_iter()

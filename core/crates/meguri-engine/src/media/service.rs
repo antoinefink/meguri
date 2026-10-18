@@ -20,7 +20,7 @@ pub(crate) struct MediaState {
 }
 impl MediaService {
     pub fn open(collection: &Collection, clock: Arc<dyn Clock>) -> Result<Self, EngineError> {
-        let _reader = collection.reader(ReaderRole::Query)?;
+        let _reader = collection.operation_reader(ReaderRole::Query)?;
         let mut bound = collection
             .core
             .media
@@ -46,20 +46,20 @@ impl MediaService {
         &self.state.store
     }
     pub fn try_job(&self, kind: MediaJobKind) -> Result<MediaJobLease, EngineError> {
-        self.collection.check_current()?;
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
         self.state.jobs.try_acquire(kind)
     }
     /// Editor attachments outside a note transaction commit immediately.
     pub fn add(&self, name: &str, bytes: &[u8]) -> Result<String, EngineError> {
-        let _reader = self.collection.reader(ReaderRole::Query)?;
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
         self.state.store.add(name, bytes).map_err(error)
     }
     pub fn begin_staging(&self) -> Result<StagedOp, EngineError> {
-        let _reader = self.collection.reader(ReaderRole::Query)?;
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
         self.state.store.begin_staging().map_err(error)
     }
     pub fn recover(&self) -> Result<RecoveryReport, EngineError> {
-        let reader = self.collection.reader(ReaderRole::Query)?;
+        let reader = self.collection.operation_reader(ReaderRole::Query)?;
         let mut snapshot = None;
         self.state
             .store
@@ -79,7 +79,7 @@ impl MediaService {
     }
     /// U111 calls this only after publishing the download batch.
     pub fn media_arrived(&self, names: Vec<String>) -> Result<(), EngineError> {
-        let _reader = self.collection.reader(ReaderRole::Query)?;
+        let _reader = self.collection.operation_reader(ReaderRole::Query)?;
         for name in &names {
             if self.state.store.lookup(name).map_err(error)?.is_none() {
                 return Err(EngineError::InvalidArgument {

@@ -7,17 +7,19 @@
 //! (`storage/schema-18` S6.2).
 //!
 //! A session's collection lives in a temporary session directory as
-//! `collection.anki2`, opened through meguri-storage's open gate. While the
-//! engine and `CoreHost::open` do not exist (U24, U38), the gate is the
-//! collection open.
+//! `collection.anki2`. Protocol storage opens remain raw; engine-owned
+//! operations close that writer before promoting to CoreHost (host H4).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use meguri_engine::{Collection, ReaderLease};
+use meguri_host::{CoreHost, HostConfig};
 use meguri_storage::raw::{RawRows, SqlValue};
-use meguri_storage::{ConfigValue, OpenError, OpenOptions, OpenedCollection, StampMode, open_collection};
+use meguri_storage::{ConfigValue, OpenError, OpenOptions, OpenedCollection, open_collection};
+use meguri_storage::{Reader, ReaderRole};
 use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -31,6 +33,7 @@ pub(super) fn register(registry: &mut Registry) {
     registry.op("db_exec", db_exec);
     registry.op("adopt", adopt);
     registry.op("set_config", set_config);
+    registry.op("remove_config", remove_config);
     registry.setup("config", setup_config);
     registry.observation("schema_objects", schema_objects);
     registry.observation("db_dump", db_dump);
@@ -44,12 +47,89 @@ const COLLECTION: &str = "collection.anki2";
 #[derive(Default)]
 pub struct Storage {
     // Fields drop in order: the collection closes before its directory goes.
-    collection: Option<OpenedCollection>,
+    collection: Option<SessionCollection>,
     media: Option<meguri_storage::media::MediaStore>,
     /// `sqlite_master` after the last open or `db_exec`, which every later
     /// Meguri operation must leave as it is.
     baseline: Objects,
     dir: Option<TempDir>,
+    host_data: Option<TempDir>,
+    backup: std::sync::Arc<super::BackupWitness>,
+    record_changes: bool,
+    changes: Vec<std::sync::Arc<meguri_engine::Event>>,
+    subscription: Option<meguri_engine::Subscription>,
+}
+
+/// A protocol storage open stays raw. Engine-owned operations promote it once,
+/// closing that writer before the hosted writer starts (engine/host H4).
+pub enum SessionCollection {
+    Raw(OpenedCollection),
+    Hosted {
+        host: Box<CoreHost>,
+        collection: Collection,
+    },
+}
+
+pub enum SessionReader<'a> {
+    Raw(Reader),
+    Hosted(ReaderLease<'a>),
+}
+impl std::ops::Deref for SessionReader<'_> {
+    type Target = Reader;
+    fn deref(&self) -> &Reader {
+        match self {
+            Self::Raw(reader) => reader,
+            Self::Hosted(reader) => reader,
+        }
+    }
+}
+
+impl SessionCollection {
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::Raw(raw) => raw.path(),
+            Self::Hosted { collection, .. } => collection.path(),
+        }
+    }
+    pub fn reader(&self) -> Result<SessionReader<'_>, ExecError> {
+        match self {
+            Self::Raw(raw) => raw
+                .reader_factory()
+                .open(ReaderRole::Query)
+                .map(SessionReader::Raw)
+                .map_err(core),
+            Self::Hosted { collection, .. } => collection
+                .reader(ReaderRole::Query)
+                .map(SessionReader::Hosted)
+                .map_err(core),
+        }
+    }
+    pub(super) fn with_snapshot<T>(
+        &self,
+        read: impl FnOnce(&meguri_storage::ReadSnapshot<'_>) -> Result<T, ExecError>,
+    ) -> Result<T, ExecError> {
+        match self {
+            Self::Raw(raw) => {
+                let reader = raw.reader_factory().open(ReaderRole::Query).map_err(core)?;
+                let snapshot = reader.begin_snapshot().map_err(core)?;
+                read(&snapshot)
+            }
+            Self::Hosted { collection, .. } => {
+                let reader = collection.reader(ReaderRole::Query).map_err(core)?;
+                let snapshot = reader.snapshot().map_err(core)?;
+                read(&snapshot)
+            }
+        }
+    }
+    fn close(self) -> Result<(), ExecError> {
+        match self {
+            Self::Raw(raw) => raw.close().map(|_| ()).map_err(core),
+            Self::Hosted { host, collection } => {
+                drop(collection);
+                host.close().map_err(core)
+            }
+        }
+    }
 }
 
 impl Storage {
@@ -57,6 +137,9 @@ impl Storage {
         &mut self,
         clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
     ) -> Result<meguri_storage::media::MediaStore, ExecError> {
+        if let Some(SessionCollection::Hosted { host, .. }) = &self.collection {
+            return host.media().map(|service| service.store().clone()).map_err(core);
+        }
         if self.media.is_none() {
             let path = self
                 .collection()
@@ -71,8 +154,98 @@ impl Storage {
     }
 
     /// The open collection, for the adapters of later areas.
-    pub fn collection(&self) -> Option<&OpenedCollection> {
+    pub fn collection(&self) -> Option<&SessionCollection> {
         self.collection.as_ref()
+    }
+
+    pub(super) fn promote(
+        &mut self,
+        clock: std::sync::Arc<dyn meguri_model::clock::Clock>,
+        random: std::sync::Arc<dyn meguri_model::rng::RandomSource>,
+    ) -> Result<bool, ExecError> {
+        match self.collection.as_ref() {
+            Some(SessionCollection::Hosted { .. }) => return Ok(false),
+            None => return Err(invalid("no collection is open")),
+            Some(SessionCollection::Raw(_)) => {}
+        }
+        self.close()?;
+        if self.host_data.is_none() {
+            self.host_data = Some(tempfile::tempdir().map_err(core)?);
+        }
+        let data = self.host_data.as_ref().expect("host data was initialized").path();
+        let backups = data.join("backups");
+        fs::create_dir_all(&backups).map_err(core)?;
+        let directory = self
+            .dir
+            .as_ref()
+            .expect("an open collection owns its directory")
+            .path()
+            .to_path_buf();
+        let config = HostConfig::new(
+            directory,
+            backups,
+            data.join("app-group/widget.snapshot"),
+            clock,
+            random,
+            std::sync::Arc::new(meguri_storage::space::StatvfsSpace),
+        )
+        .with_backup_for_testing(self.backup.clone());
+        let host = CoreHost::open(config).map_err(core)?;
+        let collection = host.collection().map_err(core)?;
+        self.backup.bind(collection.clone());
+        if self.record_changes {
+            self.subscription = Some(host.engine().stream().subscribe());
+        }
+        self.collection = Some(SessionCollection::Hosted {
+            host: Box::new(host),
+            collection,
+        });
+        self.guard()?;
+        Ok(true)
+    }
+
+    pub(super) fn host(&self) -> Result<&CoreHost, ExecError> {
+        match self.collection.as_ref() {
+            Some(SessionCollection::Hosted { host, .. }) => Ok(host),
+            _ => Err(invalid("the collection is not hosted")),
+        }
+    }
+
+    pub(super) fn current_collection(&mut self) -> Result<Collection, ExecError> {
+        match self.collection.as_mut() {
+            Some(SessionCollection::Hosted { host, collection }) => {
+                *collection = host.collection().map_err(core)?;
+                self.backup.bind(collection.clone());
+                Ok(collection.clone())
+            }
+            _ => Err(invalid("the collection is not hosted")),
+        }
+    }
+
+    /// Number of pre-delete backup hooks reached by this conformance run.
+    pub fn backup_calls(&self) -> usize {
+        self.backup.calls()
+    }
+    pub fn backup_checks(&self) -> Vec<(meguri_engine::Seq, i64)> {
+        self.backup.checks()
+    }
+    pub(super) fn record_changes(&mut self) {
+        self.record_changes = true;
+        self.backup.record_checks();
+    }
+    fn collect_changes(&mut self) {
+        if let Some(subscription) = &self.subscription {
+            while let Some(event) = subscription.try_recv() {
+                if matches!(event.kind, meguri_engine::EventKind::Changes(_)) {
+                    self.changes.push(event);
+                }
+            }
+        }
+    }
+    /// Opt-in diagnostics never enter scenario observations or goldens.
+    pub fn take_changes(&mut self) -> Vec<std::sync::Arc<meguri_engine::Event>> {
+        self.collect_changes();
+        std::mem::take(&mut self.changes)
     }
 
     fn dir(&mut self) -> Result<PathBuf, ExecError> {
@@ -95,10 +268,13 @@ impl Storage {
                 .close()
                 .map_err(|e| ExecError::new("core_error", format!("closing the collection: {e}")))?;
         }
+        self.collect_changes();
+        self.subscription = None;
         Ok(())
     }
 
     fn opened(&mut self, collection: OpenedCollection) -> Result<(), ExecError> {
+        let collection = SessionCollection::Raw(collection);
         self.baseline = object_set(&collection)?;
         self.collection = Some(collection);
         Ok(())
@@ -143,9 +319,9 @@ impl fmt::Debug for Storage {
 /// `sqlite_master`: `(type, name)` to `(tbl_name, sql)` as stored.
 type Objects = BTreeMap<(String, String), (String, Option<String>)>;
 
-fn object_set(collection: &OpenedCollection) -> Result<Objects, ExecError> {
+fn object_set(collection: &SessionCollection) -> Result<Objects, ExecError> {
     Ok(collection
-        .writer()
+        .reader()?
         .schema_objects()
         .map_err(core)?
         .into_iter()
@@ -161,7 +337,7 @@ fn invalid(detail: impl Into<String>) -> ExecError {
     ExecError::new("invalid_scenario", detail)
 }
 
-fn collection<'s>(session: &'s Session<'_>) -> Result<&'s OpenedCollection, ExecError> {
+fn collection<'s>(session: &'s Session<'_>) -> Result<&'s SessionCollection, ExecError> {
     session
         .storage
         .collection
@@ -242,16 +418,34 @@ fn db_exec(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError
     // A statement may change the schema; Meguri's operations before it may
     // not.
     session.storage.guard()?;
-    let rows = collection(session)?
-        .writer()
-        .execute_raw(&args.sql, &params)
-        .map_err(core)?;
+    let rows = match collection(session)? {
+        SessionCollection::Raw(raw) => raw.writer().execute_raw(&args.sql, &params).map_err(core)?,
+        SessionCollection::Hosted { collection, .. } => {
+            let sql = args.sql.clone();
+            collection
+                .submit_maintenance(
+                    meguri_engine::executor::catalog::ANALYZE,
+                    std::time::Duration::from_millis(10),
+                    move |writer| Ok(writer.execute_raw(&sql, &params)?),
+                )
+                .wait()
+                .map_err(core)?
+        }
+    };
     let baseline = object_set(collection(session)?)?;
     session.storage.baseline = baseline;
     // W1's reset after a write: the cached day goes (`sched/day-clock` D6).
     // The session keeps no other view and no undo history yet (U38).
     if !args.sql.trim_start().to_ascii_lowercase().starts_with("select") {
         session.day.clear();
+        if let Some(SessionCollection::Hosted { host, collection }) = session.storage.collection() {
+            collection
+                .clear_undo(meguri_engine::ClearCause::ExternalChange)
+                .map_err(core)?;
+            collection.drop_cached_day().map_err(core)?;
+            host.derived()
+                .invalidate(meguri_engine::derived_host::Invalidation::ExternalChange);
+        }
     }
     Ok(OpResult::Output(json!({ "rows": db_exec_rows(&rows) })))
 }
@@ -294,14 +488,38 @@ fn set_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecEr
             "set_config adapter called for another op",
         ));
     };
-    if args.undoable {
-        return Err(ExecError::new(
-            "unsupported_op",
-            "set_config with undoable: true records an undo step; the session has no engine yet (U38)",
-        ));
-    }
-    write_config(session, &args.key, &args.value)?;
+    write_config_mode(session, &args.key, &args.value, args.undoable)?;
     Ok(OpResult::Done)
+}
+
+fn remove_config(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let Step::RemoveConfig(args) = step else {
+        return Err(invalid("expected remove_config"));
+    };
+    let collection = session.engine_collection()?;
+    let key = args.key.clone();
+    collection
+        .run(config_op(true), move |ctx| {
+            ctx.scope().remove_config(&key)?;
+            Ok(())
+        })
+        .map_err(core)?;
+    Ok(OpResult::Done)
+}
+
+fn config_op(undoable: bool) -> meguri_engine::OpSpec {
+    use meguri_engine::{OpSource, OpSpec, StepKind, undo::names::UPDATE_CONFIG};
+    let source = if undoable {
+        OpSource::UserUndoable
+    } else {
+        OpSource::UserNonUndoable
+    };
+    let spec = OpSpec::named("set_config", source);
+    if undoable {
+        spec.undo_step(UPDATE_CONFIG, StepKind::Other)
+    } else {
+        spec.skip_undo()
+    }
 }
 
 /// dsl.md D6.1: the mapping's keys in sorted order, each written as
@@ -318,15 +536,19 @@ fn setup_config(session: &mut Session<'_>, setup: &Setup) -> Result<(), ExecErro
 /// W4's write of one key: through the config API, as an operation of its
 /// own that keeps no undo entry.
 fn write_config(session: &mut Session<'_>, key: &str, value: &Value) -> Result<(), ExecError> {
+    write_config_mode(session, key, value, false)
+}
+
+fn write_config_mode(session: &mut Session<'_>, key: &str, value: &Value, undoable: bool) -> Result<(), ExecError> {
     let value = config_value(value)?;
-    let clock = session.clock.clone();
-    let collection = collection(session)?;
-    let mut scope = collection
-        .writer()
-        .begin_write(StampMode::Local, &*clock, None)
-        .map_err(core)?;
-    let written = scope.set_config(key, &value).map_err(core)?;
-    scope.commit().map_err(core)?;
+    let collection = session.engine_collection()?;
+    let name = key.to_owned();
+    let written = collection
+        .run(config_op(undoable), move |ctx| {
+            Ok(ctx.scope().set_config(&name, &value)?)
+        })
+        .map_err(core)?
+        .value;
     // The engine's day clock computes afresh right after a change of its
     // keys (`sched/day-clock` D8, D14.2).
     if written.changed() && matches!(key, "rollover" | "creationOffset") {
@@ -414,7 +636,7 @@ pub fn normalize_sql(sql: &str) -> String {
 /// P3: every object of the main database's `sqlite_master`, sorted by type,
 /// then name.
 fn schema_objects(session: &mut Session<'_>, _request: &ObservationRequest) -> Result<Value, ExecError> {
-    let mut objects = collection(session)?.writer().schema_objects().map_err(core)?;
+    let mut objects = collection(session)?.reader()?.schema_objects().map_err(core)?;
     objects.sort_by(|a, b| (a.kind.as_str(), a.name.as_str()).cmp(&(b.kind.as_str(), b.name.as_str())));
     Ok(Value::Array(
         objects
@@ -516,7 +738,7 @@ fn key_text(value: &SqlValue) -> String {
 fn adopt(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
     let ids = |table: &str| -> Result<Vec<i64>, ExecError> {
         let rows = collection(session)?
-            .writer()
+            .reader()?
             .execute_raw(&format!("SELECT id FROM {table} ORDER BY id"), &[])
             .map_err(core)?;
         rows.rows
@@ -538,14 +760,6 @@ fn adopt(session: &mut Session<'_>, _: &Step) -> Result<OpResult, ExecError> {
     Ok(OpResult::Output(
         json!({"notes": append(&mut session.notes, notes), "cards": append(&mut session.cards, cards)}),
     ))
-}
-
-fn dump_table(collection: &OpenedCollection, table: &str, raw: bool) -> Result<Value, ExecError> {
-    let rows = collection
-        .writer()
-        .execute_raw(&format!("SELECT * FROM {table}"), &[])
-        .map_err(core)?;
-    db_dump_table_inner(table, &rows, raw)
 }
 
 /// O8: one table's rows, as `SELECT * FROM <table>` returns them, keyed by
@@ -600,14 +814,19 @@ fn db_dump(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Va
         },
         _ => DUMP_TABLES.to_vec(),
     };
-    let mut out = Map::new();
-    for table in tables {
-        if !DUMP_TABLES.contains(&table) {
-            return Err(invalid(format!("db_dump has no table {table}")));
+    collection.with_snapshot(|snapshot| {
+        let mut out = Map::new();
+        for table in tables {
+            if !DUMP_TABLES.contains(&table) {
+                return Err(invalid(format!("db_dump has no table {table}")));
+            }
+            let rows = snapshot
+                .execute_raw(&format!("SELECT * FROM {table}"), &[])
+                .map_err(core)?;
+            out.insert(table.to_owned(), db_dump_table_inner(table, &rows, raw)?);
         }
-        out.insert(table.to_owned(), dump_table(collection, table, raw)?);
-    }
-    Ok(Value::Object(out))
+        Ok(Value::Object(out))
+    })
 }
 
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -754,7 +973,14 @@ mod tests {
         let opened = open_collection(&file, &OpenOptions::new(&*session.clock, &*session.random)).unwrap();
         session.storage.opened(opened).unwrap();
         let sql = |session: &Session<'_>, sql: &str| {
-            db_exec_rows(&collection(session).unwrap().writer().execute_raw(sql, &[]).unwrap())
+            db_exec_rows(
+                &collection(session)
+                    .unwrap()
+                    .reader()
+                    .unwrap()
+                    .execute_raw(sql, &[])
+                    .unwrap(),
+            )
         };
         sql(&session, "UPDATE col SET crt = 1894676400");
         sql(

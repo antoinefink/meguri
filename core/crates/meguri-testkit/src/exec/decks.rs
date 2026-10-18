@@ -3,7 +3,7 @@ use super::{ExecError, OpResult, Registry, Session};
 use crate::scenario::{CollapseScope, ObservationRequest, Setup, Step};
 use meguri_engine::{EngineError, deck_config, decks};
 use meguri_model::ids::{DeckConfigId, DeckId};
-use meguri_storage::{ReadRows, StampMode, WriteScope};
+use meguri_storage::ReadRows;
 use serde_json::{Value, json};
 
 pub(super) fn register(r: &mut Registry) {
@@ -33,12 +33,13 @@ fn core(e: impl std::fmt::Display) -> ExecError {
 fn unknown(s: impl Into<String>) -> ExecError {
     ExecError::new("unknown_ref", s)
 }
-fn writer<'a>(s: &'a Session<'_>) -> Result<&'a meguri_storage::Writer, ExecError> {
+fn writer<'a>(s: &'a Session<'_>) -> Result<super::storage::SessionReader<'a>, ExecError> {
     s.storage
         .collection()
-        .map(|c| c.writer())
-        .ok_or_else(|| core("no collection open"))
+        .ok_or_else(|| core("no collection open"))?
+        .reader()
 }
+
 fn deck(rows: &impl ReadRows, name: &str) -> Result<DeckId, ExecError> {
     rows.deck_rows()
         .map_err(core)?
@@ -60,157 +61,162 @@ fn preset(rows: &impl ReadRows, name: &str) -> Result<DeckConfigId, ExecError> {
         _ => Err(ExecError::new("invalid_scenario", format!("ambiguous preset {name:?}"))),
     }
 }
+fn deck_id(s: &Session<'_>, name: &str) -> Result<DeckId, ExecError> {
+    deck(&*writer(s)?, name)
+}
+fn preset_id(s: &Session<'_>, name: &str) -> Result<DeckConfigId, ExecError> {
+    preset(&*writer(s)?, name)
+}
+
 fn ids(rows: &impl ReadRows, names: &[String]) -> Result<Vec<DeckId>, ExecError> {
     names.iter().map(|n| deck(rows, n)).collect()
 }
-fn apply(scope: &mut WriteScope<'_>, step: &Step) -> Result<OpResult, ExecError> {
+fn run(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
+    let c = s.engine_collection()?;
     let result = match step {
-        Step::AddDeck(a) => decks::add_in(scope, &a.name).map(|d| OpResult::Output(json!({"name": d.human_name()}))),
-        Step::RenameDeck(a) => {
-            let id = deck(scope, &a.deck)?;
-            decks::rename_in(scope, id, &a.name).map(|d| OpResult::Output(json!({"name": d.human_name()})))
+        Step::AddDeck(a) => {
+            decks::add(&c, a.name.clone()).map(|d| OpResult::Output(json!({"name": d.value.human_name()})))
         }
+        Step::RenameDeck(a) => decks::rename(&c, deck_id(s, &a.deck)?, a.name.clone())
+            .map(|d| OpResult::Output(json!({"name": d.value.human_name()}))),
         Step::ReparentDecks(a) => {
-            let ids = ids(scope, &a.decks)?;
+            let selected = ids(&*writer(s)?, &a.decks)?;
             let parent = if a.parent.is_empty() {
                 None
             } else {
-                Some(deck(scope, &a.parent)?)
+                Some(deck_id(s, &a.parent)?)
             };
-            decks::move_in(scope, &ids, parent).map(|count| OpResult::Output(json!({"count": count})))
+            decks::move_decks(&c, selected, parent).map(|r| OpResult::Output(json!({"count": r.value})))
         }
         Step::DeleteDecks(a) => {
-            let ids = ids(scope, &a.decks)?;
-            decks::delete_in(scope, &ids).map(|s| OpResult::Output(json!({"count": s.cards})))
+            let selected = ids(&*writer(s)?, &a.decks)?;
+            decks::delete(&c, selected, s.storage.host()?.backup())
+                .map(|r| OpResult::Output(json!({"count": r.value.cards})))
         }
         Step::SetDeckCollapsed(a) => {
-            let ids = ids(scope, &a.decks)?;
+            let selected = ids(&*writer(s)?, &a.decks)?;
             let which = match a.scope {
                 CollapseScope::Study => decks::CollapseScope::Study,
                 CollapseScope::Browser => decks::CollapseScope::Browser,
             };
-            decks::collapse_in(scope, &ids, which, a.collapsed).map(|_| OpResult::Done)
+            decks::collapse(&c, selected, which, a.collapsed).map(|_| OpResult::Done)
         }
-        Step::SetCurrentDeck(a) => {
-            let id = deck(scope, &a.deck)?;
-            decks::select_in(scope, id).map(|_| OpResult::Done)
-        }
-        Step::AddPreset(a) => deck_config::add_in(scope, &a.name).map(|_| OpResult::Done),
+        Step::SetCurrentDeck(a) => decks::select(&c, deck_id(s, &a.deck)?).map(|_| OpResult::Done),
+        Step::AddPreset(a) => deck_config::add(&c, a.name.clone()).map(|_| OpResult::Done),
         Step::ClonePreset(a) => {
-            let id = preset(scope, &a.preset)?;
-            deck_config::clone_in(scope, id, &a.name).map(|_| OpResult::Done)
+            deck_config::clone(&c, preset_id(s, &a.preset)?, a.name.clone()).map(|_| OpResult::Done)
         }
         Step::RenamePreset(a) => {
-            let id = preset(scope, &a.preset)?;
-            deck_config::rename_in(scope, id, &a.name).map(|_| OpResult::Done)
+            deck_config::rename(&c, preset_id(s, &a.preset)?, a.name.clone()).map(|_| OpResult::Done)
         }
         Step::RemovePreset(a) => {
-            let id = preset(scope, &a.preset)?;
-            let fallback = preset(scope, &a.fallback)?;
-            deck_config::remove_in(scope, id, fallback, true).map(|_| OpResult::Done)
+            deck_config::remove(&c, preset_id(s, &a.preset)?, preset_id(s, &a.fallback)?, true).map(|_| OpResult::Done)
         }
         Step::SetDeckPreset(a) => {
-            let id = deck(scope, &a.deck)?;
-            let preset = preset(scope, &a.preset)?;
-            deck_config::assign_in(scope, id, preset, a.subtree).map(|_| OpResult::Done)
+            deck_config::assign(&c, deck_id(s, &a.deck)?, preset_id(s, &a.preset)?, a.subtree).map(|_| OpResult::Done)
         }
         _ => return Err(core("deck adapter called for another op")),
     };
     match result {
-        Ok(r) => Ok(r),
-        Err(EngineError::DeckRefused(r)) => Ok(OpResult::Rejected(r.kind())),
-        Err(e) => Err(core(e)),
+        Ok(value) => Ok(value),
+        Err(EngineError::DeckRefused(refusal)) => Ok(OpResult::Rejected(refusal.kind())),
+        Err(error) => Err(core(error)),
     }
 }
-fn run(s: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
-    let mut scope = writer(s)?
-        .begin_write(StampMode::Local, s.clock.as_ref(), None)
-        .map_err(core)?;
-    let result = apply(&mut scope, step)?;
-    if !matches!(result, OpResult::Rejected(_)) {
-        scope.commit().map_err(core)?;
-    }
-    Ok(result)
-}
+
 fn setup_decks(s: &mut Session<'_>, setup: &Setup) -> Result<(), ExecError> {
     for entry in setup.decks.iter().flatten() {
-        let mut scope = writer(s)?
-            .begin_write(StampMode::Local, s.clock.as_ref(), None)
-            .map_err(core)?;
-        let d = decks::add_in(&mut scope, entry.name()).map_err(core)?;
-        if let Some(p) = entry.preset() {
-            let p = preset(&scope, p)?;
-            deck_config::assign_in(&mut scope, d.id, p, false).map_err(core)?;
-        }
-        scope.commit().map_err(core)?;
-        s.decks.insert(entry.name().to_owned(), d.id.0);
+        let c = s.engine_collection()?;
+        let preset = entry.preset().map(|name| preset_id(s, name)).transpose()?;
+        let name = entry.name().to_owned();
+        let deck = c
+            .run(
+                meguri_engine::OpSpec::named("scenario_setup", meguri_engine::OpSource::UserNonUndoable).skip_undo(),
+                move |ctx| {
+                    let scope = ctx.scope();
+                    let deck = decks::add_in(scope, &name)?;
+                    if let Some(preset) = preset {
+                        deck_config::assign_in(scope, deck.id, preset, false)?;
+                    }
+                    Ok(deck)
+                },
+            )
+            .map_err(core)?
+            .value;
+        s.decks.insert(entry.name().to_owned(), deck.id.0);
     }
     Ok(())
 }
+
 fn setup_presets(s: &mut Session<'_>, setup: &Setup) -> Result<(), ExecError> {
     for entry in setup.presets.iter().flatten() {
-        let mut scope = writer(s)?
-            .begin_write(StampMode::Local, s.clock.as_ref(), None)
-            .map_err(core)?;
-        let id = if entry.name == "Default" {
-            DeckConfigId(1)
-        } else {
-            // Setup starts from built-in defaults, without P4's FSRS-6
-            // list; only the add_preset operation uses the menu defaults.
-            let mut p = deck_config::defaults();
-            p.name = entry.name.clone();
-            scope.add_deck_config(&p).map_err(core)?
-        };
-        let mut p = scope
-            .deck_config(id)
-            .map_err(core)?
-            .ok_or_else(|| core("preset disappeared"))?;
-        macro_rules! field {
-            ($from:ident, $to:ident, $kind:ty) => {
-                if let Some(v) = entry.$from {
-                    p.config.$to = v as $kind;
+        let c = s.engine_collection()?;
+        let entry = entry.clone();
+        c.run(
+            meguri_engine::OpSpec::named("scenario_setup", meguri_engine::OpSource::UserNonUndoable).skip_undo(),
+            move |ctx| {
+                let scope = ctx.scope();
+                let id = if entry.name == "Default" {
+                    DeckConfigId(1)
+                } else {
+                    // Setup starts from built-in defaults, without P4's FSRS-6
+                    // list; only the add_preset operation uses the menu defaults.
+                    let mut p = deck_config::defaults();
+                    p.name = entry.name.clone();
+                    scope.add_deck_config(&p)?
+                };
+                let mut p = scope.deck_config(id)?.ok_or_else(|| EngineError::Internal {
+                    message: "preset disappeared".into(),
+                })?;
+                macro_rules! field {
+                    ($from:ident, $to:ident, $kind:ty) => {
+                        if let Some(v) = entry.$from {
+                            p.config.$to = v as $kind;
+                        }
+                    };
                 }
-            };
-        }
-        field!(graduating_interval_days, graduating_interval_good, u32);
-        field!(easy_interval_days, graduating_interval_easy, u32);
-        field!(new_per_day, new_per_day, u32);
-        field!(reviews_per_day, reviews_per_day, u32);
-        field!(max_interval_days, maximum_review_interval, u32);
-        field!(min_lapse_interval_days, minimum_lapse_interval, u32);
-        field!(starting_ease, initial_ease, f32);
-        field!(easy_bonus, easy_multiplier, f32);
-        field!(hard_interval, hard_multiplier, f32);
-        field!(interval_modifier, interval_multiplier, f32);
-        field!(lapse_new_interval, lapse_multiplier, f32);
-        field!(leech_threshold, leech_threshold, u32);
-        field!(desired_retention, desired_retention, f32);
-        if let Some(steps) = &entry.learn_steps {
-            p.config.learn_steps = steps.iter().map(|d| d.seconds() as f32 / 60.0).collect();
-        }
-        if let Some(steps) = &entry.relearn_steps {
-            p.config.relearn_steps = steps.iter().map(|d| d.seconds() as f32 / 60.0).collect();
-        }
-        if let Some(v) = entry.leech_action {
-            p.config.leech_action = match v {
-                crate::scenario::LeechAction::Suspend => 0,
-                crate::scenario::LeechAction::TagOnly => 1,
-            };
-        }
-        if let Some(v) = entry.bury_new {
-            p.config.bury_new = v;
-        }
-        if let Some(v) = entry.bury_reviews {
-            p.config.bury_reviews = v;
-        }
-        if let Some(v) = entry.bury_interday_learning {
-            p.config.bury_interday_learning = v;
-        }
-        if let Some(v) = &entry.fsrs_params {
-            p.config.set_fsrs_params_6(v.iter().map(|v| *v as f32).collect());
-        }
-        scope.put(&p).map_err(core)?;
-        scope.commit().map_err(core)?;
+                field!(graduating_interval_days, graduating_interval_good, u32);
+                field!(easy_interval_days, graduating_interval_easy, u32);
+                field!(new_per_day, new_per_day, u32);
+                field!(reviews_per_day, reviews_per_day, u32);
+                field!(max_interval_days, maximum_review_interval, u32);
+                field!(min_lapse_interval_days, minimum_lapse_interval, u32);
+                field!(starting_ease, initial_ease, f32);
+                field!(easy_bonus, easy_multiplier, f32);
+                field!(hard_interval, hard_multiplier, f32);
+                field!(interval_modifier, interval_multiplier, f32);
+                field!(lapse_new_interval, lapse_multiplier, f32);
+                field!(leech_threshold, leech_threshold, u32);
+                field!(desired_retention, desired_retention, f32);
+                if let Some(steps) = &entry.learn_steps {
+                    p.config.learn_steps = steps.iter().map(|d| d.seconds() as f32 / 60.0).collect();
+                }
+                if let Some(steps) = &entry.relearn_steps {
+                    p.config.relearn_steps = steps.iter().map(|d| d.seconds() as f32 / 60.0).collect();
+                }
+                if let Some(v) = entry.leech_action {
+                    p.config.leech_action = match v {
+                        crate::scenario::LeechAction::Suspend => 0,
+                        crate::scenario::LeechAction::TagOnly => 1,
+                    };
+                }
+                if let Some(v) = entry.bury_new {
+                    p.config.bury_new = v;
+                }
+                if let Some(v) = entry.bury_reviews {
+                    p.config.bury_reviews = v;
+                }
+                if let Some(v) = entry.bury_interday_learning {
+                    p.config.bury_interday_learning = v;
+                }
+                if let Some(v) = &entry.fsrs_params {
+                    p.config.set_fsrs_params_6(v.iter().map(|v| *v as f32).collect());
+                }
+                scope.put(&p)?;
+                Ok(())
+            },
+        )
+        .map_err(core)?;
     }
     Ok(())
 }
@@ -230,7 +236,7 @@ fn observe_tree(s: &mut Session<'_>, _: &ObservationRequest) -> Result<Value, Ex
     fn node(n: decks::tree::Node) -> Value {
         json!({"name": n.name, "children": n.children.into_iter().map(node).collect::<Vec<_>>()})
     }
-    Ok(decks::tree::tree(writer(s)?)
+    Ok(decks::tree::tree(&*writer(s)?)
         .map_err(core)?
         .into_iter()
         .map(node)

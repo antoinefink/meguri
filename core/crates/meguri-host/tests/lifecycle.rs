@@ -120,3 +120,138 @@ fn an_unavailable_backup_refuses_a_real_deck_deletion_before_mutation() {
     drop(reader);
     host.close().unwrap();
 }
+
+fn committed_publication(host: &CoreHost) -> meguri_engine::media::MediaService {
+    use meguri_engine::{EngineError, OpSource, OpSpec, notes, notetypes};
+    let collection = host.collection().unwrap();
+    let kind = notetypes::add_stock(&collection, notetypes::StockKind::Basic, Some("Recovery test".into()))
+        .unwrap()
+        .value
+        .id;
+    let media = host.media().unwrap();
+    let mut stage = media.begin_staging().unwrap();
+    stage.add("recovered.png", b"durable synthetic media").unwrap();
+    meguri_model::faultpoint::arm(
+        "media.stage.before_publish",
+        meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+    );
+    let result = collection.run(OpSpec::named("media_note", OpSource::UserNonUndoable), move |ctx| {
+        let (scope, random) = ctx.scope_and_random();
+        let added = notes::add_in(
+            scope,
+            random,
+            &notes::AddNote {
+                notetype_id: kind,
+                fields: vec!["<img src='recovered.png'>".into(), "back".into()],
+                tags: vec![],
+                deck_id: meguri_model::ids::DeckId(1),
+                guid: None,
+                update_add_defaults: false,
+            },
+        )?;
+        ctx.commit_media(stage, &[added.id])?;
+        Ok(())
+    });
+    meguri_model::faultpoint::disarm_all();
+    assert!(
+        matches!(result, Err(EngineError::MediaCommitPending { .. })),
+        "{result:?}"
+    );
+    assert!(!media.store().media_dir().join("recovered.png").exists());
+    media
+}
+
+#[test]
+fn startup_recovers_committed_media_before_exposing_the_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config(dir.path());
+    let host = CoreHost::open(config.clone()).unwrap();
+    let media = committed_publication(&host);
+    host.close().unwrap();
+    drop(host);
+    let reopened = CoreHost::open(config).unwrap();
+    assert_eq!(
+        std::fs::read(media.store().media_dir().join("recovered.png")).unwrap(),
+        b"durable synthetic media"
+    );
+    assert!(
+        media.store().pending().is_err(),
+        "the retired host's journal stays closed"
+    );
+    assert_eq!(reopened.media().unwrap().store().pending().unwrap().len(), 1);
+    reopened.close().unwrap();
+}
+
+#[test]
+fn resume_recovers_committed_media_before_admitting_operations() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    let media = committed_publication(&host);
+    host.engine().suspend(std::time::Duration::from_secs(2)).unwrap();
+    host.engine().resume().unwrap();
+    assert_eq!(
+        std::fs::read(media.store().media_dir().join("recovered.png")).unwrap(),
+        b"durable synthetic media"
+    );
+    assert_eq!(media.store().pending().unwrap().len(), 1);
+    host.close().unwrap();
+}
+
+#[test]
+fn failed_resume_recovery_keeps_admission_closed_until_recovery_succeeds() {
+    let dir = tempfile::tempdir().unwrap();
+    let host = CoreHost::open(config(dir.path())).unwrap();
+    let media = committed_publication(&host);
+    host.engine().suspend(std::time::Duration::from_secs(2)).unwrap();
+    meguri_model::faultpoint::arm(
+        "media.stage.before_publish",
+        meguri_model::faultpoint::Fault::IoError(std::io::ErrorKind::Other),
+    );
+    let result = host.engine().resume();
+    meguri_model::faultpoint::disarm_all();
+    assert!(result.is_err());
+    assert!(
+        host.collection()
+            .unwrap()
+            .run(
+                meguri_engine::OpSpec::named("blocked", meguri_engine::OpSource::UserNonUndoable),
+                |_| Ok(())
+            )
+            .is_err()
+    );
+    assert!(media.add("blocked.txt", b"must not publish").is_err());
+    assert!(!media.store().media_dir().join("blocked.txt").exists());
+    assert!(media.store().pending().is_err());
+    host.engine().resume().unwrap();
+    assert_eq!(
+        std::fs::read(media.store().media_dir().join("recovered.png")).unwrap(),
+        b"durable synthetic media"
+    );
+    host.close().unwrap();
+}
+
+#[test]
+fn resume_recovery_runs_after_external_change_checks_without_changing_generation() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config(dir.path());
+    let path = config.collection_directory.join("collection.anki2");
+    let host = CoreHost::open(config).unwrap();
+    let media = committed_publication(&host);
+    let generation = host.engine().generation();
+    host.engine().suspend(std::time::Duration::from_secs(2)).unwrap();
+    let replacement = dir.path().join("external.anki2");
+    std::fs::copy(&path, &replacement).unwrap();
+    {
+        let db = meguri_storage::raw::PlainDatabase::open(&replacement).unwrap();
+        db.execute("UPDATE col SET mod = mod + 1", &[]).unwrap();
+    }
+    std::fs::rename(replacement, path).unwrap();
+    assert!(host.engine().resume().unwrap().external_change);
+    assert_eq!(host.engine().generation(), generation);
+    assert_eq!(
+        std::fs::read(media.store().media_dir().join("recovered.png")).unwrap(),
+        b"durable synthetic media"
+    );
+    host.media().unwrap().add("current.txt", b"current generation").unwrap();
+    host.close().unwrap();
+}

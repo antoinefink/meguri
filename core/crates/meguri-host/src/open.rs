@@ -60,6 +60,8 @@ impl CoreHost {
             .ok_or_else(|| EngineError::Internal {
                 message: "backup provider is not wired".into(),
             })?;
+        #[cfg(feature = "test-hooks")]
+        let backup = config.test_backup.unwrap_or(backup);
         Ok(Self {
             engine,
             derived,

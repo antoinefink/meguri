@@ -1657,7 +1657,11 @@ name = "meguri-ffi"
 version = "0.0.0"
 dependencies = [
  "meguri-engine",
+ "meguri-host",
  "meguri-model",
+ "meguri-storage",
+ "meguri-testkit",
+ "tempfile",
  "uniffi",
 ]
 
@@ -1668,6 +1672,7 @@ dependencies = [
  "meguri-engine",
  "meguri-model",
  "meguri-storage",
+ "serde_json",
  "tempfile",
  "tracing",
 ]
@@ -1781,6 +1786,7 @@ dependencies = [
  "jiff",
  "libc",
  "meguri-engine",
+ "meguri-host",
  "meguri-model",
  "meguri-sched",
  "meguri-search",

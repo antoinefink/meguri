@@ -6,6 +6,21 @@ mg_job core-lint docker:dev mg_core_lint \
   "Rust lint: cargo fmt --check, clippy -D warnings on all targets and features, layering-check (edges.toml), and no AnkiWeb name in meguri-sync built without its features"
 mg_job core-deny docker:dev mg_core_deny \
   "Rust dependency gate: cargo deny check on core/ (licenses, advisories, bans, sources); args after -- name checks"
+mg_job u38-wiring docker:dev mg_u38_wiring \
+  "Host provider milestone check: --milestone <id>; pending providers must belong to later milestones"
+
+mg_u38_wiring() {
+  if [ "$#" -ne 2 ] || [ "$1" != --milestone ] || [ -z "$2" ]; then
+    mg_failure usage "usage: tools/mg u38-wiring --milestone <id>" "tools/mg --list"
+    mg_status error
+    return 0
+  fi
+  local target="$2" manifest="$MG_RUN_DIR/manifest.json"
+  mg_milestone_gate__load "$manifest" || return 0
+  mg_artifact manifest "$manifest" "validated milestone manifest for pending provider ownership"
+  export MEGURI_WIRING_TARGET="$target" MEGURI_WIRING_MANIFEST="$manifest"
+  mg_core_test -- --test ports --run-ignored only -E 'package(meguri-host) & test(=milestone_provider_owners)'
+}
 
 # Canary test binaries (tests/canary_*.rs) run first and alone in a bare
 # core-test; when one fails, the other tests do not run (AE82 ordering).

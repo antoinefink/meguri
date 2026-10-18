@@ -1,5 +1,5 @@
 //! Recorded scenarios run the real U27 adapters. Test-only setup/auxiliary
-//! adapters stand in for U28/U38/U44/U128; they are never T0 capabilities.
+//! adapters stand in only for U44/U128; they are never T0 capabilities.
 use meguri_engine::notes;
 use meguri_model::ids::CardId;
 use meguri_storage::{ReadRows, StampMode, WriteScope};
@@ -50,21 +50,25 @@ fn executor() -> MeguriExecutor {
 fn core(e: impl std::fmt::Display) -> ExecError {
     ExecError::new("test_standin", e.to_string())
 }
-fn scope<T>(
-    session: &Session<'_>,
+fn scope<T: Send + 'static>(
+    session: &mut Session<'_>,
     mode: StampMode,
-    f: impl FnOnce(&mut WriteScope<'_>) -> Result<T, ExecError>,
+    f: impl FnOnce(&mut WriteScope<'_>) -> Result<T, ExecError> + Send + 'static,
 ) -> Result<T, ExecError> {
-    let mut scope = session
-        .storage
-        .collection()
-        .unwrap()
-        .writer()
-        .begin_write(mode, session.clock.as_ref(), None)
-        .map_err(core)?;
-    let value = f(&mut scope)?;
-    scope.commit().map_err(core)?;
-    Ok(value)
+    let collection = session.engine_collection()?;
+    collection
+        .run(
+            meguri_engine::OpSpec::named("test_standin", meguri_engine::OpSource::UserNonUndoable)
+                .skip_undo()
+                .stamp(mode),
+            move |ctx| {
+                f(ctx.scope()).map_err(|error| meguri_engine::EngineError::Internal {
+                    message: error.to_string(),
+                })
+            },
+        )
+        .map(|result| result.value)
+        .map_err(core)
 }
 fn answer(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError> {
     let Step::Answer(args) = step else { unreachable!() };
@@ -75,7 +79,7 @@ fn answer(session: &mut Session<'_>, step: &Step) -> Result<OpResult, ExecError>
         "cardgen/position/random" => 1894705895,
         other => return Err(core(format!("no answer stand-in for {other}"))),
     };
-    scope(session, StampMode::Local, |scope| {
+    scope(session, StampMode::Local, move |scope| {
         let mut card = scope.card(id).map_err(core)?.unwrap();
         card.card_type = meguri_model::card::CardType::Learning;
         card.queue = meguri_model::card::CardQueue::Learning;

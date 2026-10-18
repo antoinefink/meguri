@@ -13,6 +13,8 @@ pub struct HostConfig {
     pub random: Arc<dyn RandomSource>,
     pub disk_space_provider: Arc<dyn DiskSpaceProvider>,
     pub engine: EngineConfig,
+    #[cfg(feature = "test-hooks")]
+    pub(crate) test_backup: Option<Arc<dyn meguri_engine::ports::BackupService>>,
 }
 
 impl HostConfig {
@@ -32,6 +34,15 @@ impl HostConfig {
             random,
             disk_space_provider,
             engine: EngineConfig::default(),
+            #[cfg(feature = "test-hooks")]
+            test_backup: None,
         }
+    }
+
+    /// A harness witness is never counted as a production provider at a gate.
+    #[cfg(feature = "test-hooks")]
+    pub fn with_backup_for_testing(mut self, backup: Arc<dyn meguri_engine::ports::BackupService>) -> Self {
+        self.test_backup = Some(backup);
+        self
     }
 }

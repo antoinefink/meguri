@@ -61,4 +61,12 @@ impl SuspendParticipant for MediaPort {
         }
         Ok(())
     }
+    fn resume_with_collection(&self, collection: &Collection) -> Result<(), EngineError> {
+        self.resume()?;
+        if let Err(error) = MediaService::open(collection, self.clock.clone()).and_then(|service| service.recover()) {
+            self.close_until(meguri_engine::monotonic::now() + Duration::from_secs(5))?;
+            return Err(error);
+        }
+        Ok(())
+    }
 }
