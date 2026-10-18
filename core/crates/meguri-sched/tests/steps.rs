@@ -73,7 +73,8 @@ fn hard_uses_integer_averages_then_rounds_first_step_delays_above_one_day() {
         assert_eq!(Steps::new(&[first, second], 2).hard().unwrap().seconds, expected);
     }
     assert_eq!(Steps::new(&[1.0, 1500.0], 1).hard().unwrap().seconds, 90000);
-    // The two-step sum saturates before division, per L4.
+    // The first-step multiplication/sum saturates before division, per L4.
+    assert_eq!(Steps::new(&[f32::INFINITY], 1).hard().unwrap().seconds, 2_147_472_000);
     assert_eq!(
         Steps::new(&[f32::INFINITY, f32::INFINITY], 2).hard().unwrap().seconds,
         2_147_472_000

@@ -5,7 +5,10 @@
 
 use fsrs::{FSRS, FSRSError, MemoryState};
 
-use super::fuzz;
+use super::{
+    fuzz,
+    interval_limits::{Picker, review_days},
+};
 
 /// A review card as the FSRS answer states read it.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,17 +68,16 @@ pub fn answers(model: &FSRS, card: &ReviewCard) -> Result<ReviewAnswers, FSRSErr
     // T4: no fuzz, minimum or maximum interval here.
     let again = rated(&next.again, next.again.interval.round().max(1.0) as u32);
 
-    // T5: each rating's lower bound, clamped to [1, M], then the fuzz pick.
-    let maximum = card.maximum_interval.max(1);
-    let factor = fuzz::factor(card.fuzz_seed);
-    let pick = |state: &fsrs::ItemState, at_least: u32| {
-        let minimum = fuzz::no_regression_minimum(state.interval, card.interval, card.maximum_interval);
-        let bound = minimum.max(at_least).clamp(1, maximum);
-        fuzz::fuzzed_interval(state.interval, bound, maximum, factor)
+    let mut picker = Picker {
+        factor: fuzz::factor(card.fuzz_seed),
+        chooser: None,
     };
-    let hard_days = pick(&next.hard, 1);
-    let good_days = pick(&next.good, hard_days.saturating_add(1));
-    let easy_days = pick(&next.easy, good_days.saturating_add(1));
+    let [hard_days, good_days, easy_days] = review_days(
+        [next.hard.interval, next.good.interval, next.easy.interval],
+        card.interval,
+        card.maximum_interval,
+        &mut picker,
+    );
     Ok(ReviewAnswers {
         again,
         hard: rated(&next.hard, hard_days),

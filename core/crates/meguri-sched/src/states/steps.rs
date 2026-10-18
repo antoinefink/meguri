@@ -52,7 +52,7 @@ impl<'a> Steps<'a> {
             let delay = if let Some(second) = self.minutes.get(1) {
                 first.saturating_add(seconds(*second)) / 2
             } else {
-                ((u64::from(first) * 3 / 2).min(u64::from(u32::MAX)) as u32).min(first.saturating_add(86400))
+                (first.saturating_mul(3) / 2).min(first.saturating_add(86400))
             };
             if delay > 86400 {
                 (delay as f32 / 86400.0).round() as u32 * 86400
