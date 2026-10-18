@@ -60,6 +60,7 @@ pub(crate) struct ExecShared {
     pub(crate) undo: UndoManager,
     /// The collection's day clock (`sched/day-clock` D8).
     pub(crate) day_clock: Arc<DayClock>,
+    pub(crate) fsrs_policy: Arc<crate::sched::fsrs_policy::PolicyState>,
 }
 
 struct QueueState {
@@ -107,6 +108,7 @@ impl ExecShared {
             clock,
             path: path.to_path_buf(),
             undo: UndoManager::default(),
+            fsrs_policy: Arc::new(crate::sched::fsrs_policy::PolicyState::load(path)),
         }
     }
 

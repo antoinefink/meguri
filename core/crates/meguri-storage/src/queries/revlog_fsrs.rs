@@ -52,6 +52,19 @@ pub(crate) fn last_review_time(conn: &Connection, card: CardId) -> Result<Option
         .query_row([card.0],|row|row.get::<_,i64>(0)).optional()?.map(|id|id/1000))
 }
 
+pub(crate) fn home_decks_in(conn: &Connection, decks: &[DeckId]) -> Result<Vec<DeckId>, StorageError> {
+    let ids = serde_json::to_string(&decks.iter().map(|id| id.0).collect::<Vec<_>>()).expect("integer ids serialize");
+    Ok(conn.prepare_cached("SELECT DISTINCT CASE WHEN odid!=0 THEN odid ELSE did END FROM cards WHERE did IN (SELECT value FROM json_each(?1)) ORDER BY 1")?
+        .query_map([ids],|row|row.get::<_,i64>(0).map(DeckId))?.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub(crate) fn selection_count(conn: &Connection, selection: &HistorySelection) -> Result<u64, StorageError> {
+    let sql = format!("SELECT count(*) FROM cards c WHERE {}", selection.predicate());
+    Ok(conn
+        .prepare_cached(&sql)?
+        .query_row([selection.json()], |row| row.get::<_, i64>(0))? as u64)
+}
+
 pub(crate) fn count(
     conn: &Connection,
     selection: &HistorySelection,

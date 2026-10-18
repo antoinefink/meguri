@@ -60,6 +60,10 @@ impl JobProgress {
         Arc::new(JobProgress { job_id, sink })
     }
 
+    pub(crate) fn engine_sink(&self) -> ProgressSink {
+        self.sink.clone()
+    }
+
     pub fn job_id(&self) -> u64 {
         self.job_id
     }

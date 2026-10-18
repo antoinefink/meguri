@@ -48,6 +48,8 @@ fn every_catalog_op_declares_an_undo_class_and_destructive_ones_confirmation_and
     assert_eq!(class("bulk_op"), Some(UndoClass::Undoable));
     assert_eq!(class("memory_recompute"), Some(UndoClass::Undoable));
     assert!(catalog::MEMORY_RECOMPUTE.cancellable_write());
+    assert_eq!(class("enable_fsrs"), Some(UndoClass::NonDestructive));
+    assert!(catalog::ENABLE_FSRS.cancellable_write());
     assert_eq!(class("sync_incoming_merge"), Some(UndoClass::NonDestructive));
     for name in ["undo", "redo", "undo_long_write", "redo_long_write"] {
         assert_eq!(class(name), Some(UndoClass::Undoable), "{name}");

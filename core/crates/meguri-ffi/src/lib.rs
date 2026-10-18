@@ -14,6 +14,7 @@ pub mod changes;
 pub mod day_clock;
 pub mod error;
 pub mod events;
+pub mod fsrs_policy;
 pub mod jobs;
 pub mod progress;
 mod runtime;

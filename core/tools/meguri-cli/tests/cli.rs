@@ -48,6 +48,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "delete_tags",
             "edit_note",
             "empty_media_trash",
+            "enable_fsrs",
+            "enable_v3",
             "ensure_io_notetype",
             "handoff",
             "legacy_update",
@@ -126,12 +128,12 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
             "undo_status",
         ])
     );
-    // dsl.md D7.2: 61 ops besides observe, the actor ops of sync-ops.md, the
+    // dsl.md D7.2: 63 ops besides observe, the actor ops of sync-ops.md, the
     // model ops of model-ops.md, storage-ops.md's open, record-ops.md's
     // set_config, undo-ops.md's undo, redo and remove_config, the eight ops
     // of tag-ops.md, browser-config-ops.md's browser_config_set, the note
     // type ops of notetype-ops.md and the deck ops of deck-ops.md, plus save_deck_options.
-    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 61);
+    assert_eq!(json["language"]["ops"].as_array().unwrap().len(), 63);
     for op in [
         "actor",
         "sync",
@@ -144,6 +146,8 @@ fn capabilities_list_what_meguri_runs_and_the_whole_language() {
         "add_deck",
         "set_deck_preset",
         "save_deck_options",
+        "enable_fsrs",
+        "enable_v3",
         "add_notetype",
         "update_notetype",
         "undo",

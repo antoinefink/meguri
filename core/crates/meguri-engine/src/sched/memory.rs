@@ -189,10 +189,19 @@ pub fn plan(
         updates: Vec::new(),
         report: RecomputeReport::default(),
     };
+    let total = rows.fsrs_selection_count(&HistorySelection::HomeDecks(
+        groups.values().flatten().map(|deck| deck.id).collect(),
+    ))?;
+    let mut visited = 0u64;
     for (preset_id, decks) in groups {
         check()?;
         let preset = PresetView::for_config(rows, preset_id)?;
+        let selection = HistorySelection::HomeDecks(decks.iter().map(|deck| deck.id).collect());
         let Ok(model) = cache.model(&preset) else {
+            visited += rows.fsrs_selection_count(&selection)?;
+            if let Some(progress) = progress {
+                progress.report(visited, Some(total));
+            }
             planned.report.skipped_presets.push(preset_id);
             continue;
         };
@@ -209,10 +218,13 @@ pub fn plan(
                 )
             })
             .collect();
-        let selection = HistorySelection::HomeDecks(decks.iter().map(|deck| deck.id).collect());
         let mut cutoff = None;
         rows.visit_fsrs_histories(&selection, |card, history| -> Result<(), EngineError> {
             check()?;
+            visited += 1;
+            if let Some(progress) = progress {
+                progress.report(visited, Some(total));
+            }
             if card.card_type == CardType::New || history.is_empty() {
                 return Ok(());
             }
@@ -243,9 +255,6 @@ pub fn plan(
                 });
             }
             planned.report.processed += 1;
-            if let Some(progress) = progress {
-                progress.report(planned.report.processed as u64, None);
-            }
             Ok(())
         })?;
     }

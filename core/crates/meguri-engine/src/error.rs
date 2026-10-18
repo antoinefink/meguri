@@ -13,6 +13,7 @@ use crate::undo::reasons::DisabledReason;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
+    SessionActive,
     InvalidIgnoreBeforeDate {
         preset: meguri_model::ids::DeckConfigId,
     },
@@ -147,6 +148,7 @@ impl From<OpenError> for EngineError {
 impl fmt::Display for EngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            EngineError::SessionActive => f.write_str("review session is active"),
             EngineError::InvalidIgnoreBeforeDate { preset } => {
                 write!(f, "invalid ignore-before date for preset {}", preset.0)
             }

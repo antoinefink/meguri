@@ -400,6 +400,10 @@ impl Engine {
             .iter()
             .map(|step| (step.name(), Box::new(|| step.run(&privileged)) as Box<dyn Fn() -> _>))
             .collect();
+        steps.push((
+            "fsrs_policy",
+            Box::new(|| crate::sched::fsrs_policy::normalize_at_open(&privileged)),
+        ));
         steps.push((DAY_CLOCK_STEP, Box::new(|| privileged.restart_day_clock().map(drop))));
         for (name, run) in steps {
             if let Err(error) = run() {

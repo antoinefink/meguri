@@ -397,6 +397,11 @@ fn run_op<T>(
     };
     let undo_notes = std::mem::take(&mut context.undo_notes);
     let hooks = std::mem::take(&mut context.on_commit);
+    let seen_fsrs = if spec.source == meguri_model::changes::OpSource::SyncIncoming {
+        Some(meguri_sched::model::sched_config::SchedConfig::new(context.scope()).fsrs())
+    } else {
+        None
+    };
     let value = match outcome {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -420,6 +425,7 @@ fn run_op<T>(
         return Err(error);
     }
 
+    let seen_fsrs = seen_fsrs.transpose()?;
     // Commit and take the seq under the commit lock, so a snapshot begun
     // under it knows exactly which commits it sees (O6).
     let (committed, reservation) = {
@@ -430,6 +436,9 @@ fn run_op<T>(
         (committed, reservation)
     };
     let seq = reservation.seq();
+    if seen_fsrs == Some(true) {
+        shared.fsrs_policy.observe_on();
+    }
     let post_commit_error = committed.post_commit_error.clone();
     // The collection commit stands. Publish every staged operation before
     // observers, retaining each failed manifest for row-based recovery.
@@ -771,7 +780,14 @@ fn first_day_check(env: &mut WriterEnv<'_>) -> Result<(), EngineError> {
     let spec = crate::sched::day_clock::op_spec();
     let mut meta = shared.meta(spec.def.name(), spec.source);
     meta.planned = Some(shared.generation());
-    run_op(env, &meta, spec, move |ctx| day_clock.run(ctx)).map(drop)
+    let policy = Arc::clone(&shared.fsrs_policy);
+    run_op(env, &meta, spec, move |ctx| {
+        if meguri_sched::model::sched_config::SchedConfig::new(ctx.scope()).fsrs()? {
+            ctx.on_commit(move |_| policy.observe_on());
+        }
+        day_clock.run(ctx)
+    })
+    .map(drop)
 }
 
 /// Closes the collection (`engine/lifecycle` L10).

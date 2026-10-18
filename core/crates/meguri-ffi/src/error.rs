@@ -58,6 +58,9 @@ impl From<EngineError> for CoreError {
         match error {
             EngineError::Cancelled => CoreError::Cancelled,
             EngineError::Busy { running_op } => CoreError::Busy { running_op },
+            EngineError::SessionActive => CoreError::Unavailable {
+                reason: "SessionActive".into(),
+            },
             EngineError::CollectionUnavailable { reason } => CoreError::Unavailable { reason },
             EngineError::SuspendDeadline { .. } => CoreError::Unavailable {
                 reason: error.to_string(),

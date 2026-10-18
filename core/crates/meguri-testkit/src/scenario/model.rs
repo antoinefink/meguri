@@ -935,6 +935,10 @@ pub enum Step {
     /// deck-options-ops.md E1: the deck options screen's Save (boxed: the
     /// largest arguments by far).
     SaveDeckOptions(Box<SaveDeckOptionsArgs>),
+    /// fsrs-policy-ops.md F2.
+    EnableFsrs(NoArgs),
+    /// fsrs-policy-ops.md F3.
+    EnableV3(NoArgs),
     /// model-ops.md L2.
     LegacyUpdate(LegacyUpdate),
     /// notetype-ops.md T2: shaped as a `setup.notetypes` entry.
@@ -1012,7 +1016,7 @@ pub enum Step {
 
 impl Step {
     /// Every op of the language (D7.2); `observe` included.
-    pub const NAMES: [&'static str; 62] = [
+    pub const NAMES: [&'static str; 64] = [
         "advance",
         "set_clock",
         "add_note",
@@ -1045,6 +1049,8 @@ impl Step {
         "reposition",
         "update_preset",
         "save_deck_options",
+        "enable_fsrs",
+        "enable_v3",
         "legacy_update",
         "add_notetype",
         "add_stock_notetype",
@@ -1115,6 +1121,8 @@ impl Step {
             Step::Reposition(_) => "reposition",
             Step::UpdatePreset(_) => "update_preset",
             Step::SaveDeckOptions(_) => "save_deck_options",
+            Step::EnableFsrs(_) => "enable_fsrs",
+            Step::EnableV3(_) => "enable_v3",
             Step::LegacyUpdate(_) => "legacy_update",
             Step::AddNotetype(_) => "add_notetype",
             Step::AddStockNotetype(_) => "add_stock_notetype",

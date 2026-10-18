@@ -87,6 +87,19 @@ pub trait ReadRows: sealed::Connected {
         crate::queries::revlog_fsrs::last_review_time(self.connection(), card)
     }
 
+    /// Home deck ids of cards currently in the selected decks, including
+    /// filtered cards. Returns one id per home, without loading card rows.
+    fn card_home_decks_in(&self, decks: &[DeckId]) -> Result<Vec<DeckId>, StorageError> {
+        crate::queries::revlog_fsrs::home_decks_in(self.connection(), decks)
+    }
+
+    fn fsrs_selection_count(
+        &self,
+        selection: &crate::queries::revlog_fsrs::HistorySelection,
+    ) -> Result<u64, StorageError> {
+        crate::queries::revlog_fsrs::selection_count(self.connection(), selection)
+    }
+
     fn fsrs_included_count(
         &self,
         selection: &crate::queries::revlog_fsrs::HistorySelection,

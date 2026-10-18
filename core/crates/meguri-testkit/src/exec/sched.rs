@@ -31,6 +31,21 @@ pub(super) fn register(registry: &mut Registry) {
     registry.observation("answer_labels", scheduling_states);
     registry.observation("ignored_before_count", ignored_before_count);
     registry.op("reopen", reopen);
+    registry.op("enable_fsrs", enable_fsrs);
+    registry.op("enable_v3", enable_v3);
+}
+
+fn enable_fsrs(session: &mut Session<'_>, _step: &Step) -> Result<OpResult, ExecError> {
+    let collection = session.engine_collection()?;
+    meguri_engine::sched::fsrs_policy::enable_fsrs(&collection, &Default::default())
+        .map_err(|error| ExecError::new("core_error", error.to_string()))?;
+    Ok(OpResult::Done)
+}
+
+fn enable_v3(session: &mut Session<'_>, _step: &Step) -> Result<OpResult, ExecError> {
+    // Promotion runs the actual engine open step; Raw reopen remains Raw.
+    session.engine_collection()?;
+    Ok(OpResult::Done)
 }
 
 fn ignored_before_count(session: &mut Session<'_>, request: &ObservationRequest) -> Result<Value, ExecError> {

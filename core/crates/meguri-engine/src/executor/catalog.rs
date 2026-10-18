@@ -124,6 +124,8 @@ pub const NOTETYPE_STRUCTURE_CHANGE: OpDef = OpDef::long_write("notetype_structu
 pub const BULK_OP: OpDef = OpDef::long_write("bulk_op", UndoClass::Undoable, false);
 /// Memory-only recompute (U46), with transaction rollback on cancellation.
 pub const MEMORY_RECOMPUTE: OpDef = OpDef::long_write("memory_recompute", UndoClass::Undoable, true);
+/// Explicit FSRS enable plus memory updates, atomically cancellable (U50).
+pub const ENABLE_FSRS: OpDef = OpDef::long_write("enable_fsrs", UndoClass::NonDestructive, true);
 /// Undo of a step (`engine/undo` M4).
 pub const UNDO: OpDef = OpDef::short("undo", UndoClass::Undoable);
 /// Redo of a step (`engine/undo` M5).
@@ -143,13 +145,14 @@ pub const ANALYZE: OpDef = OpDef::maintenance("analyze");
 pub const WAL_CHECKPOINT: OpDef = OpDef::maintenance("wal_checkpoint");
 
 /// Every catalog entry, in the spec's order.
-pub const CATALOG: [OpDef; 14] = [
+pub const CATALOG: [OpDef; 15] = [
     CHECK_DATABASE,
     APKG_APPLY,
     SYNC_INCOMING_MERGE,
     NOTETYPE_STRUCTURE_CHANGE,
     BULK_OP,
     MEMORY_RECOMPUTE,
+    ENABLE_FSRS,
     UNDO,
     REDO,
     UNDO_LONG_WRITE,
