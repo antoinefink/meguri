@@ -13,9 +13,9 @@ use serde_json::{Map, Value};
 
 use super::FormatError;
 use super::model::{
-    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FsrsNextRequest, IgnoredBeforeCountRequest, LegacyUpdate,
-    LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario, SearchRequest, Side, Step, SyncKind,
-    TemplateRequest, TextRequest, canonical_search_texts,
+    ActorName, ClozeRequest, DUMP_TABLES, DraftArgs, FieldsCheckRequest, FsrsNextRequest, IgnoredBeforeCountRequest,
+    LegacyUpdate, LogicalRef, ObservationKind, RefKind, SaveDeckOptionsArgs, Scenario, SearchRequest, Side, Step,
+    SyncKind, TemplateRequest, TextRequest, canonical_search_texts,
 };
 
 /// A draft-op argument's JSON shape (scenario.schema.json `$defs/step`).
@@ -445,12 +445,13 @@ pub(super) fn observation_list(kind: ObservationKind, items: &[Value]) -> Result
     }
 }
 
-/// observations.md O2: a kind whose value is a list (`template`, `search`,
-/// `canonical_search`, `ignored_before_count`) is requested at most once per
-/// step; two lists do not merge.
+/// observations.md O2: a kind whose value is a list (`template`,
+/// `fields_check`, `search`, `canonical_search`, `ignored_before_count`) is
+/// requested at most once per step; two lists do not merge.
 fn once_per_step(requests: &[super::model::ObservationRequest]) -> Result<(), FormatError> {
     for kind in [
         ObservationKind::Template,
+        ObservationKind::FieldsCheck,
         ObservationKind::Search,
         ObservationKind::CanonicalSearch,
         ObservationKind::IgnoredBeforeCount,
@@ -558,6 +559,10 @@ pub(super) fn observation_mapping(kind: ObservationKind, map: &Map<String, Value
         // render-ops.md Q1.1-Q1.3, Q1.6.
         ObservationKind::Template => {
             TemplateRequest::from_mapping(map)?;
+        }
+        // note-ops.md N4.
+        ObservationKind::FieldsCheck => {
+            FieldsCheckRequest::from_mapping(map)?;
         }
         ObservationKind::DbDump => {
             if let Some(key) = map.keys().find(|k| k.as_str() != "tables") {

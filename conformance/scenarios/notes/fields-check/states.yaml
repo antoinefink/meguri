@@ -1,0 +1,69 @@
+# The states of the field check and their precedence (R807, R808, R809,
+# R810, R812; specs/notes/field-check.md K1, K2, K5). A cloze in a field of
+# a cloze note type that the first template's front does not use with
+# cloze: comes first, then an empty first field, then cloze markup in a
+# standard note type or a missing cloze, then a duplicate. Only top-level
+# clozes with a number other than 0 count as cloze markup. A cloze note type
+# whose first front does not parse uses no field for clozes, so any cloze is
+# in a non-cloze field; its front is written with db_exec (protobuf field 1
+# of templates.config) and the collection reopened (note-ops.md N2). Needs
+# the fields_check observation (specs/conformance/note-ops.md N4).
+id: notes/fields-check/states
+clock: {tz: UTC, start: "2030-01-15T10:00:00"}
+setup:
+  notetypes:
+    - name: Std
+      fields: [Front, Back]
+      templates:
+        - {name: One, front: "{{Front}}", back: "{{Back}}"}
+    - name: Gap
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}<br>{{Extra}}"}
+    - name: Gap2
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}{{cloze:Extra}}", back: "{{cloze:Text}}"}
+    - name: GapBroken
+      kind: cloze
+      fields: [Text, Extra]
+      templates:
+        - {name: Gap, front: "{{cloze:Text}}", back: "{{cloze:Text}}"}
+  decks: [Inbox]
+  notes:
+    - {notetype: Std, deck: Inbox, fields: [dup, x]}
+    - {notetype: Gap, deck: Inbox, fields: ["{{c1::same}}", ""]}
+steps:
+  # GapBroken's front becomes "{{#Text}}{{cloze:Text}}" (an unclosed section).
+  - db_exec: {sql: "UPDATE templates SET config = CAST(config || X'0a177b7b23546578747d7d7b7b636c6f7a653a546578747d7d' AS BLOB) WHERE ntid = (SELECT id FROM notetypes WHERE name = 'GapBroken') AND ord = 0"}
+  - reopen: {}
+  - observe:
+      - fields_check:
+          cases:
+            - {notetype: Std, fields: [x, ""]}
+            - {notetype: Std, fields: ["", y]}
+            - {notetype: Std, fields: ["<br> <div></div>", ""]}
+            - {notetype: Std, fields: ["&nbsp;　", ""]}
+            - {notetype: Std, fields: ["<img src=\"a.jpg\">", ""]}
+            - {notetype: Std, fields: ["{{c1::x}}", ""]}
+            - {notetype: Std, fields: [x, "{{c1::y}}"]}
+            - {notetype: Std, fields: ["", "{{c1::y}}"]}
+            - {notetype: Std, fields: ["{{c0::x}}", ""]}
+            - {notetype: Std, fields: ["{{c1::x", ""]}
+            - {notetype: Std, fields: [dup, "{{c2::z}}"]}
+            - {notetype: Std, fields: [dup, z]}
+            - {notetype: Gap, fields: ["{{c1::x}}", ""]}
+            - {notetype: Gap, fields: [x, ""]}
+            - {notetype: Gap, fields: ["", ""]}
+            - {notetype: Gap, fields: [x, "{{c1::y}}"]}
+            - {notetype: Gap, fields: ["", "{{c1::y}}"]}
+            - {notetype: Gap, fields: ["{{c1::x}}", "{{c2::y}}"]}
+            - {notetype: Gap, fields: ["{{c0::x {{c1::y}}}}", ""]}
+            - {notetype: Gap, fields: ["{{c0::x}}", ""]}
+            - {notetype: Gap, fields: ["{{c1::same}}", ""]}
+            - {notetype: Gap2, fields: [x, "{{c1::y}}"]}
+            - {notetype: Gap2, fields: ["", "{{c1::y}}"]}
+            - {notetype: GapBroken, fields: ["{{c1::x}}", ""]}
+            - {notetype: GapBroken, fields: [x, ""]}
