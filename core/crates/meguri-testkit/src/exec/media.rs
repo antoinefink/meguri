@@ -64,6 +64,26 @@ fn outside_files(session: &mut Session<'_>, entries: &[MediaFileSpec]) -> Result
             }
         }
         let path = root.join(&entry.name);
+        let present = match fs::symlink_metadata(&path) {
+            Ok(metadata) => Some(metadata),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(core(error)),
+        };
+        if present
+            .as_ref()
+            .is_some_and(|m| m.file_type().is_symlink() || (!m.is_file() && !m.is_dir()))
+        {
+            return Err(invalid("media_outside supports only regular files and directories"));
+        }
+        if entry.remove != Some(true)
+            && present
+                .as_ref()
+                .is_some_and(|m| m.is_dir() != (entry.dir == Some(true)))
+        {
+            return Err(invalid(
+                "media_outside cannot replace a file with a directory or a directory with a file",
+            ));
+        }
         if entry.remove == Some(true) {
             let metadata = fs::symlink_metadata(&path).map_err(|_| invalid("media_outside removes an absent entry"))?;
             if metadata.is_dir() {
@@ -72,7 +92,9 @@ fn outside_files(session: &mut Session<'_>, entries: &[MediaFileSpec]) -> Result
                 fs::remove_file(&path).map_err(core)?;
             }
         } else if entry.dir == Some(true) {
-            fs::create_dir(&path).map_err(core)?;
+            if present.is_none() {
+                fs::create_dir(&path).map_err(core)?;
+            }
         } else {
             let mut file = File::create(&path).map_err(core)?;
             if let Some(text) = &entry.text {

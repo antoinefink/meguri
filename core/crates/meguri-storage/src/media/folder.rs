@@ -6,6 +6,7 @@ use std::{
     collections::BTreeSet,
     fs::{self, Metadata, OpenOptions},
     io::{Read, Write},
+    os::fd::{AsRawFd, FromRawFd},
     os::unix::{fs::MetadataExt, fs::OpenOptionsExt},
     path::Path,
     sync::atomic::Ordering,
@@ -211,7 +212,8 @@ impl MediaStore {
         if !safe_component(&name) || ignored(&name) {
             return Ok(None);
         }
-        if regular(&self.media_dir().join(name.as_ref()))?.is_some() {
+        let exact = regular(&self.media_dir().join(name.as_ref()))?.is_some();
+        if exact && self.inner.case_sensitive {
             return Ok(Some(name.into_owned()));
         }
         let db = self.db()?;
@@ -221,19 +223,46 @@ impl MediaStore {
                 variants.push(entry);
             }
         }
+        if exact && variants.is_empty() {
+            return Ok(Some(name.into_owned()));
+        }
         let key = case_key(&name);
         Ok(variants
             .iter()
-            .find(|e| e.name == key)
+            .find(|e| e.name == name)
+            .or_else(|| variants.iter().find(|e| e.name == key))
             .or_else(|| variants.first())
             .map(|e| e.name.clone()))
     }
     /// Renderers read the returned descriptor, never reopen the resolved path.
     /// Symlinks and non-regular files swapped in after lookup are refused.
     pub fn open_file(&self, name: &str) -> Result<Option<fs::File>> {
-        self.lookup(name)?
-            .map(|name| open_regular(&self.media_dir().join(name)))
-            .transpose()
+        let Some(name) = self.lookup(name)? else {
+            return Ok(None);
+        };
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(self.media_dir())?;
+        let name = std::ffi::CString::new(name).map_err(|_| MediaError::InvalidName)?;
+        // The component was validated by lookup. Both the directory and
+        // terminal entry are opened without following symbolic links.
+        let fd = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        // SAFETY: openat returned a new descriptor owned only by this File.
+        let file = unsafe { fs::File::from_raw_fd(fd) };
+        if !file.metadata()?.is_file() {
+            return Err(MediaError::InvalidName);
+        }
+        Ok(Some(file))
     }
     pub(super) fn candidates(&self, db: &mut Connection, name: &str) -> Result<Vec<(String, String)>> {
         let mut files = journal_db::variants(db, name)?;

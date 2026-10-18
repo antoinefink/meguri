@@ -142,6 +142,23 @@ where
     serde_json::from_value(Value::Object(map)).map_err(de::Error::custom)
 }
 
+fn present_mapping<'de, D: Deserializer<'de>, T: de::DeserializeOwned>(deserializer: D) -> Result<Option<T>, D::Error> {
+    op_mapping(deserializer).map(Some)
+}
+
+fn mapping_list<'de, D: Deserializer<'de>, T: de::DeserializeOwned>(deserializer: D) -> Result<Vec<T>, D::Error> {
+    Vec::<Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(|value| op_mapping(value).map_err(de::Error::custom))
+        .collect()
+}
+
+fn present_mapping_list<'de, D: Deserializer<'de>, T: de::DeserializeOwned>(
+    deserializer: D,
+) -> Result<Option<Vec<T>>, D::Error> {
+    mapping_list(deserializer).map(Some)
+}
+
 /// The argument `{}` of `reopen`, `converge` and `check_db`: a mapping with
 /// no keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,7 +397,7 @@ pub struct Setup {
     pub cards: Option<Vec<CardOverride>>,
     #[serde(default, deserialize_with = "present")]
     pub revlog: Option<Vec<RevlogRow>>,
-    #[serde(default, deserialize_with = "present")]
+    #[serde(default, deserialize_with = "present_mapping_list")]
     pub media_files: Option<Vec<MediaFileSpec>>,
 }
 
@@ -866,6 +883,7 @@ impl FromStr for FixturePath {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
+    #[serde(deserialize_with = "mapping_list")]
     MediaOutside(Vec<MediaFileSpec>),
     #[serde(deserialize_with = "op_mapping")]
     AddMedia(MediaFileSpec),
@@ -3024,7 +3042,7 @@ pub struct MediaFileSpec {
     pub name: String,
     #[serde(default, deserialize_with = "present")]
     pub text: Option<String>,
-    #[serde(default, deserialize_with = "present")]
+    #[serde(default, deserialize_with = "present_mapping")]
     pub fill: Option<MediaFill>,
     #[serde(default, deserialize_with = "present")]
     pub dir: Option<bool>,

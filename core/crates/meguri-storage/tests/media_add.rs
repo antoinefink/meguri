@@ -47,6 +47,17 @@ fn media_lookup_never_resolves_a_stale_case_variant_to_a_symlink() {
 }
 
 #[test]
+fn media_open_file_refuses_a_replaced_symlink_root() {
+    let (dir, store) = store();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("outside.png"), b"outside").unwrap();
+    fs::rename(store.media_dir(), dir.path().join("original-media")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), store.media_dir()).unwrap();
+    assert!(store.open_file("outside.png").is_err());
+    assert_eq!(fs::read(outside.path().join("outside.png")).unwrap(), b"outside");
+}
+
+#[test]
 fn media_ignored_names_empty_names_and_symlinks_never_enter_index() {
     let (dir, store) = store();
     assert_eq!(store.add("???", b"a"), Err(MediaError::InvalidName));

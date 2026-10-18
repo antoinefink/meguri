@@ -65,7 +65,7 @@ fn media_unchanged_folder_at_30000_files_does_not_enumerate_or_hash() {
     .unwrap();
     drop(db);
     let before = store.diagnostics();
-    let started = std::time::Instant::now();
+    let started = meguri_testkit::wallclock::Stopwatch::start();
     store.check_changes().unwrap();
     let elapsed = started.elapsed();
     assert_eq!(store.diagnostics(), before);

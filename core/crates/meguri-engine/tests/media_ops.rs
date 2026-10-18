@@ -181,6 +181,30 @@ fn media_job_lease_excludes_other_jobs_but_allows_adds() {
 }
 
 #[test]
+fn media_arrived_is_published_only_after_files_are_available() {
+    let h = Harness::open();
+    let media = MediaService::open(&h.collection, h.clock.clone()).unwrap();
+    media.add("download.png", b"downloaded").unwrap();
+    let events = h.engine.stream().subscribe();
+    media.media_arrived(vec!["download.png".into()]).unwrap();
+    let event = events.try_recv().unwrap();
+    let EventKind::Extension(extension) = &event.kind else {
+        panic!("expected media arrival");
+    };
+    assert_eq!(
+        extension
+            .as_any()
+            .downcast_ref::<meguri_engine::media::MediaArrived>()
+            .unwrap()
+            .names,
+        ["download.png"]
+    );
+    assert!(media.media_arrived(vec!["missing.png".into()]).is_err());
+    media.media_arrived(Vec::new()).unwrap();
+    assert!(events.try_recv().is_none());
+}
+
+#[test]
 fn media_services_for_the_same_collection_share_job_admission() {
     let h = Harness::open();
     let first = MediaService::open(&h.collection, h.clock.clone()).unwrap();
