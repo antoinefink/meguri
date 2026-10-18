@@ -38,7 +38,10 @@ Lookup never scans the directory or hashes files.
 ## J3. Trash
 
 Each trash entry has an independent identity and retains its original name and bytes.
-Its durable file name carries the identity and original name, so deleting the media index cannot destroy restore information.
+Its durable path carries the identity and original name, so deleting the media index cannot destroy restore information.
+The identity is a parent directory; its child keeps the complete original basename,
+including outside names that already use the filesystem's component limit.
+Recovery also accepts the earlier flat identity-prefixed filenames.
 Trash metadata records the supplied collection time. Restore processes newer identities first.
 It follows `media/media-files#M10`, and never overwrites an existing file.
 Only an explicit empty-trash call permanently removes trash bytes.
@@ -63,6 +66,9 @@ A crash needs no separate committed flag: recovery compares every expected note 
 Matching rows publish remaining staged files; nonmatching rows move their bytes into the trash.
 A destination already holding the expected bytes completes an interrupted publication without rewriting it.
 Unknown staged files are preserved in the trash. Recovery is idempotent and never permanently deletes media bytes.
+Recovery skips stages still owned by a live operation in this process. A missing
+manifest is an error when reading names, binding references or publishing; it
+cannot turn an attachment-bearing operation into an empty successful stage.
 
 ## J5. Engine coordination
 

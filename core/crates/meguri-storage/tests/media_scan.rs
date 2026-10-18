@@ -5,6 +5,25 @@ use std::{fs, os::unix::fs::MetadataExt, sync::Arc};
 
 type ScanHook = Box<dyn FnOnce() + Send>;
 static SCAN_HOOK: std::sync::Mutex<Option<ScanHook>> = std::sync::Mutex::new(None);
+
+#[test]
+fn media_reopening_preserves_the_unchanged_folder_fast_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("collection.anki2");
+    let store = MediaStore::open(&path, Arc::new(common::clock())).unwrap();
+    store.add("registered.png", b"registered").unwrap();
+    drop(store);
+    let store = MediaStore::open(&path, Arc::new(common::clock())).unwrap();
+    store.check_changes().unwrap();
+    assert_eq!(store.diagnostics().scans, 0);
+    assert_eq!(store.diagnostics().hashes, 0);
+    fs::write(store.media_dir().join("outside.png"), b"outside").unwrap();
+    drop(store);
+    let store = MediaStore::open(&path, Arc::new(common::clock())).unwrap();
+    store.check_changes().unwrap();
+    assert_eq!(store.diagnostics().scans, 1);
+    assert!(store.entries().unwrap().iter().any(|e| e.name == "outside.png"));
+}
 fn before_hash() {
     let hook = SCAN_HOOK.lock().unwrap().take();
     if let Some(hook) = hook {

@@ -52,6 +52,8 @@ fn media_staging_uncommitted_recovery_preserves_bytes_in_trash() {
     op.add("Photo.JPG", b"uncommitted").unwrap();
     op.set_references(&[reference()]).unwrap();
     std::mem::forget(op);
+    drop(store);
+    let store = open(dir.path());
     let report = store.recover(|_| Ok(false)).unwrap();
     assert_eq!(report.trashed, 1);
     assert_eq!(fs::read_dir(store.media_dir()).unwrap().count(), 0);
@@ -103,4 +105,48 @@ fn media_staging_preserves_a_conflicting_hash_case_variant_in_trash() {
     assert_eq!(store.trash_summary().unwrap().entries, 1);
     assert_eq!(fs::read(store.media_dir().join(&hash_name)).unwrap(), b"b");
     assert!(!store.media_dir().join(hash_name.to_uppercase()).exists());
+}
+
+#[test]
+fn media_recovery_does_not_consume_a_live_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let mut stage = store.begin_staging().unwrap();
+    stage.add("live.png", b"live attachment").unwrap();
+    assert_eq!(store.recover(|_| Ok(false)).unwrap().trashed, 0);
+    assert_eq!(stage.names().unwrap(), ["live.png"]);
+    stage.set_references(&[reference()]).unwrap();
+    assert_eq!(stage.publish().unwrap(), 1);
+    assert_eq!(
+        fs::read(store.media_dir().join("live.png")).unwrap(),
+        b"live attachment"
+    );
+}
+
+#[test]
+fn media_stage_rejects_a_missing_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let mut stage = store.begin_staging().unwrap();
+    stage.add("lost.png", b"attachment").unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("meguri-media.db")).unwrap();
+    db.execute("DELETE FROM staged_files", []).unwrap();
+    db.execute("DELETE FROM staged_ops", []).unwrap();
+    assert!(stage.names().is_err());
+    assert!(stage.set_references(&[reference()]).is_err());
+    assert!(stage.publish().is_err());
+}
+
+#[test]
+fn media_staged_add_sees_outside_changes_after_preparation_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = open(dir.path());
+    let mut stage = store.begin_staging().unwrap();
+    fs::write(store.media_dir().join("Photo.PNG"), b"outside").unwrap();
+    let name = stage.add("photo.png", b"attachment").unwrap();
+    assert!(name.starts_with("photo-") && name.ends_with(".png"), "{name}");
+    stage.set_references(&[reference()]).unwrap();
+    stage.publish().unwrap();
+    assert_eq!(fs::read(store.media_dir().join("Photo.PNG")).unwrap(), b"outside");
+    assert_eq!(fs::read(store.media_dir().join(name)).unwrap(), b"attachment");
 }

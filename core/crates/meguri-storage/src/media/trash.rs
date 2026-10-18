@@ -19,19 +19,31 @@ pub struct TrashSummary {
 }
 
 fn identity(path: &str) -> Option<(i64, i64, &str)> {
-    let (prefix, name) = path.split_once("--")?;
+    let (prefix, name) = path.split_once('/').or_else(|| path.split_once("--"))?;
+    if !safe_component(prefix) || !safe_component(name) {
+        return None;
+    }
     let (time, id) = prefix.rsplit_once('-')?;
-    Some((time.parse().ok()?, id.parse().ok()?, name))
+    let id: i64 = id.parse().ok()?;
+    (id > 0).then_some((time.parse().ok()?, id, name))
+}
+fn remove_empty_parent(root: &Path, relative: &str) -> Result<()> {
+    if let Some((parent, _)) = relative.split_once('/') {
+        match fs::remove_dir(root.join(parent)) {
+            Ok(()) => crate::atomic_file::sync_directory(root)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound || e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
 }
 fn list(db: &Connection) -> Result<Vec<TrashEntry>> {
     let entries = db.prepare("SELECT id,name,sha1,size,trashed_ms,path FROM trash_entries WHERE path IS NOT NULL ORDER BY trashed_ms DESC,id DESC")?
         .query_map([], |r|Ok(TrashEntry{id:r.get(0)?,name:r.get(1)?,sha1:r.get(2)?,size:journal_db::unsigned(r,3)?,trashed_ms:r.get(4)?,path:r.get(5)?}))?
         .collect::<std::result::Result<Vec<_>,_>>()?;
     for entry in &entries {
-        if !safe_component(&entry.name)
-            || !safe_component(&entry.path)
-            || identity(&entry.path).is_none_or(|(_, _, name)| name != entry.name)
-        {
+        if !safe_component(&entry.name) || identity(&entry.path).is_none_or(|(_, _, name)| name != entry.name) {
             return Err(MediaError::InvalidManifest("invalid trash path".into()));
         }
     }
@@ -79,11 +91,18 @@ impl MediaStore {
                 params![name, hash, journal_db::sqlite_integer(size)?, now],
             )?;
             let id = db.last_insert_rowid();
-            let path = format!("{now}-{id}--{name}");
-            if self.trash_dir().join(&path).symlink_metadata().is_ok() {
-                db.execute("DELETE FROM trash_entries WHERE id=?1", [id])?;
-                continue;
+            // The full original basename may already use NAME_MAX. Put the
+            // identity in its parent so the bytes remain self-describing.
+            let parent = format!("{now}-{id}");
+            match fs::create_dir(self.trash_dir().join(&parent)) {
+                Ok(()) => crate::atomic_file::sync_directory(self.trash_dir())?,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    db.execute("DELETE FROM trash_entries WHERE id=?1", [id])?;
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
             }
+            let path = format!("{parent}/{name}");
             db.execute("UPDATE trash_entries SET path=?1 WHERE id=?2", params![path, id])?;
             break TrashEntry {
                 id,
@@ -97,6 +116,7 @@ impl MediaStore {
         if let Err(e) = move_new(source, &self.trash_dir().join(&entry.path)) {
             if source.exists() {
                 db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
+                remove_empty_parent(self.trash_dir(), &entry.path)?;
             }
             return Err(e.into());
         }
@@ -108,6 +128,7 @@ impl MediaStore {
     pub(super) fn restore_original_locked(&self, db: &mut Connection, entry: &TrashEntry, name: &str) -> Result<()> {
         let target = self.media_dir().join(name);
         move_new(&self.trash_dir().join(&entry.path), &target)?;
+        remove_empty_parent(self.trash_dir(), &entry.path)?;
         folder::live(db, name, entry.sha1.clone(), &fs::symlink_metadata(target)?, false)?;
         db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
         Ok(())
@@ -139,7 +160,9 @@ impl MediaStore {
                 continue;
             }
             let marker = folder::stamp(&fs::metadata(self.media_dir())?);
-            let (name, _write) = if self.candidates(&mut db, &entry.name)?.is_empty() {
+            let (name, _write) = if self.candidates(&mut db, &entry.name)?.is_empty()
+                && folder::regular(&self.media_dir().join(&entry.name))?.is_none()
+            {
                 (entry.name.clone(), true)
             } else {
                 self.choose(&mut db, &entry.name, &entry.sha1)?
@@ -171,6 +194,7 @@ impl MediaStore {
                 outcome?;
             }
             db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
+            remove_empty_parent(self.trash_dir(), &entry.path)?;
             self.advance_marker(&db, &marker)?;
         }
         Ok(())
@@ -184,6 +208,7 @@ impl MediaStore {
                 fs::remove_file(&path)?;
             }
             db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
+            remove_empty_parent(self.trash_dir(), &entry.path)?;
         }
         crate::atomic_file::sync_directory(self.trash_dir())?;
         Ok(())
@@ -195,31 +220,40 @@ impl MediaStore {
                 db.execute("DELETE FROM trash_entries WHERE id=?1", [entry.id])?;
             }
         }
-        let mut files = fs::read_dir(self.trash_dir())?.collect::<std::io::Result<Vec<_>>>()?;
-        files.sort_by_key(|f| {
-            let name = f.file_name().to_string_lossy().into_owned();
-            let key = identity(&name)
+        let mut files = Vec::new();
+        for file in fs::read_dir(self.trash_dir())? {
+            let file = file?;
+            let Some(name) = file.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if file.file_type()?.is_dir() {
+                for child in fs::read_dir(file.path())? {
+                    let child = child?;
+                    let Some(child_name) = child.file_name().to_str().map(str::to_owned) else {
+                        continue;
+                    };
+                    let path = format!("{name}/{child_name}");
+                    if identity(&path).is_some() {
+                        files.push(path);
+                    }
+                }
+            } else if identity(&name).is_some() {
+                // Preserve journals created with the earlier flat layout.
+                files.push(name);
+            }
+        }
+        files.sort_by_key(|name| {
+            let key = identity(name)
                 .map(|(time, id, _)| (time, id))
                 .unwrap_or((i64::MIN, i64::MIN));
-            (key, name)
+            (key, name.clone())
         });
-        for file in files {
-            let Some(path) = file.file_name().to_str().map(str::to_owned) else {
+        for path in files {
+            let Some((time, _, name)) = identity(&path) else {
                 continue;
             };
-            let Some((prefix, name)) = path.split_once("--") else {
-                continue;
-            };
-            if !safe_component(name) {
-                continue;
-            }
-            let Some((time, _id)) = prefix.rsplit_once('-') else {
-                continue;
-            };
-            let Ok(time) = time.parse::<i64>() else {
-                continue;
-            };
-            let Some(m) = folder::regular(&file.path())? else {
+            let file = self.trash_dir().join(&path);
+            let Some(m) = folder::regular(&file)? else {
                 continue;
             };
             let exists: bool = db.query_row(
@@ -232,7 +266,7 @@ impl MediaStore {
                     "INSERT INTO trash_entries(name,sha1,size,trashed_ms,path) VALUES(?1,?2,?3,?4,?5)",
                     params![
                         name,
-                        folder::hash_file(&file.path())?,
+                        folder::hash_file(&file)?,
                         journal_db::sqlite_integer(m.len())?,
                         time,
                         path

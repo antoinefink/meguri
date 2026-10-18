@@ -10,10 +10,11 @@ use meguri_model::clock::Clock;
 use rusqlite::Connection;
 pub use staging::{NoteReference, RecoveryReport, StagedOp};
 use std::{
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc, Mutex, MutexGuard, Weak,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -64,6 +65,8 @@ pub type Result<T> = std::result::Result<T, MediaError>;
 #[derive(Debug)]
 struct Inner {
     db: Mutex<Connection>,
+    // Access while holding db: registration and recovery share one boundary.
+    active_stages: Mutex<BTreeMap<i64, Weak<()>>>,
     media: PathBuf,
     trash: PathBuf,
     staging: PathBuf,
@@ -98,10 +101,18 @@ impl MediaStore {
             return Err(MediaError::InvalidName);
         }
         let db = journal_db::open(&journal)?;
-        let case_sensitive = folder::probe_case_sensitivity(&media)?;
+        use std::os::unix::fs::MetadataExt;
+        let device = std::fs::metadata(&media)?.dev();
+        for dir in [&trash, &staging] {
+            if std::fs::metadata(dir)?.dev() != device {
+                return Err(MediaError::Io("media directories must share a volume".into()));
+            }
+        }
+        let case_sensitive = folder::probe_case_sensitivity(&staging)?;
         let store = Self {
             inner: Arc::new(Inner {
                 db: Mutex::new(db),
+                active_stages: Mutex::new(BTreeMap::new()),
                 media,
                 trash,
                 staging,

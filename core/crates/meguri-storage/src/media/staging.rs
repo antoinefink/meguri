@@ -3,7 +3,7 @@ use meguri_model::note::Note;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, fs};
+use std::{collections::BTreeSet, fs, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +37,7 @@ pub struct StagedOp {
     store: MediaStore,
     id: i64,
     finished: bool,
+    _live: Arc<()>,
 }
 #[derive(Debug)]
 struct FileRecord {
@@ -77,12 +78,32 @@ fn delete_manifest(db: &Connection, id: i64) -> Result<()> {
     tx.commit()?;
     Ok(())
 }
+fn require_manifest(db: &Connection, id: i64) -> Result<()> {
+    let exists: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM staged_ops WHERE id=?1)", [id], |r| {
+        r.get(0)
+    })?;
+    if !exists {
+        return Err(MediaError::InvalidManifest("staged media manifest is missing".into()));
+    }
+    Ok(())
+}
 impl StagedOp {
     pub fn collection_directory(&self) -> &std::path::Path {
         self.store.media_dir().parent().expect("media root has a parent")
     }
     pub fn add(&mut self, desired: &str, bytes: &[u8]) -> Result<String> {
+        self.store.check_changes()?;
+        for attempt in 0..3 {
+            match self.add_checked(desired, bytes, attempt == 2) {
+                Err(MediaError::NameTaken) if attempt < 2 => self.store.register_full(|_, _| true)?,
+                other => return other,
+            }
+        }
+        Err(MediaError::NameTaken)
+    }
+    fn add_checked(&mut self, desired: &str, bytes: &[u8], force_hash: bool) -> Result<String> {
         let mut db = self.store.db()?;
+        require_manifest(&db, self.id)?;
         let hash = folder::hash_bytes(bytes);
         let (mut name, write) = self.store.choose(&mut db, desired, &hash)?;
         if !write {
@@ -101,6 +122,9 @@ impl StagedOp {
             &lowercase_candidate(&meguri_text::media_name::safe_media_name(desired)),
             &hash,
         );
+        if force_hash {
+            name = hash_name.clone();
+        }
         let mut target = self.store.media_dir().join(&name);
         if target.symlink_metadata().is_ok() && folder::regular(&target)?.is_none() {
             name = hash_name.clone();
@@ -146,10 +170,9 @@ impl StagedOp {
         Ok(name)
     }
     pub fn names(&self) -> Result<Vec<String>> {
-        Ok(files(&*self.store.db()?, self.id)?
-            .into_iter()
-            .map(|f| f.name)
-            .collect())
+        let db = self.store.db()?;
+        require_manifest(&db, self.id)?;
+        Ok(files(&db, self.id)?.into_iter().map(|f| f.name).collect())
     }
     pub fn set_references(&mut self, references: &[NoteReference]) -> Result<()> {
         if references.is_empty()
@@ -162,9 +185,13 @@ impl StagedOp {
             ));
         }
         let refs = serde_json::to_string(references).map_err(|e| MediaError::InvalidManifest(e.to_string()))?;
-        self.store
+        let changed = self
+            .store
             .db()?
             .execute("UPDATE staged_ops SET refs=?1 WHERE id=?2", params![refs, self.id])?;
+        if changed != 1 {
+            return Err(MediaError::InvalidManifest("staged media manifest is missing".into()));
+        }
         Ok(())
     }
     /// Call only after the collection commit. An error retains recovery data.
@@ -189,10 +216,20 @@ impl MediaStore {
         self.check_changes()?;
         let db = self.db()?;
         db.execute("INSERT INTO staged_ops DEFAULT VALUES", [])?;
+        let id = db.last_insert_rowid();
+        let live = Arc::new(());
+        let mut active = self
+            .inner
+            .active_stages
+            .lock()
+            .map_err(|_| MediaError::Database("media stage mutex poisoned".into()))?;
+        active.retain(|_, stage| stage.strong_count() != 0);
+        active.insert(id, Arc::downgrade(&live));
         Ok(StagedOp {
             store: self.clone(),
-            id: db.last_insert_rowid(),
+            id,
             finished: false,
+            _live: live,
         })
     }
     fn abort_stage(&self, id: i64) -> Result<()> {
@@ -213,6 +250,7 @@ impl MediaStore {
     }
     fn publish_stage(&self, id: i64) -> Result<usize> {
         let mut db = self.db()?;
+        require_manifest(&db, id)?;
         let records = files(&db, id)?;
         if !records.is_empty() {
             let refs: String = db.query_row("SELECT refs FROM staged_ops WHERE id=?1", [id], |r| r.get(0))?;
@@ -273,9 +311,18 @@ impl MediaStore {
     pub fn recover(&self, mut matches: impl FnMut(&NoteReference) -> Result<bool>) -> Result<RecoveryReport> {
         let operations = {
             let db = self.db()?;
+            let mut active = self
+                .inner
+                .active_stages
+                .lock()
+                .map_err(|_| MediaError::Database("media stage mutex poisoned".into()))?;
+            active.retain(|_, stage| stage.strong_count() != 0);
             db.prepare("SELECT id,refs FROM staged_ops ORDER BY id")?
                 .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(|(id, _)| !active.contains_key(id))
+                .collect::<Vec<_>>()
         };
         let mut report = RecoveryReport::default();
         for (id, refs) in operations {
