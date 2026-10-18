@@ -1,6 +1,6 @@
 # Merging a unit
 
-`tools/mg merge <branch>` is the only path to the integration branch: the branch checked out in the main checkout (`feat/meguri-v1` today). There is no git remote, so this job, not a push hook, enforces the receipt (R1951). The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).
+`tools/mg merge <branch>` is the only path to the integration branch: the branch checked out in the main checkout (`master`). The origin remote uses `master` as its default branch. This job, rather than a push hook, enforces the receipt (R1951). The orchestrator runs it in the main checkout. A green receipt merges without human review (R1991).
 
 ## What it does
 

@@ -13,6 +13,8 @@ Meguri: native SwiftUI app (macOS, iOS, iPadOS 27) on a Rust core, fully compati
 
 ## Tooling
 
+- Integrate into `master` with `tools/mg merge`. Keep temporary role worktrees for units; push only `master` to origin, never force. `feat/meguri-v1` was retired on 2026-10-18.
+
 - Build, test and verify only through `tools/mg <job>` (`tools/mg --list`; contract in `tools/AGENTS.md`). Rust, oracle and sync-server work runs in Docker; Apple builds run on the host; simulators and Mac UI suites run in the macOS test VM.
 - Never perform the one-time user steps (`docs/process/one-time-setup.md`); `tools/mg doctor` lists the missing ones.
 
