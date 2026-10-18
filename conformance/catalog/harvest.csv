@@ -311,7 +311,7 @@ h5b5bc3629af2,rust,tag,maintenance,unclassified,,,open
 h8bba9c90dc5d,rust,tag,maintenance,unclassified,,,open
 h984772533897,rust,tag,maintenance,unclassified,,,open
 hec5bf5d4f824,rust,tag,maintenance,unclassified,,,open
-h563f74ccee41,python,tag,media,unclassified,,,open
+h563f74ccee41,python,tag,media,in-scope,"media names found in field text, the text with media tags removed, and the display encoding of local names (text area)",text/refs/extract text/refs/iri text/strip/text-line,done
 h83e771fdcf55,python,tag,media,in-scope,"adding a file: the same name and bytes are reused, other bytes get the hash name",media/add/ae36 media/add/hash-names,done
 h8a1d70115eae,python,tag,media,in-scope,Check Media's missing and unused lists (U130),,deferred
 h026e05052d5b,rust,tag,media,in-scope,Check Media (U130),,deferred
