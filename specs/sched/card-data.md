@@ -145,7 +145,7 @@ The first four rows are the golden of `sched/data/positions`; set due date and F
 
 ## K7. New positions and the counter (R590)
 
-- The cards of one note created together share one position, and the collection key `nextPos` gives it: read as an unsigned 32-bit integer (anything else reads as 0), then written back as that value plus one, wrapping from 4294967295 to 0 (`sched/config-keys#G2`). A note that already has a new card gives its new cards that card's position without touching the counter. The full rule, with random insertion order, is `notes/deck-placement-and-position` P1 to P4 (U27); the allocator lives with the scheduling model and U27's card generation calls it.
+- The cards of one note created together share one position, and the collection key `nextPos` gives it: read as an unsigned 32-bit integer (anything else reads as 0), then written back as that value plus one, wrapping from 4294967295 to 0 (`sched/config-keys#G2`). A note that already has a new card gives its new cards that card's position without touching the counter. The full rule, with random insertion order, is `notes/deck-placement-and-position` P1 to P4, which U27's card generation already implements. Meguri has one implementation of P1's read and write of the counter: the scheduling model and any later operation that draws a position from `nextPos` (U48) use that one rather than a second copy.
 - A position is stored in `due` (or `odue`) as a signed 32-bit value: positions from 2147483648 up are stored as the position minus 4294967296 (`notes/deck-placement-and-position` P3).
 
 | `nextPos` before | Cards of the added note | `nextPos` after |
